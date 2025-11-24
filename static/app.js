@@ -223,14 +223,214 @@ class TradingApp {
         this.showSystemPrompt = false;
         this.settingsCache = null;
         this.latestConversations = [];
-        this.socket = null;
         this.leaderboardLimit = 10;
         this.leaderboardData = { gainers: [], losers: [] };
-        this.leaderboardFallbackInterval = null;
         this.leaderboardLastUpdated = null;
         this.logger = frontendLogger; // 使用全局日志实例
         this.modelLeverageMap = {};
         this.init();
+    }
+
+    init() {
+        // 等待DOM加载完成
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', () => this.setupEventListeners());
+        } else {
+            this.setupEventListeners();
+        }
+    }
+
+    setupEventListeners() {
+        // 刷新按钮
+        const refreshBtn = document.getElementById('refreshBtn');
+        if (refreshBtn) {
+            refreshBtn.addEventListener('click', () => this.refresh());
+        }
+
+        // 日志切换按钮
+        const logToggleBtn = document.getElementById('logToggleBtn');
+        if (logToggleBtn) {
+            logToggleBtn.addEventListener('click', () => frontendLogger.toggle());
+        }
+
+        // 执行交易按钮
+        const executeBtn = document.getElementById('executeBtn');
+        if (executeBtn) {
+            executeBtn.addEventListener('click', () => this.executeTrading());
+        }
+
+        // 暂停自动交易按钮
+        const pauseAutoBtn = document.getElementById('pauseAutoBtn');
+        if (pauseAutoBtn) {
+            pauseAutoBtn.addEventListener('click', () => this.toggleAutoTrading());
+        }
+
+        // 设置按钮
+        const settingsBtn = document.getElementById('settingsBtn');
+        if (settingsBtn) {
+            settingsBtn.addEventListener('click', () => this.showSettingsModal());
+        }
+
+        // 策略配置按钮
+        const strategyBtn = document.getElementById('strategyBtn');
+        if (strategyBtn) {
+            strategyBtn.addEventListener('click', () => this.showStrategyModal());
+        }
+
+        // 合约配置按钮
+        const futureConfigBtn = document.getElementById('futureConfigBtn');
+        if (futureConfigBtn) {
+            futureConfigBtn.addEventListener('click', () => this.showFuturesModal());
+        }
+
+        // API提供方按钮
+        const addApiProviderBtn = document.getElementById('addApiProviderBtn');
+        if (addApiProviderBtn) {
+            addApiProviderBtn.addEventListener('click', () => this.showApiProviderModal());
+        }
+
+        // 添加模型按钮
+        const addModelBtn = document.getElementById('addModelBtn');
+        if (addModelBtn) {
+            addModelBtn.addEventListener('click', () => this.showModal());
+        }
+
+        // 涨跌幅榜刷新按钮
+        const refreshLeaderboardBtn = document.getElementById('refreshLeaderboardBtn');
+        if (refreshLeaderboardBtn) {
+            refreshLeaderboardBtn.addEventListener('click', () => this.fetchLeaderboardSnapshot(true));
+        }
+
+        // Tab切换
+        document.querySelectorAll('.tab-btn').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                const tabName = e.target.getAttribute('data-tab');
+                if (tabName) {
+                    this.switchTab(tabName);
+                }
+            });
+        });
+
+        // 模态框关闭按钮
+        const closeModalBtn = document.getElementById('closeModalBtn');
+        if (closeModalBtn) {
+            closeModalBtn.addEventListener('click', () => this.hideModal());
+        }
+
+        const cancelBtn = document.getElementById('cancelBtn');
+        if (cancelBtn) {
+            cancelBtn.addEventListener('click', () => this.hideModal());
+        }
+
+        const submitBtn = document.getElementById('submitBtn');
+        if (submitBtn) {
+            submitBtn.addEventListener('click', () => this.submitModel());
+        }
+
+        // 设置模态框
+        const closeSettingsModalBtn = document.getElementById('closeSettingsModalBtn');
+        if (closeSettingsModalBtn) {
+            closeSettingsModalBtn.addEventListener('click', () => this.hideSettingsModal());
+        }
+
+        const cancelSettingsBtn = document.getElementById('cancelSettingsBtn');
+        if (cancelSettingsBtn) {
+            cancelSettingsBtn.addEventListener('click', () => this.hideSettingsModal());
+        }
+
+        const saveSettingsBtn = document.getElementById('saveSettingsBtn');
+        if (saveSettingsBtn) {
+            saveSettingsBtn.addEventListener('click', () => this.saveSettings());
+        }
+
+        // 策略模态框
+        const closeStrategyModalBtn = document.getElementById('closeStrategyModalBtn');
+        if (closeStrategyModalBtn) {
+            closeStrategyModalBtn.addEventListener('click', () => this.hideStrategyModal());
+        }
+
+        const cancelStrategyBtn = document.getElementById('cancelStrategyBtn');
+        if (cancelStrategyBtn) {
+            cancelStrategyBtn.addEventListener('click', () => this.hideStrategyModal());
+        }
+
+        const saveStrategyBtn = document.getElementById('saveStrategyBtn');
+        if (saveStrategyBtn) {
+            saveStrategyBtn.addEventListener('click', () => this.saveStrategy());
+        }
+
+        // 合约配置模态框
+        const closeFutureModalBtn = document.getElementById('closeFutureModalBtn');
+        if (closeFutureModalBtn) {
+            closeFutureModalBtn.addEventListener('click', () => this.hideFuturesModal());
+        }
+
+        const cancelFutureBtn = document.getElementById('cancelFutureBtn');
+        if (cancelFutureBtn) {
+            cancelFutureBtn.addEventListener('click', () => this.hideFuturesModal());
+        }
+
+        const saveFutureBtn = document.getElementById('saveFutureBtn');
+        if (saveFutureBtn) {
+            saveFutureBtn.addEventListener('click', () => this.saveFuture());
+        }
+
+        // API提供方模态框
+        const closeApiProviderModalBtn = document.getElementById('closeApiProviderModalBtn');
+        if (closeApiProviderModalBtn) {
+            closeApiProviderModalBtn.addEventListener('click', () => this.hideApiProviderModal());
+        }
+
+        const cancelApiProviderBtn = document.getElementById('cancelApiProviderBtn');
+        if (cancelApiProviderBtn) {
+            cancelApiProviderBtn.addEventListener('click', () => this.hideApiProviderModal());
+        }
+
+        const saveApiProviderBtn = document.getElementById('saveApiProviderBtn');
+        if (saveApiProviderBtn) {
+            saveApiProviderBtn.addEventListener('click', () => this.saveApiProvider());
+        }
+
+        const fetchModelsBtn = document.getElementById('fetchModelsBtn');
+        if (fetchModelsBtn) {
+            fetchModelsBtn.addEventListener('click', () => this.fetchModels());
+        }
+
+        // 模型提供方选择变化
+        const modelProvider = document.getElementById('modelProvider');
+        if (modelProvider) {
+            modelProvider.addEventListener('change', (e) => {
+                this.updateModelOptions(e.target.value);
+            });
+        }
+
+        // 更新模态框
+        const closeUpdateModalBtn = document.getElementById('closeUpdateModalBtn');
+        if (closeUpdateModalBtn) {
+            closeUpdateModalBtn.addEventListener('click', () => this.hideUpdateModal());
+        }
+
+        const dismissUpdateBtn = document.getElementById('dismissUpdateBtn');
+        if (dismissUpdateBtn) {
+            dismissUpdateBtn.addEventListener('click', () => this.dismissUpdate());
+        }
+
+        // 点击模态框外部关闭
+        document.querySelectorAll('.modal').forEach(modal => {
+            modal.addEventListener('click', (e) => {
+                if (e.target === modal) {
+                    modal.classList.remove('show');
+                }
+            });
+        });
+
+        // 初始化数据加载
+        this.loadModels();
+        this.loadMarketPrices();
+        this.loadProviders();
+        this.startRefreshCycles();
+        this.fetchLeaderboardSnapshot();
+        this.checkForUpdates(true);
     }
 
     updateExecuteButtonState() {
@@ -918,7 +1118,7 @@ class TradingApp {
         document.getElementById(`${tabName}Tab`).classList.add('active');
     }
 
-    // API Provider Methods
+    // ============ API Provider Management Methods ============
     async showApiProviderModal() {
         this.loadProviders();
         document.getElementById('apiProviderModal').classList.add('show');
@@ -1190,6 +1390,8 @@ class TradingApp {
         }
     }
 
+    // ============ Model Management Methods ============
+
     showModal() {
         this.loadProviders().then(() => {
             document.getElementById('addModelModal').classList.add('show');
@@ -1205,7 +1407,9 @@ class TradingApp {
         const modelName = document.getElementById('modelIdentifier').value;
         const displayName = document.getElementById('modelName').value.trim();
         const initialCapital = parseFloat(document.getElementById('initialCapital').value);
-        const leverage = parseInt(document.getElementById('modelLeverage').value, 10);
+        // 杠杆字段可能不存在，使用默认值10
+        const leverageInput = document.getElementById('modelLeverage');
+        const leverage = leverageInput ? parseInt(leverageInput.value, 10) : 10;
 
         if (!providerId || !modelName || !displayName || Number.isNaN(initialCapital)) {
             alert('请填写所有必填字段');
@@ -1367,7 +1571,10 @@ class TradingApp {
         document.getElementById('modelIdentifier').value = '';
         document.getElementById('modelName').value = '';
         document.getElementById('initialCapital').value = '100000';
-        document.getElementById('modelLeverage').value = '10';
+        const leverageInput = document.getElementById('modelLeverage');
+        if (leverageInput) {
+            leverageInput.value = '10';
+        }
     }
 
     async refresh() {
@@ -1404,11 +1611,8 @@ class TradingApp {
         }, 10000);
     }
 
-    stopRefreshCycles() {
-        Object.values(this.refreshIntervals).forEach(interval => {
-            if (interval) clearInterval(interval);
-        });
-    }
+
+    // ============ Settings Management Methods ============
 
     async showSettingsModal() {
         const url = '/api/settings';
@@ -1448,6 +1652,8 @@ class TradingApp {
     hideSettingsModal() {
         document.getElementById('settingsModal').classList.remove('show');
     }
+
+    // ============ Futures Configuration Methods ============
 
     showFuturesModal() {
         this.loadFutures();
@@ -1737,9 +1943,9 @@ class TradingApp {
         const releaseNotes = document.getElementById('releaseNotes');
         const githubLink = document.getElementById('githubLink');
 
-        currentVersion.textContent = `v${data.current_version}`;
-        latestVersion.textContent = `v${data.latest_version}`;
-        githubLink.href = data.release_url || data.repo_url;
+        if (currentVersion) currentVersion.textContent = `v${data.current_version}`;
+        if (latestVersion) latestVersion.textContent = `v${data.latest_version}`;
+        if (githubLink) githubLink.href = data.release_url || data.repo_url;
 
         // Format release notes
         if (data.release_notes) {
@@ -1802,6 +2008,460 @@ class TradingApp {
     hideUpdateIndicator() {
         const indicator = document.getElementById('updateIndicator');
         indicator.style.display = 'none';
+    }
+
+    // ============ Trading Execution Methods ============
+
+    async executeTrading() {
+        if (!this.currentModelId || this.isAggregatedView) {
+            alert('请先选择一个模型');
+            return;
+        }
+
+        const url = `/api/models/${this.currentModelId}/execute`;
+        this.logger.logApiCall('POST', url);
+
+        const executeBtn = document.getElementById('executeBtn');
+        const originalText = executeBtn.innerHTML;
+        executeBtn.disabled = true;
+        executeBtn.innerHTML = '<i class="bi bi-hourglass-split"></i> 执行中...';
+
+        try {
+            const response = await fetch(url, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' }
+            });
+
+            let result;
+            try {
+                result = await response.json();
+            } catch (parseError) {
+                this.logger.logApiError('POST', url, new Error('响应解析失败'), response);
+                alert('响应解析失败，请稍后再试');
+                return;
+            }
+
+            if (!response.ok) {
+                this.logger.logApiError('POST', url, new Error(result.error || `HTTP ${response.status}`), response, result);
+                alert(result.error || '执行交易失败');
+                return;
+            }
+
+            this.logger.logApiSuccess('POST', url, response, result);
+            this.logger.logInfo('交易执行', '交易周期执行成功', { modelId: this.currentModelId });
+
+            await this.loadModelData();
+            alert('交易周期执行完成');
+        } catch (error) {
+            this.logger.logApiError('POST', url, error);
+            alert('执行交易失败');
+        } finally {
+            executeBtn.innerHTML = originalText;
+            executeBtn.disabled = false;
+        }
+    }
+
+    async toggleAutoTrading() {
+        if (!this.currentModelId || this.isAggregatedView) {
+            alert('请先选择一个模型');
+            return;
+        }
+
+        const newState = !this.currentModelAutoTradingEnabled;
+        const url = `/api/models/${this.currentModelId}/auto-trading`;
+        this.logger.logApiCall('POST', url, { body: { enabled: newState } });
+
+        try {
+            const response = await fetch(url, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ enabled: newState })
+            });
+
+            let result;
+            try {
+                result = await response.json();
+            } catch (parseError) {
+                this.logger.logApiError('POST', url, new Error('响应解析失败'), response);
+                alert('响应解析失败，请稍后再试');
+                return;
+            }
+
+            if (!response.ok) {
+                this.logger.logApiError('POST', url, new Error(result.error || `HTTP ${response.status}`), response, result);
+                alert(result.error || '切换自动交易状态失败');
+                return;
+            }
+
+            this.logger.logApiSuccess('POST', url, response, result);
+            this.currentModelAutoTradingEnabled = newState;
+            this.updateAutoTradingButtonState();
+            await this.loadModelData();
+            alert(newState ? '自动交易已开启' : '自动交易已关闭');
+        } catch (error) {
+            this.logger.logApiError('POST', url, error);
+            alert('切换自动交易状态失败');
+        }
+    }
+
+    async showStrategyModal() {
+        if (!this.currentModelId || this.isAggregatedView) {
+            alert('请先选择一个模型');
+            return;
+        }
+
+        const url = `/api/models/${this.currentModelId}/prompts`;
+        this.logger.logApiCall('GET', url);
+
+        try {
+            const response = await fetch(url);
+            
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+            }
+
+            let prompts;
+            try {
+                prompts = await response.json();
+            } catch (parseError) {
+                this.logger.logApiError('GET', url, new Error('响应解析失败'), response);
+                prompts = { buy_prompt: '', sell_prompt: '' };
+            }
+
+            this.logger.logApiSuccess('GET', url, response);
+
+            document.getElementById('buyPromptInput').value = prompts.buy_prompt || '';
+            document.getElementById('sellPromptInput').value = prompts.sell_prompt || '';
+            document.getElementById('strategyModalSubtitle').textContent = `配置模型 "${this.currentModelName}" 的买入/卖出提示词`;
+
+            document.getElementById('strategyModal').classList.add('show');
+        } catch (error) {
+            this.logger.logDataLoadError('策略提示词', error, url);
+            alert('加载策略配置失败');
+        }
+    }
+
+    hideStrategyModal() {
+        document.getElementById('strategyModal').classList.remove('show');
+    }
+
+    async saveStrategy() {
+        if (!this.currentModelId) return;
+
+        const buyPrompt = document.getElementById('buyPromptInput').value.trim();
+        const sellPrompt = document.getElementById('sellPromptInput').value.trim();
+
+        const url = `/api/models/${this.currentModelId}/prompts`;
+        const requestData = {
+            buy_prompt: buyPrompt,
+            sell_prompt: sellPrompt
+        };
+        this.logger.logApiCall('PUT', url, { body: requestData });
+
+        try {
+            const response = await fetch(url, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(requestData)
+            });
+
+            let result;
+            try {
+                result = await response.json();
+            } catch (parseError) {
+                this.logger.logApiError('PUT', url, new Error('响应解析失败'), response);
+                alert('响应解析失败，请稍后再试');
+                return;
+            }
+
+            if (!response.ok) {
+                this.logger.logApiError('PUT', url, new Error(result.error || `HTTP ${response.status}`), response, result);
+                alert(result.error || '保存策略失败');
+                return;
+            }
+
+            this.logger.logApiSuccess('PUT', url, response, result);
+            this.logger.logInfo('策略配置', '策略保存成功', { modelId: this.currentModelId });
+
+            this.hideStrategyModal();
+            alert('策略配置已保存');
+        } catch (error) {
+            this.logger.logApiError('PUT', url, error);
+            alert('保存策略失败');
+        }
+    }
+
+    // ============ View Management Methods ============
+
+    detectLanguage() {
+        return navigator.language.startsWith('zh') || document.documentElement.lang === 'zh-CN';
+    }
+
+    showAggregatedView() {
+        this.currentModelId = null;
+        this.isAggregatedView = true;
+        this.loadModels();
+        this.loadAggregatedData();
+        this.hideTabsInAggregatedView();
+        this.updateExecuteButtonState();
+    }
+
+    renderModels(models) {
+        const container = document.getElementById('modelList');
+        if (!container) return;
+
+        if (!models || models.length === 0) {
+            container.innerHTML = '<div class="empty-state">暂无模型，点击"添加模型"创建</div>';
+            return;
+        }
+
+        container.innerHTML = models.map(model => {
+            const isActive = this.currentModelId === model.id && !this.isAggregatedView;
+            const leverage = this.modelLeverageMap[model.id] ?? model.leverage ?? 10;
+            const leverageText = leverage === 0 ? 'AI' : `${leverage}x`;
+
+            return `
+                <div class="model-item ${isActive ? 'active' : ''}" data-model-id="${model.id}" onclick="app.selectModel(${model.id})">
+                    <div class="model-header">
+                        <div class="model-name">${model.name || `模型 #${model.id}`}</div>
+                        <div class="model-actions">
+                            <button class="model-action-btn" onclick="event.stopPropagation(); app.openLeverageModal(${model.id}, '${(model.name || `模型 #${model.id}`).replace(/'/g, "\\'")}')" title="设置杠杆">
+                                <i class="bi bi-sliders"></i>
+                            </button>
+                            <button class="model-action-btn" onclick="event.stopPropagation(); app.deleteModel(${model.id})" title="删除模型">
+                                <i class="bi bi-trash"></i>
+                            </button>
+                        </div>
+                    </div>
+                    <div class="model-meta">
+                        <span class="model-leverage">杠杆: ${leverageText}</span>
+                        <span class="model-provider">${model.provider_name || '未知'}</span>
+                    </div>
+                </div>
+            `;
+        }).join('');
+
+        // 添加聚合视图选项
+        if (models.length > 0) {
+            const aggregatedItem = `
+                <div class="model-item ${this.isAggregatedView ? 'active' : ''}" onclick="app.showAggregatedView()">
+                    <div class="model-header">
+                        <div class="model-name"><i class="bi bi-bar-chart"></i> 聚合视图</div>
+                    </div>
+                    <div class="model-meta">
+                        <span>所有模型总览</span>
+                    </div>
+                </div>
+            `;
+            container.insertAdjacentHTML('afterbegin', aggregatedItem);
+        }
+    }
+
+    // ============ Leaderboard Methods ============
+
+    async fetchLeaderboardSnapshot(manual = false) {
+        const url = '/api/market/leaderboard';
+        this.logger.logApiCall('GET', url);
+
+        try {
+            const response = await fetch(url);
+            
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+            }
+
+            let data;
+            try {
+                data = await response.json();
+            } catch (parseError) {
+                this.logger.logApiError('GET', url, new Error('响应解析失败'), response);
+                return;
+            }
+
+            this.logger.logApiSuccess('GET', url, response, data);
+
+            if (data.gainers && data.losers) {
+                this.leaderboardData = { gainers: data.gainers, losers: data.losers };
+                this.leaderboardLastUpdated = new Date();
+                this.renderLeaderboard();
+            }
+        } catch (error) {
+            this.logger.logDataLoadError('涨跌幅榜', error, url);
+        }
+    }
+
+    renderLeaderboard() {
+        const gainersContainer = document.getElementById('leaderboardGainers');
+        const losersContainer = document.getElementById('leaderboardLosers');
+        const statusElement = document.getElementById('leaderboardStatus');
+
+        if (statusElement) {
+            const timeStr = this.leaderboardLastUpdated 
+                ? this.leaderboardLastUpdated.toLocaleTimeString('zh-CN')
+                : '刚刚';
+            statusElement.textContent = `最后更新: ${timeStr}`;
+        }
+
+        if (gainersContainer) {
+            if (this.leaderboardData.gainers && this.leaderboardData.gainers.length > 0) {
+                gainersContainer.innerHTML = this.leaderboardData.gainers.map((item, index) => `
+                    <div class="leaderboard-item">
+                        <span class="rank">${index + 1}</span>
+                        <span class="symbol">${item.symbol}</span>
+                        <span class="change positive">+${item.priceChangePercent.toFixed(2)}%</span>
+                    </div>
+                `).join('');
+            } else {
+                gainersContainer.innerHTML = '<div class="empty-state">暂无数据</div>';
+            }
+        }
+
+        if (losersContainer) {
+            if (this.leaderboardData.losers && this.leaderboardData.losers.length > 0) {
+                losersContainer.innerHTML = this.leaderboardData.losers.map((item, index) => `
+                    <div class="leaderboard-item">
+                        <span class="rank">${index + 1}</span>
+                        <span class="symbol">${item.symbol}</span>
+                        <span class="change negative">${item.priceChangePercent.toFixed(2)}%</span>
+                    </div>
+                `).join('');
+            } else {
+                losersContainer.innerHTML = '<div class="empty-state">暂无数据</div>';
+            }
+        }
+    }
+
+    updateConversations(conversations) {
+        const container = document.getElementById('conversationsBody');
+        if (!container) return;
+
+        if (!conversations || conversations.length === 0) {
+            container.innerHTML = '<div class="empty-state">暂无对话记录</div>';
+            return;
+        }
+
+        container.innerHTML = conversations.map(conv => {
+            const role = conv.role || 'unknown';
+            const content = conv.content || '';
+            const timestamp = conv.timestamp ? new Date(conv.timestamp.replace(' ', 'T') + 'Z').toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' }) : '';
+
+            const isSystem = role === 'system';
+            const isUser = role === 'user';
+            const isAssistant = role === 'assistant';
+
+            if (isSystem && !this.showSystemPrompt) {
+                return '';
+            }
+
+            let roleClass = 'conversation-role-other';
+            let roleText = role;
+            if (isUser) {
+                roleClass = 'conversation-role-user';
+                roleText = '用户';
+            } else if (isAssistant) {
+                roleClass = 'conversation-role-assistant';
+                roleText = 'AI';
+            } else if (isSystem) {
+                roleClass = 'conversation-role-system';
+                roleText = '系统';
+            }
+
+            return `
+                <div class="conversation-item">
+                    <div class="conversation-header">
+                        <span class="${roleClass}">${roleText}</span>
+                        <span class="conversation-time">${timestamp}</span>
+                    </div>
+                    <div class="conversation-content">${content.replace(/\n/g, '<br>')}</div>
+                </div>
+            `;
+        }).join('');
+    }
+
+    loadSettingsCache() {
+        // 从缓存或API加载设置
+        if (this.settingsCache) {
+            this.showSystemPrompt = Boolean(this.settingsCache.show_system_prompt);
+        }
+    }
+
+    // ============ Utility/Helper Methods ============
+
+    buildTimeframeSection(timeframes) {
+        if (!timeframes || Object.keys(timeframes).length === 0) {
+            return '<div class="timeframe-empty">暂无时间框架数据</div>';
+        }
+
+        const timeframeLabels = {
+            '1m': '1分钟',
+            '5m': '5分钟',
+            '15m': '15分钟',
+            '1h': '1小时',
+            '4h': '4小时',
+            '1d': '1天'
+        };
+
+        return Object.entries(timeframes).map(([tf, data]) => {
+            const label = timeframeLabels[tf] || tf;
+            const change = data.change !== undefined ? data.change.toFixed(2) : '0.00';
+            const changeClass = parseFloat(change) >= 0 ? 'positive' : 'negative';
+            return `
+                <div class="timeframe-item">
+                    <span class="timeframe-label">${label}</span>
+                    <span class="timeframe-change ${changeClass}">${change >= 0 ? '+' : ''}${change}%</span>
+                </div>
+            `;
+        }).join('');
+    }
+
+    buildMaGrid(timeframes) {
+        if (!timeframes || Object.keys(timeframes).length === 0) {
+            return '';
+        }
+
+        return Object.entries(timeframes).map(([tf, data]) => {
+            if (!data.ma) return '';
+            const ma5 = data.ma.ma5 ? data.ma.ma5.toFixed(2) : '-';
+            const ma10 = data.ma.ma10 ? data.ma.ma10.toFixed(2) : '-';
+            const ma20 = data.ma.ma20 ? data.ma.ma20.toFixed(2) : '-';
+            return `
+                <div class="ma-item">
+                    <span class="ma-label">${tf} MA</span>
+                    <span class="ma-values">5:${ma5} | 10:${ma10} | 20:${ma20}</span>
+                </div>
+            `;
+        }).join('');
+    }
+
+    formatPnl(value, isPnl = false) {
+        if (value === null || value === undefined) return '$0.00';
+        const num = parseFloat(value);
+        if (isNaN(num)) return '$0.00';
+        const sign = isPnl && num >= 0 ? '+' : '';
+        return `${sign}$${num.toFixed(2)}`;
+    }
+
+    getPnlClass(value, isPnl = false) {
+        if (!isPnl) return '';
+        const num = parseFloat(value);
+        if (isNaN(num)) return '';
+        if (num > 0) return 'text-success';
+        if (num < 0) return 'text-danger';
+        return '';
+    }
+
+    formatCompactUsd(value) {
+        if (!value) return '--';
+        const num = parseFloat(value);
+        if (isNaN(num)) return '--';
+        if (num >= 1000000) return `$${(num / 1000000).toFixed(2)}M`;
+        if (num >= 1000) return `$${(num / 1000).toFixed(2)}K`;
+        return `$${num.toFixed(2)}`;
+    }
+
+    getModelDisplayName(modelId) {
+        const model = this.modelsCache.find(m => m.id === modelId);
+        return model ? (model.name || `模型 #${modelId}`) : `模型 #${modelId}`;
     }
 }
 
