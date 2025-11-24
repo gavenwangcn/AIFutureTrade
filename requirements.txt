@@ -1,9 +1,7 @@
 Flask==3.0.0
 Flask-CORS==4.0.0
+flask-socketio>=5.3.6
 requests==2.31.0
 openai>=1.0.0
 pyinstaller>=5.13.0
-jqdatasdk>=1.8.11
-binance-connector>=3.5.1
-flask-socketio>=5.3.6
-
+binance-sdk-derivatives-trading-usds-futures>=4.0.0

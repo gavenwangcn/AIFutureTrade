@@ -21,7 +21,8 @@ MARKET_API_CACHE = 5  # seconds
 MARKET_REFRESH = 2000  # ms - align with futures indicator frequency
 PORTFOLIO_REFRESH = 10000  # ms
 TRADE_FEE_RATE = 0.001  # 交易费率：0.1%（双向收费）
-PROMPT_MARKET_SYMBOL_LIMIT = 5  # AI提示中用于行情概览的最大合约数
+PROMPT_MARKET_SYMBOL_LIMIT = 5  # 每次调用AI模型时处理的合约数量
+BUY_DECISION_THREAD_COUNT = 2  # 买入决策API调用的并发线程数
 
 # Logging Configuration
 # 日志级别: DEBUG, INFO, WARNING, ERROR, CRITICAL

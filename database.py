@@ -4,28 +4,29 @@ Database management module
 import sqlite3
 import json
 import logging
+import config as app_config
 from datetime import datetime
 from typing import List, Dict, Optional
 
-try:
-    import config as app_config
-except ImportError:  # pragma: no cover - fallback for environments without config.py
-    import config_example as app_config
+
 
 logger = logging.getLogger(__name__)
+
 
 class Database:
     def __init__(self, db_path: str = 'trading_bot.db'):
         self.db_path = db_path
-        
+
     def get_connection(self):
         """Get database connection"""
         conn = sqlite3.connect(self.db_path)
         conn.row_factory = sqlite3.Row
         return conn
-    
+
+    # ============ Database Initialization ============
+
     def init_db(self):
-        """Initialize database tables"""
+        """Initialize database tables - only CREATE TABLE IF NOT EXISTS, no migration logic"""
         conn = self.get_connection()
         cursor = conn.cursor()
 
@@ -36,110 +37,11 @@ class Database:
                 name TEXT NOT NULL,
                 api_url TEXT NOT NULL,
                 api_key TEXT NOT NULL,
-                models TEXT,  -- JSON string or comma-separated list of models
+                models TEXT,
                 provider_type TEXT DEFAULT 'openai',
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         ''')
-
-    def upsert_leaderboard_entries(self, entries: List[Dict]):
-        if not entries:
-            return
-
-        conn = self.get_connection()
-        cursor = conn.cursor()
-        payload = []
-        for entry in entries:
-            try:
-                payload.append((
-                    entry['symbol'],
-                    entry['contract_symbol'],
-                    entry.get('name'),
-                    entry.get('exchange', 'BINANCE_FUTURES'),
-                    entry['side'],
-                    entry['rank'],
-                    entry.get('price'),
-                    entry.get('change_percent'),
-                    entry.get('quote_volume'),
-                    json.dumps(entry.get('timeframes', {}), ensure_ascii=False)
-                ))
-            except KeyError as exc:
-                logger.warning(f"[DB] 无法写入涨跌幅榜：缺少字段 {exc}")
-
-        if payload:
-            cursor.executemany('''
-                INSERT INTO futures_leaderboard (
-                    symbol, contract_symbol, name, exchange,
-                    side, rank, price, change_percent, quote_volume, timeframes, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-                ON CONFLICT(symbol, side) DO UPDATE SET
-                    contract_symbol = excluded.contract_symbol,
-                    name = excluded.name,
-                    exchange = excluded.exchange,
-                    rank = excluded.rank,
-                    price = excluded.price,
-                    change_percent = excluded.change_percent,
-                    quote_volume = excluded.quote_volume,
-                    timeframes = excluded.timeframes,
-                    updated_at = CURRENT_TIMESTAMP
-            ''', payload)
-            conn.commit()
-
-        conn.close()
-
-    def get_futures_leaderboard(self, side: Optional[str] = None, limit: int = 10) -> Dict[str, List[Dict]]:
-        conn = self.get_connection()
-        cursor = conn.cursor()
-
-        def fetch(side_key: str) -> List[Dict]:
-            cursor.execute('''
-                SELECT symbol, contract_symbol, name, exchange, side,
-                       rank, price, change_percent, quote_volume, timeframes, updated_at
-                FROM futures_leaderboard
-                WHERE side = ?
-                ORDER BY rank ASC
-                LIMIT ?
-            ''', (side_key, limit))
-            rows = cursor.fetchall()
-            result = []
-            for row in rows:
-                try:
-                    tf = json.loads(row['timeframes']) if row['timeframes'] else {}
-                except json.JSONDecodeError:
-                    tf = {}
-                result.append({
-                    'symbol': row['symbol'],
-                    'contract_symbol': row['contract_symbol'],
-                    'name': row['name'],
-                    'exchange': row['exchange'],
-                    'side': row['side'],
-                    'rank': row['rank'],
-                    'price': row['price'],
-                    'change_percent': row['change_percent'],
-                    'quote_volume': row['quote_volume'],
-                    'timeframes': tf,
-                    'updated_at': row['updated_at']
-                })
-            return result
-
-        result: Dict[str, List[Dict]] = {'gainers': [], 'losers': []}
-        side_map = {'gainer': 'gainers', 'loser': 'losers'}
-
-        if side:
-            normalized = side_map.get(side, side)
-            result[normalized] = fetch(side)
-        else:
-            for raw_key, target_key in side_map.items():
-                result[target_key] = fetch(raw_key)
-
-        conn.close()
-        return result
-
-        # Ensure provider_type column exists (for legacy databases)
-        cursor.execute("PRAGMA table_info(providers)")
-        columns = [row[1] for row in cursor.fetchall()]
-        if 'provider_type' not in columns:
-            cursor.execute("ALTER TABLE providers ADD COLUMN provider_type TEXT DEFAULT 'openai'")
 
         # Models table
         cursor.execute('''
@@ -156,14 +58,6 @@ class Database:
             )
         ''')
 
-        # Ensure auto_trading_enabled column exists (legacy support)
-        cursor.execute("PRAGMA table_info(models)")
-        model_columns = [row[1] for row in cursor.fetchall()]
-        if 'auto_trading_enabled' not in model_columns:
-            cursor.execute("ALTER TABLE models ADD COLUMN auto_trading_enabled INTEGER DEFAULT 1")
-        if 'leverage' not in model_columns:
-            cursor.execute("ALTER TABLE models ADD COLUMN leverage INTEGER DEFAULT 10")
-        
         # Portfolios table
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS portfolios (
@@ -179,8 +73,7 @@ class Database:
                 UNIQUE(model_id, future, side)
             )
         ''')
-        self._ensure_portfolios_future_column(cursor)
-        
+
         # Trades table
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS trades (
@@ -198,8 +91,7 @@ class Database:
                 FOREIGN KEY (model_id) REFERENCES models(id)
             )
         ''')
-        self._ensure_trades_future_column(cursor)
-        
+
         # Conversations table
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS conversations (
@@ -212,7 +104,7 @@ class Database:
                 FOREIGN KEY (model_id) REFERENCES models(id)
             )
         ''')
-        
+
         # Account values history table
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS account_values (
@@ -237,12 +129,6 @@ class Database:
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         ''')
-
-        # Ensure show_system_prompt column exists for legacy databases
-        cursor.execute("PRAGMA table_info(settings)")
-        settings_columns = [row[1] for row in cursor.fetchall()]
-        if 'show_system_prompt' not in settings_columns:
-            cursor.execute("ALTER TABLE settings ADD COLUMN show_system_prompt INTEGER DEFAULT 0")
 
         # Model prompts table
         cursor.execute('''
@@ -273,106 +159,6 @@ class Database:
         ''')
 
         # Futures table (USDS-M contract universe)
-        self._ensure_futures_table(cursor)
-
-        # Futures leaderboard table
-        self._ensure_leaderboard_table(cursor)
-
-        # Insert default settings if no settings exist
-        cursor.execute('SELECT COUNT(*) FROM settings')
-        if cursor.fetchone()[0] == 0:
-            cursor.execute('''
-                INSERT INTO settings (trading_frequency_minutes, trading_fee_rate, show_system_prompt)
-                VALUES (60, 0.001, 0)
-            ''')
-
-        # Daily closing prices table
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS daily_prices (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                symbol TEXT NOT NULL,
-                price REAL NOT NULL,
-                price_date TEXT NOT NULL,
-                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                UNIQUE(symbol, price_date)
-            )
-        ''')
-
-        conn.commit()
-        conn.close()
-
-    def _ensure_portfolios_future_column(self, cursor):
-        cursor.execute("PRAGMA table_info(portfolios)")
-        columns = [row[1] for row in cursor.fetchall()]
-        if 'future' in columns:
-            return
-
-        if 'coin' not in columns:
-            return
-
-        cursor.execute('ALTER TABLE portfolios RENAME TO portfolios_legacy')
-        cursor.execute('''
-            CREATE TABLE portfolios (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                model_id INTEGER NOT NULL,
-                future TEXT NOT NULL,
-                quantity REAL NOT NULL,
-                avg_price REAL NOT NULL,
-                leverage INTEGER DEFAULT 1,
-                side TEXT DEFAULT 'long',
-                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY (model_id) REFERENCES models(id),
-                UNIQUE(model_id, future, side)
-            )
-        ''')
-        cursor.execute('''
-            INSERT INTO portfolios (id, model_id, future, quantity, avg_price, leverage, side, updated_at)
-            SELECT id, model_id, coin, quantity, avg_price, leverage, side, updated_at FROM portfolios_legacy
-        ''')
-        cursor.execute('DROP TABLE portfolios_legacy')
-
-    def _ensure_trades_future_column(self, cursor):
-        cursor.execute("PRAGMA table_info(trades)")
-        columns = [row[1] for row in cursor.fetchall()]
-        if 'future' in columns:
-            return
-
-        if 'coin' not in columns:
-            return
-
-        cursor.execute('ALTER TABLE trades RENAME TO trades_legacy')
-        cursor.execute('''
-            CREATE TABLE trades (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                model_id INTEGER NOT NULL,
-                future TEXT NOT NULL,
-                signal TEXT NOT NULL,
-                quantity REAL NOT NULL,
-                price REAL NOT NULL,
-                leverage INTEGER DEFAULT 1,
-                side TEXT DEFAULT 'long',
-                pnl REAL DEFAULT 0,
-                fee REAL DEFAULT 0,
-                timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY (model_id) REFERENCES models(id)
-            )
-        ''')
-        cursor.execute('''
-            INSERT INTO trades (id, model_id, future, signal, quantity, price, leverage, side, pnl, fee, timestamp)
-            SELECT id, model_id, coin, signal, quantity, price, leverage, side, pnl, fee, timestamp FROM trades_legacy
-        ''')
-        cursor.execute('DROP TABLE trades_legacy')
-
-    def _ensure_futures_table(self, cursor):
-        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='futures'")
-        futures_exists = cursor.fetchone() is not None
-
-        if not futures_exists:
-            cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='coins'")
-            if cursor.fetchone():
-                cursor.execute('ALTER TABLE coins RENAME TO futures')
-                futures_exists = True
-
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS futures (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -386,53 +172,7 @@ class Database:
             )
         ''')
 
-        cursor.execute("PRAGMA table_info(futures)")
-        existing_columns = [row[1] for row in cursor.fetchall()]
-
-        legacy_columns = set(existing_columns)
-        needs_migration = (
-            'contract_symbol' not in legacy_columns
-            or 'sort_order' not in legacy_columns
-            or 'link' not in legacy_columns
-        )
-
-        if not needs_migration:
-            return
-
-        cursor.execute('ALTER TABLE futures RENAME TO futures_legacy')
-
-        cursor.execute('''
-            CREATE TABLE futures (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                symbol TEXT NOT NULL UNIQUE,
-                contract_symbol TEXT NOT NULL,
-                name TEXT NOT NULL,
-                exchange TEXT NOT NULL DEFAULT 'BINANCE_FUTURES',
-                link TEXT,
-                sort_order INTEGER DEFAULT 0,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        ''')
-
-        cursor.execute('''
-            INSERT INTO futures (symbol, contract_symbol, name, exchange, link, sort_order, created_at)
-            SELECT
-                symbol,
-                CASE
-                    WHEN instr(symbol, 'USDT') > 0 THEN symbol
-                    ELSE symbol || 'USDT'
-                END AS contract_symbol,
-                name,
-                COALESCE(exchange, 'BINANCE_FUTURES'),
-                NULL,
-                0,
-                COALESCE(created_at, CURRENT_TIMESTAMP)
-            FROM futures_legacy
-        ''')
-
-        cursor.execute('DROP TABLE futures_legacy')
-
-    def _ensure_leaderboard_table(self, cursor):
+        # Futures leaderboard table
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS futures_leaderboard (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -450,9 +190,127 @@ class Database:
                 UNIQUE(symbol, side)
             )
         ''')
-    
-    # ============ Model Management (Moved) ============
-    
+
+        # Daily closing prices table
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS daily_prices (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                symbol TEXT NOT NULL,
+                price REAL NOT NULL,
+                price_date TEXT NOT NULL,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(symbol, price_date)
+            )
+        ''')
+
+        # Insert default settings if no settings exist
+        cursor.execute('SELECT COUNT(*) FROM settings')
+        if cursor.fetchone()[0] == 0:
+            cursor.execute('''
+                INSERT INTO settings (trading_frequency_minutes, trading_fee_rate, show_system_prompt)
+                VALUES (60, 0.001, 0)
+            ''')
+
+        conn.commit()
+        conn.close()
+
+    # ============ Provider Management ============
+
+    def add_provider(self, name: str, api_url: str, api_key: str, models: str = '', provider_type: str = 'openai') -> int:
+        """Add new API provider"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute('''
+            INSERT INTO providers (name, api_url, api_key, models, provider_type)
+            VALUES (?, ?, ?, ?, ?)
+        ''', (name, api_url, api_key, models, provider_type.lower()))
+        provider_id = cursor.lastrowid
+        conn.commit()
+        conn.close()
+        return provider_id
+
+    def get_provider(self, provider_id: int) -> Optional[Dict]:
+        """Get provider information"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute('SELECT * FROM providers WHERE id = ?', (provider_id,))
+        row = cursor.fetchone()
+        conn.close()
+        return dict(row) if row else None
+
+    def get_all_providers(self) -> List[Dict]:
+        """Get all API providers"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute('SELECT * FROM providers ORDER BY created_at DESC')
+        rows = cursor.fetchall()
+        conn.close()
+        return [dict(row) for row in rows]
+
+    def update_provider(self, provider_id: int, name: str, api_url: str, api_key: str, models: str, provider_type: str = 'openai'):
+        """Update provider information"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute('''
+            UPDATE providers
+            SET name = ?, api_url = ?, api_key = ?, models = ?, provider_type = ?
+            WHERE id = ?
+        ''', (name, api_url, api_key, models, provider_type.lower(), provider_id))
+        conn.commit()
+        conn.close()
+
+    def delete_provider(self, provider_id: int):
+        """Delete provider"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute('DELETE FROM providers WHERE id = ?', (provider_id,))
+        conn.commit()
+        conn.close()
+
+    # ============ Model Management ============
+
+    def add_model(self, name: str, provider_id: int, model_name: str,
+                 initial_capital: float = 10000, leverage: int = 10) -> int:
+        """Add new trading model"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute('''
+            INSERT INTO models (name, provider_id, model_name, initial_capital, leverage)
+            VALUES (?, ?, ?, ?, ?)
+        ''', (name, provider_id, model_name, initial_capital, leverage))
+        model_id = cursor.lastrowid
+        conn.commit()
+        conn.close()
+        return model_id
+
+    def get_model(self, model_id: int) -> Optional[Dict]:
+        """Get model information"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute('''
+            SELECT m.*, p.api_key, p.api_url, p.provider_type
+            FROM models m
+            LEFT JOIN providers p ON m.provider_id = p.id
+            WHERE m.id = ?
+        ''', (model_id,))
+        row = cursor.fetchone()
+        conn.close()
+        return dict(row) if row else None
+
+    def get_all_models(self) -> List[Dict]:
+        """Get all trading models"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute('''
+            SELECT m.*, p.name as provider_name
+            FROM models m
+            LEFT JOIN providers p ON m.provider_id = p.id
+            ORDER BY m.created_at DESC
+        ''')
+        rows = cursor.fetchall()
+        conn.close()
+        return [dict(row) for row in rows]
+
     def delete_model(self, model_id: int):
         """Delete model and related data"""
         conn = self.get_connection()
@@ -465,10 +323,53 @@ class Database:
         cursor.execute('DELETE FROM model_futures WHERE model_id = ?', (model_id,))
         conn.commit()
         conn.close()
-    
+
+    def set_model_auto_trading(self, model_id: int, enabled: bool) -> bool:
+        """Enable or disable auto trading for a model"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        try:
+            cursor.execute('''
+                UPDATE models
+                SET auto_trading_enabled = ?
+                WHERE id = ?
+            ''', (1 if enabled else 0, model_id))
+            conn.commit()
+            return cursor.rowcount > 0
+        except Exception as exc:
+            logger.error(f"Failed to update auto trading flag for model {model_id}: {exc}")
+            return False
+        finally:
+            conn.close()
+
+    def is_model_auto_trading_enabled(self, model_id: int) -> bool:
+        """Check auto trading flag for a model"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute('SELECT auto_trading_enabled FROM models WHERE id = ?', (model_id,))
+        row = cursor.fetchone()
+        conn.close()
+        if row is None:
+            return False
+        return bool(row['auto_trading_enabled'])
+
+    def set_model_leverage(self, model_id: int, leverage: int) -> bool:
+        """Update model leverage"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        try:
+            cursor.execute('UPDATE models SET leverage = ? WHERE id = ?', (leverage, model_id))
+            conn.commit()
+            return cursor.rowcount > 0
+        except Exception as exc:
+            logger.error(f"Failed to update leverage for model {model_id}: {exc}")
+            return False
+        finally:
+            conn.close()
+
     # ============ Portfolio Management ============
-    
-    def update_position(self, model_id: int, future: str, quantity: float, 
+
+    def update_position(self, model_id: int, future: str, quantity: float,
                        avg_price: float, leverage: int = 1, side: str = 'long'):
         """Update position"""
         conn = self.get_connection()
@@ -484,7 +385,7 @@ class Database:
         ''', (model_id, future.upper(), quantity, avg_price, leverage, side))
         conn.commit()
         conn.close()
-    
+
     def get_portfolio(self, model_id: int, current_prices: Dict = None) -> Dict:
         """Get portfolio with positions and P&L
         
@@ -494,13 +395,13 @@ class Database:
         """
         conn = self.get_connection()
         cursor = conn.cursor()
-        
+
         # Get positions
         cursor.execute('''
             SELECT * FROM portfolios WHERE model_id = ? AND quantity > 0
         ''', (model_id,))
         positions = [dict(row) for row in cursor.fetchall()]
-        
+
         # Get initial capital
         cursor.execute('SELECT initial_capital FROM models WHERE id = ?', (model_id,))
         model_row = cursor.fetchone()
@@ -508,16 +409,16 @@ class Database:
             conn.close()
             raise ValueError(f"Model {model_id} not found")
         initial_capital = model_row['initial_capital']
-        
+
         # Calculate realized P&L (sum of all trade P&L)
         cursor.execute('''
             SELECT COALESCE(SUM(pnl), 0) as total_pnl FROM trades WHERE model_id = ?
         ''', (model_id,))
         realized_pnl = cursor.fetchone()['total_pnl']
-        
+
         # Calculate margin used
         margin_used = sum([p['quantity'] * p['avg_price'] / p['leverage'] for p in positions])
-        
+
         # Calculate unrealized P&L (if prices provided)
         unrealized_pnl = 0
         if current_prices:
@@ -527,16 +428,16 @@ class Database:
                     current_price = current_prices[symbol]
                     entry_price = pos['avg_price']
                     quantity = pos['quantity']
-                    
+
                     # Add current price to position
                     pos['current_price'] = current_price
-                    
+
                     # Calculate position P&L
                     if pos['side'] == 'long':
                         pos_pnl = (current_price - entry_price) * quantity
                     else:  # short
                         pos_pnl = (entry_price - current_price) * quantity
-                    
+
                     pos['pnl'] = pos_pnl
                     unrealized_pnl += pos_pnl
                 else:
@@ -546,20 +447,21 @@ class Database:
             for pos in positions:
                 pos['current_price'] = None
                 pos['pnl'] = 0
-        
+
         # Cash = initial capital + realized P&L - margin used
         cash = initial_capital + realized_pnl - margin_used
-        
+
         # Position value = quantity * entry price (not margin!)
         positions_value = sum([p['quantity'] * p['avg_price'] for p in positions])
-        
+
         # Total account value = initial capital + realized P&L + unrealized P&L
         total_value = initial_capital + realized_pnl + unrealized_pnl
-        
+
         conn.close()
-        
+
         return {
             'model_id': model_id,
+            'initial_capital': initial_capital,
             'cash': cash,
             'positions': positions,
             'positions_value': positions_value,
@@ -568,7 +470,7 @@ class Database:
             'realized_pnl': realized_pnl,
             'unrealized_pnl': unrealized_pnl
         }
-    
+
     def close_position(self, model_id: int, future: str, side: str = 'long'):
         """Close position and clean up futures universe if unused"""
         conn = self.get_connection()
@@ -594,11 +496,11 @@ class Database:
             conn.commit()
 
         conn.close()
-    
+
     # ============ Trade Records ============
-    
+
     def add_trade(self, model_id: int, future: str, signal: str, quantity: float,
-              price: float, leverage: int = 1, side: str = 'long', pnl: float = 0, fee: float = 0):  # 新增fee参数
+              price: float, leverage: int = 1, side: str = 'long', pnl: float = 0, fee: float = 0):
         """Add trade record with fee"""
         conn = self.get_connection()
         cursor = conn.cursor()
@@ -608,7 +510,7 @@ class Database:
         ''', (model_id, future.upper(), signal, quantity, price, leverage, side, pnl, fee))
         conn.commit()
         conn.close()
-    
+
     def get_trades(self, model_id: int, limit: int = 50) -> List[Dict]:
         """Get trade history"""
         conn = self.get_connection()
@@ -621,197 +523,9 @@ class Database:
         conn.close()
         return [dict(row) for row in rows]
 
-    # ============ Prompt Configuration ============
-
-    def get_model_prompt(self, model_id: int) -> Optional[Dict]:
-        conn = self.get_connection()
-        cursor = conn.cursor()
-        cursor.execute('''
-            SELECT model_id, buy_prompt, sell_prompt, updated_at
-            FROM model_prompts
-            WHERE model_id = ?
-        ''', (model_id,))
-        row = cursor.fetchone()
-        conn.close()
-        return dict(row) if row else None
-
-    def upsert_model_prompt(self, model_id: int, buy_prompt: Optional[str], sell_prompt: Optional[str]) -> bool:
-        conn = self.get_connection()
-        cursor = conn.cursor()
-        try:
-            if (not buy_prompt or not buy_prompt.strip()) and (not sell_prompt or not sell_prompt.strip()):
-                cursor.execute('DELETE FROM model_prompts WHERE model_id = ?', (model_id,))
-                conn.commit()
-                return True
-
-            cursor.execute('''
-                INSERT INTO model_prompts (model_id, buy_prompt, sell_prompt)
-                VALUES (?, ?, ?)
-                ON CONFLICT(model_id) DO UPDATE SET
-                    buy_prompt = excluded.buy_prompt,
-                    sell_prompt = excluded.sell_prompt,
-                    updated_at = CURRENT_TIMESTAMP
-            ''', (model_id, buy_prompt, sell_prompt))
-            conn.commit()
-            return True
-        except Exception as exc:
-            logger.error(f"Error updating prompts for model {model_id}: {exc}")
-            conn.rollback()
-            return False
-        finally:
-            conn.close()
-    
-    # ============ Futures Universe Management ============
-
-    def get_futures(self) -> List[Dict]:
-        conn = self.get_connection()
-        cursor = conn.cursor()
-        cursor.execute('SELECT * FROM futures ORDER BY sort_order DESC, created_at DESC, symbol ASC')
-        rows = cursor.fetchall()
-        conn.close()
-        return [dict(row) for row in rows]
-
-    def add_future(
-        self,
-        symbol: str,
-        contract_symbol: str,
-        name: str,
-        exchange: str = 'BINANCE_FUTURES',
-        link: Optional[str] = None,
-        sort_order: int = 0
-    ) -> int:
-        conn = self.get_connection()
-        cursor = conn.cursor()
-        cursor.execute('''
-            INSERT INTO futures (symbol, contract_symbol, name, exchange, link, sort_order)
-            VALUES (?, ?, ?, ?, ?, ?)
-        ''', (
-            symbol.upper(),
-            contract_symbol.upper(),
-            name,
-            exchange.upper(),
-            (link or '').strip() or None,
-            sort_order
-        ))
-        future_id = cursor.lastrowid
-        conn.commit()
-        conn.close()
-        return future_id
-
-    def upsert_future(
-        self,
-        symbol: str,
-        contract_symbol: str,
-        name: str,
-        exchange: str = 'BINANCE_FUTURES',
-        link: Optional[str] = None,
-        sort_order: int = 0
-    ):
-        """Insert or update a futures configuration identified by symbol"""
-        conn = self.get_connection()
-        cursor = conn.cursor()
-        cursor.execute('''
-            INSERT INTO futures (symbol, contract_symbol, name, exchange, link, sort_order)
-            VALUES (?, ?, ?, ?, ?, ?)
-            ON CONFLICT(symbol) DO UPDATE SET
-                name = excluded.name,
-                exchange = excluded.exchange,
-                contract_symbol = excluded.contract_symbol,
-                link = excluded.link,
-                sort_order = excluded.sort_order
-        ''', (
-            symbol.upper(),
-            contract_symbol.upper(),
-            name,
-            exchange.upper(),
-            (link or '').strip() or None,
-            sort_order
-        ))
-        conn.commit()
-        conn.close()
-
-    def delete_future(self, future_id: int):
-        conn = self.get_connection()
-        cursor = conn.cursor()
-        cursor.execute('DELETE FROM futures WHERE id = ?', (future_id,))
-        conn.commit()
-        conn.close()
-
-    def get_future_configs(self) -> List[Dict]:
-        conn = self.get_connection()
-        cursor = conn.cursor()
-        cursor.execute('''
-            SELECT symbol, contract_symbol, name, exchange, link, sort_order
-            FROM futures
-            ORDER BY sort_order DESC, symbol ASC
-        ''')
-        rows = cursor.fetchall()
-        conn.close()
-        return [dict(row) for row in rows]
-
-    def get_future_symbols(self) -> List[str]:
-        return [future['symbol'] for future in self.get_future_configs()]
-
-    # ============ Model Futures Configuration ============
-
-    def add_model_future(self, model_id: int, symbol: str, contract_symbol: str,
-                         name: str, exchange: str = 'BINANCE_FUTURES',
-                         link: Optional[str] = None, sort_order: int = 0) -> int:
-        conn = self.get_connection()
-        cursor = conn.cursor()
-        cursor.execute('''
-            INSERT INTO model_futures (model_id, symbol, contract_symbol, name, exchange, link, sort_order)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(model_id, symbol) DO UPDATE SET
-                contract_symbol = excluded.contract_symbol,
-                name = excluded.name,
-                exchange = excluded.exchange,
-                link = excluded.link,
-                sort_order = excluded.sort_order
-        ''', (
-            model_id,
-            symbol.upper(),
-            contract_symbol.upper(),
-            name,
-            exchange.upper(),
-            (link or '').strip() or None,
-            sort_order
-        ))
-        inserted_id = cursor.lastrowid
-        conn.commit()
-        conn.close()
-        return inserted_id
-
-    def delete_model_future(self, model_id: int, symbol: str):
-        conn = self.get_connection()
-        cursor = conn.cursor()
-        cursor.execute('DELETE FROM model_futures WHERE model_id = ? AND symbol = ?', (model_id, symbol.upper()))
-        conn.commit()
-        conn.close()
-
-    def get_model_futures(self, model_id: int) -> List[Dict]:
-        conn = self.get_connection()
-        cursor = conn.cursor()
-        cursor.execute('''
-            SELECT id, model_id, symbol, contract_symbol, name, exchange, link, sort_order
-            FROM model_futures
-            WHERE model_id = ?
-            ORDER BY sort_order DESC, symbol ASC
-        ''', (model_id,))
-        rows = cursor.fetchall()
-        conn.close()
-        return [dict(row) for row in rows]
-
-    def clear_model_futures(self, model_id: int):
-        conn = self.get_connection()
-        cursor = conn.cursor()
-        cursor.execute('DELETE FROM model_futures WHERE model_id = ?', (model_id,))
-        conn.commit()
-        conn.close()
-
     # ============ Conversation History ============
-    
-    def add_conversation(self, model_id: int, user_prompt: str, 
+
+    def add_conversation(self, model_id: int, user_prompt: str,
                         ai_response: str, cot_trace: str = ''):
         """Add conversation record"""
         conn = self.get_connection()
@@ -822,7 +536,7 @@ class Database:
         ''', (model_id, user_prompt, ai_response, cot_trace))
         conn.commit()
         conn.close()
-    
+
     def get_conversations(self, model_id: int, limit: int = 20) -> List[Dict]:
         """Get conversation history"""
         conn = self.get_connection()
@@ -834,10 +548,10 @@ class Database:
         rows = cursor.fetchall()
         conn.close()
         return [dict(row) for row in rows]
-    
+
     # ============ Account Value History ============
-    
-    def record_account_value(self, model_id: int, total_value: float, 
+
+    def record_account_value(self, model_id: int, total_value: float,
                             cash: float, positions_value: float):
         """Record account value snapshot"""
         conn = self.get_connection()
@@ -848,7 +562,7 @@ class Database:
         ''', (model_id, total_value, cash, positions_value))
         conn.commit()
         conn.close()
-    
+
     def get_account_value_history(self, model_id: int, limit: int = 100) -> List[Dict]:
         """Get account value history"""
         conn = self.get_connection()
@@ -866,7 +580,6 @@ class Database:
         conn = self.get_connection()
         cursor = conn.cursor()
 
-        # Get the most recent timestamp for each time point across all models
         cursor.execute('''
             SELECT timestamp,
                    SUM(total_value) as total_value,
@@ -882,7 +595,7 @@ class Database:
                        ROW_NUMBER() OVER (PARTITION BY model_id, DATE(timestamp) ORDER BY timestamp DESC) as rn
                 FROM account_values
             ) grouped
-            WHERE rn <= 10  -- Keep up to 10 records per model per day for aggregation
+            WHERE rn <= 10
             GROUP BY DATE(timestamp), HOUR(timestamp)
             ORDER BY timestamp DESC
             LIMIT ?
@@ -944,6 +657,191 @@ class Database:
 
         conn.close()
         return chart_data
+
+    # ============ Prompt Configuration ============
+
+    def get_model_prompt(self, model_id: int) -> Optional[Dict]:
+        """Get model prompt configuration"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute('''
+            SELECT model_id, buy_prompt, sell_prompt, updated_at
+            FROM model_prompts
+            WHERE model_id = ?
+        ''', (model_id,))
+        row = cursor.fetchone()
+        conn.close()
+        return dict(row) if row else None
+
+    def upsert_model_prompt(self, model_id: int, buy_prompt: Optional[str], sell_prompt: Optional[str]) -> bool:
+        """Insert or update model prompt configuration"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        try:
+            if (not buy_prompt or not buy_prompt.strip()) and (not sell_prompt or not sell_prompt.strip()):
+                cursor.execute('DELETE FROM model_prompts WHERE model_id = ?', (model_id,))
+                conn.commit()
+                return True
+
+            cursor.execute('''
+                INSERT INTO model_prompts (model_id, buy_prompt, sell_prompt)
+                VALUES (?, ?, ?)
+                ON CONFLICT(model_id) DO UPDATE SET
+                    buy_prompt = excluded.buy_prompt,
+                    sell_prompt = excluded.sell_prompt,
+                    updated_at = CURRENT_TIMESTAMP
+            ''', (model_id, buy_prompt, sell_prompt))
+            conn.commit()
+            return True
+        except Exception as exc:
+            logger.error(f"Error updating prompts for model {model_id}: {exc}")
+            conn.rollback()
+            return False
+        finally:
+            conn.close()
+
+    # ============ Futures Universe Management ============
+
+    def get_futures(self) -> List[Dict]:
+        """Get all futures configurations"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute('SELECT * FROM futures ORDER BY sort_order DESC, created_at DESC, symbol ASC')
+        rows = cursor.fetchall()
+        conn.close()
+        return [dict(row) for row in rows]
+
+    def add_future(self, symbol: str, contract_symbol: str, name: str,
+                   exchange: str = 'BINANCE_FUTURES', link: Optional[str] = None, sort_order: int = 0) -> int:
+        """Add new future configuration"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute('''
+            INSERT INTO futures (symbol, contract_symbol, name, exchange, link, sort_order)
+            VALUES (?, ?, ?, ?, ?, ?)
+        ''', (
+            symbol.upper(),
+            contract_symbol.upper(),
+            name,
+            exchange.upper(),
+            (link or '').strip() or None,
+            sort_order
+        ))
+        future_id = cursor.lastrowid
+        conn.commit()
+        conn.close()
+        return future_id
+
+    def upsert_future(self, symbol: str, contract_symbol: str, name: str,
+                     exchange: str = 'BINANCE_FUTURES', link: Optional[str] = None, sort_order: int = 0):
+        """Insert or update a futures configuration identified by symbol"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute('''
+            INSERT INTO futures (symbol, contract_symbol, name, exchange, link, sort_order)
+            VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT(symbol) DO UPDATE SET
+                name = excluded.name,
+                exchange = excluded.exchange,
+                contract_symbol = excluded.contract_symbol,
+                link = excluded.link,
+                sort_order = excluded.sort_order
+        ''', (
+            symbol.upper(),
+            contract_symbol.upper(),
+            name,
+            exchange.upper(),
+            (link or '').strip() or None,
+            sort_order
+        ))
+        conn.commit()
+        conn.close()
+
+    def delete_future(self, future_id: int):
+        """Delete future configuration"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute('DELETE FROM futures WHERE id = ?', (future_id,))
+        conn.commit()
+        conn.close()
+
+    def get_future_configs(self) -> List[Dict]:
+        """Get future configurations"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute('''
+            SELECT symbol, contract_symbol, name, exchange, link, sort_order
+            FROM futures
+            ORDER BY sort_order DESC, symbol ASC
+        ''')
+        rows = cursor.fetchall()
+        conn.close()
+        return [dict(row) for row in rows]
+
+    def get_future_symbols(self) -> List[str]:
+        """Get list of future symbols"""
+        return [future['symbol'] for future in self.get_future_configs()]
+
+    # ============ Model Futures Configuration ============
+
+    def add_model_future(self, model_id: int, symbol: str, contract_symbol: str,
+                         name: str, exchange: str = 'BINANCE_FUTURES',
+                         link: Optional[str] = None, sort_order: int = 0) -> int:
+        """Add model-specific future configuration"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute('''
+            INSERT INTO model_futures (model_id, symbol, contract_symbol, name, exchange, link, sort_order)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(model_id, symbol) DO UPDATE SET
+                contract_symbol = excluded.contract_symbol,
+                name = excluded.name,
+                exchange = excluded.exchange,
+                link = excluded.link,
+                sort_order = excluded.sort_order
+        ''', (
+            model_id,
+            symbol.upper(),
+            contract_symbol.upper(),
+            name,
+            exchange.upper(),
+            (link or '').strip() or None,
+            sort_order
+        ))
+        inserted_id = cursor.lastrowid
+        conn.commit()
+        conn.close()
+        return inserted_id
+
+    def delete_model_future(self, model_id: int, symbol: str):
+        """Delete model-specific future configuration"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute('DELETE FROM model_futures WHERE model_id = ? AND symbol = ?', (model_id, symbol.upper()))
+        conn.commit()
+        conn.close()
+
+    def get_model_futures(self, model_id: int) -> List[Dict]:
+        """Get model-specific future configurations"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute('''
+            SELECT id, model_id, symbol, contract_symbol, name, exchange, link, sort_order
+            FROM model_futures
+            WHERE model_id = ?
+            ORDER BY sort_order DESC, symbol ASC
+        ''', (model_id,))
+        rows = cursor.fetchall()
+        conn.close()
+        return [dict(row) for row in rows]
+
+    def clear_model_futures(self, model_id: int):
+        """Clear all model-specific future configurations"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute('DELETE FROM model_futures WHERE model_id = ?', (model_id,))
+        conn.commit()
+        conn.close()
 
     # ============ Settings Management ============
 
@@ -1075,142 +973,99 @@ class Database:
         conn.close()
         return {row['symbol']: {'price': row['price'], 'price_date': row['price_date']} for row in rows}
 
-    # ============ Provider Management ============
+    # ============ Leaderboard Management ============
 
-    def add_provider(self, name: str, api_url: str, api_key: str, models: str = '', provider_type: str = 'openai') -> int:
-        """Add new API provider"""
+    def upsert_leaderboard_entries(self, entries: List[Dict]):
+        """Insert or update leaderboard entries"""
+        if not entries:
+            return
+
         conn = self.get_connection()
         cursor = conn.cursor()
-        cursor.execute('''
-            INSERT INTO providers (name, api_url, api_key, models, provider_type)
-            VALUES (?, ?, ?, ?, ?)
-        ''', (name, api_url, api_key, models, provider_type.lower()))
-        provider_id = cursor.lastrowid
-        conn.commit()
+        payload = []
+        for entry in entries:
+            try:
+                payload.append((
+                    entry['symbol'],
+                    entry['contract_symbol'],
+                    entry.get('name'),
+                    entry.get('exchange', 'BINANCE_FUTURES'),
+                    entry['side'],
+                    entry['rank'],
+                    entry.get('price'),
+                    entry.get('change_percent'),
+                    entry.get('quote_volume'),
+                    json.dumps(entry.get('timeframes', {}), ensure_ascii=False)
+                ))
+            except KeyError as exc:
+                logger.warning(f"[DB] 无法写入涨跌幅榜：缺少字段 {exc}")
+
+        if payload:
+            cursor.executemany('''
+                INSERT INTO futures_leaderboard (
+                    symbol, contract_symbol, name, exchange,
+                    side, rank, price, change_percent, quote_volume, timeframes, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                ON CONFLICT(symbol, side) DO UPDATE SET
+                    contract_symbol = excluded.contract_symbol,
+                    name = excluded.name,
+                    exchange = excluded.exchange,
+                    rank = excluded.rank,
+                    price = excluded.price,
+                    change_percent = excluded.change_percent,
+                    quote_volume = excluded.quote_volume,
+                    timeframes = excluded.timeframes,
+                    updated_at = CURRENT_TIMESTAMP
+            ''', payload)
+            conn.commit()
+
         conn.close()
-        return provider_id
 
-    def get_provider(self, provider_id: int) -> Optional[Dict]:
-        """Get provider information"""
+    def get_futures_leaderboard(self, side: Optional[str] = None, limit: int = 10) -> Dict[str, List[Dict]]:
+        """Get futures leaderboard data"""
         conn = self.get_connection()
         cursor = conn.cursor()
-        cursor.execute('SELECT * FROM providers WHERE id = ?', (provider_id,))
-        row = cursor.fetchone()
-        conn.close()
-        return dict(row) if row else None
 
-    def set_model_auto_trading(self, model_id: int, enabled: bool) -> bool:
-        """Enable or disable auto trading for a model"""
-        conn = self.get_connection()
-        cursor = conn.cursor()
-        try:
+        def fetch(side_key: str) -> List[Dict]:
             cursor.execute('''
-                UPDATE models
-                SET auto_trading_enabled = ?
-                WHERE id = ?
-            ''', (1 if enabled else 0, model_id))
-            conn.commit()
-            return cursor.rowcount > 0
-        except Exception as exc:
-            logger.error(f"Failed to update auto trading flag for model {model_id}: {exc}")
-            return False
-        finally:
-            conn.close()
+                SELECT symbol, contract_symbol, name, exchange, side,
+                       rank, price, change_percent, quote_volume, timeframes, updated_at
+                FROM futures_leaderboard
+                WHERE side = ?
+                ORDER BY rank ASC
+                LIMIT ?
+            ''', (side_key, limit))
+            rows = cursor.fetchall()
+            result = []
+            for row in rows:
+                try:
+                    tf = json.loads(row['timeframes']) if row['timeframes'] else {}
+                except json.JSONDecodeError:
+                    tf = {}
+                result.append({
+                    'symbol': row['symbol'],
+                    'contract_symbol': row['contract_symbol'],
+                    'name': row['name'],
+                    'exchange': row['exchange'],
+                    'side': row['side'],
+                    'rank': row['rank'],
+                    'price': row['price'],
+                    'change_percent': row['change_percent'],
+                    'quote_volume': row['quote_volume'],
+                    'timeframes': tf,
+                    'updated_at': row['updated_at']
+                })
+            return result
 
-    def is_model_auto_trading_enabled(self, model_id: int) -> bool:
-        """Check auto trading flag for a model"""
-        conn = self.get_connection()
-        cursor = conn.cursor()
-        cursor.execute('SELECT auto_trading_enabled FROM models WHERE id = ?', (model_id,))
-        row = cursor.fetchone()
+        result: Dict[str, List[Dict]] = {'gainers': [], 'losers': []}
+        side_map = {'gainer': 'gainers', 'loser': 'losers'}
+
+        if side:
+            normalized = side_map.get(side, side)
+            result[normalized] = fetch(side)
+        else:
+            for raw_key, target_key in side_map.items():
+                result[target_key] = fetch(raw_key)
+
         conn.close()
-        if row is None:
-            return False
-        return bool(row['auto_trading_enabled'])
-
-    def get_all_providers(self) -> List[Dict]:
-        """Get all API providers"""
-        conn = self.get_connection()
-        cursor = conn.cursor()
-        cursor.execute('SELECT * FROM providers ORDER BY created_at DESC')
-        rows = cursor.fetchall()
-        conn.close()
-        return [dict(row) for row in rows]
-
-    def delete_provider(self, provider_id: int):
-        """Delete provider"""
-        conn = self.get_connection()
-        cursor = conn.cursor()
-        cursor.execute('DELETE FROM providers WHERE id = ?', (provider_id,))
-        conn.commit()
-        conn.close()
-
-    def update_provider(self, provider_id: int, name: str, api_url: str, api_key: str, models: str, provider_type: str = 'openai'):
-        """Update provider information"""
-        conn = self.get_connection()
-        cursor = conn.cursor()
-        cursor.execute('''
-            UPDATE providers
-            SET name = ?, api_url = ?, api_key = ?, models = ?, provider_type = ?
-            WHERE id = ?
-        ''', (name, api_url, api_key, models, provider_type.lower(), provider_id))
-        conn.commit()
-        conn.close()
-
-    # ============ Model Management (Updated) ============
-
-    def add_model(self, name: str, provider_id: int, model_name: str,
-                 initial_capital: float = 10000, leverage: int = 10) -> int:
-        """Add new trading model"""
-        conn = self.get_connection()
-        cursor = conn.cursor()
-        cursor.execute('''
-            INSERT INTO models (name, provider_id, model_name, initial_capital, leverage)
-            VALUES (?, ?, ?, ?, ?)
-        ''', (name, provider_id, model_name, initial_capital, leverage))
-        model_id = cursor.lastrowid
-        conn.commit()
-        conn.close()
-        return model_id
-
-    def get_model(self, model_id: int) -> Optional[Dict]:
-        """Get model information"""
-        conn = self.get_connection()
-        cursor = conn.cursor()
-        cursor.execute('''
-            SELECT m.*, p.api_key, p.api_url, p.provider_type
-            FROM models m
-            LEFT JOIN providers p ON m.provider_id = p.id
-            WHERE m.id = ?
-        ''', (model_id,))
-        row = cursor.fetchone()
-        conn.close()
-        return dict(row) if row else None
-
-    def set_model_leverage(self, model_id: int, leverage: int) -> bool:
-        conn = self.get_connection()
-        cursor = conn.cursor()
-        try:
-            cursor.execute('UPDATE models SET leverage = ? WHERE id = ?', (leverage, model_id))
-            conn.commit()
-            return cursor.rowcount > 0
-        except Exception as exc:
-            logger.error(f"Failed to update leverage for model {model_id}: {exc}")
-            return False
-        finally:
-            conn.close()
-
-    def get_all_models(self) -> List[Dict]:
-        """Get all trading models"""
-        conn = self.get_connection()
-        cursor = conn.cursor()
-        cursor.execute('''
-            SELECT m.*, p.name as provider_name
-            FROM models m
-            LEFT JOIN providers p ON m.provider_id = p.id
-            ORDER BY m.created_at DESC
-        ''')
-        rows = cursor.fetchall()
-        conn.close()
-        return [dict(row) for row in rows]
-
+        return result

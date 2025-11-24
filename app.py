@@ -1,25 +1,6 @@
-@app.route('/api/market/leaderboard', methods=['GET'])
-def get_market_leaderboard():
-    limit = request.args.get('limit', type=int)
-    force = request.args.get('force', default=0, type=int)
-    try:
-        data = market_fetcher.sync_leaderboard(force=bool(force), limit=limit)
-        return jsonify(data)
-    except Exception as exc:
-        logger.error(f"Failed to load leaderboard: {exc}")
-        return jsonify({'error': str(exc)}), 500
-
-
-@socketio.on('leaderboard:request')
-def handle_leaderboard_request(payload=None):
-    payload = payload or {}
-    limit = payload.get('limit')
-    try:
-        data = market_fetcher.get_leaderboard(limit=limit)
-        emit('leaderboard:update', data)
-    except Exception as exc:
-        emit('leaderboard:error', {'message': str(exc)})
-
+"""
+Flask application for AI Futures Trading System
+"""
 from flask import Flask, render_template, request, jsonify
 from flask_cors import CORS
 from flask_socketio import SocketIO, emit
@@ -27,7 +8,6 @@ import os
 import time
 import threading
 import json
-import re
 from datetime import datetime
 from trading_engine import TradingEngine
 from market_data import MarketDataFetcher
@@ -36,19 +16,18 @@ from database import Database
 from version import __version__
 from prompt_defaults import DEFAULT_BUY_CONSTRAINTS, DEFAULT_SELL_CONSTRAINTS
 
-try:
-    import config as app_config
-except ImportError:  # pragma: no cover
-    import config_example as app_config
+import config as app_config
+import logging
+import sys
+
+# ============ Application Initialization ============
 
 app = Flask(__name__)
 CORS(app)
 socketio = SocketIO(app, cors_allowed_origins="*")
 
-import logging
-import sys
+# ============ Logging Configuration ============
 
-# 从配置读取日志级别
 def get_log_level():
     """从配置获取日志级别，默认为 INFO"""
     log_level_str = getattr(app_config, 'LOG_LEVEL', 'INFO').upper()
@@ -61,30 +40,26 @@ def get_log_level():
     }
     return log_level_map.get(log_level_str, logging.INFO)
 
-# 从配置读取日志格式
 log_format = getattr(app_config, 'LOG_FORMAT', '%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 log_date_format = getattr(app_config, 'LOG_DATE_FORMAT', '%Y-%m-%d %H:%M:%S')
 
-# 配置日志系统
 logging.basicConfig(
     level=get_log_level(),
     format=log_format,
     datefmt=log_date_format,
-    handlers=[
-        logging.StreamHandler(sys.stdout)
-    ]
+    handlers=[logging.StreamHandler(sys.stdout)]
 )
 
-# 设置 werkzeug 日志级别为 WARNING（减少 Flask 的请求日志）
 logging.getLogger('werkzeug').setLevel(logging.WARNING)
-
-# 创建应用日志器
 logger = logging.getLogger(__name__)
+
+# ============ Global Configuration ============
 
 DEFAULT_DB_PATH = 'trading_bot.db'
 env_db_path = os.getenv('DATABASE_PATH')
 config_db_path = getattr(app_config, 'DATABASE_PATH', None)
 db_path = env_db_path or config_db_path or DEFAULT_DB_PATH
+
 db = Database(db_path)
 market_fetcher = MarketDataFetcher(db)
 trading_engines = {}
@@ -95,6 +70,7 @@ LEADERBOARD_REFRESH_INTERVAL = getattr(app_config, 'FUTURES_LEADERBOARD_REFRESH'
 leaderboard_thread = None
 leaderboard_stop_event = threading.Event()
 
+# ============ Helper Functions ============
 
 def init_trading_engine_for_model(model_id: int):
     """Initialize trading engine for a model if possible."""
@@ -121,6 +97,7 @@ def init_trading_engine_for_model(model_id: int):
     return trading_engines[model_id], None
 
 def get_tracked_symbols():
+    """Get list of tracked future symbols"""
     symbols = db.get_future_symbols()
     if not symbols:
         logger.warning('No futures configured. Please add futures via /api/futures.')
@@ -140,22 +117,149 @@ def get_trading_interval_seconds() -> int:
     minutes = max(1, min(1440, minutes))
     return minutes * 60
 
+def init_trading_engines():
+    """Initialize trading engines for all models"""
+    try:
+        models = db.get_all_models()
+
+        if not models:
+            logger.warning("No trading models found")
+            return
+
+        logger.info(f"\nINIT: Initializing trading engines...")
+        for model in models:
+            model_id = model['id']
+            model_name = model['name']
+
+            try:
+                provider = db.get_provider(model['provider_id'])
+                if not provider:
+                    logger.warning(f"  Model {model_id} ({model_name}): Provider not found")
+                    continue
+
+                trading_engines[model_id] = TradingEngine(
+                    model_id=model_id,
+                    db=db,
+                    market_fetcher=market_fetcher,
+                    ai_trader=AITrader(
+                        provider_type=provider.get('provider_type', 'openai'),
+                        api_key=provider['api_key'],
+                        api_url=provider['api_url'],
+                        model_name=model['model_name']
+                    ),
+                    trade_fee_rate=TRADE_FEE_RATE
+                )
+                logger.info(f"  OK: Model {model_id} ({model_name})")
+            except Exception as e:
+                logger.error(f"  Model {model_id} ({model_name}): {e}")
+                continue
+
+        logger.info(f"Initialized {len(trading_engines)} engine(s)\n")
+
+    except Exception as e:
+        logger.error(f"Init engines failed: {e}\n")
+
+# ============ Background Tasks ============
 
 def _leaderboard_loop():
-    logger.info("Leaderboard loop started")
+    """
+    后台循环任务：定期同步涨跌幅榜数据并推送到前端
+    
+    流程：
+    1. 启动循环，记录启动信息
+    2. 定期调用 sync_leaderboard 同步数据
+    3. 如果同步成功，通过 WebSocket 推送到前端
+    4. 等待指定间隔后继续下一次循环
+    5. 收到停止信号时退出循环
+    """
+    thread_id = threading.current_thread().ident
+    logger.info(f"[Leaderboard Worker-{thread_id}] ========== 涨跌幅榜同步循环启动 ==========")
+    logger.info(f"[Leaderboard Worker-{thread_id}] 刷新间隔: {LEADERBOARD_REFRESH_INTERVAL} 秒")
+    
     wait_seconds = max(5, LEADERBOARD_REFRESH_INTERVAL)
+    cycle_count = 0
+    
     while not leaderboard_stop_event.is_set():
+        cycle_count += 1
+        cycle_start_time = datetime.now()
+        
+        logger.info(f"[Leaderboard Worker-{thread_id}] [循环 #{cycle_count}] ========== 开始同步涨跌幅榜 ==========")
+        logger.info(f"[Leaderboard Worker-{thread_id}] [循环 #{cycle_count}] 同步时间: {cycle_start_time.strftime('%Y-%m-%d %H:%M:%S')}")
+        
         try:
+            # 调用同步方法（不强制刷新，使用缓存机制）
+            logger.info(f"[Leaderboard Worker-{thread_id}] [循环 #{cycle_count}] [步骤1] 调用 sync_leaderboard 同步数据...")
+            sync_start_time = datetime.now()
+            
             data = market_fetcher.sync_leaderboard(force=False)
+            
+            sync_duration = (datetime.now() - sync_start_time).total_seconds()
+            logger.info(f"[Leaderboard Worker-{thread_id}] [循环 #{cycle_count}] [步骤1] 数据同步完成, 耗时: {sync_duration:.2f} 秒")
+            
+            # 检查同步结果
             if data:
+                gainers = data.get('gainers', [])
+                losers = data.get('losers', [])
+                gainers_count = len(gainers) if gainers else 0
+                losers_count = len(losers) if losers else 0
+                
+                logger.info(f"[Leaderboard Worker-{thread_id}] [循环 #{cycle_count}] [步骤2] 同步数据统计: "
+                           f"涨幅榜={gainers_count} 条, 跌幅榜={losers_count} 条")
+                
+                # 记录涨幅榜前3名（如果有）
+                if gainers_count > 0:
+                    top_gainers = gainers[:3]
+                    for idx, entry in enumerate(top_gainers):
+                        logger.info(f"[Leaderboard Worker-{thread_id}] [循环 #{cycle_count}] [步骤2.1] 涨幅榜 #{idx+1}: "
+                                   f"{entry.get('symbol', 'N/A')} "
+                                   f"价格=${entry.get('price', 0):.4f} "
+                                   f"涨跌幅={entry.get('change_percent', 0):.2f}% "
+                                   f"成交量=${entry.get('quote_volume', 0):.2f}")
+                
+                # 记录跌幅榜前3名（如果有）
+                if losers_count > 0:
+                    top_losers = losers[:3]
+                    for idx, entry in enumerate(top_losers):
+                        logger.info(f"[Leaderboard Worker-{thread_id}] [循环 #{cycle_count}] [步骤2.2] 跌幅榜 #{idx+1}: "
+                                   f"{entry.get('symbol', 'N/A')} "
+                                   f"价格=${entry.get('price', 0):.4f} "
+                                   f"涨跌幅={entry.get('change_percent', 0):.2f}% "
+                                   f"成交量=${entry.get('quote_volume', 0):.2f}")
+                
+                # 通过 WebSocket 推送到前端
+                logger.info(f"[Leaderboard Worker-{thread_id}] [循环 #{cycle_count}] [步骤3] 通过 WebSocket 推送数据到前端...")
+                emit_start_time = datetime.now()
+                
                 socketio.emit('leaderboard:update', data)
+                
+                emit_duration = (datetime.now() - emit_start_time).total_seconds()
+                logger.info(f"[Leaderboard Worker-{thread_id}] [循环 #{cycle_count}] [步骤3] WebSocket 推送完成, 耗时: {emit_duration:.3f} 秒")
+                
+            else:
+                logger.warning(f"[Leaderboard Worker-{thread_id}] [循环 #{cycle_count}] [步骤2] 同步返回空数据，跳过推送")
+                
         except Exception as exc:
-            logger.error(f"Leaderboard sync failed: {exc}")
+            cycle_duration = (datetime.now() - cycle_start_time).total_seconds()
+            logger.error(f"[Leaderboard Worker-{thread_id}] [循环 #{cycle_count}] ========== 涨跌幅榜同步失败 ==========")
+            logger.error(f"[Leaderboard Worker-{thread_id}] [循环 #{cycle_count}] 错误信息: {exc}")
+            logger.error(f"[Leaderboard Worker-{thread_id}] [循环 #{cycle_count}] 失败耗时: {cycle_duration:.2f} 秒")
+            import traceback
+            logger.error(f"[Leaderboard Worker-{thread_id}] [循环 #{cycle_count}] 错误堆栈:\n{traceback.format_exc()}")
+        
+        # 计算本次循环总耗时
+        cycle_duration = (datetime.now() - cycle_start_time).total_seconds()
+        logger.info(f"[Leaderboard Worker-{thread_id}] [循环 #{cycle_count}] ========== 同步循环完成 ==========")
+        logger.info(f"[Leaderboard Worker-{thread_id}] [循环 #{cycle_count}] 本次循环耗时: {cycle_duration:.2f} 秒")
+        logger.info(f"[Leaderboard Worker-{thread_id}] [循环 #{cycle_count}] 等待 {wait_seconds} 秒后开始下一次循环...")
+        
+        # 等待指定间隔（可被停止事件中断）
         leaderboard_stop_event.wait(wait_seconds)
-    logger.info("Leaderboard loop stopped")
-
+    
+    logger.info(f"[Leaderboard Worker-{thread_id}] ========== 涨跌幅榜同步循环停止 ==========")
+    logger.info(f"[Leaderboard Worker-{thread_id}] 总循环次数: {cycle_count}")
 
 def start_leaderboard_worker():
+    """Start background worker for leaderboard updates"""
     global leaderboard_thread
     if leaderboard_thread and leaderboard_thread.is_alive():
         return
@@ -163,12 +267,71 @@ def start_leaderboard_worker():
     leaderboard_thread = threading.Thread(target=_leaderboard_loop, daemon=True)
     leaderboard_thread.start()
 
+def trading_loop():
+    """Main trading loop for automatic trading"""
+    logger.info("Trading loop started")
 
-def stop_leaderboard_worker():
-    leaderboard_stop_event.set()
+    while auto_trading:
+        try:
+            if not trading_engines:
+                time.sleep(30)
+                continue
+
+            logger.info(f"\n{'='*60}")
+            logger.info(f"CYCLE: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+            logger.info(f"Active models: {len(trading_engines)}")
+            logger.info(f"{'='*60}")
+
+            for model_id, engine in list(trading_engines.items()):
+                try:
+                    if not db.is_model_auto_trading_enabled(model_id):
+                        logger.info(f"SKIP: Model {model_id} auto trading paused")
+                        continue
+
+                    logger.info(f"\nEXEC: Model {model_id}")
+                    result = engine.execute_trading_cycle()
+
+                    if result.get('success'):
+                        logger.info(f"OK: Model {model_id} completed")
+                        if result.get('executions'):
+                            for exec_result in result['executions']:
+                                signal = exec_result.get('signal', 'unknown')
+                                symbol = exec_result.get('future', exec_result.get('symbol', 'unknown'))
+                                msg = exec_result.get('message', '')
+                                if signal != 'hold':
+                                    logger.info(f"  TRADE: {symbol}: {msg}")
+                    else:
+                        error = result.get('error', 'Unknown error')
+                        logger.warning(f"Model {model_id} failed: {error}")
+
+                except Exception as e:
+                    logger.error(f"Model {model_id} exception: {e}")
+                    import traceback
+                    logger.error(traceback.format_exc())
+                    continue
+
+            interval_seconds = get_trading_interval_seconds()
+            interval_minutes = interval_seconds / 60
+            logger.info(f"\n{'='*60}")
+            logger.info(f"SLEEP: Waiting {interval_minutes:.1f} minute(s) for next cycle")
+            logger.info(f"{'='*60}\n")
+
+            time.sleep(interval_seconds)
+
+        except Exception as e:
+            logger.critical(f"\nTrading loop error: {e}")
+            import traceback
+            logger.critical(traceback.format_exc())
+            logger.info("RETRY: Retrying in 60 seconds\n")
+            time.sleep(60)
+
+    logger.info("Trading loop stopped")
+
+# ============ Page Routes ============
 
 @app.route('/')
 def index():
+    """Main page route"""
     return render_template('index.html')
 
 # ============ Provider API Endpoints ============
@@ -215,13 +378,10 @@ def fetch_provider_models():
         return jsonify({'error': 'API URL and key are required'}), 400
 
     try:
-        # This is a placeholder - implement actual API call based on provider
-        # For now, return empty list or common models
         models = []
 
         # Try to detect provider type and call appropriate API
         if 'openai.com' in api_url.lower():
-            # OpenAI API call
             import requests
             headers = {
                 'Authorization': f'Bearer {api_key}',
@@ -232,7 +392,6 @@ def fetch_provider_models():
                 result = response.json()
                 models = [m['id'] for m in result.get('data', []) if 'gpt' in m['id'].lower()]
         elif 'deepseek' in api_url.lower():
-            # DeepSeek API
             import requests
             headers = {
                 'Authorization': f'Bearer {api_key}',
@@ -251,10 +410,11 @@ def fetch_provider_models():
         logger.error(f"Fetch models failed: {e}")
         return jsonify({'error': f'Failed to fetch models: {str(e)}'}), 500
 
-# ============ Futures Configuration Endpoints ============
+# ============ Futures Configuration API Endpoints ============
 
 @app.route('/api/futures', methods=['GET'])
 def list_futures():
+    """Get all futures configurations"""
     try:
         futures = db.get_futures()
         return jsonify(futures)
@@ -263,6 +423,7 @@ def list_futures():
 
 @app.route('/api/futures', methods=['POST'])
 def add_future_config():
+    """Add new future configuration"""
     data = request.json or {}
     symbol = data.get('symbol', '').strip().upper()
     contract_symbol = data.get('contract_symbol', '').strip().upper()
@@ -294,6 +455,7 @@ def add_future_config():
 
 @app.route('/api/futures/<int:future_id>', methods=['DELETE'])
 def delete_future_config(future_id):
+    """Delete future configuration"""
     try:
         db.delete_future(future_id)
         return jsonify({'message': 'Future deleted successfully'})
@@ -304,14 +466,15 @@ def delete_future_config(future_id):
 
 @app.route('/api/models', methods=['GET'])
 def get_models():
+    """Get all trading models"""
     models = db.get_all_models()
     return jsonify(models)
 
 @app.route('/api/models', methods=['POST'])
 def add_model():
+    """Add new trading model"""
     data = request.json or {}
     try:
-        # Get provider info
         provider = db.get_provider(data['provider_id'])
         if not provider:
             return jsonify({'error': 'Provider not found'}), 404
@@ -325,12 +488,10 @@ def add_model():
         )
 
         model = db.get_model(model_id)
-        
-        # Get provider info
         provider = db.get_provider(model['provider_id'])
         if not provider:
             return jsonify({'error': 'Provider not found'}), 404
-        
+
         trading_engines[model_id] = TradingEngine(
             model_id=model_id,
             db=db,
@@ -341,7 +502,7 @@ def add_model():
                 api_url=provider['api_url'],
                 model_name=model['model_name']
             ),
-            trade_fee_rate=TRADE_FEE_RATE  # 新增：传入费率
+            trade_fee_rate=TRADE_FEE_RATE
         )
         logger.info(f"Model {model_id} ({data['name']}) initialized")
 
@@ -353,14 +514,15 @@ def add_model():
 
 @app.route('/api/models/<int:model_id>', methods=['DELETE'])
 def delete_model(model_id):
+    """Delete trading model"""
     try:
         model = db.get_model(model_id)
         model_name = model['name'] if model else f"ID-{model_id}"
-        
+
         db.delete_model(model_id)
         if model_id in trading_engines:
             del trading_engines[model_id]
-        
+
         logger.info(f"Model {model_id} ({model_name}) deleted")
         return jsonify({'message': 'Model deleted successfully'})
     except Exception as e:
@@ -369,6 +531,7 @@ def delete_model(model_id):
 
 @app.route('/api/models/<int:model_id>/portfolio', methods=['GET'])
 def get_portfolio(model_id):
+    """Get model portfolio data"""
     model = db.get_model(model_id)
     if not model:
         return jsonify({'error': f'Model {model_id} not found'}), 404
@@ -376,13 +539,14 @@ def get_portfolio(model_id):
     symbols = get_tracked_symbols()
     prices_data = market_fetcher.get_prices(symbols)
     current_prices = {symbol: data['price'] for symbol, data in prices_data.items()}
-    
+
     try:
         portfolio = db.get_portfolio(model_id, current_prices)
     except ValueError as exc:
         return jsonify({'error': str(exc)}), 404
+
     account_value = db.get_account_value_history(model_id, limit=100)
-    
+
     return jsonify({
         'portfolio': portfolio,
         'account_value_history': account_value,
@@ -390,37 +554,23 @@ def get_portfolio(model_id):
         'leverage': model.get('leverage', 10)
     })
 
-@app.route('/api/models/<int:model_id>/leverage', methods=['POST'])
-def update_model_leverage(model_id):
-    data = request.json or {}
-    if 'leverage' not in data:
-        return jsonify({'error': 'leverage is required'}), 400
-
-    model = db.get_model(model_id)
-    if not model:
-        return jsonify({'error': 'Model not found'}), 404
-
-    leverage = int(data.get('leverage', 0))
-    leverage = max(0, leverage)
-    if not db.set_model_leverage(model_id, leverage):
-        return jsonify({'error': 'Failed to update leverage'}), 500
-
-    return jsonify({'model_id': model_id, 'leverage': leverage})
-
 @app.route('/api/models/<int:model_id>/trades', methods=['GET'])
 def get_trades(model_id):
+    """Get model trade history"""
     limit = request.args.get('limit', 50, type=int)
     trades = db.get_trades(model_id, limit=limit)
     return jsonify(trades)
 
 @app.route('/api/models/<int:model_id>/conversations', methods=['GET'])
 def get_conversations(model_id):
+    """Get model conversation history"""
     limit = request.args.get('limit', 20, type=int)
     conversations = db.get_conversations(model_id, limit=limit)
     return jsonify(conversations)
 
 @app.route('/api/models/<int:model_id>/prompts', methods=['GET'])
 def get_model_prompts(model_id):
+    """Get model prompt configuration"""
     model = db.get_model(model_id)
     if not model:
         return jsonify({'error': 'Model not found'}), 404
@@ -440,6 +590,7 @@ def get_model_prompts(model_id):
 
 @app.route('/api/models/<int:model_id>/prompts', methods=['PUT'])
 def update_model_prompts(model_id):
+    """Update model prompt configuration"""
     model = db.get_model(model_id)
     if not model:
         return jsonify({'error': 'Model not found'}), 404
@@ -454,6 +605,65 @@ def update_model_prompts(model_id):
 
     return jsonify({'success': True, 'message': 'Prompts updated successfully'})
 
+@app.route('/api/models/<int:model_id>/leverage', methods=['POST'])
+def update_model_leverage(model_id):
+    """Update model leverage"""
+    data = request.json or {}
+    if 'leverage' not in data:
+        return jsonify({'error': 'leverage is required'}), 400
+
+    model = db.get_model(model_id)
+    if not model:
+        return jsonify({'error': 'Model not found'}), 404
+
+    leverage = int(data.get('leverage', 0))
+    leverage = max(0, leverage)
+    if not db.set_model_leverage(model_id, leverage):
+        return jsonify({'error': 'Failed to update leverage'}), 500
+
+    return jsonify({'model_id': model_id, 'leverage': leverage})
+
+@app.route('/api/models/<int:model_id>/execute', methods=['POST'])
+def execute_trading(model_id):
+    """Execute trading cycle for a model"""
+    if model_id not in trading_engines:
+        engine, error = init_trading_engine_for_model(model_id)
+        if error:
+            return jsonify({'error': error}), 404
+    else:
+        engine = trading_engines[model_id]
+
+    # Manual execution enables auto trading
+    db.set_model_auto_trading(model_id, True)
+
+    try:
+        result = engine.execute_trading_cycle()
+        result['auto_trading_enabled'] = True
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/models/<int:model_id>/auto-trading', methods=['POST'])
+def set_model_auto_trading(model_id):
+    """Enable or disable auto trading for a model"""
+    data = request.json or {}
+    if 'enabled' not in data:
+        return jsonify({'error': 'enabled flag is required'}), 400
+
+    model = db.get_model(model_id)
+    if not model:
+        return jsonify({'error': 'Model not found'}), 404
+
+    enabled = bool(data.get('enabled'))
+    success = db.set_model_auto_trading(model_id, enabled)
+    if not success:
+        return jsonify({'error': 'Failed to update model status'}), 500
+
+    if enabled and model_id not in trading_engines:
+        init_trading_engine_for_model(model_id)
+
+    return jsonify({'model_id': model_id, 'auto_trading_enabled': enabled})
+
 @app.route('/api/aggregated/portfolio', methods=['GET'])
 def get_aggregated_portfolio():
     """Get aggregated portfolio data across all models"""
@@ -461,7 +671,6 @@ def get_aggregated_portfolio():
     prices_data = market_fetcher.get_current_prices(symbols)
     current_prices = {symbol: data['price'] for symbol, data in prices_data.items()}
 
-    # Get aggregated data
     models = db.get_all_models()
     total_portfolio = {
         'total_value': 0,
@@ -513,8 +722,6 @@ def get_aggregated_portfolio():
                     current_pos['pnl'] = (pos['current_price'] - current_pos['avg_price']) * total_quantity
 
     total_portfolio['positions'] = list(all_positions.values())
-
-    # Get multi-model chart data
     chart_data = db.get_multi_model_chart_data(limit=100)
 
     return jsonify({
@@ -523,142 +730,39 @@ def get_aggregated_portfolio():
         'model_count': len(models)
     })
 
-@app.route('/api/models/chart-data', methods=['GET'])
-def get_models_chart_data():
-    """Get chart data for all models"""
-    limit = request.args.get('limit', 100, type=int)
-    chart_data = db.get_multi_model_chart_data(limit=limit)
-    return jsonify(chart_data)
+# ============ Market Data API Endpoints ============
 
 @app.route('/api/market/prices', methods=['GET'])
 def get_market_prices():
+    """Get current market prices"""
     symbols = get_tracked_symbols()
     prices = market_fetcher.get_prices(symbols)
     return jsonify(prices)
 
-@app.route('/api/models/<int:model_id>/execute', methods=['POST'])
-def execute_trading(model_id):
-    if model_id not in trading_engines:
-        engine, error = init_trading_engine_for_model(model_id)
-        if error:
-            return jsonify({'error': error}), 404
-    else:
-        engine = trading_engines[model_id]
-
-    # Manual执行视为重新开启自动交易
-    db.set_model_auto_trading(model_id, True)
-
+@app.route('/api/market/leaderboard', methods=['GET'])
+def get_market_leaderboard():
+    """Get market leaderboard data"""
+    limit = request.args.get('limit', type=int)
+    force = request.args.get('force', default=0, type=int)
     try:
-        result = engine.execute_trading_cycle()
-        result['auto_trading_enabled'] = True
-        return jsonify(result)
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        data = market_fetcher.sync_leaderboard(force=bool(force), limit=limit)
+        return jsonify(data)
+    except Exception as exc:
+        logger.error(f"Failed to load leaderboard: {exc}")
+        return jsonify({'error': str(exc)}), 500
 
+@socketio.on('leaderboard:request')
+def handle_leaderboard_request(payload=None):
+    """WebSocket handler for leaderboard requests"""
+    payload = payload or {}
+    limit = payload.get('limit')
+    try:
+        data = market_fetcher.get_leaderboard(limit=limit)
+        emit('leaderboard:update', data)
+    except Exception as exc:
+        emit('leaderboard:error', {'message': str(exc)})
 
-@app.route('/api/models/<int:model_id>/auto-trading', methods=['POST'])
-def set_model_auto_trading(model_id):
-    data = request.json or {}
-    if 'enabled' not in data:
-        return jsonify({'error': 'enabled flag is required'}), 400
-
-    model = db.get_model(model_id)
-    if not model:
-        return jsonify({'error': 'Model not found'}), 404
-
-    enabled = bool(data.get('enabled'))
-    success = db.set_model_auto_trading(model_id, enabled)
-    if not success:
-        return jsonify({'error': 'Failed to update model status'}), 500
-
-    if enabled and model_id not in trading_engines:
-        init_trading_engine_for_model(model_id)
-
-    return jsonify({'model_id': model_id, 'auto_trading_enabled': enabled})
-
-def trading_loop():
-    logger.info("Trading loop started")
-    
-    while auto_trading:
-        try:
-            if not trading_engines:
-                time.sleep(30)
-                continue
-            
-            logger.info(f"\n{'='*60}")
-            logger.info(f"CYCLE: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-            logger.info(f"Active models: {len(trading_engines)}")
-            logger.info(f"{'='*60}")
-            
-            for model_id, engine in list(trading_engines.items()):
-                try:
-                    if not db.is_model_auto_trading_enabled(model_id):
-                        logger.info(f"SKIP: Model {model_id} auto trading paused")
-                        continue
-                    
-                    logger.info(f"\nEXEC: Model {model_id}")
-                    result = engine.execute_trading_cycle()
-                    
-                    if result.get('success'):
-                        logger.info(f"OK: Model {model_id} completed")
-                        if result.get('executions'):
-                            for exec_result in result['executions']:
-                                signal = exec_result.get('signal', 'unknown')
-                                symbol = exec_result.get('future', exec_result.get('symbol', 'unknown'))
-                                msg = exec_result.get('message', '')
-                                if signal != 'hold':
-                                    logger.info(f"  TRADE: {symbol}: {msg}")
-                    else:
-                        error = result.get('error', 'Unknown error')
-                        logger.warning(f"Model {model_id} failed: {error}")
-                        
-                except Exception as e:
-                    logger.error(f"Model {model_id} exception: {e}")
-                    import traceback
-                    logger.error(traceback.format_exc())
-                    continue
-            
-            interval_seconds = get_trading_interval_seconds()
-            interval_minutes = interval_seconds / 60
-            logger.info(f"\n{'='*60}")
-            logger.info(f"SLEEP: Waiting {interval_minutes:.1f} minute(s) for next cycle")
-            logger.info(f"{'='*60}\n")
-            
-            time.sleep(interval_seconds)
-            
-        except Exception as e:
-            logger.critical(f"\nTrading loop error: {e}")
-            import traceback
-            logger.critical(traceback.format_exc())
-            logger.info("RETRY: Retrying in 60 seconds\n")
-            time.sleep(60)
-    
-    logger.info("Trading loop stopped")
-
-@app.route('/api/leaderboard', methods=['GET'])
-def get_leaderboard():
-    models = db.get_all_models()
-    leaderboard = []
-    
-    symbols = get_tracked_symbols()
-    prices_data = market_fetcher.get_prices(symbols)
-    current_prices = {symbol: data['price'] for symbol, data in prices_data.items()}
-    
-    for model in models:
-        portfolio = db.get_portfolio(model['id'], current_prices)
-        account_value = portfolio.get('total_value', model['initial_capital'])
-        returns = ((account_value - model['initial_capital']) / model['initial_capital']) * 100
-        
-        leaderboard.append({
-            'model_id': model['id'],
-            'model_name': model['name'],
-            'account_value': account_value,
-            'returns': returns,
-            'initial_capital': model['initial_capital']
-        })
-    
-    leaderboard.sort(key=lambda x: x['returns'], reverse=True)
-    return jsonify(leaderboard)
+# ============ Settings API Endpoints ============
 
 @app.route('/api/settings', methods=['GET'])
 def get_settings():
@@ -691,6 +795,8 @@ def update_settings():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+# ============ Version API Endpoints ============
+
 @app.route('/api/version', methods=['GET'])
 def get_version():
     """Get current version information"""
@@ -698,118 +804,66 @@ def get_version():
         'current_version': __version__
     })
 
-def compare_versions(version1, version2):
-    """Compare two version strings.
-
-    Returns:
-        1 if version1 > version2
-        0 if version1 == version2
-        -1 if version1 < version2
-    """
-    def normalize(v):
-        # Extract numeric parts from version string
-        parts = re.findall(r'\d+', v)
-        # Pad with zeros to make them comparable
-        return [int(p) for p in parts]
-
-    v1_parts = normalize(version1)
-    v2_parts = normalize(version2)
-
-    # Pad shorter version with zeros
-    max_len = max(len(v1_parts), len(v2_parts))
-    v1_parts.extend([0] * (max_len - len(v1_parts)))
-    v2_parts.extend([0] * (max_len - len(v2_parts)))
-
-    # Compare
-    if v1_parts > v2_parts:
-        return 1
-    elif v1_parts < v2_parts:
-        return -1
-    else:
-        return 0
-
-def init_trading_engines():
+@app.route('/api/check-update', methods=['GET'])
+def check_update():
+    """Check for application updates"""
     try:
-        models = db.get_all_models()
-
-        if not models:
-            logger.warning("No trading models found")
-            return
-
-        logger.info(f"\nINIT: Initializing trading engines...")
-        for model in models:
-            model_id = model['id']
-            model_name = model['name']
-
-            try:
-                # Get provider info
-                provider = db.get_provider(model['provider_id'])
-                if not provider:
-                    logger.warning(f"  Model {model_id} ({model_name}): Provider not found")
-                    continue
-
-                trading_engines[model_id] = TradingEngine(
-                    model_id=model_id,
-                    db=db,
-                    market_fetcher=market_fetcher,
-                    ai_trader=AITrader(
-                        provider_type=provider.get('provider_type', 'openai'),
-                        api_key=provider['api_key'],
-                        api_url=provider['api_url'],
-                        model_name=model['model_name']
-                    ),
-                    trade_fee_rate=TRADE_FEE_RATE
-                )
-                logger.info(f"  OK: Model {model_id} ({model_name})")
-            except Exception as e:
-                logger.error(f"  Model {model_id} ({model_name}): {e}")
-                continue
-
-        logger.info(f"Initialized {len(trading_engines)} engine(s)\n")
-
+        return jsonify({
+            'update_available': False,
+            'current_version': __version__,
+            'latest_version': __version__,
+            'error': None
+        })
     except Exception as e:
-        logger.error(f"Init engines failed: {e}\n")
+        logger.error(f"Check update failed: {e}")
+        return jsonify({
+            'update_available': False,
+            'current_version': __version__,
+            'latest_version': __version__,
+            'error': str(e)
+        }), 500
+
+# ============ Main Entry Point ============
 
 if __name__ == '__main__':
     import webbrowser
-    import os
-    
+
     logger.info("\n" + "=" * 60)
     logger.info("AICoinTrade - Starting...")
     logger.info("=" * 60)
     logger.info("Initializing database...")
-    
+
     db.init_db()
-    
+
     logger.info("Database initialized")
     logger.info("Initializing trading engines...")
-    
+
     init_trading_engines()
-    
+
     if auto_trading:
         trading_thread = threading.Thread(target=trading_loop, daemon=True)
         trading_thread.start()
         logger.info("Auto-trading enabled")
 
     start_leaderboard_worker()
-    
+
     logger.info("\n" + "=" * 60)
     logger.info("AICoinTrade is running!")
     logger.info("Server: http://localhost:5002")
     logger.info("Press Ctrl+C to stop")
     logger.info("=" * 60 + "\n")
-    
-    # 自动打开浏览器
+
     def open_browser():
-        time.sleep(1.5)  # 等待服务器启动
+        """Open browser after server starts"""
+        time.sleep(1.5)
         url = "http://localhost:5002"
         try:
             webbrowser.open(url)
             logger.info(f"Browser opened: {url}")
         except Exception as e:
             logger.warning(f"Could not open browser: {e}")
-    
+
     browser_thread = threading.Thread(target=open_browser, daemon=True)
     browser_thread.start()
-    
+
     socketio.run(app, debug=False, host='0.0.0.0', port=5002, use_reloader=False)
