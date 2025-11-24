@@ -229,6 +229,7 @@ class TradingApp {
         this.leaderboardFallbackInterval = null;
         this.leaderboardLastUpdated = null;
         this.logger = frontendLogger; // 使用全局日志实例
+        this.modelLeverageMap = {};
         this.init();
     }
 
@@ -298,6 +299,9 @@ class TradingApp {
             this.logger.logApiSuccess('GET', url, response);
             
             this.modelsCache = Array.isArray(models) ? models : [];
+            this.modelsCache.forEach(model => {
+                this.modelLeverageMap[model.id] = model.leverage ?? 10;
+            });
             this.renderModels(models);
             this.updateStrategyButtonState();
 
@@ -387,10 +391,15 @@ class TradingApp {
                 return;
             }
 
-            const { portfolio, account_value_history, auto_trading_enabled } = portfolioPayload;
+            const { portfolio, account_value_history, auto_trading_enabled, leverage } = portfolioPayload;
 
             this.currentModelAutoTradingEnabled = Boolean(auto_trading_enabled);
             this.updateAutoTradingButtonState();
+
+            if (typeof leverage === 'number') {
+                this.modelLeverageMap[this.currentModelId] = leverage;
+                this.updateModelLeverageDisplay(this.currentModelId, leverage);
+            }
 
             // Check if portfolio data exists
             if (!portfolio) {
@@ -1196,9 +1205,15 @@ class TradingApp {
         const modelName = document.getElementById('modelIdentifier').value;
         const displayName = document.getElementById('modelName').value.trim();
         const initialCapital = parseFloat(document.getElementById('initialCapital').value);
+        const leverage = parseInt(document.getElementById('modelLeverage').value, 10);
 
-        if (!providerId || !modelName || !displayName) {
+        if (!providerId || !modelName || !displayName || Number.isNaN(initialCapital)) {
             alert('请填写所有必填字段');
+            return;
+        }
+
+        if (Number.isNaN(leverage) || leverage < 0 || leverage > 125) {
+            alert('请输入有效的杠杆（0-125，0 表示由 AI 自行决定）');
             return;
         }
 
@@ -1207,7 +1222,8 @@ class TradingApp {
             provider_id: providerId,
             model_name: modelName,
             name: displayName,
-            initial_capital: initialCapital
+            initial_capital: initialCapital,
+            leverage: leverage
         };
         this.logger.logApiCall('POST', url, { body: requestData });
 
@@ -1245,6 +1261,65 @@ class TradingApp {
         } catch (error) {
             this.logger.logApiError('POST', url, error);
             alert('添加模型失败');
+        }
+    }
+
+    openLeverageModal(modelId, modelName) {
+        this.pendingLeverageModelId = modelId;
+        document.getElementById('leverageModelName').textContent = modelName || `模型 #${modelId}`;
+        const leverageInput = document.getElementById('leverageInput');
+        leverageInput.value = this.modelLeverageMap[modelId] ?? 10;
+        document.getElementById('leverageModal').classList.add('show');
+    }
+
+    closeLeverageModal() {
+        this.pendingLeverageModelId = null;
+        document.getElementById('leverageModal').classList.remove('show');
+    }
+
+    async saveModelLeverage() {
+        if (!this.pendingLeverageModelId) return;
+        const leverageInput = document.getElementById('leverageInput');
+        const leverage = parseInt(leverageInput.value, 10);
+        if (Number.isNaN(leverage) || leverage < 0 || leverage > 125) {
+            alert('请输入有效的杠杆（0-125，0 表示由 AI 自行决定）');
+            return;
+        }
+
+        const modelId = this.pendingLeverageModelId;
+        const url = `/api/models/${modelId}/leverage`;
+        const payload = { leverage };
+        this.logger.logApiCall('POST', url, { body: payload });
+
+        try {
+            const response = await fetch(url, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+
+            const result = await response.json();
+            if (!response.ok) {
+                this.logger.logApiError('POST', url, new Error(result.error || `HTTP ${response.status}`), response, result);
+                alert(result.error || '更新杠杆失败');
+                return;
+            }
+
+            this.logger.logApiSuccess('POST', url, response, result);
+            this.modelLeverageMap[modelId] = leverage;
+            this.updateModelLeverageDisplay(modelId, leverage);
+            this.closeLeverageModal();
+            alert('杠杆设置已保存');
+        } catch (error) {
+            this.logger.logApiError('POST', url, error);
+            alert('更新杠杆失败');
+        }
+    }
+
+    updateModelLeverageDisplay(modelId, leverage) {
+        const badge = document.querySelector(`[data-model-id="${modelId}"] .model-leverage`);
+        if (badge) {
+            badge.textContent = leverage === 0 ? '杠杆: AI' : `杠杆: ${leverage}x`;
         }
     }
 
@@ -1292,6 +1367,7 @@ class TradingApp {
         document.getElementById('modelIdentifier').value = '';
         document.getElementById('modelName').value = '';
         document.getElementById('initialCapital').value = '100000';
+        document.getElementById('modelLeverage').value = '10';
     }
 
     async refresh() {
