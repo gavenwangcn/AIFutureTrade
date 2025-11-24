@@ -32,6 +32,7 @@ class TradingEngine:
             account_info = self._build_account_info(portfolio)
             prompt_templates = self._get_prompt_templates()
             market_snapshot = self._get_prompt_market_snapshot()
+            self.current_model_leverage = self._get_model_leverage()
 
             executions = []
             conversation_prompts = []
@@ -269,7 +270,7 @@ class TradingEngine:
     def _execute_buy(self, symbol: str, decision: Dict, market_state: Dict, 
                     portfolio: Dict) -> Dict:
         quantity = decision.get('quantity', 0)
-        leverage = int(decision.get('leverage', 1))
+        leverage = self._resolve_leverage(decision)
         price = market_state[symbol]['price']
         
         positions = portfolio.get('positions', [])
@@ -328,6 +329,41 @@ class TradingEngine:
             'fee': trade_fee,  # 返回费用信息
             'message': f'买入 {symbol} {quantity:.4f} @ ${price:.2f} (手续费: ${trade_fee:.2f})'
         }
+
+    def _get_model_leverage(self) -> int:
+        try:
+            model = self.db.get_model(self.model_id)
+        except Exception as exc:
+            logger.warning(f"[Model {self.model_id}] 读取杠杆失败: {exc}")
+            return 10
+
+        if not model:
+            return 10
+
+        leverage = model.get('leverage', 10)
+        try:
+            leverage = int(leverage)
+        except (TypeError, ValueError):
+            leverage = 10
+        return max(0, leverage)
+
+    def _resolve_leverage(self, decision: Dict) -> int:
+        configured = getattr(self, 'current_model_leverage', None)
+        if configured is None:
+            configured = self._get_model_leverage()
+
+        ai_leverage = decision.get('leverage')
+        try:
+            ai_leverage = int(ai_leverage)
+        except (TypeError, ValueError):
+            ai_leverage = 1
+
+        ai_leverage = max(1, ai_leverage)
+
+        if configured == 0:
+            return ai_leverage
+
+        return max(1, configured)
 
     def _ensure_future_record(self, symbol: str, market_meta: Optional[Dict]):
         if not symbol:
