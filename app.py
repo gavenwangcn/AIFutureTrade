@@ -309,7 +309,7 @@ def get_models():
 
 @app.route('/api/models', methods=['POST'])
 def add_model():
-    data = request.json
+    data = request.json or {}
     try:
         # Get provider info
         provider = db.get_provider(data['provider_id'])
@@ -320,7 +320,8 @@ def add_model():
             name=data['name'],
             provider_id=data['provider_id'],
             model_name=data['model_name'],
-            initial_capital=float(data.get('initial_capital', 100000))
+            initial_capital=float(data.get('initial_capital', 100000)),
+            leverage=int(data.get('leverage', 10))
         )
 
         model = db.get_model(model_id)
@@ -385,8 +386,26 @@ def get_portfolio(model_id):
     return jsonify({
         'portfolio': portfolio,
         'account_value_history': account_value,
-        'auto_trading_enabled': bool(model.get('auto_trading_enabled', 1))
+        'auto_trading_enabled': bool(model.get('auto_trading_enabled', 1)),
+        'leverage': model.get('leverage', 10)
     })
+
+@app.route('/api/models/<int:model_id>/leverage', methods=['POST'])
+def update_model_leverage(model_id):
+    data = request.json or {}
+    if 'leverage' not in data:
+        return jsonify({'error': 'leverage is required'}), 400
+
+    model = db.get_model(model_id)
+    if not model:
+        return jsonify({'error': 'Model not found'}), 404
+
+    leverage = int(data.get('leverage', 0))
+    leverage = max(0, leverage)
+    if not db.set_model_leverage(model_id, leverage):
+        return jsonify({'error': 'Failed to update leverage'}), 500
+
+    return jsonify({'model_id': model_id, 'leverage': leverage})
 
 @app.route('/api/models/<int:model_id>/trades', methods=['GET'])
 def get_trades(model_id):
