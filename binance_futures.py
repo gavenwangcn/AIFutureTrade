@@ -2,19 +2,33 @@ import logging
 import threading
 from typing import Callable, Dict, List, Optional
 
-from binance_common.configuration import ConfigurationRestAPI
-from binance_common.constants import (
-    DERIVATIVES_TRADING_USDS_FUTURES_REST_API_PROD_URL,
-    DERIVATIVES_TRADING_USDS_FUTURES_REST_API_TESTNET_URL,
-)
-from binance_sdk_derivatives_trading_usds_futures.derivatives_trading_usds_futures import (
-    DerivativesTradingUsdsFutures,
-)
-from binance_sdk_derivatives_trading_usds_futures.rest_api.models import (
-    KlineCandlestickDataIntervalEnum,
-    SymbolPriceTickerResponse,
-    Ticker24hrPriceChangeStatisticsResponse,
-)
+BINANCE_SDK_AVAILABLE = True
+_BINANCE_IMPORT_ERROR: Optional[ImportError] = None
+
+try:  # pragma: no cover - external dependency optional in many envs
+    from binance_common.configuration import ConfigurationRestAPI
+    from binance_common.constants import (
+        DERIVATIVES_TRADING_USDS_FUTURES_REST_API_PROD_URL,
+        DERIVATIVES_TRADING_USDS_FUTURES_REST_API_TESTNET_URL,
+    )
+    from binance_sdk_derivatives_trading_usds_futures.derivatives_trading_usds_futures import (
+        DerivativesTradingUsdsFutures,
+    )
+    from binance_sdk_derivatives_trading_usds_futures.rest_api.models import (
+        KlineCandlestickDataIntervalEnum,
+        SymbolPriceTickerResponse,
+        Ticker24hrPriceChangeStatisticsResponse,
+    )
+except ImportError as exc:  # pragma: no cover - handled at runtime
+    BINANCE_SDK_AVAILABLE = False
+    _BINANCE_IMPORT_ERROR = exc
+    ConfigurationRestAPI = None  # type: ignore[assignment]
+    DerivativesTradingUsdsFutures = None  # type: ignore[assignment]
+    KlineCandlestickDataIntervalEnum = None  # type: ignore[assignment]
+    SymbolPriceTickerResponse = None  # type: ignore[assignment]
+    Ticker24hrPriceChangeStatisticsResponse = None  # type: ignore[assignment]
+    DERIVATIVES_TRADING_USDS_FUTURES_REST_API_PROD_URL = None  # type: ignore[assignment]
+    DERIVATIVES_TRADING_USDS_FUTURES_REST_API_TESTNET_URL = None  # type: ignore[assignment]
 
 
 logger = logging.getLogger(__name__)
@@ -33,6 +47,12 @@ class BinanceFuturesClient:
         base_path: Optional[str] = None,
         testnet: bool = False,
     ):
+        if not BINANCE_SDK_AVAILABLE:
+            raise RuntimeError(
+                "Binance official futures SDK not available. Install 'binance-common' "
+                "and related packages or set BINANCE_API_KEY/SECRET empty to disable."
+            ) from _BINANCE_IMPORT_ERROR
+
         rest_base = base_path
         if not rest_base:
             rest_base = (
