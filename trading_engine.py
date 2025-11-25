@@ -8,13 +8,9 @@ import logging
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import config as app_config
-logger = logging.getLogger(__name__)
-
-
-
-
 from prompt_defaults import DEFAULT_BUY_CONSTRAINTS, DEFAULT_SELL_CONSTRAINTS
 
+logger = logging.getLogger(__name__)
 
 class TradingEngine:
     def __init__(self, model_id: int, db, market_fetcher, ai_trader, trade_fee_rate: float = 0.001):

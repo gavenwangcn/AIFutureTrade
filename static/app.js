@@ -469,10 +469,8 @@ class TradingApp {
         if (!strategyBtn) return;
 
         if (this.isAggregatedView || !this.currentModelId) {
-            strategyBtn.disabled = true;
             strategyBtn.title = '请选择具体模型后配置策略';
         } else {
-            strategyBtn.disabled = false;
             strategyBtn.title = '配置当前模型的买入/卖出提示词';
         }
     }
@@ -518,6 +516,7 @@ class TradingApp {
         this.currentModelId = modelId;
         this.isAggregatedView = false;
         this.currentModelName = this.getModelDisplayName(modelId);
+        this.updateStrategyButtonState();
         this.loadModels();
         await this.loadModelData();
         this.showTabsInSingleModelView();
@@ -1656,6 +1655,7 @@ class TradingApp {
     // ============ Futures Configuration Methods ============
 
     showFuturesModal() {
+        this.hideFutureError();
         this.loadFutures();
         document.getElementById('futureConfigModal').classList.add('show');
     }
@@ -1666,12 +1666,27 @@ class TradingApp {
     }
 
     clearFutureForm() {
+        this.hideFutureError();
         document.getElementById('futureSymbol').value = '';
         document.getElementById('futureContractSymbol').value = '';
         document.getElementById('futureName').value = '';
         document.getElementById('futureExchange').value = 'BINANCE_FUTURES';
         document.getElementById('futureLink').value = '';
         document.getElementById('futureSortOrder').value = '';
+    }
+
+    showFutureError(message) {
+        const errorBox = document.getElementById('futureError');
+        if (!errorBox) return;
+        errorBox.textContent = message;
+        errorBox.style.display = 'block';
+    }
+
+    hideFutureError() {
+        const errorBox = document.getElementById('futureError');
+        if (!errorBox) return;
+        errorBox.textContent = '';
+        errorBox.style.display = 'none';
     }
 
     async loadFutures() {
@@ -1690,6 +1705,7 @@ class TradingApp {
                 futures = await response.json();
             } catch (parseError) {
                 this.logger.logApiError('GET', url, new Error('响应解析失败'), response);
+                this.showFutureError('响应解析失败，请稍后再试');
                 return;
             }
 
@@ -1699,6 +1715,7 @@ class TradingApp {
             this.renderFutures(futures);
         } catch (error) {
             this.logger.logDataLoadError('合约配置', error, url);
+            this.showFutureError('加载合约配置失败，请稍后再试');
         }
     }
 
@@ -1726,6 +1743,7 @@ class TradingApp {
     }
 
     async saveFuture() {
+        this.hideFutureError();
         const data = {
             symbol: document.getElementById('futureSymbol').value.trim().toUpperCase(),
             contract_symbol: document.getElementById('futureContractSymbol').value.trim().toUpperCase(),
@@ -1736,14 +1754,14 @@ class TradingApp {
         };
 
         if (!data.symbol || !data.contract_symbol || !data.name) {
-            alert('请填写币种简称、合约代码与名称');
+            this.showFutureError('请填写币种简称、合约代码与名称');
             return;
         }
 
         if (data.sort_order) {
             const parsed = parseInt(data.sort_order, 10);
             if (Number.isNaN(parsed)) {
-                alert('排序No需要为数字');
+                this.showFutureError('排序No需要为数字');
                 return;
             }
             data.sort_order = parsed;
@@ -1766,13 +1784,13 @@ class TradingApp {
                 result = await response.json();
             } catch (parseError) {
                 this.logger.logApiError('POST', url, new Error('响应解析失败'), response);
-                alert('响应解析失败，请稍后再试');
+                this.showFutureError('响应解析失败，请稍后再试');
                 return;
             }
 
             if (!response.ok) {
                 this.logger.logApiError('POST', url, new Error(result.error || `HTTP ${response.status}`), response, result);
-                alert(result.error || '保存合约失败');
+                this.showFutureError(result.error || '保存合约失败');
                 return;
             }
 
@@ -1785,10 +1803,11 @@ class TradingApp {
             this.clearFutureForm();
             this.loadFutures();
             this.refresh();
+            this.hideFuturesModal();
             alert('合约保存成功');
         } catch (error) {
             this.logger.logApiError('POST', url, error);
-            alert('保存合约失败');
+            this.showFutureError(error.message || '保存合约失败');
         }
     }
 
@@ -2204,6 +2223,7 @@ class TradingApp {
         this.loadAggregatedData();
         this.hideTabsInAggregatedView();
         this.updateExecuteButtonState();
+        this.updateStrategyButtonState();
     }
 
     renderModels(models) {

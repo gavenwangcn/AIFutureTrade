@@ -32,10 +32,10 @@ LOG_FORMAT = '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 LOG_DATE_FORMAT = '%Y-%m-%d %H:%M:%S'
 
 # Binance Futures Integration
-BINANCE_API_KEY = os.getenv('BINANCE_API_KEY', '')
-BINANCE_API_SECRET = os.getenv('BINANCE_API_SECRET', '')
+BINANCE_API_KEY = os.getenv('BINANCE_API_KEY', 'Eric')
+BINANCE_API_SECRET = os.getenv('BINANCE_API_SECRET', 'rg5CRfwMCbkFCZBQKatrnlM7ALOQQDDyfRyaLUs4TduxSRP8WQwk4PrcksHgWP4j')
 FUTURES_TOP_GAINERS_LIMIT = 10
-FUTURES_TOP_GAINERS_REFRESH = 3600  # seconds
+FUTURES_TOP_GAINERS_REFRESH = 5  # seconds, can be adjusted per deployment needs
 FUTURES_INDICATOR_REFRESH = 2  # seconds
 FUTURES_KLINE_LIMIT = 120
 FUTURES_QUOTE_ASSET = 'USDT'

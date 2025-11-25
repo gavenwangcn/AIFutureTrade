@@ -1,7 +1,7 @@
 import logging
 import threading
 import time
-from typing import Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 BINANCE_SDK_AVAILABLE = True
 _BINANCE_IMPORT_ERROR: Optional[ImportError] = None
@@ -79,6 +79,84 @@ class BinanceFuturesClient:
     def format_symbol(self, base_symbol: str) -> str:
         return f"{base_symbol.upper()}{self.quote_asset}"
 
+    @staticmethod
+    def _normalize_list(payload: Any) -> List[Any]:
+        """Handle SDK responses that may wrap lists inside data/items attributes."""
+        if payload is None:
+            return []
+        if isinstance(payload, list):
+            return payload
+
+        for attr in ("data", "items", "list", "records"):
+            attr_value = getattr(payload, attr, None)
+            if callable(attr_value):
+                try:
+                    attr_value = attr_value()
+                except TypeError:
+                    attr_value = getattr(payload, attr, None)
+            if isinstance(attr_value, list):
+                return attr_value
+
+        if hasattr(payload, "model_dump"):
+            try:
+                dumped = payload.model_dump()
+            except Exception:  # pragma: no cover - defensive
+                dumped = None
+            if isinstance(dumped, dict):
+                for key in ("data", "items", "list", "records"):
+                    value = dumped.get(key)
+                    if isinstance(value, list):
+                        return value
+
+        return [payload]
+
+    @staticmethod
+    def _ensure_dict(item: Any) -> Dict[str, Any]:
+        """Convert SDK model/objects into plain dictionaries for downstream use."""
+        if isinstance(item, dict):
+            return item
+
+        if hasattr(item, "model_dump"):
+            try:
+                dumped = item.model_dump()
+            except Exception:  # pragma: no cover - defensive against SDK quirks
+                dumped = None
+            if isinstance(dumped, dict):
+                return dumped
+
+        if hasattr(item, "dict"):
+            try:
+                dumped = item.dict()
+            except Exception:
+                dumped = None
+            if isinstance(dumped, dict):
+                return dumped
+
+        if hasattr(item, "__dict__"):
+            data = {
+                key: value for key, value in vars(item).items() if not key.startswith("_")
+            }
+            if data:
+                return data
+
+        return {}
+
+    @staticmethod
+    def _to_dict(payload: Any) -> Optional[Dict[str, Any]]:
+        """Best-effort conversion of SDK models to plain dicts."""
+        if payload is None:
+            return None
+        if isinstance(payload, dict):
+            return payload
+        if hasattr(payload, "model_dump"):
+            try:
+                dumped = payload.model_dump()
+            except Exception:  # pragma: no cover - defensive
+                return None
+            if isinstance(dumped, dict):
+                return dumped
+        return None
+
     def get_24h_ticker(self, symbols: List[str]) -> Dict[str, Dict]:
         """
         获取指定交易对的24小时价格变动统计
@@ -105,7 +183,7 @@ class BinanceFuturesClient:
             api_start_time = time.time()
             
             response = self._rest.ticker24hr_price_change_statistics()
-            all_stats: List[Ticker24hrPriceChangeStatisticsResponse] = response.data()
+            all_stats: List[Ticker24hrPriceChangeStatisticsResponse] = self._normalize_list(response.data())
             
             api_duration = time.time() - api_start_time
             logger.info(f"[Binance Futures] [步骤1] API调用完成, 耗时: {api_duration:.3f} 秒, 返回数据总数: {len(all_stats)}")
@@ -113,8 +191,12 @@ class BinanceFuturesClient:
             # 过滤出请求的交易对
             logger.info(f"[Binance Futures] [步骤2] 过滤匹配的交易对...")
             for stat in all_stats:
-                if stat.symbol in symbols:
-                    result[stat.symbol] = stat.model_dump()
+                stat_dict = self._to_dict(stat)
+                if not stat_dict:
+                    continue
+                symbol = stat_dict.get("symbol")
+                if symbol in symbols:
+                    result[symbol] = stat_dict
             
             logger.info(f"[Binance Futures] [步骤2] 过滤完成, 匹配到 {len(result)}/{len(symbols)} 个交易对")
             
@@ -164,54 +246,119 @@ class BinanceFuturesClient:
             # 调用币安API获取24小时统计数据
             logger.info(f"[Binance Futures] [步骤1] 调用币安API: ticker24hr_price_change_statistics()")
             api_start_time = time.time()
-            
+
             response = self._rest.ticker24hr_price_change_statistics()
-            all_stats: List[Ticker24hrPriceChangeStatisticsResponse] = response.data()
-            
+            raw_items = response.data()
+            if raw_items is None:
+                raw_items = []
+            elif not isinstance(raw_items, list):
+                raw_items = [raw_items]
+
             api_duration = time.time() - api_start_time
-            logger.info(f"[Binance Futures] [步骤1] API调用完成, 耗时: {api_duration:.3f} 秒, 返回数据总数: {len(all_stats)}")
-            
-            # 转换为字典列表
-            logger.info(f"[Binance Futures] [步骤2] 转换数据格式...")
-            data = [stat.model_dump() for stat in all_stats]
-            logger.info(f"[Binance Futures] [步骤2] 数据转换完成, 总交易对数: {len(data)}")
-            
-            # 过滤出指定计价资产的交易对
-            logger.info(f"[Binance Futures] [步骤3] 过滤 {self.quote_asset} 计价资产...")
-            filtered = [
-                item for item in data if item.get("symbol", "").endswith(self.quote_asset)
-            ]
-            logger.info(f"[Binance Futures] [步骤3] 过滤完成, {self.quote_asset} 计价资产数量: {len(filtered)}")
-            
-            # 按涨跌幅降序排序
-            logger.info(f"[Binance Futures] [步骤4] 按涨跌幅降序排序...")
-            filtered.sort(key=lambda x: float(x.get("priceChangePercent", 0)), reverse=True)
-            logger.info(f"[Binance Futures] [步骤4] 排序完成")
-            
-            # 取前N名
-            result = filtered[:limit]
-            logger.info(f"[Binance Futures] [步骤5] 取前 {limit} 名, 实际返回: {len(result)} 条")
-            
-            # 记录涨跌幅榜详情
-            if result:
-                logger.info(f"[Binance Futures] [步骤6] 涨跌幅榜详情:")
-                for idx, item in enumerate(result):
+            logger.info(
+                f"[Binance Futures] [步骤1] API调用完成, 耗时: {api_duration:.3f} 秒, 返回数据总数: {len(raw_items)}"
+            )
+
+            def _safe_float(value: Any, default: float = 0.0) -> float:
+                try:
+                    return float(value)
+                except (TypeError, ValueError):
+                    return default
+
+            logger.info(f"[Binance Futures] [步骤2] 过滤 {self.quote_asset} 计价资产...")
+            filtered: List[tuple[Ticker24hrPriceChangeStatisticsResponse, float]] = []
+            skipped_no_symbol = 0
+            skipped_quote_asset = 0
+            for stat in raw_items:
+                symbol = getattr(stat, "symbol", None)
+                if not symbol:
+                    skipped_no_symbol += 1
+                    continue
+                contract_symbol = str(symbol).upper()
+                if not contract_symbol.endswith(self.quote_asset):
+                    skipped_quote_asset += 1
+                    continue
+
+                change_raw = (
+                    getattr(stat, "price_change_percent", None)
+                    or getattr(stat, "priceChangePercent", None)
+                    or getattr(stat, "P", None)
+                )
+                change_percent = _safe_float(change_raw)
+                filtered.append((stat, change_percent))
+
+            logger.info(
+                f"[Binance Futures] [步骤2] 过滤完成, {self.quote_asset} 计价资产数量: {len(filtered)} | "
+                f"跳过无symbol={skipped_no_symbol} | 跳过不同计价资产={skipped_quote_asset}"
+            )
+
+            if not filtered:
+                logger.warning("[Binance Futures] [步骤2] 未找到任何符合条件的 {self.quote_asset} 交易对")
+                return []
+
+            logger.info(f"[Binance Futures] [步骤3] 按涨跌幅降序排序...")
+            filtered.sort(key=lambda x: x[1], reverse=True)
+            logger.info(f"[Binance Futures] [步骤3] 排序完成")
+
+            selected = filtered[: max(0, limit)]
+            result_payload: List[Dict[str, Any]] = []
+            for stat, change_percent in selected:
+                payload: Dict[str, Any]
+                if hasattr(stat, "model_dump"):
+                    try:
+                        dumped = stat.model_dump()
+                        payload = dumped if isinstance(dumped, dict) else {}
+                    except Exception:
+                        payload = {}
+                else:
+                    payload = {}
+
+                if not payload:
+                    payload = self._ensure_dict(stat)
+
+                payload.setdefault("symbol", getattr(stat, "symbol", ""))
+                payload.setdefault("priceChangePercent", change_percent)
+                payload.setdefault("price_change_percent", change_percent)
+                payload.setdefault(
+                    "lastPrice",
+                    getattr(stat, "last_price", None)
+                    or getattr(stat, "lastPrice", None)
+                    or payload.get("close"),
+                )
+                payload.setdefault(
+                    "quoteVolume",
+                    getattr(stat, "quote_volume", None)
+                    or getattr(stat, "quoteVolume", None)
+                    or payload.get("volume"),
+                )
+                payload.setdefault("highPrice", getattr(stat, "high_price", None) or getattr(stat, "highPrice", None))
+                payload.setdefault("lowPrice", getattr(stat, "low_price", None) or getattr(stat, "lowPrice", None))
+
+                result_payload.append(payload)
+
+            logger.info(f"[Binance Futures] [步骤4] 取前 {limit} 名, 实际返回: {len(result_payload)} 条")
+
+            if result_payload:
+                logger.info(f"[Binance Futures] [步骤5] 涨跌幅榜详情:")
+                for idx, item in enumerate(result_payload):
                     symbol = item.get("symbol", "N/A")
-                    price = item.get("lastPrice", 0)
-                    change_pct = item.get("priceChangePercent", 0)
-                    volume = item.get("quoteVolume", 0)
-                    high = item.get("highPrice", 0)
-                    low = item.get("lowPrice", 0)
-                    logger.info(f"[Binance Futures] [步骤6.{idx+1}] 排名 #{idx+1}: {symbol} | "
-                               f"价格=${float(price):.4f} | "
-                               f"涨跌幅={float(change_pct):.2f}% | "
-                               f"24h最高=${float(high):.4f} | "
-                               f"24h最低=${float(low):.4f} | "
-                               f"24h成交量=${float(volume):.2f}")
-            
+                    price = item.get("lastPrice") or item.get("last_price")
+                    change_pct = item.get("price_change_percent") or item.get("priceChangePercent")
+                    volume = item.get("quoteVolume") or item.get("quote_volume")
+                    high = item.get("highPrice") or item.get("high_price")
+                    low = item.get("lowPrice") or item.get("low_price")
+                    logger.info(
+                        f"[Binance Futures] [步骤5.{idx+1}] #{idx+1}: {symbol} | "
+                        f"价格=${_safe_float(price):.4f} | "
+                        f"涨跌幅={_safe_float(change_pct):.2f}% | "
+                        f"24h最高=${_safe_float(high):.4f} | "
+                        f"24h最低=${_safe_float(low):.4f} | "
+                        f"24h成交量=${_safe_float(volume):.2f}"
+                    )
+
             logger.info(f"[Binance Futures] ========== 涨跌幅榜获取完成 ==========")
-            return result
-            
+            return result_payload
+
         except Exception as exc:
             logger.error(f"[Binance Futures] ========== 获取涨跌幅榜失败 ==========")
             logger.error(f"[Binance Futures] 错误信息: {exc}")
@@ -285,7 +432,7 @@ class BinanceFuturesClient:
             api_start_time = time.time()
             
             response = self._rest.symbol_price_ticker()
-            data: List[SymbolPriceTickerResponse] = response.data()
+            data: List[SymbolPriceTickerResponse] = self._normalize_list(response.data())
             
             api_duration = time.time() - api_start_time
             logger.info(f"[Binance Futures] [步骤1] API调用完成, 耗时: {api_duration:.3f} 秒, 返回数据总数: {len(data)}")
@@ -352,24 +499,49 @@ class BinanceFuturesClient:
                 interval=interval_enum,
                 limit=limit,
             )
-            data = response.data()
+            data = self._normalize_list(response.data())
             
             api_duration = time.time() - api_start_time
             logger.info(f"[Binance Futures] [步骤2] API调用完成, 耗时: {api_duration:.3f} 秒, 返回K线数量: {len(data)}")
             
             # 将K线数据转换为列表格式
             logger.info(f"[Binance Futures] [步骤3] 转换K线数据格式...")
-            klines = [
-                [
-                    item.open_time,
-                    item.open,
-                    item.high,
-                    item.low,
-                    item.close,
-                    item.volume,
-                ]
-                for item in data
-            ]
+            klines: List[List[Any]] = []
+            for item in data:
+                if isinstance(item, (list, tuple)):
+                    if len(item) >= 6:
+                        klines.append(list(item[:6]))
+                    else:
+                        logger.debug("[Binance Futures] [KLines] 忽略长度不足的数据项: %s", item)
+                    continue
+
+                entry = self._to_dict(item)
+                if entry:
+                    klines.append(
+                        [
+                            entry.get("open_time"),
+                            entry.get("open"),
+                            entry.get("high"),
+                            entry.get("low"),
+                            entry.get("close"),
+                            entry.get("volume"),
+                        ]
+                    )
+                else:
+                    # 尝试直接读取属性，兼容 SDK 模型
+                    try:
+                        klines.append(
+                            [
+                                getattr(item, "open_time"),
+                                getattr(item, "open"),
+                                getattr(item, "high"),
+                                getattr(item, "low"),
+                                getattr(item, "close"),
+                                getattr(item, "volume"),
+                            ]
+                        )
+                    except AttributeError:
+                        logger.debug("[Binance Futures] [KLines] 无法解析的数据项: %s", item)
             logger.info(f"[Binance Futures] [步骤3] 数据格式转换完成, 返回K线数量: {len(klines)}")
             
             # 记录K线数据统计信息

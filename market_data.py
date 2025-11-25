@@ -353,23 +353,44 @@ class MarketDataFetcher:
         if limit is None:
             limit = getattr(app_config, 'FUTURES_TOP_GAINERS_LIMIT', 10)
 
+        logger.info(
+            '[Leaderboard] sync_leaderboard called | force=%s limit=%s refresh=%ss',
+            force,
+            limit,
+            self._leaderboard_refresh
+        )
+
+        # 如果没有可用的币安客户端，直接返回数据库缓存并记录日志，便于排查初始化问题
         if not self._futures_client:
+            logger.warning('[Leaderboard] Binance client unavailable, returning cached DB data')
             return self.db.get_futures_leaderboard(limit=limit)
 
         now = time.time()
+        # 刷新节流：除非 force，否则在刷新周期内直接返回数据库缓存
         if not force and now - self._last_leaderboard_sync < self._leaderboard_refresh:
+            logger.debug('[Leaderboard] Skip refresh, last_sync=%.2fs ago (< %s)',
+                         now - self._last_leaderboard_sync, self._leaderboard_refresh)
             return self.db.get_futures_leaderboard(limit=limit)
 
         with self._leaderboard_lock:
+            # 进入临界区后再次检查，避免并发线程重复刷新
             now = time.time()
             if not force and now - self._last_leaderboard_sync < self._leaderboard_refresh:
+                logger.debug('[Leaderboard] Skip refresh (post-lock), another thread just updated')
                 return self.db.get_futures_leaderboard(limit=limit)
 
+            logger.info('[Leaderboard] Refreshing leaderboard from Binance...')
+            sync_start = time.time()
             try:
                 entries = self._build_leaderboard_entries(limit)
+                logger.info('[Leaderboard] Raw entries fetched: %s', len(entries))
                 if entries:
                     self.db.upsert_leaderboard_entries(entries)
                     self._last_leaderboard_sync = now
+                    logger.info('[Leaderboard] DB updated successfully (elapsed %.2fs)',
+                                time.time() - sync_start)
+                else:
+                    logger.warning('[Leaderboard] No entries returned from Binance, keep cached data')
             except Exception as exc:
                 self._log_api_error(
                     api_name='Binance Futures',
@@ -378,8 +399,12 @@ class MarketDataFetcher:
                     error_msg=str(exc),
                     level='ERROR'
                 )
+                logger.exception('[Leaderboard] Failed to refresh leaderboard from Binance')
 
-        return self.db.get_futures_leaderboard(limit=limit)
+        data = self.db.get_futures_leaderboard(limit=limit)
+        logger.info('[Leaderboard] Returning leaderboard payload: gainers=%s losers=%s',
+                    len(data.get('gainers', [])), len(data.get('losers', [])))
+        return data
 
     def get_leaderboard(self, limit: Optional[int] = None) -> Dict[str, List[Dict]]:
         """Get leaderboard data (wrapper for sync_leaderboard)"""
