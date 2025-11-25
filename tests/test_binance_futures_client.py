@@ -24,6 +24,7 @@ from binance_sdk_derivatives_trading_usds_futures.derivatives_trading_usds_futur
 )
 from binance_sdk_derivatives_trading_usds_futures.rest_api.models import (
     ExchangeInformationResponse,
+    Ticker24hrPriceChangeStatisticsResponse,
 )
 
 from binance_futures import BinanceFuturesClient
@@ -60,9 +61,90 @@ def sdk_exchange_information_health_check(api_key: str, api_secret: str) -> None
         response = client.rest_api.ticker24hr_price_change_statistics()
 
         rate_limits = response.rate_limits
-        data = response.data()
-        logging.info(f"ticker24hr_price_change_statistics() response: {data}")
-        logging.info(f"ticker24hr_price_change_statistics() rate limits: {rate_limits}")
+        raw_data = response.data()
+        logging.info("ticker24hr_price_change_statistics() rate limits: %s", rate_limits)
+
+        if raw_data is None:
+            entries = []
+        elif isinstance(raw_data, list):
+            entries = raw_data
+        else:
+            entries = [raw_data]
+
+        logging.info("ticker24hr_price_change_statistics() raw entries: %s", len(entries))
+
+        def _convert_entry(model) -> dict | list | None:
+            if model is None:
+                return None
+            if isinstance(model, dict):
+                return model
+            try:
+                # 官方响应模型提供 to_dict，可直接展开 Union 结构
+                return Ticker24hrPriceChangeStatisticsResponse.to_dict(model)
+            except Exception:
+                pass
+            if hasattr(model, "to_dict"):
+                try:
+                    return model.to_dict()
+                except Exception:
+                    return None
+            return None
+
+        def _extract_dicts(node) -> List[dict]:
+            if node is None:
+                return []
+            if isinstance(node, list):
+                flattened: List[dict] = []
+                for item in node:
+                    flattened.extend(_extract_dicts(item))
+                return flattened
+            parsed = _convert_entry(node)
+            if parsed is None:
+                return []
+            if isinstance(parsed, list):
+                flattened: List[dict] = []
+                for item in parsed:
+                    flattened.extend(_extract_dicts(item))
+                return flattened
+
+            #logging.info(f"ticker24hr_price_change_statistics() response: {parsed}")
+            return [parsed]
+
+        detailed_samples = []
+        for entry in entries:
+            for parsed in _extract_dicts(entry):
+                symbol = parsed.get("symbol") or parsed.get("s")
+                detail = {
+                    "symbol": symbol,
+                    "last_price": parsed.get("lastPrice") or parsed.get("c"),
+                    "price_change_percent": parsed.get("priceChangePercent") or parsed.get("P"),
+                    "high_price": parsed.get("highPrice") or parsed.get("h"),
+                    "low_price": parsed.get("lowPrice") or parsed.get("l"),
+                    "quote_volume": parsed.get("quoteVolume") or parsed.get("q"),
+                }
+                detailed_samples.append(detail)
+                if len(detailed_samples) >= 5:
+                    break
+            if len(detailed_samples) >= 5:
+                break
+
+        if detailed_samples:
+            logging.info("Sample ticker24hr stats:")
+            logging.info("ticker24hr_price_change_statistics() detailed_samples: %s", len(detailed_samples))
+            for idx, item in enumerate(detailed_samples, start=1):
+                logging.info(
+                    "  #%d %s | last=%s | change=%s%% | high=%s | low=%s | quote_volume=%s",
+                    idx,
+                    item.get("symbol") or "N/A",
+                    item.get("last_price"),
+                    item.get("price_change_percent"),
+                    item.get("high_price"),
+                    item.get("low_price"),
+                    item.get("quote_volume"),
+                )
+        else:
+            logging.warning("ticker24hr_price_change_statistics() returned no parsable entries")
+
     except Exception as e:
         logging.error(f"ticker24hr_price_change_statistics() error: {e}")
 
@@ -85,19 +167,16 @@ def exercise_binance_futures_client(api_key: str, api_secret: str) -> None:
     top_gainers = client.get_top_gainers(limit=5)
     _log_sample("top_gainers", top_gainers)
 
-  ##  logging.info("Testing get_all_tickers()...")
-  #  all_tickers = client.get_all_tickers()
-  #  _log_sample("all_tickers", all_tickers)
 
-   # symbols: List[str] = ["BTCUSDT", "ETHUSDT", "BNBUSDT"]
+    symbols: List[str] = ["BTCUSDT", "ETHUSDT", "BNBUSDT"]
 
-  #  logging.info("Testing get_24h_ticker()...")
-   # ticker_24h = client.get_24h_ticker(symbols)
-   # _log_sample("ticker_24h", ticker_24h)
+    #logging.info("Testing get_24h_ticker()...")
+    #ticker_24h = client.get_24h_ticker(symbols)
+    #_log_sample("ticker_24h", ticker_24h)
 
-  #  logging.info("Testing get_symbol_prices()...")
-  #  symbol_prices = client.get_symbol_prices(symbols)
-  #  _log_sample("symbol_prices", symbol_prices)
+    #logging.info("Testing get_symbol_prices()...")
+    #symbol_prices = client.get_symbol_prices(symbols)
+    #_log_sample("symbol_prices", symbol_prices)
 
    # logging.info("Testing get_klines()...")
    # klines = client.get_klines(symbol="BTCUSDT", interval="1m", limit=5)
