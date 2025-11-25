@@ -243,16 +243,45 @@ class BinanceFuturesClient:
         logger.info(f"[Binance Futures] 请求参数: limit={limit}, quote_asset={self.quote_asset}")
         
         try:
-            # 调用币安API获取24小时统计数据
+            # Step 1 —— 调用API并记录耗时
             logger.info(f"[Binance Futures] [步骤1] 调用币安API: ticker24hr_price_change_statistics()")
             api_start_time = time.time()
-
             response = self._rest.ticker24hr_price_change_statistics()
-            raw_items = response.data()
-            if raw_items is None:
-                raw_items = []
-            elif not isinstance(raw_items, list):
-                raw_items = [raw_items]
+            data_obj = response.data()
+
+            # Step 2 —— 通过一个简单队列把任意嵌套结构摊平为 dict 列表
+            raw_items: List[Dict[str, Any]] = []
+            queue: List[Any] = [data_obj]
+            while queue:
+                current = queue.pop(0)
+                if current is None:
+                    continue
+
+                if isinstance(current, list):
+                    queue.extend(current)
+                    continue
+
+                if hasattr(current, "to_dict"):
+                    try:
+                        queue.append(current.to_dict())
+                    except Exception:
+                        logger.debug("[Binance Futures] to_dict() 调用失败, 跳过当前项")
+                    continue
+
+                if isinstance(current, dict):
+                    nested = next((current.get(key) for key in ("data", "items", "list", "records")
+                                    if isinstance(current.get(key), list)), None)
+                    if nested is not None:
+                        queue.extend(nested)
+                        continue
+                    normalized = self._ensure_dict(current)
+                    if normalized:
+                        raw_items.append(normalized)
+                    continue
+
+                normalized = self._ensure_dict(current)
+                if normalized:
+                    raw_items.append(normalized)
 
             api_duration = time.time() - api_start_time
             logger.info(
@@ -265,12 +294,13 @@ class BinanceFuturesClient:
                 except (TypeError, ValueError):
                     return default
 
+            # Step 3 —— 过滤指定计价资产并求出涨跌幅
             logger.info(f"[Binance Futures] [步骤2] 过滤 {self.quote_asset} 计价资产...")
-            filtered: List[tuple[Ticker24hrPriceChangeStatisticsResponse, float]] = []
+            filtered: List[tuple[Dict[str, Any], float]] = []
             skipped_no_symbol = 0
             skipped_quote_asset = 0
             for stat in raw_items:
-                symbol = getattr(stat, "symbol", None)
+                symbol = stat.get("symbol") or stat.get("s")
                 if not symbol:
                     skipped_no_symbol += 1
                     continue
@@ -280,9 +310,9 @@ class BinanceFuturesClient:
                     continue
 
                 change_raw = (
-                    getattr(stat, "price_change_percent", None)
-                    or getattr(stat, "priceChangePercent", None)
-                    or getattr(stat, "P", None)
+                    stat.get("price_change_percent")
+                    or stat.get("priceChangePercent")
+                    or stat.get("P")
                 )
                 change_percent = _safe_float(change_raw)
                 filtered.append((stat, change_percent))
@@ -296,6 +326,7 @@ class BinanceFuturesClient:
                 logger.warning("[Binance Futures] [步骤2] 未找到任何符合条件的 {self.quote_asset} 交易对")
                 return []
 
+            # Step 4 —— 排序并限制数量
             logger.info(f"[Binance Futures] [步骤3] 按涨跌幅降序排序...")
             filtered.sort(key=lambda x: x[1], reverse=True)
             logger.info(f"[Binance Futures] [步骤3] 排序完成")
@@ -303,41 +334,18 @@ class BinanceFuturesClient:
             selected = filtered[: max(0, limit)]
             result_payload: List[Dict[str, Any]] = []
             for stat, change_percent in selected:
-                payload: Dict[str, Any]
-                if hasattr(stat, "model_dump"):
-                    try:
-                        dumped = stat.model_dump()
-                        payload = dumped if isinstance(dumped, dict) else {}
-                    except Exception:
-                        payload = {}
-                else:
-                    payload = {}
-
-                if not payload:
-                    payload = self._ensure_dict(stat)
-
-                payload.setdefault("symbol", getattr(stat, "symbol", ""))
+                payload = dict(stat)
                 payload.setdefault("priceChangePercent", change_percent)
                 payload.setdefault("price_change_percent", change_percent)
-                payload.setdefault(
-                    "lastPrice",
-                    getattr(stat, "last_price", None)
-                    or getattr(stat, "lastPrice", None)
-                    or payload.get("close"),
-                )
-                payload.setdefault(
-                    "quoteVolume",
-                    getattr(stat, "quote_volume", None)
-                    or getattr(stat, "quoteVolume", None)
-                    or payload.get("volume"),
-                )
-                payload.setdefault("highPrice", getattr(stat, "high_price", None) or getattr(stat, "highPrice", None))
-                payload.setdefault("lowPrice", getattr(stat, "low_price", None) or getattr(stat, "lowPrice", None))
-
+                payload.setdefault("lastPrice", payload.get("last_price") or payload.get("close"))
+                payload.setdefault("quoteVolume", payload.get("quote_volume") or payload.get("volume"))
+                payload.setdefault("highPrice", payload.get("high_price"))
+                payload.setdefault("lowPrice", payload.get("low_price"))
                 result_payload.append(payload)
 
             logger.info(f"[Binance Futures] [步骤4] 取前 {limit} 名, 实际返回: {len(result_payload)} 条")
 
+            # Step 5 —— 输出结果详情
             if result_payload:
                 logger.info(f"[Binance Futures] [步骤5] 涨跌幅榜详情:")
                 for idx, item in enumerate(result_payload):
