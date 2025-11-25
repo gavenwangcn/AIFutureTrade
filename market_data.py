@@ -412,7 +412,7 @@ class MarketDataFetcher:
 
     def _build_leaderboard_entries(self, limit: int) -> List[Dict]:
         """Build leaderboard entries from Binance ticker data"""
-        tickers = self._futures_client.get_all_tickers()
+        tickers = self._futures_client.get_top_gainers()
         if not tickers:
             return []
 
