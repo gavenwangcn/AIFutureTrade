@@ -39,5 +39,5 @@ FUTURES_TOP_GAINERS_REFRESH = 5  # seconds, can be adjusted per deployment needs
 FUTURES_INDICATOR_REFRESH = 2  # seconds
 FUTURES_KLINE_LIMIT = 120
 FUTURES_QUOTE_ASSET = 'USDT'
-FUTURES_LEADERBOARD_REFRESH = 180  # seconds
+FUTURES_LEADERBOARD_REFRESH = 10  # seconds - WebSocket实时推送间隔
 

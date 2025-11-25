@@ -186,16 +186,32 @@ class AITrader:
                 tf = timeframes.get(key)
                 if not tf:
                     continue
-                close = fmt_number(tf.get('close'))
+                
+                # 新格式：{kline: {}, ma: {}, macd: {}, rsi: {}, vol: {}}
+                kline = tf.get('kline', {})
+                close = fmt_number(kline.get('close') or tf.get('close'))
                 ma = tf.get('ma') or {}
                 ma_text = ', '.join(
                     [f"MA{length}:{fmt_number(ma.get(f'ma{length}'))}" for length in (5, 20, 60, 99)]
                 )
-                macd = fmt_number(tf.get('macd'))
-                rsi = fmt_number(tf.get('rsi'))
+                
+                # MACD 新格式：{dif: float, dea: float, bar: float}
+                macd_data = tf.get('macd', {})
+                if isinstance(macd_data, dict):
+                    macd_text = f"DIF:{fmt_number(macd_data.get('dif'))}, DEA:{fmt_number(macd_data.get('dea'))}, BAR:{fmt_number(macd_data.get('bar'))}"
+                else:
+                    macd_text = fmt_number(macd_data)
+                
+                # RSI 新格式：{rsi6: float, rsi9: float}
+                rsi_data = tf.get('rsi', {})
+                if isinstance(rsi_data, dict):
+                    rsi_text = f"RSI6:{fmt_number(rsi_data.get('rsi6'))}, RSI9:{fmt_number(rsi_data.get('rsi9'))}"
+                else:
+                    rsi_text = fmt_number(rsi_data)
+                
                 vol = fmt_number(tf.get('vol'), precision=2)
                 lines.append(
-                    f"   - {label}: close={close}, {ma_text}, MACD={macd}, RSI={rsi}, VOL={vol}"
+                    f"   - {label}: close={close}, {ma_text}, MACD({macd_text}), RSI({rsi_text}), VOL={vol}"
                 )
 
         return '\n'.join(lines) + '\n'

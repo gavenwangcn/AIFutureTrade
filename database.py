@@ -191,18 +191,6 @@ class Database:
             )
         ''')
 
-        # Daily closing prices table
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS daily_prices (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                symbol TEXT NOT NULL,
-                price REAL NOT NULL,
-                price_date TEXT NOT NULL,
-                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                UNIQUE(symbol, price_date)
-            )
-        ''')
-
         # Insert default settings if no settings exist
         cursor.execute('SELECT COUNT(*) FROM settings')
         if cursor.fetchone()[0] == 0:
@@ -900,78 +888,6 @@ class Database:
             logger.error(f"Error updating settings: {e}")
             conn.close()
             return False
-
-    # ============ Daily Closing Prices ============
-
-    def upsert_daily_price(self, symbol: str, price: float, price_date: Optional[str] = None):
-        """Store or update daily closing price for a symbol"""
-        if price is None:
-            return
-
-        price_date = price_date or datetime.now().strftime('%Y-%m-%d')
-        conn = self.get_connection()
-        cursor = conn.cursor()
-        cursor.execute('''
-            INSERT INTO daily_prices (symbol, price, price_date)
-            VALUES (?, ?, ?)
-            ON CONFLICT(symbol, price_date) DO UPDATE SET
-                price = excluded.price,
-                updated_at = CURRENT_TIMESTAMP
-        ''', (symbol, price, price_date))
-        conn.commit()
-        conn.close()
-
-    def get_latest_daily_prices(self, symbols: Optional[List[str]] = None) -> Dict[str, Dict]:
-        """Get the latest stored closing price per symbol"""
-        conn = self.get_connection()
-        cursor = conn.cursor()
-
-        params: List = []
-        symbol_filter = ''
-        if symbols:
-            placeholders = ','.join(['?'] * len(symbols))
-            symbol_filter = f'WHERE symbol IN ({placeholders})'
-            params.extend(symbols)
-
-        query = f'''
-            WITH latest AS (
-                SELECT symbol, MAX(price_date) AS price_date
-                FROM daily_prices
-                {symbol_filter}
-                GROUP BY symbol
-            )
-            SELECT dp.symbol, dp.price, dp.price_date
-            FROM daily_prices dp
-            JOIN latest ON dp.symbol = latest.symbol AND dp.price_date = latest.price_date
-        '''
-
-        cursor.execute(query, params)
-        rows = cursor.fetchall()
-        conn.close()
-
-        return {row['symbol']: {'price': row['price'], 'price_date': row['price_date']} for row in rows}
-
-    def get_daily_prices_for_date(self, price_date: str, symbols: Optional[List[str]] = None) -> Dict[str, Dict]:
-        """Get stored closing prices for a specific date"""
-        conn = self.get_connection()
-        cursor = conn.cursor()
-
-        params: List = [price_date]
-        symbol_filter = ''
-        if symbols:
-            placeholders = ','.join(['?'] * len(symbols))
-            symbol_filter = f' AND symbol IN ({placeholders})'
-            params.extend(symbols)
-
-        cursor.execute(f'''
-            SELECT symbol, price, price_date
-            FROM daily_prices
-            WHERE price_date = ?{symbol_filter}
-        ''', params)
-
-        rows = cursor.fetchall()
-        conn.close()
-        return {row['symbol']: {'price': row['price'], 'price_date': row['price_date']} for row in rows}
 
     # ============ Leaderboard Management ============
 

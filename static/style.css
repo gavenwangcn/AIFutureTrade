@@ -129,7 +129,7 @@
 
 .leaderboard-item {
     display: grid;
-    grid-template-columns: 60px 1fr 100px 110px 110px;
+    grid-template-columns: 50px 1fr 100px 110px 110px;
     align-items: center;
     gap: 12px;
     padding: 12px 14px;
@@ -137,6 +137,25 @@
     border-radius: 14px;
     border: 1px solid rgba(0, 0, 0, 0.04);
     box-shadow: 0 6px 18px rgba(15, 23, 42, 0.08);
+    transition: transform 0.2s, box-shadow 0.2s;
+}
+
+.leaderboard-item:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 24px rgba(15, 23, 42, 0.12);
+}
+
+/* 响应式布局：小屏幕时调整列宽 */
+@media (max-width: 768px) {
+    .leaderboard-item {
+        grid-template-columns: 40px 1fr 80px 90px;
+        gap: 8px;
+        padding: 10px 12px;
+    }
+    
+    .leaderboard-volume {
+        display: none; /* 小屏幕隐藏成交量 */
+    }
 }
 
 .leaderboard-rank {
@@ -180,6 +199,16 @@
     font-size: 13px;
     color: var(--text-2);
     text-align: right;
+}
+
+.empty-state {
+    text-align: center;
+    padding: 40px 20px;
+    color: var(--text-3);
+    font-size: 14px;
+    background: rgba(255, 255, 255, 0.5);
+    border-radius: 12px;
+    border: 1px dashed rgba(0, 0, 0, 0.1);
 }
 
 .leaderboard-trend {
@@ -549,20 +578,78 @@ body {
 .market-prices {
     display: flex;
     flex-direction: column;
+    gap: 12px;
+    max-height: calc(100vh - 200px);
+    overflow-y: auto;
+    padding-right: 4px;
+}
+
+.market-prices::-webkit-scrollbar {
+    width: 6px;
+}
+
+.market-prices::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+.market-prices::-webkit-scrollbar-thumb {
+    background: rgba(0, 0, 0, 0.2);
+    border-radius: 3px;
+}
+
+.market-section {
+    display: flex;
+    flex-direction: column;
     gap: 8px;
+}
+
+.market-section-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 6px 12px;
+    background: rgba(255, 255, 255, 0.6);
+    border-radius: 8px;
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.section-badge {
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 10px;
+    font-weight: 700;
+}
+
+.section-badge.configured {
+    background: rgba(59, 130, 246, 0.15);
+    color: #3b82f6;
+}
+
+.section-badge.position {
+    background: rgba(34, 197, 94, 0.15);
+    color: #22c55e;
+}
+
+.section-count {
+    color: var(--text-3);
+    font-size: 10px;
 }
 
 .price-item {
     display: flex;
     flex-direction: column;
-    gap: 12px;
-    padding: 16px 18px;
+    gap: 10px;
+    padding: 12px 14px;
     background: rgba(255, 255, 255, 0.9);
-    border-radius: 16px;
+    border-radius: 12px;
     border: 1px solid rgba(255, 255, 255, 0.4);
-    box-shadow: 0 12px 25px rgba(15, 23, 42, 0.08);
+    box-shadow: 0 8px 20px rgba(15, 23, 42, 0.06);
     position: relative;
     overflow: hidden;
+    min-width: 0; /* 防止内容溢出 */
 }
 
 .price-item::after {
@@ -584,9 +671,10 @@ body {
 }
 
 .price-symbol {
-    font-weight: 500;
+    font-weight: 600;
     color: var(--text-1);
-    font-size: 16px;
+    font-size: 14px;
+    line-height: 1.2;
 }
 
 .price-name {
@@ -610,9 +698,10 @@ body {
 }
 
 .price-value {
-    font-size: 22px;
+    font-size: 18px;
     font-weight: 600;
     color: var(--text-1);
+    line-height: 1.2;
 }
 
 .price-change {
@@ -636,10 +725,11 @@ body {
 .price-body {
     width: 100%;
     border-top: 1px solid var(--border-1);
-    padding-top: 12px;
+    padding-top: 10px;
     display: flex;
     flex-direction: column;
-    gap: 10px;
+    gap: 8px;
+    min-width: 0; /* 防止内容溢出 */
 }
 
 .price-timeframes {
@@ -686,6 +776,185 @@ body {
     font-size: 11px;
     font-weight: 600;
     color: var(--text-3);
+}
+
+/* 时间框架展示优化 */
+.timeframe-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 6px 10px;
+    background: var(--bg-3);
+    border-radius: 6px;
+    margin-bottom: 4px;
+    transition: background 0.2s;
+    min-width: 0; /* 防止内容溢出 */
+    flex-wrap: nowrap;
+}
+
+.timeframe-item:hover {
+    background: var(--bg-4);
+}
+
+.timeframe-label {
+    font-size: 10px;
+    font-weight: 600;
+    color: var(--text-2);
+    min-width: 50px;
+    flex-shrink: 0;
+}
+
+.timeframe-price {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--text-1);
+    flex: 1;
+    text-align: center;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    padding: 0 4px;
+}
+
+.timeframe-change {
+    font-size: 10px;
+    font-weight: 600;
+    padding: 2px 6px;
+    border-radius: 4px;
+    flex-shrink: 0;
+    white-space: nowrap;
+}
+
+.timeframe-change.positive {
+    color: var(--success);
+    background: rgba(34, 197, 94, 0.1);
+}
+
+.timeframe-change.negative {
+    color: var(--danger);
+    background: rgba(239, 68, 68, 0.1);
+}
+
+/* MA 网格优化 */
+.ma-item {
+    display: flex;
+    align-items: center;
+    padding: 6px 10px;
+    background: var(--bg-3);
+    border-radius: 6px;
+    margin-bottom: 4px;
+    transition: background 0.2s;
+    min-width: 0; /* 防止内容溢出 */
+    flex-wrap: wrap;
+    gap: 4px;
+}
+
+.ma-item:hover {
+    background: var(--bg-4);
+}
+
+.ma-item .ma-label {
+    font-size: 10px;
+    font-weight: 600;
+    color: var(--text-2);
+    min-width: 50px;
+    flex-shrink: 0;
+}
+
+.ma-item .ma-values {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    flex: 1;
+    min-width: 0;
+}
+
+.ma-item .ma-value {
+    font-size: 10px;
+    color: var(--text-1);
+    white-space: nowrap;
+}
+
+.ma-item .ma-value strong {
+    color: var(--primary);
+    font-weight: 600;
+}
+
+/* 技术指标展示 */
+.indicators-section {
+    margin-top: 8px;
+    padding: 10px;
+    background: var(--bg-2);
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    min-width: 0; /* 防止内容溢出 */
+}
+
+.indicators-title {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--text-1);
+    margin-bottom: 8px;
+    padding-bottom: 6px;
+    border-bottom: 1px solid var(--border);
+}
+
+.indicator-item {
+    display: flex;
+    align-items: flex-start;
+    padding: 6px 0;
+    border-bottom: 1px solid var(--border);
+    min-width: 0; /* 防止内容溢出 */
+    flex-wrap: wrap;
+    gap: 4px;
+}
+
+.indicator-item:last-child {
+    border-bottom: none;
+}
+
+.indicator-label {
+    font-size: 10px;
+    font-weight: 600;
+    color: var(--text-2);
+    min-width: 50px;
+    flex-shrink: 0;
+}
+
+.indicator-values {
+    font-size: 10px;
+    color: var(--text-1);
+    flex: 1;
+    line-height: 1.5;
+    min-width: 0;
+    word-break: break-word;
+    overflow-wrap: break-word;
+}
+
+.indicator-values .positive {
+    color: var(--success);
+}
+
+.indicator-values .negative {
+    color: var(--danger);
+}
+
+.rsi-overbought {
+    color: var(--danger);
+    font-weight: 600;
+}
+
+.rsi-oversold {
+    color: var(--success);
+    font-weight: 600;
+}
+
+.timeframe-empty {
+    text-align: center;
+    padding: 20px;
+    color: var(--text-3);
+    font-size: 13px;
 }
 
 .ma-value {

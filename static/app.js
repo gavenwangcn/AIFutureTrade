@@ -228,16 +228,95 @@ class TradingApp {
         this.leaderboardLastUpdated = null;
         this.logger = frontendLogger; // 使用全局日志实例
         this.modelLeverageMap = {};
+        this.socket = null; // WebSocket连接
+        this.leaderboardRefreshInterval = null; // 定期刷新定时器
         this.init();
     }
 
     init() {
         // 等待DOM加载完成
         if (document.readyState === 'loading') {
-            document.addEventListener('DOMContentLoaded', () => this.setupEventListeners());
+            document.addEventListener('DOMContentLoaded', () => {
+                this.setupEventListeners();
+                this.initWebSocket();
+                this.startLeaderboardAutoRefresh();
+            });
         } else {
             this.setupEventListeners();
+            this.initWebSocket();
+            this.startLeaderboardAutoRefresh();
         }
+    }
+
+    initWebSocket() {
+        // 检查是否支持WebSocket（通过检查是否有socket.io库）
+        if (typeof io === 'undefined') {
+            console.warn('[WebSocket] socket.io 未加载，使用轮询方式更新涨跌幅榜');
+            return;
+        }
+
+        try {
+            // 连接到WebSocket服务器
+            this.socket = io();
+            
+            // 监听涨跌幅榜更新事件
+            this.socket.on('leaderboard:update', (data) => {
+                console.log('[WebSocket] 收到涨跌幅榜更新', data);
+                if (data && (data.gainers || data.losers)) {
+                    this.leaderboardData = {
+                        gainers: Array.isArray(data.gainers) ? data.gainers : [],
+                        losers: Array.isArray(data.losers) ? data.losers : []
+                    };
+                    this.leaderboardLastUpdated = new Date();
+                    this.renderLeaderboard();
+                    
+                    // 更新状态指示器
+                    const statusElement = document.getElementById('leaderboardStatus');
+                    if (statusElement) {
+                        statusElement.textContent = '实时更新';
+                        statusElement.className = 'status-indicator success';
+                    }
+                }
+            });
+
+            // 监听错误事件
+            this.socket.on('leaderboard:error', (error) => {
+                console.error('[WebSocket] 涨跌幅榜更新错误', error);
+                const statusElement = document.getElementById('leaderboardStatus');
+                if (statusElement) {
+                    statusElement.textContent = '更新失败';
+                    statusElement.className = 'status-indicator error';
+                }
+            });
+
+            // 连接成功后请求初始数据
+            this.socket.on('connect', () => {
+                console.log('[WebSocket] 已连接到服务器');
+                this.socket.emit('leaderboard:request', { limit: this.leaderboardLimit });
+            });
+
+            // 连接断开时重连
+            this.socket.on('disconnect', () => {
+                console.warn('[WebSocket] 连接断开，尝试重新连接...');
+            });
+        } catch (error) {
+            console.error('[WebSocket] 初始化失败', error);
+        }
+    }
+
+    startLeaderboardAutoRefresh() {
+        // 清除已有定时器
+        if (this.leaderboardRefreshInterval) {
+            clearInterval(this.leaderboardRefreshInterval);
+        }
+
+        // 立即获取一次数据
+        this.fetchLeaderboardSnapshot();
+
+        // 每30秒自动刷新一次（作为WebSocket的备用方案）
+        this.leaderboardRefreshInterval = setInterval(() => {
+            this.fetchLeaderboardSnapshot();
+        }, 30000);
     }
 
     setupEventListeners() {
@@ -1074,39 +1153,94 @@ class TradingApp {
 
     renderMarketPrices(prices) {
         const container = document.getElementById('marketPrices');
+        
+        if (!prices || Object.keys(prices).length === 0) {
+            container.innerHTML = '<div class="empty-state">暂无市场行情数据</div>';
+            return;
+        }
 
-        container.innerHTML = Object.entries(prices).map(([symbol, data]) => {
-            const changeClass = data.change_24h >= 0 ? 'positive' : 'negative';
-            const changeIcon = data.change_24h >= 0 ? '▲' : '▼';
+        // 分离配置的合约和持仓的合约
+        const configuredItems = [];
+        const positionItems = [];
+        
+        Object.entries(prices).forEach(([symbol, data]) => {
+            const item = { symbol, data };
+            if (data.source === 'position') {
+                positionItems.push(item);
+            } else {
+                configuredItems.push(item);
+            }
+        });
 
-            const volumeText = data.daily_volume ? this.formatCompactUsd(data.daily_volume) : '--';
-            const timeframeSection = this.buildTimeframeSection(data.timeframes || {});
-            const maSection = this.buildMaGrid(data.timeframes || {});
-
-            return `
-                <div class="price-item">
-                    <div class="price-head">
-                        <div>
-                            <div class="price-symbol">${symbol}</div>
-                            <div class="price-name">${data.name || ''}</div>
-                        </div>
-                        <div class="price-metrics">
-                            <div class="price-value">$${(data.price || 0).toFixed(4)}</div>
-                            <div class="price-change ${changeClass}">${changeIcon} ${
-                                data.change_24h !== undefined && data.change_24h !== null
-                                    ? data.change_24h.toFixed(2)
-                                    : '0.00'
-                            }%</div>
-                            <div class="price-volume">当日成交额：${volumeText}</div>
-                        </div>
+        // 构建HTML
+        let html = '';
+        
+        // 配置的合约部分
+        if (configuredItems.length > 0) {
+            html += `
+                <div class="market-section">
+                    <div class="market-section-header">
+                        <span class="section-badge configured">配置合约</span>
+                        <span class="section-count">${configuredItems.length} 个</span>
                     </div>
-                    <div class="price-body">
-                        ${timeframeSection}
-                        ${maSection}
-                    </div>
+                    ${configuredItems.map(({symbol, data}) => this.buildPriceItem(symbol, data)).join('')}
                 </div>
             `;
-        }).join('');
+        }
+        
+        // 持仓的合约部分
+        if (positionItems.length > 0) {
+            html += `
+                <div class="market-section">
+                    <div class="market-section-header">
+                        <span class="section-badge position">持仓合约</span>
+                        <span class="section-count">${positionItems.length} 个</span>
+                    </div>
+                    ${positionItems.map(({symbol, data}) => this.buildPriceItem(symbol, data)).join('')}
+                </div>
+            `;
+        }
+        
+        if (!html) {
+            html = '<div class="empty-state">暂无市场行情数据</div>';
+        }
+        
+        container.innerHTML = html;
+    }
+
+    buildPriceItem(symbol, data) {
+        const changeClass = data.change_24h >= 0 ? 'positive' : 'negative';
+        const changeIcon = data.change_24h >= 0 ? '▲' : '▼';
+
+        const volumeText = data.daily_volume ? this.formatCompactUsd(data.daily_volume) : '--';
+        const timeframeSection = this.buildTimeframeSection(data.timeframes || {});
+        const maSection = this.buildMaGrid(data.timeframes || {});
+        const indicatorsSection = this.buildIndicatorsSection(data.timeframes || {});
+
+        return `
+            <div class="price-item">
+                <div class="price-head">
+                    <div>
+                        <div class="price-symbol">${symbol}</div>
+                        <div class="price-name">${data.name || ''}</div>
+                    </div>
+                    <div class="price-metrics">
+                        <div class="price-value">$${(data.price || 0).toFixed(4)}</div>
+                        <div class="price-change ${changeClass}">${changeIcon} ${
+                            data.change_24h !== undefined && data.change_24h !== null
+                                ? data.change_24h.toFixed(2)
+                                : '0.00'
+                        }%</div>
+                        <div class="price-volume">当日成交额：${volumeText}</div>
+                    </div>
+                </div>
+                <div class="price-body">
+                    ${timeframeSection}
+                    ${maSection}
+                    ${indicatorsSection}
+                </div>
+            </div>
+        `;
     }
 
     switchTab(tabName) {
@@ -2283,6 +2417,13 @@ class TradingApp {
         const url = '/api/market/leaderboard';
         this.logger.logApiCall('GET', url);
 
+        // 更新状态指示器
+        const statusElement = document.getElementById('leaderboardStatus');
+        if (statusElement) {
+            statusElement.textContent = '正在加载...';
+            statusElement.className = 'status-indicator loading';
+        }
+
         try {
             const response = await fetch(url);
             
@@ -2295,18 +2436,42 @@ class TradingApp {
                 data = await response.json();
             } catch (parseError) {
                 this.logger.logApiError('GET', url, new Error('响应解析失败'), response);
+                if (statusElement) {
+                    statusElement.textContent = '数据解析失败';
+                    statusElement.className = 'status-indicator error';
+                }
                 return;
             }
 
-            this.logger.logApiSuccess('GET', url, response, data);
-
-            if (data.gainers && data.losers) {
-                this.leaderboardData = { gainers: data.gainers, losers: data.losers };
-                this.leaderboardLastUpdated = new Date();
-                this.renderLeaderboard();
+            // 检查返回数据格式
+            if (!data || typeof data !== 'object') {
+                throw new Error('返回数据格式错误');
             }
+
+            // 确保 gainers 和 losers 是数组
+            const gainers = Array.isArray(data.gainers) ? data.gainers : [];
+            const losers = Array.isArray(data.losers) ? data.losers : [];
+
+            this.leaderboardData = { gainers, losers };
+            this.leaderboardLastUpdated = new Date();
+            
+            // 更新状态指示器
+            if (statusElement) {
+                statusElement.textContent = '数据已更新';
+                statusElement.className = 'status-indicator success';
+            }
+
+            this.logger.logApiSuccess('GET', url, response, data);
+            this.renderLeaderboard();
         } catch (error) {
             this.logger.logDataLoadError('涨跌幅榜', error, url);
+            
+            // 更新状态指示器为错误状态
+            const statusElement = document.getElementById('leaderboardStatus');
+            if (statusElement) {
+                statusElement.textContent = '加载失败';
+                statusElement.className = 'status-indicator error';
+            }
         }
     }
 
@@ -2315,40 +2480,89 @@ class TradingApp {
         const losersContainer = document.getElementById('leaderboardLosers');
         const statusElement = document.getElementById('leaderboardStatus');
 
-        if (statusElement) {
-            const timeStr = this.leaderboardLastUpdated 
-                ? this.leaderboardLastUpdated.toLocaleTimeString('zh-CN')
-                : '刚刚';
-            statusElement.textContent = `最后更新: ${timeStr}`;
+        // 更新状态时间
+        if (statusElement && this.leaderboardLastUpdated) {
+            const timeStr = this.leaderboardLastUpdated.toLocaleTimeString('zh-CN');
+            const dateStr = this.leaderboardLastUpdated.toLocaleDateString('zh-CN');
+            statusElement.textContent = `最后更新: ${dateStr} ${timeStr}`;
         }
 
+        // 渲染涨幅榜
         if (gainersContainer) {
             if (this.leaderboardData.gainers && this.leaderboardData.gainers.length > 0) {
-                gainersContainer.innerHTML = this.leaderboardData.gainers.map((item, index) => `
-                    <div class="leaderboard-item">
-                        <span class="rank">${index + 1}</span>
-                        <span class="symbol">${item.symbol}</span>
-                        <span class="change positive">+${item.priceChangePercent.toFixed(2)}%</span>
-                    </div>
-                `).join('');
+                gainersContainer.innerHTML = this.leaderboardData.gainers.map((item) => {
+                    // 安全获取数据字段，兼容不同的字段名
+                    const rank = item.rank || 0;
+                    const symbol = item.symbol || item.contract_symbol || 'N/A';
+                    const contractSymbol = item.contract_symbol || symbol;
+                    const price = this.formatNumber(item.price || 0, 4);
+                    const changePercent = item.change_percent !== undefined 
+                        ? item.change_percent 
+                        : (item.priceChangePercent !== undefined ? item.priceChangePercent : 0);
+                    const volume = this.formatCompactUsd(item.quote_volume || item.quoteVolume || 0);
+                    
+                    // 确保涨跌幅为正数（涨幅榜）
+                    const changeValue = Math.abs(changePercent);
+                    const changeDisplay = changeValue >= 0 ? `+${changeValue.toFixed(2)}%` : `${changeValue.toFixed(2)}%`;
+                    
+                    return `
+                        <div class="leaderboard-item">
+                            <span class="leaderboard-rank">${rank}</span>
+                            <div class="leaderboard-symbol">
+                                <strong>${symbol}</strong>
+                                <span>${contractSymbol}</span>
+                            </div>
+                            <span class="leaderboard-price">$${price}</span>
+                            <span class="leaderboard-change positive">${changeDisplay}</span>
+                            <span class="leaderboard-volume">${volume}</span>
+                        </div>
+                    `;
+                }).join('');
             } else {
-                gainersContainer.innerHTML = '<div class="empty-state">暂无数据</div>';
+                gainersContainer.innerHTML = '<div class="empty-state">暂无涨幅数据</div>';
             }
         }
 
+        // 渲染跌幅榜
         if (losersContainer) {
             if (this.leaderboardData.losers && this.leaderboardData.losers.length > 0) {
-                losersContainer.innerHTML = this.leaderboardData.losers.map((item, index) => `
-                    <div class="leaderboard-item">
-                        <span class="rank">${index + 1}</span>
-                        <span class="symbol">${item.symbol}</span>
-                        <span class="change negative">${item.priceChangePercent.toFixed(2)}%</span>
-                    </div>
-                `).join('');
+                losersContainer.innerHTML = this.leaderboardData.losers.map((item) => {
+                    // 安全获取数据字段，兼容不同的字段名
+                    const rank = item.rank || 0;
+                    const symbol = item.symbol || item.contract_symbol || 'N/A';
+                    const contractSymbol = item.contract_symbol || symbol;
+                    const price = this.formatNumber(item.price || 0, 4);
+                    const changePercent = item.change_percent !== undefined 
+                        ? item.change_percent 
+                        : (item.priceChangePercent !== undefined ? item.priceChangePercent : 0);
+                    const volume = this.formatCompactUsd(item.quote_volume || item.quoteVolume || 0);
+                    
+                    // 确保涨跌幅为负数（跌幅榜）
+                    const changeValue = changePercent <= 0 ? changePercent : -changePercent;
+                    const changeDisplay = `${changeValue.toFixed(2)}%`;
+                    
+                    return `
+                        <div class="leaderboard-item">
+                            <span class="leaderboard-rank">${rank}</span>
+                            <div class="leaderboard-symbol">
+                                <strong>${symbol}</strong>
+                                <span>${contractSymbol}</span>
+                            </div>
+                            <span class="leaderboard-price">$${price}</span>
+                            <span class="leaderboard-change negative">${changeDisplay}</span>
+                            <span class="leaderboard-volume">${volume}</span>
+                        </div>
+                    `;
+                }).join('');
             } else {
-                losersContainer.innerHTML = '<div class="empty-state">暂无数据</div>';
+                losersContainer.innerHTML = '<div class="empty-state">暂无跌幅数据</div>';
             }
         }
+    }
+
+    formatNumber(value, decimals = 2) {
+        if (value === null || value === undefined || isNaN(value)) return '0.00';
+        return parseFloat(value).toFixed(decimals);
     }
 
     updateConversations(conversations) {
@@ -2413,25 +2627,45 @@ class TradingApp {
         }
 
         const timeframeLabels = {
-            '1m': '1分钟',
-            '5m': '5分钟',
-            '15m': '15分钟',
-            '1h': '1小时',
+            '1w': '1周',
+            '1d': '1天',
             '4h': '4小时',
-            '1d': '1天'
+            '1h': '1小时',
+            '15m': '15分钟',
+            '5m': '5分钟',
+            '1m': '1分钟'
         };
 
-        return Object.entries(timeframes).map(([tf, data]) => {
+        // 按时间框架顺序排列
+        const timeframeOrder = ['1w', '1d', '4h', '1h', '15m', '5m', '1m'];
+        
+        return timeframeOrder.map(tf => {
+            const data = timeframes[tf];
+            if (!data) return '';
+            
             const label = timeframeLabels[tf] || tf;
-            const change = data.change !== undefined ? data.change.toFixed(2) : '0.00';
-            const changeClass = parseFloat(change) >= 0 ? 'positive' : 'negative';
+            const kline = data.kline || {};
+            const close = parseFloat(kline.close || data.close || 0);
+            const open = parseFloat(kline.open || data.open || 0);
+            
+            // 计算涨跌幅
+            let change = 0;
+            if (open > 0) {
+                change = ((close - open) / open) * 100;
+            }
+            const changeClass = change >= 0 ? 'positive' : 'negative';
+            const changeIcon = change >= 0 ? '▲' : '▼';
+            
             return `
                 <div class="timeframe-item">
                     <span class="timeframe-label">${label}</span>
-                    <span class="timeframe-change ${changeClass}">${change >= 0 ? '+' : ''}${change}%</span>
+                    <span class="timeframe-price">$${close.toFixed(4)}</span>
+                    <span class="timeframe-change ${changeClass}">
+                        ${changeIcon} ${Math.abs(change).toFixed(2)}%
+                    </span>
                 </div>
             `;
-        }).join('');
+        }).filter(html => html).join('');
     }
 
     buildMaGrid(timeframes) {
@@ -2439,18 +2673,117 @@ class TradingApp {
             return '';
         }
 
-        return Object.entries(timeframes).map(([tf, data]) => {
-            if (!data.ma) return '';
-            const ma5 = data.ma.ma5 ? data.ma.ma5.toFixed(2) : '-';
-            const ma10 = data.ma.ma10 ? data.ma.ma10.toFixed(2) : '-';
-            const ma20 = data.ma.ma20 ? data.ma.ma20.toFixed(2) : '-';
+        const timeframeLabels = {
+            '1w': '1周',
+            '1d': '1天',
+            '4h': '4小时',
+            '1h': '1小时',
+            '15m': '15分钟',
+            '5m': '5分钟',
+            '1m': '1分钟'
+        };
+
+        const timeframeOrder = ['1w', '1d', '4h', '1h', '15m', '5m', '1m'];
+        
+        return timeframeOrder.map(tf => {
+            const data = timeframes[tf];
+            if (!data || !data.ma) return '';
+            
+            const label = timeframeLabels[tf] || tf;
+            const ma = data.ma;
+            const ma5 = ma.ma5 ? parseFloat(ma.ma5).toFixed(4) : '-';
+            const ma20 = ma.ma20 ? parseFloat(ma.ma20).toFixed(4) : '-';
+            const ma60 = ma.ma60 ? parseFloat(ma.ma60).toFixed(4) : '-';
+            const ma99 = ma.ma99 ? parseFloat(ma.ma99).toFixed(4) : '-';
+            
             return `
                 <div class="ma-item">
-                    <span class="ma-label">${tf} MA</span>
-                    <span class="ma-values">5:${ma5} | 10:${ma10} | 20:${ma20}</span>
+                    <span class="ma-label">${label}</span>
+                    <span class="ma-values">
+                        <span class="ma-value">MA5:<strong>$${ma5}</strong></span>
+                        <span class="ma-value">MA20:<strong>$${ma20}</strong></span>
+                        <span class="ma-value">MA60:<strong>$${ma60}</strong></span>
+                        <span class="ma-value">MA99:<strong>$${ma99}</strong></span>
+                    </span>
                 </div>
             `;
-        }).join('');
+        }).filter(html => html).join('');
+    }
+
+    buildIndicatorsSection(timeframes) {
+        if (!timeframes || Object.keys(timeframes).length === 0) {
+            return '';
+        }
+
+        const timeframeLabels = {
+            '1w': '1周',
+            '1d': '1天',
+            '4h': '4小时',
+            '1h': '1小时',
+            '15m': '15分钟',
+            '5m': '5分钟',
+            '1m': '1分钟'
+        };
+
+        const timeframeOrder = ['1w', '1d', '4h', '1h', '15m', '5m', '1m'];
+        
+        const items = timeframeOrder.map(tf => {
+            const data = timeframes[tf];
+            if (!data) return '';
+            
+            const label = timeframeLabels[tf] || tf;
+            const parts = [];
+            
+            // MACD 指标
+            if (data.macd) {
+                const macd = data.macd;
+                if (typeof macd === 'object') {
+                    const dif = macd.dif ? parseFloat(macd.dif).toFixed(3) : '-';
+                    const dea = macd.dea ? parseFloat(macd.dea).toFixed(3) : '-';
+                    const bar = macd.bar ? parseFloat(macd.bar).toFixed(3) : '-';
+                    const barClass = parseFloat(bar) >= 0 ? 'positive' : 'negative';
+                    parts.push(`MACD: DIF=${dif} DEA=${dea} BAR=<span class="${barClass}">${bar}</span>`);
+                }
+            }
+            
+            // RSI 指标
+            if (data.rsi) {
+                const rsi = data.rsi;
+                if (typeof rsi === 'object') {
+                    const rsi6 = rsi.rsi6 ? parseFloat(rsi.rsi6).toFixed(2) : '-';
+                    const rsi9 = rsi.rsi9 ? parseFloat(rsi.rsi9).toFixed(2) : '-';
+                    const rsi6Class = parseFloat(rsi6) >= 70 ? 'rsi-overbought' : parseFloat(rsi6) <= 30 ? 'rsi-oversold' : '';
+                    const rsi9Class = parseFloat(rsi9) >= 70 ? 'rsi-overbought' : parseFloat(rsi9) <= 30 ? 'rsi-oversold' : '';
+                    parts.push(`RSI: <span class="${rsi6Class}">RSI6=${rsi6}</span> <span class="${rsi9Class}">RSI9=${rsi9}</span>`);
+                }
+            }
+            
+            // 成交量
+            if (data.vol !== undefined && data.vol !== null) {
+                const vol = parseFloat(data.vol);
+                if (!isNaN(vol)) {
+                    parts.push(`VOL: ${this.formatCompactUsd(vol)}`);
+                }
+            }
+            
+            if (parts.length === 0) return '';
+            
+            return `
+                <div class="indicator-item">
+                    <span class="indicator-label">${label}</span>
+                    <span class="indicator-values">${parts.join(' | ')}</span>
+                </div>
+            `;
+        }).filter(html => html);
+        
+        if (items.length === 0) return '';
+        
+        return `
+            <div class="indicators-section">
+                <div class="indicators-title">技术指标</div>
+                ${items.join('')}
+            </div>
+        `;
     }
 
     formatPnl(value, isPnl = false) {

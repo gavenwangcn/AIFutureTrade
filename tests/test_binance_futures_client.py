@@ -13,7 +13,14 @@ few sample rows from each response so you can confirm live data is accessible.
 
 import logging
 import os
+import sys
+from pathlib import Path
 from typing import List
+
+# 添加项目根目录到Python路径，以便导入项目模块
+project_root = Path(__file__).parent.parent
+if str(project_root) not in sys.path:
+    sys.path.insert(0, str(project_root))
 
 from binance_common.configuration import ConfigurationRestAPI
 from binance_common.constants import (

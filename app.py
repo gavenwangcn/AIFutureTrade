@@ -65,7 +65,7 @@ market_fetcher = MarketDataFetcher(db)
 trading_engines = {}
 auto_trading = getattr(app_config, 'AUTO_TRADING', True)
 TRADE_FEE_RATE = getattr(app_config, 'TRADE_FEE_RATE', 0.001)
-LEADERBOARD_REFRESH_INTERVAL = getattr(app_config, 'FUTURES_LEADERBOARD_REFRESH', 180)
+LEADERBOARD_REFRESH_INTERVAL = getattr(app_config, 'FUTURES_LEADERBOARD_REFRESH', 10)
 
 leaderboard_thread = None
 leaderboard_stop_event = threading.Event()
@@ -734,10 +734,38 @@ def get_aggregated_portfolio():
 
 @app.route('/api/market/prices', methods=['GET'])
 def get_market_prices():
-    """Get current market prices"""
-    symbols = get_tracked_symbols()
-    prices = market_fetcher.get_prices(symbols)
-    return jsonify(prices)
+    """Get current market prices for both configured futures and model positions"""
+    # 获取配置的合约
+    configured_symbols = get_tracked_symbols()
+    configured_prices = market_fetcher.get_prices(configured_symbols)
+    
+    # 为配置的合约添加来源标记
+    for symbol in configured_prices:
+        configured_prices[symbol]['source'] = 'configured'
+    
+    # 获取所有模型的持仓合约
+    models = db.get_all_models()
+    position_symbols = set()
+    for model in models:
+        try:
+            portfolio = db.get_portfolio(model['id'], {})
+            for pos in portfolio.get('positions', []):
+                if pos.get('future'):
+                    position_symbols.add(pos['future'])
+        except Exception:
+            continue
+    
+    # 获取持仓合约的价格数据（排除已配置的合约，避免重复）
+    position_symbols = [s for s in position_symbols if s not in configured_symbols]
+    if position_symbols:
+        position_prices = market_fetcher.get_prices(position_symbols)
+        # 为持仓合约添加来源标记
+        for symbol in position_prices:
+            position_prices[symbol]['source'] = 'position'
+        # 合并数据
+        configured_prices.update(position_prices)
+    
+    return jsonify(configured_prices)
 
 @app.route('/api/market/leaderboard', methods=['GET'])
 def get_market_leaderboard():

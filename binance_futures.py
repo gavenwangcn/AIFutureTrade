@@ -1,7 +1,17 @@
+"""
+币安期货客户端 - 封装币安官方衍生品SDK的高级接口
+
+提供简洁易用的接口来获取币安USDS-M期货合约的市场数据，包括：
+- 24小时价格变动统计
+- 实时价格查询
+- K线数据获取
+- 涨跌幅榜查询
+"""
 import logging
-import threading
 import time
 from typing import Any, Callable, Dict, List, Optional
+
+# ============ SDK导入和可用性检查 ============
 
 BINANCE_SDK_AVAILABLE = True
 _BINANCE_IMPORT_ERROR: Optional[ImportError] = None
@@ -17,8 +27,6 @@ try:  # pragma: no cover - external dependency optional in many envs
     )
     from binance_sdk_derivatives_trading_usds_futures.rest_api.models import (
         KlineCandlestickDataIntervalEnum,
-        SymbolPriceTickerResponse,
-        Ticker24hrPriceChangeStatisticsResponse,
     )
 except ImportError as exc:  # pragma: no cover - handled at runtime
     BINANCE_SDK_AVAILABLE = False
@@ -26,8 +34,6 @@ except ImportError as exc:  # pragma: no cover - handled at runtime
     ConfigurationRestAPI = None  # type: ignore[assignment]
     DerivativesTradingUsdsFutures = None  # type: ignore[assignment]
     KlineCandlestickDataIntervalEnum = None  # type: ignore[assignment]
-    SymbolPriceTickerResponse = None  # type: ignore[assignment]
-    Ticker24hrPriceChangeStatisticsResponse = None  # type: ignore[assignment]
     DERIVATIVES_TRADING_USDS_FUTURES_REST_API_PROD_URL = None  # type: ignore[assignment]
     DERIVATIVES_TRADING_USDS_FUTURES_REST_API_TESTNET_URL = None  # type: ignore[assignment]
 
@@ -36,9 +42,11 @@ logger = logging.getLogger(__name__)
 
 
 class BinanceFuturesClient:
-    """High level helper over Binance official derivatives SDK"""
-
-    _KEEPALIVE_INTERVAL = 15 * 60  # seconds
+    """
+    币安期货客户端 - 封装币安官方衍生品SDK的高级接口
+    
+    提供简洁易用的方法来获取市场数据，自动处理SDK响应格式转换。
+    """
 
     def __init__(
         self,
@@ -48,20 +56,30 @@ class BinanceFuturesClient:
         base_path: Optional[str] = None,
         testnet: bool = False,
     ):
+        """
+        初始化币安期货客户端
+        
+        Args:
+            api_key: 币安API密钥
+            api_secret: 币安API密钥
+            quote_asset: 计价资产，默认为USDT
+            base_path: 自定义REST API基础路径（可选）
+            testnet: 是否使用测试网络，默认False
+        """
         if not BINANCE_SDK_AVAILABLE:
             raise RuntimeError(
                 "Binance official futures SDK not available. Install 'binance-common' "
                 "and related packages or set BINANCE_API_KEY/SECRET empty to disable."
             ) from _BINANCE_IMPORT_ERROR
 
-        rest_base = base_path
-        if not rest_base:
-            rest_base = (
-                DERIVATIVES_TRADING_USDS_FUTURES_REST_API_TESTNET_URL
-                if testnet
-                else DERIVATIVES_TRADING_USDS_FUTURES_REST_API_PROD_URL
-            )
+        # 确定REST API基础路径
+        rest_base = base_path or (
+            DERIVATIVES_TRADING_USDS_FUTURES_REST_API_TESTNET_URL
+            if testnet
+            else DERIVATIVES_TRADING_USDS_FUTURES_REST_API_PROD_URL
+        )
 
+        # 创建SDK配置和客户端
         configuration = ConfigurationRestAPI(
             api_key=api_key,
             api_secret=api_secret,
@@ -71,22 +89,43 @@ class BinanceFuturesClient:
         self.quote_asset = quote_asset.upper()
         self._client = DerivativesTradingUsdsFutures(config_rest_api=configuration)
         self._rest = self._client.rest_api
-        self._callback: Optional[Callable[[Dict], None]] = None
-        self._listen_key: Optional[str] = None
-        self._listen_stop = threading.Event()
-        self._keepalive_thread: Optional[threading.Thread] = None
+
+    # ============ 工具方法：数据格式转换 ============
 
     def format_symbol(self, base_symbol: str) -> str:
+        """
+        格式化交易对符号，添加计价资产后缀
+        
+        Args:
+            base_symbol: 基础交易对符号，如 'BTC'
+            
+        Returns:
+            完整交易对符号，如 'BTCUSDT'
+        """
         return f"{base_symbol.upper()}{self.quote_asset}"
 
     @staticmethod
     def _normalize_list(payload: Any) -> List[Any]:
-        """Handle SDK responses that may wrap lists inside data/items attributes."""
+        """
+        规范化SDK响应为列表格式
+        
+        SDK响应可能以多种格式返回：
+        - 直接是列表
+        - 包装在对象的data/items/list/records属性中
+        - 是单个对象
+        
+        Args:
+            payload: SDK响应数据
+            
+        Returns:
+            规范化后的列表
+        """
         if payload is None:
             return []
         if isinstance(payload, list):
             return payload
 
+        # 尝试从常见属性中提取列表
         for attr in ("data", "items", "list", "records"):
             attr_value = getattr(payload, attr, None)
             if callable(attr_value):
@@ -97,44 +136,59 @@ class BinanceFuturesClient:
             if isinstance(attr_value, list):
                 return attr_value
 
+        # 尝试从model_dump中提取
         if hasattr(payload, "model_dump"):
             try:
                 dumped = payload.model_dump()
+                if isinstance(dumped, dict):
+                    for key in ("data", "items", "list", "records"):
+                        value = dumped.get(key)
+                        if isinstance(value, list):
+                            return value
             except Exception:  # pragma: no cover - defensive
-                dumped = None
-            if isinstance(dumped, dict):
-                for key in ("data", "items", "list", "records"):
-                    value = dumped.get(key)
-                    if isinstance(value, list):
-                        return value
+                pass
 
+        # 如果都不是，包装为列表
         return [payload]
 
     @staticmethod
     def _ensure_dict(item: Any) -> Dict[str, Any]:
-        """Convert SDK model/objects into plain dictionaries for downstream use."""
+        """
+        将SDK模型对象转换为普通字典
+        
+        Args:
+            item: SDK模型对象或字典
+            
+        Returns:
+            普通字典
+        """
         if isinstance(item, dict):
             return item
 
+        # 尝试使用model_dump方法
         if hasattr(item, "model_dump"):
             try:
                 dumped = item.model_dump()
-            except Exception:  # pragma: no cover - defensive against SDK quirks
-                dumped = None
-            if isinstance(dumped, dict):
-                return dumped
+                if isinstance(dumped, dict):
+                    return dumped
+            except Exception:  # pragma: no cover - defensive
+                pass
 
+        # 尝试使用dict方法
         if hasattr(item, "dict"):
             try:
                 dumped = item.dict()
+                if isinstance(dumped, dict):
+                    return dumped
             except Exception:
-                dumped = None
-            if isinstance(dumped, dict):
-                return dumped
+                pass
 
+        # 尝试使用__dict__属性
         if hasattr(item, "__dict__"):
             data = {
-                key: value for key, value in vars(item).items() if not key.startswith("_")
+                key: value
+                for key, value in vars(item).items()
+                if not key.startswith("_")
             }
             if data:
                 return data
@@ -143,7 +197,15 @@ class BinanceFuturesClient:
 
     @staticmethod
     def _to_dict(payload: Any) -> Optional[Dict[str, Any]]:
-        """Best-effort conversion of SDK models to plain dicts."""
+        """
+        将SDK响应转换为字典（如果可能）
+        
+        Args:
+            payload: SDK响应数据
+            
+        Returns:
+            字典或None
+        """
         if payload is None:
             return None
         if isinstance(payload, dict):
@@ -151,14 +213,25 @@ class BinanceFuturesClient:
         if hasattr(payload, "model_dump"):
             try:
                 dumped = payload.model_dump()
+                if isinstance(dumped, dict):
+                    return dumped
             except Exception:  # pragma: no cover - defensive
-                return None
-            if isinstance(dumped, dict):
-                return dumped
+                pass
         return None
 
     def _flatten_to_dicts(self, payload: Any, context: str) -> List[Dict[str, Any]]:
-        """Flatten SDK response payload (dict / list / model) into dict list."""
+        """
+        将SDK响应扁平化为字典列表
+        
+        递归处理嵌套的列表、字典和模型对象，最终返回字典列表。
+        
+        Args:
+            payload: SDK响应数据
+            context: 上下文信息，用于日志记录
+            
+        Returns:
+            字典列表
+        """
         flattened: List[Dict[str, Any]] = []
         queue: List[Any] = [payload]
 
@@ -167,14 +240,17 @@ class BinanceFuturesClient:
             if current is None:
                 continue
 
+            # 如果是列表，展开添加到队列
             if isinstance(current, list):
                 queue.extend(current)
                 continue
 
+            # 如果是字典，直接添加
             if isinstance(current, dict):
                 flattened.append(current)
                 continue
 
+            # 尝试使用to_dict方法
             to_dict_method = getattr(current, "to_dict", None)
             if callable(to_dict_method):
                 try:
@@ -187,6 +263,7 @@ class BinanceFuturesClient:
                         exc_info=True,
                     )
 
+            # 尝试使用model_dump方法
             model_dump_method = getattr(current, "model_dump", None)
             if callable(model_dump_method):
                 try:
@@ -199,11 +276,14 @@ class BinanceFuturesClient:
                         exc_info=True,
                     )
 
+            # 使用_ensure_dict作为最后手段
             normalized = self._ensure_dict(current)
             if normalized:
                 flattened.append(normalized)
 
         return flattened
+
+    # ============ 市场数据获取方法 ============
 
     def get_24h_ticker(self, symbols: List[str]) -> Dict[str, Dict]:
         """
@@ -215,42 +295,38 @@ class BinanceFuturesClient:
         Returns:
             字典，key为交易对符号，value为24小时统计数据
         """
-        logger.info(f"[Binance Futures] ========== 开始获取24小时价格变动统计 ==========")
-        logger.info(f"[Binance Futures] 请求交易对数量: {len(symbols)}")
-        if symbols:
-            logger.info(f"[Binance Futures] 请求交易对列表: {symbols[:10]}{'...' if len(symbols) > 10 else ''}")
+        logger.info(f"[Binance Futures] 开始获取24小时价格变动统计，交易对数量: {len(symbols)}")
         
         result: Dict[str, Dict] = {}
         if not symbols:
-            logger.info(f"[Binance Futures] 交易对列表为空，直接返回")
             return result
-        
+
         try:
-            # 按 symbol 逐个调用官方 SDK（该接口需指定 symbol 参数）
+            # 逐个调用API获取每个交易对的数据
             prepared_symbols = [(symbol, symbol.upper()) for symbol in symbols]
             total = len(prepared_symbols)
             fetch_start = time.time()
             success = 0
 
-            logger.info(f"[Binance Futures] [步骤1] 按顺序调用 ticker24hr_price_change_statistics(), 总次数: {total}")
             for idx, (source_symbol, request_symbol) in enumerate(prepared_symbols, start=1):
-                logger.info(
-                    f"[Binance Futures] [步骤1.{idx}] 获取 {request_symbol} 24小时统计 ({idx}/{total})"
-                )
+                logger.debug(f"[Binance Futures] 获取 {request_symbol} 24小时统计 ({idx}/{total})")
+                
                 try:
                     call_start = time.time()
                     response = self._rest.ticker24hr_price_change_statistics(symbol=request_symbol)
                     call_duration = time.time() - call_start
+                    
+                    # 转换响应为字典列表
                     dict_entries = self._flatten_to_dicts(
                         response.data(),
                         "ticker24hr_price_change_statistics",
                     )
+                    
                     if not dict_entries:
-                        logger.warning(
-                            f"[Binance Futures] [步骤1.{idx}] {request_symbol} 无返回数据，跳过"
-                        )
+                        logger.warning(f"[Binance Futures] {request_symbol} 无返回数据，跳过")
                         continue
 
+                    # 匹配正确的交易对数据
                     normalized_symbol = request_symbol.upper()
                     matched_entry = None
                     for item in dict_entries:
@@ -258,106 +334,97 @@ class BinanceFuturesClient:
                         if symbol_value and str(symbol_value).upper() == normalized_symbol:
                             matched_entry = item
                             break
+                    
+                    # 如果没找到精确匹配，使用第一条数据
                     if matched_entry is None:
                         matched_entry = dict_entries[0]
 
                     result[source_symbol] = matched_entry
                     success += 1
-                    logger.info(
-                        f"[Binance Futures] [步骤1.{idx}] {request_symbol} 获取成功, 耗时 {call_duration:.3f} 秒"
-                    )
+                    logger.debug(f"[Binance Futures] {request_symbol} 获取成功, 耗时 {call_duration:.3f} 秒")
+                    
                 except Exception as symbol_exc:
-                    logger.warning(
-                        f"[Binance Futures] [步骤1.{idx}] 获取 {request_symbol} 失败: {symbol_exc}"
-                    )
+                    logger.warning(f"[Binance Futures] 获取 {request_symbol} 失败: {symbol_exc}")
                     continue
 
             total_duration = time.time() - fetch_start
             logger.info(
-                f"[Binance Futures] [步骤2] 全部调用完成, 成功 {success}/{total}, 总耗时 {total_duration:.3f} 秒"
+                f"[Binance Futures] 24小时统计获取完成, 成功 {success}/{total}, 总耗时 {total_duration:.3f} 秒"
             )
 
-            # 记录匹配到的交易对详情
-            if result:
-                logger.info(f"[Binance Futures] [步骤3] 匹配到的交易对详情:")
-                for idx, (symbol, data) in enumerate(list(result.items())[:5]):  # 只记录前5个
-                    price = data.get('lastPrice', 0)
-                    change_pct = data.get('priceChangePercent', 0)
-                    volume = data.get('quoteVolume', 0)
-                    logger.info(
-                        f"[Binance Futures] [步骤3.{idx+1}] {symbol}: "
-                        f"价格=${float(price):.4f}, "
-                        f"涨跌幅={float(change_pct):.2f}%, "
-                        f"24h成交量=${float(volume):.2f}"
-                    )
-                if len(result) > 5:
-                    logger.info(f"[Binance Futures] [步骤3] ... 还有 {len(result) - 5} 个交易对未显示")
-
-            # 检查是否有未匹配的交易对
+            # 记录未匹配的交易对
             missing = set(symbols) - set(result.keys())
             if missing:
                 logger.warning(
-                    f"[Binance Futures] [步骤3] 未匹配到的交易对 ({len(missing)} 个): {list(missing)[:10]}{'...' if len(missing) > 10 else ''}"
+                    f"[Binance Futures] 未匹配到的交易对 ({len(missing)} 个): {list(missing)[:10]}{'...' if len(missing) > 10 else ''}"
                 )
 
-            logger.info(f"[Binance Futures] ========== 24小时价格变动统计获取完成 ==========")
-
         except Exception as exc:
-            logger.error(f"[Binance Futures] ========== 获取24小时价格变动统计失败 ==========")
-            logger.error(f"[Binance Futures] 错误信息: {exc}")
-            import traceback
-            logger.error(f"[Binance Futures] 错误堆栈:\n{traceback.format_exc()}")
+            logger.error(f"[Binance Futures] 获取24小时价格变动统计失败: {exc}", exc_info=True)
 
         return result
 
-    def get_top_gainers(self, limit: int = 10) -> List[Dict]:
+    def get_top_gainers(self, limit: Optional[int] = None) -> List[Dict]:
         """
-        获取涨跌幅榜前N名的合约信息（按涨跌幅降序排列）
+        获取所有符合条件的合约涨跌幅数据（已包含 side 标记）
+        
+        每条返回的数据都会包含 'side' 字段，用于标识是涨幅榜还是跌幅榜：
+        - 'gainer': 涨跌幅 >= 0（上涨或持平）
+        - 'loser': 涨跌幅 < 0（下跌）
+        
+        注意：此方法返回所有过滤后的数据，不限制数量，以便调用方可以正确分离涨幅榜和跌幅榜。
+        如果传入 limit 参数，则返回涨幅前 limit 名（保持向后兼容）。
         
         Args:
-            limit: 返回前N名，默认10
+            limit: 可选，如果指定则返回涨幅前N名（用于向后兼容），否则返回所有数据
             
         Returns:
-            涨跌幅榜列表，每个元素包含合约的24小时统计数据
+            合约24小时统计数据列表，每个元素包含：
+            - 合约的完整信息（价格、成交量等）
+            - 'side' 字段：'gainer' 或 'loser'，标识涨跌方向
+            - 'priceChangePercent' 字段：涨跌幅百分比
         """
-        logger.info(f"[Binance Futures] ========== 开始获取涨跌幅榜 ==========")
-        logger.info(f"[Binance Futures] 请求参数: limit={limit}, quote_asset={self.quote_asset}")
-        
+        if limit is not None:
+            logger.info(f"[Binance Futures] 开始获取涨跌幅榜, limit={limit}, quote_asset={self.quote_asset}")
+        else:
+            logger.info(f"[Binance Futures] 开始获取所有涨跌幅数据, quote_asset={self.quote_asset}")
+
         try:
-            # Step 1 —— 调用API并记录耗时
-            logger.info(f"[Binance Futures] [步骤1] 调用币安API: ticker24hr_price_change_statistics()")
+            # 调用API获取所有交易对的24小时统计
             api_start_time = time.time()
             response = self._rest.ticker24hr_price_change_statistics()
             raw_items = self._flatten_to_dicts(
                 response.data(), "ticker24hr_price_change_statistics"
             )
-
             api_duration = time.time() - api_start_time
-            logger.info(
-                f"[Binance Futures] [步骤1] API调用完成, 耗时: {api_duration:.3f} 秒, 返回数据总数: {len(raw_items)}"
+            logger.debug(
+                f"[Binance Futures] API调用完成, 耗时: {api_duration:.3f} 秒, 返回数据总数: {len(raw_items)}"
             )
 
+            # 辅助函数：安全转换为浮点数
             def _safe_float(value: Any, default: float = 0.0) -> float:
                 try:
                     return float(value)
                 except (TypeError, ValueError):
                     return default
 
-            # Step 3 —— 过滤指定计价资产并求出涨跌幅
-            logger.info(f"[Binance Futures] [步骤2] 过滤 {self.quote_asset} 计价资产...")
+            # 过滤指定计价资产的交易对并提取涨跌幅
             filtered: List[tuple[Dict[str, Any], float]] = []
             skipped_no_symbol = 0
             skipped_quote_asset = 0
+            
             for stat in raw_items:
                 symbol = stat.get("symbol") or stat.get("s")
                 if not symbol:
                     skipped_no_symbol += 1
                     continue
+                
                 contract_symbol = str(symbol).upper()
                 if not contract_symbol.endswith(self.quote_asset):
                     skipped_quote_asset += 1
                     continue
 
+                # 提取涨跌幅百分比
                 change_raw = (
                     stat.get("price_change_percent")
                     or stat.get("priceChangePercent")
@@ -366,61 +433,52 @@ class BinanceFuturesClient:
                 change_percent = _safe_float(change_raw)
                 filtered.append((stat, change_percent))
 
-            logger.info(
-                f"[Binance Futures] [步骤2] 过滤完成, {self.quote_asset} 计价资产数量: {len(filtered)} | "
+            logger.debug(
+                f"[Binance Futures] 过滤完成, {self.quote_asset} 计价资产数量: {len(filtered)} | "
                 f"跳过无symbol={skipped_no_symbol} | 跳过不同计价资产={skipped_quote_asset}"
             )
 
             if not filtered:
-                logger.warning("[Binance Futures] [步骤2] 未找到任何符合条件的 {self.quote_asset} 交易对")
+                logger.warning(f"[Binance Futures] 未找到任何符合条件的 {self.quote_asset} 交易对")
                 return []
 
-            # Step 4 —— 排序并限制数量
-            logger.info(f"[Binance Futures] [步骤3] 按涨跌幅降序排序...")
+            # 按涨跌幅降序排序
             filtered.sort(key=lambda x: x[1], reverse=True)
-            logger.info(f"[Binance Futures] [步骤3] 排序完成")
 
-            selected = filtered[: max(0, limit)]
+            # 如果指定了 limit，只返回涨幅前N名（向后兼容）
+            # 否则返回所有数据，供调用方分离涨跌榜
+            if limit is not None:
+                selected = filtered[:max(0, limit)]
+            else:
+                selected = filtered
+
             result_payload: List[Dict[str, Any]] = []
+            
             for stat, change_percent in selected:
                 payload = dict(stat)
+                # 确保关键字段存在
                 payload.setdefault("priceChangePercent", change_percent)
                 payload.setdefault("price_change_percent", change_percent)
                 payload.setdefault("lastPrice", payload.get("last_price") or payload.get("close"))
                 payload.setdefault("quoteVolume", payload.get("quote_volume") or payload.get("volume"))
                 payload.setdefault("highPrice", payload.get("high_price"))
                 payload.setdefault("lowPrice", payload.get("low_price"))
+                
+                # 设置 side 标记：根据涨跌幅判断是涨幅榜还是跌幅榜
+                # priceChangePercent >= 0 表示上涨，标记为 'gainer'
+                # priceChangePercent < 0 表示下跌，标记为 'loser'
+                payload['side'] = 'gainer' if change_percent >= 0 else 'loser'
+                
                 result_payload.append(payload)
 
-            logger.info(f"[Binance Futures] [步骤4] 取前 {limit} 名, 实际返回: {len(result_payload)} 条")
-
-            # Step 5 —— 输出结果详情
-            if result_payload:
-                logger.info(f"[Binance Futures] [步骤5] 涨跌幅榜详情:")
-                for idx, item in enumerate(result_payload):
-                    symbol = item.get("symbol", "N/A")
-                    price = item.get("lastPrice") or item.get("last_price")
-                    change_pct = item.get("price_change_percent") or item.get("priceChangePercent")
-                    volume = item.get("quoteVolume") or item.get("quote_volume")
-                    high = item.get("highPrice") or item.get("high_price")
-                    low = item.get("lowPrice") or item.get("low_price")
-                    logger.info(
-                        f"[Binance Futures] [步骤5.{idx+1}] #{idx+1}: {symbol} | "
-                        f"价格=${_safe_float(price):.4f} | "
-                        f"涨跌幅={_safe_float(change_pct):.2f}% | "
-                        f"24h最高=${_safe_float(high):.4f} | "
-                        f"24h最低=${_safe_float(low):.4f} | "
-                        f"24h成交量=${_safe_float(volume):.2f}"
-                    )
-
-            logger.info(f"[Binance Futures] ========== 涨跌幅榜获取完成 ==========")
+            if limit is not None:
+                logger.info(f"[Binance Futures] 涨跌幅榜获取完成, 返回涨幅前 {len(result_payload)} 条数据")
+            else:
+                logger.info(f"[Binance Futures] 所有涨跌幅数据获取完成, 返回 {len(result_payload)} 条数据")
             return result_payload
 
         except Exception as exc:
-            logger.error(f"[Binance Futures] ========== 获取涨跌幅榜失败 ==========")
-            logger.error(f"[Binance Futures] 错误信息: {exc}")
-            import traceback
-            logger.error(f"[Binance Futures] 错误堆栈:\n{traceback.format_exc()}")
+            logger.error(f"[Binance Futures] 获取涨跌幅榜失败: {exc}", exc_info=True)
             return []
 
     def get_symbol_prices(self, symbols: List[str]) -> Dict[str, Dict]:
@@ -433,40 +491,37 @@ class BinanceFuturesClient:
         Returns:
             字典，key为交易对符号，value为实时价格数据
         """
-        logger.info(f"[Binance Futures] ========== 开始获取实时价格 ==========")
-        logger.info(f"[Binance Futures] 请求交易对数量: {len(symbols)}")
-        if symbols:
-            logger.info(f"[Binance Futures] 请求交易对列表: {symbols[:10]}{'...' if len(symbols) > 10 else ''}")
-        
+        logger.info(f"[Binance Futures] 开始获取实时价格，交易对数量: {len(symbols)}")
+
         payload: Dict[str, Dict] = {}
         if not symbols:
-            logger.info(f"[Binance Futures] 交易对列表为空，直接返回")
             return payload
-        
+
         try:
+            # 逐个调用API获取每个交易对的实时价格
             prepared_symbols = [(symbol, symbol.upper()) for symbol in symbols]
             total = len(prepared_symbols)
             fetch_start = time.time()
             success = 0
 
-            logger.info(f"[Binance Futures] [步骤1] 按顺序调用 symbol_price_ticker(), 总次数: {total}")
             for idx, (source_symbol, request_symbol) in enumerate(prepared_symbols, start=1):
-                logger.info(
-                    f"[Binance Futures] [步骤1.{idx}] 获取 {request_symbol} 实时价格 ({idx}/{total})"
-                )
+                logger.debug(f"[Binance Futures] 获取 {request_symbol} 实时价格 ({idx}/{total})")
+                
                 try:
                     call_start = time.time()
                     response = self._rest.symbol_price_ticker(symbol=request_symbol)
                     call_duration = time.time() - call_start
+                    
+                    # 转换响应为字典列表
                     dict_entries = self._flatten_to_dicts(
                         response.data(), "symbol_price_ticker"
                     )
+                    
                     if not dict_entries:
-                        logger.warning(
-                            f"[Binance Futures] [步骤1.{idx}] {request_symbol} 无返回数据，跳过"
-                        )
+                        logger.warning(f"[Binance Futures] {request_symbol} 无返回数据，跳过")
                         continue
 
+                    # 匹配正确的交易对数据
                     normalized_symbol = request_symbol.upper()
                     matched_entry = None
                     for item in dict_entries:
@@ -474,47 +529,34 @@ class BinanceFuturesClient:
                         if symbol_value and str(symbol_value).upper() == normalized_symbol:
                             matched_entry = item
                             break
+                    
+                    # 如果没找到精确匹配，使用第一条数据
                     if matched_entry is None:
                         matched_entry = dict_entries[0]
 
                     payload[source_symbol.upper()] = matched_entry
                     success += 1
-                    logger.info(
-                        f"[Binance Futures] [步骤1.{idx}] {request_symbol} 获取成功, 耗时 {call_duration:.3f} 秒"
-                    )
+                    logger.debug(f"[Binance Futures] {request_symbol} 获取成功, 耗时 {call_duration:.3f} 秒")
+                    
                 except Exception as symbol_exc:
-                    logger.warning(
-                        f"[Binance Futures] [步骤1.{idx}] 获取 {request_symbol} 失败: {symbol_exc}"
-                    )
+                    logger.warning(f"[Binance Futures] 获取 {request_symbol} 失败: {symbol_exc}")
                     continue
 
             total_duration = time.time() - fetch_start
             logger.info(
-                f"[Binance Futures] [步骤2] 全部调用完成, 成功 {success}/{total}, 总耗时 {total_duration:.3f} 秒"
+                f"[Binance Futures] 实时价格获取完成, 成功 {success}/{total}, 总耗时 {total_duration:.3f} 秒"
             )
 
-            # 记录匹配到的交易对实时价格详情
-            if payload:
-                logger.info(f"[Binance Futures] [步骤4] 实时价格详情:")
-                for idx, (symbol, price_data) in enumerate(list(payload.items())[:10]):  # 记录前10个
-                    price = price_data.get('price') or price_data.get('p') or 0
-                    logger.info(f"[Binance Futures] [步骤4.{idx+1}] {symbol}: 实时价格=${float(price):.4f}")
-                if len(payload) > 10:
-                    logger.info(f"[Binance Futures] [步骤4] ... 还有 {len(payload) - 10} 个交易对未显示")
-            
-            # 检查是否有未匹配的交易对
+            # 记录未匹配的交易对
             missing = set(symbols) - set(payload.keys())
             if missing:
-                logger.warning(f"[Binance Futures] [步骤4] 未匹配到的交易对 ({len(missing)} 个): {list(missing)[:10]}{'...' if len(missing) > 10 else ''}")
-            
-            logger.info(f"[Binance Futures] ========== 实时价格获取完成 ==========")
-            
+                logger.warning(
+                    f"[Binance Futures] 未匹配到的交易对 ({len(missing)} 个): {list(missing)[:10]}{'...' if len(missing) > 10 else ''}"
+                )
+
         except Exception as exc:
-            logger.error(f"[Binance Futures] ========== 获取实时价格失败 ==========")
-            logger.error(f"[Binance Futures] 错误信息: {exc}")
-            import traceback
-            logger.error(f"[Binance Futures] 错误堆栈:\n{traceback.format_exc()}")
-        
+            logger.error(f"[Binance Futures] 获取实时价格失败: {exc}", exc_info=True)
+
         return payload
 
     def get_klines(self, symbol: str, interval: str, limit: int = 120) -> List[List]:
@@ -529,40 +571,37 @@ class BinanceFuturesClient:
         Returns:
             K线数据列表，每个元素为 [open_time, open, high, low, close, volume]
         """
-        logger.info(f"[Binance Futures] ========== 开始获取K线数据 ==========")
-        logger.info(f"[Binance Futures] 请求参数: symbol={symbol}, interval={interval}, limit={limit}")
-        
+        logger.info(f"[Binance Futures] 开始获取K线数据, symbol={symbol}, interval={interval}, limit={limit}")
+
         try:
-            # 转换间隔枚举
-            logger.info(f"[Binance Futures] [步骤1] 转换K线间隔枚举...")
+            # 转换间隔为枚举类型
             interval_enum = KlineCandlestickDataIntervalEnum(interval)
-            logger.info(f"[Binance Futures] [步骤1] 间隔枚举转换完成: {interval}")
-            
-            # 调用币安API获取K线数据
-            logger.info(f"[Binance Futures] [步骤2] 调用币安API: kline_candlestick_data()")
+
+            # 调用API获取K线数据
             api_start_time = time.time()
-            
             response = self._rest.kline_candlestick_data(
                 symbol=symbol,
                 interval=interval_enum,
                 limit=limit,
             )
             data = self._normalize_list(response.data())
-            
             api_duration = time.time() - api_start_time
-            logger.info(f"[Binance Futures] [步骤2] API调用完成, 耗时: {api_duration:.3f} 秒, 返回K线数量: {len(data)}")
-            
-            # 将K线数据转换为列表格式
-            logger.info(f"[Binance Futures] [步骤3] 转换K线数据格式...")
+            logger.debug(
+                f"[Binance Futures] API调用完成, 耗时: {api_duration:.3f} 秒, 返回K线数量: {len(data)}"
+            )
+
+            # 转换K线数据为标准格式
             klines: List[List[Any]] = []
             for item in data:
+                # 如果已经是列表/元组格式
                 if isinstance(item, (list, tuple)):
                     if len(item) >= 6:
                         klines.append(list(item[:6]))
                     else:
-                        logger.debug("[Binance Futures] [KLines] 忽略长度不足的数据项: %s", item)
+                        logger.debug("[Binance Futures] 忽略长度不足的数据项: %s", item)
                     continue
 
+                # 如果是字典或模型对象
                 entry = self._to_dict(item)
                 if entry:
                     klines.append(
@@ -576,7 +615,7 @@ class BinanceFuturesClient:
                         ]
                     )
                 else:
-                    # 尝试直接读取属性，兼容 SDK 模型
+                    # 尝试直接读取属性
                     try:
                         klines.append(
                             [
@@ -589,79 +628,15 @@ class BinanceFuturesClient:
                             ]
                         )
                     except AttributeError:
-                        logger.debug("[Binance Futures] [KLines] 无法解析的数据项: %s", item)
-            logger.info(f"[Binance Futures] [步骤3] 数据格式转换完成, 返回K线数量: {len(klines)}")
-            
-            # 记录K线数据统计信息
-            if klines:
-                first_kline = klines[0]
-                last_kline = klines[-1]
-                logger.info(f"[Binance Futures] [步骤4] K线数据统计:")
-                logger.info(f"[Binance Futures] [步骤4.1] 第一条K线: 时间={first_kline[0]}, "
-                           f"开盘=${float(first_kline[1]):.4f}, "
-                           f"最高=${float(first_kline[2]):.4f}, "
-                           f"最低=${float(first_kline[3]):.4f}, "
-                           f"收盘=${float(first_kline[4]):.4f}, "
-                           f"成交量={float(first_kline[5]):.2f}")
-                logger.info(f"[Binance Futures] [步骤4.2] 最后一条K线: 时间={last_kline[0]}, "
-                           f"开盘=${float(last_kline[1]):.4f}, "
-                           f"最高=${float(last_kline[2]):.4f}, "
-                           f"最低=${float(last_kline[3]):.4f}, "
-                           f"收盘=${float(last_kline[4]):.4f}, "
-                           f"成交量={float(last_kline[5]):.2f}")
-                
-                # 计算价格范围
-                all_highs = [float(k[2]) for k in klines]
-                all_lows = [float(k[3]) for k in klines]
-                max_high = max(all_highs)
-                min_low = min(all_lows)
-                price_range = max_high - min_low
-                price_range_pct = (price_range / min_low) * 100 if min_low > 0 else 0
-                logger.info(f"[Binance Futures] [步骤4.3] 价格范围: 最高=${max_high:.4f}, "
-                           f"最低=${min_low:.4f}, "
-                           f"波动范围=${price_range:.4f} ({price_range_pct:.2f}%)")
-            
-            logger.info(f"[Binance Futures] ========== K线数据获取完成 ==========")
+                        logger.debug("[Binance Futures] 无法解析的数据项: %s", item)
+
+            logger.info(f"[Binance Futures] K线数据获取完成, 返回 {len(klines)} 条K线")
             return klines
-            
+
         except Exception as exc:
-            logger.error(f"[Binance Futures] ========== 获取K线数据失败 ==========")
-            logger.error(f"[Binance Futures] 错误信息: {exc}")
-            logger.error(f"[Binance Futures] 请求参数: symbol={symbol}, interval={interval}, limit={limit}")
-            import traceback
-            logger.error(f"[Binance Futures] 错误堆栈:\n{traceback.format_exc()}")
+            logger.error(
+                f"[Binance Futures] 获取K线数据失败: {exc}, "
+                f"symbol={symbol}, interval={interval}, limit={limit}",
+                exc_info=True
+            )
             return []
-
-    # Placeholder user stream (REST create listen key via user data stream API)
-    def start_user_stream(self, callback: Optional[Callable[[Dict], None]] = None):
-        self._callback = callback
-        try:
-            resp = self._rest.start_user_data_stream()
-            key = resp.data().get("listenKey")
-        except Exception as exc:
-            logger.error(f"[Binance Futures] start_user_stream failed: {exc}")
-            return
-
-        self._listen_key = key
-        self._listen_stop.clear()
-        self._keepalive_thread = threading.Thread(
-            target=self._keep_listen_key_alive, daemon=True
-        )
-        self._keepalive_thread.start()
-        logger.info("[Binance Futures] Listen key created")
-
-    def _keep_listen_key_alive(self):
-        while not self._listen_stop.wait(self._KEEPALIVE_INTERVAL):
-            if not self._listen_key:
-                continue
-            try:
-                self._rest.keepalive_user_data_stream(listen_key=self._listen_key)
-            except Exception as exc:
-                logger.warning(f"[Binance Futures] keepalive failed: {exc}")
-
-    def stop_user_stream(self):
-        self._listen_stop.set()
-        self._listen_key = None
-
-    def close(self):
-        self.stop_user_stream()
