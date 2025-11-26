@@ -6,27 +6,48 @@ import asyncio
 import contextlib
 import logging
 import signal
+import sys
 from typing import Awaitable, Callable, Dict, Optional
 
+# 检查Python版本
+if sys.version_info < (3, 10):
+    raise RuntimeError(
+        f"Python 3.10+ is required. Current version: {sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}\n"
+        "Please upgrade Python or use Python 3.10+ in your Docker image."
+    )
+
 import config as app_config
-from market_streams import run_market_ticker_stream, run_kline_sync_agent
-from kline_cleanup import run_cleanup_scheduler
 
 logger = logging.getLogger(__name__)
 
 
+def _lazy_import_market_streams():
+    """延迟导入market_streams模块，避免在Python 3.9上导入时出错"""
+    from market_streams import run_market_ticker_stream, run_kline_sync_agent
+    return run_market_ticker_stream, run_kline_sync_agent
+
+
+def _lazy_import_kline_cleanup():
+    """延迟导入kline_cleanup模块"""
+    from kline_cleanup import run_cleanup_scheduler
+    return run_cleanup_scheduler
+
+
 async def _run_market_tickers(duration: Optional[int] = None) -> None:
+    run_market_ticker_stream, _ = _lazy_import_market_streams()
     await run_market_ticker_stream(run_seconds=duration)
 
 
 async def _run_kline_sync(duration: Optional[int] = None) -> None:
     """运行K线同步服务"""
+    _, run_kline_sync_agent = _lazy_import_market_streams()
     check_interval = getattr(app_config, 'KLINE_SYNC_CHECK_INTERVAL', 10)
     await run_kline_sync_agent(check_interval=check_interval)
 
 
 async def _run_kline_cleanup(duration: Optional[int] = None) -> None:
     """运行K线清理服务"""
+    run_cleanup_scheduler = _lazy_import_kline_cleanup()
     await run_cleanup_scheduler()
 
 
@@ -35,6 +56,9 @@ async def _run_kline_services(duration: Optional[int] = None) -> None:
     同时运行K线同步服务和清理服务
     这两个服务会作为后台任务持续运行
     """
+    _, run_kline_sync_agent = _lazy_import_market_streams()
+    run_cleanup_scheduler = _lazy_import_kline_cleanup()
+    
     check_interval = getattr(app_config, 'KLINE_SYNC_CHECK_INTERVAL', 10)
     
     # 创建两个后台任务
