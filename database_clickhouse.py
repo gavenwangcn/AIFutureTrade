@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+from datetime import datetime, timezone
 from typing import Any, Dict, Iterable, List, Optional
 
 import clickhouse_connect
@@ -54,10 +55,12 @@ class ClickHouseDatabase:
         """Create the 24h market ticker table if it does not exist."""
         ddl = f"""
         CREATE TABLE IF NOT EXISTS {self.market_ticker_table} (
-            event_time UInt64,
+            event_time DateTime,
             symbol String,
             price_change Float64,
             price_change_percent Float64,
+            side String,
+            change_percent_text String,
             average_price Float64,
             last_price Float64,
             last_trade_volume Float64,
@@ -66,8 +69,8 @@ class ClickHouseDatabase:
             low_price Float64,
             base_volume Float64,
             quote_volume Float64,
-            stats_open_time UInt64,
-            stats_close_time UInt64,
+            stats_open_time DateTime,
+            stats_close_time DateTime,
             first_trade_id UInt64,
             last_trade_id UInt64,
             trade_count UInt64,
@@ -85,6 +88,8 @@ class ClickHouseDatabase:
             "symbol",
             "price_change",
             "price_change_percent",
+            "side",
+            "change_percent_text",
             "average_price",
             "last_price",
             "last_trade_volume",
@@ -99,5 +104,44 @@ class ClickHouseDatabase:
             "last_trade_id",
             "trade_count",
         ]
-        payload = ([row[name] for name in column_names] for row in rows)
-        self.insert_rows(self.market_ticker_table, payload, column_names)
+
+        prepared_rows: List[List[Any]] = []
+        for row in rows:
+            normalized = dict(row)
+            normalized["event_time"] = _to_datetime(normalized.get("event_time"))
+            normalized["stats_open_time"] = _to_datetime(normalized.get("stats_open_time"))
+            normalized["stats_close_time"] = _to_datetime(normalized.get("stats_close_time"))
+            percent = normalized.get("price_change_percent")
+            normalized.setdefault("side", _derive_side(percent))
+            normalized.setdefault("change_percent_text", _format_percent_text(percent))
+            prepared_rows.append([normalized.get(name) for name in column_names])
+
+        self.insert_rows(self.market_ticker_table, prepared_rows, column_names)
+
+
+def _to_datetime(value: Any) -> datetime:
+    if isinstance(value, datetime):
+        return value
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError):
+        return datetime.now(timezone.utc)
+
+    seconds = numeric / 1000.0
+    return datetime.fromtimestamp(seconds, tz=timezone.utc)
+
+
+def _derive_side(percent: Any) -> str:
+    try:
+        value = float(percent)
+    except (TypeError, ValueError):
+        value = 0.0
+    return "loser" if value < 0 else "gainer"
+
+
+def _format_percent_text(percent: Any) -> str:
+    try:
+        value = float(percent)
+    except (TypeError, ValueError):
+        value = 0.0
+    return f"{value:.2f}%"

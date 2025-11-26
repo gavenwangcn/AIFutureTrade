@@ -38,11 +38,14 @@ def _to_int(value: Any) -> int:
 
 
 def _normalize_ticker(raw: Dict[str, Any]) -> Dict[str, Any]:
+    percent = raw.get("P")
     return {
         "event_time": _to_int(raw.get("E")),
         "symbol": raw.get("s", ""),
         "price_change": _to_float(raw.get("p")),
-        "price_change_percent": _to_float(raw.get("P")),
+        "price_change_percent": _to_float(percent),
+        "side": "loser" if _to_float(percent) < 0 else "gainer",
+        "change_percent_text": f"{_to_float(percent):.2f}%",
         "average_price": _to_float(raw.get("w")),
         "last_price": _to_float(raw.get("c")),
         "last_trade_volume": _to_float(raw.get("Q")),
@@ -70,6 +73,13 @@ def _extract_tickers(message: Any) -> List[Dict[str, Any]]:
             logger.warning("[MarketStreams] Unable to decode message: %s", message)
             return []
 
+    # SDK response objects (e.g., AllMarketTickersStreamsResponse)
+    if hasattr(message, "model_dump"):
+        try:
+            message = message.model_dump()
+        except Exception:
+            message = message.__dict__
+
     if isinstance(message, dict):
         data = message.get("data") or message.get("tickers") or message.get("payload")
         if data is None:
@@ -77,8 +87,20 @@ def _extract_tickers(message: Any) -> List[Dict[str, Any]]:
     else:
         data = message
 
+    result: List[Dict[str, Any]] = []
     if isinstance(data, list):
-        return [item for item in data if isinstance(item, dict)]
+        for item in data:
+            if hasattr(item, "model_dump"):
+                try:
+                    result.append(item.model_dump())
+                    continue
+                except Exception:
+                    pass
+            if isinstance(item, dict):
+                result.append(item)
+            else:
+                result.append(vars(item))
+        return result
     if isinstance(data, dict):
         return [data]
     return []
