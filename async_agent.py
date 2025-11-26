@@ -9,7 +9,8 @@ import signal
 from typing import Awaitable, Callable, Dict, Optional
 
 import config as app_config
-from market_streams import run_market_ticker_stream
+from market_streams import run_market_ticker_stream, run_kline_sync_agent
+from kline_cleanup import run_cleanup_scheduler
 
 logger = logging.getLogger(__name__)
 
@@ -18,8 +19,56 @@ async def _run_market_tickers(duration: Optional[int] = None) -> None:
     await run_market_ticker_stream(run_seconds=duration)
 
 
+async def _run_kline_sync(duration: Optional[int] = None) -> None:
+    """运行K线同步服务"""
+    check_interval = getattr(app_config, 'KLINE_SYNC_CHECK_INTERVAL', 10)
+    await run_kline_sync_agent(check_interval=check_interval)
+
+
+async def _run_kline_cleanup(duration: Optional[int] = None) -> None:
+    """运行K线清理服务"""
+    await run_cleanup_scheduler()
+
+
+async def _run_kline_services(duration: Optional[int] = None) -> None:
+    """
+    同时运行K线同步服务和清理服务
+    这两个服务会作为后台任务持续运行
+    """
+    check_interval = getattr(app_config, 'KLINE_SYNC_CHECK_INTERVAL', 10)
+    
+    # 创建两个后台任务
+    sync_task = asyncio.create_task(run_kline_sync_agent(check_interval=check_interval))
+    cleanup_task = asyncio.create_task(run_cleanup_scheduler())
+    
+    logger.info("[AsyncAgent] Started K-line sync and cleanup services")
+    
+    # 等待两个任务（如果duration指定，则等待指定时间后停止）
+    if duration:
+        await asyncio.sleep(duration)
+        sync_task.cancel()
+        cleanup_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await sync_task
+            await cleanup_task
+    else:
+        # 持续运行，等待任一任务完成或取消
+        done, pending = await asyncio.wait(
+            {sync_task, cleanup_task},
+            return_when=asyncio.FIRST_COMPLETED
+        )
+        # 取消另一个任务
+        for task in pending:
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
+
+
 TASK_REGISTRY: Dict[str, Callable[[Optional[int]], Awaitable[None]]] = {
     "market_tickers": _run_market_tickers,
+    "kline_sync": _run_kline_sync,
+    "kline_cleanup": _run_kline_cleanup,
+    "kline_services": _run_kline_services,  # 同时运行同步和清理服务
 }
 
 
@@ -71,7 +120,7 @@ def main() -> int:
     parser.add_argument(
         "--task",
         choices=TASK_REGISTRY.keys(),
-        default="market_tickers",
+        default="kline_services",  # 默认启动K线服务（包含同步和清理）
         help="Name of the async task to run",
     )
     parser.add_argument(

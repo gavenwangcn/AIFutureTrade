@@ -12,7 +12,7 @@ services:
     restart: unless-stopped
   async-agent:
     build: .
-    command: ["python", "async_agent.py", "--task", "market_tickers"]
+    command: ["python", "async_agent.py", "--task", "kline_services"]
     volumes:
       - ./data:/app/data
     restart: unless-stopped

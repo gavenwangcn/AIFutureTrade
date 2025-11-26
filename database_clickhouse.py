@@ -10,6 +10,7 @@ import config as app_config
 
 MARKET_TICKER_TABLE = "24_market_tickers"
 LEADERBOARD_TABLE = "futures_leaderboard"
+MARKET_KLINES_TABLE = "market_klines"
 
 logger = logging.getLogger(__name__)
 
@@ -28,9 +29,11 @@ class ClickHouseDatabase:
         )
         self.market_ticker_table = MARKET_TICKER_TABLE
         self.leaderboard_table = getattr(app_config, 'CLICKHOUSE_LEADERBOARD_TABLE', LEADERBOARD_TABLE)
+        self.market_klines_table = getattr(app_config, 'CLICKHOUSE_MARKET_KLINES_TABLE', MARKET_KLINES_TABLE)
         if auto_init_tables:
             self.ensure_market_ticker_table()
             self.ensure_leaderboard_table()
+            self.ensure_market_klines_table()
 
     # ------------------------------------------------------------------
     # Generic helpers
@@ -473,6 +476,121 @@ class ClickHouseDatabase:
             logger.error("[ClickHouse] Failed to get leaderboard: %s", exc, exc_info=True)
             return {'gainers': [], 'losers': []}
 
+    def get_leaderboard_symbols(self) -> List[str]:
+        """Get distinct symbols from leaderboard table."""
+        try:
+            query = f"""
+            SELECT DISTINCT symbol
+            FROM {self.leaderboard_table}
+            WHERE symbol != ''
+            """
+            result = self._client.query(query)
+            symbols = [row[0] for row in result.result_rows if row[0]]
+            return symbols
+        except Exception as exc:
+            logger.error("[ClickHouse] Failed to get leaderboard symbols: %s", exc, exc_info=True)
+            return []
+
+    def ensure_market_klines_table(self) -> None:
+        """Create the market_klines table if it does not exist."""
+        ddl = f"""
+        CREATE TABLE IF NOT EXISTS {self.market_klines_table} (
+            event_time DateTime,
+            symbol String,
+            contract_type String,
+            kline_start_time DateTime,
+            kline_end_time DateTime,
+            interval String,
+            first_trade_id UInt64,
+            last_trade_id UInt64,
+            open_price Float64,
+            close_price Float64,
+            high_price Float64,
+            low_price Float64,
+            base_volume Float64,
+            trade_count UInt64,
+            is_closed UInt8,
+            quote_volume Float64,
+            taker_buy_base_volume Float64,
+            taker_buy_quote_volume Float64,
+            create_time DateTime DEFAULT now()
+        )
+        ENGINE = MergeTree
+        ORDER BY (symbol, interval, kline_end_time, event_time)
+        TTL kline_end_time + INTERVAL 2 DAY
+        """
+        self.command(ddl)
+        logger.info("[ClickHouse] Ensured table %s exists", self.market_klines_table)
+
+    def insert_market_klines(self, rows: Iterable[Dict[str, Any]]) -> None:
+        """Insert kline data into market_klines table."""
+        if not rows:
+            return
+        
+        column_names = [
+            "event_time",
+            "symbol",
+            "contract_type",
+            "kline_start_time",
+            "kline_end_time",
+            "interval",
+            "first_trade_id",
+            "last_trade_id",
+            "open_price",
+            "close_price",
+            "high_price",
+            "low_price",
+            "base_volume",
+            "trade_count",
+            "is_closed",
+            "quote_volume",
+            "taker_buy_base_volume",
+            "taker_buy_quote_volume",
+        ]
+        
+        # Convert rows to list of tuples
+        insert_rows = []
+        for row in rows:
+            insert_rows.append((
+                row.get("event_time"),
+                row.get("symbol", ""),
+                row.get("contract_type", ""),
+                row.get("kline_start_time"),
+                row.get("kline_end_time"),
+                row.get("interval", ""),
+                row.get("first_trade_id", 0),
+                row.get("last_trade_id", 0),
+                row.get("open_price", 0.0),
+                row.get("close_price", 0.0),
+                row.get("high_price", 0.0),
+                row.get("low_price", 0.0),
+                row.get("base_volume", 0.0),
+                row.get("trade_count", 0),
+                row.get("is_closed", 0),
+                row.get("quote_volume", 0.0),
+                row.get("taker_buy_base_volume", 0.0),
+                row.get("taker_buy_quote_volume", 0.0),
+            ))
+        
+        self.insert_rows(self.market_klines_table, insert_rows, column_names)
+        logger.debug("[ClickHouse] Inserted %s kline rows into %s", len(insert_rows), self.market_klines_table)
+
+    def cleanup_old_klines(self, days: int = 2) -> int:
+        """Delete klines older than specified days. Returns number of deleted rows."""
+        try:
+            # ClickHouse DELETE requires mutations, use ALTER TABLE DELETE
+            delete_sql = f"""
+            ALTER TABLE {self.market_klines_table}
+            DELETE WHERE kline_end_time < now() - INTERVAL {days} DAY
+            """
+            self.command(delete_sql)
+            # Note: ClickHouse DELETE is asynchronous, we can't get exact count immediately
+            logger.info("[ClickHouse] Initiated cleanup of klines older than %s days", days)
+            return 0  # ClickHouse doesn't return count for async DELETE
+        except Exception as exc:
+            logger.error("[ClickHouse] Failed to cleanup old klines: %s", exc, exc_info=True)
+            return 0
+
 
 def _to_datetime(value: Any) -> datetime:
     if isinstance(value, datetime):
@@ -500,3 +618,117 @@ def _format_percent_text(percent: Any) -> str:
     except (TypeError, ValueError):
         value = 0.0
     return f"{value:.2f}%"
+    def ensure_market_klines_table(self) -> None:
+        """Create the market_klines table if it does not exist."""
+        ddl = f"""
+        CREATE TABLE IF NOT EXISTS {self.market_klines_table} (
+            event_time DateTime,
+            symbol String,
+            contract_type String,
+            kline_start_time DateTime,
+            kline_end_time DateTime,
+            interval String,
+            first_trade_id UInt64,
+            last_trade_id UInt64,
+            open_price Float64,
+            close_price Float64,
+            high_price Float64,
+            low_price Float64,
+            base_volume Float64,
+            trade_count UInt64,
+            is_closed UInt8,
+            quote_volume Float64,
+            taker_buy_base_volume Float64,
+            taker_buy_quote_volume Float64,
+            create_time DateTime DEFAULT now()
+        )
+        ENGINE = MergeTree
+        ORDER BY (symbol, interval, kline_end_time, event_time)
+        TTL kline_end_time + INTERVAL 2 DAY
+        """
+        self.command(ddl)
+        logger.info("[ClickHouse] Ensured table %s exists", self.market_klines_table)
+
+    def insert_market_klines(self, rows: Iterable[Dict[str, Any]]) -> None:
+        """Insert kline data into market_klines table."""
+        if not rows:
+            return
+        
+        column_names = [
+            "event_time",
+            "symbol",
+            "contract_type",
+            "kline_start_time",
+            "kline_end_time",
+            "interval",
+            "first_trade_id",
+            "last_trade_id",
+            "open_price",
+            "close_price",
+            "high_price",
+            "low_price",
+            "base_volume",
+            "trade_count",
+            "is_closed",
+            "quote_volume",
+            "taker_buy_base_volume",
+            "taker_buy_quote_volume",
+        ]
+        
+        # Convert rows to list of tuples
+        insert_rows = []
+        for row in rows:
+            insert_rows.append((
+                row.get("event_time"),
+                row.get("symbol", ""),
+                row.get("contract_type", ""),
+                row.get("kline_start_time"),
+                row.get("kline_end_time"),
+                row.get("interval", ""),
+                row.get("first_trade_id", 0),
+                row.get("last_trade_id", 0),
+                row.get("open_price", 0.0),
+                row.get("close_price", 0.0),
+                row.get("high_price", 0.0),
+                row.get("low_price", 0.0),
+                row.get("base_volume", 0.0),
+                row.get("trade_count", 0),
+                row.get("is_closed", 0),
+                row.get("quote_volume", 0.0),
+                row.get("taker_buy_base_volume", 0.0),
+                row.get("taker_buy_quote_volume", 0.0),
+            ))
+        
+        self.insert_rows(self.market_klines_table, insert_rows, column_names)
+        logger.debug("[ClickHouse] Inserted %s kline rows into %s", len(insert_rows), self.market_klines_table)
+
+    def get_leaderboard_symbols(self) -> List[str]:
+        """Get distinct symbols from leaderboard table."""
+        try:
+            query = f"""
+            SELECT DISTINCT symbol
+            FROM {self.leaderboard_table}
+            WHERE symbol != ''
+            """
+            result = self._client.query(query)
+            symbols = [row[0] for row in result.result_rows if row[0]]
+            return symbols
+        except Exception as exc:
+            logger.error("[ClickHouse] Failed to get leaderboard symbols: %s", exc, exc_info=True)
+            return []
+
+    def cleanup_old_klines(self, days: int = 2) -> int:
+        """Delete klines older than specified days. Returns number of deleted rows."""
+        try:
+            # ClickHouse DELETE requires mutations, use ALTER TABLE DELETE
+            delete_sql = f"""
+            ALTER TABLE {self.market_klines_table}
+            DELETE WHERE kline_end_time < now() - INTERVAL {days} DAY
+            """
+            self.command(delete_sql)
+            # Note: ClickHouse DELETE is asynchronous, we can't get exact count immediately
+            logger.info("[ClickHouse] Initiated cleanup of klines older than %s days", days)
+            return 0  # ClickHouse doesn't return count for async DELETE
+        except Exception as exc:
+            logger.error("[ClickHouse] Failed to cleanup old klines: %s", exc, exc_info=True)
+            return 0
