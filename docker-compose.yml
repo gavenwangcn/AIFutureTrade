@@ -9,6 +9,8 @@ services:
       - ./data:/app/data
     environment:
       - DATABASE_PATH=/app/data/trading_bot.db
+      - USE_GUNICORN=true
+      - FLASK_ENV=production
     restart: unless-stopped
   async-agent:
     build: .

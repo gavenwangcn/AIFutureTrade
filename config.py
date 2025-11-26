@@ -7,6 +7,15 @@ HOST = '0.0.0.0'
 PORT = 5002
 DEBUG = False
 
+# Performance Settings
+# Gunicorn配置（生产环境）
+GUNICORN_WORKERS = int(os.getenv('GUNICORN_WORKERS', '4'))  # Worker进程数，建议为CPU核心数*2+1
+GUNICORN_WORKER_CLASS = os.getenv('GUNICORN_WORKER_CLASS', 'eventlet')  # 使用eventlet异步worker
+GUNICORN_WORKER_CONNECTIONS = int(os.getenv('GUNICORN_WORKER_CONNECTIONS', '1000'))  # 每个worker的最大连接数
+GUNICORN_TIMEOUT = int(os.getenv('GUNICORN_TIMEOUT', '120'))  # Worker超时时间（秒）
+GUNICORN_KEEPALIVE = int(os.getenv('GUNICORN_KEEPALIVE', '5'))  # Keep-alive时间（秒）
+GUNICORN_MAX_REQUESTS = int(os.getenv('GUNICORN_MAX_REQUESTS', '1000'))  # 每个worker处理的最大请求数
+
 # Database
 DATABASE_PATH = 'trading_bot.db'
 

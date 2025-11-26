@@ -24,7 +24,20 @@ import sys
 
 app = Flask(__name__)
 CORS(app)
-socketio = SocketIO(app, cors_allowed_origins="*")
+# 使用eventlet作为异步模式以获得更好的性能
+# async_mode='eventlet' 提供更好的并发性能
+socketio = SocketIO(
+    app, 
+    cors_allowed_origins="*",
+    async_mode='eventlet',  # 使用eventlet异步模式
+    logger=False,  # 禁用SocketIO日志以减少开销
+    engineio_logger=False,  # 禁用EngineIO日志
+    ping_timeout=60,  # WebSocket ping超时时间
+    ping_interval=25,  # WebSocket ping间隔
+    max_http_buffer_size=1e6,  # 最大HTTP缓冲区大小
+    allow_upgrades=True,  # 允许协议升级
+    transports=['websocket', 'polling']  # 支持的传输方式
+)
 
 # ============ Logging Configuration ============
 
@@ -1026,4 +1039,27 @@ if __name__ == '__main__':
     browser_thread = threading.Thread(target=open_browser, daemon=True)
     browser_thread.start()
 
-    socketio.run(app, debug=False, host='0.0.0.0', port=5002, use_reloader=False)
+    # 开发环境：使用Werkzeug服务器
+    # 生产环境：使用gunicorn + eventlet（见Dockerfile和gunicorn_config.py）
+    # 通过环境变量USE_GUNICORN=true来使用gunicorn启动
+    if os.getenv('USE_GUNICORN') == 'true':
+        logger.info("Production mode: Use 'gunicorn --config gunicorn_config.py app:app' to start")
+        # 生产环境应该使用gunicorn启动，这里只是提示
+        socketio.run(
+            app, 
+            debug=False, 
+            host='0.0.0.0', 
+            port=5002, 
+            use_reloader=False,
+            allow_unsafe_werkzeug=True
+        )
+    else:
+        # 开发环境
+        socketio.run(
+            app, 
+            debug=False, 
+            host='0.0.0.0', 
+            port=5002, 
+            use_reloader=False,
+            allow_unsafe_werkzeug=True
+        )
