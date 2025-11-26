@@ -4,7 +4,7 @@ services:
   web:
     build: .
     ports:
-      - "5002:5002"
+      - "5002:5002"  # Web服务端口，Flask应用
     volumes:
       - ./data:/app/data
     environment:
@@ -14,7 +14,10 @@ services:
     restart: unless-stopped
   async-agent:
     build: .
-    command: ["python", "async_agent.py", "--task", "kline_services"]
+    command: ["python", "async_agent.py", "--task", "all"]
+    # 注意：async-agent 是后台数据同步服务，不需要暴露端口
+    # 不设置 ports 映射，避免端口冲突
+    # 启动所有任务服务：market_tickers, kline_sync, kline_cleanup
     volumes:
       - ./data:/app/data
     restart: unless-stopped
