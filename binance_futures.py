@@ -372,8 +372,8 @@ class BinanceFuturesClient:
         - 'gainer': 涨跌幅 >= 0（上涨或持平）
         - 'loser': 涨跌幅 < 0（下跌）
         
-        注意：此方法返回所有过滤后的数据，不限制数量，以便调用方可以正确分离涨幅榜和跌幅榜。
-        如果传入 limit 参数，则返回涨幅前 limit 名（保持向后兼容）。
+        注意：此方法默认返回所有过滤后的数据，以便调用方自行分离涨幅榜和跌幅榜。
+        如果传入 limit 参数，则返回涨幅前 limit 名 + 跌幅前 limit 名（各自独立限制）。
         
         Args:
             limit: 可选，如果指定则返回涨幅前N名（用于向后兼容），否则返回所有数据
@@ -442,13 +442,22 @@ class BinanceFuturesClient:
                 logger.warning(f"[Binance Futures] 未找到任何符合条件的 {self.quote_asset} 交易对")
                 return []
 
-            # 按涨跌幅降序排序
+            # 按涨跌幅降序排序，便于默认（limit=None）返回整体榜单
             filtered.sort(key=lambda x: x[1], reverse=True)
 
-            # 如果指定了 limit，只返回涨幅前N名（向后兼容）
-            # 否则返回所有数据，供调用方分离涨跌榜
             if limit is not None:
-                selected = filtered[:max(0, limit)]
+                per_side_limit = max(0, limit)
+                if per_side_limit == 0:
+                    logger.info("[Binance Futures] limit<=0, 返回空榜单")
+                    return []
+
+                gainers_only = [item for item in filtered if item[1] >= 0]
+                losers_only = [item for item in filtered if item[1] < 0]
+
+                top_gainers = gainers_only[:per_side_limit]
+                top_losers = sorted(losers_only, key=lambda x: x[1])[:per_side_limit]
+
+                selected = top_gainers + top_losers
             else:
                 selected = filtered
 

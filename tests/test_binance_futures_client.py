@@ -170,20 +170,20 @@ def exercise_binance_futures_client(api_key: str, api_secret: str) -> None:
     client = BinanceFuturesClient(api_key=api_key, api_secret=api_secret)
     logging.info("Created BinanceFuturesClient: quote_asset=%s", client.quote_asset)
 
-    logging.info("Testing get_top_gainers()...")
-    top_gainers = client.get_top_gainers(limit=5)
-    _log_sample("top_gainers", top_gainers)
+    #logging.info("Testing get_top_gainers()...")
+    #top_gainers = client.get_top_gainers(limit=10)
+    #_log_sample("top_gainers", top_gainers)
 
 
-    symbols: List[str] = ["BTCUSDT", "ETHUSDT", "BNBUSDT"]
+    symbols: List[str] = ["USUALUSDT", "ESPORTSUSDT", "CROSSUSDT"]
 
     #logging.info("Testing get_24h_ticker()...")
     #ticker_24h = client.get_24h_ticker(symbols)
     #_log_sample("ticker_24h", ticker_24h)
 
-    #logging.info("Testing get_symbol_prices()...")
-    #symbol_prices = client.get_symbol_prices(symbols)
-    #_log_sample("symbol_prices", symbol_prices)
+    logging.info("Testing get_symbol_prices()...")
+    symbol_prices = client.get_symbol_prices(symbols)
+    _log_sample("symbol_prices", symbol_prices)
 
    # logging.info("Testing get_klines()...")
    # klines = client.get_klines(symbol="BTCUSDT", interval="1m", limit=5)

@@ -28,12 +28,12 @@ class MarketDataFetcher:
 
         self._futures_client: Optional[BinanceFuturesClient] = None
         self._last_gainers_update: float = 0
-        self._gainers_refresh = getattr(app_config, 'FUTURES_TOP_GAINERS_REFRESH', 3600)
+        self._gainers_refresh = getattr(app_config, 'FUTURES_TOP_GAINERS_REFRESH', 300)
         self._indicator_cache: Dict[str, Dict] = {}
         self._indicator_refresh = getattr(app_config, 'FUTURES_INDICATOR_REFRESH', 2)
         self._futures_kline_limit = getattr(app_config, 'FUTURES_KLINE_LIMIT', 120)
         self._futures_quote_asset = getattr(app_config, 'FUTURES_QUOTE_ASSET', 'USDT')
-        self._leaderboard_refresh = getattr(app_config, 'FUTURES_LEADERBOARD_REFRESH', 10)
+        self._leaderboard_refresh = getattr(app_config, 'FUTURES_LEADERBOARD_REFRESH', 60)
         self._last_leaderboard_sync: float = 0
         self._leaderboard_lock = threading.Lock()
         self._init_futures_client()
@@ -685,9 +685,9 @@ class MarketDataFetcher:
         Returns:
             涨跌幅榜条目列表，每个条目包含 'side' 字段（'gainer' 或 'loser'）
         """
-        # 获取所有涨跌幅数据（不限制数量，以便正确分离涨跌榜）
+        # 获取所有涨跌幅数据（限制10数量，以便正确分离涨跌榜）
         # get_top_gainers 已经为每条数据设置了 'side' 标记
-        tickers = self._futures_client.get_top_gainers(limit=None)
+        tickers = self._futures_client.get_top_gainers(limit=10)
         if not tickers:
             return []
 

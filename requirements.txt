@@ -5,3 +5,4 @@ requests==2.31.0
 openai>=1.0.0
 pyinstaller>=5.13.0
 binance-sdk-derivatives-trading-usds-futures>=4.0.0
+clickhouse-connect>=0.7.5
