@@ -10,4 +10,10 @@ services:
     environment:
       - DATABASE_PATH=/app/data/trading_bot.db
     restart: unless-stopped
+  async-agent:
+    build: .
+    command: ["python", "async_agent.py", "--task", "market_tickers"]
+    volumes:
+      - ./data:/app/data
+    restart: unless-stopped
 
