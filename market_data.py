@@ -9,6 +9,7 @@ from datetime import datetime
 from typing import Dict, List, Optional
 
 from binance_futures import BinanceFuturesClient
+from database_clickhouse import ClickHouseDatabase
 
 logger = logging.getLogger(__name__)
 
@@ -19,24 +20,21 @@ class MarketDataFetcher:
     def __init__(self, db):
         """Initialize market data fetcher"""
         self.db = db
-        self._cache = {}
-        self._cache_time = {}
-        self._cache_duration = getattr(app_config, 'MARKET_API_CACHE', 2)
-
+        # 移除价格缓存，实时获取以保证最高实时性
         self._last_live_prices: Dict[str, Dict] = {}
         self._last_live_date: Optional[datetime.date] = None
 
         self._futures_client: Optional[BinanceFuturesClient] = None
         self._last_gainers_update: float = 0
         self._gainers_refresh = getattr(app_config, 'FUTURES_TOP_GAINERS_REFRESH', 300)
-        self._indicator_cache: Dict[str, Dict] = {}
-        self._indicator_refresh = getattr(app_config, 'FUTURES_INDICATOR_REFRESH', 2)
         self._futures_kline_limit = getattr(app_config, 'FUTURES_KLINE_LIMIT', 120)
         self._futures_quote_asset = getattr(app_config, 'FUTURES_QUOTE_ASSET', 'USDT')
         self._leaderboard_refresh = getattr(app_config, 'FUTURES_LEADERBOARD_REFRESH', 60)
         self._last_leaderboard_sync: float = 0
         self._leaderboard_lock = threading.Lock()
+        self._clickhouse_db: Optional[ClickHouseDatabase] = None
         self._init_futures_client()
+        self._init_clickhouse_db()
 
     # ============ Initialization Methods ============
 
@@ -60,6 +58,15 @@ class MarketDataFetcher:
         except Exception as exc:
             logger.warning(f'[Futures] Unable to initialize Binance futures client: {exc}')
             self._futures_client = None
+
+    def _init_clickhouse_db(self):
+        """Initialize ClickHouse database connection"""
+        try:
+            self._clickhouse_db = ClickHouseDatabase(auto_init_tables=True)
+            logger.info('[ClickHouse] ClickHouse database connection initialized')
+        except Exception as exc:
+            logger.warning('[ClickHouse] Failed to initialize ClickHouse connection: %s', exc)
+            self._clickhouse_db = None
 
     # ============ Helper/Utility Methods ============
 
@@ -87,9 +94,10 @@ class MarketDataFetcher:
 
     def get_prices(self, symbols: Optional[List[str]] = None) -> Dict[str, Dict]:
         """
-        获取最新价格数据（仅使用实时数据）
+        获取最新价格数据（实时获取，无缓存）
         
-        优先返回实时价格，如果无法获取实时数据，则返回最近一次缓存的实时价格快照。
+        实时从交易所获取最新价格数据，不使用任何缓存机制。
+        如果无法获取实时数据，则返回最近一次的价格作为降级方案（仅在API完全不可用时使用）。
         
         Args:
             symbols: 可选的交易对符号列表，如果为None则返回所有已配置的交易对
@@ -99,18 +107,17 @@ class MarketDataFetcher:
         """
         now = datetime.now()
         
-        # 尝试获取实时价格
+        # 实时获取价格数据（不使用缓存）
         live_prices = self.get_current_prices(symbols)
         if live_prices:
-            # 标记为实时数据并更新缓存
+            # 标记为实时数据
             for payload in live_prices.values():
                 payload['source'] = 'live'
                 payload['price_date'] = now.strftime('%Y-%m-%d')
-            self._last_live_prices = live_prices
-            self._last_live_date = now.date()
             return live_prices
 
-        # 如果无法获取实时数据，返回最近一次缓存的实时价格快照
+        # 如果无法获取实时数据，返回最近一次的价格作为降级方案
+        # 这仅在交易所API完全不可用时使用，不用于缓存目的
         if self._last_live_prices:
             fallback: Dict[str, Dict] = {}
             for symbol, payload in self._last_live_prices.items():
@@ -118,18 +125,31 @@ class MarketDataFetcher:
                     continue
                 fallback[symbol] = {
                     **payload,
-                    'source': payload.get('source', 'previous_live'),
+                    'source': 'fallback',  # 明确标记为降级数据
                     'price_date': payload.get('price_date') or (
                         self._last_live_date.strftime('%Y-%m-%d') if self._last_live_date else None
                     )
                 }
+            logger.warning(f'[Prices] Using fallback prices for {len(fallback)} symbols (API unavailable)')
             return fallback
 
         # 如果没有任何数据，返回空字典
+        logger.warning('[Prices] No price data available')
         return {}
 
     def get_current_prices(self, symbols: List[str] = None) -> Dict[str, Dict]:
-        """Get current futures prices using Binance SDK with caching/fallback"""
+        """
+        获取当前期货价格（实时获取，无缓存）
+        
+        此方法实时从交易所获取最新价格数据，不使用任何缓存机制，
+        以保证最高实时性。每次调用都直接请求交易所API获取最新数据。
+        
+        Args:
+            symbols: 可选的交易对符号列表，如果为None则返回所有已配置的交易对
+            
+        Returns:
+            价格数据字典，key为交易对符号，value为价格信息
+        """
         futures = self._get_configured_futures()
         if not futures:
             return {}
@@ -140,32 +160,49 @@ class MarketDataFetcher:
         if not futures:
             return {}
 
-        cache_key = 'prices_' + '_'.join(sorted([f['symbol'] for f in futures]))
-        if cache_key in self._cache:
-            if time.time() - self._cache_time[cache_key] < self._cache_duration:
-                return self._cache[cache_key]
-
+        # 实时获取价格数据（不使用缓存）
         prices = self._fetch_from_binance_futures(futures)
 
-        # Fallback to last known prices when futures client unavailable or missing data
+        # 如果某些交易对获取失败，使用最近一次的价格作为降级方案
+        # 但仅在交易所API完全不可用时使用，不用于缓存
         missing_symbols = [f['symbol'] for f in futures if f['symbol'] not in prices]
-        for symbol in missing_symbols:
-            last_price = self._last_live_prices.get(symbol, {}).get('price', 0)
-            prices[symbol] = {
-                'price': last_price if last_price > 0 else 0,
-                'name': symbol,
-                'exchange': 'BINANCE_FUTURES',
-                'change_24h': 0,
-                'daily_volume': 0,
-                'timeframes': self._indicator_cache.get(symbol, {}).get('data', {}).get(symbol, {})
-            }
+        if missing_symbols and self._last_live_prices:
+            for symbol in missing_symbols:
+                last_price_info = self._last_live_prices.get(symbol, {})
+                last_price = last_price_info.get('price', 0)
+                # 只有在有有效历史价格时才使用降级方案
+                if last_price > 0:
+                    prices[symbol] = {
+                        'price': last_price,
+                        'name': symbol,
+                        'exchange': 'BINANCE_FUTURES',
+                        'change_24h': last_price_info.get('change_24h', 0),
+                        'daily_volume': last_price_info.get('daily_volume', 0),
+                        'timeframes': {}  # 不再实时生成，只在 AI 交易时计算
+                    }
+                    logger.debug(f'[Prices] Using fallback price for {symbol}: ${last_price}')
 
-        self._cache[cache_key] = prices
-        self._cache_time[cache_key] = time.time()
+        # 更新最近一次的价格记录（仅用于降级方案，不用于缓存）
+        if prices:
+            for symbol, price_data in prices.items():
+                self._last_live_prices[symbol] = price_data.copy()
+            self._last_live_date = datetime.now().date()
+
         return prices
 
     def _fetch_from_binance_futures(self, futures: List[Dict]) -> Dict[str, Dict]:
-        """Fetch prices from Binance futures API"""
+        """
+        从币安期货API实时获取价格数据
+        
+        此方法每次调用都直接请求币安API获取最新价格数据，不使用任何缓存。
+        保证数据的最高实时性。
+        
+        Args:
+            futures: 期货配置列表
+            
+        Returns:
+            价格数据字典，key为交易对符号，value为价格信息
+        """
         prices: Dict[str, Dict] = {}
         if not futures or not self._futures_client:
             return prices
@@ -192,11 +229,7 @@ class MarketDataFetcher:
             except (ValueError, TypeError):
                 continue
 
-            timeframe_data = self._get_timeframe_indicators(symbol)
-            # 新格式：{symbol: {1w: {...}, 1d: {...}}}
-            # 提取 symbol 对应的数据
-            timeframes = timeframe_data.get(symbol, {}) if timeframe_data else {}
-            
+            # 不再实时生成 timeframes 数据，只在 AI 交易时通过 calculate_technical_indicators 计算
             future_meta = next((f for f in futures if f['symbol'] == symbol), {})
             prices[symbol] = {
                 'price': last_price,
@@ -204,7 +237,7 @@ class MarketDataFetcher:
                 'exchange': future_meta.get('exchange', 'BINANCE_FUTURES'),
                 'change_24h': change_percent,
                 'daily_volume': quote_volume,
-                'timeframes': timeframes
+                'timeframes': {}  # 不再实时生成，只在 AI 交易时计算
             }
 
         return prices
@@ -213,10 +246,13 @@ class MarketDataFetcher:
 
     def calculate_technical_indicators(self, symbol: str) -> Dict:
         """
-        计算技术指标
+        计算技术指标（实时计算，无缓存）
+        
+        此方法用于 AI 交易决策，需要最高实时性，每次调用都实时计算所有指标。
+        不再使用任何缓存机制，确保数据的最新性。
         
         Args:
-            symbol: 交易对符号
+            symbol: 交易对符号（如 'BTC'）
             
         Returns:
             格式：{'timeframes': {1w: {kline: {}, ma: {}, macd: {}, rsi: {}, vol: {}}, 1d: {...}}}
@@ -241,7 +277,7 @@ class MarketDataFetcher:
 
     def _get_timeframe_indicators(self, symbol: str) -> Dict:
         """
-        获取指定交易对的所有时间框架技术指标
+        获取指定交易对的所有时间框架技术指标（实时计算，无缓存）
         
         计算每个时间框架的：
         - K线数据（最新一根K线）
@@ -250,6 +286,9 @@ class MarketDataFetcher:
         - RSI指标（RSI6、RSI9）
         - 成交量（VOL）
         
+        注意：此方法不再使用缓存，每次调用都实时从交易所获取最新数据并计算，
+        以保证 AI 交易决策所需的高实时性。
+        
         Args:
             symbol: 交易对符号（如 'BTC'）
             
@@ -257,13 +296,8 @@ class MarketDataFetcher:
             格式：{symbol: {1w: {kline: {}, ma: {}, macd: {}, rsi: {}, vol: {}}, 1d: {...}}}
         """
         if not self._futures_client:
+            logger.warning(f'[Indicators] Futures client unavailable for {symbol}')
             return {}
-
-        # 检查缓存
-        cache = self._indicator_cache.get(symbol)
-        now_ts = time.time()
-        if cache and now_ts - cache['timestamp'] < self._indicator_refresh:
-            return cache['data']
 
         # 时间框架映射
         timeframe_map = {
@@ -285,40 +319,54 @@ class MarketDataFetcher:
         # 存储所有时间框架的数据
         timeframe_data: Dict[str, Dict] = {}
 
-        # 遍历每个时间框架
+        # 遍历每个时间框架（实时计算，无缓存）
         for label, interval in timeframe_map.items():
             try:
-                # 获取K线数据
+                # 实时获取K线数据（每次调用都获取最新数据）
                 klines = self._futures_client.get_klines(symbol_key, interval, limit=self._futures_kline_limit)
                 
                 if not klines or len(klines) == 0:
+                    logger.debug(f'[Indicators] No klines data for {symbol} {label}')
                     continue
                 
-                # 提取收盘价和成交量
-                closes = [float(item[4]) for item in klines if len(item) > 4]
-                volumes = [float(item[5]) for item in klines if len(item) > 5]
+                # 提取收盘价和成交量（使用列表推导式提高效率）
+                closes = []
+                volumes = []
+                for item in klines:
+                    if len(item) > 4:
+                        try:
+                            closes.append(float(item[4]))
+                            if len(item) > 5:
+                                volumes.append(float(item[5]))
+                        except (ValueError, TypeError):
+                            continue
                 
-                if not closes:
+                if not closes or len(closes) < 2:
+                    logger.debug(f'[Indicators] Insufficient data for {symbol} {label}: {len(closes)} closes')
                     continue
                 
                 # 获取最新一根K线数据
                 latest_kline = klines[-1]
-                kline_data = {
-                    'open_time': latest_kline[0] if len(latest_kline) > 0 else None,
-                    'open': float(latest_kline[1]) if len(latest_kline) > 1 else 0.0,
-                    'high': float(latest_kline[2]) if len(latest_kline) > 2 else 0.0,
-                    'low': float(latest_kline[3]) if len(latest_kline) > 3 else 0.0,
-                    'close': float(latest_kline[4]) if len(latest_kline) > 4 else 0.0,
-                    'volume': float(latest_kline[5]) if len(latest_kline) > 5 else 0.0
-                }
+                try:
+                    kline_data = {
+                        'open_time': int(latest_kline[0]) if len(latest_kline) > 0 and latest_kline[0] else None,
+                        'open': float(latest_kline[1]) if len(latest_kline) > 1 else 0.0,
+                        'high': float(latest_kline[2]) if len(latest_kline) > 2 else 0.0,
+                        'low': float(latest_kline[3]) if len(latest_kline) > 3 else 0.0,
+                        'close': float(latest_kline[4]) if len(latest_kline) > 4 else 0.0,
+                        'volume': float(latest_kline[5]) if len(latest_kline) > 5 else 0.0
+                    }
+                except (ValueError, TypeError, IndexError) as e:
+                    logger.warning(f'[Indicators] Failed to parse kline data for {symbol} {label}: {e}')
+                    continue
                 
-                # 计算MA值（简单移动平均）
+                # 实时计算MA值（简单移动平均）
                 ma_values = self._calculate_ma_values(closes, ma_lengths)
                 
-                # 计算MACD指标
+                # 实时计算MACD指标
                 macd = self._calculate_macd(closes)
                 
-                # 计算RSI指标
+                # 实时计算RSI指标
                 rsi = self._calculate_rsi(closes)
                 
                 # 获取最新成交量
@@ -340,12 +388,9 @@ class MarketDataFetcher:
                 )
                 continue
 
-        # 缓存结果
+        # 直接返回结果，不使用缓存（保证实时性）
         result = {symbol: timeframe_data}
-        self._indicator_cache[symbol] = {
-            'timestamp': now_ts,
-            'data': result
-        }
+        logger.debug(f'[Indicators] Calculated indicators for {symbol}: {len(timeframe_data)} timeframes')
         
         return result
 
@@ -582,15 +627,16 @@ class MarketDataFetcher:
 
     def sync_leaderboard(self, force: bool = False, limit: Optional[int] = None) -> Dict[str, List[Dict]]:
         """
-        同步涨幅榜数据
+        同步涨幅榜数据（从 ClickHouse 查询）
         
         优化逻辑：
-        1. 如果数据库中没有数据，立即通过SDK获取并更新
-        2. 如果数据库有数据且未到刷新时间，返回缓存数据
-        3. 如果数据库有数据但已到刷新时间，更新数据
+        1. 从 ClickHouse futures_leaderboard 表查询涨幅榜数据
+        2. 不再查询 SQLite 数据库
+        3. 不再实时计算 K线指标和 timeframes 数据
+        4. 使用 ClickHouse 表中的 last_price 字段作为最新价格
         
         Args:
-            force: 是否强制刷新，忽略刷新节流
+            force: 是否强制刷新（保留参数以兼容现有调用，但实际不使用）
             limit: 返回的数据条数限制
             
         Returns:
@@ -600,70 +646,72 @@ class MarketDataFetcher:
             limit = getattr(app_config, 'FUTURES_TOP_GAINERS_LIMIT', 10)
 
         logger.info(
-            '[Leaderboard] sync_leaderboard called | force=%s limit=%s refresh=%ss',
-            force,
-            limit,
-            self._leaderboard_refresh
+            '[Leaderboard] sync_leaderboard called | limit=%s (from ClickHouse)',
+            limit
         )
 
-        # 如果没有可用的币安客户端，直接返回数据库缓存
-        if not self._futures_client:
-            logger.warning('[Leaderboard] Binance client unavailable, returning cached DB data')
-            return self.db.get_futures_leaderboard(limit=limit)
+        # 如果没有可用的 ClickHouse 连接，返回空数据
+        if not self._clickhouse_db:
+            logger.warning('[Leaderboard] ClickHouse unavailable, returning empty data')
+            return {'gainers': [], 'losers': []}
 
-        # 先检查数据库中是否有数据
-        cached_data = self.db.get_futures_leaderboard(limit=limit)
-        has_cached_data = (
-            len(cached_data.get('gainers', [])) > 0 or 
-            len(cached_data.get('losers', [])) > 0
-        )
-
-        # 如果数据库中没有数据，立即强制从SDK获取
-        if not has_cached_data:
-            logger.info('[Leaderboard] 数据库中没有涨幅榜数据，立即从SDK获取并更新')
-            force = True  # 强制刷新
-
-        now = time.time()
-        # 刷新节流：除非 force 或数据库为空，否则在刷新周期内直接返回数据库缓存
-        if not force and now - self._last_leaderboard_sync < self._leaderboard_refresh:
-            logger.debug('[Leaderboard] Skip refresh, last_sync=%.2fs ago (< %s)',
-                         now - self._last_leaderboard_sync, self._leaderboard_refresh)
-            return cached_data
-
-        with self._leaderboard_lock:
-            # 进入临界区后再次检查，避免并发线程重复刷新
-            now = time.time()
-            if not force and now - self._last_leaderboard_sync < self._leaderboard_refresh:
-                logger.debug('[Leaderboard] Skip refresh (post-lock), another thread just updated')
-                return self.db.get_futures_leaderboard(limit=limit)
-
-            logger.info('[Leaderboard] Refreshing leaderboard from Binance...')
-            sync_start = time.time()
-            try:
-                entries = self._build_leaderboard_entries(limit)
-                logger.info('[Leaderboard] Raw entries fetched: %s', len(entries))
-                if entries:
-                    self.db.upsert_leaderboard_entries(entries)
-                    self._last_leaderboard_sync = now
-                    logger.info('[Leaderboard] DB updated successfully (elapsed %.2fs)',
-                                time.time() - sync_start)
-                else:
-                    logger.warning('[Leaderboard] No entries returned from Binance, keep cached data')
-            except Exception as exc:
-                self._log_api_error(
-                    api_name='Binance Futures',
-                    scenario='涨跌幅榜同步',
-                    error_type='数据处理错误',
-                    error_msg=str(exc),
-                    level='ERROR'
-                )
-                logger.exception('[Leaderboard] Failed to refresh leaderboard from Binance')
-
-        # 返回更新后的数据
-        data = self.db.get_futures_leaderboard(limit=limit)
-        logger.info('[Leaderboard] Returning leaderboard payload: gainers=%s losers=%s',
-                    len(data.get('gainers', [])), len(data.get('losers', [])))
-        return data
+        try:
+            # 从 ClickHouse 查询涨幅榜数据
+            data = self._clickhouse_db.get_leaderboard(limit=limit)
+            
+            # 转换数据格式以兼容现有接口
+            # ClickHouse 返回的数据格式：{'gainers': [...], 'losers': [...]}
+            # 需要转换为与原来 SQLite 返回格式一致的结构
+            formatted_data = {
+                'gainers': [],
+                'losers': []
+            }
+            
+            # 格式化涨幅榜数据
+            for item in data.get('gainers', []):
+                symbol = item.get('symbol', '')
+                # 提取基础符号（去掉 USDT 后缀）
+                base_symbol = symbol.replace(self._futures_quote_asset, '') if symbol.endswith(self._futures_quote_asset) else symbol
+                
+                formatted_data['gainers'].append({
+                    'symbol': base_symbol,
+                    'contract_symbol': symbol,
+                    'name': base_symbol,
+                    'exchange': 'BINANCE_FUTURES',
+                    'side': 'gainer',
+                    'rank': item.get('rank', 0),
+                    'price': item.get('price', 0.0),  # 使用 ClickHouse 的 last_price
+                    'change_percent': item.get('change_percent', 0.0),
+                    'quote_volume': item.get('quote_volume', 0.0),
+                    'timeframes': {}  # 不再生成 timeframes 数据
+                })
+            
+            # 格式化跌幅榜数据
+            for item in data.get('losers', []):
+                symbol = item.get('symbol', '')
+                # 提取基础符号（去掉 USDT 后缀）
+                base_symbol = symbol.replace(self._futures_quote_asset, '') if symbol.endswith(self._futures_quote_asset) else symbol
+                
+                formatted_data['losers'].append({
+                    'symbol': base_symbol,
+                    'contract_symbol': symbol,
+                    'name': base_symbol,
+                    'exchange': 'BINANCE_FUTURES',
+                    'side': 'loser',
+                    'rank': item.get('rank', 0),
+                    'price': item.get('price', 0.0),  # 使用 ClickHouse 的 last_price
+                    'change_percent': item.get('change_percent', 0.0),
+                    'quote_volume': item.get('quote_volume', 0.0),
+                    'timeframes': {}  # 不再生成 timeframes 数据
+                })
+            
+            logger.info('[Leaderboard] Returning leaderboard payload from ClickHouse: gainers=%s losers=%s',
+                        len(formatted_data.get('gainers', [])), len(formatted_data.get('losers', [])))
+            return formatted_data
+            
+        except Exception as exc:
+            logger.error('[Leaderboard] Failed to get leaderboard from ClickHouse: %s', exc, exc_info=True)
+            return {'gainers': [], 'losers': []}
 
     def get_leaderboard(self, limit: Optional[int] = None) -> Dict[str, List[Dict]]:
         """Get leaderboard data (wrapper for sync_leaderboard)"""
@@ -671,96 +719,16 @@ class MarketDataFetcher:
 
     def _build_leaderboard_entries(self, limit: int) -> List[Dict]:
         """
-        构建涨跌幅榜条目
+        构建涨跌幅榜条目（已废弃，不再使用）
         
-        从币安获取所有涨跌幅数据（已包含 side 标记），然后分离出涨幅前N名和跌幅前N名。
-        
-        利用 get_top_gainers() 返回的 'side' 标记来分离涨跌榜：
-        - side='gainer': 涨幅榜（priceChangePercent >= 0）
-        - side='loser': 跌幅榜（priceChangePercent < 0）
+        此方法已被废弃，涨幅榜数据现在直接从 ClickHouse 查询。
+        保留此方法仅为了向后兼容，实际不会被调用。
         
         Args:
-            limit: 每个榜单返回的条数（涨幅榜和跌幅榜各返回limit条）
+            limit: 每个榜单返回的条数
             
         Returns:
-            涨跌幅榜条目列表，每个条目包含 'side' 字段（'gainer' 或 'loser'）
+            空列表（已废弃）
         """
-        # 获取所有涨跌幅数据（限制10数量，以便正确分离涨跌榜）
-        # get_top_gainers 已经为每条数据设置了 'side' 标记
-        tickers = self._futures_client.get_top_gainers(limit=10)
-        if not tickers:
-            return []
-
-        # 数据已经在 get_top_gainers 中过滤过，这里不需要再次过滤
-        # 但为了安全，再次确认计价资产匹配
-        filtered = [
-            item for item in tickers
-            if item.get('symbol', '').endswith(self._futures_client.quote_asset)
-        ]
-
-        if not filtered:
-            return []
-
-        # 按涨跌幅百分比排序
-        def sort_key(item):
-            try:
-                return float(item.get('priceChangePercent', 0))
-            except (TypeError, ValueError):
-                return 0.0
-
-        # 利用 get_top_gainers 返回的 side 标记分离涨跌榜
-        # 涨幅榜：筛选 side='gainer' 的数据，按涨跌幅降序，取前limit个
-        gainers = sorted(
-            [item for item in filtered if item.get('side') == 'gainer'],
-            key=sort_key,
-            reverse=True
-        )[:limit]
-        # 跌幅榜：筛选 side='loser' 的数据，按涨跌幅升序，取前limit个
-        losers = sorted(
-            [item for item in filtered if item.get('side') == 'loser'],
-            key=sort_key
-        )[:limit]
-
-        entries: List[Dict] = []
-        for side, collection in (('gainer', gainers), ('loser', losers)):
-            for idx, item in enumerate(collection):
-                # 确保使用数据中的 side 标记（如果存在）
-                item_side = item.get('side', side)
-                contract_symbol = item.get('symbol', '')
-                if not contract_symbol or not contract_symbol.endswith(self._futures_client.quote_asset):
-                    continue
-                base_symbol = contract_symbol[:-len(self._futures_client.quote_asset)]
-                if not base_symbol:
-                    continue
-                try:
-                    price = float(item.get('lastPrice') or item.get('close') or 0)
-                except (TypeError, ValueError):
-                    price = 0
-                try:
-                    change_percent = float(item.get('priceChangePercent', 0))
-                except (TypeError, ValueError):
-                    change_percent = 0
-                try:
-                    quote_volume = float(item.get('quoteVolume', item.get('volume', 0)))
-                except (TypeError, ValueError):
-                    quote_volume = 0
-
-                timeframe_data = self._get_timeframe_indicators(base_symbol)
-                # 新格式：{symbol: {1w: {...}, 1d: {...}}}
-                # 提取 symbol 对应的数据
-                timeframes = timeframe_data.get(base_symbol, {}) if timeframe_data else {}
-
-                entries.append({
-                    'symbol': base_symbol,
-                    'contract_symbol': contract_symbol,
-                    'name': base_symbol,
-                    'exchange': 'BINANCE_FUTURES',
-                    'side': item_side,  # 使用数据中的 side 标记
-                    'rank': idx + 1,
-                    'price': price,
-                    'change_percent': change_percent,
-                    'quote_volume': quote_volume,
-                    'timeframes': timeframes
-                })
-
-        return entries
+        logger.warning('[Leaderboard] _build_leaderboard_entries is deprecated, data now comes from ClickHouse')
+        return []

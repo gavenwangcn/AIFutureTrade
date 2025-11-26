@@ -100,6 +100,26 @@
     color: var(--warning);
 }
 
+.btn-running {
+    background: rgba(34, 197, 94, 0.15);
+    color: var(--success);
+    border-color: rgba(34, 197, 94, 0.3);
+}
+
+.btn-running:hover {
+    background: rgba(34, 197, 94, 0.25);
+}
+
+.btn-paused {
+    background: rgba(239, 68, 68, 0.15);
+    color: var(--danger);
+    border-color: rgba(239, 68, 68, 0.3);
+}
+
+.btn-paused:hover {
+    background: rgba(239, 68, 68, 0.25);
+}
+
 .leaderboard-columns {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));

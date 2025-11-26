@@ -230,6 +230,7 @@ class TradingApp {
         this.modelLeverageMap = {};
         this.socket = null; // WebSocket连接
         this.leaderboardRefreshInterval = null; // 定期刷新定时器
+        this.clickhouseLeaderboardSyncRunning = true; // ClickHouse 涨幅榜同步状态，默认执行
         this.init();
     }
 
@@ -317,6 +318,79 @@ class TradingApp {
         this.leaderboardRefreshInterval = setInterval(() => {
             this.fetchLeaderboardSnapshot();
         }, 30000);
+
+        // 初始化 ClickHouse 涨幅榜同步状态
+        this.updateClickhouseLeaderboardSyncStatus();
+        // 定期更新状态（每10秒）
+        setInterval(() => {
+            this.updateClickhouseLeaderboardSyncStatus();
+        }, 10000);
+    }
+
+    async updateClickhouseLeaderboardSyncStatus() {
+        try {
+            const response = await fetch('/api/clickhouse/leaderboard/status');
+            if (response.ok) {
+                const data = await response.json();
+                this.clickhouseLeaderboardSyncRunning = data.running || false;
+                this.renderClickhouseLeaderboardSyncButton();
+            }
+        } catch (error) {
+            console.error('[ClickHouse Leaderboard] Failed to get sync status:', error);
+        }
+    }
+
+    async toggleClickhouseLeaderboardSync() {
+        const action = this.clickhouseLeaderboardSyncRunning ? 'stop' : 'start';
+        
+        try {
+            const response = await fetch('/api/clickhouse/leaderboard/control', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ action })
+            });
+
+            if (response.ok) {
+                const data = await response.json();
+                this.clickhouseLeaderboardSyncRunning = data.running;
+                this.renderClickhouseLeaderboardSyncButton();
+                this.logger.logInfo(
+                    'ClickHouse 涨幅榜同步',
+                    `已${this.clickhouseLeaderboardSyncRunning ? '启动' : '暂停'}同步`
+                );
+            } else {
+                const error = await response.json();
+                this.logger.logApiError('POST', '/api/clickhouse/leaderboard/control', new Error(error.error || '操作失败'), response);
+            }
+        } catch (error) {
+            this.logger.logApiError('POST', '/api/clickhouse/leaderboard/control', error, null);
+        }
+    }
+
+    renderClickhouseLeaderboardSyncButton() {
+        const btn = document.getElementById('clickhouseLeaderboardSyncBtn');
+        const icon = document.getElementById('clickhouseLeaderboardSyncIcon');
+        const text = document.getElementById('clickhouseLeaderboardSyncText');
+        
+        if (!btn || !icon || !text) return;
+
+        if (this.clickhouseLeaderboardSyncRunning) {
+            // 执行中状态
+            icon.className = 'bi bi-pause-circle';
+            text.textContent = '执行中';
+            btn.title = '点击暂停 ClickHouse 涨幅榜同步';
+            btn.classList.remove('btn-paused');
+            btn.classList.add('btn-running');
+        } else {
+            // 暂停状态
+            icon.className = 'bi bi-play-circle';
+            text.textContent = '已暂停';
+            btn.title = '点击启动 ClickHouse 涨幅榜同步';
+            btn.classList.remove('btn-running');
+            btn.classList.add('btn-paused');
+        }
     }
 
     setupEventListeners() {
@@ -378,6 +452,12 @@ class TradingApp {
         const refreshLeaderboardBtn = document.getElementById('refreshLeaderboardBtn');
         if (refreshLeaderboardBtn) {
             refreshLeaderboardBtn.addEventListener('click', () => this.fetchLeaderboardSnapshot(true));
+        }
+
+        // ClickHouse 涨幅榜同步控制按钮
+        const clickhouseLeaderboardSyncBtn = document.getElementById('clickhouseLeaderboardSyncBtn');
+        if (clickhouseLeaderboardSyncBtn) {
+            clickhouseLeaderboardSyncBtn.addEventListener('click', () => this.toggleClickhouseLeaderboardSync());
         }
 
         // Tab切换

@@ -70,6 +70,11 @@ LEADERBOARD_REFRESH_INTERVAL = getattr(app_config, 'FUTURES_LEADERBOARD_REFRESH'
 leaderboard_thread = None
 leaderboard_stop_event = threading.Event()
 
+# ClickHouse leaderboard sync
+clickhouse_leaderboard_thread = None
+clickhouse_leaderboard_stop_event = threading.Event()
+clickhouse_leaderboard_running = False
+
 # ============ Helper Functions ============
 
 def init_trading_engine_for_model(model_id: int):
@@ -257,6 +262,104 @@ def _leaderboard_loop():
     
     logger.info(f"[Leaderboard Worker-{thread_id}] ========== 涨跌幅榜同步循环停止 ==========")
     logger.info(f"[Leaderboard Worker-{thread_id}] 总循环次数: {cycle_count}")
+
+def _clickhouse_leaderboard_loop():
+    """
+    后台循环任务：定期从 ClickHouse 24_market_tickers 表同步涨跌幅榜数据到 futures_leaderboard 表
+    
+    流程：
+    1. 查询 ingestion_time 大于当前时间-5秒的去重合约数据
+    2. 按涨跌类型分别查询前N名
+    3. 先删除再新增，保证表中只有前N涨幅和前N跌幅
+    4. 循环执行，默认间隔2秒
+    """
+    from database_clickhouse import ClickHouseDatabase
+    
+    thread_id = threading.current_thread().ident
+    logger.info(f"[ClickHouse Leaderboard Worker-{thread_id}] ========== ClickHouse 涨幅榜同步循环启动 ==========")
+    
+    # 获取配置
+    sync_interval = getattr(app_config, 'CLICKHOUSE_LEADERBOARD_SYNC_INTERVAL', 2)
+    time_window = getattr(app_config, 'CLICKHOUSE_LEADERBOARD_TIME_WINDOW', 5)
+    top_n = getattr(app_config, 'CLICKHOUSE_LEADERBOARD_TOP_N', 10)
+    
+    logger.info(f"[ClickHouse Leaderboard Worker-{thread_id}] 同步间隔: {sync_interval} 秒")
+    logger.info(f"[ClickHouse Leaderboard Worker-{thread_id}] 时间窗口: {time_window} 秒")
+    logger.info(f"[ClickHouse Leaderboard Worker-{thread_id}] 前N名: {top_n}")
+    
+    wait_seconds = max(1, sync_interval)
+    cycle_count = 0
+    
+    try:
+        db = ClickHouseDatabase(auto_init_tables=True)
+    except Exception as exc:
+        logger.error(f"[ClickHouse Leaderboard Worker-{thread_id}] 初始化 ClickHouse 连接失败: {exc}")
+        return
+    
+    while not clickhouse_leaderboard_stop_event.is_set():
+        cycle_count += 1
+        cycle_start_time = datetime.now()
+        
+        logger.debug(f"[ClickHouse Leaderboard Worker-{thread_id}] [循环 #{cycle_count}] 开始同步...")
+        
+        try:
+            db.sync_leaderboard(
+                time_window_seconds=time_window,
+                top_n=top_n
+            )
+            
+            cycle_duration = (datetime.now() - cycle_start_time).total_seconds()
+            logger.debug(
+                f"[ClickHouse Leaderboard Worker-{thread_id}] [循环 #{cycle_count}] "
+                f"同步完成, 耗时: {cycle_duration:.3f} 秒"
+            )
+        except Exception as exc:
+            cycle_duration = (datetime.now() - cycle_start_time).total_seconds()
+            logger.error(
+                f"[ClickHouse Leaderboard Worker-{thread_id}] [循环 #{cycle_count}] "
+                f"同步失败: {exc}, 耗时: {cycle_duration:.3f} 秒"
+            )
+        
+        # 等待指定间隔（可被停止事件中断）
+        clickhouse_leaderboard_stop_event.wait(wait_seconds)
+    
+    logger.info(f"[ClickHouse Leaderboard Worker-{thread_id}] ========== ClickHouse 涨幅榜同步循环停止 ==========")
+    logger.info(f"[ClickHouse Leaderboard Worker-{thread_id}] 总循环次数: {cycle_count}")
+
+def start_clickhouse_leaderboard_sync():
+    """启动 ClickHouse 涨幅榜同步线程"""
+    global clickhouse_leaderboard_thread, clickhouse_leaderboard_running
+    
+    if clickhouse_leaderboard_thread and clickhouse_leaderboard_thread.is_alive():
+        logger.warning("[ClickHouse Leaderboard] 同步线程已在运行")
+        return
+    
+    clickhouse_leaderboard_stop_event.clear()
+    clickhouse_leaderboard_running = True
+    clickhouse_leaderboard_thread = threading.Thread(
+        target=_clickhouse_leaderboard_loop,
+        daemon=True,
+        name="ClickHouseLeaderboardSync"
+    )
+    clickhouse_leaderboard_thread.start()
+    logger.info("[ClickHouse Leaderboard] 同步线程已启动")
+
+def stop_clickhouse_leaderboard_sync():
+    """停止 ClickHouse 涨幅榜同步线程"""
+    global clickhouse_leaderboard_running
+    
+    if not clickhouse_leaderboard_running:
+        logger.warning("[ClickHouse Leaderboard] 同步线程未运行")
+        return
+    
+    clickhouse_leaderboard_running = False
+    clickhouse_leaderboard_stop_event.set()
+    
+    if clickhouse_leaderboard_thread and clickhouse_leaderboard_thread.is_alive():
+        clickhouse_leaderboard_thread.join(timeout=5)
+        logger.info("[ClickHouse Leaderboard] 同步线程已停止")
+    else:
+        logger.info("[ClickHouse Leaderboard] 同步线程已停止（未运行）")
 
 def start_leaderboard_worker():
     """Start background worker for leaderboard updates"""
@@ -779,6 +882,30 @@ def get_market_leaderboard():
         logger.error(f"Failed to load leaderboard: {exc}")
         return jsonify({'error': str(exc)}), 500
 
+@app.route('/api/clickhouse/leaderboard/status', methods=['GET'])
+def get_clickhouse_leaderboard_status():
+    """Get ClickHouse leaderboard sync status"""
+    global clickhouse_leaderboard_running
+    return jsonify({
+        'running': clickhouse_leaderboard_running,
+        'thread_alive': clickhouse_leaderboard_thread.is_alive() if clickhouse_leaderboard_thread else False
+    })
+
+@app.route('/api/clickhouse/leaderboard/control', methods=['POST'])
+def control_clickhouse_leaderboard():
+    """Control ClickHouse leaderboard sync (start/stop)"""
+    data = request.json or {}
+    action = data.get('action', '').lower()
+    
+    if action == 'start':
+        start_clickhouse_leaderboard_sync()
+        return jsonify({'message': 'ClickHouse leaderboard sync started', 'running': True})
+    elif action == 'stop':
+        stop_clickhouse_leaderboard_sync()
+        return jsonify({'message': 'ClickHouse leaderboard sync stopped', 'running': False})
+    else:
+        return jsonify({'error': 'Invalid action. Use "start" or "stop"'}), 400
+
 @socketio.on('leaderboard:request')
 def handle_leaderboard_request(payload=None):
     """WebSocket handler for leaderboard requests"""
@@ -874,6 +1001,11 @@ if __name__ == '__main__':
         logger.info("Auto-trading enabled")
 
     start_leaderboard_worker()
+    logger.info("Leaderboard worker started")
+    
+    # 启动 ClickHouse 涨幅榜同步（默认自动执行）
+    start_clickhouse_leaderboard_sync()
+    logger.info("ClickHouse leaderboard sync started")
 
     logger.info("\n" + "=" * 60)
     logger.info("AICoinTrade is running!")

@@ -99,7 +99,22 @@ class TradingEngine:
             logger.debug(f"[Model {self.model_id}] [阶段2.1] 当前持仓数量: {positions_count}")
             
             if positions_count > 0:
-                logger.debug(f"[Model {self.model_id}] [阶段2.2] 调用AI模型进行卖出决策...")
+                # 确保market_state中的价格是实时的（重新获取一次以确保最新）
+                # 在构建sell prompt时，实时更新持仓合约的价格
+                positions = portfolio.get('positions', []) or []
+                if positions:
+                    position_symbols = [pos.get('future') for pos in positions if pos.get('future')]
+                    if position_symbols:
+                        # 实时获取持仓合约的最新价格（不使用缓存）
+                        realtime_prices = self.market_fetcher.get_current_prices(position_symbols)
+                        # 更新market_state中的价格
+                        for symbol, price_info in realtime_prices.items():
+                            if symbol in market_state:
+                                market_state[symbol]['price'] = price_info.get('price', market_state[symbol].get('price', 0))
+                                logger.debug(f"[Model {self.model_id}] 更新持仓 {symbol} 实时价格: ${price_info.get('price', 0):.4f}")
+                
+                # 调用AI模型获取卖出决策（使用实时价格）
+                logger.debug(f"[Model {self.model_id}] [阶段2.2] 调用AI模型进行卖出决策（使用实时价格）...")
                 sell_payload = self.ai_trader.make_sell_decision(
                     portfolio,
                     market_state,
@@ -266,15 +281,22 @@ class TradingEngine:
         return [future['symbol'] for future in self.db.get_future_configs()]
 
     def _get_market_state(self) -> Dict:
-        """Get current market state with prices and indicators"""
+        """
+        获取当前市场状态（包含价格和技术指标）
+        
+        此方法用于AI交易决策，使用实时价格数据，不使用任何缓存。
+        每次调用都实时从交易所获取最新价格，确保AI决策基于最新市场数据。
+        """
         market_state = {}
         symbols = self._get_tracked_symbols()
-        prices = self.market_fetcher.get_prices(symbols)
+        # 使用 get_current_prices 确保实时价格，不使用缓存
+        prices = self.market_fetcher.get_current_prices(symbols)
 
         for symbol in symbols:
             price_info = prices.get(symbol)
             if price_info:
                 market_state[symbol] = price_info.copy()
+                # 实时计算技术指标（无缓存）
                 indicators = self.market_fetcher.calculate_technical_indicators(symbol)
                 market_state[symbol]['indicators'] = indicators
 
@@ -290,27 +312,73 @@ class TradingEngine:
         return prices
 
     def _augment_market_state_with_candidates(self, market_state: Dict, candidates: list) -> Dict:
-        """Augment market state with candidate symbols from leaderboard"""
+        """
+        使用候选合约增强市场状态（使用实时价格）
+        
+        从涨幅榜获取的候选合约价格可能不是最新的，此方法会实时获取最新价格
+        以确保AI决策基于实时市场数据。
+        """
         augmented = dict(market_state)
+        
+        # 提取候选合约的符号列表
+        candidate_symbols = []
+        for entry in candidates:
+            symbol = entry.get('symbol')
+            if symbol:
+                candidate_symbols.append(symbol.upper())
+        
+        # 实时获取候选合约的最新价格（不使用缓存）
+        if candidate_symbols:
+            realtime_prices = self.market_fetcher.get_current_prices(candidate_symbols)
+        else:
+            realtime_prices = {}
+        
+        # 使用实时价格更新候选合约信息
         for entry in candidates:
             symbol = entry.get('symbol')
             if not symbol:
                 continue
             symbol = symbol.upper()
+            
+            # 如果市场状态中已有该符号的实时数据，跳过
             if symbol in augmented and augmented[symbol].get('price'):
                 continue
-            augmented[symbol] = {
-                'price': entry.get('price', 0),
-                'name': entry.get('name', symbol),
-                'exchange': entry.get('exchange', 'BINANCE_FUTURES'),
-                'contract_symbol': entry.get('contract_symbol') or f"{symbol}USDT",
-                'timeframes': entry.get('timeframes') or {},
-                'source': 'leaderboard'
-            }
+            
+            # 优先使用实时价格，如果没有则使用候选中的价格作为降级方案
+            realtime_price_info = realtime_prices.get(symbol, {})
+            if realtime_price_info and realtime_price_info.get('price', 0) > 0:
+                # 使用实时价格数据
+                augmented[symbol] = {
+                    'price': realtime_price_info.get('price', 0),
+                    'name': realtime_price_info.get('name', symbol),
+                    'exchange': realtime_price_info.get('exchange', 'BINANCE_FUTURES'),
+                    'contract_symbol': entry.get('contract_symbol') or f"{symbol}USDT",
+                    'change_24h': realtime_price_info.get('change_24h', 0),
+                    'daily_volume': realtime_price_info.get('daily_volume', 0),
+                    'timeframes': {},  # 技术指标会在需要时实时计算
+                    'source': 'realtime'
+                }
+            else:
+                # 降级方案：使用候选中的价格（但标记为非实时）
+                augmented[symbol] = {
+                    'price': entry.get('price', 0),
+                    'name': entry.get('name', symbol),
+                    'exchange': entry.get('exchange', 'BINANCE_FUTURES'),
+                    'contract_symbol': entry.get('contract_symbol') or f"{symbol}USDT",
+                    'timeframes': entry.get('timeframes') or {},
+                    'source': 'leaderboard_fallback'  # 标记为降级数据
+                }
+                logger.warning(f"[Model {self.model_id}] 候选合约 {symbol} 无法获取实时价格，使用涨幅榜价格")
+        
         return augmented
 
     def _get_prompt_market_snapshot(self) -> List[Dict]:
-        """Get market snapshot for prompt context"""
+        """
+        获取用于prompt的市场快照（使用实时价格）
+        
+        此方法用于构建AI交易的prompt，确保所有价格数据都是实时的，
+        不使用任何缓存，以保证AI决策基于最新市场数据。
+        """
         limit = getattr(app_config, 'PROMPT_MARKET_SYMBOL_LIMIT', 5)
         limit = max(1, int(limit))
 
@@ -321,17 +389,46 @@ class TradingEngine:
             return []
 
         entries = leaderboard.get('gainers') or []
+        if not entries:
+            return []
+        
+        # 提取所有符号
+        symbols = [entry.get('symbol') for entry in entries[:limit] if entry.get('symbol')]
+        
+        # 实时获取这些符号的最新价格（不使用缓存）
+        realtime_prices = {}
+        if symbols:
+            realtime_prices = self.market_fetcher.get_current_prices(symbols)
+        
+        # 构建快照，优先使用实时价格
         snapshot = []
         for entry in entries[:limit]:
             symbol = entry.get('symbol')
             if not symbol:
                 continue
+            
+            # 获取实时价格信息
+            realtime_info = realtime_prices.get(symbol, {})
+            
+            # 优先使用实时价格，如果没有则使用涨幅榜中的价格作为降级方案
+            if realtime_info and realtime_info.get('price', 0) > 0:
+                price = realtime_info.get('price', 0)
+                quote_volume = realtime_info.get('daily_volume', entry.get('quote_volume', 0))
+            else:
+                price = entry.get('price', 0)
+                quote_volume = entry.get('quote_volume', 0)
+                logger.warning(f"[Model {self.model_id}] 市场快照中 {symbol} 无法获取实时价格，使用涨幅榜价格")
+            
+            # 实时计算技术指标（无缓存）
+            indicators = self.market_fetcher.calculate_technical_indicators(symbol)
+            timeframes = indicators.get('timeframes', {}) if indicators else {}
+            
             snapshot.append({
                 'symbol': symbol,
                 'contract_symbol': entry.get('contract_symbol'),
-                'price': entry.get('price'),
-                'quote_volume': entry.get('quote_volume'),
-                'timeframes': entry.get('timeframes') or {}
+                'price': price,  # 使用实时价格
+                'quote_volume': quote_volume,
+                'timeframes': timeframes  # 使用实时计算的技术指标
             })
 
         return snapshot

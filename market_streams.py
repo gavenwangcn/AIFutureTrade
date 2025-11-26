@@ -144,7 +144,7 @@ class MarketTickerStream:
                 await stream.unsubscribe()
             else:
                 while True:
-                    await asyncio.sleep(1)
+                    await asyncio.sleep(0.5)
         except asyncio.CancelledError:
             raise
         except Exception as exc:
