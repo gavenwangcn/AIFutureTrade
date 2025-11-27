@@ -2,8 +2,10 @@
 from __future__ import annotations
 
 import logging
+import threading
 from datetime import datetime, timezone
-from typing import Any, Dict, Iterable, List, Optional
+from queue import Queue, Empty
+from typing import Any, Dict, Iterable, List, Optional, Callable
 
 import clickhouse_connect
 import config as app_config
@@ -15,32 +17,212 @@ MARKET_KLINES_TABLE = "market_klines"
 logger = logging.getLogger(__name__)
 
 
+class ClickHouseConnectionPool:
+    """ClickHouse connection pool to manage client instances.
+    
+    This class manages a pool of ClickHouse client instances to avoid creating
+    too many connections to the ClickHouse server. It provides methods to acquire
+    and release connections, and supports dynamic expansion up to a maximum
+    number of connections.
+    """
+    
+    def __init__(
+        self,
+        host: str,
+        port: int,
+        username: str,
+        password: str,
+        database: str,
+        secure: bool,
+        min_connections: int = 5,
+        max_connections: int = 20,
+        connection_timeout: int = 30
+    ):
+        """Initialize the connection pool.
+        
+        Args:
+            host: ClickHouse host
+            port: ClickHouse port
+            username: ClickHouse username
+            password: ClickHouse password
+            database: ClickHouse database
+            secure: Whether to use secure connection
+            min_connections: Minimum number of connections to keep in the pool
+            max_connections: Maximum number of connections allowed in the pool
+            connection_timeout: Timeout for acquiring a connection (seconds)
+        """
+        self._host = host
+        self._port = port
+        self._username = username
+        self._password = password
+        self._database = database
+        self._secure = secure
+        self._min_connections = min_connections
+        self._max_connections = max_connections
+        self._connection_timeout = connection_timeout
+        
+        # Create a queue to hold the connections
+        self._pool = Queue(maxsize=max_connections)
+        
+        # Create a lock to protect the connection count
+        self._lock = threading.Lock()
+        
+        # Current number of connections in the pool
+        self._current_connections = 0
+        
+        # Initialize the pool with min_connections
+        self._initialize_pool()
+    
+    def _initialize_pool(self):
+        """Initialize the pool with minimum connections."""
+        for _ in range(self._min_connections):
+            self._create_connection()
+    
+    def _create_connection(self):
+        """Create a new ClickHouse client connection."""
+        with self._lock:
+            if self._current_connections >= self._max_connections:
+                return None
+            
+            try:
+                client = clickhouse_connect.get_client(
+                    host=self._host,
+                    port=self._port,
+                    username=self._username,
+                    password=self._password,
+                    database=self._database,
+                    secure=self._secure
+                )
+                self._pool.put(client)
+                self._current_connections += 1
+                logger.debug(f"[ClickHouse] Created new connection. Current connections: {self._current_connections}")
+                return client
+            except Exception as e:
+                logger.error(f"[ClickHouse] Failed to create connection: {e}")
+                return None
+    
+    def acquire(self, timeout: Optional[int] = None) -> Optional[Any]:
+        """Acquire a connection from the pool.
+        
+        Args:
+            timeout: Timeout for acquiring a connection (seconds). If None, use the default timeout.
+            
+        Returns:
+            A ClickHouse client instance, or None if no connection is available within the timeout.
+        """
+        timeout = timeout or self._connection_timeout
+        
+        try:
+            # Try to get a connection from the pool
+            client = self._pool.get(timeout=timeout)
+            logger.debug(f"[ClickHouse] Acquired connection from pool")
+            return client
+        except Empty:
+            # If the pool is empty, try to create a new connection
+            logger.debug(f"[ClickHouse] Pool is empty, creating new connection")
+            client = self._create_connection()
+            if client:
+                return client
+            
+            # If we can't create a new connection, try again to get from the pool
+            try:
+                client = self._pool.get(timeout=timeout)
+                logger.debug(f"[ClickHouse] Acquired connection from pool after waiting")
+                return client
+            except Empty:
+                logger.error(f"[ClickHouse] Failed to acquire connection within timeout {timeout} seconds")
+                return None
+    
+    def release(self, client: Any) -> None:
+        """Release a connection back to the pool.
+        
+        Args:
+            client: The ClickHouse client instance to release
+        """
+        try:
+            # Check if the client is still valid by sending a simple query
+            client.query("SELECT 1")
+            self._pool.put(client)
+            logger.debug(f"[ClickHouse] Released connection back to pool")
+        except Exception as e:
+            # If the client is invalid, close it and don't return it to the pool
+            logger.error(f"[ClickHouse] Connection is invalid, closing it: {e}")
+            with self._lock:
+                self._current_connections -= 1
+    
+    def close_all(self) -> None:
+        """Close all connections in the pool."""
+        with self._lock:
+            while not self._pool.empty():
+                try:
+                    client = self._pool.get_nowait()
+                    client.close()
+                    self._current_connections -= 1
+                except Exception as e:
+                    logger.error(f"[ClickHouse] Failed to close connection: {e}")
+            
+            logger.info(f"[ClickHouse] Closed all connections. Current connections: {self._current_connections}")
+
+
 class ClickHouseDatabase:
     """Encapsulates ClickHouse connectivity and CRUD helpers."""
 
     def __init__(self, *, auto_init_tables: bool = True) -> None:
-        self._client = clickhouse_connect.get_client(
+        # Create a connection pool instead of individual client instances
+        self._pool = ClickHouseConnectionPool(
             host=app_config.CLICKHOUSE_HOST,
             port=app_config.CLICKHOUSE_PORT,
             username=app_config.CLICKHOUSE_USER,
             password=app_config.CLICKHOUSE_PASSWORD,
             database=app_config.CLICKHOUSE_DATABASE,
             secure=app_config.CLICKHOUSE_SECURE,
+            min_connections=5,
+            max_connections=50,
+            connection_timeout=30
         )
+        
         self.market_ticker_table = MARKET_TICKER_TABLE
         self.leaderboard_table = getattr(app_config, 'CLICKHOUSE_LEADERBOARD_TABLE', LEADERBOARD_TABLE)
         self.market_klines_table = getattr(app_config, 'CLICKHOUSE_MARKET_KLINES_TABLE', MARKET_KLINES_TABLE)
+        
         if auto_init_tables:
+            # Initialize tables using the connection pool
             self.ensure_market_ticker_table()
             self.ensure_leaderboard_table()
             self.ensure_market_klines_table()
+    
+    def _with_connection(self, func: Callable, *args, **kwargs) -> Any:
+        """Execute a function with a ClickHouse connection from the pool.
+        
+        This method acquires a connection from the pool, executes the given function
+        with the connection as the first argument, and then releases the connection back to the pool.
+        
+        Args:
+            func: The function to execute
+            *args: Positional arguments to pass to the function
+            **kwargs: Keyword arguments to pass to the function
+            
+        Returns:
+            The result of the function call
+        """
+        client = self._pool.acquire()
+        if not client:
+            raise Exception("Failed to acquire ClickHouse connection")
+        
+        try:
+            return func(client, *args, **kwargs)
+        finally:
+            self._pool.release(client)
 
     # ------------------------------------------------------------------
     # Generic helpers
     # ------------------------------------------------------------------
     def command(self, sql: str) -> None:
         """Execute a raw SQL command."""
-        self._client.command(sql)
+        def _execute_command(client):
+            client.command(sql)
+        
+        self._with_connection(_execute_command)
 
     def insert_rows(
         self,
@@ -51,8 +233,12 @@ class ClickHouseDatabase:
         payload = list(rows)
         if not payload:
             return
-        self._client.insert(table, payload, column_names=column_names)
-        logger.debug("[ClickHouse] Inserted %s rows into %s", len(payload), table)
+        
+        def _execute_insert(client):
+            client.insert(table, payload, column_names=column_names)
+            logger.debug("[ClickHouse] Inserted %s rows into %s", len(payload), table)
+        
+        self._with_connection(_execute_insert)
 
     # ------------------------------------------------------------------
     # Market ticker helpers
@@ -328,7 +514,10 @@ class ClickHouseDatabase:
             LIMIT {top_n * 2}
             """
         
-        result = self._client.query(query)
+        def _execute_query(client):
+            return client.query(query)
+        
+        result = self._with_connection(_execute_query)
         
         # 转换为字典列表
         columns = [
@@ -501,8 +690,14 @@ class ClickHouseDatabase:
             LIMIT {limit}
             """
             
-            gainers_result = self._client.query(gainers_query)
-            losers_result = self._client.query(losers_query)
+            def _execute_gainers_query(client):
+                return client.query(gainers_query)
+            
+            def _execute_losers_query(client):
+                return client.query(losers_query)
+            
+            gainers_result = self._with_connection(_execute_gainers_query)
+            losers_result = self._with_connection(_execute_losers_query)
             
             # 转换涨幅榜数据
             gainers = []
@@ -554,7 +749,11 @@ class ClickHouseDatabase:
             FROM {self.leaderboard_table}
             WHERE symbol != ''
             """
-            result = self._client.query(query)
+            
+            def _execute_query(client):
+                return client.query(query)
+            
+            result = self._with_connection(_execute_query)
             symbols = [row[0] for row in result.result_rows if row[0]]
             return symbols
         except Exception as exc:

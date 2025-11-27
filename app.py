@@ -78,6 +78,13 @@ config_db_path = getattr(app_config, 'DATABASE_PATH', None)
 db_path = env_db_path or config_db_path or DEFAULT_DB_PATH
 
 db = Database(db_path)
+
+# Initialize database tables immediately when the application starts
+# This ensures tables are created even when running with gunicorn or other WSGI servers
+with app.app_context():
+    db.init_db()
+    logger.info("Database tables initialized")
+
 market_fetcher = MarketDataFetcher(db)
 trading_engines = {}
 auto_trading = getattr(app_config, 'AUTO_TRADING', True)
