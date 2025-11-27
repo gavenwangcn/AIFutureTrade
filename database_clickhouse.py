@@ -688,43 +688,67 @@ class ClickHouseDatabase:
                 # 使用更高效的方式更新数据：
                 # 1. 创建临时表
                 temp_table = f"{self.leaderboard_table}_temp"
-                logger.debug(f"[ClickHouse] 创建临时表: {temp_table}")
-                
-                # 2. 创建临时表结构与原表相同
-                create_temp_sql = f"CREATE TABLE IF NOT EXISTS {temp_table} AS {self.leaderboard_table} ENGINE = Memory"
-                self.command(create_temp_sql)
-                logger.debug(f"[ClickHouse] 临时表创建完成: {temp_table}")
-                
-                # 3. 插入数据到临时表
-                logger.info(f"[ClickHouse] 📥 插入数据到临时表...")
-                self.insert_rows(temp_table, all_rows, column_names)
-                logger.info(f"[ClickHouse] ✅ 数据插入完成，共 {len(all_rows)} 条")
-                
-                # 4. 原子替换原表数据
-                # 使用 RENAME TABLE 原子操作，避免数据空窗期
-                logger.info(f"[ClickHouse] 🔄 原子替换原表数据...")
-                # 先重命名原表为备份表
                 backup_table = f"{self.leaderboard_table}_backup"
-                rename_old_sql = f"RENAME TABLE {self.leaderboard_table} TO {backup_table}"
-                self.command(rename_old_sql)
-                # 再重命名临时表为原表
-                rename_new_sql = f"RENAME TABLE {temp_table} TO {self.leaderboard_table}"
-                self.command(rename_new_sql)
-                # 删除备份表
-                drop_backup_sql = f"DROP TABLE IF EXISTS {backup_table}"
-                self.command(drop_backup_sql)
-                logger.info(f"[ClickHouse] ✅ 原表数据替换完成")
                 
-                # 5. 删除临时表
-                logger.debug(f"[ClickHouse] 删除临时表: {temp_table}")
-                drop_temp_sql = f"DROP TABLE IF EXISTS {temp_table}"
-                self.command(drop_temp_sql)
-                logger.debug(f"[ClickHouse] 临时表删除完成: {temp_table}")
-                
-                logger.info(
-                    "[ClickHouse] 🎉 涨跌幅榜同步完成: %d 涨幅, %d 跌幅",
-                    len(gainers), len(losers)
-                )
+                try:
+                    # 2. 创建临时表结构与原表相同
+                    logger.debug(f"[ClickHouse] 创建临时表: {temp_table}")
+                    create_temp_sql = f"CREATE TABLE IF NOT EXISTS {temp_table} AS {self.leaderboard_table} ENGINE = Memory"
+                    self.command(create_temp_sql)
+                    logger.debug(f"[ClickHouse] 临时表创建完成: {temp_table}")
+                    
+                    # 3. 插入数据到临时表
+                    logger.info(f"[ClickHouse] 📥 插入数据到临时表...")
+                    self.insert_rows(temp_table, all_rows, column_names)
+                    logger.info(f"[ClickHouse] ✅ 数据插入完成，共 {len(all_rows)} 条")
+                    
+                    # 4. 原子替换原表数据
+                    # 使用 RENAME TABLE 原子操作，避免数据空窗期
+                    logger.info(f"[ClickHouse] 🔄 原子替换原表数据...")
+                    try:
+                        # 先删除已存在的备份表（处理并发情况）
+                        drop_existing_backup_sql = f"DROP TABLE IF EXISTS {backup_table}"
+                        self.command(drop_existing_backup_sql)
+                        # 重命名原表为备份表
+                        rename_old_sql = f"RENAME TABLE {self.leaderboard_table} TO {backup_table}"
+                        self.command(rename_old_sql)
+                        # 再重命名临时表为原表
+                        rename_new_sql = f"RENAME TABLE {temp_table} TO {self.leaderboard_table}"
+                        self.command(rename_new_sql)
+                        logger.info(f"[ClickHouse] ✅ 原表数据替换完成")
+                    except Exception as e:
+                        logger.error(f"[ClickHouse] ❌ 原表数据替换失败: {e}")
+                        # 如果重命名失败，尝试恢复原表
+                        try:
+                            restore_sql = f"RENAME TABLE {backup_table} TO {self.leaderboard_table}"
+                            self.command(restore_sql)
+                            logger.info(f"[ClickHouse] ✅ 原表恢复成功")
+                        except Exception as restore_error:
+                            logger.error(f"[ClickHouse] ❌ 原表恢复失败: {restore_error}")
+                        raise e
+                    
+                    logger.info(
+                        "[ClickHouse] 🎉 涨跌幅榜同步完成: %d 涨幅, %d 跌幅",
+                        len(gainers), len(losers)
+                    )
+                finally:
+                    # 确保清理临时表（即使出现异常也要清理）
+                    try:
+                        logger.debug(f"[ClickHouse] 删除临时表: {temp_table}")
+                        drop_temp_sql = f"DROP TABLE IF EXISTS {temp_table}"
+                        self.command(drop_temp_sql)
+                        logger.debug(f"[ClickHouse] 临时表删除完成: {temp_table}")
+                    except Exception as cleanup_exc:
+                        logger.warning(f"[ClickHouse] ⚠️  清理临时表失败: {cleanup_exc}")
+                        
+                    # 确保清理备份表（即使出现异常也要清理）
+                    try:
+                        logger.debug(f"[ClickHouse] 删除备份表: {backup_table}")
+                        drop_backup_sql = f"DROP TABLE IF EXISTS {backup_table}"
+                        self.command(drop_backup_sql)
+                        logger.debug(f"[ClickHouse] 备份表删除完成: {backup_table}")
+                    except Exception as cleanup_exc:
+                        logger.warning(f"[ClickHouse] ⚠️  清理备份表失败: {cleanup_exc}")
             else:
                 logger.warning("[ClickHouse] ⚠️  没有涨跌幅榜数据可同步")
                 

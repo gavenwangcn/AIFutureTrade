@@ -98,6 +98,8 @@ leaderboard_stop_event = threading.Event()
 clickhouse_leaderboard_thread = None
 clickhouse_leaderboard_stop_event = threading.Event()
 clickhouse_leaderboard_running = False
+# 添加线程锁以防止并发执行
+clickhouse_leaderboard_lock = threading.Lock()
 
 # ============ Helper Functions ============
 
@@ -408,31 +410,33 @@ def start_clickhouse_leaderboard_sync():
     """
     global clickhouse_leaderboard_thread, clickhouse_leaderboard_running
     
-    # 检查线程是否已在运行
-    if clickhouse_leaderboard_thread and clickhouse_leaderboard_thread.is_alive():
-        logger.warning("[ClickHouse Leaderboard] ⚠️  同步线程已在运行，无需重复启动")
-        return
-    
-    logger.info("[ClickHouse Leaderboard] 🚀 准备启动涨跌幅榜同步线程...")
-    
-    # 重置停止事件和运行状态
-    clickhouse_leaderboard_stop_event.clear()
-    clickhouse_leaderboard_running = True
-    
-    # 创建同步线程
-    clickhouse_leaderboard_thread = threading.Thread(
-        target=_clickhouse_leaderboard_loop,
-        daemon=True,  # 设置为守护线程
-        name="ClickHouseLeaderboardSync"  # 设置线程名称，便于调试
-    )
-    
-    # 启动线程
-    clickhouse_leaderboard_thread.start()
-    
-    # 记录启动信息
-    logger.info(f"[ClickHouse Leaderboard] ✅ 涨跌幅榜同步线程已启动")
-    logger.info(f"[ClickHouse Leaderboard] 📋 线程ID: {clickhouse_leaderboard_thread.ident}")
-    logger.info(f"[ClickHouse Leaderboard] 📋 线程名称: {clickhouse_leaderboard_thread.name}")
+    # 使用锁防止并发执行
+    with clickhouse_leaderboard_lock:
+        # 检查线程是否已在运行
+        if clickhouse_leaderboard_thread and clickhouse_leaderboard_thread.is_alive():
+            logger.warning("[ClickHouse Leaderboard] ⚠️  同步线程已在运行，无需重复启动")
+            return
+        
+        logger.info("[ClickHouse Leaderboard] 🚀 准备启动涨跌幅榜同步线程...")
+        
+        # 重置停止事件和运行状态
+        clickhouse_leaderboard_stop_event.clear()
+        clickhouse_leaderboard_running = True
+        
+        # 创建同步线程
+        clickhouse_leaderboard_thread = threading.Thread(
+            target=_clickhouse_leaderboard_loop,
+            daemon=True,  # 设置为守护线程
+            name="ClickHouseLeaderboardSync"  # 设置线程名称，便于调试
+        )
+        
+        # 启动线程
+        clickhouse_leaderboard_thread.start()
+        
+        # 记录启动信息
+        logger.info(f"[ClickHouse Leaderboard] ✅ 涨跌幅榜同步线程已启动")
+        logger.info(f"[ClickHouse Leaderboard] 📋 线程ID: {clickhouse_leaderboard_thread.ident}")
+        logger.info(f"[ClickHouse Leaderboard] 📋 线程名称: {clickhouse_leaderboard_thread.name}")
 
 
 def stop_clickhouse_leaderboard_sync():
@@ -451,30 +455,32 @@ def stop_clickhouse_leaderboard_sync():
     """
     global clickhouse_leaderboard_running
     
-    # 检查线程是否在运行
-    if not clickhouse_leaderboard_running:
-        logger.warning("[ClickHouse Leaderboard] ⚠️  同步线程未运行，无需停止")
-        return
-    
-    logger.info("[ClickHouse Leaderboard] 🛑 准备停止涨跌幅榜同步线程...")
-    
-    # 设置停止状态和停止事件
-    clickhouse_leaderboard_running = False
-    clickhouse_leaderboard_stop_event.set()
-    
-    # 等待线程终止，最多5秒
-    if clickhouse_leaderboard_thread and clickhouse_leaderboard_thread.is_alive():
-        logger.info("[ClickHouse Leaderboard] ⏳ 等待线程终止...")
-        clickhouse_leaderboard_thread.join(timeout=5)
+    # 使用锁防止并发执行
+    with clickhouse_leaderboard_lock:
+        # 检查线程是否在运行
+        if not clickhouse_leaderboard_running:
+            logger.warning("[ClickHouse Leaderboard] ⚠️  同步线程未运行，无需停止")
+            return
         
-        if clickhouse_leaderboard_thread.is_alive():
-            logger.warning("[ClickHouse Leaderboard] ⚠️  线程未能在5秒内终止，可能已强制终止")
+        logger.info("[ClickHouse Leaderboard] 🛑 准备停止涨跌幅榜同步线程...")
+        
+        # 设置停止状态和停止事件
+        clickhouse_leaderboard_running = False
+        clickhouse_leaderboard_stop_event.set()
+        
+        # 等待线程终止，最多5秒
+        if clickhouse_leaderboard_thread and clickhouse_leaderboard_thread.is_alive():
+            logger.info("[ClickHouse Leaderboard] ⏳ 等待线程终止...")
+            clickhouse_leaderboard_thread.join(timeout=5)
+            
+            if clickhouse_leaderboard_thread.is_alive():
+                logger.warning("[ClickHouse Leaderboard] ⚠️  线程未能在5秒内终止，可能已强制终止")
+            else:
+                logger.info("[ClickHouse Leaderboard] ✅ 线程已成功终止")
         else:
-            logger.info("[ClickHouse Leaderboard] ✅ 线程已成功终止")
-    else:
-        logger.info("[ClickHouse Leaderboard] ✅ 线程已停止（未运行）")
-    
-    logger.info("[ClickHouse Leaderboard] 📋 涨跌幅榜同步线程停止完成")
+            logger.info("[ClickHouse Leaderboard] ✅ 线程已停止（未运行）")
+        
+        logger.info("[ClickHouse Leaderboard] 📋 涨跌幅榜同步线程停止完成")
 
 def start_leaderboard_worker():
     """Start background worker for leaderboard updates"""
