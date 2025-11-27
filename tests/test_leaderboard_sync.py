@@ -19,7 +19,8 @@ from app import (
     start_clickhouse_leaderboard_sync,
     stop_clickhouse_leaderboard_sync,
     clickhouse_leaderboard_stop_event,
-    clickhouse_leaderboard_running
+    clickhouse_leaderboard_running,
+    clickhouse_leaderboard_thread
 )
 from database_clickhouse import ClickHouseDatabase
 
@@ -133,9 +134,6 @@ def _check_leaderboard_sync_functionality(db: ClickHouseDatabase) -> None:
     
     # Start the sync thread with a larger time window to ensure test data is captured
     # We use a 60-second window to make sure our test data is included
-    from app import clickhouse_leaderboard_thread, clickhouse_leaderboard_running
-    from app import start_clickhouse_leaderboard_sync, stop_clickhouse_leaderboard_sync
-    from app import clickhouse_leaderboard_stop_event
     import config as app_config
     
     # Temporarily modify the time window for testing
