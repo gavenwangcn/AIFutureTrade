@@ -701,10 +701,18 @@ class ClickHouseDatabase:
                 logger.info(f"[ClickHouse] ✅ 数据插入完成，共 {len(all_rows)} 条")
                 
                 # 4. 原子替换原表数据
-                # 使用 REPLACE TABLE 原子操作，避免数据空窗期
+                # 使用 RENAME TABLE 原子操作，避免数据空窗期
                 logger.info(f"[ClickHouse] 🔄 原子替换原表数据...")
-                replace_sql = f"REPLACE TABLE {self.leaderboard_table} WITH {temp_table}"
-                self.command(replace_sql)
+                # 先重命名原表为备份表
+                backup_table = f"{self.leaderboard_table}_backup"
+                rename_old_sql = f"RENAME TABLE {self.leaderboard_table} TO {backup_table}"
+                self.command(rename_old_sql)
+                # 再重命名临时表为原表
+                rename_new_sql = f"RENAME TABLE {temp_table} TO {self.leaderboard_table}"
+                self.command(rename_new_sql)
+                # 删除备份表
+                drop_backup_sql = f"DROP TABLE IF EXISTS {backup_table}"
+                self.command(drop_backup_sql)
                 logger.info(f"[ClickHouse] ✅ 原表数据替换完成")
                 
                 # 5. 删除临时表
