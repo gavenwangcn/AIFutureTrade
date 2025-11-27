@@ -21,9 +21,9 @@ DATABASE_PATH = 'trading_bot.db'
 
 # ClickHouse (market streams)
 CLICKHOUSE_HOST = os.getenv('CLICKHOUSE_HOST', '193.134.209.95')
-CLICKHOUSE_PORT = int(os.getenv('CLICKHOUSE_PORT', '30000'))
-CLICKHOUSE_USER = os.getenv('CLICKHOUSE_USER', 'root')
-CLICKHOUSE_PASSWORD = os.getenv('CLICKHOUSE_PASSWORD', '123456O')
+CLICKHOUSE_PORT = int(os.getenv('CLICKHOUSE_PORT', '32123'))
+CLICKHOUSE_USER = os.getenv('CLICKHOUSE_USER', 'default')
+CLICKHOUSE_PASSWORD = os.getenv('CLICKHOUSE_PASSWORD', 'di88fg2k')
 CLICKHOUSE_DATABASE = os.getenv('CLICKHOUSE_DATABASE', 'default')
 CLICKHOUSE_SECURE = os.getenv('CLICKHOUSE_SECURE', '0').lower() in {'1', 'true', 'yes'}
 CLICKHOUSE_MARKET_TICKER_TABLE = os.getenv('CLICKHOUSE_MARKET_TICKER_TABLE', '24_market_tickers')
