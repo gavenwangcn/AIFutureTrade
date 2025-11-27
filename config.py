@@ -38,16 +38,6 @@ KLINE_SYNC_CHECK_INTERVAL = int(os.getenv('KLINE_SYNC_CHECK_INTERVAL', '10'))  #
 KLINE_CLEANUP_CRON = os.getenv('KLINE_CLEANUP_CRON', '0 */2 * * *')  # Cron表达式，默认每2小时执行一次
 KLINE_CLEANUP_RETENTION_DAYS = int(os.getenv('KLINE_CLEANUP_RETENTION_DAYS', '2'))  # 保留天数，默认2天（48小时）
 
-# UTC8 数据转换配置
-CLICKHOUSE_UTC8_TICKER_TABLE = os.getenv('CLICKHOUSE_UTC8_TICKER_TABLE', '24_market_tickers_utc8')
-UTC8_PROCESS_INTERVAL = int(os.getenv('UTC8_PROCESS_INTERVAL', '300'))  # 秒，UTC8数据转换处理间隔，默认5分钟
-UTC8_BATCH_SIZE = int(os.getenv('UTC8_BATCH_SIZE', '1000'))  # 每批处理的交易对数量
-UTC8_THREAD_COUNT = int(os.getenv('UTC8_THREAD_COUNT', '4'))  # 处理线程数
-UTC8_LOOKBACK_HOURS = int(os.getenv('UTC8_LOOKBACK_HOURS', '48'))  # 处理最近N小时的数据，默认48小时
-
-# Market Ticker 增量插入配置
-MARKET_TICKER_INSERT_INTERVAL_MINUTES = int(os.getenv('MARKET_TICKER_INSERT_INTERVAL_MINUTES', '30'))  # 分钟，增量插入时间间隔，默认30分钟（基于stats_close_time判断）
-MARKET_TICKER_RETENTION_DAYS = int(os.getenv('MARKET_TICKER_RETENTION_DAYS', '2'))  # 保留天数，默认2天（今天和前一天）
 
 # Trading
 AUTO_TRADING = True

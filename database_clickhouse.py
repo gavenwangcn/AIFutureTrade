@@ -314,17 +314,7 @@ class ClickHouseDatabase:
         self.insert_rows(self.market_ticker_table, prepared_rows, column_names)
         
     def upsert_market_tickers(self, rows: Iterable[Dict[str, Any]]) -> None:
-        """
-        增量插入市场ticker数据（按时间间隔判断是否需要插入）
-        
-        优化逻辑：
-        1. 不再删除同一symbol的所有旧数据，而是增量插入
-        2. 根据配置的时间间隔（默认30分钟），基于stats_close_time判断是否需要插入新数据
-        3. 对于每个symbol，如果距离上次插入的stats_close_time超过间隔，则插入新数据
-        4. 这样可以保留历史数据，用于UTC8转换，同时避免数据过于密集
-        
-        重要：使用stats_close_time（24小时滚动窗口的结束时间）来判断间隔，
-        而不是ingestion_time，确保同一symbol的数据间隔至少30分钟。
+        """Update or insert market tickers. If symbol exists, update it, otherwise insert.
         
         Args:
             rows: Iterable of ticker dictionaries
@@ -337,12 +327,7 @@ class ClickHouseDatabase:
         if not usdt_rows:
             logger.debug("[ClickHouse] No USDT symbols to upsert")
             return
-        
-        # 获取配置的插入间隔（分钟，默认30分钟）
-        import config as app_config
-        insert_interval_minutes = getattr(app_config, 'MARKET_TICKER_INSERT_INTERVAL_MINUTES', 30)
-        insert_interval_seconds = insert_interval_minutes * 60
-        
+            
         column_names = [
             "event_time",
             "symbol",
@@ -365,10 +350,9 @@ class ClickHouseDatabase:
             "trade_count",
         ]
 
-        prepared_rows: List[List[Any]] = []
-        rows_to_insert: List[Dict[str, Any]] = []
+        # 处理数据：对于同一批数据中的重复symbol，只保留最新的一条（基于stats_close_time）
+        symbol_data_map: Dict[str, Dict[str, Any]] = {}
         
-        # 准备数据并检查是否需要插入
         for row in usdt_rows:
             normalized = dict(row)
             normalized["event_time"] = _to_datetime(normalized.get("event_time"))
@@ -379,103 +363,55 @@ class ClickHouseDatabase:
             normalized.setdefault("change_percent_text", _format_percent_text(percent))
             
             symbol = normalized.get("symbol")
-            stats_close_time = normalized.get("stats_close_time")
-            
-            if not symbol or not stats_close_time:
+            if not symbol:
                 continue
             
-            # 检查是否需要插入：查询该symbol最近一次插入的stats_close_time
-            # 使用stats_close_time判断，确保同一symbol的数据间隔至少30分钟
-            should_insert = True
-            try:
-                query = f"""
-                SELECT MAX(stats_close_time) as last_stats_close_time
-                FROM {self.market_ticker_table}
-                WHERE symbol = '{symbol}'
-                """
-                
-                def _execute_query(client):
-                    return client.query(query)
-                
-                result = self._with_connection(_execute_query)
-                if result.result_rows and result.result_rows[0][0]:
-                    last_stats_close_time = result.result_rows[0][0]
-                    if isinstance(last_stats_close_time, datetime):
-                        if last_stats_close_time.tzinfo is None:
-                            last_stats_close_time = last_stats_close_time.replace(tzinfo=timezone.utc)
-                    else:
-                        last_stats_close_time = _to_datetime(last_stats_close_time)
-                    
-                    if last_stats_close_time and stats_close_time:
-                        # 计算当前stats_close_time与上次stats_close_time的时间差
-                        time_diff = (stats_close_time - last_stats_close_time).total_seconds()
-                        
-                        # 如果时间差小于间隔（30分钟），则跳过插入
-                        if time_diff < insert_interval_seconds:
-                            should_insert = False
-                            logger.info(
-                                "[ClickHouse] ⏭️  跳过插入 %s: stats_close_time间隔=%.1f分钟 < 要求间隔=%d分钟 "
-                                "(当前: %s, 上次: %s)",
-                                symbol, 
-                                time_diff / 60.0, 
-                                insert_interval_minutes,
-                                stats_close_time.strftime('%Y-%m-%d %H:%M:%S') if stats_close_time else 'N/A',
-                                last_stats_close_time.strftime('%Y-%m-%d %H:%M:%S') if last_stats_close_time else 'N/A'
-                            )
-                        else:
-                            logger.debug(
-                                "[ClickHouse] ✅ 允许插入 %s: stats_close_time间隔=%.1f分钟 >= 要求间隔=%d分钟",
-                                symbol, time_diff / 60.0, insert_interval_minutes
-                            )
-                else:
-                    # 如果没有历史数据，允许插入
-                    logger.debug("[ClickHouse] ✅ 允许插入 %s: 首次插入该symbol", symbol)
-            except Exception as e:
-                logger.warning(
-                    "[ClickHouse] ⚠️  查询失败，仍插入数据（避免丢失）: symbol=%s, error=%s", 
-                    symbol, e
-                )
-                # 如果查询失败，仍然插入（避免丢失数据）
+            stats_close_time = normalized.get("stats_close_time")
             
-            if should_insert:
-                prepared_rows.append([normalized.get(name) for name in column_names])
-                rows_to_insert.append(normalized)
+            # 如果该symbol已存在，比较stats_close_time，只保留最新的
+            if symbol in symbol_data_map:
+                existing_stats_close_time = symbol_data_map[symbol].get("stats_close_time")
+                if stats_close_time and existing_stats_close_time:
+                    if stats_close_time > existing_stats_close_time:
+                        symbol_data_map[symbol] = normalized
+                elif stats_close_time:
+                    # 当前数据有stats_close_time，保留当前数据
+                    symbol_data_map[symbol] = normalized
+            else:
+                symbol_data_map[symbol] = normalized
         
-        if not prepared_rows:
-            logger.debug("[ClickHouse] No new rows to insert (all within interval)")
+        if not symbol_data_map:
             return
         
-        # 插入新数据（增量插入，不删除旧数据）
+        # 准备插入数据（每个symbol只有一条最新数据）
+        prepared_rows: List[List[Any]] = []
+        symbols_to_upsert = []
+        
+        for symbol, normalized in symbol_data_map.items():
+            prepared_rows.append([normalized.get(name) for name in column_names])
+            symbols_to_upsert.append(symbol)
+        
+        # For ClickHouse, the most efficient way to upsert is to delete existing rows first, then insert new ones
+        # This is more efficient than UPDATE for MergeTree tables
+        if symbols_to_upsert:
+            # Delete existing rows with the same symbols
+            # 使用去重后的symbol列表，避免重复删除
+            unique_symbols = list(set(symbols_to_upsert))
+            symbols_str = "', '".join(unique_symbols)
+            delete_query = f"ALTER TABLE {self.market_ticker_table} DELETE WHERE symbol IN ('{symbols_str}')"
+            try:
+                self.command(delete_query)
+                logger.debug("[ClickHouse] Deleted existing rows for symbols: %s", unique_symbols)
+            except Exception as e:
+                logger.warning("[ClickHouse] Failed to delete existing rows: %s", e)
+        
+        # Insert new rows (每个symbol只有一条数据)
         self.insert_rows(self.market_ticker_table, prepared_rows, column_names)
-        logger.info(
-            "[ClickHouse] Incrementally inserted %s rows into %s (interval=%d minutes)",
-            len(prepared_rows), self.market_ticker_table, insert_interval_minutes
+        logger.debug(
+            "[ClickHouse] Upserted %s rows into %s (ensured no duplicate symbols)",
+            len(prepared_rows), self.market_ticker_table
         )
     
-    def cleanup_old_market_tickers(self, retention_days: int = 2) -> None:
-        """
-        清理旧的市场ticker数据，只保留最近N天的数据
-        
-        Args:
-            retention_days: 保留天数，默认2天（今天和前一天）
-        """
-        try:
-            cutoff_time = datetime.now(timezone.utc) - timedelta(days=retention_days)
-            cutoff_str = cutoff_time.strftime('%Y-%m-%d %H:%M:%S')
-            
-            delete_query = f"""
-            ALTER TABLE {self.market_ticker_table}
-            DELETE WHERE ingestion_time < '{cutoff_str}'
-            """
-            
-            self.command(delete_query)
-            logger.info(
-                "[ClickHouse] Cleaned up old market tickers older than %d days (before %s)",
-                retention_days, cutoff_str
-            )
-        except Exception as e:
-            logger.warning("[ClickHouse] Failed to cleanup old market tickers: %s", e)
-
     # ------------------------------------------------------------------
     # Leaderboard helpers
     # ------------------------------------------------------------------
