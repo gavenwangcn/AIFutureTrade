@@ -421,29 +421,52 @@ class ClickHouseDatabase:
         side: Optional[str] = None,
         top_n: int = 10
     ) -> List[Dict[str, Any]]:
-        """Query recent tickers from market_ticker_table.
+        """查询最近的市场行情数据，用于生成涨跌幅榜
+        
+        核心功能：
+        - 从24_market_tickers表查询指定时间窗口内的数据
+        - 对每个交易对取最新的行情数据（去重）
+        - 根据price_change_percent字段判断涨跌：正为涨，负为跌
+        - 返回涨幅或跌幅前十的数据
+        
+        执行流程：
+        1. 计算时间阈值（当前时间 - 时间窗口）
+        2. 根据side参数确定查询逻辑：
+           - gainer：查询price_change_percent>0的合约，按降序排序
+           - loser：查询price_change_percent<0的合约，按升序排序
+        3. 构建查询SQL，包含去重逻辑（按symbol分组，取最新event_time）
+        4. 执行查询并返回结果
         
         Args:
-            time_window_seconds: Time window in seconds (query tickers with ingestion_time > now() - time_window_seconds)
-            side: Filter by side ('gainer' or 'loser'), None for all
-            top_n: Number of top items to return
+            time_window_seconds: 查询时间窗口（秒），只返回ingestion_time大于该阈值的数据
+            side: 筛选方向，可选值：'gainer'（涨幅榜）、'loser'（跌幅榜），None表示全部
+            top_n: 返回前N名数据
             
         Returns:
-            List of ticker dictionaries
+            List[Dict[str, Any]]: 行情数据字典列表
         """
         from datetime import timedelta
         
+        logger.info(f"[ClickHouse] 📊 开始查询最近行情数据...")
+        logger.info(f"[ClickHouse] 📋 查询参数: time_window={time_window_seconds}s, side={side}, top_n={top_n}")
+        
+        # 计算时间阈值：当前时间减去时间窗口
         time_threshold = datetime.now(timezone.utc) - timedelta(seconds=time_window_seconds)
         time_threshold_str = time_threshold.strftime('%Y-%m-%d %H:%M:%S')
+        logger.info(f"[ClickHouse] ⏱️  时间阈值: {time_threshold_str}")
         
-        # 构建查询SQL：去重，取每个symbol最新的ingestion_time
+        # 构建查询SQL：去重，取每个symbol最新的event_time
         if side:
-            # 涨幅榜：按 price_change_percent 降序
-            # 跌幅榜：按 abs(price_change_percent) 降序（取绝对值）
             if side == 'gainer':
+                # 涨幅榜：查询price_change_percent>0的合约，按price_change_percent降序排序
+                where_clause = "price_change_percent > 0"
                 order_by = "price_change_percent DESC"
+                logger.info(f"[ClickHouse] 📈 涨幅榜查询: {where_clause}, 排序: {order_by}")
             else:  # loser
-                order_by = "abs(price_change_percent) DESC"
+                # 跌幅榜：查询price_change_percent<0的合约，按price_change_percent升序排序（跌幅最大的排在前面）
+                where_clause = "price_change_percent < 0"
+                order_by = "price_change_percent ASC"
+                logger.info(f"[ClickHouse] 📉 跌幅榜查询: {where_clause}, 排序: {order_by}")
             
             query = f"""
             SELECT 
@@ -451,7 +474,7 @@ class ClickHouseDatabase:
                 symbol,
                 price_change,
                 price_change_percent,
-                side,
+                '{side}' as side,
                 change_percent_text,
                 average_price,
                 last_price,
@@ -470,10 +493,10 @@ class ClickHouseDatabase:
             FROM (
                 SELECT 
                     *,
-                    ROW_NUMBER() OVER (PARTITION BY symbol ORDER BY ingestion_time DESC) as rn
+                    ROW_NUMBER() OVER (PARTITION BY symbol ORDER BY event_time DESC) as rn
                 FROM {self.market_ticker_table}
                 WHERE ingestion_time > '{time_threshold_str}'
-                AND side = '{side}'
+                AND {where_clause}
             ) AS ranked
             WHERE rn = 1
             ORDER BY {order_by}
@@ -487,7 +510,11 @@ class ClickHouseDatabase:
                 symbol,
                 price_change,
                 price_change_percent,
-                side,
+                CASE 
+                    WHEN price_change_percent > 0 THEN 'gainer' 
+                    WHEN price_change_percent < 0 THEN 'loser' 
+                    ELSE 'neutral' 
+                END as side,
                 change_percent_text,
                 average_price,
                 last_price,
@@ -506,7 +533,7 @@ class ClickHouseDatabase:
             FROM (
                 SELECT 
                     *,
-                    ROW_NUMBER() OVER (PARTITION BY symbol ORDER BY ingestion_time DESC) as rn
+                    ROW_NUMBER() OVER (PARTITION BY symbol ORDER BY event_time DESC) as rn
                 FROM {self.market_ticker_table}
                 WHERE ingestion_time > '{time_threshold_str}'
             ) AS ranked
@@ -517,7 +544,9 @@ class ClickHouseDatabase:
         def _execute_query(client):
             return client.query(query)
         
+        logger.info(f"[ClickHouse] 📝 执行查询: {query[:100]}...")
         result = self._with_connection(_execute_query)
+        logger.info(f"[ClickHouse] ✅ 查询执行完成")
         
         # 转换为字典列表
         columns = [
@@ -533,6 +562,7 @@ class ClickHouseDatabase:
             row_dict = dict(zip(columns, row))
             rows.append(row_dict)
         
+        logger.info(f"[ClickHouse] 📊 查询结果: 共 {len(rows)} 条数据")
         return rows
 
     def sync_leaderboard(
@@ -542,36 +572,49 @@ class ClickHouseDatabase:
     ) -> None:
         """Sync leaderboard data from market_ticker_table to leaderboard_table.
         
+        核心功能：
+        - 从24_market_tickers表查询最近时间窗口内的市场数据
+        - 计算每个合约的涨跌幅
+        - 筛选出涨幅前N名和跌幅前N名
+        - 使用原子操作更新futures_leaderboard表
+        
+        执行流程：
+        1. 查询涨幅榜前N名
+        2. 查询跌幅榜前N名
+        3. 准备插入数据
+        4. 创建临时表
+        5. 插入数据到临时表
+        6. 使用REPLACE TABLE原子替换原表数据
+        7. 删除临时表
+        
         Args:
-            time_window_seconds: Time window in seconds for querying recent tickers
-            top_n: Number of top gainers and losers to keep
+            time_window_seconds: 查询时间窗口（秒）
+            top_n: 涨跌幅前N名数量
         """
         try:
-            # 先删除所有现有数据（使用 TRUNCATE 或 DELETE）
-            # ClickHouse 的 DELETE 需要启用 mutations，使用 TRUNCATE 更简单
-            try:
-                truncate_sql = f"TRUNCATE TABLE {self.leaderboard_table}"
-                self.command(truncate_sql)
-            except Exception:
-                # 如果 TRUNCATE 不支持，使用 DELETE
-                delete_sql = f"ALTER TABLE {self.leaderboard_table} DELETE WHERE 1=1"
-                self.command(delete_sql)
+            logger.info(f"[ClickHouse] 🚀 开始涨跌幅榜同步...")
+            logger.info(f"[ClickHouse] 📋 同步参数: time_window={time_window_seconds}s, top_n={top_n}")
             
             # 查询涨幅榜前N名
+            logger.info(f"[ClickHouse] 🔍 查询涨幅榜前{top_n}名...")
             gainers = self.query_recent_tickers(
                 time_window_seconds=time_window_seconds,
                 side='gainer',
                 top_n=top_n
             )
+            logger.info(f"[ClickHouse] ✅ 涨幅榜查询完成，共 {len(gainers)} 条数据")
             
             # 查询跌幅榜前N名
+            logger.info(f"[ClickHouse] 🔍 查询跌幅榜前{top_n}名...")
             losers = self.query_recent_tickers(
                 time_window_seconds=time_window_seconds,
                 side='loser',
                 top_n=top_n
             )
+            logger.info(f"[ClickHouse] ✅ 跌幅榜查询完成，共 {len(losers)} 条数据")
             
             # 准备插入数据
+            logger.info(f"[ClickHouse] 📝 准备插入数据...")
             all_rows = []
             column_names = [
                 "event_time", "symbol", "price_change", "price_change_percent", "side",
@@ -582,6 +625,7 @@ class ClickHouseDatabase:
             ]
             
             # 添加涨幅榜数据（带排名）
+            logger.info(f"[ClickHouse] 📊 处理涨幅榜数据...")
             for idx, row in enumerate(gainers, 1):
                 row_data = [
                     _to_datetime(row.get("event_time")),
@@ -607,8 +651,10 @@ class ClickHouseDatabase:
                     idx  # rank
                 ]
                 all_rows.append(row_data)
+            logger.info(f"[ClickHouse] ✅ 涨幅榜数据处理完成，共 {len(gainers)} 条")
             
             # 添加跌幅榜数据（带排名）
+            logger.info(f"[ClickHouse] 📊 处理跌幅榜数据...")
             for idx, row in enumerate(losers, 1):
                 row_data = [
                     _to_datetime(row.get("event_time")),
@@ -634,19 +680,48 @@ class ClickHouseDatabase:
                     idx  # rank
                 ]
                 all_rows.append(row_data)
+            logger.info(f"[ClickHouse] ✅ 跌幅榜数据处理完成，共 {len(losers)} 条")
             
-            # 插入新数据
             if all_rows:
-                self.insert_rows(self.leaderboard_table, all_rows, column_names)
+                logger.info(f"[ClickHouse] 💾 准备写入数据到ClickHouse，共 {len(all_rows)} 条...")
+                
+                # 使用更高效的方式更新数据：
+                # 1. 创建临时表
+                temp_table = f"{self.leaderboard_table}_temp"
+                logger.debug(f"[ClickHouse] 创建临时表: {temp_table}")
+                
+                # 2. 创建临时表结构与原表相同
+                create_temp_sql = f"CREATE TABLE IF NOT EXISTS {temp_table} AS {self.leaderboard_table} ENGINE = Memory"
+                self.command(create_temp_sql)
+                logger.debug(f"[ClickHouse] 临时表创建完成: {temp_table}")
+                
+                # 3. 插入数据到临时表
+                logger.info(f"[ClickHouse] 📥 插入数据到临时表...")
+                self.insert_rows(temp_table, all_rows, column_names)
+                logger.info(f"[ClickHouse] ✅ 数据插入完成，共 {len(all_rows)} 条")
+                
+                # 4. 原子替换原表数据
+                # 使用 REPLACE TABLE 原子操作，避免数据空窗期
+                logger.info(f"[ClickHouse] 🔄 原子替换原表数据...")
+                replace_sql = f"REPLACE TABLE {self.leaderboard_table} WITH {temp_table}"
+                self.command(replace_sql)
+                logger.info(f"[ClickHouse] ✅ 原表数据替换完成")
+                
+                # 5. 删除临时表
+                logger.debug(f"[ClickHouse] 删除临时表: {temp_table}")
+                drop_temp_sql = f"DROP TABLE IF EXISTS {temp_table}"
+                self.command(drop_temp_sql)
+                logger.debug(f"[ClickHouse] 临时表删除完成: {temp_table}")
+                
                 logger.info(
-                    "[ClickHouse] Synced leaderboard: %d gainers, %d losers",
+                    "[ClickHouse] 🎉 涨跌幅榜同步完成: %d 涨幅, %d 跌幅",
                     len(gainers), len(losers)
                 )
             else:
-                logger.warning("[ClickHouse] No leaderboard data to sync")
+                logger.warning("[ClickHouse] ⚠️  没有涨跌幅榜数据可同步")
                 
         except Exception as exc:
-            logger.error("[ClickHouse] Failed to sync leaderboard: %s", exc, exc_info=True)
+            logger.error("[ClickHouse] ❌ 涨跌幅榜同步失败: %s", exc, exc_info=True)
 
     def get_leaderboard(self, limit: int = 10) -> Dict[str, List[Dict]]:
         """Get leaderboard data from futures_leaderboard table.
