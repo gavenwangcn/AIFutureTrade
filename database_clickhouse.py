@@ -123,6 +123,76 @@ class ClickHouseDatabase:
             prepared_rows.append([normalized.get(name) for name in column_names])
 
         self.insert_rows(self.market_ticker_table, prepared_rows, column_names)
+        
+    def upsert_market_tickers(self, rows: Iterable[Dict[str, Any]]) -> None:
+        """Update or insert market tickers. If symbol exists, update it, otherwise insert.
+        
+        Args:
+            rows: Iterable of ticker dictionaries
+        """
+        if not rows:
+            return
+            
+        # Filter rows to only include symbols ending with "USDT"
+        usdt_rows = [row for row in rows if row.get("symbol", "").endswith("USDT")]
+        if not usdt_rows:
+            logger.debug("[ClickHouse] No USDT symbols to upsert")
+            return
+            
+        column_names = [
+            "event_time",
+            "symbol",
+            "price_change",
+            "price_change_percent",
+            "side",
+            "change_percent_text",
+            "average_price",
+            "last_price",
+            "last_trade_volume",
+            "open_price",
+            "high_price",
+            "low_price",
+            "base_volume",
+            "quote_volume",
+            "stats_open_time",
+            "stats_close_time",
+            "first_trade_id",
+            "last_trade_id",
+            "trade_count",
+        ]
+
+        prepared_rows: List[List[Any]] = []
+        symbols_to_upsert = []
+        
+        for row in usdt_rows:
+            normalized = dict(row)
+            normalized["event_time"] = _to_datetime(normalized.get("event_time"))
+            normalized["stats_open_time"] = _to_datetime(normalized.get("stats_open_time"))
+            normalized["stats_close_time"] = _to_datetime(normalized.get("stats_close_time"))
+            percent = normalized.get("price_change_percent")
+            normalized.setdefault("side", _derive_side(percent))
+            normalized.setdefault("change_percent_text", _format_percent_text(percent))
+            prepared_rows.append([normalized.get(name) for name in column_names])
+            symbols_to_upsert.append(normalized.get("symbol"))
+        
+        if not prepared_rows:
+            return
+        
+        # For ClickHouse, the most efficient way to upsert is to delete existing rows first, then insert new ones
+        # This is more efficient than UPDATE for MergeTree tables
+        if symbols_to_upsert:
+            # Delete existing rows with the same symbols
+            symbols_str = "', '" .join(symbols_to_upsert)
+            delete_query = f"ALTER TABLE {self.market_ticker_table} DELETE WHERE symbol IN ('{symbols_str}')"
+            try:
+                self.command(delete_query)
+                logger.debug("[ClickHouse] Deleted existing rows for symbols: %s", symbols_to_upsert)
+            except Exception as e:
+                logger.warning("[ClickHouse] Failed to delete existing rows: %s", e)
+        
+        # Insert new rows
+        self.insert_rows(self.market_ticker_table, prepared_rows, column_names)
+        logger.debug("[ClickHouse] Upserted %s rows into %s", len(prepared_rows), self.market_ticker_table)
 
     # ------------------------------------------------------------------
     # Leaderboard helpers
