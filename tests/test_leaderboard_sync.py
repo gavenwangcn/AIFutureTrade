@@ -131,30 +131,44 @@ def _check_leaderboard_sync_functionality(db: ClickHouseDatabase) -> None:
     
     db.insert_market_tickers(test_tickers)
     
-    # Start the sync thread
-    start_clickhouse_leaderboard_sync()
+    # Start the sync thread with a larger time window to ensure test data is captured
+    # We use a 60-second window to make sure our test data is included
+    from app import clickhouse_leaderboard_thread, clickhouse_leaderboard_running
+    from app import start_clickhouse_leaderboard_sync, stop_clickhouse_leaderboard_sync
+    from app import clickhouse_leaderboard_stop_event
+    import config as app_config
     
-    # Wait a bit for the sync to happen (with a timeout)
-    timeout = time.time() + 10  # 10 seconds timeout
-    synced = False
-    while time.time() < timeout:
-        # Check that data was synced to leaderboard table
-        try:
-            result = db._client.query(f"SELECT count() FROM {db.leaderboard_table}")
-            count = result.result_rows[0][0]
-            if count > 0:
-                synced = True
-                break
-        except Exception:
-            pass  # Ignore exceptions during polling
-        time.sleep(0.5)
+    # Temporarily modify the time window for testing
+    original_time_window = getattr(app_config, 'CLICKHOUSE_LEADERBOARD_TIME_WINDOW', 5)
+    app_config.CLICKHOUSE_LEADERBOARD_TIME_WINDOW = 60  # Use 60 seconds for testing
     
-    # Stop the thread
-    stop_clickhouse_leaderboard_sync()
-    time.sleep(0.1)  # Give time for thread to stop
-    
-    # Verify that sync happened
-    assert synced, "Leaderboard table should have data after sync within timeout"
+    try:
+        start_clickhouse_leaderboard_sync()
+        
+        # Wait a bit for the sync to happen (with a timeout)
+        timeout = time.time() + 10  # 10 seconds timeout
+        synced = False
+        while time.time() < timeout:
+            # Check that data was synced to leaderboard table
+            try:
+                result = db._client.query(f"SELECT count() FROM {db.leaderboard_table}")
+                count = result.result_rows[0][0]
+                if count > 0:
+                    synced = True
+                    break
+            except Exception:
+                pass  # Ignore exceptions during polling
+            time.sleep(0.5)
+        
+        # Stop the thread
+        stop_clickhouse_leaderboard_sync()
+        time.sleep(0.1)  # Give time for thread to stop
+        
+        # Verify that sync happened
+        assert synced, "Leaderboard table should have data after sync within timeout"
+    finally:
+        # Restore original time window
+        app_config.CLICKHOUSE_LEADERBOARD_TIME_WINDOW = original_time_window
 
 
 def _check_leaderboard_sync_stop_functionality() -> None:
