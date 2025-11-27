@@ -325,13 +325,13 @@ def _clickhouse_leaderboard_loop():
     
     # 获取配置参数，带默认值
     sync_interval = getattr(app_config, 'CLICKHOUSE_LEADERBOARD_SYNC_INTERVAL', 2)
-    time_window = getattr(app_config, 'CLICKHOUSE_LEADERBOARD_TIME_WINDOW', 5)
+    time_window = getattr(app_config, 'CLICKHOUSE_LEADERBOARD_TIME_WINDOW', 5)  # 已废弃，保留以兼容
     top_n = getattr(app_config, 'CLICKHOUSE_LEADERBOARD_TOP_N', 10)
     
     # 记录配置信息
     logger.info(f"[ClickHouse Leaderboard Worker-{thread_id}] 配置信息:")
     logger.info(f"[ClickHouse Leaderboard Worker-{thread_id}]   同步间隔: {sync_interval} 秒")
-    logger.info(f"[ClickHouse Leaderboard Worker-{thread_id}]   时间窗口: {time_window} 秒")
+    logger.info(f"[ClickHouse Leaderboard Worker-{thread_id}]   查询范围: 所有数据（已移除时间窗口限制）")
     logger.info(f"[ClickHouse Leaderboard Worker-{thread_id}]   前N名数量: {top_n}")
     
     # 确保等待时间至少为1秒
@@ -347,6 +347,40 @@ def _clickhouse_leaderboard_loop():
         logger.error(f"[ClickHouse Leaderboard Worker-{thread_id}] ❌ 初始化ClickHouse连接失败: {exc}")
         logger.error(f"[ClickHouse Leaderboard Worker-{thread_id}] ❌ 涨跌幅榜同步线程将退出")
         return
+    
+    # 立即执行第一次同步（启动时立即刷新数据）
+    logger.info(f"[ClickHouse Leaderboard Worker-{thread_id}] 🚀 启动时立即执行第一次同步...")
+    cycle_count = 0
+    cycle_count += 1
+    cycle_start_time = datetime.now()
+    
+    logger.info(f"[ClickHouse Leaderboard Worker-{thread_id}] [循环 #{cycle_count}] 🚀 开始同步...")
+    logger.info(f"[ClickHouse Leaderboard Worker-{thread_id}] [循环 #{cycle_count}] 同步时间: {cycle_start_time.strftime('%Y-%m-%d %H:%M:%S')}")
+    
+    try:
+        # 执行同步逻辑
+        logger.debug(f"[ClickHouse Leaderboard Worker-{thread_id}] [循环 #{cycle_count}] 调用db.sync_leaderboard()")
+        db.sync_leaderboard(
+            time_window_seconds=time_window,
+            top_n=top_n
+        )
+        
+        # 计算同步耗时
+        cycle_duration = (datetime.now() - cycle_start_time).total_seconds()
+        logger.info(
+            f"[ClickHouse Leaderboard Worker-{thread_id}] [循环 #{cycle_count}] ✅ 同步完成, 耗时: {cycle_duration:.3f} 秒"
+        )
+        logger.info(f"[ClickHouse Leaderboard Worker-{thread_id}] [循环 #{cycle_count}] ✅ 启动时首次同步成功")
+    except Exception as exc:
+        # 处理同步失败的情况
+        cycle_duration = (datetime.now() - cycle_start_time).total_seconds()
+        logger.error(
+            f"[ClickHouse Leaderboard Worker-{thread_id}] [循环 #{cycle_count}] ❌ 启动时首次同步失败: {exc}, 耗时: {cycle_duration:.3f} 秒"
+        )
+        # 记录详细的错误堆栈
+        import traceback
+        error_stack = traceback.format_exc()
+        logger.error(f"[ClickHouse Leaderboard Worker-{thread_id}] [循环 #{cycle_count}] ❌ 错误堆栈: {error_stack}")
     
     # 主循环：定期执行同步任务
     logger.info(f"[ClickHouse Leaderboard Worker-{thread_id}] 进入主同步循环")
