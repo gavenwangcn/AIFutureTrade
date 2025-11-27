@@ -319,9 +319,12 @@ class ClickHouseDatabase:
         
         优化逻辑：
         1. 不再删除同一symbol的所有旧数据，而是增量插入
-        2. 根据配置的时间间隔（如15分钟），判断是否需要插入新数据
-        3. 对于每个symbol，如果距离上次插入时间超过间隔，则插入新数据
-        4. 这样可以保留历史数据，用于UTC8转换
+        2. 根据配置的时间间隔（默认30分钟），基于stats_close_time判断是否需要插入新数据
+        3. 对于每个symbol，如果距离上次插入的stats_close_time超过间隔，则插入新数据
+        4. 这样可以保留历史数据，用于UTC8转换，同时避免数据过于密集
+        
+        重要：使用stats_close_time（24小时滚动窗口的结束时间）来判断间隔，
+        而不是ingestion_time，确保同一symbol的数据间隔至少30分钟。
         
         Args:
             rows: Iterable of ticker dictionaries
@@ -335,9 +338,9 @@ class ClickHouseDatabase:
             logger.debug("[ClickHouse] No USDT symbols to upsert")
             return
         
-        # 获取配置的插入间隔（分钟）
+        # 获取配置的插入间隔（分钟，默认30分钟）
         import config as app_config
-        insert_interval_minutes = getattr(app_config, 'MARKET_TICKER_INSERT_INTERVAL_MINUTES', 15)
+        insert_interval_minutes = getattr(app_config, 'MARKET_TICKER_INSERT_INTERVAL_MINUTES', 30)
         insert_interval_seconds = insert_interval_minutes * 60
         
         column_names = [
@@ -381,11 +384,12 @@ class ClickHouseDatabase:
             if not symbol or not stats_close_time:
                 continue
             
-            # 检查是否需要插入：查询该symbol最近一次插入的时间
+            # 检查是否需要插入：查询该symbol最近一次插入的stats_close_time
+            # 使用stats_close_time判断，确保同一symbol的数据间隔至少30分钟
             should_insert = True
             try:
                 query = f"""
-                SELECT MAX(stats_close_time) as last_time
+                SELECT MAX(stats_close_time) as last_stats_close_time
                 FROM {self.market_ticker_table}
                 WHERE symbol = '{symbol}'
                 """
@@ -395,24 +399,42 @@ class ClickHouseDatabase:
                 
                 result = self._with_connection(_execute_query)
                 if result.result_rows and result.result_rows[0][0]:
-                    last_time = result.result_rows[0][0]
-                    if isinstance(last_time, datetime):
-                        if last_time.tzinfo is None:
-                            last_time = last_time.replace(tzinfo=timezone.utc)
+                    last_stats_close_time = result.result_rows[0][0]
+                    if isinstance(last_stats_close_time, datetime):
+                        if last_stats_close_time.tzinfo is None:
+                            last_stats_close_time = last_stats_close_time.replace(tzinfo=timezone.utc)
                     else:
-                        last_time = _to_datetime(last_time)
+                        last_stats_close_time = _to_datetime(last_stats_close_time)
                     
-                    if last_time and stats_close_time:
-                        time_diff = (stats_close_time - last_time).total_seconds()
-                        # 如果距离上次插入时间小于间隔，则跳过
+                    if last_stats_close_time and stats_close_time:
+                        # 计算当前stats_close_time与上次stats_close_time的时间差
+                        time_diff = (stats_close_time - last_stats_close_time).total_seconds()
+                        
+                        # 如果时间差小于间隔（30分钟），则跳过插入
                         if time_diff < insert_interval_seconds:
                             should_insert = False
-                            logger.debug(
-                                "[ClickHouse] Skip insert for %s: time_diff=%.1fs < interval=%ds",
-                                symbol, time_diff, insert_interval_seconds
+                            logger.info(
+                                "[ClickHouse] ⏭️  跳过插入 %s: stats_close_time间隔=%.1f分钟 < 要求间隔=%d分钟 "
+                                "(当前: %s, 上次: %s)",
+                                symbol, 
+                                time_diff / 60.0, 
+                                insert_interval_minutes,
+                                stats_close_time.strftime('%Y-%m-%d %H:%M:%S') if stats_close_time else 'N/A',
+                                last_stats_close_time.strftime('%Y-%m-%d %H:%M:%S') if last_stats_close_time else 'N/A'
                             )
+                        else:
+                            logger.debug(
+                                "[ClickHouse] ✅ 允许插入 %s: stats_close_time间隔=%.1f分钟 >= 要求间隔=%d分钟",
+                                symbol, time_diff / 60.0, insert_interval_minutes
+                            )
+                else:
+                    # 如果没有历史数据，允许插入
+                    logger.debug("[ClickHouse] ✅ 允许插入 %s: 首次插入该symbol", symbol)
             except Exception as e:
-                logger.warning("[ClickHouse] Failed to check last insert time for %s: %s", symbol, e)
+                logger.warning(
+                    "[ClickHouse] ⚠️  查询失败，仍插入数据（避免丢失）: symbol=%s, error=%s", 
+                    symbol, e
+                )
                 # 如果查询失败，仍然插入（避免丢失数据）
             
             if should_insert:

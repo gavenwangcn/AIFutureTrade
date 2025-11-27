@@ -17,7 +17,7 @@ import asyncio
 import logging
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone, timedelta, date
 from typing import Any, Dict, List, Optional, Set, Tuple
 from collections import defaultdict
 
@@ -80,7 +80,7 @@ class UTC8TickerProcessor:
         self.db.command(ddl)
         logger.info(f"[UTC8 Processor] 确保目标表存在: {self.target_table}")
     
-    def get_utc8_period(self, dt: datetime) -> Tuple[datetime, datetime, str]:
+    def get_utc8_period(self, dt: datetime) -> Tuple[datetime, datetime, date]:
         """
         根据时间戳计算所属的UTC 8点周期
         
@@ -92,10 +92,10 @@ class UTC8TickerProcessor:
             dt: 时间戳（UTC时间）
             
         Returns:
-            (period_start, period_end, utc8_date_str)
+            (period_start, period_end, utc8_date)
             - period_start: UTC 8点周期的开始时间（UTC 8:00:00）
             - period_end: UTC 8点周期的结束时间（下一个UTC 8:00:00 - 1秒）
-            - utc8_date_str: UTC 8点日期字符串（YYYY-MM-DD），基于UTC 8时区的日期
+            - utc8_date: UTC 8点日期对象（date类型），基于UTC 8时区的日期
         """
         # 转换为UTC 8时区
         dt_utc8 = dt.astimezone(UTC8_OFFSET)
@@ -110,8 +110,6 @@ class UTC8TickerProcessor:
             # 在UTC 8点之后，属于当天的UTC 8点周期
             utc8_date = dt_utc8.date()
         
-        utc8_date_str = utc8_date.strftime('%Y-%m-%d')
-        
         # 计算UTC 8点周期的开始时间（UTC 8:00:00）
         period_start_utc8 = datetime.combine(utc8_date, datetime.min.time().replace(hour=8))
         period_start = period_start_utc8.replace(tzinfo=UTC8_OFFSET).astimezone(timezone.utc)
@@ -120,7 +118,7 @@ class UTC8TickerProcessor:
         period_end_utc8 = period_start_utc8 + timedelta(days=1) - timedelta(seconds=1)
         period_end = period_end_utc8.replace(tzinfo=UTC8_OFFSET).astimezone(timezone.utc)
         
-        return period_start, period_end, utc8_date_str
+        return period_start, period_end, utc8_date
     
     def query_source_data(
         self, 
@@ -257,14 +255,14 @@ class UTC8TickerProcessor:
                     row = row_info['data']
                     
                     # 计算UTC 8点周期
-                    period_start, period_end, utc8_date_str = self.get_utc8_period(stats_close_dt)
+                    period_start, period_end, utc8_date = self.get_utc8_period(stats_close_dt)
                     
-                    # 分组键：(utc8_date, symbol)
-                    group_key = (utc8_date_str, symbol)
+                    # 分组键：(utc8_date, symbol) - 使用date对象
+                    group_key = (utc8_date, symbol)
                     
                     if group_key not in grouped_data:
                         grouped_data[group_key] = {
-                            'utc8_date': utc8_date_str,
+                            'utc8_date': utc8_date,
                             'utc8_period_start': period_start,
                             'utc8_period_end': period_end,
                             'period_end_data': row,  # 周期结束时的数据
@@ -425,9 +423,11 @@ class UTC8TickerProcessor:
             logger.info(f"[UTC8 Processor] 准备删除 {len(date_symbol_pairs)} 个(utc8_date, symbol)组合的旧数据...")
             for utc8_date, symbol in date_symbol_pairs:
                 try:
+                    # 将date对象转换为字符串用于SQL查询
+                    utc8_date_str = utc8_date.strftime('%Y-%m-%d') if hasattr(utc8_date, 'strftime') else str(utc8_date)
                     delete_sql = f"""
                     ALTER TABLE {self.target_table}
-                    DELETE WHERE utc8_date = '{utc8_date}' AND symbol = '{symbol}'
+                    DELETE WHERE utc8_date = '{utc8_date_str}' AND symbol = '{symbol}'
                     """
                     self.db.command(delete_sql)
                 except Exception as e:
@@ -448,8 +448,24 @@ class UTC8TickerProcessor:
         prepared_rows = []
         for row in utc8_rows:
             try:
+                # 确保utc8_date是date对象
+                utc8_date = row.get('utc8_date')
+                if isinstance(utc8_date, str):
+                    # 如果是字符串，转换为date对象
+                    utc8_date = datetime.strptime(utc8_date, '%Y-%m-%d').date()
+                elif isinstance(utc8_date, datetime):
+                    # 如果是datetime对象，提取date部分
+                    utc8_date = utc8_date.date()
+                elif not isinstance(utc8_date, date):
+                    # 如果既不是字符串也不是date对象，尝试转换
+                    if hasattr(utc8_date, 'date'):
+                        utc8_date = utc8_date.date()
+                    else:
+                        logger.warning(f"[UTC8 Processor] 无法转换utc8_date: {utc8_date}, type={type(utc8_date)}")
+                        continue
+                
                 row_data = [
-                    row.get('utc8_date'),
+                    utc8_date,  # 使用转换后的date对象
                     row.get('utc8_period_start'),
                     row.get('utc8_period_end'),
                     row.get('symbol', ''),
