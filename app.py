@@ -1,3 +1,7 @@
+# This must be at the very top of the file, before any other imports
+import eventlet
+eventlet.monkey_patch()
+
 """
 Flask application for AI Futures Trading System
 """
@@ -1001,22 +1005,25 @@ if __name__ == '__main__':
     logger.info("=" * 60)
     logger.info("Initializing database...")
 
-    db.init_db()
+    # Initialize database and trading engines within application context
+    with app.app_context():
+        db.init_db()
+        logger.info("Database initialized")
+        logger.info("Initializing trading engines...")
+        init_trading_engines()
+        logger.info("Trading engines initialized")
 
-    logger.info("Database initialized")
-    logger.info("Initializing trading engines...")
-
-    init_trading_engines()
-
+    # Start background threads
     if auto_trading:
         trading_thread = threading.Thread(target=trading_loop, daemon=True)
         trading_thread.start()
         logger.info("Auto-trading enabled")
 
+    # Start leaderboard workers
     start_leaderboard_worker()
     logger.info("Leaderboard worker started")
     
-    # 启动 ClickHouse 涨幅榜同步（默认自动执行）
+    # Start ClickHouse leaderboard sync
     start_clickhouse_leaderboard_sync()
     logger.info("ClickHouse leaderboard sync started")
 
