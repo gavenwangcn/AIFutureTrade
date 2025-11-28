@@ -269,13 +269,81 @@ class ClickHouseDatabase:
             first_trade_id UInt64,
             last_trade_id UInt64,
             trade_count UInt64,
-            ingestion_time DateTime DEFAULT now()
+            ingestion_time DateTime DEFAULT now(),
+            update_price_date DateTime
         )
         ENGINE = MergeTree
         ORDER BY (symbol, stats_close_time, event_time)
         """
         self.command(ddl)
         logger.info("[ClickHouse] Ensured table %s exists", self.market_ticker_table)
+        
+        # 如果表已存在，添加新字段（如果不存在）
+        try:
+            # 检查字段是否存在，如果不存在则添加
+            check_column_sql = f"""
+            SELECT name FROM system.columns 
+            WHERE database = '{app_config.CLICKHOUSE_DATABASE}' 
+            AND table = '{self.market_ticker_table}' 
+            AND name = 'update_price_date'
+            """
+            def _check_column(client):
+                result = client.query(check_column_sql)
+                return len(result.result_rows) > 0
+            
+            column_exists = self._with_connection(_check_column)
+            
+            if not column_exists:
+                add_column_sql = f"""
+                ALTER TABLE {self.market_ticker_table} 
+                ADD COLUMN IF NOT EXISTS update_price_date DateTime
+                """
+                self.command(add_column_sql)
+                logger.info("[ClickHouse] Added update_price_date column to %s", self.market_ticker_table)
+        except Exception as e:
+            logger.warning("[ClickHouse] Failed to add update_price_date column (may already exist): %s", e)
+
+    def get_existing_symbol_data(self, symbols: List[str]) -> Dict[str, Dict[str, Any]]:
+        """查询现有symbol的数据，返回字典 {symbol: {open_price: ..., ...}}"""
+        if not symbols:
+            return {}
+        
+        try:
+            symbols_str = "', '".join(symbols)
+            query = f"""
+            SELECT 
+                symbol,
+                open_price,
+                last_price
+            FROM (
+                SELECT 
+                    *,
+                    ROW_NUMBER() OVER (PARTITION BY symbol ORDER BY event_time DESC) as rn
+                FROM {self.market_ticker_table}
+                WHERE symbol IN ('{symbols_str}')
+            ) AS ranked
+            WHERE rn = 1
+            """
+            
+            def _execute_query(client):
+                return client.query(query)
+            
+            result = self._with_connection(_execute_query)
+            
+            symbol_data = {}
+            for row in result.result_rows:
+                symbol = row[0]
+                open_price = row[1] if row[1] is not None else None
+                last_price = row[2] if row[2] is not None else None
+                symbol_data[symbol] = {
+                    "open_price": open_price,
+                    "last_price": last_price
+                }
+            
+            return symbol_data
+        except Exception as e:
+            logger.warning("[ClickHouse] Failed to get existing symbol data: %s", e)
+            return {}
 
     def insert_market_tickers(self, rows: Iterable[Dict[str, Any]]) -> None:
         column_names = [
@@ -298,6 +366,7 @@ class ClickHouseDatabase:
             "first_trade_id",
             "last_trade_id",
             "trade_count",
+            "update_price_date",
         ]
 
         prepared_rows: List[List[Any]] = []
@@ -306,15 +375,23 @@ class ClickHouseDatabase:
             normalized["event_time"] = _to_datetime(normalized.get("event_time"))
             normalized["stats_open_time"] = _to_datetime(normalized.get("stats_open_time"))
             normalized["stats_close_time"] = _to_datetime(normalized.get("stats_close_time"))
-            percent = normalized.get("price_change_percent")
-            normalized.setdefault("side", _derive_side(percent))
-            normalized.setdefault("change_percent_text", _format_percent_text(percent))
+            # 第一次插入时，这些字段都为空
+            normalized.setdefault("price_change", None)
+            normalized.setdefault("price_change_percent", None)
+            normalized.setdefault("side", None)
+            normalized.setdefault("change_percent_text", None)
+            normalized.setdefault("open_price", None)
+            normalized.setdefault("update_price_date", None)
             prepared_rows.append([normalized.get(name) for name in column_names])
 
         self.insert_rows(self.market_ticker_table, prepared_rows, column_names)
         
     def upsert_market_tickers(self, rows: Iterable[Dict[str, Any]]) -> None:
         """Update or insert market tickers. If symbol exists, update it, otherwise insert.
+        
+        处理逻辑：
+        1. 第一次插入时，price_change, price_change_percent, side, change_percent_text, open_price 都为空
+        2. 更新时，如果 open_price 有值，则通过 last_price 和 open_price 计算涨跌幅相关字段
         
         Args:
             rows: Iterable of ticker dictionaries
@@ -348,6 +425,7 @@ class ClickHouseDatabase:
             "first_trade_id",
             "last_trade_id",
             "trade_count",
+            "update_price_date",
         ]
 
         # 处理数据：对于同一批数据中的重复symbol，只保留最新的一条（基于stats_close_time）
@@ -358,9 +436,6 @@ class ClickHouseDatabase:
             normalized["event_time"] = _to_datetime(normalized.get("event_time"))
             normalized["stats_open_time"] = _to_datetime(normalized.get("stats_open_time"))
             normalized["stats_close_time"] = _to_datetime(normalized.get("stats_close_time"))
-            percent = normalized.get("price_change_percent")
-            normalized.setdefault("side", _derive_side(percent))
-            normalized.setdefault("change_percent_text", _format_percent_text(percent))
             
             symbol = normalized.get("symbol")
             if not symbol:
@@ -383,13 +458,68 @@ class ClickHouseDatabase:
         if not symbol_data_map:
             return
         
+        # 查询现有symbol的数据，获取open_price
+        symbols_to_upsert = list(symbol_data_map.keys())
+        existing_data = self.get_existing_symbol_data(symbols_to_upsert)
+        
         # 准备插入数据（每个symbol只有一条最新数据）
         prepared_rows: List[List[Any]] = []
-        symbols_to_upsert = []
         
         for symbol, normalized in symbol_data_map.items():
+            # 获取当前报文的last_price
+            try:
+                current_last_price = float(normalized.get("last_price", 0))
+            except (TypeError, ValueError):
+                current_last_price = 0.0
+            
+            # 判断是插入还是更新
+            existing_symbol_data = existing_data.get(symbol)
+            existing_open_price = existing_symbol_data.get("open_price") if existing_symbol_data else None
+            
+            # 如果是更新且open_price有值，则计算涨跌幅相关字段
+            if existing_open_price is not None and existing_open_price != 0 and current_last_price != 0:
+                try:
+                    existing_open_price_float = float(existing_open_price)
+                    current_last_price_float = float(current_last_price)
+                    
+                    # 计算 price_change = last_price - open_price
+                    price_change = current_last_price_float - existing_open_price_float
+                    
+                    # 计算 price_change_percent = (last_price - open_price) / open_price * 100
+                    price_change_percent = (price_change / existing_open_price_float) * 100
+                    
+                    # 根据正负设置 side（0为正，即gainer）
+                    side = "gainer" if price_change_percent >= 0 else "loser"
+                    
+                    # 设置 change_percent_text = price_change_percent + "%"
+                    change_percent_text = f"{price_change_percent:.2f}%"
+                    
+                    # 保持原有的open_price，不更新
+                    normalized["price_change"] = price_change
+                    normalized["price_change_percent"] = price_change_percent
+                    normalized["side"] = side
+                    normalized["change_percent_text"] = change_percent_text
+                    normalized["open_price"] = existing_open_price_float
+                    normalized["update_price_date"] = None  # 只有开盘价异步刷新服务才会更新这个字段
+                except (TypeError, ValueError) as e:
+                    logger.warning("[ClickHouse] Failed to calculate price change for symbol %s: %s", symbol, e)
+                    # 计算失败时，设置为空
+                    normalized["price_change"] = None
+                    normalized["price_change_percent"] = None
+                    normalized["side"] = None
+                    normalized["change_percent_text"] = None
+                    normalized["open_price"] = existing_open_price_float
+                    normalized["update_price_date"] = None
+            else:
+                # 第一次插入，这些字段都为空
+                normalized["price_change"] = None
+                normalized["price_change_percent"] = None
+                normalized["side"] = None
+                normalized["change_percent_text"] = None
+                normalized["open_price"] = None
+                normalized["update_price_date"] = None
+            
             prepared_rows.append([normalized.get(name) for name in column_names])
-            symbols_to_upsert.append(symbol)
         
         # For ClickHouse, the most efficient way to upsert is to delete existing rows first, then insert new ones
         # This is more efficient than UPDATE for MergeTree tables
@@ -411,6 +541,168 @@ class ClickHouseDatabase:
             "[ClickHouse] Upserted %s rows into %s (ensured no duplicate symbols)",
             len(prepared_rows), self.market_ticker_table
         )
+    
+    def get_symbols_needing_price_refresh(self) -> List[str]:
+        """获取需要刷新价格的symbol列表
+        
+        查询条件：
+        - update_price_date 为空
+        - 或者 update_price_date 不为当天
+        
+        Returns:
+            需要刷新价格的symbol列表（去重）
+        """
+        try:
+            query = f"""
+            SELECT DISTINCT symbol
+            FROM {self.market_ticker_table}
+            WHERE symbol != ''
+            AND (
+                update_price_date IS NULL
+                OR toDate(update_price_date) != today()
+            )
+            ORDER BY symbol
+            """
+            
+            def _execute_query(client):
+                return client.query(query)
+            
+            result = self._with_connection(_execute_query)
+            symbols = [row[0] for row in result.result_rows if row[0]]
+            logger.debug("[ClickHouse] Found %s symbols needing price refresh", len(symbols))
+            return symbols
+        except Exception as e:
+            logger.error("[ClickHouse] Failed to get symbols needing price refresh: %s", e, exc_info=True)
+            return []
+    
+    def update_open_price(self, symbol: str, open_price: float, update_date: datetime) -> bool:
+        """更新指定symbol的open_price和update_price_date
+        
+        Args:
+            symbol: 交易对符号
+            open_price: 开盘价（昨天的日K线收盘价）
+            update_date: 更新日期（当天时间）
+            
+        Returns:
+            是否更新成功
+        """
+        try:
+            # 使用ALTER TABLE UPDATE来更新数据
+            # 由于ClickHouse的UPDATE操作是异步的，我们使用DELETE + INSERT的方式更可靠
+            # 但为了性能，我们可以使用ALTER TABLE UPDATE
+            
+            # 先查询当前数据
+            query = f"""
+            SELECT 
+                event_time,
+                symbol,
+                price_change,
+                price_change_percent,
+                side,
+                change_percent_text,
+                average_price,
+                last_price,
+                last_trade_volume,
+                high_price,
+                low_price,
+                base_volume,
+                quote_volume,
+                stats_open_time,
+                stats_close_time,
+                first_trade_id,
+                last_trade_id,
+                trade_count,
+                ingestion_time
+            FROM (
+                SELECT 
+                    *,
+                    ROW_NUMBER() OVER (PARTITION BY symbol ORDER BY event_time DESC) as rn
+                FROM {self.market_ticker_table}
+                WHERE symbol = '{symbol}'
+            ) AS ranked
+            WHERE rn = 1
+            """
+            
+            def _execute_query(client):
+                return client.query(query)
+            
+            result = self._with_connection(_execute_query)
+            
+            if not result.result_rows:
+                logger.warning("[ClickHouse] Symbol %s not found for price update", symbol)
+                return False
+            
+            # 获取最新的一条数据
+            row = result.result_rows[0]
+            
+            # 准备更新后的数据
+            column_names = [
+                "event_time", "symbol", "price_change", "price_change_percent", "side",
+                "change_percent_text", "average_price", "last_price", "last_trade_volume",
+                "open_price", "high_price", "low_price", "base_volume", "quote_volume",
+                "stats_open_time", "stats_close_time", "first_trade_id", "last_trade_id",
+                "trade_count", "ingestion_time", "update_price_date"
+            ]
+            
+            # 重新计算涨跌幅相关字段（基于新的open_price和当前的last_price）
+            # 查询返回的列顺序：event_time, symbol, price_change, price_change_percent, side,
+            # change_percent_text, average_price, last_price, last_trade_volume, high_price,
+            # low_price, base_volume, quote_volume, stats_open_time, stats_close_time,
+            # first_trade_id, last_trade_id, trade_count, ingestion_time
+            last_price = float(row[7]) if row[7] is not None else 0.0  # last_price在索引7
+            new_open_price = float(open_price)
+            
+            if new_open_price != 0 and last_price != 0:
+                price_change = last_price - new_open_price
+                price_change_percent = (price_change / new_open_price) * 100
+                side = "gainer" if price_change_percent >= 0 else "loser"
+                change_percent_text = f"{price_change_percent:.2f}%"
+            else:
+                price_change = None
+                price_change_percent = None
+                side = None
+                change_percent_text = None
+            
+            # 构建更新后的行数据
+            updated_row = [
+                _to_datetime(row[0]),  # event_time
+                row[1],  # symbol
+                price_change,  # price_change (重新计算)
+                price_change_percent,  # price_change_percent (重新计算)
+                side,  # side (重新计算)
+                change_percent_text,  # change_percent_text (重新计算)
+                float(row[6]) if row[6] is not None else 0.0,  # average_price (索引6)
+                float(row[7]) if row[7] is not None else 0.0,  # last_price (索引7)
+                float(row[8]) if row[8] is not None else 0.0,  # last_trade_volume (索引8)
+                new_open_price,  # open_price (更新)
+                float(row[9]) if row[9] is not None else 0.0,  # high_price (索引9)
+                float(row[10]) if row[10] is not None else 0.0,  # low_price (索引10)
+                float(row[11]) if row[11] is not None else 0.0,  # base_volume (索引11)
+                float(row[12]) if row[12] is not None else 0.0,  # quote_volume (索引12)
+                _to_datetime(row[13]),  # stats_open_time (索引13)
+                _to_datetime(row[14]),  # stats_close_time (索引14)
+                int(row[15]) if row[15] is not None else 0,  # first_trade_id (索引15)
+                int(row[16]) if row[16] is not None else 0,  # last_trade_id (索引16)
+                int(row[17]) if row[17] is not None else 0,  # trade_count (索引17)
+                _to_datetime(row[18]) if row[18] else datetime.now(timezone.utc),  # ingestion_time (索引18)
+                update_date  # update_price_date (更新)
+            ]
+            
+            # 删除旧数据并插入新数据（ClickHouse的UPDATE方式）
+            delete_query = f"ALTER TABLE {self.market_ticker_table} DELETE WHERE symbol = '{symbol}'"
+            try:
+                self.command(delete_query)
+            except Exception as e:
+                logger.warning("[ClickHouse] Failed to delete old row for %s: %s", symbol, e)
+            
+            # 插入更新后的数据
+            self.insert_rows(self.market_ticker_table, [updated_row], column_names)
+            logger.debug("[ClickHouse] Updated open_price for symbol %s: %s", symbol, new_open_price)
+            return True
+            
+        except Exception as e:
+            logger.error("[ClickHouse] Failed to update open_price for symbol %s: %s", symbol, e, exc_info=True)
+            return False
     
     # ------------------------------------------------------------------
     # Leaderboard helpers

@@ -39,18 +39,21 @@ def _to_int(value: Any) -> int:
 
 
 def _normalize_ticker(raw: Dict[str, Any]) -> Dict[str, Any]:
-    percent = raw.get("P")
+    """标准化ticker数据，不再从报文中解析 price_change, price_change_percent, side, change_percent_text, open_price
+    这些字段将在 upsert_market_tickers 中根据业务逻辑计算
+    """
     return {
         "event_time": _to_int(raw.get("E")),
         "symbol": raw.get("s", ""),
-        "price_change": _to_float(raw.get("p")),
-        "price_change_percent": _to_float(percent),
-        "side": "loser" if _to_float(percent) < 0 else "gainer",
-        "change_percent_text": f"{_to_float(percent):.2f}%",
+        # 不再从报文中解析这些字段，将在 upsert_market_tickers 中计算
+        # "price_change": _to_float(raw.get("p")),
+        # "price_change_percent": _to_float(percent),
+        # "side": "loser" if _to_float(percent) < 0 else "gainer",
+        # "change_percent_text": f"{_to_float(percent):.2f}%",
         "average_price": _to_float(raw.get("w")),
         "last_price": _to_float(raw.get("c")),
         "last_trade_volume": _to_float(raw.get("Q")),
-        "open_price": _to_float(raw.get("o")),
+        # "open_price": _to_float(raw.get("o")),  # 不再从报文中解析
         "high_price": _to_float(raw.get("h")),
         "low_price": _to_float(raw.get("l")),
         "base_volume": _to_float(raw.get("v")),
