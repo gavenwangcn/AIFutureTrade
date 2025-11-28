@@ -270,7 +270,7 @@ class ClickHouseDatabase:
             last_trade_id UInt64,
             trade_count UInt64,
             ingestion_time DateTime DEFAULT now(),
-            update_price_date DateTime
+            update_price_date Nullable(DateTime)
         )
         ENGINE = MergeTree
         ORDER BY (symbol, stats_close_time, event_time)
@@ -278,30 +278,44 @@ class ClickHouseDatabase:
         self.command(ddl)
         logger.info("[ClickHouse] Ensured table %s exists", self.market_ticker_table)
         
-        # 如果表已存在，添加新字段（如果不存在）
+        # 如果表已存在，添加新字段（如果不存在）或修改字段类型为Nullable
         try:
-            # 检查字段是否存在，如果不存在则添加
+            # 检查字段是否存在
             check_column_sql = f"""
-            SELECT name FROM system.columns 
+            SELECT name, type FROM system.columns 
             WHERE database = '{app_config.CLICKHOUSE_DATABASE}' 
             AND table = '{self.market_ticker_table}' 
             AND name = 'update_price_date'
             """
             def _check_column(client):
                 result = client.query(check_column_sql)
-                return len(result.result_rows) > 0
+                if len(result.result_rows) > 0:
+                    return result.result_rows[0][1]  # 返回字段类型
+                return None
             
-            column_exists = self._with_connection(_check_column)
+            column_type = self._with_connection(_check_column)
             
-            if not column_exists:
+            if column_type is None:
+                # 字段不存在，添加为Nullable
                 add_column_sql = f"""
                 ALTER TABLE {self.market_ticker_table} 
-                ADD COLUMN IF NOT EXISTS update_price_date DateTime
+                ADD COLUMN IF NOT EXISTS update_price_date Nullable(DateTime)
                 """
                 self.command(add_column_sql)
                 logger.info("[ClickHouse] Added update_price_date column to %s", self.market_ticker_table)
+            elif 'Nullable' not in str(column_type):
+                # 字段存在但不是Nullable，尝试修改为Nullable
+                try:
+                    modify_column_sql = f"""
+                    ALTER TABLE {self.market_ticker_table} 
+                    MODIFY COLUMN update_price_date Nullable(DateTime)
+                    """
+                    self.command(modify_column_sql)
+                    logger.info("[ClickHouse] Modified update_price_date column to Nullable(DateTime)")
+                except Exception as modify_exc:
+                    logger.warning("[ClickHouse] Failed to modify update_price_date to Nullable (may not be supported): %s", modify_exc)
         except Exception as e:
-            logger.warning("[ClickHouse] Failed to add update_price_date column (may already exist): %s", e)
+            logger.warning("[ClickHouse] Failed to check/modify update_price_date column: %s", e)
 
     def get_existing_symbol_data(self, symbols: List[str]) -> Dict[str, Dict[str, Any]]:
         """查询现有symbol的数据，返回字典 {symbol: {open_price: ..., update_price_date: ..., ...}}
@@ -587,6 +601,11 @@ class ClickHouseDatabase:
                 if normalized.get(field) is None:
                     normalized[field] = ""
             
+            # DateTime字段处理：update_price_date可以为None（因为表结构中是Nullable(DateTime)）
+            # 其他DateTime字段（event_time, stats_open_time, stats_close_time）已经在前面通过_to_datetime处理过了
+            # 确保update_price_date如果是None，保持为None（Nullable字段允许None）
+            # 不需要额外处理，因为Nullable(DateTime)字段可以接受None
+            
             prepared_rows.append([normalized.get(name) for name in column_names])
         
         # For ClickHouse, the most efficient way to upsert is to delete existing rows first, then insert new ones
@@ -726,34 +745,36 @@ class ClickHouseDatabase:
                 side = "gainer" if price_change_percent >= 0 else "loser"
                 change_percent_text = f"{price_change_percent:.2f}%"
             else:
-                price_change = None
-                price_change_percent = None
-                side = None
-                change_percent_text = None
+                # 如果无法计算，使用默认值（不能为None）
+                price_change = 0.0
+                price_change_percent = 0.0
+                side = ""
+                change_percent_text = ""
             
             # 构建更新后的行数据
+            # 确保所有字段都有正确的类型和默认值
             updated_row = [
-                _to_datetime(row[0]),  # event_time
-                row[1],  # symbol
-                price_change,  # price_change (重新计算)
-                price_change_percent,  # price_change_percent (重新计算)
-                side,  # side (重新计算)
-                change_percent_text,  # change_percent_text (重新计算)
-                float(row[6]) if row[6] is not None else 0.0,  # average_price (索引6)
-                float(row[7]) if row[7] is not None else 0.0,  # last_price (索引7)
-                float(row[8]) if row[8] is not None else 0.0,  # last_trade_volume (索引8)
-                new_open_price,  # open_price (更新)
-                float(row[9]) if row[9] is not None else 0.0,  # high_price (索引9)
-                float(row[10]) if row[10] is not None else 0.0,  # low_price (索引10)
-                float(row[11]) if row[11] is not None else 0.0,  # base_volume (索引11)
-                float(row[12]) if row[12] is not None else 0.0,  # quote_volume (索引12)
-                _to_datetime(row[13]),  # stats_open_time (索引13)
-                _to_datetime(row[14]),  # stats_close_time (索引14)
-                int(row[15]) if row[15] is not None else 0,  # first_trade_id (索引15)
-                int(row[16]) if row[16] is not None else 0,  # last_trade_id (索引16)
-                int(row[17]) if row[17] is not None else 0,  # trade_count (索引17)
-                _to_datetime(row[18]) if row[18] else datetime.now(timezone.utc),  # ingestion_time (索引18)
-                update_date  # update_price_date (更新)
+                _to_datetime(row[0]),  # event_time (DateTime)
+                _normalize_field_value(row[1], "String", "symbol"),  # symbol (String)
+                _normalize_field_value(price_change, "Float64", "price_change"),  # price_change (Float64)
+                _normalize_field_value(price_change_percent, "Float64", "price_change_percent"),  # price_change_percent (Float64)
+                _normalize_field_value(side, "String", "side"),  # side (String)
+                _normalize_field_value(change_percent_text, "String", "change_percent_text"),  # change_percent_text (String)
+                _normalize_field_value(row[6], "Float64", "average_price"),  # average_price (Float64)
+                _normalize_field_value(row[7], "Float64", "last_price"),  # last_price (Float64)
+                _normalize_field_value(row[8], "Float64", "last_trade_volume"),  # last_trade_volume (Float64)
+                _normalize_field_value(new_open_price, "Float64", "open_price"),  # open_price (Float64)
+                _normalize_field_value(row[9], "Float64", "high_price"),  # high_price (Float64)
+                _normalize_field_value(row[10], "Float64", "low_price"),  # low_price (Float64)
+                _normalize_field_value(row[11], "Float64", "base_volume"),  # base_volume (Float64)
+                _normalize_field_value(row[12], "Float64", "quote_volume"),  # quote_volume (Float64)
+                _to_datetime(row[13]),  # stats_open_time (DateTime)
+                _to_datetime(row[14]),  # stats_close_time (DateTime)
+                _normalize_field_value(row[15], "UInt64", "first_trade_id"),  # first_trade_id (UInt64)
+                _normalize_field_value(row[16], "UInt64", "last_trade_id"),  # last_trade_id (UInt64)
+                _normalize_field_value(row[17], "UInt64", "trade_count"),  # trade_count (UInt64)
+                _to_datetime(row[18]) if row[18] else datetime.now(timezone.utc),  # ingestion_time (DateTime)
+                update_date  # update_price_date (Nullable(DateTime)) - 可以为None
             ]
             
             # 删除旧数据并插入新数据（ClickHouse的UPDATE方式）
@@ -1011,27 +1032,27 @@ class ClickHouseDatabase:
             logger.info(f"[ClickHouse] 📊 处理涨幅榜数据...")
             for idx, row in enumerate(gainers, 1):
                 row_data = [
-                    _to_datetime(row.get("event_time")),
-                    row.get("symbol", ""),
-                    float(row.get("price_change", 0)),
-                    float(row.get("price_change_percent", 0)),
-                    row.get("side", "gainer"),
-                    row.get("change_percent_text", ""),
-                    float(row.get("average_price", 0)),
-                    float(row.get("last_price", 0)),
-                    float(row.get("last_trade_volume", 0)),
-                    float(row.get("open_price", 0)),
-                    float(row.get("high_price", 0)),
-                    float(row.get("low_price", 0)),
-                    float(row.get("base_volume", 0)),
-                    float(row.get("quote_volume", 0)),
-                    _to_datetime(row.get("stats_open_time")),
-                    _to_datetime(row.get("stats_close_time")),
-                    int(row.get("first_trade_id", 0)),
-                    int(row.get("last_trade_id", 0)),
-                    int(row.get("trade_count", 0)),
-                    _to_datetime(row.get("ingestion_time")),
-                    idx  # rank
+                    _to_datetime(row.get("event_time")),  # DateTime
+                    _normalize_field_value(row.get("symbol"), "String", "symbol"),  # String
+                    _normalize_field_value(row.get("price_change"), "Float64", "price_change"),  # Float64
+                    _normalize_field_value(row.get("price_change_percent"), "Float64", "price_change_percent"),  # Float64
+                    _normalize_field_value(row.get("side", "gainer"), "String", "side"),  # String
+                    _normalize_field_value(row.get("change_percent_text"), "String", "change_percent_text"),  # String
+                    _normalize_field_value(row.get("average_price"), "Float64", "average_price"),  # Float64
+                    _normalize_field_value(row.get("last_price"), "Float64", "last_price"),  # Float64
+                    _normalize_field_value(row.get("last_trade_volume"), "Float64", "last_trade_volume"),  # Float64
+                    _normalize_field_value(row.get("open_price"), "Float64", "open_price"),  # Float64
+                    _normalize_field_value(row.get("high_price"), "Float64", "high_price"),  # Float64
+                    _normalize_field_value(row.get("low_price"), "Float64", "low_price"),  # Float64
+                    _normalize_field_value(row.get("base_volume"), "Float64", "base_volume"),  # Float64
+                    _normalize_field_value(row.get("quote_volume"), "Float64", "quote_volume"),  # Float64
+                    _to_datetime(row.get("stats_open_time")),  # DateTime
+                    _to_datetime(row.get("stats_close_time")),  # DateTime
+                    _normalize_field_value(row.get("first_trade_id"), "UInt64", "first_trade_id"),  # UInt64
+                    _normalize_field_value(row.get("last_trade_id"), "UInt64", "last_trade_id"),  # UInt64
+                    _normalize_field_value(row.get("trade_count"), "UInt64", "trade_count"),  # UInt64
+                    _to_datetime(row.get("ingestion_time")),  # DateTime
+                    _normalize_field_value(idx, "UInt8", "rank")  # UInt8 (rank)
                 ]
                 all_rows.append(row_data)
             logger.info(f"[ClickHouse] ✅ 涨幅榜数据处理完成，共 {len(gainers)} 条")
@@ -1040,27 +1061,27 @@ class ClickHouseDatabase:
             logger.info(f"[ClickHouse] 📊 处理跌幅榜数据...")
             for idx, row in enumerate(losers, 1):
                 row_data = [
-                    _to_datetime(row.get("event_time")),
-                    row.get("symbol", ""),
-                    float(row.get("price_change", 0)),
-                    float(row.get("price_change_percent", 0)),
-                    row.get("side", "loser"),
-                    row.get("change_percent_text", ""),
-                    float(row.get("average_price", 0)),
-                    float(row.get("last_price", 0)),
-                    float(row.get("last_trade_volume", 0)),
-                    float(row.get("open_price", 0)),
-                    float(row.get("high_price", 0)),
-                    float(row.get("low_price", 0)),
-                    float(row.get("base_volume", 0)),
-                    float(row.get("quote_volume", 0)),
-                    _to_datetime(row.get("stats_open_time")),
-                    _to_datetime(row.get("stats_close_time")),
-                    int(row.get("first_trade_id", 0)),
-                    int(row.get("last_trade_id", 0)),
-                    int(row.get("trade_count", 0)),
-                    _to_datetime(row.get("ingestion_time")),
-                    idx  # rank
+                    _to_datetime(row.get("event_time")),  # DateTime
+                    _normalize_field_value(row.get("symbol"), "String", "symbol"),  # String
+                    _normalize_field_value(row.get("price_change"), "Float64", "price_change"),  # Float64
+                    _normalize_field_value(row.get("price_change_percent"), "Float64", "price_change_percent"),  # Float64
+                    _normalize_field_value(row.get("side", "loser"), "String", "side"),  # String
+                    _normalize_field_value(row.get("change_percent_text"), "String", "change_percent_text"),  # String
+                    _normalize_field_value(row.get("average_price"), "Float64", "average_price"),  # Float64
+                    _normalize_field_value(row.get("last_price"), "Float64", "last_price"),  # Float64
+                    _normalize_field_value(row.get("last_trade_volume"), "Float64", "last_trade_volume"),  # Float64
+                    _normalize_field_value(row.get("open_price"), "Float64", "open_price"),  # Float64
+                    _normalize_field_value(row.get("high_price"), "Float64", "high_price"),  # Float64
+                    _normalize_field_value(row.get("low_price"), "Float64", "low_price"),  # Float64
+                    _normalize_field_value(row.get("base_volume"), "Float64", "base_volume"),  # Float64
+                    _normalize_field_value(row.get("quote_volume"), "Float64", "quote_volume"),  # Float64
+                    _to_datetime(row.get("stats_open_time")),  # DateTime
+                    _to_datetime(row.get("stats_close_time")),  # DateTime
+                    _normalize_field_value(row.get("first_trade_id"), "UInt64", "first_trade_id"),  # UInt64
+                    _normalize_field_value(row.get("last_trade_id"), "UInt64", "last_trade_id"),  # UInt64
+                    _normalize_field_value(row.get("trade_count"), "UInt64", "trade_count"),  # UInt64
+                    _to_datetime(row.get("ingestion_time")),  # DateTime
+                    _normalize_field_value(idx, "UInt8", "rank")  # UInt8 (rank)
                 ]
                 all_rows.append(row_data)
             logger.info(f"[ClickHouse] ✅ 跌幅榜数据处理完成，共 {len(losers)} 条")
@@ -1373,8 +1394,14 @@ class ClickHouseDatabase:
 
 
 def _to_datetime(value: Any) -> datetime:
+    """将值转换为datetime对象，如果无法转换则返回当前UTC时间
+    
+    注意：此函数永远不会返回None，确保DateTime字段始终有值
+    """
     if isinstance(value, datetime):
         return value
+    if value is None:
+        return datetime.now(timezone.utc)
     try:
         numeric = float(value)
     except (TypeError, ValueError):
@@ -1382,6 +1409,61 @@ def _to_datetime(value: Any) -> datetime:
 
     seconds = numeric / 1000.0
     return datetime.fromtimestamp(seconds, tz=timezone.utc)
+
+
+def _normalize_field_value(value: Any, field_type: str, field_name: str = "") -> Any:
+    """规范化字段值，确保符合ClickHouse字段类型要求
+    
+    Args:
+        value: 原始值
+        field_type: 字段类型 ('Float64', 'UInt64', 'UInt8', 'String', 'DateTime')
+        field_name: 字段名称（用于日志）
+        
+    Returns:
+        规范化后的值，确保不为None（除非字段类型允许）
+    """
+    if value is None:
+        if field_type == 'Float64':
+            return 0.0
+        elif field_type == 'UInt64':
+            return 0
+        elif field_type == 'UInt8':
+            return 0
+        elif field_type == 'String':
+            return ""
+        elif field_type == 'DateTime':
+            return datetime.now(timezone.utc)
+        else:
+            logger.warning(f"[ClickHouse] Unknown field type {field_type} for field {field_name}, using None")
+            return None
+    
+    # 类型转换
+    try:
+        if field_type == 'Float64':
+            return float(value)
+        elif field_type == 'UInt64':
+            return int(value)
+        elif field_type == 'UInt8':
+            return int(value)
+        elif field_type == 'String':
+            return str(value) if value else ""
+        elif field_type == 'DateTime':
+            return _to_datetime(value)
+    except (TypeError, ValueError) as e:
+        logger.warning(f"[ClickHouse] Failed to convert field {field_name} ({field_type}): {e}, using default")
+        # 返回默认值
+        if field_type == 'Float64':
+            return 0.0
+        elif field_type == 'UInt64':
+            return 0
+        elif field_type == 'UInt8':
+            return 0
+        elif field_type == 'String':
+            return ""
+        elif field_type == 'DateTime':
+            return datetime.now(timezone.utc)
+    
+    return value
 
 
 def _derive_side(percent: Any) -> str:
@@ -1398,117 +1480,3 @@ def _format_percent_text(percent: Any) -> str:
     except (TypeError, ValueError):
         value = 0.0
     return f"{value:.2f}%"
-    def ensure_market_klines_table(self) -> None:
-        """Create the market_klines table if it does not exist."""
-        ddl = f"""
-        CREATE TABLE IF NOT EXISTS {self.market_klines_table} (
-            event_time DateTime,
-            symbol String,
-            contract_type String,
-            kline_start_time DateTime,
-            kline_end_time DateTime,
-            interval String,
-            first_trade_id UInt64,
-            last_trade_id UInt64,
-            open_price Float64,
-            close_price Float64,
-            high_price Float64,
-            low_price Float64,
-            base_volume Float64,
-            trade_count UInt64,
-            is_closed UInt8,
-            quote_volume Float64,
-            taker_buy_base_volume Float64,
-            taker_buy_quote_volume Float64,
-            create_time DateTime DEFAULT now()
-        )
-        ENGINE = MergeTree
-        ORDER BY (symbol, interval, kline_end_time, event_time)
-        TTL kline_end_time + INTERVAL 2 DAY
-        """
-        self.command(ddl)
-        logger.info("[ClickHouse] Ensured table %s exists", self.market_klines_table)
-
-    def insert_market_klines(self, rows: Iterable[Dict[str, Any]]) -> None:
-        """Insert kline data into market_klines table."""
-        if not rows:
-            return
-        
-        column_names = [
-            "event_time",
-            "symbol",
-            "contract_type",
-            "kline_start_time",
-            "kline_end_time",
-            "interval",
-            "first_trade_id",
-            "last_trade_id",
-            "open_price",
-            "close_price",
-            "high_price",
-            "low_price",
-            "base_volume",
-            "trade_count",
-            "is_closed",
-            "quote_volume",
-            "taker_buy_base_volume",
-            "taker_buy_quote_volume",
-        ]
-        
-        # Convert rows to list of tuples
-        insert_rows = []
-        for row in rows:
-            insert_rows.append((
-                row.get("event_time"),
-                row.get("symbol", ""),
-                row.get("contract_type", ""),
-                row.get("kline_start_time"),
-                row.get("kline_end_time"),
-                row.get("interval", ""),
-                row.get("first_trade_id", 0),
-                row.get("last_trade_id", 0),
-                row.get("open_price", 0.0),
-                row.get("close_price", 0.0),
-                row.get("high_price", 0.0),
-                row.get("low_price", 0.0),
-                row.get("base_volume", 0.0),
-                row.get("trade_count", 0),
-                row.get("is_closed", 0),
-                row.get("quote_volume", 0.0),
-                row.get("taker_buy_base_volume", 0.0),
-                row.get("taker_buy_quote_volume", 0.0),
-            ))
-        
-        self.insert_rows(self.market_klines_table, insert_rows, column_names)
-        logger.debug("[ClickHouse] Inserted %s kline rows into %s", len(insert_rows), self.market_klines_table)
-
-    def get_leaderboard_symbols(self) -> List[str]:
-        """Get distinct symbols from leaderboard table."""
-        try:
-            query = f"""
-            SELECT DISTINCT symbol
-            FROM {self.leaderboard_table}
-            WHERE symbol != ''
-            """
-            result = self._client.query(query)
-            symbols = [row[0] for row in result.result_rows if row[0]]
-            return symbols
-        except Exception as exc:
-            logger.error("[ClickHouse] Failed to get leaderboard symbols: %s", exc, exc_info=True)
-            return []
-
-    def cleanup_old_klines(self, days: int = 2) -> int:
-        """Delete klines older than specified days. Returns number of deleted rows."""
-        try:
-            # ClickHouse DELETE requires mutations, use ALTER TABLE DELETE
-            delete_sql = f"""
-            ALTER TABLE {self.market_klines_table}
-            DELETE WHERE kline_end_time < now() - INTERVAL {days} DAY
-            """
-            self.command(delete_sql)
-            # Note: ClickHouse DELETE is asynchronous, we can't get exact count immediately
-            logger.info("[ClickHouse] Initiated cleanup of klines older than %s days", days)
-            return 0  # ClickHouse doesn't return count for async DELETE
-        except Exception as exc:
-            logger.error("[ClickHouse] Failed to cleanup old klines: %s", exc, exc_info=True)
-            return 0
