@@ -117,12 +117,12 @@ async def refresh_price_for_symbol(
         )
         
         if success:
-            logger.debug(
-                "[PriceRefresh] Symbol %s: Updated open_price to %s (yesterday close)",
-                symbol, yesterday_close_price
+            logger.info(
+                "[PriceRefresh] ✅ Symbol %s: 成功更新open_price = %s (昨天收盘价), update_price_date = %s",
+                symbol, yesterday_close_price, today_start.strftime('%Y-%m-%d %H:%M:%S UTC')
             )
         else:
-            logger.warning("[PriceRefresh] Symbol %s: Failed to update open_price", symbol)
+            logger.warning("[PriceRefresh] ❌ Symbol %s: 更新open_price失败", symbol)
         
         return success
         
@@ -155,7 +155,7 @@ async def refresh_prices_batch(
         刷新结果统计
     """
     if not symbols:
-        logger.info("[PriceRefresh] No symbols to refresh")
+        logger.info("[PriceRefresh] [批量刷新] 没有需要刷新的symbol")
         return {"total": 0, "success": 0, "failed": 0}
     
     total = len(symbols)
@@ -163,7 +163,7 @@ async def refresh_prices_batch(
     failed_count = 0
     
     logger.info(
-        "[PriceRefresh] Starting batch refresh: %s symbols, max %s per minute",
+        "[PriceRefresh] [批量刷新] 开始批量刷新: 总计 %s 个symbol, 每分钟最多处理 %s 个",
         total, max_per_minute
     )
     
@@ -171,10 +171,20 @@ async def refresh_prices_batch(
     batch_size = max_per_minute
     batches = [symbols[i:i + batch_size] for i in range(0, total, batch_size)]
     
+    logger.info(
+        "[PriceRefresh] [批量刷新] 将分为 %s 个批次处理，每批最多 %s 个symbol",
+        len(batches), batch_size
+    )
+    
     for batch_idx, batch in enumerate(batches, 1):
+        batch_start_time = datetime.now(timezone.utc)
         logger.info(
-            "[PriceRefresh] Processing batch %s/%s: %s symbols",
+            "[PriceRefresh] [批量刷新] [批次 %s/%s] 开始处理，包含 %s 个symbol",
             batch_idx, len(batches), len(batch)
+        )
+        logger.info(
+            "[PriceRefresh] [批量刷新] [批次 %s/%s] Symbol列表（前5个）: %s",
+            batch_idx, len(batches), batch[:5]
         )
         
         # 并发刷新当前批次的所有symbol
@@ -186,29 +196,52 @@ async def refresh_prices_batch(
         results = await asyncio.gather(*tasks, return_exceptions=True)
         
         # 统计结果
+        batch_success = 0
+        batch_failed = 0
         for symbol, result in zip(batch, results):
             if isinstance(result, Exception):
                 logger.error(
-                    "[PriceRefresh] Symbol %s: Exception: %s",
-                    symbol, result
+                    "[PriceRefresh] [批量刷新] [批次 %s/%s] Symbol %s: 异常 - %s",
+                    batch_idx, len(batches), symbol, result
                 )
                 failed_count += 1
+                batch_failed += 1
             elif result:
                 success_count += 1
+                batch_success += 1
             else:
                 failed_count += 1
+                batch_failed += 1
+        
+        batch_duration = (datetime.now(timezone.utc) - batch_start_time).total_seconds()
+        logger.info(
+            "[PriceRefresh] [批量刷新] [批次 %s/%s] 处理完成，耗时: %.2f秒",
+            batch_idx, len(batches), batch_duration
+        )
+        logger.info(
+            "[PriceRefresh] [批量刷新] [批次 %s/%s] 批次统计: 成功 %s, 失败 %s, 总计 %s",
+            batch_idx, len(batches), batch_success, batch_failed, len(batch)
+        )
+        logger.info(
+            "[PriceRefresh] [批量刷新] [批次 %s/%s] 累计统计: 成功 %s, 失败 %s, 总计 %s",
+            batch_idx, len(batches), success_count, failed_count, success_count + failed_count
+        )
         
         # 如果不是最后一批，等待1分钟再处理下一批
         if batch_idx < len(batches):
             logger.info(
-                "[PriceRefresh] Batch %s completed. Waiting 60 seconds before next batch...",
-                batch_idx
+                "[PriceRefresh] [批量刷新] [批次 %s/%s] 等待60秒后处理下一批次...",
+                batch_idx, len(batches)
             )
             await asyncio.sleep(60)
     
     logger.info(
-        "[PriceRefresh] Batch refresh completed: %s total, %s success, %s failed",
-        total, success_count, failed_count
+        "[PriceRefresh] [批量刷新] ✅ 批量刷新完成: 总计 %s, 成功 %s (%.2f%%), 失败 %s (%.2f%%)",
+        total,
+        success_count,
+        (success_count / total * 100) if total > 0 else 0,
+        failed_count,
+        (failed_count / total * 100) if total > 0 else 0
     )
     
     return {
@@ -220,8 +253,15 @@ async def refresh_prices_batch(
 
 async def refresh_all_prices() -> None:
     """刷新所有需要更新价格的symbol"""
+    refresh_start_time = datetime.now(timezone.utc)
+    logger.info("=" * 80)
+    logger.info("[PriceRefresh] ========== 开始执行异步价格刷新任务 ==========")
+    logger.info("[PriceRefresh] 执行时间: %s", refresh_start_time.strftime('%Y-%m-%d %H:%M:%S UTC'))
+    logger.info("=" * 80)
+    
     try:
         # 初始化数据库和币安客户端
+        logger.info("[PriceRefresh] [步骤1] 初始化数据库和币安客户端...")
         db = ClickHouseDatabase(auto_init_tables=False)
         
         binance_client = BinanceFuturesClient(
@@ -229,16 +269,27 @@ async def refresh_all_prices() -> None:
             api_secret=app_config.BINANCE_API_SECRET,
             quote_asset=getattr(app_config, 'FUTURES_QUOTE_ASSET', 'USDT')
         )
+        logger.info("[PriceRefresh] [步骤1] ✅ 数据库和币安客户端初始化完成")
         
         # 获取需要刷新的symbol列表
         # 使用asyncio.to_thread避免阻塞事件循环
+        logger.info("[PriceRefresh] [步骤2] 查询需要刷新价格的symbol列表...")
+        query_start_time = datetime.now(timezone.utc)
         symbols = await asyncio.to_thread(db.get_symbols_needing_price_refresh)
+        query_duration = (datetime.now(timezone.utc) - query_start_time).total_seconds()
         
         if not symbols:
-            logger.info("[PriceRefresh] No symbols need price refresh")
+            logger.info("[PriceRefresh] [步骤2] ⚠️  没有需要刷新价格的symbol")
+            logger.info("=" * 80)
+            logger.info("[PriceRefresh] ========== 价格刷新任务完成（无数据需要刷新） ==========")
+            logger.info("=" * 80)
             return
         
-        logger.info("[PriceRefresh] Found %s symbols needing price refresh", len(symbols))
+        logger.info(
+            "[PriceRefresh] [步骤2] ✅ 查询完成，耗时: %.2f秒，找到 %s 个需要刷新的symbol",
+            query_duration, len(symbols)
+        )
+        logger.info("[PriceRefresh] [步骤2] 需要刷新的symbol列表（前10个）: %s", symbols[:10])
         
         # 获取配置
         max_per_minute = getattr(
@@ -246,11 +297,18 @@ async def refresh_all_prices() -> None:
             'PRICE_REFRESH_MAX_PER_MINUTE',
             1000
         )
+        logger.info("[PriceRefresh] [步骤3] 配置参数: max_per_minute=%s", max_per_minute)
         
         # 当前日期（用于计算昨天）
         target_date = datetime.now(timezone.utc)
+        logger.info(
+            "[PriceRefresh] [步骤3] 目标日期: %s (将使用昨天的收盘价作为今天的open_price)",
+            target_date.strftime('%Y-%m-%d')
+        )
         
         # 执行批量刷新
+        logger.info("[PriceRefresh] [步骤4] 开始执行批量价格刷新...")
+        batch_start_time = datetime.now(timezone.utc)
         result = await refresh_prices_batch(
             binance_client=binance_client,
             db=db,
@@ -258,14 +316,37 @@ async def refresh_all_prices() -> None:
             target_date=target_date,
             max_per_minute=max_per_minute
         )
+        batch_duration = (datetime.now(timezone.utc) - batch_start_time).total_seconds()
         
-        logger.info(
-            "[PriceRefresh] Refresh completed: %s total, %s success, %s failed",
-            result["total"], result["success"], result["failed"]
-        )
+        # 计算总耗时
+        total_duration = (datetime.now(timezone.utc) - refresh_start_time).total_seconds()
+        
+        # 输出详细统计信息
+        logger.info("=" * 80)
+        logger.info("[PriceRefresh] ========== 异步价格刷新任务执行完成 ==========")
+        logger.info("[PriceRefresh] 执行时间: %s", refresh_start_time.strftime('%Y-%m-%d %H:%M:%S UTC'))
+        logger.info("[PriceRefresh] 完成时间: %s", datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC'))
+        logger.info("[PriceRefresh] 总耗时: %.2f秒 (%.2f分钟)", total_duration, total_duration / 60)
+        logger.info("[PriceRefresh] 批量刷新耗时: %.2f秒 (%.2f分钟)", batch_duration, batch_duration / 60)
+        logger.info("[PriceRefresh] 统计信息:")
+        logger.info("[PriceRefresh]   - 总计: %s 个symbol", result["total"])
+        logger.info("[PriceRefresh]   - 成功: %s 个symbol (%.2f%%)", 
+                   result["success"], 
+                   (result["success"] / result["total"] * 100) if result["total"] > 0 else 0)
+        logger.info("[PriceRefresh]   - 失败: %s 个symbol (%.2f%%)", 
+                   result["failed"], 
+                   (result["failed"] / result["total"] * 100) if result["total"] > 0 else 0)
+        logger.info("=" * 80)
         
     except Exception as e:
-        logger.error("[PriceRefresh] Error refreshing prices: %s", e, exc_info=True)
+        total_duration = (datetime.now(timezone.utc) - refresh_start_time).total_seconds()
+        logger.error("=" * 80)
+        logger.error("[PriceRefresh] ========== 异步价格刷新任务执行失败 ==========")
+        logger.error("[PriceRefresh] 执行时间: %s", refresh_start_time.strftime('%Y-%m-%d %H:%M:%S UTC'))
+        logger.error("[PriceRefresh] 失败时间: %s", datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC'))
+        logger.error("[PriceRefresh] 总耗时: %.2f秒", total_duration)
+        logger.error("[PriceRefresh] 错误信息: %s", e, exc_info=True)
+        logger.error("=" * 80)
 
 
 async def run_price_refresh_scheduler() -> None:
@@ -284,25 +365,62 @@ async def run_price_refresh_scheduler() -> None:
     # 解析执行间隔
     interval_seconds = parse_cron_interval(cron_expr)
     
-    logger.info(
-        "[PriceRefresh] Scheduler started with interval: %s seconds (%s), max_per_minute: %s",
-        interval_seconds,
-        cron_expr,
-        max_per_minute
-    )
+    logger.info("=" * 80)
+    logger.info("[PriceRefresh] ========== 价格刷新调度器启动 ==========")
+    logger.info("[PriceRefresh] 启动时间: %s", datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC'))
+    logger.info("[PriceRefresh] Cron表达式: %s", cron_expr)
+    logger.info("[PriceRefresh] 执行间隔: %s 秒 (%.2f 分钟)", interval_seconds, interval_seconds / 60)
+    logger.info("[PriceRefresh] 每分钟最多刷新: %s 个symbol", max_per_minute)
+    logger.info("=" * 80)
+    
+    execution_count = 0
     
     try:
         # 立即执行一次
+        execution_count += 1
+        logger.info(
+            "[PriceRefresh] [调度器] ========== 第 %s 次执行（启动时立即执行） ==========",
+            execution_count
+        )
         await refresh_all_prices()
+        logger.info(
+            "[PriceRefresh] [调度器] ✅ 第 %s 次执行完成",
+            execution_count
+        )
         
         # 定时执行
         while True:
+            next_execution_time = datetime.now(timezone.utc) + timedelta(seconds=interval_seconds)
+            logger.info(
+                "[PriceRefresh] [调度器] 等待 %s 秒后执行下一次刷新 (下次执行时间: %s)",
+                interval_seconds,
+                next_execution_time.strftime('%Y-%m-%d %H:%M:%S UTC')
+            )
             await asyncio.sleep(interval_seconds)
+            
+            execution_count += 1
+            logger.info(
+                "[PriceRefresh] [调度器] ========== 第 %s 次执行（定时执行） ==========",
+                execution_count
+            )
             await refresh_all_prices()
+            logger.info(
+                "[PriceRefresh] [调度器] ✅ 第 %s 次执行完成",
+                execution_count
+            )
     except KeyboardInterrupt:
-        logger.info("[PriceRefresh] Scheduler stopped by user")
+        logger.info("=" * 80)
+        logger.info("[PriceRefresh] [调度器] ========== 价格刷新调度器被用户停止 ==========")
+        logger.info("[PriceRefresh] [调度器] 总执行次数: %s", execution_count)
+        logger.info("[PriceRefresh] [调度器] 停止时间: %s", datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC'))
+        logger.info("=" * 80)
     except Exception as e:
-        logger.error("[PriceRefresh] Scheduler error: %s", e, exc_info=True)
+        logger.error("=" * 80)
+        logger.error("[PriceRefresh] [调度器] ========== 价格刷新调度器发生错误 ==========")
+        logger.error("[PriceRefresh] [调度器] 总执行次数: %s", execution_count)
+        logger.error("[PriceRefresh] [调度器] 错误时间: %s", datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC'))
+        logger.error("[PriceRefresh] [调度器] 错误信息: %s", e, exc_info=True)
+        logger.error("=" * 80)
 
 
 if __name__ == "__main__":

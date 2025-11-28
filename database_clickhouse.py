@@ -430,10 +430,33 @@ class ClickHouseDatabase:
                 if normalized.get(field) is None:
                     normalized[field] = ""
             
-            # DateTime字段可以为None
+            # DateTime字段处理：确保所有非Nullable的DateTime字段都不为None
+            # event_time, stats_open_time, stats_close_time 已经在前面通过_to_datetime处理过了
+            # ingestion_time 如果没有值，使用当前时间
+            # update_price_date 可以为None（因为表结构中是Nullable(DateTime)）
+            datetime_fields = ["event_time", "stats_open_time", "stats_close_time"]
+            for field in datetime_fields:
+                if normalized.get(field) is None:
+                    normalized[field] = datetime.now(timezone.utc)
+            
+            # ingestion_time 字段处理（如果有的话）
+            if "ingestion_time" in normalized and normalized.get("ingestion_time") is None:
+                normalized["ingestion_time"] = datetime.now(timezone.utc)
+            
+            # update_price_date 可以为None（Nullable字段）
             normalized.setdefault("update_price_date", None)
             
-            prepared_rows.append([normalized.get(name) for name in column_names])
+            # 准备行数据，确保所有字段都有值
+            row_data = []
+            for name in column_names:
+                value = normalized.get(name)
+                # 对于非Nullable的DateTime字段，确保不为None
+                if name in ["event_time", "stats_open_time", "stats_close_time", "ingestion_time"]:
+                    if value is None:
+                        value = datetime.now(timezone.utc)
+                row_data.append(value)
+            
+            prepared_rows.append(row_data)
 
         self.insert_rows(self.market_ticker_table, prepared_rows, column_names)
         
@@ -601,12 +624,30 @@ class ClickHouseDatabase:
                 if normalized.get(field) is None:
                     normalized[field] = ""
             
-            # DateTime字段处理：update_price_date可以为None（因为表结构中是Nullable(DateTime)）
-            # 其他DateTime字段（event_time, stats_open_time, stats_close_time）已经在前面通过_to_datetime处理过了
-            # 确保update_price_date如果是None，保持为None（Nullable字段允许None）
-            # 不需要额外处理，因为Nullable(DateTime)字段可以接受None
+            # DateTime字段处理：确保所有非Nullable的DateTime字段都不为None
+            # event_time, stats_open_time, stats_close_time 已经在前面通过_to_datetime处理过了
+            # ingestion_time 如果没有值，使用当前时间
+            # update_price_date 可以为None（因为表结构中是Nullable(DateTime)）
+            datetime_fields = ["event_time", "stats_open_time", "stats_close_time"]
+            for field in datetime_fields:
+                if normalized.get(field) is None:
+                    normalized[field] = datetime.now(timezone.utc)
             
-            prepared_rows.append([normalized.get(name) for name in column_names])
+            # ingestion_time 字段处理（如果有的话）
+            if "ingestion_time" in normalized and normalized.get("ingestion_time") is None:
+                normalized["ingestion_time"] = datetime.now(timezone.utc)
+            
+            # 准备行数据，确保所有字段都有值
+            row_data = []
+            for name in column_names:
+                value = normalized.get(name)
+                # 对于非Nullable的DateTime字段，确保不为None
+                if name in ["event_time", "stats_open_time", "stats_close_time", "ingestion_time"]:
+                    if value is None:
+                        value = datetime.now(timezone.utc)
+                row_data.append(value)
+            
+            prepared_rows.append(row_data)
         
         # For ClickHouse, the most efficient way to upsert is to delete existing rows first, then insert new ones
         # This is more efficient than UPDATE for MergeTree tables
@@ -861,15 +902,16 @@ class ClickHouseDatabase:
         logger.info(f"[ClickHouse] 📋 查询参数: side={side}, top_n={top_n} (已移除时间窗口限制)")
         
         # 构建查询SQL：去重，取每个symbol最新的event_time
+        # 重要：只查询side字段不为空字符串的数据（side=''表示价格异步刷新服务还没刷新，没有涨跌数据）
         if side:
             if side == 'gainer':
-                # 涨幅榜：查询price_change_percent>0的合约，按price_change_percent降序排序
-                where_clause = "price_change_percent > 0"
+                # 涨幅榜：查询price_change_percent>0且side不为空的合约，按price_change_percent降序排序
+                where_clause = "price_change_percent > 0 AND side != '' AND side IS NOT NULL"
                 order_by = "price_change_percent DESC"
                 logger.info(f"[ClickHouse] 📈 涨幅榜查询: {where_clause}, 排序: {order_by}")
             else:  # loser
-                # 跌幅榜：查询price_change_percent<0的合约，按price_change_percent升序排序（跌幅最大的排在前面）
-                where_clause = "price_change_percent < 0"
+                # 跌幅榜：查询price_change_percent<0且side不为空的合约，按price_change_percent升序排序（跌幅最大的排在前面）
+                where_clause = "price_change_percent < 0 AND side != '' AND side IS NOT NULL"
                 order_by = "price_change_percent ASC"
                 logger.info(f"[ClickHouse] 📉 跌幅榜查询: {where_clause}, 排序: {order_by}")
             
@@ -879,7 +921,7 @@ class ClickHouseDatabase:
                 symbol,
                 price_change,
                 price_change_percent,
-                '{side}' as side,
+                side,
                 change_percent_text,
                 average_price,
                 last_price,
@@ -907,7 +949,7 @@ class ClickHouseDatabase:
             LIMIT {top_n}
             """
         else:
-            # 查询所有，不区分涨跌
+            # 查询所有，不区分涨跌，但只查询side字段不为空的数据
             query = f"""
             SELECT 
                 event_time,
@@ -939,6 +981,7 @@ class ClickHouseDatabase:
                     *,
                     ROW_NUMBER() OVER (PARTITION BY symbol ORDER BY event_time DESC) as rn
                 FROM {self.market_ticker_table}
+                WHERE side != '' AND side IS NOT NULL
             ) AS ranked
             WHERE rn = 1
             LIMIT {top_n * 2}
@@ -1016,6 +1059,13 @@ class ClickHouseDatabase:
                 top_n=top_n
             )
             logger.info(f"[ClickHouse] ✅ 跌幅榜查询完成，共 {len(losers)} 条数据")
+            
+            # 重要：检查是否有有效数据（side字段不为空）
+            # 如果涨幅榜和跌幅榜都没有数据，说明价格异步刷新服务还没刷新，此时不应该执行同步
+            if not gainers and not losers:
+                logger.warning(f"[ClickHouse] ⚠️ 涨幅榜和跌幅榜都没有数据（side字段为空），跳过同步操作")
+                logger.warning(f"[ClickHouse] ⚠️ 这可能是因为价格异步刷新服务还没有刷新open_price，导致side字段为空字符串")
+                return
             
             # 准备插入数据
             logger.info(f"[ClickHouse] 📝 准备插入数据...")
