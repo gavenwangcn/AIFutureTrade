@@ -226,6 +226,32 @@ class ClickHouseDatabase:
             client.command(sql)
         
         self._with_connection(_execute_command)
+    
+    def _check_table_exists(self, table_name: str) -> bool:
+        """Check if a table exists in ClickHouse.
+        
+        Args:
+            table_name: The name of the table to check
+            
+        Returns:
+            True if the table exists, False otherwise
+        """
+        def _execute_check(client):
+            try:
+                # 查询系统表检查表是否存在
+                check_sql = f"""
+                SELECT count() 
+                FROM system.tables 
+                WHERE database = currentDatabase() 
+                AND name = '{table_name}'
+                """
+                result = client.query(check_sql)
+                return result.result_rows[0][0] > 0 if result.result_rows else False
+            except Exception as e:
+                logger.warning(f"[ClickHouse] 检查表是否存在时出错: {e}")
+                return False
+        
+        return self._with_connection(_execute_check)
 
     def insert_rows(
         self,
@@ -1055,15 +1081,16 @@ class ClickHouseDatabase:
         - 对每个交易对取最新的行情数据（去重）
         - 计算每个合约的涨跌幅
         - 筛选出涨幅前N名和跌幅前N名
-        - 使用安全的upsert方式更新futures_leaderboard表（DELETE + INSERT）
+        - 使用全量更新方式更新futures_leaderboard表（临时表 + REPLACE TABLE）
         
         执行流程：
-        1. 确保leaderboard表存在
+        1. 检查leaderboard表是否存在，不存在则创建
         2. 查询涨幅榜前N名（查询所有数据，按涨跌幅排序）
         3. 查询跌幅榜前N名（查询所有数据，按涨跌幅排序）
         4. 准备插入数据
-        5. 删除现有数据（按side和symbol）
-        6. 插入新数据
+        5. 创建临时表并插入数据
+        6. 使用REPLACE TABLE原子替换原表（全量更新）
+        7. 清理临时表
         
         Args:
             time_window_seconds: 已废弃，保留参数以兼容现有调用，不再使用时间窗口限制
@@ -1073,10 +1100,15 @@ class ClickHouseDatabase:
             logger.info(f"[ClickHouse] 🚀 开始涨跌幅榜同步...")
             logger.info(f"[ClickHouse] 📋 同步参数: top_n={top_n} (查询所有数据，不限制时间窗口)")
             
-            # 重要：确保leaderboard表存在
-            logger.info(f"[ClickHouse] 🔍 确保leaderboard表存在...")
-            self.ensure_leaderboard_table()
-            logger.info(f"[ClickHouse] ✅ leaderboard表已确保存在")
+            # 重要：检查表是否存在，不存在则创建
+            logger.info(f"[ClickHouse] 🔍 检查leaderboard表是否存在...")
+            table_exists = self._check_table_exists(self.leaderboard_table)
+            if not table_exists:
+                logger.info(f"[ClickHouse] 📋 leaderboard表不存在，创建表...")
+                self.ensure_leaderboard_table()
+                logger.info(f"[ClickHouse] ✅ leaderboard表创建完成")
+            else:
+                logger.info(f"[ClickHouse] ✅ leaderboard表已存在")
             
             # 查询涨幅榜前N名（查询所有数据，按涨跌幅排序）
             logger.info(f"[ClickHouse] 🔍 查询涨幅榜前{top_n}名（从所有数据中排序）...")
@@ -1195,22 +1227,94 @@ class ClickHouseDatabase:
             logger.info(f"[ClickHouse] ✅ 跌幅榜数据处理完成，共 {len(losers)} 条")
             
             if all_rows:
-                logger.info(f"[ClickHouse] 💾 准备写入数据到ClickHouse，共 {len(all_rows)} 条...")
+                logger.info(f"[ClickHouse] 💾 准备全量更新数据到ClickHouse，共 {len(all_rows)} 条...")
                 
-                # 使用锁防止并发执行
+                # 使用锁防止并发执行，避免表名冲突
                 with ClickHouseDatabase._sync_leaderboard_lock:
+                    # 使用时间戳生成唯一的临时表名，避免并发冲突
+                    timestamp = int(datetime.now().timestamp() * 1000)  # 毫秒级时间戳
+                    temp_table = f"{self.leaderboard_table}_temp_{timestamp}"
+                    
                     try:
-                        # 使用安全的upsert方式：先删除现有数据，再插入新数据
-                        # 这种方式避免了删表操作，更安全，也支持并发
-                        logger.info(f"[ClickHouse] 🗑️  删除现有leaderboard数据...")
-                        delete_sql = f"ALTER TABLE {self.leaderboard_table} DELETE WHERE 1=1"
-                        self.command(delete_sql)
-                        logger.info(f"[ClickHouse] ✅ 现有数据删除完成")
+                        # 1. 创建临时表（结构与原表相同）
+                        logger.info(f"[ClickHouse] 📋 创建临时表: {temp_table}")
+                        # 先获取原表的结构
+                        table_exists = self._check_table_exists(self.leaderboard_table)
+                        if table_exists:
+                            # 如果表存在，使用 AS 语法复制表结构
+                            create_temp_sql = f"""
+                            CREATE TABLE {temp_table}
+                            ENGINE = MergeTree
+                            ORDER BY (side, rank, symbol)
+                            AS {self.leaderboard_table}
+                            """
+                        else:
+                            # 如果表不存在，直接创建表（使用ensure_leaderboard_table的DDL）
+                            create_temp_sql = f"""
+                            CREATE TABLE {temp_table} (
+                                event_time DateTime,
+                                symbol String,
+                                price_change Float64,
+                                price_change_percent Float64,
+                                side String,
+                                change_percent_text String,
+                                average_price Float64,
+                                last_price Float64,
+                                last_trade_volume Float64,
+                                open_price Float64,
+                                high_price Float64,
+                                low_price Float64,
+                                base_volume Float64,
+                                quote_volume Float64,
+                                stats_open_time DateTime,
+                                stats_close_time DateTime,
+                                first_trade_id UInt64,
+                                last_trade_id UInt64,
+                                trade_count UInt64,
+                                ingestion_time DateTime DEFAULT now(),
+                                rank UInt8
+                            )
+                            ENGINE = MergeTree
+                            ORDER BY (side, rank, symbol)
+                            """
+                        self.command(create_temp_sql)
+                        logger.info(f"[ClickHouse] ✅ 临时表创建完成")
                         
-                        # 插入新数据
-                        logger.info(f"[ClickHouse] 📥 插入新数据到leaderboard表...")
-                        self.insert_rows(self.leaderboard_table, all_rows, column_names)
+                        # 2. 插入数据到临时表
+                        logger.info(f"[ClickHouse] 📥 插入数据到临时表...")
+                        self.insert_rows(temp_table, all_rows, column_names)
                         logger.info(f"[ClickHouse] ✅ 数据插入完成，共 {len(all_rows)} 条")
+                        
+                        # 3. 使用RENAME TABLE原子替换原表（全量更新）
+                        # ClickHouse的RENAME TABLE是原子操作，可以同时重命名多个表
+                        # 如果原表存在，先备份原表，然后删除，再重命名临时表
+                        logger.info(f"[ClickHouse] 🔄 执行全量更新（RENAME TABLE原子替换）...")
+                        if table_exists:
+                            # 生成备份表名
+                            backup_table = f"{self.leaderboard_table}_backup_{timestamp}"
+                            # 原子操作：先备份原表，再重命名临时表
+                            rename_sql = f"""
+                            RENAME TABLE 
+                                {self.leaderboard_table} TO {backup_table},
+                                {temp_table} TO {self.leaderboard_table}
+                            """
+                            self.command(rename_sql)
+                            logger.info(f"[ClickHouse] ✅ 表重命名完成（原表已备份为: {backup_table}）")
+                            
+                            # 删除备份表（异步删除，不影响主流程）
+                            try:
+                                drop_backup_sql = f"DROP TABLE IF EXISTS {backup_table}"
+                                self.command(drop_backup_sql)
+                                logger.debug(f"[ClickHouse] 🧹 备份表已删除: {backup_table}")
+                            except Exception as drop_exc:
+                                logger.warning(f"[ClickHouse] ⚠️  删除备份表失败（可稍后手动清理）: {drop_exc}")
+                        else:
+                            # 如果原表不存在，直接重命名临时表
+                            rename_sql = f"RENAME TABLE {temp_table} TO {self.leaderboard_table}"
+                            self.command(rename_sql)
+                            logger.info(f"[ClickHouse] ✅ 表重命名完成（新表创建）")
+                        
+                        logger.info(f"[ClickHouse] ✅ 全量更新完成")
                         
                         logger.info(
                             "[ClickHouse] 🎉 涨跌幅榜同步完成: %d 涨幅, %d 跌幅",
@@ -1218,6 +1322,13 @@ class ClickHouseDatabase:
                         )
                     except Exception as e:
                         logger.error(f"[ClickHouse] ❌ 涨跌幅榜同步失败: {e}", exc_info=True)
+                        # 如果失败，尝试清理临时表
+                        try:
+                            drop_temp_sql = f"DROP TABLE IF EXISTS {temp_table}"
+                            self.command(drop_temp_sql)
+                            logger.info(f"[ClickHouse] 🧹 临时表已清理: {temp_table}")
+                        except Exception as cleanup_exc:
+                            logger.warning(f"[ClickHouse] ⚠️  清理临时表失败: {cleanup_exc}")
                         raise
             else:
                 logger.warning("[ClickHouse] ⚠️  没有涨跌幅榜数据可同步")
