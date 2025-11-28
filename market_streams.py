@@ -127,6 +127,7 @@ class MarketTickerStream:
         if not tickers:
             return
         normalized = [_normalize_ticker(ticker) for ticker in tickers]
+        # 使用优化后的增量插入逻辑
         await asyncio.to_thread(self._db.upsert_market_tickers, normalized)
 
     async def stream(self, run_seconds: Optional[int] = None) -> None:

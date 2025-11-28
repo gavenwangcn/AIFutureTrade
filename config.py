@@ -38,6 +38,7 @@ KLINE_SYNC_CHECK_INTERVAL = int(os.getenv('KLINE_SYNC_CHECK_INTERVAL', '10'))  #
 KLINE_CLEANUP_CRON = os.getenv('KLINE_CLEANUP_CRON', '0 */2 * * *')  # Cron表达式，默认每2小时执行一次
 KLINE_CLEANUP_RETENTION_DAYS = int(os.getenv('KLINE_CLEANUP_RETENTION_DAYS', '2'))  # 保留天数，默认2天（48小时）
 
+
 # Trading
 AUTO_TRADING = True
 TRADING_INTERVAL = 180  # seconds
