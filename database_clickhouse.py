@@ -304,7 +304,11 @@ class ClickHouseDatabase:
             logger.warning("[ClickHouse] Failed to add update_price_date column (may already exist): %s", e)
 
     def get_existing_symbol_data(self, symbols: List[str]) -> Dict[str, Dict[str, Any]]:
-        """查询现有symbol的数据，返回字典 {symbol: {open_price: ..., ...}}"""
+        """查询现有symbol的数据，返回字典 {symbol: {open_price: ..., update_price_date: ..., ...}}
+        
+        注意：为了保持原有逻辑，如果open_price为0.0且update_price_date为None，
+        则视为"未设置"，返回open_price=None而不是0.0
+        """
         if not symbols:
             return {}
         
@@ -314,7 +318,8 @@ class ClickHouseDatabase:
             SELECT 
                 symbol,
                 open_price,
-                last_price
+                last_price,
+                update_price_date
             FROM (
                 SELECT 
                     *,
@@ -333,11 +338,21 @@ class ClickHouseDatabase:
             symbol_data = {}
             for row in result.result_rows:
                 symbol = row[0]
-                open_price = row[1] if row[1] is not None else None
+                open_price_raw = row[1]  # 可能是0.0或实际价格
                 last_price = row[2] if row[2] is not None else None
+                update_price_date = row[3] if len(row) > 3 else None
+                
+                # 关键逻辑：如果open_price为0.0且update_price_date为None，视为"未设置"
+                # 返回None以保持原有判断逻辑的正确性
+                if open_price_raw == 0.0 and update_price_date is None:
+                    open_price = None  # 视为未设置
+                else:
+                    open_price = open_price_raw if open_price_raw is not None else None
+                
                 symbol_data[symbol] = {
                     "open_price": open_price,
-                    "last_price": last_price
+                    "last_price": last_price,
+                    "update_price_date": update_price_date
                 }
             
             return symbol_data
@@ -375,13 +390,30 @@ class ClickHouseDatabase:
             normalized["event_time"] = _to_datetime(normalized.get("event_time"))
             normalized["stats_open_time"] = _to_datetime(normalized.get("stats_open_time"))
             normalized["stats_close_time"] = _to_datetime(normalized.get("stats_close_time"))
-            # 第一次插入时，这些字段都为空
-            normalized.setdefault("price_change", None)
-            normalized.setdefault("price_change_percent", None)
+            
+            # 确保所有Float64字段不为None，使用0.0作为默认值
+            # Float64字段列表：price_change, price_change_percent, average_price, last_price,
+            # last_trade_volume, open_price, high_price, low_price, base_volume, quote_volume
+            float64_fields = [
+                "price_change", "price_change_percent", "average_price", "last_price",
+                "last_trade_volume", "open_price", "high_price", "low_price",
+                "base_volume", "quote_volume"
+            ]
+            for field in float64_fields:
+                if normalized.get(field) is None:
+                    normalized[field] = 0.0
+            
+            # 确保UInt64字段不为None
+            uint64_fields = ["first_trade_id", "last_trade_id", "trade_count"]
+            for field in uint64_fields:
+                if normalized.get(field) is None:
+                    normalized[field] = 0
+            
+            # 第一次插入时，这些字段都为空（String和DateTime可以为None）
             normalized.setdefault("side", None)
             normalized.setdefault("change_percent_text", None)
-            normalized.setdefault("open_price", None)
             normalized.setdefault("update_price_date", None)
+            
             prepared_rows.append([normalized.get(name) for name in column_names])
 
         self.insert_rows(self.market_ticker_table, prepared_rows, column_names)
@@ -476,7 +508,10 @@ class ClickHouseDatabase:
             existing_symbol_data = existing_data.get(symbol)
             existing_open_price = existing_symbol_data.get("open_price") if existing_symbol_data else None
             
-            # 如果是更新且open_price有值，则计算涨跌幅相关字段
+            # 关键逻辑：判断open_price是否已设置
+            # existing_open_price为None表示未设置（即使数据库中存储的是0.0，如果update_price_date为None也视为未设置）
+            # existing_open_price不为None且不为0表示已设置且有有效值
+            # 如果是更新且open_price有值（不为None且不为0），则计算涨跌幅相关字段
             if existing_open_price is not None and existing_open_price != 0 and current_last_price != 0:
                 try:
                     existing_open_price_float = float(existing_open_price)
@@ -503,21 +538,42 @@ class ClickHouseDatabase:
                     normalized["update_price_date"] = None  # 只有开盘价异步刷新服务才会更新这个字段
                 except (TypeError, ValueError) as e:
                     logger.warning("[ClickHouse] Failed to calculate price change for symbol %s: %s", symbol, e)
-                    # 计算失败时，设置为空
-                    normalized["price_change"] = None
-                    normalized["price_change_percent"] = None
+                    # 计算失败时，设置为0.0（Float64字段不能为None）
+                    normalized["price_change"] = 0.0
+                    normalized["price_change_percent"] = 0.0
                     normalized["side"] = None
                     normalized["change_percent_text"] = None
-                    normalized["open_price"] = existing_open_price_float
+                    normalized["open_price"] = existing_open_price_float if existing_open_price_float else 0.0
                     normalized["update_price_date"] = None
             else:
-                # 第一次插入，这些字段都为空
-                normalized["price_change"] = None
-                normalized["price_change_percent"] = None
+                # 第一次插入或open_price未设置的情况
+                # Float64字段设置为0.0而不是None（因为ClickHouse Float64不接受None）
+                # 但逻辑上，open_price=0.0且update_price_date=None表示"未设置"
+                # 这样下次查询时，get_existing_symbol_data会返回open_price=None，保持原有判断逻辑正确
+                normalized["price_change"] = 0.0
+                normalized["price_change_percent"] = 0.0
                 normalized["side"] = None
                 normalized["change_percent_text"] = None
-                normalized["open_price"] = None
+                normalized["open_price"] = 0.0  # 存储为0.0，但逻辑上视为"未设置"（因为update_price_date=None）
                 normalized["update_price_date"] = None
+            
+            # 确保所有Float64字段不为None，使用0.0作为默认值
+            # Float64字段列表：price_change, price_change_percent, average_price, last_price,
+            # last_trade_volume, open_price, high_price, low_price, base_volume, quote_volume
+            float64_fields = [
+                "price_change", "price_change_percent", "average_price", "last_price",
+                "last_trade_volume", "open_price", "high_price", "low_price",
+                "base_volume", "quote_volume"
+            ]
+            for field in float64_fields:
+                if normalized.get(field) is None:
+                    normalized[field] = 0.0
+            
+            # 确保UInt64字段不为None
+            uint64_fields = ["first_trade_id", "last_trade_id", "trade_count"]
+            for field in uint64_fields:
+                if normalized.get(field) is None:
+                    normalized[field] = 0
             
             prepared_rows.append([normalized.get(name) for name in column_names])
         
