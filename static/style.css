@@ -149,7 +149,7 @@
 
 .leaderboard-item {
     display: grid;
-    grid-template-columns: 50px 1fr 100px 110px 140px;
+    grid-template-columns: 50px 1fr 100px 110px 110px;
     align-items: center;
     gap: 12px;
     padding: 12px 14px;
@@ -213,13 +213,6 @@
 
 .leaderboard-change.negative {
     color: var(--success);
-}
-
-.leaderboard-volumes {
-    display: flex;
-    flex-direction: column;
-    align-items: flex-end;
-    gap: 6px;
 }
 
 .leaderboard-volume {

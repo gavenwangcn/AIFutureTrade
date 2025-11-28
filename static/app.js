@@ -2580,7 +2580,6 @@ class TradingApp {
                         ? item.change_percent 
                         : (item.priceChangePercent !== undefined ? item.priceChangePercent : 0);
                     const quoteVolume = this.formatVolumeChinese(item.quote_volume || item.quoteVolume || 0);
-                    const baseVolume = this.formatVolumeChinese(item.base_volume || item.baseVolume || 0);
                     
                     // 确保涨跌幅为正数（涨幅榜）
                     const changeValue = Math.abs(changePercent);
@@ -2595,16 +2594,10 @@ class TradingApp {
                             </div>
                             <span class="leaderboard-price">$${price}</span>
                             <span class="leaderboard-change positive">${changeDisplay}</span>
-                            <div class="leaderboard-volumes">
-                                <span class="leaderboard-volume">
-                                    <span class="volume-label">成交额</span>
-                                    <span class="volume-value">${quoteVolume}</span>
-                                </span>
-                                <span class="leaderboard-volume">
-                                    <span class="volume-label">成交量</span>
-                                    <span class="volume-value">${baseVolume}</span>
-                                </span>
-                            </div>
+                            <span class="leaderboard-volume">
+                                <span class="volume-label">成交额</span>
+                                <span class="volume-value">${quoteVolume}</span>
+                            </span>
                         </div>
                     `;
                 }).join('');
@@ -2626,7 +2619,6 @@ class TradingApp {
                         ? item.change_percent 
                         : (item.priceChangePercent !== undefined ? item.priceChangePercent : 0);
                     const quoteVolume = this.formatVolumeChinese(item.quote_volume || item.quoteVolume || 0);
-                    const baseVolume = this.formatVolumeChinese(item.base_volume || item.baseVolume || 0);
                     
                     // 确保涨跌幅为负数（跌幅榜）
                     const changeValue = changePercent <= 0 ? changePercent : -changePercent;
@@ -2641,16 +2633,10 @@ class TradingApp {
                             </div>
                             <span class="leaderboard-price">$${price}</span>
                             <span class="leaderboard-change negative">${changeDisplay}</span>
-                            <div class="leaderboard-volumes">
-                                <span class="leaderboard-volume">
-                                    <span class="volume-label">成交额</span>
-                                    <span class="volume-value">${quoteVolume}</span>
-                                </span>
-                                <span class="leaderboard-volume">
-                                    <span class="volume-label">成交量</span>
-                                    <span class="volume-value">${baseVolume}</span>
-                                </span>
-                            </div>
+                            <span class="leaderboard-volume">
+                                <span class="volume-label">成交额</span>
+                                <span class="volume-value">${quoteVolume}</span>
+                            </span>
                         </div>
                     `;
                 }).join('');

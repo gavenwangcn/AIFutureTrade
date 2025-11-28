@@ -1032,6 +1032,14 @@ class ClickHouseDatabase:
             row_dict = dict(zip(columns, row))
             rows.append(row_dict)
         
+        # 调试日志：检查前3条数据的volume字段
+        if rows and len(rows) > 0:
+            for i, row_dict in enumerate(rows[:3]):
+                logger.debug(
+                    f"[ClickHouse] [查询结果 #{i+1}] Symbol: {row_dict.get('symbol')}, "
+                    f"base_volume: {row_dict.get('base_volume')}, quote_volume: {row_dict.get('quote_volume')}"
+                )
+        
         logger.info(f"[ClickHouse] 📊 查询结果: 共 {len(rows)} 条数据")
         return rows
 
@@ -1109,6 +1117,17 @@ class ClickHouseDatabase:
             # 添加涨幅榜数据（带排名）
             logger.info(f"[ClickHouse] 📊 处理涨幅榜数据...")
             for idx, row in enumerate(gainers, 1):
+                symbol = row.get("symbol", "")
+                base_volume_raw = row.get("base_volume")
+                quote_volume_raw = row.get("quote_volume")
+                
+                # 调试日志：检查原始数据
+                if idx <= 3:  # 只记录前3条，避免日志过多
+                    logger.debug(
+                        f"[ClickHouse] [涨幅榜 #{idx}] Symbol: {symbol}, "
+                        f"base_volume_raw: {base_volume_raw}, quote_volume_raw: {quote_volume_raw}"
+                    )
+                
                 row_data = [
                     _to_datetime(row.get("event_time")),  # DateTime
                     _normalize_field_value(row.get("symbol"), "String", "symbol"),  # String
@@ -1122,8 +1141,8 @@ class ClickHouseDatabase:
                     _normalize_field_value(row.get("open_price"), "Float64", "open_price"),  # Float64
                     _normalize_field_value(row.get("high_price"), "Float64", "high_price"),  # Float64
                     _normalize_field_value(row.get("low_price"), "Float64", "low_price"),  # Float64
-                    _normalize_field_value(row.get("base_volume"), "Float64", "base_volume"),  # Float64
-                    _normalize_field_value(row.get("quote_volume"), "Float64", "quote_volume"),  # Float64
+                    _normalize_field_value(base_volume_raw, "Float64", "base_volume"),  # Float64
+                    _normalize_field_value(quote_volume_raw, "Float64", "quote_volume"),  # Float64
                     _to_datetime(row.get("stats_open_time")),  # DateTime
                     _to_datetime(row.get("stats_close_time")),  # DateTime
                     _normalize_field_value(row.get("first_trade_id"), "UInt64", "first_trade_id"),  # UInt64
@@ -1138,6 +1157,17 @@ class ClickHouseDatabase:
             # 添加跌幅榜数据（带排名）
             logger.info(f"[ClickHouse] 📊 处理跌幅榜数据...")
             for idx, row in enumerate(losers, 1):
+                symbol = row.get("symbol", "")
+                base_volume_raw = row.get("base_volume")
+                quote_volume_raw = row.get("quote_volume")
+                
+                # 调试日志：检查原始数据
+                if idx <= 3:  # 只记录前3条，避免日志过多
+                    logger.debug(
+                        f"[ClickHouse] [跌幅榜 #{idx}] Symbol: {symbol}, "
+                        f"base_volume_raw: {base_volume_raw}, quote_volume_raw: {quote_volume_raw}"
+                    )
+                
                 row_data = [
                     _to_datetime(row.get("event_time")),  # DateTime
                     _normalize_field_value(row.get("symbol"), "String", "symbol"),  # String
@@ -1151,8 +1181,8 @@ class ClickHouseDatabase:
                     _normalize_field_value(row.get("open_price"), "Float64", "open_price"),  # Float64
                     _normalize_field_value(row.get("high_price"), "Float64", "high_price"),  # Float64
                     _normalize_field_value(row.get("low_price"), "Float64", "low_price"),  # Float64
-                    _normalize_field_value(row.get("base_volume"), "Float64", "base_volume"),  # Float64
-                    _normalize_field_value(row.get("quote_volume"), "Float64", "quote_volume"),  # Float64
+                    _normalize_field_value(base_volume_raw, "Float64", "base_volume"),  # Float64
+                    _normalize_field_value(quote_volume_raw, "Float64", "quote_volume"),  # Float64
                     _to_datetime(row.get("stats_open_time")),  # DateTime
                     _to_datetime(row.get("stats_close_time")),  # DateTime
                     _normalize_field_value(row.get("first_trade_id"), "UInt64", "first_trade_id"),  # UInt64
@@ -1214,7 +1244,6 @@ class ClickHouseDatabase:
                 side,
                 change_percent_text,
                 quote_volume,
-                base_volume,
                 rank
             FROM {self.leaderboard_table}
             WHERE side = 'gainer'
@@ -1231,7 +1260,6 @@ class ClickHouseDatabase:
                 side,
                 change_percent_text,
                 quote_volume,
-                base_volume,
                 rank
             FROM {self.leaderboard_table}
             WHERE side = 'loser'
@@ -1258,9 +1286,8 @@ class ClickHouseDatabase:
                         'change_percent': float(row[2]) if row[2] is not None else 0.0,
                         'side': str(row[3]) if row[3] else 'gainer',
                         'change_percent_text': str(row[4]) if row[4] else '',
-                        'quote_volume': float(row[5]) if row[5] is not None else 0.0,
-                        'base_volume': float(row[6]) if len(row) > 6 and row[6] is not None else 0.0,
-                        'rank': int(row[7]) if len(row) > 7 and row[7] is not None else 0
+                        'quote_volume': float(row[5]) if len(row) > 5 and row[5] is not None else 0.0,
+                        'rank': int(row[6]) if len(row) > 6 and row[6] is not None else 0
                     })
                 except (TypeError, ValueError, IndexError) as e:
                     logger.warning("[ClickHouse] Failed to parse gainer row: %s, error: %s", row, e)
@@ -1276,9 +1303,8 @@ class ClickHouseDatabase:
                         'change_percent': float(row[2]) if row[2] is not None else 0.0,
                         'side': str(row[3]) if row[3] else 'loser',
                         'change_percent_text': str(row[4]) if row[4] else '',
-                        'quote_volume': float(row[5]) if row[5] is not None else 0.0,
-                        'base_volume': float(row[6]) if len(row) > 6 and row[6] is not None else 0.0,
-                        'rank': int(row[7]) if len(row) > 7 and row[7] is not None else 0
+                        'quote_volume': float(row[5]) if len(row) > 5 and row[5] is not None else 0.0,
+                        'rank': int(row[6]) if len(row) > 6 and row[6] is not None else 0
                     })
                 except (TypeError, ValueError, IndexError) as e:
                     logger.warning("[ClickHouse] Failed to parse loser row: %s, error: %s", row, e)
