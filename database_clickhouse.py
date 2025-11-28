@@ -409,9 +409,14 @@ class ClickHouseDatabase:
                 if normalized.get(field) is None:
                     normalized[field] = 0
             
-            # 第一次插入时，这些字段都为空（String和DateTime可以为None）
-            normalized.setdefault("side", None)
-            normalized.setdefault("change_percent_text", None)
+            # 确保String字段不为None，使用空字符串作为默认值
+            # String字段：side, change_percent_text（表结构中这些字段不是Nullable）
+            string_fields = ["side", "change_percent_text"]
+            for field in string_fields:
+                if normalized.get(field) is None:
+                    normalized[field] = ""
+            
+            # DateTime字段可以为None
             normalized.setdefault("update_price_date", None)
             
             prepared_rows.append([normalized.get(name) for name in column_names])
@@ -541,8 +546,8 @@ class ClickHouseDatabase:
                     # 计算失败时，设置为0.0（Float64字段不能为None）
                     normalized["price_change"] = 0.0
                     normalized["price_change_percent"] = 0.0
-                    normalized["side"] = None
-                    normalized["change_percent_text"] = None
+                    normalized["side"] = ""  # String字段不能为None，使用空字符串
+                    normalized["change_percent_text"] = ""  # String字段不能为None，使用空字符串
                     normalized["open_price"] = existing_open_price_float if existing_open_price_float else 0.0
                     normalized["update_price_date"] = None
             else:
@@ -552,8 +557,8 @@ class ClickHouseDatabase:
                 # 这样下次查询时，get_existing_symbol_data会返回open_price=None，保持原有判断逻辑正确
                 normalized["price_change"] = 0.0
                 normalized["price_change_percent"] = 0.0
-                normalized["side"] = None
-                normalized["change_percent_text"] = None
+                normalized["side"] = ""  # String字段不能为None，使用空字符串
+                normalized["change_percent_text"] = ""  # String字段不能为None，使用空字符串
                 normalized["open_price"] = 0.0  # 存储为0.0，但逻辑上视为"未设置"（因为update_price_date=None）
                 normalized["update_price_date"] = None
             
@@ -574,6 +579,13 @@ class ClickHouseDatabase:
             for field in uint64_fields:
                 if normalized.get(field) is None:
                     normalized[field] = 0
+            
+            # 确保String字段不为None，使用空字符串作为默认值
+            # String字段：side, change_percent_text（表结构中这些字段不是Nullable）
+            string_fields = ["side", "change_percent_text"]
+            for field in string_fields:
+                if normalized.get(field) is None:
+                    normalized[field] = ""
             
             prepared_rows.append([normalized.get(name) for name in column_names])
         
