@@ -149,7 +149,7 @@
 
 .leaderboard-item {
     display: grid;
-    grid-template-columns: 50px 1fr 100px 110px 110px;
+    grid-template-columns: 50px 1fr 100px 110px 140px;
     align-items: center;
     gap: 12px;
     padding: 12px 14px;
@@ -215,10 +215,35 @@
     color: var(--success);
 }
 
+.leaderboard-volumes {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 6px;
+}
+
 .leaderboard-volume {
     font-size: 13px;
     color: var(--text-2);
     text-align: right;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 2px;
+}
+
+.volume-label {
+    font-size: 11px;
+    color: var(--text-3);
+    opacity: 0.7;
+    font-weight: 500;
+    letter-spacing: 0.3px;
+}
+
+.volume-value {
+    font-size: 13px;
+    color: var(--text-2);
+    font-weight: 600;
 }
 
 .empty-state {

@@ -2579,7 +2579,8 @@ class TradingApp {
                     const changePercent = item.change_percent !== undefined 
                         ? item.change_percent 
                         : (item.priceChangePercent !== undefined ? item.priceChangePercent : 0);
-                    const volume = this.formatCompactUsd(item.quote_volume || item.quoteVolume || 0);
+                    const quoteVolume = this.formatVolumeChinese(item.quote_volume || item.quoteVolume || 0);
+                    const baseVolume = this.formatVolumeChinese(item.base_volume || item.baseVolume || 0);
                     
                     // 确保涨跌幅为正数（涨幅榜）
                     const changeValue = Math.abs(changePercent);
@@ -2594,7 +2595,16 @@ class TradingApp {
                             </div>
                             <span class="leaderboard-price">$${price}</span>
                             <span class="leaderboard-change positive">${changeDisplay}</span>
-                            <span class="leaderboard-volume">${volume}</span>
+                            <div class="leaderboard-volumes">
+                                <span class="leaderboard-volume">
+                                    <span class="volume-label">成交额</span>
+                                    <span class="volume-value">${quoteVolume}</span>
+                                </span>
+                                <span class="leaderboard-volume">
+                                    <span class="volume-label">成交量</span>
+                                    <span class="volume-value">${baseVolume}</span>
+                                </span>
+                            </div>
                         </div>
                     `;
                 }).join('');
@@ -2615,7 +2625,8 @@ class TradingApp {
                     const changePercent = item.change_percent !== undefined 
                         ? item.change_percent 
                         : (item.priceChangePercent !== undefined ? item.priceChangePercent : 0);
-                    const volume = this.formatCompactUsd(item.quote_volume || item.quoteVolume || 0);
+                    const quoteVolume = this.formatVolumeChinese(item.quote_volume || item.quoteVolume || 0);
+                    const baseVolume = this.formatVolumeChinese(item.base_volume || item.baseVolume || 0);
                     
                     // 确保涨跌幅为负数（跌幅榜）
                     const changeValue = changePercent <= 0 ? changePercent : -changePercent;
@@ -2630,7 +2641,16 @@ class TradingApp {
                             </div>
                             <span class="leaderboard-price">$${price}</span>
                             <span class="leaderboard-change negative">${changeDisplay}</span>
-                            <span class="leaderboard-volume">${volume}</span>
+                            <div class="leaderboard-volumes">
+                                <span class="leaderboard-volume">
+                                    <span class="volume-label">成交额</span>
+                                    <span class="volume-value">${quoteVolume}</span>
+                                </span>
+                                <span class="leaderboard-volume">
+                                    <span class="volume-label">成交量</span>
+                                    <span class="volume-value">${baseVolume}</span>
+                                </span>
+                            </div>
                         </div>
                     `;
                 }).join('');
@@ -2890,6 +2910,32 @@ class TradingApp {
         if (num >= 1000000) return `$${(num / 1000000).toFixed(2)}M`;
         if (num >= 1000) return `$${(num / 1000).toFixed(2)}K`;
         return `$${num.toFixed(2)}`;
+    }
+
+    /**
+     * 使用中文单位格式化成交量（亿、万）
+     * @param {number} value - 成交量数值
+     * @returns {string} 格式化后的字符串，例如："1.23亿"、"45.67万"、"1234.56"
+     */
+    formatVolumeChinese(value) {
+        if (!value && value !== 0) return '--';
+        const num = parseFloat(value);
+        if (isNaN(num)) return '--';
+        
+        // 大于等于1亿（100000000）
+        if (num >= 100000000) {
+            const yi = num / 100000000;
+            return `${yi.toFixed(2)}亿`;
+        }
+        
+        // 大于等于1万（10000）
+        if (num >= 10000) {
+            const wan = num / 10000;
+            return `${wan.toFixed(2)}万`;
+        }
+        
+        // 小于1万，显示原数字，保留2位小数
+        return num.toFixed(2);
     }
 
     getModelDisplayName(modelId) {

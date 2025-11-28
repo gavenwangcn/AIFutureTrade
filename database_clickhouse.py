@@ -1214,6 +1214,7 @@ class ClickHouseDatabase:
                 side,
                 change_percent_text,
                 quote_volume,
+                base_volume,
                 rank
             FROM {self.leaderboard_table}
             WHERE side = 'gainer'
@@ -1230,6 +1231,7 @@ class ClickHouseDatabase:
                 side,
                 change_percent_text,
                 quote_volume,
+                base_volume,
                 rank
             FROM {self.leaderboard_table}
             WHERE side = 'loser'
@@ -1257,7 +1259,8 @@ class ClickHouseDatabase:
                         'side': str(row[3]) if row[3] else 'gainer',
                         'change_percent_text': str(row[4]) if row[4] else '',
                         'quote_volume': float(row[5]) if row[5] is not None else 0.0,
-                        'rank': int(row[6]) if row[6] is not None else 0
+                        'base_volume': float(row[6]) if len(row) > 6 and row[6] is not None else 0.0,
+                        'rank': int(row[7]) if len(row) > 7 and row[7] is not None else 0
                     })
                 except (TypeError, ValueError, IndexError) as e:
                     logger.warning("[ClickHouse] Failed to parse gainer row: %s, error: %s", row, e)
@@ -1274,7 +1277,8 @@ class ClickHouseDatabase:
                         'side': str(row[3]) if row[3] else 'loser',
                         'change_percent_text': str(row[4]) if row[4] else '',
                         'quote_volume': float(row[5]) if row[5] is not None else 0.0,
-                        'rank': int(row[6]) if row[6] is not None else 0
+                        'base_volume': float(row[6]) if len(row) > 6 and row[6] is not None else 0.0,
+                        'rank': int(row[7]) if len(row) > 7 and row[7] is not None else 0
                     })
                 except (TypeError, ValueError, IndexError) as e:
                     logger.warning("[ClickHouse] Failed to parse loser row: %s, error: %s", row, e)
