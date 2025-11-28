@@ -16,6 +16,7 @@ import os
 import sys
 from pathlib import Path
 from typing import List
+from datetime import datetime, timedelta
 
 # 添加项目根目录到Python路径，以便导入项目模块
 project_root = Path(__file__).parent.parent
@@ -181,13 +182,30 @@ def exercise_binance_futures_client(api_key: str, api_secret: str) -> None:
     #ticker_24h = client.get_24h_ticker(symbols)
     #_log_sample("ticker_24h", ticker_24h)
 
-    logging.info("Testing get_symbol_prices()...")
-    symbol_prices = client.get_symbol_prices(symbols)
-    _log_sample("symbol_prices", symbol_prices)
+    #logging.info("Testing get_symbol_prices()...")
+    #symbol_prices = client.get_symbol_prices(symbols)
+    #_log_sample("symbol_prices", symbol_prices)
 
-   # logging.info("Testing get_klines()...")
-   # klines = client.get_klines(symbol="BTCUSDT", interval="1m", limit=5)
-   # _log_sample("klines", klines)
+    logging.info("Testing get_klines()...")
+    klines = client.get_klines(symbol="BTCUSDT", interval="1m", limit=5)
+    _log_sample("klines", klines)
+
+    # 获取今天和昨天的日K线数据，使用limit=2验证是否能获取两条K线
+    logging.info("Testing get_klines() for today and yesterday daily data with limit=2...")
+    
+    # 获取最近两天的日K线数据
+    klines_daily = client.get_klines(symbol="BTCUSDT", interval="1d", limit=2)
+    
+    # 打印结果
+    logging.info(f"Daily klines count: {len(klines_daily)}")
+    for i, kline in enumerate(klines_daily):
+        logging.info(f"Daily kline #{i+1}: {kline}")
+    
+    # 验证是否获取到了两条K线数据
+    if len(klines_daily) == 2:
+        logging.info("Successfully retrieved 2 daily klines as expected")
+    else:
+        logging.warning(f"Expected 2 daily klines, but got {len(klines_daily)}")
 
     logging.info("All BinanceFuturesClient method calls completed.")
 

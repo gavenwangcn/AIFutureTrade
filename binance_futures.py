@@ -568,7 +568,7 @@ class BinanceFuturesClient:
 
         return payload
 
-    def get_klines(self, symbol: str, interval: str, limit: int = 120) -> List[List]:
+    def get_klines(self, symbol: str, interval: str, limit: int = 120, startTime: Optional[int] = None, endTime: Optional[int] = None) -> List[List]:
         """
         获取K线数据
         
@@ -576,23 +576,34 @@ class BinanceFuturesClient:
             symbol: 交易对符号，如 'BTCUSDT'
             interval: K线间隔，如 '1m', '5m', '1h', '1d' 等
             limit: 返回的K线数量，默认120
+            startTime: 起始时间戳（毫秒）
+            endTime: 结束时间戳（毫秒）
             
         Returns:
             K线数据列表，每个元素为 [open_time, open, high, low, close, volume]
         """
-        logger.info(f"[Binance Futures] 开始获取K线数据, symbol={symbol}, interval={interval}, limit={limit}")
+        logger.info(f"[Binance Futures] 开始获取K线数据, symbol={symbol}, interval={interval}, limit={limit}, startTime={startTime}, endTime={endTime}")
 
         try:
             # 转换间隔为枚举类型
             interval_enum = KlineCandlestickDataIntervalEnum(interval)
 
+            # 构建API调用参数
+            api_params = {
+                "symbol": symbol,
+                "interval": interval_enum,
+                "limit": limit,
+            }
+            
+            # 添加可选的时间参数
+            if startTime is not None:
+                api_params["startTime"] = startTime
+            if endTime is not None:
+                api_params["endTime"] = endTime
+
             # 调用API获取K线数据
             api_start_time = time.time()
-            response = self._rest.kline_candlestick_data(
-                symbol=symbol,
-                interval=interval_enum,
-                limit=limit,
-            )
+            response = self._rest.kline_candlestick_data(**api_params)
             data = self._normalize_list(response.data())
             api_duration = time.time() - api_start_time
             logger.debug(
