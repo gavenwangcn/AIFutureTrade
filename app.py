@@ -100,10 +100,6 @@ def _init_background_services():
     
     logger.info("✅ 后台服务初始化完成")
 
-# 在模块加载时立即初始化后台服务
-# 这样无论通过什么方式启动应用（直接运行、gunicorn等），都会自动启动
-_init_background_services()
-
 market_fetcher = MarketDataFetcher(db)
 trading_engines = {}
 auto_trading = getattr(app_config, 'AUTO_TRADING', True)
@@ -705,6 +701,17 @@ def trading_loop():
 
 # ============ Page Routes ============
 
+# 后台服务初始化标志（延迟初始化，确保所有函数都已定义）
+_background_services_initialized = False
+
+@app.before_request
+def _ensure_background_services():
+    """确保后台服务已启动（在第一次请求时调用）"""
+    global _background_services_initialized
+    if not _background_services_initialized:
+        _init_background_services()
+        _background_services_initialized = True
+
 @app.route('/')
 def index():
     """Main page route"""
@@ -1297,15 +1304,9 @@ if __name__ == '__main__':
     start_leaderboard_worker()
     logger.info("✅ 涨跌幅榜前端推送线程已启动")
     
-    # ClickHouse涨跌幅榜同步线程已在模块加载时自动启动
-    # 这里只需要确认状态
-    logger.info("📊 ClickHouse涨跌幅榜同步服务状态检查...")
-    if clickhouse_leaderboard_running:
-        logger.info("✅ ClickHouse涨跌幅榜同步服务已在运行（默认运行状态）")
-    else:
-        logger.warning("⚠️  ClickHouse涨跌幅榜同步服务未运行，尝试启动...")
-        start_clickhouse_leaderboard_sync()
-        logger.info("✅ ClickHouse涨跌幅榜同步服务已启动")
+    # 初始化后台服务（包括ClickHouse涨跌幅榜同步线程）
+    logger.info("📊 初始化后台服务...")
+    _init_background_services()
     
     logger.info("✅ 所有涨跌幅榜相关工作线程已启动完成")
 

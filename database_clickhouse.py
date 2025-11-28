@@ -401,6 +401,16 @@ class ClickHouseDatabase:
         prepared_rows: List[List[Any]] = []
         for row in rows:
             normalized = dict(row)
+            
+            # 重要：移除接口数据中的 open_price 和 update_price_date 字段
+            # 这两个字段只能由异步价格刷新服务更新，接口数据不能覆盖它们
+            if "open_price" in normalized:
+                del normalized["open_price"]
+                logger.debug("[ClickHouse] 移除接口数据中的 open_price 字段（只能由异步价格刷新服务更新）")
+            if "update_price_date" in normalized:
+                del normalized["update_price_date"]
+                logger.debug("[ClickHouse] 移除接口数据中的 update_price_date 字段（只能由异步价格刷新服务更新）")
+            
             normalized["event_time"] = _to_datetime(normalized.get("event_time"))
             normalized["stats_open_time"] = _to_datetime(normalized.get("stats_open_time"))
             normalized["stats_close_time"] = _to_datetime(normalized.get("stats_close_time"))
@@ -507,6 +517,16 @@ class ClickHouseDatabase:
         
         for row in usdt_rows:
             normalized = dict(row)
+            
+            # 重要：移除接口数据中的 open_price 和 update_price_date 字段
+            # 这两个字段只能由异步价格刷新服务更新，接口数据不能覆盖它们
+            if "open_price" in normalized:
+                del normalized["open_price"]
+                logger.debug("[ClickHouse] 移除接口数据中的 open_price 字段（只能由异步价格刷新服务更新）")
+            if "update_price_date" in normalized:
+                del normalized["update_price_date"]
+                logger.debug("[ClickHouse] 移除接口数据中的 update_price_date 字段（只能由异步价格刷新服务更新）")
+            
             normalized["event_time"] = _to_datetime(normalized.get("event_time"))
             normalized["stats_open_time"] = _to_datetime(normalized.get("stats_open_time"))
             normalized["stats_close_time"] = _to_datetime(normalized.get("stats_close_time"))
@@ -549,6 +569,7 @@ class ClickHouseDatabase:
             # 判断是插入还是更新
             existing_symbol_data = existing_data.get(symbol)
             existing_open_price = existing_symbol_data.get("open_price") if existing_symbol_data else None
+            existing_update_price_date = existing_symbol_data.get("update_price_date") if existing_symbol_data else None
             
             # 关键逻辑：判断open_price是否已设置
             # existing_open_price为None表示未设置（即使数据库中存储的是0.0，如果update_price_date为None也视为未设置）
@@ -571,13 +592,14 @@ class ClickHouseDatabase:
                     # 设置 change_percent_text = price_change_percent + "%"
                     change_percent_text = f"{price_change_percent:.2f}%"
                     
-                    # 保持原有的open_price，不更新
+                    # 重要：保持原有的open_price和update_price_date，不更新
+                    # 这两个字段只能由异步价格刷新服务更新，接口数据不能覆盖它们
                     normalized["price_change"] = price_change
                     normalized["price_change_percent"] = price_change_percent
                     normalized["side"] = side
                     normalized["change_percent_text"] = change_percent_text
-                    normalized["open_price"] = existing_open_price_float
-                    normalized["update_price_date"] = None  # 只有开盘价异步刷新服务才会更新这个字段
+                    normalized["open_price"] = existing_open_price_float  # 保留数据库中的值
+                    normalized["update_price_date"] = existing_update_price_date  # 保留数据库中的值（可能为None）
                 except (TypeError, ValueError) as e:
                     logger.warning("[ClickHouse] Failed to calculate price change for symbol %s: %s", symbol, e)
                     # 计算失败时，设置为0.0（Float64字段不能为None）
@@ -585,8 +607,9 @@ class ClickHouseDatabase:
                     normalized["price_change_percent"] = 0.0
                     normalized["side"] = ""  # String字段不能为None，使用空字符串
                     normalized["change_percent_text"] = ""  # String字段不能为None，使用空字符串
+                    # 重要：保留数据库中的open_price和update_price_date
                     normalized["open_price"] = existing_open_price_float if existing_open_price_float else 0.0
-                    normalized["update_price_date"] = None
+                    normalized["update_price_date"] = existing_update_price_date  # 保留数据库中的值（可能为None）
             else:
                 # 第一次插入或open_price未设置的情况
                 # Float64字段设置为0.0而不是None（因为ClickHouse Float64不接受None）
@@ -596,8 +619,9 @@ class ClickHouseDatabase:
                 normalized["price_change_percent"] = 0.0
                 normalized["side"] = ""  # String字段不能为None，使用空字符串
                 normalized["change_percent_text"] = ""  # String字段不能为None，使用空字符串
+                # 重要：如果是更新操作，保留数据库中的update_price_date；如果是插入操作，设置为None
                 normalized["open_price"] = 0.0  # 存储为0.0，但逻辑上视为"未设置"（因为update_price_date=None）
-                normalized["update_price_date"] = None
+                normalized["update_price_date"] = existing_update_price_date if existing_symbol_data else None
             
             # 确保所有Float64字段不为None，使用0.0作为默认值
             # Float64字段列表：price_change, price_change_percent, average_price, last_price,
@@ -709,7 +733,7 @@ class ClickHouseDatabase:
         Args:
             symbol: 交易对符号
             open_price: 开盘价（昨天的日K线收盘价）
-            update_date: 更新日期（当天时间）
+            update_date: 更新日期时间（当前刷新时间，用于记录刷新时间戳）
             
         Returns:
             是否更新成功
