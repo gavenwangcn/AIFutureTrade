@@ -186,7 +186,25 @@ class ClickHouseDatabase:
         
         self.market_ticker_table = MARKET_TICKER_TABLE
         self.leaderboard_table = getattr(app_config, 'CLICKHOUSE_LEADERBOARD_TABLE', LEADERBOARD_TABLE)
-        self.market_klines_table = getattr(app_config, 'CLICKHOUSE_MARKET_KLINES_TABLE', MARKET_KLINES_TABLE)
+
+        # K线表前缀（默认 market_klines），按不同 interval 拆分为多张表：
+        # market_klines_1w, market_klines_1d, market_klines_4h, market_klines_1h,
+        # market_klines_15m, market_klines_5m, market_klines_1m
+        self.market_klines_table: str = getattr(
+            app_config,
+            "CLICKHOUSE_MARKET_KLINES_TABLE",
+            MARKET_KLINES_TABLE,
+        )
+        prefix = self.market_klines_table
+        self.market_klines_tables: Dict[str, str] = {
+            "1w": f"{prefix}_1w",
+            "1d": f"{prefix}_1d",
+            "4h": f"{prefix}_4h",
+            "1h": f"{prefix}_1h",
+            "15m": f"{prefix}_15m",
+            "5m": f"{prefix}_5m",
+            "1m": f"{prefix}_1m",
+        }
         
         if auto_init_tables:
             # Initialize tables using the connection pool
@@ -911,13 +929,39 @@ class ClickHouseDatabase:
             last_trade_id UInt64,
             trade_count UInt64,
             ingestion_time DateTime DEFAULT now(),
-            rank UInt8
+            rank UInt8,
+            create_datetime DateTime DEFAULT now()
         )
         ENGINE = MergeTree
-        ORDER BY (side, rank, symbol)
+        ORDER BY (side, rank, symbol, create_datetime)
         """
         self.command(ddl)
         logger.info("[ClickHouse] Ensured table %s exists", self.leaderboard_table)
+
+        # 如果表已存在，确保新增字段 create_datetime 存在
+        try:
+            check_column_sql = f"""
+            SELECT count()
+            FROM system.columns
+            WHERE database = '{app_config.CLICKHOUSE_DATABASE}'
+              AND table = '{self.leaderboard_table}'
+              AND name = 'create_datetime'
+            """
+
+            def _check_column(client):
+                result = client.query(check_column_sql)
+                return result.result_rows[0][0] > 0 if result.result_rows else False
+
+            has_column = self._with_connection(_check_column)
+            if not has_column:
+                add_column_sql = f"""
+                ALTER TABLE {self.leaderboard_table}
+                ADD COLUMN IF NOT EXISTS create_datetime DateTime DEFAULT now()
+                """
+                self.command(add_column_sql)
+                logger.info("[ClickHouse] Added create_datetime column to %s", self.leaderboard_table)
+        except Exception as e:
+            logger.warning("[ClickHouse] Failed to ensure create_datetime column on %s: %s", self.leaderboard_table, e)
 
     def query_recent_tickers(
         self, 
@@ -1097,57 +1141,60 @@ class ClickHouseDatabase:
             top_n: 涨跌幅前N名数量
         """
         try:
-            logger.info(f"[ClickHouse] 🚀 开始涨跌幅榜同步...")
-            logger.info(f"[ClickHouse] 📋 同步参数: top_n={top_n} (查询所有数据，不限制时间窗口)")
+            logger.info("[ClickHouse] 🚀 开始涨跌幅榜同步...")
+            logger.info("[ClickHouse] 📋 同步参数: top_n=%s (查询所有数据，不限制时间窗口)", top_n)
             
             # 重要：检查表是否存在，不存在则创建
-            logger.info(f"[ClickHouse] 🔍 检查leaderboard表是否存在...")
+            logger.info("[ClickHouse] 🔍 检查leaderboard表是否存在...")
             table_exists = self._check_table_exists(self.leaderboard_table)
             if not table_exists:
-                logger.info(f"[ClickHouse] 📋 leaderboard表不存在，创建表...")
+                logger.info("[ClickHouse] 📋 leaderboard表不存在，创建表...")
                 self.ensure_leaderboard_table()
-                logger.info(f"[ClickHouse] ✅ leaderboard表创建完成")
+                logger.info("[ClickHouse] ✅ leaderboard表创建完成")
             else:
-                logger.info(f"[ClickHouse] ✅ leaderboard表已存在")
+                logger.info("[ClickHouse] ✅ leaderboard表已存在")
             
             # 查询涨幅榜前N名（查询所有数据，按涨跌幅排序）
-            logger.info(f"[ClickHouse] 🔍 查询涨幅榜前{top_n}名（从所有数据中排序）...")
+            logger.info("[ClickHouse] 🔍 查询涨幅榜前%s名（从所有数据中排序）...", top_n)
             gainers = self.query_recent_tickers(
                 time_window_seconds=time_window_seconds,
                 side='gainer',
                 top_n=top_n
             )
-            logger.info(f"[ClickHouse] ✅ 涨幅榜查询完成，共 {len(gainers)} 条数据")
+            logger.info("[ClickHouse] ✅ 涨幅榜查询完成，共 %s 条数据", len(gainers))
             
             # 查询跌幅榜前N名（查询所有数据，按涨跌幅排序）
-            logger.info(f"[ClickHouse] 🔍 查询跌幅榜前{top_n}名（从所有数据中排序）...")
+            logger.info("[ClickHouse] 🔍 查询跌幅榜前%s名（从所有数据中排序）...", top_n)
             losers = self.query_recent_tickers(
                 time_window_seconds=time_window_seconds,
                 side='loser',
                 top_n=top_n
             )
-            logger.info(f"[ClickHouse] ✅ 跌幅榜查询完成，共 {len(losers)} 条数据")
+            logger.info("[ClickHouse] ✅ 跌幅榜查询完成，共 %s 条数据", len(losers))
             
             # 重要：检查是否有有效数据（side字段不为空）
             # 如果涨幅榜和跌幅榜都没有数据，说明价格异步刷新服务还没刷新，此时不应该执行同步
             if not gainers and not losers:
-                logger.warning(f"[ClickHouse] ⚠️ 涨幅榜和跌幅榜都没有数据（side字段为空），跳过同步操作")
-                logger.warning(f"[ClickHouse] ⚠️ 这可能是因为价格异步刷新服务还没有刷新open_price，导致side字段为空字符串")
+                logger.warning("[ClickHouse] ⚠️ 涨幅榜和跌幅榜都没有数据（side字段为空），跳过同步操作")
+                logger.warning("[ClickHouse] ⚠️ 这可能是因为价格异步刷新服务还没有刷新open_price，导致side字段为空字符串")
                 return
             
             # 准备插入数据
-            logger.info(f"[ClickHouse] 📝 准备插入数据...")
+            logger.info("[ClickHouse] 📝 准备插入数据...")
             all_rows = []
             column_names = [
                 "event_time", "symbol", "price_change", "price_change_percent", "side",
                 "change_percent_text", "average_price", "last_price", "last_trade_volume",
                 "open_price", "high_price", "low_price", "base_volume", "quote_volume",
                 "stats_open_time", "stats_close_time", "first_trade_id", "last_trade_id",
-                "trade_count", "ingestion_time", "rank"
+                "trade_count", "ingestion_time", "rank", "create_datetime"
             ]
+
+            # 本次同步批次的唯一时间戳（整批插入使用相同的 create_datetime）
+            batch_time = datetime.now(timezone.utc)
             
             # 添加涨幅榜数据（带排名）
-            logger.info(f"[ClickHouse] 📊 处理涨幅榜数据...")
+            logger.info("[ClickHouse] 📊 处理涨幅榜数据...")
             for idx, row in enumerate(gainers, 1):
                 symbol = row.get("symbol", "")
                 base_volume_raw = row.get("base_volume")
@@ -1181,13 +1228,14 @@ class ClickHouseDatabase:
                     _normalize_field_value(row.get("last_trade_id"), "UInt64", "last_trade_id"),  # UInt64
                     _normalize_field_value(row.get("trade_count"), "UInt64", "trade_count"),  # UInt64
                     _to_datetime(row.get("ingestion_time")),  # DateTime
-                    _normalize_field_value(idx, "UInt8", "rank")  # UInt8 (rank)
+                    _normalize_field_value(idx, "UInt8", "rank"),  # UInt8 (rank)
+                    batch_time,  # create_datetime，同一批次使用相同时间
                 ]
                 all_rows.append(row_data)
-            logger.info(f"[ClickHouse] ✅ 涨幅榜数据处理完成，共 {len(gainers)} 条")
+            logger.info("[ClickHouse] ✅ 涨幅榜数据处理完成，共 %s 条", len(gainers))
             
             # 添加跌幅榜数据（带排名）
-            logger.info(f"[ClickHouse] 📊 处理跌幅榜数据...")
+            logger.info("[ClickHouse] 📊 处理跌幅榜数据...")
             for idx, row in enumerate(losers, 1):
                 symbol = row.get("symbol", "")
                 base_volume_raw = row.get("base_volume")
@@ -1221,115 +1269,25 @@ class ClickHouseDatabase:
                     _normalize_field_value(row.get("last_trade_id"), "UInt64", "last_trade_id"),  # UInt64
                     _normalize_field_value(row.get("trade_count"), "UInt64", "trade_count"),  # UInt64
                     _to_datetime(row.get("ingestion_time")),  # DateTime
-                    _normalize_field_value(idx, "UInt8", "rank")  # UInt8 (rank)
+                    _normalize_field_value(idx, "UInt8", "rank"),  # UInt8 (rank)
+                    batch_time,  # create_datetime，同一批次使用相同时间
                 ]
                 all_rows.append(row_data)
-            logger.info(f"[ClickHouse] ✅ 跌幅榜数据处理完成，共 {len(losers)} 条")
+            logger.info("[ClickHouse] ✅ 跌幅榜数据处理完成，共 %s 条", len(losers))
             
             if all_rows:
-                logger.info(f"[ClickHouse] 💾 准备全量更新数据到ClickHouse，共 {len(all_rows)} 条...")
-                
-                # 使用锁防止并发执行，避免表名冲突
+                logger.info("[ClickHouse] 💾 准备批量插入数据到ClickHouse，共 %s 条...", len(all_rows))
+
+                # 使用锁防止并发执行插入，避免并发批次交织
                 with ClickHouseDatabase._sync_leaderboard_lock:
-                    # 使用时间戳生成唯一的临时表名，避免并发冲突
-                    timestamp = int(datetime.now().timestamp() * 1000)  # 毫秒级时间戳
-                    temp_table = f"{self.leaderboard_table}_temp_{timestamp}"
-                    
-                    try:
-                        # 1. 创建临时表（结构与原表相同）
-                        logger.info(f"[ClickHouse] 📋 创建临时表: {temp_table}")
-                        # 先获取原表的结构
-                        table_exists = self._check_table_exists(self.leaderboard_table)
-                        if table_exists:
-                            # 如果表存在，使用 AS 语法复制表结构
-                            create_temp_sql = f"""
-                            CREATE TABLE {temp_table}
-                            ENGINE = MergeTree
-                            ORDER BY (side, rank, symbol)
-                            AS {self.leaderboard_table}
-                            """
-                        else:
-                            # 如果表不存在，直接创建表（使用ensure_leaderboard_table的DDL）
-                            create_temp_sql = f"""
-                            CREATE TABLE {temp_table} (
-                                event_time DateTime,
-                                symbol String,
-                                price_change Float64,
-                                price_change_percent Float64,
-                                side String,
-                                change_percent_text String,
-                                average_price Float64,
-                                last_price Float64,
-                                last_trade_volume Float64,
-                                open_price Float64,
-                                high_price Float64,
-                                low_price Float64,
-                                base_volume Float64,
-                                quote_volume Float64,
-                                stats_open_time DateTime,
-                                stats_close_time DateTime,
-                                first_trade_id UInt64,
-                                last_trade_id UInt64,
-                                trade_count UInt64,
-                                ingestion_time DateTime DEFAULT now(),
-                                rank UInt8
-                            )
-                            ENGINE = MergeTree
-                            ORDER BY (side, rank, symbol)
-                            """
-                        self.command(create_temp_sql)
-                        logger.info(f"[ClickHouse] ✅ 临时表创建完成")
-                        
-                        # 2. 插入数据到临时表
-                        logger.info(f"[ClickHouse] 📥 插入数据到临时表...")
-                        self.insert_rows(temp_table, all_rows, column_names)
-                        logger.info(f"[ClickHouse] ✅ 数据插入完成，共 {len(all_rows)} 条")
-                        
-                        # 3. 使用RENAME TABLE原子替换原表（全量更新）
-                        # ClickHouse的RENAME TABLE是原子操作，可以同时重命名多个表
-                        # 如果原表存在，先备份原表，然后删除，再重命名临时表
-                        logger.info(f"[ClickHouse] 🔄 执行全量更新（RENAME TABLE原子替换）...")
-                        if table_exists:
-                            # 生成备份表名
-                            backup_table = f"{self.leaderboard_table}_backup_{timestamp}"
-                            # 原子操作：先备份原表，再重命名临时表
-                            rename_sql = f"""
-                            RENAME TABLE 
-                                {self.leaderboard_table} TO {backup_table},
-                                {temp_table} TO {self.leaderboard_table}
-                            """
-                            self.command(rename_sql)
-                            logger.info(f"[ClickHouse] ✅ 表重命名完成（原表已备份为: {backup_table}）")
-                            
-                            # 删除备份表（异步删除，不影响主流程）
-                            try:
-                                drop_backup_sql = f"DROP TABLE IF EXISTS {backup_table}"
-                                self.command(drop_backup_sql)
-                                logger.debug(f"[ClickHouse] 🧹 备份表已删除: {backup_table}")
-                            except Exception as drop_exc:
-                                logger.warning(f"[ClickHouse] ⚠️  删除备份表失败（可稍后手动清理）: {drop_exc}")
-                        else:
-                            # 如果原表不存在，直接重命名临时表
-                            rename_sql = f"RENAME TABLE {temp_table} TO {self.leaderboard_table}"
-                            self.command(rename_sql)
-                            logger.info(f"[ClickHouse] ✅ 表重命名完成（新表创建）")
-                        
-                        logger.info(f"[ClickHouse] ✅ 全量更新完成")
-                        
-                        logger.info(
-                            "[ClickHouse] 🎉 涨跌幅榜同步完成: %d 涨幅, %d 跌幅",
-                            len(gainers), len(losers)
-                        )
-                    except Exception as e:
-                        logger.error(f"[ClickHouse] ❌ 涨跌幅榜同步失败: {e}", exc_info=True)
-                        # 如果失败，尝试清理临时表
-                        try:
-                            drop_temp_sql = f"DROP TABLE IF EXISTS {temp_table}"
-                            self.command(drop_temp_sql)
-                            logger.info(f"[ClickHouse] 🧹 临时表已清理: {temp_table}")
-                        except Exception as cleanup_exc:
-                            logger.warning(f"[ClickHouse] ⚠️  清理临时表失败: {cleanup_exc}")
-                        raise
+                    # 直接使用 ClickHouse 批量插入，不再使用临时表/全量替换方案
+                    self.insert_rows(self.leaderboard_table, all_rows, column_names)
+                    logger.info(
+                        "[ClickHouse] ✅ 批量插入完成，本次批次时间戳: %s, 涨幅: %d 条, 跌幅: %d 条",
+                        batch_time.isoformat(),
+                        len(gainers),
+                        len(losers),
+                    )
             else:
                 logger.warning("[ClickHouse] ⚠️  没有涨跌幅榜数据可同步")
                 
@@ -1346,84 +1304,69 @@ class ClickHouseDatabase:
             Dictionary with 'gainers' and 'losers' lists
         """
         try:
-            # 查询涨幅榜
-            gainers_query = f"""
-            SELECT 
+            # 一条 SQL：先锁定最新批次的 create_datetime，再取该批次所有涨跌数据
+            query = f"""
+            SELECT
                 symbol,
                 last_price,
                 price_change_percent,
                 side,
                 change_percent_text,
                 quote_volume,
-                rank
+                rank,
+                create_datetime
             FROM {self.leaderboard_table}
-            WHERE side = 'gainer'
-            ORDER BY rank ASC
-            LIMIT {limit}
+            WHERE create_datetime = (
+                SELECT max(create_datetime) FROM {self.leaderboard_table}
+            )
+              AND side IN ('gainer', 'loser')
             """
-            
-            # 查询跌幅榜
-            losers_query = f"""
-            SELECT 
-                symbol,
-                last_price,
-                price_change_percent,
-                side,
-                change_percent_text,
-                quote_volume,
-                rank
-            FROM {self.leaderboard_table}
-            WHERE side = 'loser'
-            ORDER BY rank ASC
-            LIMIT {limit}
-            """
-            
-            def _execute_gainers_query(client):
-                return client.query(gainers_query)
-            
-            def _execute_losers_query(client):
-                return client.query(losers_query)
-            
-            gainers_result = self._with_connection(_execute_gainers_query)
-            losers_result = self._with_connection(_execute_losers_query)
-            
-            # 转换涨幅榜数据
-            gainers = []
-            for row in gainers_result.result_rows:
+
+            def _execute_query(client):
+                return client.query(query)
+
+            result = self._with_connection(_execute_query)
+            rows = result.result_rows
+
+            if not rows:
+                logger.warning("[ClickHouse] get_leaderboard: futures_leaderboard 中没有数据")
+                return {'gainers': [], 'losers': []}
+
+            gainers: List[Dict] = []
+            losers: List[Dict] = []
+
+            # 先按 side 分类，再在内存中排序 + 截断前 N
+            for row in rows:
                 try:
-                    gainers.append({
+                    side = str(row[3]) if row[3] else ''
+                    item = {
                         'symbol': str(row[0]) if row[0] else '',
                         'price': float(row[1]) if row[1] is not None else 0.0,
                         'change_percent': float(row[2]) if row[2] is not None else 0.0,
-                        'side': str(row[3]) if row[3] else 'gainer',
+                        'side': side or ('gainer' if (row[2] or 0) >= 0 else 'loser'),
                         'change_percent_text': str(row[4]) if row[4] else '',
                         'quote_volume': float(row[5]) if len(row) > 5 and row[5] is not None else 0.0,
-                        'rank': int(row[6]) if len(row) > 6 and row[6] is not None else 0
-                    })
+                        'rank': int(row[6]) if len(row) > 6 and row[6] is not None else 0,
+                    }
+
+                    if item['side'] == 'gainer':
+                        gainers.append(item)
+                    elif item['side'] == 'loser':
+                        losers.append(item)
                 except (TypeError, ValueError, IndexError) as e:
-                    logger.warning("[ClickHouse] Failed to parse gainer row: %s, error: %s", row, e)
+                    logger.warning("[ClickHouse] Failed to parse leaderboard row: %s, error: %s", row, e)
                     continue
-            
-            # 转换跌幅榜数据
-            losers = []
-            for row in losers_result.result_rows:
-                try:
-                    losers.append({
-                        'symbol': str(row[0]) if row[0] else '',
-                        'price': float(row[1]) if row[1] is not None else 0.0,
-                        'change_percent': float(row[2]) if row[2] is not None else 0.0,
-                        'side': str(row[3]) if row[3] else 'loser',
-                        'change_percent_text': str(row[4]) if row[4] else '',
-                        'quote_volume': float(row[5]) if len(row) > 5 and row[5] is not None else 0.0,
-                        'rank': int(row[6]) if len(row) > 6 and row[6] is not None else 0
-                    })
-                except (TypeError, ValueError, IndexError) as e:
-                    logger.warning("[ClickHouse] Failed to parse loser row: %s, error: %s", row, e)
-                    continue
-            
+
+            # 在内存中按涨跌幅排序并截取前 N 名
+            gainers.sort(key=lambda x: x.get('change_percent', 0.0), reverse=True)
+            losers.sort(key=lambda x: x.get('change_percent', 0.0))  # 跌幅越小（更负）排越前
+
+            gainers = gainers[: max(0, int(limit or 0))] if limit else gainers
+            losers = losers[: max(0, int(limit or 0))] if limit else losers
+
             return {
                 'gainers': gainers,
-                'losers': losers
+                'losers': losers,
             }
         except Exception as exc:
             logger.error("[ClickHouse] Failed to get leaderboard: %s", exc, exc_info=True)
@@ -1433,9 +1376,10 @@ class ClickHouseDatabase:
         """Get distinct symbols from leaderboard table."""
         try:
             query = f"""
-            SELECT DISTINCT symbol
+            SELECT symbol
             FROM {self.leaderboard_table}
             WHERE symbol != ''
+            GROUP BY symbol
             """
             
             def _execute_query(client):
@@ -1449,41 +1393,48 @@ class ClickHouseDatabase:
             return []
 
     def ensure_market_klines_table(self) -> None:
-        """Create the market_klines table if it does not exist."""
-        ddl = f"""
-        CREATE TABLE IF NOT EXISTS {self.market_klines_table} (
-            event_time DateTime,
-            symbol String,
-            contract_type String,
-            kline_start_time DateTime,
-            kline_end_time DateTime,
-            interval String,
-            first_trade_id UInt64,
-            last_trade_id UInt64,
-            open_price Float64,
-            close_price Float64,
-            high_price Float64,
-            low_price Float64,
-            base_volume Float64,
-            trade_count UInt64,
-            is_closed UInt8,
-            quote_volume Float64,
-            taker_buy_base_volume Float64,
-            taker_buy_quote_volume Float64,
-            create_time DateTime DEFAULT now()
-        )
-        ENGINE = MergeTree
-        ORDER BY (symbol, interval, kline_end_time, event_time)
-        TTL kline_end_time + INTERVAL 2 DAY
+        """Create per-interval market_klines tables if they do not exist.
+
+        拆分原来的单表 market_klines 为 7 张按 interval 划分的表：
+        - market_klines_1w, market_klines_1d, market_klines_4h, market_klines_1h,
+          market_klines_15m, market_klines_5m, market_klines_1m
         """
-        self.command(ddl)
-        logger.info("[ClickHouse] Ensured table %s exists", self.market_klines_table)
+        for interval, table_name in self.market_klines_tables.items():
+            ddl = f"""
+            CREATE TABLE IF NOT EXISTS {table_name} (
+                event_time DateTime,
+                symbol String,
+                contract_type String,
+                kline_start_time DateTime,
+                kline_end_time DateTime,
+                interval String,
+                first_trade_id UInt64,
+                last_trade_id UInt64,
+                open_price Float64,
+                close_price Float64,
+                high_price Float64,
+                low_price Float64,
+                base_volume Float64,
+                trade_count UInt64,
+                is_closed UInt8,
+                quote_volume Float64,
+                taker_buy_base_volume Float64,
+                taker_buy_quote_volume Float64,
+                create_time DateTime DEFAULT now()
+            )
+            ENGINE = MergeTree
+            ORDER BY (symbol, interval, kline_end_time, event_time)
+            TTL kline_end_time + INTERVAL 2 DAY
+            """
+            self.command(ddl)
+            logger.info("[ClickHouse] Ensured kline table %s (interval=%s) exists", table_name, interval)
 
     def insert_market_klines(self, rows: Iterable[Dict[str, Any]]) -> None:
-        """Insert kline data into market_klines table."""
+        """Insert kline data into per-interval market_klines tables."""
+        rows = list(rows)
         if not rows:
             return
-        
+
         column_names = [
             "event_time",
             "symbol",
@@ -1504,17 +1455,27 @@ class ClickHouseDatabase:
             "taker_buy_base_volume",
             "taker_buy_quote_volume",
         ]
-        
-        # Convert rows to list of tuples
-        insert_rows = []
+
+        # 按 interval 归类到对应的表
+        bucketed: Dict[str, List[Tuple[Any, ...]]] = {}
         for row in rows:
-            insert_rows.append((
+            interval = (row.get("interval") or "").strip()
+            table_name = self.market_klines_tables.get(interval)
+            if not table_name:
+                logger.debug(
+                    "[ClickHouse] Skip kline row with unsupported interval: %s (row=%s)",
+                    interval,
+                    row,
+                )
+                continue
+
+            values = (
                 row.get("event_time"),
                 row.get("symbol", ""),
                 row.get("contract_type", ""),
                 row.get("kline_start_time"),
                 row.get("kline_end_time"),
-                row.get("interval", ""),
+                interval,
                 row.get("first_trade_id", 0),
                 row.get("last_trade_id", 0),
                 row.get("open_price", 0.0),
@@ -1527,25 +1488,65 @@ class ClickHouseDatabase:
                 row.get("quote_volume", 0.0),
                 row.get("taker_buy_base_volume", 0.0),
                 row.get("taker_buy_quote_volume", 0.0),
-            ))
-        
-        self.insert_rows(self.market_klines_table, insert_rows, column_names)
-        logger.debug("[ClickHouse] Inserted %s kline rows into %s", len(insert_rows), self.market_klines_table)
+            )
+            bucketed.setdefault(table_name, []).append(values)
+
+        # 批量写入各 interval 对应的表
+        for table_name, payload in bucketed.items():
+            if not payload:
+                continue
+            self.insert_rows(table_name, payload, column_names)
+            logger.debug(
+                "[ClickHouse] Inserted %s kline rows into %s",
+                len(payload),
+                table_name,
+            )
 
     def cleanup_old_klines(self, days: int = 2) -> int:
         """Delete klines older than specified days. Returns number of deleted rows."""
         try:
             # ClickHouse DELETE requires mutations, use ALTER TABLE DELETE
-            delete_sql = f"""
-            ALTER TABLE {self.market_klines_table}
-            DELETE WHERE kline_end_time < now() - INTERVAL {days} DAY
-            """
-            self.command(delete_sql)
+            for interval, table_name in self.market_klines_tables.items():
+                delete_sql = f"""
+                ALTER TABLE {table_name}
+                DELETE WHERE kline_end_time < now() - INTERVAL {days} DAY
+                """
+                self.command(delete_sql)
+                logger.info(
+                    "[ClickHouse] Initiated cleanup of klines older than %s days for %s (interval=%s)",
+                    days,
+                    table_name,
+                    interval,
+                )
             # Note: ClickHouse DELETE is asynchronous, we can't get exact count immediately
-            logger.info("[ClickHouse] Initiated cleanup of klines older than %s days", days)
             return 0  # ClickHouse doesn't return count for async DELETE
         except Exception as exc:
             logger.error("[ClickHouse] Failed to cleanup old klines: %s", exc, exc_info=True)
+            return 0
+
+    def cleanup_old_leaderboard(self, minutes: int = 10) -> int:
+        """Delete leaderboard rows older than specified minutes based on create_datetime.
+
+        Args:
+            minutes: 保留时间窗口（分钟），删除 create_datetime 早于当前时间该分钟数之前的数据
+
+        Returns:
+            已提交删除任务的行数（ClickHouse 异步 DELETE，返回0表示未知）
+        """
+        try:
+            delete_sql = f"""
+            ALTER TABLE {self.leaderboard_table}
+            DELETE WHERE create_datetime < now() - INTERVAL {minutes} MINUTE
+            """
+            self.command(delete_sql)
+            logger.info(
+                "[ClickHouse] Initiated cleanup of leaderboard rows older than %s minutes",
+                minutes,
+            )
+            # ClickHouse 的 ALTER DELETE 是异步的，这里返回0表示已提交
+            return 0
+        except Exception as exc:
+            logger.error("[ClickHouse] Failed to cleanup old leaderboard rows: %s", exc, exc_info=True)
             return 0
 
 
