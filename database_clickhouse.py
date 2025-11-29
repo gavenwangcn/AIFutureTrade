@@ -5,7 +5,7 @@ import logging
 import threading
 from datetime import datetime, timezone, timedelta
 from queue import Queue, Empty
-from typing import Any, Dict, Iterable, List, Optional, Callable
+from typing import Any, Dict, Iterable, List, Optional, Callable, Tuple
 
 import clickhouse_connect
 import config as app_config
@@ -321,45 +321,6 @@ class ClickHouseDatabase:
         """
         self.command(ddl)
         logger.info("[ClickHouse] Ensured table %s exists", self.market_ticker_table)
-        
-        # 如果表已存在，添加新字段（如果不存在）或修改字段类型为Nullable
-        try:
-            # 检查字段是否存在
-            check_column_sql = f"""
-            SELECT name, type FROM system.columns 
-            WHERE database = '{app_config.CLICKHOUSE_DATABASE}' 
-            AND table = '{self.market_ticker_table}' 
-            AND name = 'update_price_date'
-            """
-            def _check_column(client):
-                result = client.query(check_column_sql)
-                if len(result.result_rows) > 0:
-                    return result.result_rows[0][1]  # 返回字段类型
-                return None
-            
-            column_type = self._with_connection(_check_column)
-            
-            if column_type is None:
-                # 字段不存在，添加为Nullable
-                add_column_sql = f"""
-                ALTER TABLE {self.market_ticker_table} 
-                ADD COLUMN IF NOT EXISTS update_price_date Nullable(DateTime)
-                """
-                self.command(add_column_sql)
-                logger.info("[ClickHouse] Added update_price_date column to %s", self.market_ticker_table)
-            elif 'Nullable' not in str(column_type):
-                # 字段存在但不是Nullable，尝试修改为Nullable
-                try:
-                    modify_column_sql = f"""
-                    ALTER TABLE {self.market_ticker_table} 
-                    MODIFY COLUMN update_price_date Nullable(DateTime)
-                    """
-                    self.command(modify_column_sql)
-                    logger.info("[ClickHouse] Modified update_price_date column to Nullable(DateTime)")
-                except Exception as modify_exc:
-                    logger.warning("[ClickHouse] Failed to modify update_price_date to Nullable (may not be supported): %s", modify_exc)
-        except Exception as e:
-            logger.warning("[ClickHouse] Failed to check/modify update_price_date column: %s", e)
 
     def get_existing_symbol_data(self, symbols: List[str]) -> Dict[str, Dict[str, Any]]:
         """查询现有symbol的数据，返回字典 {symbol: {open_price: ..., update_price_date: ..., ...}}
@@ -930,38 +891,14 @@ class ClickHouseDatabase:
             trade_count UInt64,
             ingestion_time DateTime DEFAULT now(),
             rank UInt8,
-            create_datetime DateTime DEFAULT now()
+            create_datetime DateTime DEFAULT now(),
+            create_datetime_long UInt64 DEFAULT 0
         )
         ENGINE = MergeTree
-        ORDER BY (side, rank, symbol, create_datetime)
+        ORDER BY (side, rank, symbol, create_datetime_long)
         """
         self.command(ddl)
         logger.info("[ClickHouse] Ensured table %s exists", self.leaderboard_table)
-
-        # 如果表已存在，确保新增字段 create_datetime 存在
-        try:
-            check_column_sql = f"""
-            SELECT count()
-            FROM system.columns
-            WHERE database = '{app_config.CLICKHOUSE_DATABASE}'
-              AND table = '{self.leaderboard_table}'
-              AND name = 'create_datetime'
-            """
-
-            def _check_column(client):
-                result = client.query(check_column_sql)
-                return result.result_rows[0][0] > 0 if result.result_rows else False
-
-            has_column = self._with_connection(_check_column)
-            if not has_column:
-                add_column_sql = f"""
-                ALTER TABLE {self.leaderboard_table}
-                ADD COLUMN IF NOT EXISTS create_datetime DateTime DEFAULT now()
-                """
-                self.command(add_column_sql)
-                logger.info("[ClickHouse] Added create_datetime column to %s", self.leaderboard_table)
-        except Exception as e:
-            logger.warning("[ClickHouse] Failed to ensure create_datetime column on %s: %s", self.leaderboard_table, e)
 
     def query_recent_tickers(
         self, 
@@ -1187,11 +1124,13 @@ class ClickHouseDatabase:
                 "change_percent_text", "average_price", "last_price", "last_trade_volume",
                 "open_price", "high_price", "low_price", "base_volume", "quote_volume",
                 "stats_open_time", "stats_close_time", "first_trade_id", "last_trade_id",
-                "trade_count", "ingestion_time", "rank", "create_datetime"
+                "trade_count", "ingestion_time", "rank", "create_datetime", "create_datetime_long"
             ]
 
-            # 本次同步批次的唯一时间戳（整批插入使用相同的 create_datetime）
+            # 本次同步批次的唯一时间戳（整批插入使用相同的 create_datetime 和 create_datetime_long）
             batch_time = datetime.now(timezone.utc)
+            # 生成毫秒级时间戳（UInt64），用于精确排序和查询最新批次
+            batch_time_long = int(batch_time.timestamp() * 1000)
             
             # 添加涨幅榜数据（带排名）
             logger.info("[ClickHouse] 📊 处理涨幅榜数据...")
@@ -1230,6 +1169,7 @@ class ClickHouseDatabase:
                     _to_datetime(row.get("ingestion_time")),  # DateTime
                     _normalize_field_value(idx, "UInt8", "rank"),  # UInt8 (rank)
                     batch_time,  # create_datetime，同一批次使用相同时间
+                    batch_time_long,  # create_datetime_long，同一批次使用相同的毫秒级时间戳
                 ]
                 all_rows.append(row_data)
             logger.info("[ClickHouse] ✅ 涨幅榜数据处理完成，共 %s 条", len(gainers))
@@ -1271,6 +1211,7 @@ class ClickHouseDatabase:
                     _to_datetime(row.get("ingestion_time")),  # DateTime
                     _normalize_field_value(idx, "UInt8", "rank"),  # UInt8 (rank)
                     batch_time,  # create_datetime，同一批次使用相同时间
+                    batch_time_long,  # create_datetime_long，同一批次使用相同的毫秒级时间戳
                 ]
                 all_rows.append(row_data)
             logger.info("[ClickHouse] ✅ 跌幅榜数据处理完成，共 %s 条", len(losers))
@@ -1283,8 +1224,9 @@ class ClickHouseDatabase:
                     # 直接使用 ClickHouse 批量插入，不再使用临时表/全量替换方案
                     self.insert_rows(self.leaderboard_table, all_rows, column_names)
                     logger.info(
-                        "[ClickHouse] ✅ 批量插入完成，本次批次时间戳: %s, 涨幅: %d 条, 跌幅: %d 条",
+                        "[ClickHouse] ✅ 批量插入完成，本次批次时间戳: %s (create_datetime_long=%s), 涨幅: %d 条, 跌幅: %d 条",
                         batch_time.isoformat(),
+                        batch_time_long,
                         len(gainers),
                         len(losers),
                     )
@@ -1297,6 +1239,9 @@ class ClickHouseDatabase:
     def get_leaderboard(self, limit: int = 10) -> Dict[str, List[Dict]]:
         """Get leaderboard data from futures_leaderboard table.
         
+        使用 create_datetime_long 字段（数值型毫秒级时间戳）查询最新批次，
+        避免 create_datetime（秒级精度）导致同一秒多条数据无法区分的问题。
+        
         Args:
             limit: Number of top items to return for each side
             
@@ -1304,7 +1249,7 @@ class ClickHouseDatabase:
             Dictionary with 'gainers' and 'losers' lists
         """
         try:
-            # 一条 SQL：先锁定最新批次的 create_datetime，再取该批次所有涨跌数据
+            # 一条 SQL：先锁定最新批次的 create_datetime_long（数值型，毫秒级精度），再取该批次所有涨跌数据
             query = f"""
             SELECT
                 symbol,
@@ -1314,10 +1259,10 @@ class ClickHouseDatabase:
                 change_percent_text,
                 quote_volume,
                 rank,
-                create_datetime
+                create_datetime_long
             FROM {self.leaderboard_table}
-            WHERE create_datetime = (
-                SELECT max(create_datetime) FROM {self.leaderboard_table}
+            WHERE create_datetime_long = (
+                SELECT max(create_datetime_long) FROM {self.leaderboard_table}
             )
               AND side IN ('gainer', 'loser')
             """
@@ -1525,23 +1470,32 @@ class ClickHouseDatabase:
             return 0
 
     def cleanup_old_leaderboard(self, minutes: int = 10) -> int:
-        """Delete leaderboard rows older than specified minutes based on create_datetime.
+        """Delete leaderboard rows older than specified minutes based on create_datetime_long.
+
+        使用 create_datetime_long（数值型毫秒级时间戳）进行清理，避免 create_datetime（秒级精度）
+        导致同一秒多条数据无法准确区分的问题。
 
         Args:
-            minutes: 保留时间窗口（分钟），删除 create_datetime 早于当前时间该分钟数之前的数据
+            minutes: 保留时间窗口（分钟），删除 create_datetime_long 早于当前时间该分钟数之前的数据
 
         Returns:
             已提交删除任务的行数（ClickHouse 异步 DELETE，返回0表示未知）
         """
         try:
+            # 计算当前时间减去指定分钟数后的毫秒级时间戳
+            from datetime import datetime, timezone
+            cutoff_time = datetime.now(timezone.utc)
+            cutoff_timestamp_ms = int((cutoff_time.timestamp() - minutes * 60) * 1000)
+            
             delete_sql = f"""
             ALTER TABLE {self.leaderboard_table}
-            DELETE WHERE create_datetime < now() - INTERVAL {minutes} MINUTE
+            DELETE WHERE create_datetime_long < {cutoff_timestamp_ms}
             """
             self.command(delete_sql)
             logger.info(
-                "[ClickHouse] Initiated cleanup of leaderboard rows older than %s minutes",
+                "[ClickHouse] Initiated cleanup of leaderboard rows older than %s minutes (cutoff_timestamp_ms=%s)",
                 minutes,
+                cutoff_timestamp_ms,
             )
             # ClickHouse 的 ALTER DELETE 是异步的，这里返回0表示已提交
             return 0
