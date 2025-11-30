@@ -341,23 +341,19 @@ class MarketDataFetcher:
                 # 根据时间框架获取优化的limit值
                 limit = timeframe_limits.get(label, self._futures_kline_limit)
                 
-                # 显式设置endTime为当前时间（毫秒时间戳），确保获取最新的K线数据
-                # 注意：Binance API如果不指定endTime，默认返回最新数据
-                # 但显式设置endTime可以确保获取到包含当前时间点的最新K线
-                current_time_ms = int(time.time() * 1000)
-                
                 # 实时获取K线数据（每次调用都获取最新数据）
-                # 使用对应时间框架的interval和limit值，显式指定endTime确保获取最新数据
+                # 注意：Binance API的kline_candlestick_data()方法不支持endTime参数
+                # 不指定startTime和endTime时，API默认返回最新的limit根K线数据
+                # 这正好符合我们的需求：获取最新的K线数据用于指标计算
                 klines = self._futures_client.get_klines(
                     symbol_key, 
                     interval, 
-                    limit=limit,
-                    endTime=current_time_ms
+                    limit=limit
                 )
                 
                 logger.debug(
                     f'[Indicators] 获取K线数据: symbol={symbol}, interval={interval}, limit={limit}, '
-                    f'endTime={current_time_ms}, 返回{len(klines) if klines else 0}根K线'
+                    f'返回{len(klines) if klines else 0}根K线'
                 )
                 
                 if not klines or len(klines) == 0:
