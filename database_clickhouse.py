@@ -940,7 +940,7 @@ class ClickHouseDatabase:
                 _normalize_field_value(row[16], "UInt64", "last_trade_id"),  # last_trade_id (UInt64)
                 _normalize_field_value(row[17], "UInt64", "trade_count"),  # trade_count (UInt64)
                 _to_datetime(row[18]) if row[18] else datetime.now(timezone.utc),  # ingestion_time (DateTime)
-                update_date  # update_price_date (Nullable(DateTime)) - 可以为None
+                _to_naive_datetime(update_date) if update_date else None  # update_price_date (Nullable(DateTime)) - 转换为naive datetime避免时区问题
             ]
             
             # 删除旧数据并插入新数据（ClickHouse的UPDATE方式）
@@ -952,7 +952,20 @@ class ClickHouseDatabase:
             
             # 插入更新后的数据
             self.insert_rows(self.market_ticker_table, [updated_row], column_names)
-            logger.debug("[ClickHouse] Updated open_price for symbol %s: %s", symbol, new_open_price)
+            
+            # 记录时间转换信息，用于调试时区问题
+            if update_date:
+                naive_dt = _to_naive_datetime(update_date)
+                logger.debug(
+                    "[ClickHouse] Updated open_price for symbol %s: %s | update_price_date: %s (UTC) -> %s (naive, stored)",
+                    symbol,
+                    new_open_price,
+                    update_date.strftime('%Y-%m-%d %H:%M:%S %Z') if hasattr(update_date, 'strftime') else str(update_date),
+                    naive_dt.strftime('%Y-%m-%d %H:%M:%S')
+                )
+            else:
+                logger.debug("[ClickHouse] Updated open_price for symbol %s: %s", symbol, new_open_price)
+            
             return True
             
         except Exception as e:
@@ -1853,6 +1866,44 @@ def _to_datetime(value: Any) -> datetime:
 
     seconds = numeric / 1000.0
     return datetime.fromtimestamp(seconds, tz=timezone.utc)
+
+
+def _to_naive_datetime(value: Any) -> datetime:
+    """将datetime对象转换为naive datetime（移除时区信息），用于ClickHouse存储。
+    
+    ClickHouse的DateTime类型不存储时区信息，如果传入带时区的datetime对象，
+    clickhouse_connect库可能会根据服务器时区进行转换，导致时间偏移。
+    
+    此函数确保：
+    1. 如果输入是带时区的datetime（如UTC），先转换为UTC时间，再移除时区信息
+    2. 如果输入是naive datetime，直接返回
+    3. 如果输入是None，返回当前UTC时间的naive版本
+    
+    Args:
+        value: datetime对象或None
+        
+    Returns:
+        naive datetime对象（无时区信息），时间值为UTC时间
+    """
+    if value is None:
+        # 返回当前UTC时间的naive版本
+        return datetime.utcnow()
+    
+    if isinstance(value, datetime):
+        if value.tzinfo is not None:
+            # 带时区的datetime，转换为UTC后再移除时区信息
+            utc_time = value.astimezone(timezone.utc)
+            return utc_time.replace(tzinfo=None)
+        else:
+            # 已经是naive datetime，直接返回
+            return value
+    
+    # 如果不是datetime对象，尝试转换
+    dt = _to_datetime(value)
+    if dt.tzinfo is not None:
+        utc_time = dt.astimezone(timezone.utc)
+        return utc_time.replace(tzinfo=None)
+    return dt
 
 
 def _normalize_field_value(value: Any, field_type: str, field_name: str = "") -> Any:

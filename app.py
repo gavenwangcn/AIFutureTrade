@@ -1150,6 +1150,46 @@ def get_market_prices():
     
     return jsonify(configured_prices)
 
+@app.route('/api/market/indicators/<symbol>', methods=['GET'])
+def get_market_indicators(symbol):
+    """Get technical indicators for a specific symbol
+    
+    从币安API实时获取并计算技术指标数据，包括：
+    - K线数据（开高低收、成交量）
+    - MA均线（5、20、60、99周期）
+    - MACD指标（DIF、DEA、BAR）
+    - RSI指标（RSI6、RSI9）
+    - 成交量（VOL）
+    
+    时间框架：1周、1天、4小时、1小时、15分钟、5分钟、1分钟
+    
+    Args:
+        symbol: 交易对符号（如 'BTC'）
+        
+    Returns:
+        技术指标数据字典，格式：{'timeframes': {1w: {...}, 1d: {...}, ...}}
+    """
+    try:
+        indicators = market_fetcher.calculate_technical_indicators(symbol)
+        if not indicators:
+            return jsonify({
+                'symbol': symbol,
+                'timeframes': {},
+                'error': '无法获取技术指标数据'
+            }), 200
+        
+        return jsonify({
+            'symbol': symbol,
+            **indicators
+        })
+    except Exception as e:
+        logger.error(f"[API] Failed to get indicators for {symbol}: {e}", exc_info=True)
+        return jsonify({
+            'symbol': symbol,
+            'timeframes': {},
+            'error': str(e)
+        }), 500
+
 @app.route('/api/market/leaderboard', methods=['GET'])
 def get_market_leaderboard():
     """Get market leaderboard data"""

@@ -1251,6 +1251,8 @@ class TradingApp {
                 configuredItems.push(item);
             }
         });
+        
+        // 先渲染价格数据
 
         // 构建HTML
         let html = '';
@@ -1286,6 +1288,49 @@ class TradingApp {
         }
         
         container.innerHTML = html;
+        
+        // 异步加载所有合约的技术指标数据
+        const allSymbols = [...configuredItems, ...positionItems].map(item => item.symbol);
+        allSymbols.forEach(symbol => {
+            this.loadIndicatorsForSymbol(symbol);
+        });
+    }
+    
+    async loadIndicatorsForSymbol(symbol) {
+        const url = `/api/market/indicators/${symbol}`;
+        this.logger.logApiCall('GET', url);
+        
+        try {
+            const response = await fetch(url);
+            
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+            }
+            
+            const data = await response.json();
+            this.logger.logApiSuccess('GET', url, response, data);
+            
+            // 更新对应合约的技术指标显示
+            if (data.timeframes) {
+                this.updateIndicatorsForSymbol(symbol, data.timeframes);
+            }
+        } catch (error) {
+            this.logger.logApiError('GET', url, error, null);
+            // 不显示错误，因为技术指标是可选数据
+        }
+    }
+    
+    updateIndicatorsForSymbol(symbol, timeframes) {
+        const container = document.querySelector(`[data-indicators-container="${symbol}"]`);
+        if (!container) return;
+        
+        // 重新构建技术指标部分
+        const timeframeSection = this.buildTimeframeSection(timeframes || {});
+        const maSection = this.buildMaGrid(timeframes || {});
+        const indicatorsSection = this.buildIndicatorsSection(timeframes || {});
+        
+        // 更新容器内容
+        container.innerHTML = timeframeSection + maSection + indicatorsSection;
     }
 
     buildPriceItem(symbol, data) {
@@ -1299,7 +1344,7 @@ class TradingApp {
         const indicatorsSection = this.buildIndicatorsSection(data.timeframes || {});
 
         return `
-            <div class="price-item">
+            <div class="price-item" data-symbol="${symbol}">
                 <div class="price-head">
                     <div class="price-info">
                         <div class="price-symbol">${symbol}</div>
@@ -1318,7 +1363,7 @@ class TradingApp {
                         </div>
                     </div>
                 </div>
-                <div class="price-body">
+                <div class="price-body" data-indicators-container="${symbol}">
                     ${timeframeSection}
                     ${maSection}
                     ${indicatorsSection}
@@ -2713,7 +2758,7 @@ class TradingApp {
 
     buildTimeframeSection(timeframes) {
         if (!timeframes || Object.keys(timeframes).length === 0) {
-            return '<div class="timeframe-empty">暂无时间框架数据</div>';
+            return '<div class="timeframe-empty">暂无技术指标数据</div>';
         }
 
         const timeframeLabels = {
