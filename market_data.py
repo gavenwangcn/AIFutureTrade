@@ -5,7 +5,7 @@ import time
 import logging
 import threading
 import config as app_config
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, List, Optional
 
 from binance_futures import BinanceFuturesClient
@@ -293,7 +293,7 @@ class MarketDataFetcher:
             symbol: 交易对符号（如 'BTC'）
             
         Returns:
-            格式：{symbol: {1w: {kline: {}, ma: {}, macd: {}, rsi: {}, vol: {}}, 1d: {...}}}
+            格式：{symbol: {1w: {kline: {}, ma: {}, macd: {}, rsi: {}, VoL: {}}, 1d: {...}}}
         """
         if not self._futures_client:
             logger.warning(f'[Indicators] Futures client unavailable for {symbol}')
@@ -313,6 +313,22 @@ class MarketDataFetcher:
         # MA周期列表
         ma_lengths = [5, 20, 60, 99]
         
+        # 不同时间框架的K线limit值优化配置
+        # 注意：Binance API的limit最大值为120，所有时间框架统一使用120
+        # 120根K线足够计算所有指标：
+        # - MA99需要99根（满足）
+        # - MACD需要26根（满足）
+        # - RSI需要14根（满足）
+        timeframe_limits = {
+            '1w': 120,   # 周线：120根 = 约2.3年历史数据
+            '1d': 120,   # 日线：120根 = 约4个月历史数据
+            '4h': 120,   # 4小时：120根 = 约20天历史数据
+            '1h': 120,   # 1小时：120根 = 约5天历史数据
+            '15m': 120,  # 15分钟：120根 = 约1.25天历史数据
+            '5m': 120,   # 5分钟：120根 = 约10小时历史数据
+            '1m': 120    # 1分钟：120根 = 约2小时历史数据
+        }
+        
         # 格式化交易对符号（添加计价资产后缀）
         symbol_key = self._futures_client.format_symbol(symbol)
         
@@ -322,8 +338,27 @@ class MarketDataFetcher:
         # 遍历每个时间框架（实时计算，无缓存）
         for label, interval in timeframe_map.items():
             try:
+                # 根据时间框架获取优化的limit值
+                limit = timeframe_limits.get(label, self._futures_kline_limit)
+                
+                # 显式设置endTime为当前时间（毫秒时间戳），确保获取最新的K线数据
+                # 注意：Binance API如果不指定endTime，默认返回最新数据
+                # 但显式设置endTime可以确保获取到包含当前时间点的最新K线
+                current_time_ms = int(time.time() * 1000)
+                
                 # 实时获取K线数据（每次调用都获取最新数据）
-                klines = self._futures_client.get_klines(symbol_key, interval, limit=self._futures_kline_limit)
+                # 使用对应时间框架的interval和limit值，显式指定endTime确保获取最新数据
+                klines = self._futures_client.get_klines(
+                    symbol_key, 
+                    interval, 
+                    limit=limit,
+                    endTime=current_time_ms
+                )
+                
+                logger.debug(
+                    f'[Indicators] 获取K线数据: symbol={symbol}, interval={interval}, limit={limit}, '
+                    f'endTime={current_time_ms}, 返回{len(klines) if klines else 0}根K线'
+                )
                 
                 if not klines or len(klines) == 0:
                     logger.debug(f'[Indicators] No klines data for {symbol} {label}')
@@ -369,7 +404,9 @@ class MarketDataFetcher:
                 # 实时计算RSI指标
                 rsi = self._calculate_rsi(closes)
                 
-                # 获取最新成交量
+                # 获取最新成交量（VOL）
+                # VOL通常指当前K线的成交量，也可以计算成交量移动平均
+                # 这里返回最新一根K线的成交量
                 vol = volumes[-1] if volumes else 0.0
                 
                 # 组装该时间框架的数据
@@ -380,6 +417,15 @@ class MarketDataFetcher:
                     'rsi': rsi,
                     'vol': vol
                 }
+                
+                # 记录计算成功的日志（仅在DEBUG级别）
+                logger.debug(
+                    f'[Indicators] {symbol} {label} 指标计算完成: '
+                    f'MA5={ma_values.get("ma5", 0):.2f}, '
+                    f'MACD_DIF={macd.get("dif", 0):.4f}, '
+                    f'RSI6={rsi.get("rsi6", 0):.2f}, '
+                    f'VOL={vol:.2f}'
+                )
                 
             except Exception as e:
                 logger.warning(
@@ -398,7 +444,9 @@ class MarketDataFetcher:
         """
         计算简单移动平均（MA）值
         
-        MA(N) = 近N个交易日的收盘价之和 ÷ N
+        MA标准计算公式：
+        MA(N) = (P1 + P2 + ... + PN) / N
+        其中P1到PN是最近N个周期的收盘价
         
         如果数据不足N个，则使用所有可用数据的平均值。
         
@@ -423,8 +471,12 @@ class MarketDataFetcher:
                 if len(closes) > 0:
                     ma_value = sum(closes) / len(closes)
                     ma_values[f'ma{length}'] = ma_value
+                    logger.warning(
+                        f'[MA] 数据不足: MA{length}需要{length}个数据点，实际只有{len(closes)}个，使用所有可用数据计算'
+                    )
                 else:
                     ma_values[f'ma{length}'] = 0.0
+                    logger.warning(f'[MA] 无数据: 无法计算MA{length}')
         
         return ma_values
 
@@ -433,20 +485,26 @@ class MarketDataFetcher:
         """
         计算MACD指标（指数平滑异同移动平均线）
         
-        MACD计算过程：
-        1. 计算EMA(12)和EMA(26)
-        2. 计算DIF = EMA(12) - EMA(26)
-        3. 计算DEA = DIF的9日EMA（信号线）
-        4. 计算BAR = (DIF - DEA) × 2（柱状线）
+        MACD标准计算公式：
+        1. 计算快速EMA(12)和慢速EMA(26)
+        2. 计算DIF（差离值）= EMA(12) - EMA(26)
+        3. 计算DEA（信号线）= DIF的9日EMA
+        4. 计算BAR（柱状线）= (DIF - DEA) × 2
+        
+        注意：MACD的BAR通常有两种计算方式：
+        - 方式1：BAR = (DIF - DEA) × 2（常用）
+        - 方式2：BAR = DIF - DEA（简化版）
+        这里使用方式1，符合大多数交易软件的标准
         
         Args:
-            closes: 收盘价列表
+            closes: 收盘价列表（按时间顺序，最新的在最后）
             
         Returns:
             包含DIF、DEA、BAR的字典，如果数据不足则返回默认值
         """
         # 需要至少26个数据点才能计算EMA(26)
         if len(closes) < 26:
+            logger.warning(f'[MACD] 数据不足: 需要至少26个数据点，实际只有{len(closes)}个')
             return {'dif': 0.0, 'dea': 0.0, 'bar': 0.0}
         
         # 步骤1：计算EMA(12)和EMA(26)的历史序列
@@ -459,14 +517,16 @@ class MarketDataFetcher:
         # 获取最新的DIF值
         dif = dif_series[-1]
         
-        # 步骤3：计算DEA（DIF的9日EMA）
+        # 步骤3：计算DEA（DIF的9日EMA，也称为信号线）
         # 需要至少9个DIF值才能计算DEA
         if len(dif_series) < 9:
+            logger.warning(f'[MACD] DIF序列不足: 需要至少9个DIF值，实际只有{len(dif_series)}个')
             return {'dif': dif, 'dea': 0.0, 'bar': 0.0}
         
         dea = self._calculate_ema(dif_series, 9)
         
         # 步骤4：计算BAR = (DIF - DEA) × 2
+        # 乘以2是为了放大柱状图的视觉效果，这是MACD的标准做法
         bar = (dif - dea) * 2
         
         return {
@@ -479,11 +539,17 @@ class MarketDataFetcher:
         """
         计算EMA序列（返回所有历史EMA值）
         
+        EMA标准计算公式：
+        - 平滑系数（multiplier）= 2 / (period + 1)
+        - 第一个EMA值 = 前period个数据的简单移动平均（SMA）
+        - 后续EMA值 = 今日价格 × multiplier + 昨日EMA × (1 - multiplier)
+        即：EMA(today) = Price(today) × (2/(N+1)) + EMA(yesterday) × ((N-1)/(N+1))
+        
         为了保持序列长度一致，前period-1个数据点使用简单移动平均作为初始值。
         
         Args:
-            closes: 收盘价列表
-            period: EMA周期
+            closes: 收盘价列表（按时间顺序，最新的在最后）
+            period: EMA周期（如12、26）
             
         Returns:
             EMA值序列，长度与closes相同
@@ -497,6 +563,7 @@ class MarketDataFetcher:
         ema_series = []
         
         # 前period-1个数据点使用简单移动平均（逐步增加窗口）
+        # 这样可以保持序列长度一致，但前几个值不是真正的EMA
         for i in range(period - 1):
             if i == 0:
                 ema_series.append(closes[0])
@@ -505,12 +572,13 @@ class MarketDataFetcher:
                 ema_series.append(avg)
         
         # 从第period个数据点开始，使用标准EMA计算
-        # 初始化：第一个有效EMA值使用前period个数据的简单平均
+        # 初始化：第一个有效EMA值使用前period个数据的简单平均（SMA）
         ema = sum(closes[:period]) / period
         ema_series.append(ema)
         
         # 递推计算后续EMA值
-        # EMA(n) = 今日收盘价 × (2/(n+1)) + 昨日EMA × ((n-1)/(n+1))
+        # EMA公式：EMA(today) = Price(today) × multiplier + EMA(yesterday) × (1 - multiplier)
+        # 等价于：EMA(today) = EMA(yesterday) + (Price(today) - EMA(yesterday)) × multiplier
         for price in closes[period:]:
             ema = (price - ema) * multiplier + ema
             ema_series.append(ema)
@@ -577,20 +645,31 @@ class MarketDataFetcher:
 
     def _calculate_rsi_single(self, closes: List[float], period: int) -> float:
         """
-        计算单个周期的RSI值
+        计算单个周期的RSI值（使用Wilder's Smoothing Method）
         
-        使用平滑平均（类似EMA）：
-        - 首次计算：使用简单平均
-        - 后续计算：平滑平均 = (前n-1天平均值 × (n-1) + 今日值) ÷ n
+        RSI标准计算公式（Wilder's Method）：
+        1. 计算价格变化：change = close[i] - close[i-1]
+        2. 分离涨幅和跌幅：
+           - gain = change if change > 0 else 0
+           - loss = -change if change < 0 else 0
+        3. 计算初始平均涨幅和跌幅（前period个周期）：
+           - avg_gain = sum(gains[:period]) / period
+           - avg_loss = sum(losses[:period]) / period
+        4. 使用Wilder's平滑方法计算后续平均值：
+           - avg_gain = (avg_gain * (period - 1) + current_gain) / period
+           - avg_loss = (avg_loss * (period - 1) + current_loss) / period
+        5. 计算RS = avg_gain / avg_loss
+        6. 计算RSI = 100 - (100 / (1 + RS))
         
         Args:
-            closes: 收盘价列表
+            closes: 收盘价列表（按时间顺序，最新的在最后）
             period: RSI周期（如6、9、14）
             
         Returns:
             RSI值（0-100之间）
         """
         if len(closes) < period + 1:
+            logger.warning(f'[RSI] 数据不足: 需要至少{period + 1}个数据点，实际只有{len(closes)}个')
             return 50.0
         
         # 步骤1：计算每日涨跌幅度
@@ -598,28 +677,30 @@ class MarketDataFetcher:
         gains = [change if change > 0 else 0.0 for change in changes]
         losses = [-change if change < 0 else 0.0 for change in changes]
         
-        # 步骤2：计算平滑平均涨幅和平均跌幅
-        # 首次计算（第period天）：使用简单平均
+        # 步骤2：计算初始平均涨幅和平均跌幅（前period个周期）
         initial_gains = gains[:period]
         initial_losses = losses[:period]
         avg_gain = sum(initial_gains) / period
         avg_loss = sum(initial_losses) / period
         
-        # 后续计算（第period+1天及以后）：使用平滑平均
-        # 平滑平均 = (前n-1天平均值 × (n-1) + 今日值) ÷ n
+        # 步骤3：使用Wilder's平滑方法计算后续平均值
+        # Wilder's平滑公式：新平均值 = (旧平均值 × (周期-1) + 当前值) / 周期
         for i in range(period, len(gains)):
             avg_gain = (avg_gain * (period - 1) + gains[i]) / period
             avg_loss = (avg_loss * (period - 1) + losses[i]) / period
         
-        # 步骤3：计算RS = 平均涨幅 ÷ 平均跌幅
+        # 步骤4：计算RS = 平均涨幅 ÷ 平均跌幅
         if avg_loss == 0:
-            # 如果平均跌幅为0，说明没有下跌，RSI应该接近100
+            # 如果平均跌幅为0，说明没有下跌，RSI应该为100
             return 100.0
         
         rs = avg_gain / avg_loss
         
-        # 步骤4：计算RSI = 100 - (100 ÷ (1 + RS))
+        # 步骤5：计算RSI = 100 - (100 / (1 + RS))
         rsi = 100 - (100 / (1 + rs))
+        
+        # 确保RSI值在0-100范围内
+        rsi = max(0.0, min(100.0, rsi))
         
         return rsi
 
