@@ -16,7 +16,7 @@ from datetime import datetime
 from trading_engine import TradingEngine
 from market_data import MarketDataFetcher
 from ai_trader import AITrader
-from database import Database
+from database_basic import Database
 from version import __version__
 from prompt_defaults import DEFAULT_BUY_CONSTRAINTS, DEFAULT_SELL_CONSTRAINTS
 

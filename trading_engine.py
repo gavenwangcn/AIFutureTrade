@@ -13,7 +13,8 @@ from prompt_defaults import DEFAULT_BUY_CONSTRAINTS, DEFAULT_SELL_CONSTRAINTS
 logger = logging.getLogger(__name__)
 
 class TradingEngine:
-    def __init__(self, model_id: int, db, market_fetcher, ai_trader, trade_fee_rate: float = 0.001):
+    def __init__(self, model_id: int, db, market_fetcher, ai_trader, trade_fee_rate: float = 0.001,
+                 buy_cycle_interval: int = 5, sell_cycle_interval: int = 5):
         """Initialize trading engine for a model"""
         self.model_id = model_id
         self.db = db
@@ -21,82 +22,80 @@ class TradingEngine:
         self.ai_trader = ai_trader
         self.trade_fee_rate = trade_fee_rate
         self.max_positions = 3
+        # 配置执行周期（秒）
+        self.buy_cycle_interval = buy_cycle_interval
+        self.sell_cycle_interval = sell_cycle_interval
+        # 线程控制标志
+        self.running = False
+        self.buy_thread = None
+        self.sell_thread = None
+        # 全局交易锁，用于协调买入和卖出服务线程之间的并发操作
+        self.trading_lock = threading.Lock()
 
     # ============ Main Trading Cycle ============
 
-    def execute_trading_cycle(self) -> Dict:
+    def execute_sell_cycle(self) -> Dict:
         """
-        执行一个完整的交易周期
+        执行卖出/平仓决策周期
         
-        交易周期流程：
-        1. 初始化阶段：获取市场状态、持仓信息、账户信息、提示词模板等
-        2. 卖出决策阶段：优先处理卖出/平仓决策（风控优先）
-        3. 买入决策阶段：分批处理买入决策（多线程并发，每批立即执行）
-        4. 记录阶段：记录账户价值快照
+        流程：
+        1. 初始化数据准备：获取市场状态、持仓信息、账户信息、卖出提示词模板等
+        2. 卖出决策处理：调用AI模型获取卖出决策并执行
+        3. 记录账户价值快照
         
         返回：
             Dict: {
                 'success': bool,  # 是否成功
                 'executions': List,  # 执行结果列表
                 'portfolio': Dict,  # 最终持仓信息
-                'conversations': List,  # 对话类型列表 ['sell', 'buy']
+                'conversations': List,  # 对话类型列表 ['sell']
                 'error': str  # 错误信息（如果失败）
             }
         """
-        logger.debug(f"[Model {self.model_id}] ========== 开始执行交易周期 ==========")
+        logger.debug(f"[Model {self.model_id}] [卖出服务] ========== 开始执行卖出决策周期 ==========")
         cycle_start_time = datetime.now()
         
         try:
             # ========== 阶段1: 初始化数据准备 ==========
-            logger.debug(f"[Model {self.model_id}] [阶段1] 开始初始化数据准备")
+            logger.debug(f"[Model {self.model_id}] [卖出服务] [阶段1] 开始初始化数据准备")
             
             # 获取市场状态（包含价格和技术指标）
-            logger.debug(f"[Model {self.model_id}] [阶段1.1] 获取市场状态...")
+            logger.debug(f"[Model {self.model_id}] [卖出服务] [阶段1.1] 获取市场状态...")
             market_state = self._get_market_state()
-            logger.debug(f"[Model {self.model_id}] [阶段1.1] 市场状态获取完成, 跟踪合约数: {len(market_state)}")
+            logger.debug(f"[Model {self.model_id}] [卖出服务] [阶段1.1] 市场状态获取完成, 跟踪合约数: {len(market_state)}")
             
             # 提取当前价格映射（用于计算持仓价值）
             current_prices = self._extract_price_map(market_state)
-            logger.debug(f"[Model {self.model_id}] [阶段1.2] 价格映射提取完成, 价格数量: {len(current_prices)}")
+            logger.debug(f"[Model {self.model_id}] [卖出服务] [阶段1.2] 价格映射提取完成, 价格数量: {len(current_prices)}")
             
             # 获取当前持仓信息
             portfolio = self.db.get_portfolio(self.model_id, current_prices)
-            logger.debug(f"[Model {self.model_id}] [阶段1.3] 持仓信息获取完成: "
+            logger.debug(f"[Model {self.model_id}] [卖出服务] [阶段1.3] 持仓信息获取完成: "
                         f"总价值=${portfolio.get('total_value', 0):.2f}, "
                         f"现金=${portfolio.get('cash', 0):.2f}, "
                         f"持仓数={len(portfolio.get('positions', []) or [])}")
             
             # 构建账户信息（用于AI决策）
             account_info = self._build_account_info(portfolio)
-            logger.debug(f"[Model {self.model_id}] [阶段1.4] 账户信息构建完成: "
+            logger.debug(f"[Model {self.model_id}] [卖出服务] [阶段1.4] 账户信息构建完成: "
                         f"初始资金=${account_info.get('initial_capital', 0):.2f}, "
                         f"总收益率={account_info.get('total_return', 0):.2f}%")
             
-            # 获取提示词模板（买入和卖出约束）
+            # 获取提示词模板（仅卖出约束）
             prompt_templates = self._get_prompt_templates()
-            logger.debug(f"[Model {self.model_id}] [阶段1.5] 提示词模板获取完成: "
-                        f"买入提示词长度={len(prompt_templates.get('buy', ''))}, "
-                        f"卖出提示词长度={len(prompt_templates.get('sell', ''))}")
-            
-            # 获取市场快照（涨跌幅榜，用于AI决策参考）
-            market_snapshot = self._get_prompt_market_snapshot()
-            logger.debug(f"[Model {self.model_id}] [阶段1.6] 市场快照获取完成, 快照数量: {len(market_snapshot)}")
-            
-            # 获取模型杠杆配置
-            self.current_model_leverage = self._get_model_leverage()
-            logger.debug(f"[Model {self.model_id}] [阶段1.7] 模型杠杆配置: {self.current_model_leverage}x")
+            logger.debug(f"[Model {self.model_id}] [卖出服务] [阶段1.5] 卖出提示词模板获取完成")
             
             # 初始化执行结果和对话记录
             executions = []
             conversation_prompts = []
-            logger.debug(f"[Model {self.model_id}] [阶段1] 初始化完成")
+            logger.debug(f"[Model {self.model_id}] [卖出服务] [阶段1] 初始化完成")
 
-            # ========== 阶段2: 卖出/平仓决策处理（风控优先） ==========
-            logger.debug(f"[Model {self.model_id}] [阶段2] 开始处理卖出/平仓决策")
+            # ========== 阶段2: 卖出/平仓决策处理 ==========
+            logger.debug(f"[Model {self.model_id}] [卖出服务] [阶段2] 开始处理卖出/平仓决策")
             
             # 检查是否有持仓需要处理
             positions_count = len(portfolio.get('positions', []) or [])
-            logger.debug(f"[Model {self.model_id}] [阶段2.1] 当前持仓数量: {positions_count}")
+            logger.debug(f"[Model {self.model_id}] [卖出服务] [阶段2.1] 当前持仓数量: {positions_count}")
             
             if positions_count > 0:
                 # 确保market_state中的价格是实时的（重新获取一次以确保最新）
@@ -111,128 +110,58 @@ class TradingEngine:
                         for symbol, price_info in realtime_prices.items():
                             if symbol in market_state:
                                 market_state[symbol]['price'] = price_info.get('price', market_state[symbol].get('price', 0))
-                                logger.debug(f"[Model {self.model_id}] 更新持仓 {symbol} 实时价格: ${price_info.get('price', 0):.4f}")
+                                logger.debug(f"[Model {self.model_id}] [卖出服务] 更新持仓 {symbol} 实时价格: ${price_info.get('price', 0):.4f}")
                 
                 # 调用AI模型获取卖出决策（使用实时价格）
-                logger.debug(f"[Model {self.model_id}] [阶段2.2] 调用AI模型进行卖出决策（使用实时价格）...")
+                # 注意：卖出决策不需要涨幅榜信息，只基于当前持仓
+                logger.debug(f"[Model {self.model_id}] [卖出服务] [阶段2.2] 调用AI模型进行卖出决策（使用实时价格）...")
                 sell_payload = self.ai_trader.make_sell_decision(
                     portfolio,
                     market_state,
                     account_info,
-                    constraints_text=prompt_templates['sell'],
-                    market_snapshot=market_snapshot
+                    constraints_text=prompt_templates['sell']
                 )
                 
                 # 检查AI决策结果
                 is_skipped = sell_payload.get('skipped', False)
                 has_prompt = bool(sell_payload.get('prompt'))
                 decisions = sell_payload.get('decisions') or {}
-                logger.debug(f"[Model {self.model_id}] [阶段2.3] AI卖出决策完成: "
+                logger.debug(f"[Model {self.model_id}] [卖出服务] [阶段2.3] AI卖出决策完成: "
                             f"跳过={is_skipped}, 有提示词={has_prompt}, 决策数量={len(decisions)}")
                 
                 if not is_skipped and has_prompt:
                     # 记录AI对话到数据库
-                    logger.debug(f"[Model {self.model_id}] [阶段2.4] 记录AI对话到数据库...")
+                    logger.debug(f"[Model {self.model_id}] [卖出服务] [阶段2.4] 记录AI对话到数据库...")
                     self._record_ai_conversation(sell_payload)
                     
                     # 执行卖出决策
-                    logger.debug(f"[Model {self.model_id}] [阶段2.5] 开始执行卖出决策, 决策详情: {list(decisions.keys())}")
+                    logger.debug(f"[Model {self.model_id}] [卖出服务] [阶段2.5] 开始执行卖出决策, 决策详情: {list(decisions.keys())}")
                     sell_results = self._execute_decisions(
                         decisions,
                         market_state,
                         portfolio
                     )
-                    logger.debug(f"[Model {self.model_id}] [阶段2.6] 卖出决策执行完成, 执行结果数: {len(sell_results)}")
+                    logger.debug(f"[Model {self.model_id}] [卖出服务] [阶段2.6] 卖出决策执行完成, 执行结果数: {len(sell_results)}")
                     for idx, result in enumerate(sell_results):
-                        logger.debug(f"[Model {self.model_id}] [阶段2.6.{idx+1}] 执行结果: "
+                        logger.debug(f"[Model {self.model_id}] [卖出服务] [阶段2.6.{idx+1}] 执行结果: "
                                     f"合约={result.get('future')}, "
                                     f"信号={result.get('signal')}, "
                                     f"错误={result.get('error', '无')}")
                     
                     executions.extend(sell_results)
                     conversation_prompts.append('sell')
-                    
-                    # 更新持仓信息（卖出后持仓状态已改变）
-                    logger.debug(f"[Model {self.model_id}] [阶段2.7] 更新持仓信息...")
-                    portfolio = self.db.get_portfolio(self.model_id, current_prices)
-                    account_info = self._build_account_info(portfolio)
-                    logger.debug(f"[Model {self.model_id}] [阶段2.7] 持仓信息更新完成: "
-                                f"总价值=${portfolio.get('total_value', 0):.2f}, "
-                                f"现金=${portfolio.get('cash', 0):.2f}, "
-                                f"持仓数={len(portfolio.get('positions', []) or [])}")
                 else:
-                    logger.debug(f"[Model {self.model_id}] [阶段2] 卖出决策被跳过或无有效决策")
+                    logger.debug(f"[Model {self.model_id}] [卖出服务] [阶段2] 卖出决策被跳过或无有效决策")
             else:
-                logger.debug(f"[Model {self.model_id}] [阶段2] 无持仓，跳过卖出决策处理")
+                logger.debug(f"[Model {self.model_id}] [卖出服务] [阶段2] 无持仓，跳过卖出决策处理")
             
-            logger.debug(f"[Model {self.model_id}] [阶段2] 卖出/平仓决策处理完成")
+            logger.debug(f"[Model {self.model_id}] [卖出服务] [阶段2] 卖出/平仓决策处理完成")
 
-            # ========== 阶段3: 买入决策处理（分批多线程） ==========
-            logger.debug(f"[Model {self.model_id}] [阶段3] 开始处理买入决策")
-            
-            # 从涨跌幅榜选择买入候选
-            logger.debug(f"[Model {self.model_id}] [阶段3.1] 从涨跌幅榜选择买入候选...")
-            buy_candidates = self._select_buy_candidates(portfolio)
-            logger.debug(f"[Model {self.model_id}] [阶段3.1] 买入候选选择完成, 候选数量: {len(buy_candidates)}")
-            if buy_candidates:
-                for idx, candidate in enumerate(buy_candidates[:5]):  # 只记录前5个
-                    logger.debug(f"[Model {self.model_id}] [阶段3.1.{idx+1}] 候选: "
-                                f"{candidate.get('symbol')}, "
-                                f"价格=${candidate.get('price', 0):.4f}, "
-                                f"涨跌幅={candidate.get('change_percent', 0):.2f}%")
-            
-            if buy_candidates:
-                # 将候选合约添加到市场状态中
-                logger.debug(f"[Model {self.model_id}] [阶段3.2] 将候选合约添加到市场状态...")
-                market_state = self._augment_market_state_with_candidates(market_state, buy_candidates)
-                current_prices = self._extract_price_map(market_state)
-                logger.debug(f"[Model {self.model_id}] [阶段3.2] 市场状态更新完成, 总合约数: {len(market_state)}")
-                
-                # 构建约束条件（用于AI决策）
-                constraints = {
-                    'max_positions': self.max_positions,
-                    'occupied': len(portfolio.get('positions', []) or []),
-                    'available_cash': portfolio.get('cash', 0)
-                }
-                logger.debug(f"[Model {self.model_id}] [阶段3.3] 约束条件构建完成: "
-                            f"最大持仓数={constraints['max_positions']}, "
-                            f"已占用={constraints['occupied']}, "
-                            f"可用现金=${constraints['available_cash']:.2f}")
-                
-                # 分批处理买入决策（多线程并发，每批立即执行）
-                logger.debug(f"[Model {self.model_id}] [阶段3.4] 开始分批处理买入决策（多线程）...")
-                self._make_batch_buy_decisions(
-                    buy_candidates,
-                    portfolio,
-                    account_info,
-                    constraints,
-                    prompt_templates['buy'],
-                    market_snapshot,
-                    market_state,
-                    executions,
-                    conversation_prompts,
-                    current_prices
-                )
-                logger.debug(f"[Model {self.model_id}] [阶段3.4] 分批买入决策处理完成")
-                
-                # 更新持仓信息（所有批次处理完成后）
-                logger.debug(f"[Model {self.model_id}] [阶段3.5] 更新最终持仓信息...")
-                portfolio = self.db.get_portfolio(self.model_id, current_prices)
-                account_info = self._build_account_info(portfolio)
-                logger.debug(f"[Model {self.model_id}] [阶段3.5] 最终持仓信息: "
-                            f"总价值=${portfolio.get('total_value', 0):.2f}, "
-                            f"现金=${portfolio.get('cash', 0):.2f}, "
-                            f"持仓数={len(portfolio.get('positions', []) or [])}")
-            else:
-                logger.debug(f"[Model {self.model_id}] [阶段3] 无买入候选，跳过买入决策处理")
-            
-            logger.debug(f"[Model {self.model_id}] [阶段3] 买入决策处理完成")
-
-            # ========== 阶段4: 记录账户价值快照 ==========
-            logger.debug(f"[Model {self.model_id}] [阶段4] 开始记录账户价值快照")
+            # ========== 阶段3: 记录账户价值快照 ==========
+            logger.debug(f"[Model {self.model_id}] [卖出服务] [阶段3] 开始记录账户价值快照")
             
             updated_portfolio = self.db.get_portfolio(self.model_id, current_prices)
-            logger.debug(f"[Model {self.model_id}] [阶段4.1] 账户价值: "
+            logger.debug(f"[Model {self.model_id}] [卖出服务] [阶段3.1] 账户价值: "
                         f"总价值=${updated_portfolio.get('total_value', 0):.2f}, "
                         f"现金=${updated_portfolio.get('cash', 0):.2f}, "
                         f"持仓价值=${updated_portfolio.get('positions_value', 0):.2f}")
@@ -243,13 +172,18 @@ class TradingEngine:
                 updated_portfolio['cash'],
                 updated_portfolio['positions_value']
             )
-            logger.debug(f"[Model {self.model_id}] [阶段4.2] 账户价值快照已记录到数据库")
+            logger.debug(f"[Model {self.model_id}] [卖出服务] [阶段3.2] 账户价值快照已记录到数据库")
+            
+            # ========== 同步model_futures表数据 ==========
+            logger.debug(f"[Model {self.model_id}] [卖出服务] [阶段4] 同步model_futures表数据")
+            # 在交易完成后，从portfolios表同步最新的合约信息到model_futures表
+            self.db.sync_model_futures_from_portfolio(self.model_id)
             
             # ========== 交易周期完成 ==========
             cycle_end_time = datetime.now()
             cycle_duration = (cycle_end_time - cycle_start_time).total_seconds()
-            logger.debug(f"[Model {self.model_id}] ========== 交易周期执行完成 ==========")
-            logger.debug(f"[Model {self.model_id}] 执行统计: "
+            logger.debug(f"[Model {self.model_id}] [卖出服务] ========== 卖出决策周期执行完成 ==========")
+            logger.debug(f"[Model {self.model_id}] [卖出服务] 执行统计: "
                         f"总耗时={cycle_duration:.2f}秒, "
                         f"执行操作数={len(executions)}, "
                         f"对话类型={conversation_prompts}")
@@ -264,21 +198,319 @@ class TradingEngine:
         except Exception as e:
             cycle_end_time = datetime.now()
             cycle_duration = (cycle_end_time - cycle_start_time).total_seconds()
-            logger.error(f"[Model {self.model_id}] ========== 交易周期执行失败 ==========")
-            logger.error(f"[Model {self.model_id}] 错误信息: {e}")
-            logger.error(f"[Model {self.model_id}] 执行耗时: {cycle_duration:.2f}秒")
+            logger.error(f"[Model {self.model_id}] [卖出服务] ========== 卖出决策周期执行失败 ==========")
+            logger.error(f"[Model {self.model_id}] [卖出服务] 错误信息: {e}")
+            logger.error(f"[Model {self.model_id}] [卖出服务] 执行耗时: {cycle_duration:.2f}秒")
             import traceback
-            logger.error(f"[Model {self.model_id}] 错误堆栈:\n{traceback.format_exc()}")
+            logger.error(f"[Model {self.model_id}] [卖出服务] 错误堆栈:\n{traceback.format_exc()}")
             return {
                 'success': False,
                 'error': str(e)
             }
+    
+    def execute_buy_cycle(self) -> Dict:
+        """
+        执行买入决策周期
+        
+        流程：
+        1. 初始化数据准备：获取市场状态、持仓信息、账户信息、买入提示词模板等
+        2. 买入决策处理：从涨跌幅榜选择候选，调用AI模型获取买入决策并执行
+        3. 记录账户价值快照
+        
+        返回：
+            Dict: {
+                'success': bool,  # 是否成功
+                'executions': List,  # 执行结果列表
+                'portfolio': Dict,  # 最终持仓信息
+                'conversations': List,  # 对话类型列表 ['buy']
+                'error': str  # 错误信息（如果失败）
+            }
+        """
+        logger.debug(f"[Model {self.model_id}] [买入服务] ========== 开始执行买入决策周期 ==========")
+        cycle_start_time = datetime.now()
+        
+        try:
+            # ========== 阶段1: 初始化数据准备 ==========
+            logger.debug(f"[Model {self.model_id}] [买入服务] [阶段1] 开始初始化数据准备")
+            
+            # 获取市场状态（包含价格和技术指标）
+            logger.debug(f"[Model {self.model_id}] [买入服务] [阶段1.1] 获取市场状态...")
+            market_state = self._get_market_state()
+            logger.debug(f"[Model {self.model_id}] [买入服务] [阶段1.1] 市场状态获取完成, 跟踪合约数: {len(market_state)}")
+            
+            # 提取当前价格映射（用于计算持仓价值）
+            current_prices = self._extract_price_map(market_state)
+            logger.debug(f"[Model {self.model_id}] [买入服务] [阶段1.2] 价格映射提取完成, 价格数量: {len(current_prices)}")
+            
+            # 获取当前持仓信息
+            portfolio = self.db.get_portfolio(self.model_id, current_prices)
+            logger.debug(f"[Model {self.model_id}] [买入服务] [阶段1.3] 持仓信息获取完成: "
+                        f"总价值=${portfolio.get('total_value', 0):.2f}, "
+                        f"现金=${portfolio.get('cash', 0):.2f}, "
+                        f"持仓数={len(portfolio.get('positions', []) or [])}")
+            
+            # 构建账户信息（用于AI决策）
+            account_info = self._build_account_info(portfolio)
+            logger.debug(f"[Model {self.model_id}] [买入服务] [阶段1.4] 账户信息构建完成: "
+                        f"初始资金=${account_info.get('initial_capital', 0):.2f}, "
+                        f"总收益率={account_info.get('total_return', 0):.2f}%")
+            
+            # 获取提示词模板（仅买入约束）
+            prompt_templates = self._get_prompt_templates()
+            logger.debug(f"[Model {self.model_id}] [买入服务] [阶段1.5] 买入提示词模板获取完成")
+            
+            # 获取市场快照（涨跌幅榜，用于AI决策参考）
+            market_snapshot = self._get_prompt_market_snapshot()
+            logger.debug(f"[Model {self.model_id}] [买入服务] [阶段1.6] 市场快照获取完成, 快照数量: {len(market_snapshot)}")
+            
+            # 初始化执行结果和对话记录
+            executions = []
+            conversation_prompts = []
+            logger.debug(f"[Model {self.model_id}] [买入服务] [阶段1] 初始化完成")
+
+            # ========== 阶段2: 买入决策处理（分批多线程） ==========
+            logger.debug(f"[Model {self.model_id}] [买入服务] [阶段2] 开始处理买入决策")
+            
+            # 从涨跌幅榜选择买入候选
+            logger.debug(f"[Model {self.model_id}] [买入服务] [阶段2.1] 从涨跌幅榜选择买入候选...")
+            buy_candidates = self._select_buy_candidates(portfolio)
+            logger.debug(f"[Model {self.model_id}] [买入服务] [阶段2.1] 买入候选选择完成, 候选数量: {len(buy_candidates)}")
+            if buy_candidates:
+                for idx, candidate in enumerate(buy_candidates[:5]):  # 只记录前5个
+                    logger.debug(f"[Model {self.model_id}] [买入服务] [阶段2.1.{idx+1}] 候选: "
+                                f"{candidate.get('symbol')}, "
+                                f"价格=${candidate.get('price', 0):.4f}, "
+                                f"涨跌幅={candidate.get('change_percent', 0):.2f}%")
+            
+            if buy_candidates:
+                # 将候选合约添加到市场状态中
+                logger.debug(f"[Model {self.model_id}] [买入服务] [阶段2.2] 将候选合约添加到市场状态...")
+                market_state = self._augment_market_state_with_candidates(market_state, buy_candidates)
+                current_prices = self._extract_price_map(market_state)
+                logger.debug(f"[Model {self.model_id}] [买入服务] [阶段2.2] 市场状态更新完成, 总合约数: {len(market_state)}")
+                
+                # 构建约束条件（用于AI决策）
+                constraints = {
+                    'max_positions': self.max_positions,
+                    'occupied': len(portfolio.get('positions', []) or []),
+                    'available_cash': portfolio.get('cash', 0)
+                }
+                logger.debug(f"[Model {self.model_id}] [买入服务] [阶段2.3] 约束条件构建完成: "
+                            f"最大持仓数={constraints['max_positions']}, "
+                            f"已占用={constraints['occupied']}, "
+                            f"可用现金=${constraints['available_cash']:.2f}")
+                
+                # 分批处理买入决策（多线程并发，每批立即执行）
+                logger.debug(f"[Model {self.model_id}] [买入服务] [阶段2.4] 开始分批处理买入决策（多线程）...")
+                self._make_batch_buy_decisions(
+                    buy_candidates,
+                    portfolio,
+                    account_info,
+                    constraints,
+                    prompt_templates['buy'],
+                    market_snapshot,
+                    market_state,
+                    executions,
+                    conversation_prompts,
+                    current_prices
+                )
+                logger.debug(f"[Model {self.model_id}] [买入服务] [阶段2.4] 分批买入决策处理完成")
+            else:
+                logger.debug(f"[Model {self.model_id}] [买入服务] [阶段2] 无买入候选，跳过买入决策处理")
+            
+            logger.debug(f"[Model {self.model_id}] [买入服务] [阶段2] 买入决策处理完成")
+
+            # ========== 阶段3: 记录账户价值快照 ==========
+            logger.debug(f"[Model {self.model_id}] [买入服务] [阶段3] 开始记录账户价值快照")
+            
+            updated_portfolio = self.db.get_portfolio(self.model_id, current_prices)
+            logger.debug(f"[Model {self.model_id}] [买入服务] [阶段3.1] 账户价值: "
+                        f"总价值=${updated_portfolio.get('total_value', 0):.2f}, "
+                        f"现金=${updated_portfolio.get('cash', 0):.2f}, "
+                        f"持仓价值=${updated_portfolio.get('positions_value', 0):.2f}")
+            
+            self.db.record_account_value(
+                self.model_id,
+                updated_portfolio['total_value'],
+                updated_portfolio['cash'],
+                updated_portfolio['positions_value']
+            )
+            logger.debug(f"[Model {self.model_id}] [买入服务] [阶段3.2] 账户价值快照已记录到数据库")
+            
+            # ========== 同步model_futures表数据 ==========
+            logger.debug(f"[Model {self.model_id}] [买入服务] [阶段4] 同步model_futures表数据")
+            # 在交易完成后，从portfolios表同步最新的合约信息到model_futures表
+            self.db.sync_model_futures_from_portfolio(self.model_id)
+            
+            # ========== 交易周期完成 ==========
+            cycle_end_time = datetime.now()
+            cycle_duration = (cycle_end_time - cycle_start_time).total_seconds()
+            logger.debug(f"[Model {self.model_id}] [买入服务] ========== 买入决策周期执行完成 ==========")
+            logger.debug(f"[Model {self.model_id}] [买入服务] 执行统计: "
+                        f"总耗时={cycle_duration:.2f}秒, "
+                        f"执行操作数={len(executions)}, "
+                        f"对话类型={conversation_prompts}")
+            
+            return {
+                'success': True,
+                'executions': executions,
+                'portfolio': updated_portfolio,
+                'conversations': conversation_prompts
+            }
+
+        except Exception as e:
+            cycle_end_time = datetime.now()
+            cycle_duration = (cycle_end_time - cycle_start_time).total_seconds()
+            logger.error(f"[Model {self.model_id}] [买入服务] ========== 买入决策周期执行失败 ==========")
+            logger.error(f"[Model {self.model_id}] [买入服务] 错误信息: {e}")
+            logger.error(f"[Model {self.model_id}] [买入服务] 执行耗时: {cycle_duration:.2f}秒")
+            import traceback
+            logger.error(f"[Model {self.model_id}] [买入服务] 错误堆栈:\n{traceback.format_exc()}")
+            return {
+                'success': False,
+                'error': str(e)
+            }
+            
+    def _run_buy_service(self):
+        """
+        运行买入服务的循环
+        """
+        logger.info(f"[Model {self.model_id}] [买入服务] 启动，执行周期: {self.buy_cycle_interval}秒")
+        import time
+        while self.running:
+            try:
+                self.execute_buy_cycle()
+            except Exception as e:
+                logger.error(f"[Model {self.model_id}] [买入服务] 循环执行出错: {e}")
+                import traceback
+                logger.error(f"[Model {self.model_id}] [买入服务] 错误堆栈:\n{traceback.format_exc()}")
+            
+            # 等待下一个周期
+            if self.running:
+                logger.debug(f"[Model {self.model_id}] [买入服务] 等待下一个周期，{self.buy_cycle_interval}秒后继续")
+                time.sleep(self.buy_cycle_interval)
+        logger.info(f"[Model {self.model_id}] [买入服务] 已停止")
+        
+    def _run_sell_service(self):
+        """
+        运行卖出服务的循环
+        """
+        logger.info(f"[Model {self.model_id}] [卖出服务] 启动，执行周期: {self.sell_cycle_interval}秒")
+        import time
+        while self.running:
+            try:
+                self.execute_sell_cycle()
+            except Exception as e:
+                logger.error(f"[Model {self.model_id}] [卖出服务] 循环执行出错: {e}")
+                import traceback
+                logger.error(f"[Model {self.model_id}] [卖出服务] 错误堆栈:\n{traceback.format_exc()}")
+            
+            # 等待下一个周期
+            if self.running:
+                logger.debug(f"[Model {self.model_id}] [卖出服务] 等待下一个周期，{self.sell_cycle_interval}秒后继续")
+                time.sleep(self.sell_cycle_interval)
+        logger.info(f"[Model {self.model_id}] [卖出服务] 已停止")
+    
+    def execute_trading_cycle(self):
+        """
+        启动买入和卖出两个独立的AI决策交易服务，并立即执行一次完整的交易周期
+        
+        两个服务将在独立线程中以各自的周期执行：
+        - 买入服务：使用买入prompt配置，在买入循环周期中执行
+        - 卖出服务：使用卖出prompt配置，在卖出循环周期中执行
+        
+        执行周期可通过构造函数配置，默认为5秒
+        
+        返回：
+            Dict: 包含执行结果的字典，兼容原有格式
+        """
+        # 停止已有的服务
+        self.stop_trading_services()
+        
+        # 启动新的服务
+        self.running = True
+        
+        # 创建并启动买入服务线程
+        self.buy_thread = threading.Thread(target=self._run_buy_service, daemon=True)
+        self.buy_thread.start()
+        
+        # 创建并启动卖出服务线程
+        self.sell_thread = threading.Thread(target=self._run_sell_service, daemon=True)
+        self.sell_thread.start()
+        
+        logger.info(f"[Model {self.model_id}] 交易服务已启动: "
+                   f"买入周期={self.buy_cycle_interval}秒, "
+                   f"卖出周期={self.sell_cycle_interval}秒")
+        
+        # 立即执行一次卖出和买入周期，以兼容原有调用方式
+        try:
+            # 先执行卖出/平仓决策
+            sell_result = self.execute_sell_cycle()
+            logger.debug(f"[Model {self.model_id}] 立即执行卖出周期完成")
+            
+            # 再执行买入决策
+            buy_result = self.execute_buy_cycle()
+            logger.debug(f"[Model {self.model_id}] 立即执行买入周期完成")
+            
+            # 合并结果
+            executions = []
+            executions.extend(sell_result.get('executions', []))
+            executions.extend(buy_result.get('executions', []))
+            
+            success = sell_result.get('success', False) and buy_result.get('success', False)
+            
+            return {
+                'success': success,
+                'executions': executions,
+                'portfolio': buy_result.get('portfolio', sell_result.get('portfolio', {})),
+                'conversations': ['sell', 'buy'],
+                'message': f'交易服务已启动，买入周期{self.buy_cycle_interval}秒，卖出周期{self.sell_cycle_interval}秒',
+                'error': sell_result.get('error') or buy_result.get('error') or None
+            }
+        except Exception as e:
+            logger.error(f"[Model {self.model_id}] 立即执行交易周期失败: {e}")
+            return {
+                'success': True,  # 服务已启动，所以整体仍返回成功
+                'executions': [],
+                'conversations': [],
+                'message': f'交易服务已启动，但立即执行交易周期失败: {str(e)}',
+                'error': str(e)
+            }
+    
+    def stop_trading_services(self):
+        """
+        停止买入和卖出交易服务
+        """
+        logger.info(f"[Model {self.model_id}] 正在停止交易服务...")
+        self.running = False
+        
+        # 等待线程结束
+        if self.buy_thread and self.buy_thread.is_alive():
+            self.buy_thread.join(timeout=5)
+        if self.sell_thread and self.sell_thread.is_alive():
+            self.sell_thread.join(timeout=5)
+        
+        self.buy_thread = None
+        self.sell_thread = None
+        logger.info(f"[Model {self.model_id}] 交易服务已停止")
+        
+        return {
+            'success': True,
+            'message': '交易服务已停止'
+        }
 
     # ============ Market Data Methods ============
 
     def _get_tracked_symbols(self) -> List[str]:
-        """Get list of tracked future symbols"""
-        return [future['symbol'] for future in self.db.get_future_configs()]
+        """获取模型跟踪的期货合约列表
+        
+        从model_futures表获取当前模型关联的所有期货合约，而不是使用全局配置
+        这样每个模型可以独立跟踪不同的期货合约集合
+        
+        Returns:
+            List[str]: 合约symbol列表
+        """
+        return [future['symbol'] for future in self.db.get_model_futures(self.model_id)]
 
     def _get_market_state(self) -> Dict:
         """
@@ -809,37 +1041,43 @@ class TradingEngine:
     # ============ Decision Execution Methods ============
 
     def _execute_decisions(self, decisions: Dict, market_state: Dict, portfolio: Dict) -> list:
-        """Execute AI trading decisions"""
+        """Execute AI trading decisions with thread safety"""
         results = []
 
         tracked = set(self._get_tracked_symbols())
         positions_map = {pos['future']: pos for pos in portfolio.get('positions', [])}
 
-        for symbol, decision in decisions.items():
-            if symbol not in tracked:
-                continue
+        # 获取全局交易锁，确保买入和卖出服务线程不会同时执行交易操作
+        with self.trading_lock:
+            logger.debug(f"[Model {self.model_id}] [交易执行] 获取到交易锁，开始执行交易决策")
+            
+            for symbol, decision in decisions.items():
+                if symbol not in tracked:
+                    continue
 
-            signal = decision.get('signal', '').lower()
+                signal = decision.get('signal', '').lower()
 
-            try:
-                if signal == 'buy_to_enter':
-                    result = self._execute_buy(symbol, decision, market_state, portfolio)
-                elif signal == 'sell_to_enter':
-                    result = {'future': symbol, 'error': '当前账户暂不支持做空'}
-                elif signal == 'close_position':
-                    if symbol not in positions_map:
-                        result = {'future': symbol, 'error': 'No position to close'}
+                try:
+                    if signal == 'buy_to_enter':
+                        result = self._execute_buy(symbol, decision, market_state, portfolio)
+                    elif signal == 'sell_to_enter':
+                        result = {'future': symbol, 'error': '当前账户暂不支持做空'}
+                    elif signal == 'close_position':
+                        if symbol not in positions_map:
+                            result = {'future': symbol, 'error': 'No position to close'}
+                        else:
+                            result = self._execute_close(symbol, decision, market_state, portfolio)
+                    elif signal == 'hold':
+                        result = {'future': symbol, 'signal': 'hold', 'message': '保持观望'}
                     else:
-                        result = self._execute_close(symbol, decision, market_state, portfolio)
-                elif signal == 'hold':
-                    result = {'future': symbol, 'signal': 'hold', 'message': '保持观望'}
-                else:
-                    result = {'future': symbol, 'error': f'Unknown signal: {signal}'}
+                        result = {'future': symbol, 'error': f'Unknown signal: {signal}'}
 
-                results.append(result)
+                    results.append(result)
 
-            except Exception as e:
-                results.append({'future': symbol, 'error': str(e)})
+                except Exception as e:
+                    results.append({'future': symbol, 'error': str(e)})
+            
+            logger.debug(f"[Model {self.model_id}] [交易执行] 交易决策执行完成，释放交易锁")
 
         return results
 

@@ -43,14 +43,26 @@ class AITrader:
         portfolio: Dict,
         market_state: Dict,
         account_info: Dict,
-        constraints_text: Optional[str] = None,
-        market_snapshot: Optional[List[Dict]] = None
+        constraints_text: Optional[str] = None
     ) -> Dict:
-        """Make sell/close position decision based on current holdings"""
+        """Make sell/close position decision based on current holdings.
+        
+        此方法只处理账户本身现有持有的币，决定是持有还是平仓。
+        不需要获取任何 market_snapshot 涨幅榜信息。
+        
+        Args:
+            portfolio: 当前持仓组合信息
+            market_state: 市场状态（包含持仓币种的实时价格等信息）
+            account_info: 账户信息
+            constraints_text: 策略约束文本
+            
+        Returns:
+            包含决策结果的字典
+        """
         if not portfolio.get('positions'):
             return {'decisions': {}, 'prompt': None, 'raw_response': None, 'cot_trace': None, 'skipped': True}
 
-        prompt = self._build_sell_prompt(portfolio, market_state, account_info, constraints_text, market_snapshot)
+        prompt = self._build_sell_prompt(portfolio, market_state, account_info, constraints_text)
         return self._request_decisions(prompt)
 
     # ============ Prompt Building Methods ============
@@ -112,23 +124,49 @@ class AITrader:
         return prompt
 
     def _build_sell_prompt(self, portfolio: Dict, market_state: Dict, account_info: Dict,
-                           constraints_text: Optional[str], market_snapshot: Optional[List[Dict]] = None) -> str:
-        """Build prompt for sell/close position decision"""
-        prompt = """你是USDS-M合约的AI卖出/风控模块，负责判断当前持仓是平仓还是继续持有。"""
+                           constraints_text: Optional[str]) -> str:
+        """Build prompt for sell/close position decision.
+        
+        此方法只关注当前持仓信息，不包含涨幅榜数据。
+        决策基于持仓币种本身的表现和账户状态。
+        """
+        prompt = """你是USDS-M合约的AI卖出/风控模块，负责判断当前持仓是平仓还是继续持有。
+        
+注意：你只需要关注当前账户持有的币种，不需要考虑涨幅榜或其他市场行情。
+决策应基于持仓币种本身的价格表现、盈亏情况、风险控制等因素。"""
 
-        if market_snapshot:
-            prompt += "\n\n市场行情（涨跌幅榜快照）：\n"
-            prompt += self._format_market_snapshot(market_snapshot)
-
-        prompt += "\n\n当前持仓：\n"
+        prompt += "\n\n当前持仓详情：\n"
         positions = portfolio.get('positions', []) or []
         for pos in positions:
             symbol = pos['future']
             market_info = market_state.get(symbol, {}) if market_state else {}
-            current_price = market_info.get('price')
+            current_price = market_info.get('price') or 0.0
+            avg_price = pos.get('avg_price', 0.0)
+            quantity = pos.get('quantity', 0.0)
+            side = pos.get('side', 'long')
+            
+            # 计算盈亏
+            if avg_price > 0 and current_price > 0:
+                if side.lower() == 'long':
+                    # 做多：盈亏 = (现价 - 均价) / 均价 * 100
+                    pnl_pct = ((current_price - avg_price) / avg_price) * 100
+                else:
+                    # 做空：盈亏 = (均价 - 现价) / 均价 * 100
+                    pnl_pct = ((avg_price - current_price) / avg_price) * 100
+                
+                # 计算盈亏金额（近似值）
+                position_value = quantity * avg_price
+                pnl_amount = position_value * (pnl_pct / 100)
+                pnl_status = "盈利" if pnl_pct > 0 else "亏损" if pnl_pct < 0 else "持平"
+            else:
+                pnl_pct = 0.0
+                pnl_amount = 0.0
+                pnl_status = "未知"
+            
             prompt += (
-                f"- {symbol} {pos['side']} 数量 {pos['quantity']:.4f} @ ${pos['avg_price']:.4f}"
-                f" | 现价: ${current_price:.4f if current_price else 0:.4f}"
+                f"- {symbol} ({side.upper()}) 数量: {quantity:.4f} | "
+                f"开仓均价: ${avg_price:.4f} | 当前价格: ${current_price:.4f} | "
+                f"盈亏: {pnl_status} {pnl_pct:+.2f}% (约 ${pnl_amount:+.2f})"
             )
             prompt += "\n"
 

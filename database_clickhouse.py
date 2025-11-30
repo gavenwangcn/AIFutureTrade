@@ -74,12 +74,19 @@ class ClickHouseConnectionPool:
         self._initialize_pool()
     
     def _initialize_pool(self):
-        """Initialize the pool with minimum connections."""
+        """初始化连接池，创建最小数量的连接。
+        
+        该方法在连接池初始化时调用，根据配置的最小连接数创建并添加连接到池中。
+        """
         for _ in range(self._min_connections):
             self._create_connection()
     
-    def _create_connection(self):
-        """Create a new ClickHouse client connection."""
+    def _create_connection(self) -> Optional[Any]:
+        """创建一个新的ClickHouse客户端连接。
+        
+        Returns:
+            成功时返回ClickHouse客户端实例，失败或达到最大连接数时返回None
+        """
         with self._lock:
             if self._current_connections >= self._max_connections:
                 return None
@@ -170,6 +177,10 @@ class ClickHouseDatabase:
     # 类级别的锁，用于防止并发执行 sync_leaderboard
     _sync_leaderboard_lock = threading.Lock()
 
+    # ==================================================================
+    # 初始化和连接管理
+    # ==================================================================
+    
     def __init__(self, *, auto_init_tables: bool = True) -> None:
         # Create a connection pool instead of individual client instances
         self._pool = ClickHouseConnectionPool(
@@ -212,6 +223,10 @@ class ClickHouseDatabase:
             self.ensure_leaderboard_table()
             self.ensure_market_klines_table()
     
+    # ==================================================================
+    # 连接管理方法
+    # ==================================================================
+    
     def _with_connection(self, func: Callable, *args, **kwargs) -> Any:
         """Execute a function with a ClickHouse connection from the pool.
         
@@ -235,11 +250,16 @@ class ClickHouseDatabase:
         finally:
             self._pool.release(client)
 
-    # ------------------------------------------------------------------
-    # Generic helpers
-    # ------------------------------------------------------------------
+    # ==================================================================
+    # 通用数据库操作方法
+    # ==================================================================
+    
     def command(self, sql: str) -> None:
-        """Execute a raw SQL command."""
+        """执行原始SQL命令。
+        
+        Args:
+            sql: 要执行的SQL命令字符串
+        """
         def _execute_command(client):
             client.command(sql)
         
@@ -277,6 +297,13 @@ class ClickHouseDatabase:
         rows: Iterable[Iterable[Any]],
         column_names: List[str],
     ) -> None:
+        """向指定表中插入多行数据。
+        
+        Args:
+            table: 目标表名
+            rows: 要插入的数据行集合，每行是一个值的集合
+            column_names: 列名列表，与数据行中的值一一对应
+        """
         payload = list(rows)
         if not payload:
             return
@@ -287,9 +314,10 @@ class ClickHouseDatabase:
         
         self._with_connection(_execute_insert)
 
-    # ------------------------------------------------------------------
-    # Market ticker helpers
-    # ------------------------------------------------------------------
+    # ==================================================================
+    # Market Ticker 模块：表管理
+    # ==================================================================
+    
     def ensure_market_ticker_table(self) -> None:
         """Create the 24h market ticker table if it does not exist."""
         ddl = f"""
@@ -322,11 +350,39 @@ class ClickHouseDatabase:
         self.command(ddl)
         logger.info("[ClickHouse] Ensured table %s exists", self.market_ticker_table)
 
+    # ==================================================================
+    # Market Ticker 模块：数据查询
+    # ==================================================================
+    
     def get_existing_symbol_data(self, symbols: List[str]) -> Dict[str, Dict[str, Any]]:
-        """查询现有symbol的数据，返回字典 {symbol: {open_price: ..., update_price_date: ..., ...}}
+        """获取数据库中已存在交易对的最新数据，主要用于upsert操作时获取参考价格信息。
         
-        注意：为了保持原有逻辑，如果open_price为0.0且update_price_date为None，
-        则视为"未设置"，返回open_price=None而不是0.0
+        功能说明：
+        1. 批量查询指定交易对列表的最新行情记录
+        2. 为每个交易对获取open_price、last_price和update_price_date字段
+        3. 智能处理价格未设置的特殊情况
+        4. 返回格式化的字典，方便upsert_market_tickers方法快速查找和使用
+        
+        查询逻辑：
+        - 使用PARTITION BY和ROW_NUMBER()窗口函数为每个交易对筛选最新的一条记录
+        - 按event_time降序排序，确保获取最新数据
+        - 只查询指定的symbol列表，提高查询效率
+        
+        特殊处理：
+        - 关键逻辑：如果open_price为0.0且update_price_date为None，视为"未设置"状态
+        - 这种情况下返回open_price=None，而不是0.0，以保持原有业务逻辑的一致性
+        
+        错误处理：
+        - 查询失败时返回空字典，确保调用方能够继续执行
+        - 记录警告日志，便于排查问题
+        
+        Args:
+            symbols: 需要查询的交易对列表，格式如["BTCUSDT", "ETHUSDT"]
+            
+        Returns:
+            嵌套字典，格式为{symbol: {open_price: float, last_price: float, update_price_date: datetime}}
+            示例: {"BTCUSDT": {"open_price": 35000.0, "last_price": 36000.0, "update_price_date": datetime(...)}}
+            当交易对不存在或open_price未设置时，对应值可能为None
         """
         if not symbols:
             return {}
@@ -379,7 +435,23 @@ class ClickHouseDatabase:
             logger.warning("[ClickHouse] Failed to get existing symbol data: %s", e)
             return {}
 
+    # ==================================================================
+    # Market Ticker 模块：数据插入和更新
+    # ==================================================================
+    
     def insert_market_tickers(self, rows: Iterable[Dict[str, Any]]) -> None:
+        """插入市场行情数据到market_ticker表。
+        
+        此方法会对输入数据进行标准化处理，包括：
+        1. 移除接口数据中的open_price和update_price_date字段（这两个字段只能由异步价格刷新服务更新）
+        2. 确保日期时间字段格式正确
+        3. 为Float64字段设置默认值0.0
+        4. 为UInt64字段设置默认值0
+        5. 为String字段设置默认值空字符串
+        
+        Args:
+            rows: 市场行情数据字典的可迭代对象
+        """
         column_names = [
             "event_time",
             "symbol",
@@ -476,14 +548,30 @@ class ClickHouseDatabase:
         self.insert_rows(self.market_ticker_table, prepared_rows, column_names)
         
     def upsert_market_tickers(self, rows: Iterable[Dict[str, Any]]) -> None:
-        """Update or insert market tickers. If symbol exists, update it, otherwise insert.
+        """更新或插入市场行情数据（upsert操作）。
         
-        处理逻辑：
-        1. 第一次插入时，price_change, price_change_percent, side, change_percent_text, open_price 都为空
-        2. 更新时，如果 open_price 有值，则通过 last_price 和 open_price 计算涨跌幅相关字段
+        功能说明：
+        1. 筛选出以USDT结尾的交易对
+        2. 对于同一批数据中的重复symbol，只保留最新的一条（基于stats_close_time）
+        3. 查询数据库中已有的symbol数据，获取open_price信息
+        4. 根据已有open_price计算涨跌幅相关字段
+        5. 执行批量插入操作
+        
+        核心逻辑：
+        - 首次插入时，price_change, price_change_percent, side, change_percent_text, open_price 都为空
+        - 更新时，如果数据库中open_price有值，则通过last_price和open_price计算涨跌幅指标
+        - 保留原有open_price和update_price_date，这两个字段只能由异步价格刷新服务更新
+        
+        数据处理：
+        1. 规范化时间字段为datetime对象
+        2. 移除接口数据中的open_price和update_price_date字段（保护机制）
+        3. 智能处理重复数据，确保每个symbol只保留最新记录
         
         Args:
-            rows: Iterable of ticker dictionaries
+            rows: 市场行情数据的迭代器，每个元素是包含行情信息的字典
+        
+        Returns:
+            None
         """
         if not rows:
             return
@@ -699,15 +787,19 @@ class ClickHouseDatabase:
             len(prepared_rows), self.market_ticker_table
         )
     
+    # ==================================================================
+    # Market Ticker 模块：价格管理
+    # ==================================================================
+    
     def get_symbols_needing_price_refresh(self) -> List[str]:
-        """获取需要刷新价格的symbol列表
+        """获取需要刷新价格的symbol列表。
         
         查询条件：
         - update_price_date 为空
         - 或者 update_price_date 不为当天
         
         Returns:
-            需要刷新价格的symbol列表（去重）
+            需要刷新价格的symbol列表（已去重并按字母顺序排序）
         """
         try:
             query = f"""
@@ -863,11 +955,26 @@ class ClickHouseDatabase:
             logger.error("[ClickHouse] Failed to update open_price for symbol %s: %s", symbol, e, exc_info=True)
             return False
     
-    # ------------------------------------------------------------------
-    # Leaderboard helpers
-    # ------------------------------------------------------------------
+    # ==================================================================
+    # Leaderboard 模块：表管理
+    # ==================================================================
+    
     def ensure_leaderboard_table(self) -> None:
-        """Create the futures leaderboard table if it does not exist."""
+        """创建期货排行榜表（如果不存在）。
+        
+        表结构说明：
+        - symbol: 交易对符号
+        - price_change: 价格变化量
+        - price_change_percent: 价格变化百分比
+        - side: 涨跌方向（gainer/loser）
+        - change_percent_text: 格式化的涨跌幅文本
+        - last_price: 最新价格
+        - rank: 排名(1-10等)
+        - create_datetime: 创建时间
+        - create_datetime_long: 毫秒级时间戳(用于批次标识)
+        
+        表使用MergeTree引擎，按(side, rank, symbol, create_datetime_long)排序，
+        确保查询性能和数据组织的合理性。"""
         ddl = f"""
         CREATE TABLE IF NOT EXISTS {self.leaderboard_table} (
             event_time DateTime,
@@ -900,6 +1007,10 @@ class ClickHouseDatabase:
         self.command(ddl)
         logger.info("[ClickHouse] Ensured table %s exists", self.leaderboard_table)
 
+    # ==================================================================
+    # Leaderboard 模块：数据查询
+    # ==================================================================
+    
     def query_recent_tickers(
         self, 
         time_window_seconds: int = 5,
@@ -1050,6 +1161,10 @@ class ClickHouseDatabase:
         logger.info(f"[ClickHouse] 📊 查询结果: 共 {len(rows)} 条数据")
         return rows
 
+    # ==================================================================
+    # Leaderboard 模块：数据同步
+    # ==================================================================
+    
     def sync_leaderboard(
         self,
         time_window_seconds: int = 5,
@@ -1058,19 +1173,19 @@ class ClickHouseDatabase:
         """Sync leaderboard data from market_ticker_table to leaderboard_table.
         
         核心功能：
-        - 从24_market_tickers表查询所有市场数据（不限制时间窗口）
-        - 对每个交易对取最新的行情数据（去重）
+        - 从24_market_tickers表查询所有市场数据(不限制时间窗口)
+        - 对每个交易对取最新的行情数据(去重)
         - 计算每个合约的涨跌幅
         - 筛选出涨幅前N名和跌幅前N名
-        - 使用全量更新方式更新futures_leaderboard表（临时表 + REPLACE TABLE）
+        - 使用全量更新方式更新futures_leaderboard表(临时表 + REPLACE TABLE)
         
         执行流程：
         1. 检查leaderboard表是否存在，不存在则创建
-        2. 查询涨幅榜前N名（查询所有数据，按涨跌幅排序）
-        3. 查询跌幅榜前N名（查询所有数据，按涨跌幅排序）
+        2. 查询涨幅榜前N名(查询所有数据，按涨跌幅排序)
+        3. 查询跌幅榜前N名(查询所有数据，按涨跌幅排序)
         4. 准备插入数据
         5. 创建临时表并插入数据
-        6. 使用REPLACE TABLE原子替换原表（全量更新）
+        6. 使用REPLACE TABLE原子替换原表(全量更新)
         7. 清理临时表
         
         Args:
@@ -1237,16 +1352,22 @@ class ClickHouseDatabase:
             logger.error("[ClickHouse] ❌ 涨跌幅榜同步失败: %s", exc, exc_info=True)
 
     def get_leaderboard(self, limit: int = 10) -> Dict[str, List[Dict]]:
-        """Get leaderboard data from futures_leaderboard table.
+        """获取最新批次的期货涨跌幅榜数据。
         
-        使用 create_datetime_long 字段（数值型毫秒级时间戳）查询最新批次，
-        避免 create_datetime（秒级精度）导致同一秒多条数据无法区分的问题。
+        使用create_datetime_long字段(数值型毫秒级时间戳)查询最新批次，
+        避免create_datetime(秒级精度)导致同一秒多条数据无法区分的问题。
+        
+        实现原理：
+        1. 通过子查询获取最大的create_datetime_long值(最新批次标识)
+        2. 查询该批次的所有涨幅榜和跌幅榜数据
+        3. 在内存中按涨跌幅排序并截取前N名
+        4. 返回包含gainers和losers两个列表的字典
         
         Args:
-            limit: Number of top items to return for each side
+            limit: 每个方向(涨幅/跌幅)返回的最大记录数
             
         Returns:
-            Dictionary with 'gainers' and 'losers' lists
+            包含'gainers'和'losers'两个列表的字典，每个列表包含格式化后的排行榜数据项
         """
         try:
             # 一条 SQL：先锁定最新批次的 create_datetime_long（数值型，毫秒级精度），再取该批次所有涨跌数据
@@ -1318,7 +1439,13 @@ class ClickHouseDatabase:
             return {'gainers': [], 'losers': []}
 
     def get_leaderboard_symbols(self) -> List[str]:
-        """Get distinct symbols from leaderboard table."""
+        """获取排行榜中所有不同的交易对符号。
+        
+        从leaderboard表中查询所有非空的symbol字段，并进行去重处理。
+        
+        Returns:
+            去重后的交易对符号列表
+        """
         try:
             query = f"""
             SELECT symbol
@@ -1337,6 +1464,53 @@ class ClickHouseDatabase:
             logger.error("[ClickHouse] Failed to get leaderboard symbols: %s", exc, exc_info=True)
             return []
 
+    # ==================================================================
+    # Leaderboard 模块：数据清理
+    # ==================================================================
+    
+    def cleanup_old_leaderboard(self, minutes: int = 10) -> int:
+        """清理指定时间之前的旧排行榜数据。
+        
+        使用 create_datetime_long（数值型毫秒级时间戳）进行清理，避免 create_datetime（秒级精度）
+        导致同一秒多条数据无法准确区分的问题。
+        
+        实现原理：
+        1. 计算当前时间减去指定分钟数后的毫秒级时间戳作为截止时间
+        2. 使用ALTER TABLE DELETE语句删除所有早于截止时间的记录
+        3. 记录清理日志并返回结果
+        
+        Args:
+            minutes: 保留时间窗口（分钟），删除create_datetime_long早于当前时间该分钟数之前的数据
+        
+        Returns:
+            已提交删除任务的行数（ClickHouse的ALTER DELETE是异步的，返回0表示已提交）
+        """
+        try:
+            # 计算当前时间减去指定分钟数后的毫秒级时间戳
+            from datetime import datetime, timezone
+            cutoff_time = datetime.now(timezone.utc)
+            cutoff_timestamp_ms = int((cutoff_time.timestamp() - minutes * 60) * 1000)
+            
+            delete_sql = f"""
+            ALTER TABLE {self.leaderboard_table}
+            DELETE WHERE create_datetime_long < {cutoff_timestamp_ms}
+            """
+            self.command(delete_sql)
+            logger.info(
+                "[ClickHouse] Initiated cleanup of leaderboard rows older than %s minutes (cutoff_timestamp_ms=%s)",
+                minutes,
+                cutoff_timestamp_ms,
+            )
+            # ClickHouse 的 ALTER DELETE 是异步的，这里返回0表示已提交
+            return 0
+        except Exception as exc:
+            logger.error("[ClickHouse] Failed to cleanup old leaderboard rows: %s", exc, exc_info=True)
+            return 0
+
+    # ==================================================================
+    # Market Klines 模块：表管理
+    # ==================================================================
+    
     def ensure_market_klines_table(self) -> None:
         """Create per-interval market_klines tables if they do not exist.
 
@@ -1374,8 +1548,22 @@ class ClickHouseDatabase:
             self.command(ddl)
             logger.info("[ClickHouse] Ensured kline table %s (interval=%s) exists", table_name, interval)
 
+    # ==================================================================
+    # Market Klines 模块：数据插入
+    # ==================================================================
+    
     def insert_market_klines(self, rows: Iterable[Dict[str, Any]]) -> None:
-        """Insert kline data into per-interval market_klines tables."""
+        """将K线数据插入到按时间间隔划分的market_klines表中。
+        
+        功能说明：
+        1. 将K线数据按时间间隔（interval）归类到对应的表中
+        2. 支持7种时间间隔：1w, 1d, 4h, 1h, 15m, 5m, 1m
+        3. 对每条数据进行字段标准化处理
+        4. 按不同时间间隔表进行批量插入
+        
+        Args:
+            rows: K线数据字典的可迭代对象，每条数据包含event_time、symbol、interval等字段
+        """
         rows = list(rows)
         if not rows:
             return
@@ -1447,8 +1635,26 @@ class ClickHouseDatabase:
                 table_name,
             )
 
+    # ==================================================================
+    # Market Klines 模块：数据清理
+    # ==================================================================
+    
     def cleanup_old_klines(self, days: int = 2) -> int:
-        """Delete klines older than specified days. Returns number of deleted rows."""
+        """清理指定天数之前的旧K线数据。
+        
+        功能说明：
+        1. 遍历所有时间间隔的K线表（1w, 1d, 4h, 1h, 15m, 5m, 1m）
+        2. 对每个表执行ALTER TABLE DELETE操作，删除超过指定天数的数据
+        3. 记录清理操作日志
+        
+        注意：ClickHouse的DELETE操作是异步执行的，所以无法立即获取删除的具体行数
+        
+        Args:
+            days: 保留天数，删除kline_end_time早于当前时间减去该天数的数据
+            
+        Returns:
+            由于是异步操作，返回0表示删除任务已提交
+        """
         try:
             # ClickHouse DELETE requires mutations, use ALTER TABLE DELETE
             for interval, table_name in self.market_klines_tables.items():
@@ -1469,45 +1675,27 @@ class ClickHouseDatabase:
             logger.error("[ClickHouse] Failed to cleanup old klines: %s", exc, exc_info=True)
             return 0
 
-    def cleanup_old_leaderboard(self, minutes: int = 10) -> int:
-        """Delete leaderboard rows older than specified minutes based on create_datetime_long.
 
-        使用 create_datetime_long（数值型毫秒级时间戳）进行清理，避免 create_datetime（秒级精度）
-        导致同一秒多条数据无法准确区分的问题。
-
-        Args:
-            minutes: 保留时间窗口（分钟），删除 create_datetime_long 早于当前时间该分钟数之前的数据
-
-        Returns:
-            已提交删除任务的行数（ClickHouse 异步 DELETE，返回0表示未知）
-        """
-        try:
-            # 计算当前时间减去指定分钟数后的毫秒级时间戳
-            from datetime import datetime, timezone
-            cutoff_time = datetime.now(timezone.utc)
-            cutoff_timestamp_ms = int((cutoff_time.timestamp() - minutes * 60) * 1000)
-            
-            delete_sql = f"""
-            ALTER TABLE {self.leaderboard_table}
-            DELETE WHERE create_datetime_long < {cutoff_timestamp_ms}
-            """
-            self.command(delete_sql)
-            logger.info(
-                "[ClickHouse] Initiated cleanup of leaderboard rows older than %s minutes (cutoff_timestamp_ms=%s)",
-                minutes,
-                cutoff_timestamp_ms,
-            )
-            # ClickHouse 的 ALTER DELETE 是异步的，这里返回0表示已提交
-            return 0
-        except Exception as exc:
-            logger.error("[ClickHouse] Failed to cleanup old leaderboard rows: %s", exc, exc_info=True)
-            return 0
-
+# ==================================================================
+# 辅助函数
+# ==================================================================
 
 def _to_datetime(value: Any) -> datetime:
-    """将值转换为datetime对象，如果无法转换则返回当前UTC时间
+    """将值转换为datetime对象，如果无法转换则返回当前UTC时间。
+    
+    支持的输入类型：
+    - datetime对象：直接返回
+    - None：返回当前UTC时间
+    - 时间戳（整数或浮点数）：自动转换为datetime对象
+    - 其他类型：尝试转换为浮点数作为时间戳，失败则返回当前UTC时间
     
     注意：此函数永远不会返回None，确保DateTime字段始终有值
+    
+    Args:
+        value: 需要转换的值
+        
+    Returns:
+        datetime对象，确保有值且带时区信息(UTC)
     """
     if isinstance(value, datetime):
         return value
@@ -1578,6 +1766,14 @@ def _normalize_field_value(value: Any, field_type: str, field_name: str = "") ->
 
 
 def _derive_side(percent: Any) -> str:
+    """根据涨跌幅百分比确定涨跌方向。
+    
+    Args:
+        percent: 涨跌幅百分比值
+        
+    Returns:
+        "gainer"表示上涨，"loser"表示下跌
+    """
     try:
         value = float(percent)
     except (TypeError, ValueError):
@@ -1586,6 +1782,14 @@ def _derive_side(percent: Any) -> str:
 
 
 def _format_percent_text(percent: Any) -> str:
+    """将涨跌幅百分比格式化为字符串，保留两位小数。
+    
+    Args:
+        percent: 涨跌幅百分比值
+        
+    Returns:
+        格式化后的百分比字符串，如"5.25%"
+    """
     try:
         value = float(percent)
     except (TypeError, ValueError):
