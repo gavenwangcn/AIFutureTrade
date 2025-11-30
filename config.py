@@ -41,7 +41,7 @@ KLINE_CLEANUP_CRON = os.getenv('KLINE_CLEANUP_CRON', '0 */1 * * *')  # Cron表�
 KLINE_CLEANUP_RETENTION_DAYS = int(os.getenv('KLINE_CLEANUP_RETENTION_DAYS', '14'))  # 保留天数，默认2天（48小时）
 
 # 价格刷新服务配置
-PRICE_REFRESH_CRON = os.getenv('PRICE_REFRESH_CRON', '0 */1 * * *')  # Cron表达式，默认每小时执行一次
+PRICE_REFRESH_CRON = os.getenv('PRICE_REFRESH_CRON', '*/5 * * * *')  # Cron表达式，默认每3分钟执行一次
 PRICE_REFRESH_MAX_PER_MINUTE = int(os.getenv('PRICE_REFRESH_MAX_PER_MINUTE', '1000'))  # 每分钟最多刷新的symbol数量
 
 

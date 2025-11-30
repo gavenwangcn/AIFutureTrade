@@ -99,7 +99,8 @@ class ClickHouseConnectionPool:
                     username=self._username,
                     password=self._password,
                     database=self._database,
-                    secure=self._secure
+                    secure=self._secure,
+                    settings={'timezone': 'UTC'}  # 设置时区为UTC，确保时间处理一致
                 )
                 self._pool.put(client)
                 self._current_connections += 1
@@ -1248,6 +1249,14 @@ class ClickHouseDatabase:
             # 生成毫秒级时间戳（UInt64），用于精确排序和查询最新批次
             batch_time_long = int(batch_time.timestamp() * 1000)
             
+            # 记录时间戳信息，用于调试时区问题
+            logger.debug(
+                "[ClickHouse] 📅 批次时间戳 | UTC时间: %s | 时间戳(ms): %s | 本地时间: %s",
+                batch_time.isoformat(),
+                batch_time_long,
+                batch_time.astimezone().strftime('%Y-%m-%d %H:%M:%S %Z'),
+            )
+            
             # 添加涨幅榜数据（带排名）
             logger.info("[ClickHouse] 📊 处理涨幅榜数据...")
             for idx, row in enumerate(gainers, 1):
@@ -1515,12 +1524,37 @@ class ClickHouseDatabase:
             stats['cutoff_timestamp_ms'] = cutoff_timestamp_ms
             stats['cutoff_time'] = cutoff_time_str
             
+            # 记录当前时间和截止时间的详细信息，用于调试时区问题
             logger.info(
-                "[ClickHouse] 🧹 开始清理涨跌榜历史数据 | 保留时间: %s 分钟 | 截止时间: %s (timestamp_ms=%s)",
+                "[ClickHouse] 🧹 开始清理涨跌榜历史数据 | 保留时间: %s 分钟",
                 minutes,
+            )
+            logger.info(
+                "[ClickHouse] ⏰ 时间信息 | 当前UTC时间: %s | 截止UTC时间: %s | 截止时间戳(ms): %s",
+                current_time.strftime('%Y-%m-%d %H:%M:%S UTC'),
                 cutoff_time_str,
                 cutoff_timestamp_ms,
             )
+            
+            # 查询数据库中的最新时间戳，用于对比
+            try:
+                max_timestamp_sql = f"SELECT max(create_datetime_long) FROM {self.leaderboard_table}"
+                def _execute_max_timestamp(client):
+                    result = client.query(max_timestamp_sql)
+                    return result.result_rows[0][0] if result.result_rows and result.result_rows[0][0] else 0
+                
+                max_timestamp_in_db = self._with_connection(_execute_max_timestamp)
+                if max_timestamp_in_db > 0:
+                    max_time_in_db = datetime.fromtimestamp(max_timestamp_in_db / 1000, tz=timezone.utc)
+                    time_diff_seconds = (max_timestamp_in_db - cutoff_timestamp_ms) / 1000
+                    logger.info(
+                        "[ClickHouse] 📊 数据库时间对比 | 数据库最新时间戳(ms): %s | 对应UTC时间: %s | 与截止时间差: %.1f 秒",
+                        max_timestamp_in_db,
+                        max_time_in_db.strftime('%Y-%m-%d %H:%M:%S UTC'),
+                        time_diff_seconds,
+                    )
+            except Exception as e:
+                logger.warning("[ClickHouse] ⚠️ 查询数据库最新时间戳时出错: %s", e)
             
             # 查询清理前的数据量统计
             try:

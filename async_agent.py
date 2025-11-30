@@ -39,6 +39,12 @@ def _lazy_import_price_refresh():
     return run_price_refresh_scheduler
 
 
+def _lazy_import_leaderboard_cleanup():
+    """延迟导入leaderboard_cleanup模块"""
+    from leaderboard_cleanup import run_cleanup_scheduler
+    return run_cleanup_scheduler
+
+
 async def _run_market_tickers(duration: Optional[int] = None) -> None:
     run_market_ticker_stream, _ = _lazy_import_market_streams()
     await run_market_ticker_stream(run_seconds=duration)
@@ -64,6 +70,12 @@ async def _run_price_refresh(duration: Optional[int] = None) -> None:
     """
     run_price_refresh_scheduler = _lazy_import_price_refresh()
     await run_price_refresh_scheduler()
+
+
+async def _run_leaderboard_cleanup(duration: Optional[int] = None) -> None:
+    """运行涨跌榜清理服务"""
+    run_cleanup_scheduler = _lazy_import_leaderboard_cleanup()
+    await run_cleanup_scheduler()
 
 
 async def _run_kline_services(duration: Optional[int] = None) -> None:
@@ -110,36 +122,41 @@ async def _run_all_services(duration: Optional[int] = None) -> None:
     - kline_sync: K线同步服务
     - kline_cleanup: K线清理服务
     - price_refresh: 价格刷新服务
+    - leaderboard_cleanup: 涨跌榜清理服务
     """
     run_market_ticker_stream, run_kline_sync_agent = _lazy_import_market_streams()
-    run_cleanup_scheduler = _lazy_import_kline_cleanup()
+    run_kline_cleanup_scheduler = _lazy_import_kline_cleanup()
     run_price_refresh_scheduler = _lazy_import_price_refresh()
+    run_leaderboard_cleanup_scheduler = _lazy_import_leaderboard_cleanup()
     
     check_interval = getattr(app_config, 'KLINE_SYNC_CHECK_INTERVAL', 10)
     
     # 创建所有后台任务
     market_tickers_task = asyncio.create_task(run_market_ticker_stream(run_seconds=duration))
     sync_task = asyncio.create_task(run_kline_sync_agent(check_interval=check_interval))
-    cleanup_task = asyncio.create_task(run_cleanup_scheduler())
+    kline_cleanup_task = asyncio.create_task(run_kline_cleanup_scheduler())
     price_refresh_task = asyncio.create_task(run_price_refresh_scheduler())
+    leaderboard_cleanup_task = asyncio.create_task(run_leaderboard_cleanup_scheduler())
     
-    logger.info("[AsyncAgent] Started all services: market_tickers, kline_sync, kline_cleanup, price_refresh")
+    logger.info("[AsyncAgent] Started all services: market_tickers, kline_sync, kline_cleanup, price_refresh, leaderboard_cleanup")
     
     # 等待所有任务（如果duration指定，则等待指定时间后停止）
     if duration:
         await asyncio.sleep(duration)
         market_tickers_task.cancel()
         sync_task.cancel()
-        cleanup_task.cancel()
+        kline_cleanup_task.cancel()
         price_refresh_task.cancel()
+        leaderboard_cleanup_task.cancel()
         with contextlib.suppress(asyncio.CancelledError):
             await market_tickers_task
             await sync_task
-            await cleanup_task
+            await kline_cleanup_task
             await price_refresh_task
+            await leaderboard_cleanup_task
     else:
         # 持续运行，等待任一任务完成或取消
-        all_tasks = {market_tickers_task, sync_task, cleanup_task, price_refresh_task}
+        all_tasks = {market_tickers_task, sync_task, kline_cleanup_task, price_refresh_task, leaderboard_cleanup_task}
         done, pending = await asyncio.wait(
             all_tasks,
             return_when=asyncio.FIRST_COMPLETED
@@ -157,6 +174,7 @@ TASK_REGISTRY: Dict[str, Callable[[Optional[int]], Awaitable[None]]] = {
     "kline_cleanup": _run_kline_cleanup,
     "kline_services": _run_kline_services,  # 同时运行同步和清理服务
     "price_refresh": _run_price_refresh,  # 价格刷新服务
+    "leaderboard_cleanup": _run_leaderboard_cleanup,  # 涨跌榜清理服务
     "all": _run_all_services,  # 运行所有任务服务
 }
 
