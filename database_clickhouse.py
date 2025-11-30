@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import logging
 import threading
+import time
 from datetime import datetime, timezone, timedelta
 from queue import Queue, Empty
 from typing import Any, Dict, Iterable, List, Optional, Callable, Tuple
@@ -1468,7 +1469,7 @@ class ClickHouseDatabase:
     # Leaderboard 模块：数据清理
     # ==================================================================
     
-    def cleanup_old_leaderboard(self, minutes: int = 10) -> int:
+    def cleanup_old_leaderboard(self, minutes: int = 10) -> dict:
         """清理指定时间之前的旧排行榜数据。
         
         使用 create_datetime_long（数值型毫秒级时间戳）进行清理，避免 create_datetime（秒级精度）
@@ -1476,36 +1477,144 @@ class ClickHouseDatabase:
         
         实现原理：
         1. 计算当前时间减去指定分钟数后的毫秒级时间戳作为截止时间
-        2. 使用ALTER TABLE DELETE语句删除所有早于截止时间的记录
-        3. 记录清理日志并返回结果
+        2. 查询清理前的数据量统计
+        3. 使用ALTER TABLE DELETE语句删除所有早于截止时间的记录
+        4. 查询清理后的数据量统计
+        5. 记录详细的清理日志并返回统计信息
         
         Args:
             minutes: 保留时间窗口（分钟），删除create_datetime_long早于当前时间该分钟数之前的数据
         
         Returns:
-            已提交删除任务的行数（ClickHouse的ALTER DELETE是异步的，返回0表示已提交）
+            包含清理统计信息的字典：
+            - total_before: 清理前的总数据量
+            - total_after: 清理后的总数据量（估算，因为DELETE是异步的）
+            - to_delete_count: 待删除的数据量（估算）
+            - cutoff_timestamp_ms: 截止时间戳
+            - cutoff_time: 截止时间（字符串格式）
         """
+        cleanup_start_time = time.time()
+        stats = {
+            'total_before': 0,
+            'total_after': 0,
+            'to_delete_count': 0,
+            'cutoff_timestamp_ms': 0,
+            'cutoff_time': '',
+            'execution_time': 0.0
+        }
+        
         try:
-            # 计算当前时间减去指定分钟数后的毫秒级时间戳
             from datetime import datetime, timezone
-            cutoff_time = datetime.now(timezone.utc)
-            cutoff_timestamp_ms = int((cutoff_time.timestamp() - minutes * 60) * 1000)
             
+            # 计算当前时间减去指定分钟数后的毫秒级时间戳
+            current_time = datetime.now(timezone.utc)
+            cutoff_time = current_time
+            cutoff_timestamp_ms = int((cutoff_time.timestamp() - minutes * 60) * 1000)
+            cutoff_time_str = datetime.fromtimestamp(cutoff_timestamp_ms / 1000, tz=timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')
+            
+            stats['cutoff_timestamp_ms'] = cutoff_timestamp_ms
+            stats['cutoff_time'] = cutoff_time_str
+            
+            logger.info(
+                "[ClickHouse] 🧹 开始清理涨跌榜历史数据 | 保留时间: %s 分钟 | 截止时间: %s (timestamp_ms=%s)",
+                minutes,
+                cutoff_time_str,
+                cutoff_timestamp_ms,
+            )
+            
+            # 查询清理前的数据量统计
+            try:
+                count_before_sql = f"SELECT count() FROM {self.leaderboard_table}"
+                count_to_delete_sql = f"SELECT count() FROM {self.leaderboard_table} WHERE create_datetime_long < {cutoff_timestamp_ms}"
+                
+                def _execute_count_before(client):
+                    result = client.query(count_before_sql)
+                    return result.result_rows[0][0] if result.result_rows else 0
+                
+                def _execute_count_to_delete(client):
+                    result = client.query(count_to_delete_sql)
+                    return result.result_rows[0][0] if result.result_rows else 0
+                
+                stats['total_before'] = self._with_connection(_execute_count_before)
+                stats['to_delete_count'] = self._with_connection(_execute_count_to_delete)
+                
+                logger.info(
+                    "[ClickHouse] 📊 清理前数据统计 | 总数据量: %s 条 | 待删除数据量: %s 条 | 保留数据量: %s 条",
+                    stats['total_before'],
+                    stats['to_delete_count'],
+                    stats['total_before'] - stats['to_delete_count'],
+                )
+            except Exception as count_exc:
+                logger.warning(
+                    "[ClickHouse] ⚠️ 查询清理前数据量时出错: %s (继续执行清理)",
+                    count_exc,
+                )
+            
+            # 执行删除操作
             delete_sql = f"""
             ALTER TABLE {self.leaderboard_table}
             DELETE WHERE create_datetime_long < {cutoff_timestamp_ms}
             """
+            
+            logger.info("[ClickHouse] 🔨 执行删除操作...")
             self.command(delete_sql)
+            
+            # 查询清理后的数据量（由于DELETE是异步的，这里只是估算）
+            try:
+                # 等待一小段时间让DELETE操作开始执行
+                time.sleep(0.5)  # 等待500ms
+                
+                def _execute_count_after(client):
+                    result = client.query(count_before_sql)
+                    return result.result_rows[0][0] if result.result_rows else 0
+                
+                stats['total_after'] = self._with_connection(_execute_count_after)
+            except Exception as count_after_exc:
+                logger.warning(
+                    "[ClickHouse] ⚠️ 查询清理后数据量时出错: %s",
+                    count_after_exc,
+                )
+                # 估算清理后的数据量
+                stats['total_after'] = stats['total_before'] - stats['to_delete_count']
+            
+            cleanup_end_time = time.time()
+            stats['execution_time'] = cleanup_end_time - cleanup_start_time
+            
+            # 记录详细的清理结果日志
             logger.info(
-                "[ClickHouse] Initiated cleanup of leaderboard rows older than %s minutes (cutoff_timestamp_ms=%s)",
-                minutes,
-                cutoff_timestamp_ms,
+                "[ClickHouse] ✅ 清理操作已完成 | 执行时间: %.3f 秒 | 清理前: %s 条 | 待删除: %s 条 | 清理后(估算): %s 条",
+                stats['execution_time'],
+                stats['total_before'],
+                stats['to_delete_count'],
+                stats['total_after'],
             )
-            # ClickHouse 的 ALTER DELETE 是异步的，这里返回0表示已提交
-            return 0
+            
+            # 如果待删除的数据量很大，记录警告
+            if stats['to_delete_count'] > 100000:
+                logger.warning(
+                    "[ClickHouse] ⚠️ 待删除数据量较大: %s 条，可能需要较长时间完成删除操作",
+                    stats['to_delete_count'],
+                )
+            
+            # 如果清理后数据量仍然很大，记录警告
+            if stats['total_after'] > 50000:
+                logger.warning(
+                    "[ClickHouse] ⚠️ 清理后数据量仍然较大: %s 条，建议检查数据插入频率或调整保留时间",
+                    stats['total_after'],
+                )
+            
+            return stats
+            
         except Exception as exc:
-            logger.error("[ClickHouse] Failed to cleanup old leaderboard rows: %s", exc, exc_info=True)
-            return 0
+            cleanup_end_time = time.time()
+            stats['execution_time'] = cleanup_end_time - cleanup_start_time
+            logger.error(
+                "[ClickHouse] ❌ 清理涨跌榜历史数据失败 | 执行时间: %.3f 秒 | 错误: %s",
+                stats['execution_time'],
+                exc,
+                exc_info=True,
+            )
+            return stats
 
     # ==================================================================
     # Market Klines 模块：表管理

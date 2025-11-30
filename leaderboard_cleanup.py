@@ -7,6 +7,8 @@ ClickHouse 涨跌榜数据定时清理服务
 import asyncio
 import logging
 import sys
+import time
+from datetime import datetime, timezone
 
 import config as app_config
 from database_clickhouse import ClickHouseDatabase
@@ -14,17 +16,75 @@ from database_clickhouse import ClickHouseDatabase
 logger = logging.getLogger(__name__)
 
 
-async def cleanup_old_leaderboard(minutes: int = 10) -> None:
-    """清理超过指定分钟数的涨跌榜历史数据."""
+async def cleanup_old_leaderboard(minutes: int = 10) -> dict:
+    """清理超过指定分钟数的涨跌榜历史数据.
+    
+    Args:
+        minutes: 保留时间窗口（分钟）
+        
+    Returns:
+        包含清理统计信息的字典
+    """
+    cleanup_start_time = time.time()
+    cleanup_time_str = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')
+    
+    logger.info(
+        "[LeaderboardCleanup] 🚀 开始执行清理任务 | 时间: %s | 保留时间: %s 分钟",
+        cleanup_time_str,
+        minutes,
+    )
+    
     try:
         db = ClickHouseDatabase(auto_init_tables=False)
-        db.cleanup_old_leaderboard(minutes=minutes)
+        stats = db.cleanup_old_leaderboard(minutes=minutes)
+        
+        cleanup_end_time = time.time()
+        total_execution_time = cleanup_end_time - cleanup_start_time
+        
+        # 记录详细的清理结果
         logger.info(
-            "[LeaderboardCleanup] Cleanup initiated for leaderboard rows older than %s minutes",
-            minutes,
+            "[LeaderboardCleanup] ✅ 清理任务完成 | 总耗时: %.3f 秒 | "
+            "清理前: %s 条 | 待删除: %s 条 | 清理后: %s 条",
+            total_execution_time,
+            stats.get('total_before', 0),
+            stats.get('to_delete_count', 0),
+            stats.get('total_after', 0),
         )
+        
+        # 计算数据减少比例
+        if stats.get('total_before', 0) > 0:
+            reduction_percent = (stats.get('to_delete_count', 0) / stats.get('total_before', 1)) * 100
+            logger.info(
+                "[LeaderboardCleanup] 📊 数据减少比例: %.2f%% | 截止时间: %s",
+                reduction_percent,
+                stats.get('cutoff_time', 'N/A'),
+            )
+        
+        # 性能警告
+        if total_execution_time > 30:
+            logger.warning(
+                "[LeaderboardCleanup] ⚠️ 清理任务执行时间较长: %.3f 秒，建议检查数据库性能",
+                total_execution_time,
+            )
+        
+        return stats
+        
     except Exception as e:
-        logger.error("[LeaderboardCleanup] Cleanup failed: %s", e, exc_info=True)
+        cleanup_end_time = time.time()
+        total_execution_time = cleanup_end_time - cleanup_start_time
+        logger.error(
+            "[LeaderboardCleanup] ❌ 清理任务失败 | 耗时: %.3f 秒 | 错误: %s",
+            total_execution_time,
+            e,
+            exc_info=True,
+        )
+        return {
+            'total_before': 0,
+            'total_after': 0,
+            'to_delete_count': 0,
+            'execution_time': total_execution_time,
+            'error': str(e),
+        }
 
 
 async def run_cleanup_scheduler() -> None:
@@ -37,23 +97,83 @@ async def run_cleanup_scheduler() -> None:
 
     interval_seconds = interval_minutes * 60
 
-    logger.info(
-        "[LeaderboardCleanup] Scheduler started: interval=%s minutes (%s seconds), retention=%s minutes",
-        interval_minutes,
-        interval_seconds,
-        retention_minutes,
-    )
+    scheduler_start_time = datetime.now(timezone.utc)
+    scheduler_start_str = scheduler_start_time.strftime('%Y-%m-%d %H:%M:%S UTC')
+    
+    logger.info("=" * 80)
+    logger.info("[LeaderboardCleanup] 🎯 清理调度器启动")
+    logger.info("[LeaderboardCleanup] 📅 启动时间: %s", scheduler_start_str)
+    logger.info("[LeaderboardCleanup] ⏰ 清理执行间隔: %s 分钟 (%s 秒)", interval_minutes, interval_seconds)
+    logger.info("[LeaderboardCleanup] 📦 数据保留时间: %s 分钟", retention_minutes)
+    logger.info("=" * 80)
 
+    cycle_count = 0
+    total_cleaned = 0
+    
     try:
         # 立即执行一次
-        await cleanup_old_leaderboard(retention_minutes)
+        logger.info("[LeaderboardCleanup] 🔄 执行首次清理任务...")
+        cycle_count += 1
+        stats = await cleanup_old_leaderboard(retention_minutes)
+        if stats:
+            total_cleaned += stats.get('to_delete_count', 0)
+        
+        logger.info(
+            "[LeaderboardCleanup] 💤 等待 %s 分钟 (%s 秒) 后执行下一次清理...",
+            interval_minutes,
+            interval_seconds,
+        )
 
         # 按配置的间隔循环执行
         while True:
             await asyncio.sleep(interval_seconds)
-            await cleanup_old_leaderboard(retention_minutes)
+            cycle_count += 1
+            next_run_time = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')
+            
+            logger.info(
+                "[LeaderboardCleanup] 🔄 [第 %s 次] 开始执行清理任务 | 时间: %s",
+                cycle_count,
+                next_run_time,
+            )
+            
+            stats = await cleanup_old_leaderboard(retention_minutes)
+            if stats:
+                total_cleaned += stats.get('to_delete_count', 0)
+            
+            # 每10次清理输出一次汇总统计
+            if cycle_count % 10 == 0:
+                uptime = (datetime.now(timezone.utc) - scheduler_start_time).total_seconds() / 3600
+                logger.info(
+                    "[LeaderboardCleanup] 📈 清理统计汇总 | "
+                    "执行次数: %s | 累计清理: %s 条 | 运行时长: %.2f 小时",
+                    cycle_count,
+                    total_cleaned,
+                    uptime,
+                )
+            
+            logger.info(
+                "[LeaderboardCleanup] 💤 等待 %s 分钟 (%s 秒) 后执行下一次清理...",
+                interval_minutes,
+                interval_seconds,
+            )
+            
     except KeyboardInterrupt:
-        logger.info("[LeaderboardCleanup] Scheduler stopped by user")
+        scheduler_end_time = datetime.now(timezone.utc)
+        uptime = (scheduler_end_time - scheduler_start_time).total_seconds() / 3600
+        logger.info("=" * 80)
+        logger.info("[LeaderboardCleanup] 🛑 清理调度器已停止（用户中断）")
+        logger.info("[LeaderboardCleanup] 📊 最终统计:")
+        logger.info("[LeaderboardCleanup]   - 执行次数: %s", cycle_count)
+        logger.info("[LeaderboardCleanup]   - 累计清理数据: %s 条", total_cleaned)
+        logger.info("[LeaderboardCleanup]   - 运行时长: %.2f 小时", uptime)
+        logger.info("=" * 80)
+    except Exception as e:
+        logger.error(
+            "[LeaderboardCleanup] ❌ 清理调度器发生未预期的错误: %s",
+            e,
+            exc_info=True,
+        )
+        raise
 
 
 if __name__ == "__main__":
