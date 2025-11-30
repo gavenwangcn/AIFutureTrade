@@ -313,6 +313,10 @@ class MarketDataFetcher:
         # MA周期列表
         ma_lengths = [5, 20, 60, 99]
         
+        # VOL均量线（MAVOL）周期列表
+        # 根据文档：5周期（短期）、10周期（中期）
+        mavol_lengths = [5, 10]
+        
         # 不同时间框架的K线limit值优化配置
         # 注意：Binance API的limit最大值为120，所有时间框架统一使用120
         # 120根K线足够计算所有指标：
@@ -400,10 +404,10 @@ class MarketDataFetcher:
                 # 实时计算RSI指标
                 rsi = self._calculate_rsi(closes)
                 
-                # 获取最新成交量（VOL）
-                # VOL通常指当前K线的成交量，也可以计算成交量移动平均
-                # 这里返回最新一根K线的成交量
-                vol = volumes[-1] if volumes else 0.0
+                # 计算VOL指标（成交量）和均量线（MAVOL）
+                # VOL：当前K线的成交量（该周期内的成交总量）
+                # MAVOL：成交量移动平均线，用于过滤短期波动
+                vol_data = self._calculate_vol_indicators(volumes, mavol_lengths)
                 
                 # 组装该时间框架的数据
                 timeframe_data[label] = {
@@ -411,7 +415,7 @@ class MarketDataFetcher:
                     'ma': ma_values,
                     'macd': macd,
                     'rsi': rsi,
-                    'vol': vol
+                    'vol': vol_data
                 }
                 
                 # 记录计算成功的日志（仅在DEBUG级别）
@@ -420,7 +424,8 @@ class MarketDataFetcher:
                     f'MA5={ma_values.get("ma5", 0):.2f}, '
                     f'MACD_DIF={macd.get("dif", 0):.4f}, '
                     f'RSI6={rsi.get("rsi6", 0):.2f}, '
-                    f'VOL={vol:.2f}'
+                    f'VOL={vol_data.get("vol", 0):.2f}, '
+                    f'MAVOL5={vol_data.get("mavol5", 0):.2f}'
                 )
                 
             except Exception as e:
@@ -438,59 +443,78 @@ class MarketDataFetcher:
 
     def _calculate_ma_values(self, closes: List[float], ma_lengths: List[int]) -> Dict[str, float]:
         """
-        计算简单移动平均（MA）值
+        计算简单移动平均（MA）值（币圈标准计算方式）
         
-        MA标准计算公式：
-        MA(N) = (P1 + P2 + ... + PN) / N
-        其中P1到PN是最近N个周期的收盘价
+        MA（Moving Average，移动平均线）是某一时间段内标的资产收盘价的算术平均值。
+        这是简单移动平均（SMA），核心作用是过滤短期价格波动、反映中长期趋势方向。
         
-        如果数据不足N个，则使用所有可用数据的平均值。
+        MA标准计算公式（币圈与股票市场完全一致）：
+        MA(n) = （第1期收盘价 + 第2期收盘价 + ... + 第n期收盘价）÷ n
+        
+        计算逻辑：
+        1. 收盘价列表按时间顺序从旧到新排列（最新的在最后）
+        2. 取最近n期的收盘价（即最后n个收盘价）
+        3. 求和后除以n得到MA值
+        
+        示例（MA5计算）：
+        假设收盘价列表：[42000, 43500, 42800, 44200, 43900, 45000, 44500, 46000, 45800, 47000]
+        取最后5个：45000, 44500, 46000, 45800, 47000
+        MA5 = (45000 + 44500 + 46000 + 45800 + 47000) ÷ 5 = 45660
+        
+        周期说明：
+        - MA5：5周期均线（短期趋势）
+        - MA20：20周期均线（中期趋势）
+        - MA60：60周期均线（中长期趋势）
+        - MA99：99周期均线（长期趋势，币圈中部分交易者视为牛熊分界线）
+        
+        注意：
+        - 币圈7×24小时交易，周期划分以自然时间单位为准（日/小时/分钟）
+        - 计算MA99需至少99根对应周期的K线数据
+        - 数据不足时返回0.0，并记录警告日志
         
         Args:
-            closes: 收盘价列表（按时间顺序，最新的在最后）
+            closes: 收盘价列表（按时间顺序从旧到新排列，最新的在最后）
             ma_lengths: MA周期列表，如 [5, 20, 60, 99]
             
         Returns:
-            包含各周期MA值的字典，如 {'ma5': 100.5, 'ma20': 98.3, ...}
+            包含各周期MA值的字典，如 {'ma5': 100.5, 'ma20': 98.3, 'ma60': 99.2, 'ma99': 98.8}
+            如果数据不足，对应周期的MA值为0.0
         """
         ma_values = {}
         
         for length in ma_lengths:
             if len(closes) >= length:
-                # 数据充足：使用最近N个收盘价的平均值
-                # 取最后N个收盘价（最新的在最后）
+                # 数据充足：使用最近N个收盘价的算术平均值
+                # 取最后N个收盘价（最新的在最后，符合文档要求）
                 recent_closes = closes[-length:]
+                # MA(n) = 最近n期收盘价之和 ÷ n
                 ma_value = sum(recent_closes) / length
                 ma_values[f'ma{length}'] = ma_value
             else:
-                # 数据不足：使用所有可用数据的平均值
-                if len(closes) > 0:
-                    ma_value = sum(closes) / len(closes)
-                    ma_values[f'ma{length}'] = ma_value
-                    logger.warning(
-                        f'[MA] 数据不足: MA{length}需要{length}个数据点，实际只有{len(closes)}个，使用所有可用数据计算'
-                    )
-                else:
-                    ma_values[f'ma{length}'] = 0.0
-                    logger.warning(f'[MA] 无数据: 无法计算MA{length}')
+                # 数据不足：根据文档，应返回None或0，不计算MA值
+                # 这里返回0.0，表示无法计算（数据不足）
+                ma_values[f'ma{length}'] = 0.0
+                logger.warning(
+                    f'[MA] 数据不足: MA{length}需要至少{length}根K线数据，实际只有{len(closes)}根，无法计算'
+                )
         
         return ma_values
 
 
     def _calculate_macd(self, closes: List[float]) -> Dict[str, float]:
         """
-        计算MACD指标（指数平滑异同移动平均线）
+        计算MACD指标（指数平滑异同移动平均线）- 简化版
         
         MACD标准计算公式：
         1. 计算快速EMA(12)和慢速EMA(26)
         2. 计算DIF（差离值）= EMA(12) - EMA(26)
         3. 计算DEA（信号线）= DIF的9日EMA
-        4. 计算BAR（柱状线）= (DIF - DEA) × 2
+        4. 计算BAR（柱状线）= DIF - DEA（简化版，不乘以2）
         
-        注意：MACD的BAR通常有两种计算方式：
-        - 方式1：BAR = (DIF - DEA) × 2（常用）
-        - 方式2：BAR = DIF - DEA（简化版）
-        这里使用方式1，符合大多数交易软件的标准
+        注意：MACD的BAR有两种计算方式：
+        - 方式1：BAR = (DIF - DEA) × 2（常用版，放大视觉效果）
+        - 方式2：BAR = DIF - DEA（简化版，直接差值）
+        这里使用简化版方式2
         
         Args:
             closes: 收盘价列表（按时间顺序，最新的在最后）
@@ -521,9 +545,8 @@ class MarketDataFetcher:
         
         dea = self._calculate_ema(dif_series, 9)
         
-        # 步骤4：计算BAR = (DIF - DEA) × 2
-        # 乘以2是为了放大柱状图的视觉效果，这是MACD的标准做法
-        bar = (dif - dea) * 2
+        # 步骤4：计算BAR = DIF - DEA（简化版，不乘以2）
+        bar = dif - dea
         
         return {
             'dif': dif,
@@ -699,6 +722,66 @@ class MarketDataFetcher:
         rsi = max(0.0, min(100.0, rsi))
         
         return rsi
+
+    def _calculate_vol_indicators(self, volumes: List[float], mavol_lengths: List[int]) -> Dict[str, float]:
+        """
+        计算VOL指标（成交量）和均量线（MAVOL）
+        
+        VOL指标定义：
+        - VOL（Volume，成交量）：某一时间段内标的资产的成交总量
+        - 每根K线对应一个VOL值，表示该周期内的成交总量
+        
+        均量线（MAVOL）定义：
+        - MAVOL-n = 过去n个周期的VOL总和 ÷ n
+        - 用于过滤短期波动，识别成交量趋势
+        - 常用参数：5周期（短期）、10周期（中期）
+        
+        计算逻辑：
+        1. VOL = 最新一根K线的成交量（当前周期的成交总量）
+        2. MAVOL-n = 过去n个周期成交量的简单移动平均
+        
+        注意：
+        - 币圈VOL以基础货币数量为单位（如BTC/USDT交易对，VOL单位为BTC）
+        - 数据来源于Binance API的K线数据，已包含对应周期的成交量
+        
+        Args:
+            volumes: 成交量列表（按时间顺序，最新的在最后）
+            mavol_lengths: 均量线周期列表，如 [5, 10, 60]
+            
+        Returns:
+            包含VOL和MAVOL值的字典，格式：
+            {
+                'vol': 当前周期成交量,
+                'mavol5': 5周期均量线,
+                'mavol10': 10周期均量线
+            }
+        """
+        result = {}
+        
+        # 1. 计算VOL：最新一根K线的成交量
+        vol = volumes[-1] if volumes else 0.0
+        result['vol'] = vol
+        
+        # 2. 计算均量线（MAVOL）
+        for length in mavol_lengths:
+            if len(volumes) >= length:
+                # 数据充足：使用最近N个周期的成交量平均值
+                recent_volumes = volumes[-length:]
+                mavol_value = sum(recent_volumes) / length
+                result[f'mavol{length}'] = mavol_value
+            else:
+                # 数据不足：使用所有可用数据的平均值
+                if len(volumes) > 0:
+                    mavol_value = sum(volumes) / len(volumes)
+                    result[f'mavol{length}'] = mavol_value
+                    logger.warning(
+                        f'[VOL] 数据不足: MAVOL{length}需要{length}个数据点，实际只有{len(volumes)}个，使用所有可用数据计算'
+                    )
+                else:
+                    result[f'mavol{length}'] = 0.0
+                    logger.warning(f'[VOL] 无数据: 无法计算MAVOL{length}')
+        
+        return result
 
     # ============ Leaderboard Methods ============
 
