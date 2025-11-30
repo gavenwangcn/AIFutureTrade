@@ -1292,7 +1292,8 @@ class TradingApp {
         const changeClass = data.change_24h >= 0 ? 'positive' : 'negative';
         const changeIcon = data.change_24h >= 0 ? '▲' : '▼';
 
-        const volumeText = data.daily_volume ? this.formatCompactUsd(data.daily_volume) : '--';
+        // 使用中文单位格式化成交额（亿、万），不添加$符号
+        const volumeText = data.daily_volume ? this.formatVolumeChinese(data.daily_volume) : '--';
         const timeframeSection = this.buildTimeframeSection(data.timeframes || {});
         const maSection = this.buildMaGrid(data.timeframes || {});
         const indicatorsSection = this.buildIndicatorsSection(data.timeframes || {});
@@ -1300,7 +1301,7 @@ class TradingApp {
         return `
             <div class="price-item">
                 <div class="price-head">
-                    <div>
+                    <div class="price-info">
                         <div class="price-symbol">${symbol}</div>
                         <div class="price-name">${data.name || ''}</div>
                     </div>
@@ -1311,7 +1312,10 @@ class TradingApp {
                                 ? data.change_24h.toFixed(2)
                                 : '0.00'
                         }%</div>
-                        <div class="price-volume">当日成交额：${volumeText}</div>
+                        <div class="price-volume">
+                            <span class="volume-label">当日成交额：</span>
+                            <span class="volume-value">${volumeText}</span>
+                        </div>
                     </div>
                 </div>
                 <div class="price-body">
