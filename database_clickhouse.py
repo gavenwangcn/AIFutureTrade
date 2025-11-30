@@ -93,14 +93,16 @@ class ClickHouseConnectionPool:
                 return None
             
             try:
+                # 注意：不设置 timezone，因为某些 ClickHouse 服务器不支持或不允许设置该参数
+                # 时区处理在应用层完成，所有时间都使用 UTC 时间戳（create_datetime_long）
+                # 清理逻辑使用时间戳比较，不依赖时区设置
                 client = clickhouse_connect.get_client(
                     host=self._host,
                     port=self._port,
                     username=self._username,
                     password=self._password,
                     database=self._database,
-                    secure=self._secure,
-                    settings={'timezone': 'UTC'}  # 设置时区为UTC，确保时间处理一致
+                    secure=self._secure
                 )
                 self._pool.put(client)
                 self._current_connections += 1
