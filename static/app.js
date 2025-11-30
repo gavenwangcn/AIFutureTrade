@@ -2893,11 +2893,44 @@ class TradingApp {
                 }
             }
             
-            // 成交量
+            // 成交量（VOL）指标
+            // VOL数据格式：{vol: 当前周期成交量, mavol5: 5周期均量线, mavol10: 10周期均量线}
             if (data.vol !== undefined && data.vol !== null) {
-                const vol = parseFloat(data.vol);
-                if (!isNaN(vol)) {
-                    parts.push(`VOL: ${this.formatCompactUsd(vol)}`);
+                let volValue = null;
+                let mavol5Value = null;
+                let mavol10Value = null;
+                
+                // 兼容新旧格式：可能是对象或数值
+                if (typeof data.vol === 'object') {
+                    volValue = data.vol.vol;
+                    mavol5Value = data.vol.mavol5;
+                    mavol10Value = data.vol.mavol10;
+                } else {
+                    // 旧格式：直接是数值
+                    volValue = data.vol;
+                }
+                
+                // 显示VOL值
+                if (volValue !== undefined && volValue !== null) {
+                    const vol = parseFloat(volValue);
+                    if (!isNaN(vol) && vol > 0) {
+                        parts.push(`VOL: ${this.formatCompactUsd(vol)}`);
+                    }
+                }
+                
+                // 显示MAVOL5和MAVOL10（如果存在）
+                if (mavol5Value !== undefined && mavol5Value !== null) {
+                    const mavol5 = parseFloat(mavol5Value);
+                    if (!isNaN(mavol5) && mavol5 > 0) {
+                        parts.push(`MAVOL5: ${this.formatCompactUsd(mavol5)}`);
+                    }
+                }
+                
+                if (mavol10Value !== undefined && mavol10Value !== null) {
+                    const mavol10 = parseFloat(mavol10Value);
+                    if (!isNaN(mavol10) && mavol10 > 0) {
+                        parts.push(`MAVOL10: ${this.formatCompactUsd(mavol10)}`);
+                    }
                 }
             }
             
