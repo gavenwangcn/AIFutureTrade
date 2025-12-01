@@ -224,6 +224,7 @@ def exercise_binance_futures_client(api_key: str, api_secret: str) -> None:
         # 导入MarketDataFetcher类
         from market_data import MarketDataFetcher
         from database_clickhouse import ClickHouseDatabase
+        import json
         
         # 创建MarketDataFetcher实例（需要数据库连接）
         # 由于这是一个测试脚本，我们创建一个简单的数据库实例
@@ -239,19 +240,10 @@ def exercise_binance_futures_client(api_key: str, api_secret: str) -> None:
         if indicators and 'timeframes' in indicators:
             logging.info("Successfully calculated technical indicators")
             timeframes = indicators['timeframes']
-            logging.info(f"Available timeframes: {list(timeframes.keys())}")
             
-            # 打印一些关键指标
-            for timeframe, data in timeframes.items():
-                if data and 'kline' in data and 'ma' in data:
-                    kline = data['kline']
-                    ma = data['ma']
-                    logging.info(f"  {timeframe} - Close: {kline.get('close', 'N/A')}, "
-                               f"MA5: {ma.get('ma5', 'N/A'):.2f}, "
-                               f"MA20: {ma.get('ma20', 'N/A'):.2f}")
-                # 只打印前几个时间框架以避免日志过长
-                if list(timeframes.keys()).index(timeframe) >= 2:
-                    break
+            # 以JSON格式打印所有timeframes信息
+            logging.info("All timeframes data in JSON format:")
+            logging.info(json.dumps(timeframes, indent=2, default=str))
         else:
             logging.warning("Failed to calculate technical indicators or no data returned")
             
