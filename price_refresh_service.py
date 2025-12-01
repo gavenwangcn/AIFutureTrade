@@ -10,6 +10,24 @@
 3. 分批调用接口刷新价格
 4. open_price使用昨天的日K线收盘价，并更新update_price_date为当天时间
 5. 每小时执行一次（可配置，使用cron表达式）
+
+K线数据格式说明：
+- 旧格式：[open_time, open, high, low, close, volume, ...]（列表格式）
+- 新格式：{
+    "open_time": int,           # 开盘时间（毫秒时间戳）
+    "open_time_dt": datetime,   # 开盘时间（日期格式）
+    "open": str,                # 开盘价
+    "high": str,                # 最高价
+    "low": str,                 # 最低价
+    "close": str,               # 收盘价
+    "volume": str,              # 成交量
+    "close_time": int,          # 收盘时间（毫秒时间戳）
+    "close_time_dt": datetime,  # 收盘时间（日期格式）
+    "quote_asset_volume": str,  # 成交额
+    "number_of_trades": int,    # 成交笔数
+    "taker_buy_base_volume": str,   # 主动买入成交量
+    "taker_buy_quote_volume": str   # 主动买入成交额
+  }（字典格式）
 """
 import asyncio
 import logging
@@ -93,12 +111,24 @@ async def refresh_price_for_symbol(
         # klines[0] 是昨天的，klines[1] 是今天的（最新的）
         yesterday_kline = klines[0]  # 昨天的K线（较早的）
         
-        if len(yesterday_kline) < 5:
-            logger.warning("[PriceRefresh] Symbol %s: Invalid kline data format", symbol)
+        # 兼容旧的列表格式和新的字典格式
+        try:
+            if isinstance(yesterday_kline, dict):
+                # 新的字典格式
+                if 'close' not in yesterday_kline:
+                    logger.warning("[PriceRefresh] Symbol %s: Invalid kline data format", symbol)
+                    return False
+                yesterday_close_price = float(yesterday_kline['close'])
+            else:
+                # 旧的列表格式
+                if len(yesterday_kline) < 5:
+                    logger.warning("[PriceRefresh] Symbol %s: Invalid kline data format", symbol)
+                    return False
+                # 昨天的收盘价（索引4是close）
+                yesterday_close_price = float(yesterday_kline[4])
+        except (ValueError, TypeError, KeyError) as e:
+            logger.warning("[PriceRefresh] Symbol %s: Failed to parse close price: %s", symbol, e)
             return False
-        
-        # 昨天的收盘价（索引4是close）
-        yesterday_close_price = float(yesterday_kline[4])
         
         if yesterday_close_price <= 0:
             logger.warning("[PriceRefresh] Symbol %s: Invalid close price: %s", symbol, yesterday_close_price)

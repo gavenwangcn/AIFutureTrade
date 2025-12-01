@@ -199,13 +199,64 @@ def exercise_binance_futures_client(api_key: str, api_secret: str) -> None:
     # 打印结果
     logging.info(f"Daily klines count: {len(klines_daily)}")
     for i, kline in enumerate(klines_daily):
-        logging.info(f"Daily kline #{i+1}: {kline}")
+        logging.info(f"Daily kline #{i+1}:")
+        logging.info(f"  开盘时间: {kline.get('open_time')} ({kline.get('open_time_dt')})")
+        logging.info(f"  开盘价: {kline.get('open')}")
+        logging.info(f"  最高价: {kline.get('high')}")
+        logging.info(f"  最低价: {kline.get('low')}")
+        logging.info(f"  收盘价: {kline.get('close')}")
+        logging.info(f"  成交量: {kline.get('volume')}")
+        logging.info(f"  收盘时间: {kline.get('close_time')} ({kline.get('close_time_dt')})")
+        logging.info(f"  成交额: {kline.get('quote_asset_volume')}")
+        logging.info(f"  成交笔数: {kline.get('number_of_trades')}")
+        logging.info(f"  主动买入成交量: {kline.get('taker_buy_base_volume')}")
+        logging.info(f"  主动买入成交额: {kline.get('taker_buy_quote_volume')}")
     
     # 验证是否获取到了两条K线数据
     if len(klines_daily) == 2:
         logging.info("Successfully retrieved 2 daily klines as expected")
     else:
         logging.warning(f"Expected 2 daily klines, but got {len(klines_daily)}")
+
+    # 测试技术指标计算功能
+    logging.info("Testing calculate_technical_indicators()...")
+    try:
+        # 导入MarketDataFetcher类
+        from market_data import MarketDataFetcher
+        from database_clickhouse import ClickHouseDatabase
+        
+        # 创建MarketDataFetcher实例（需要数据库连接）
+        # 由于这是一个测试脚本，我们创建一个简单的数据库实例
+        db = ClickHouseDatabase(auto_init_tables=False)
+        market_fetcher = MarketDataFetcher(db)
+        
+        # 设置币安期货客户端
+        market_fetcher._futures_client = client
+        
+        # 计算BTC的技术指标
+        indicators = market_fetcher.calculate_technical_indicators("BTC")
+        
+        if indicators and 'timeframes' in indicators:
+            logging.info("Successfully calculated technical indicators")
+            timeframes = indicators['timeframes']
+            logging.info(f"Available timeframes: {list(timeframes.keys())}")
+            
+            # 打印一些关键指标
+            for timeframe, data in timeframes.items():
+                if data and 'kline' in data and 'ma' in data:
+                    kline = data['kline']
+                    ma = data['ma']
+                    logging.info(f"  {timeframe} - Close: {kline.get('close', 'N/A')}, "
+                               f"MA5: {ma.get('ma5', 'N/A'):.2f}, "
+                               f"MA20: {ma.get('ma20', 'N/A'):.2f}")
+                # 只打印前几个时间框架以避免日志过长
+                if list(timeframes.keys()).index(timeframe) >= 2:
+                    break
+        else:
+            logging.warning("Failed to calculate technical indicators or no data returned")
+            
+    except Exception as e:
+        logging.error(f"Error calculating technical indicators: {e}")
 
     logging.info("All BinanceFuturesClient method calls completed.")
 

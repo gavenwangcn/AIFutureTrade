@@ -368,13 +368,19 @@ class MarketDataFetcher:
                 closes = []
                 volumes = []
                 for item in klines:
-                    if len(item) > 4:
-                        try:
+                    # 兼容旧的列表格式和新的字典格式
+                    try:
+                        # 如果是字典格式（新的实现）
+                        if isinstance(item, dict):
+                            closes.append(float(item['close']))
+                            volumes.append(float(item['volume']))
+                        # 如果是列表格式（旧的实现）
+                        elif isinstance(item, (list, tuple)) and len(item) > 4:
                             closes.append(float(item[4]))
                             if len(item) > 5:
                                 volumes.append(float(item[5]))
-                        except (ValueError, TypeError):
-                            continue
+                    except (ValueError, TypeError, KeyError):
+                        continue
                 
                 if not closes or len(closes) < 2:
                     logger.debug(f'[Indicators] Insufficient data for {symbol} {label}: {len(closes)} closes')
@@ -383,14 +389,27 @@ class MarketDataFetcher:
                 # 获取最新一根K线数据
                 latest_kline = klines[-1]
                 try:
-                    kline_data = {
-                        'open_time': int(latest_kline[0]) if len(latest_kline) > 0 and latest_kline[0] else None,
-                        'open': float(latest_kline[1]) if len(latest_kline) > 1 else 0.0,
-                        'high': float(latest_kline[2]) if len(latest_kline) > 2 else 0.0,
-                        'low': float(latest_kline[3]) if len(latest_kline) > 3 else 0.0,
-                        'close': float(latest_kline[4]) if len(latest_kline) > 4 else 0.0,
-                        'volume': float(latest_kline[5]) if len(latest_kline) > 5 else 0.0
-                    }
+                    # 兼容旧的列表格式和新的字典格式
+                    if isinstance(latest_kline, dict):
+                        # 新的字典格式
+                        kline_data = {
+                            'open_time': int(latest_kline['open_time']) if latest_kline.get('open_time') else None,
+                            'open': float(latest_kline['open']) if latest_kline.get('open') else 0.0,
+                            'high': float(latest_kline['high']) if latest_kline.get('high') else 0.0,
+                            'low': float(latest_kline['low']) if latest_kline.get('low') else 0.0,
+                            'close': float(latest_kline['close']) if latest_kline.get('close') else 0.0,
+                            'volume': float(latest_kline['volume']) if latest_kline.get('volume') else 0.0
+                        }
+                    else:
+                        # 旧的列表格式
+                        kline_data = {
+                            'open_time': int(latest_kline[0]) if len(latest_kline) > 0 and latest_kline[0] else None,
+                            'open': float(latest_kline[1]) if len(latest_kline) > 1 else 0.0,
+                            'high': float(latest_kline[2]) if len(latest_kline) > 2 else 0.0,
+                            'low': float(latest_kline[3]) if len(latest_kline) > 3 else 0.0,
+                            'close': float(latest_kline[4]) if len(latest_kline) > 4 else 0.0,
+                            'volume': float(latest_kline[5]) if len(latest_kline) > 5 else 0.0
+                        }
                 except (ValueError, TypeError, IndexError) as e:
                     logger.warning(f'[Indicators] Failed to parse kline data for {symbol} {label}: {e}')
                     continue

@@ -568,7 +568,7 @@ class BinanceFuturesClient:
 
         return payload
 
-    def get_klines(self, symbol: str, interval: str, limit: int = 120, startTime: Optional[int] = None, endTime: Optional[int] = None) -> List[List]:
+    def get_klines(self, symbol: str, interval: str, limit: int = 120, startTime: Optional[int] = None, endTime: Optional[int] = None) -> List[Dict[str, Any]]:
         """
         获取K线数据
         
@@ -580,7 +580,22 @@ class BinanceFuturesClient:
             endTime: 结束时间戳（毫秒）
             
         Returns:
-            K线数据列表，每个元素为 [open_time, open, high, low, close, volume]
+            K线数据列表，每个元素为包含完整K线信息的字典：
+            {
+                "open_time": int,           # 开盘时间（毫秒时间戳）
+                "open_time_dt": datetime,   # 开盘时间（日期格式）
+                "open": str,                # 开盘价
+                "high": str,                # 最高价
+                "low": str,                 # 最低价
+                "close": str,               # 收盘价
+                "volume": str,              # 成交量
+                "close_time": int,          # 收盘时间（毫秒时间戳）
+                "close_time_dt": datetime,  # 收盘时间（日期格式）
+                "quote_asset_volume": str,  # 成交额
+                "number_of_trades": int,    # 成交笔数
+                "taker_buy_base_volume": str,   # 主动买入成交量
+                "taker_buy_quote_volume": str   # 主动买入成交额
+            }
         """
         logger.info(f"[Binance Futures] 开始获取K线数据, symbol={symbol}, interval={interval}, limit={limit}, startTime={startTime}, endTime={endTime}")
 
@@ -610,45 +625,72 @@ class BinanceFuturesClient:
                 f"[Binance Futures] API调用完成, 耗时: {api_duration:.3f} 秒, 返回K线数量: {len(data)}"
             )
 
-            # 转换K线数据为标准格式
-            klines: List[List[Any]] = []
+            # 转换K线数据为完整格式
+            klines: List[Dict[str, Any]] = []
             for item in data:
-                # 如果已经是列表/元组格式
-                if isinstance(item, (list, tuple)):
-                    if len(item) >= 6:
-                        klines.append(list(item[:6]))
-                    else:
-                        logger.debug("[Binance Futures] 忽略长度不足的数据项: %s", item)
-                    continue
-
+                # 如果是列表/元组格式（Binance API标准格式）
+                if isinstance(item, (list, tuple)) and len(item) >= 11:
+                    open_time = item[0]
+                    open_price = item[1]
+                    high_price = item[2]
+                    low_price = item[3]
+                    close_price = item[4]
+                    volume = item[5]
+                    close_time = item[6]
+                    quote_asset_volume = item[7]
+                    number_of_trades = item[8]
+                    taker_buy_base_volume = item[9]
+                    taker_buy_quote_volume = item[10]
+                    
+                    # 转换时间戳为日期格式
+                    open_time_dt = datetime.fromtimestamp(open_time / 1000) if open_time else None
+                    close_time_dt = datetime.fromtimestamp(close_time / 1000) if close_time else None
+                    
+                    kline_dict = {
+                        "open_time": open_time,
+                        "open_time_dt": open_time_dt,
+                        "open": open_price,
+                        "high": high_price,
+                        "low": low_price,
+                        "close": close_price,
+                        "volume": volume,
+                        "close_time": close_time,
+                        "close_time_dt": close_time_dt,
+                        "quote_asset_volume": quote_asset_volume,
+                        "number_of_trades": number_of_trades,
+                        "taker_buy_base_volume": taker_buy_base_volume,
+                        "taker_buy_quote_volume": taker_buy_quote_volume
+                    }
+                    klines.append(kline_dict)
                 # 如果是字典或模型对象
-                entry = self._to_dict(item)
-                if entry:
-                    klines.append(
-                        [
-                            entry.get("open_time"),
-                            entry.get("open"),
-                            entry.get("high"),
-                            entry.get("low"),
-                            entry.get("close"),
-                            entry.get("volume"),
-                        ]
-                    )
+                elif isinstance(item, dict) or hasattr(item, '__dict__'):
+                    entry = self._to_dict(item) if not isinstance(item, dict) else item
+                    if entry and len(entry) >= 6:
+                        open_time = entry.get("open_time") or entry.get("openTime") or entry.get("t")
+                        close_time = entry.get("close_time") or entry.get("closeTime") or entry.get("T")
+                        
+                        # 转换时间戳为日期格式
+                        open_time_dt = datetime.fromtimestamp(open_time / 1000) if open_time else None
+                        close_time_dt = datetime.fromtimestamp(close_time / 1000) if close_time else None
+                        
+                        kline_dict = {
+                            "open_time": open_time,
+                            "open_time_dt": open_time_dt,
+                            "open": entry.get("open") or entry.get("o"),
+                            "high": entry.get("high") or entry.get("h"),
+                            "low": entry.get("low") or entry.get("l"),
+                            "close": entry.get("close") or entry.get("c"),
+                            "volume": entry.get("volume") or entry.get("v"),
+                            "close_time": close_time,
+                            "close_time_dt": close_time_dt,
+                            "quote_asset_volume": entry.get("quote_asset_volume") or entry.get("q"),
+                            "number_of_trades": entry.get("number_of_trades") or entry.get("n"),
+                            "taker_buy_base_volume": entry.get("taker_buy_base_volume") or entry.get("V"),
+                            "taker_buy_quote_volume": entry.get("taker_buy_quote_volume") or entry.get("Q")
+                        }
+                        klines.append(kline_dict)
                 else:
-                    # 尝试直接读取属性
-                    try:
-                        klines.append(
-                            [
-                                getattr(item, "open_time"),
-                                getattr(item, "open"),
-                                getattr(item, "high"),
-                                getattr(item, "low"),
-                                getattr(item, "close"),
-                                getattr(item, "volume"),
-                            ]
-                        )
-                    except AttributeError:
-                        logger.debug("[Binance Futures] 无法解析的数据项: %s", item)
+                    logger.debug("[Binance Futures] 无法解析的数据项: %s", item)
 
             logger.info(f"[Binance Futures] K线数据获取完成, 返回 {len(klines)} 条K线")
             return klines
