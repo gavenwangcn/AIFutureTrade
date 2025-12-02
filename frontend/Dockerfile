@@ -28,9 +28,9 @@ RUN npm config set registry ${NPM_REGISTRY} && \
 COPY frontend/package.json frontend/package-lock.json* ./
 COPY frontend/scripts/ scripts/
 
-# 安装npm依赖（包括 klinecharts）
-# 按官网要求：npm install klinecharts
-# 注意：klinecharts 将通过 npm 安装，然后在 Vue 组件中通过 ES6 import 使用
+# 安装npm依赖（包括 @klinecharts/pro）
+# 按官网要求：npm install @klinecharts/pro
+# 注意：@klinecharts/pro 将通过 npm 安装，然后在 Vue 组件中通过 ES6 import 使用
 # 添加重试机制以提高网络不稳定时的成功率
 RUN if [ -f package-lock.json ]; then \
         npm ci --legacy-peer-deps || \
@@ -41,16 +41,16 @@ RUN if [ -f package-lock.json ]; then \
         npm install --legacy-peer-deps; \
     fi
 
-# 验证 klinecharts 是否已正确安装
-RUN if [ -d node_modules/klinecharts ]; then \
-        echo "[Dockerfile] ✓ klinecharts package installed via npm"; \
+# 验证 @klinecharts/pro 是否已正确安装
+RUN if [ -d node_modules/@klinecharts/pro ]; then \
+        echo "[Dockerfile] ✓ @klinecharts/pro package installed via npm"; \
         echo "[Dockerfile] Package version:"; \
-        cat node_modules/klinecharts/package.json | grep '"version"' || echo "Version not found"; \
+        cat node_modules/@klinecharts/pro/package.json | grep '"version"' || echo "Version not found"; \
         echo "[Dockerfile] Package structure:"; \
-        ls -la node_modules/klinecharts/ | head -10; \
+        ls -la node_modules/@klinecharts/pro/ | head -10; \
     else \
-        echo "[Dockerfile] ✗ klinecharts package not found in node_modules"; \
-        echo "[Dockerfile] Please ensure 'klinecharts' is listed in package.json dependencies"; \
+        echo "[Dockerfile] ✗ @klinecharts/pro package not found in node_modules"; \
+        echo "[Dockerfile] Please ensure '@klinecharts/pro' is listed in package.json dependencies"; \
         exit 1; \
     fi
 
@@ -72,16 +72,16 @@ RUN if [ -d static ]; then cp -r static/* /tmp/static/ 2>/dev/null || true; fi
 # 同步静态资源（从static/目录复制到public/目录）
 RUN npm run sync-static 2>&1 || echo "Static assets sync skipped"
 
-# 注意：klinecharts 不再需要复制到 public/lib/
-# klinecharts 将通过 npm 安装，在 Vue 组件中通过 ES6 import 使用
-# Vite 构建时会自动处理 klinecharts 的打包
+# 注意：@klinecharts/pro 不再需要复制到 public/lib/
+# @klinecharts/pro 将通过 npm 安装，在 Vue 组件中通过 ES6 import 使用
+# Vite 构建时会自动处理 @klinecharts/pro 的打包
 
 # 构建Vue应用（生产环境）
 # 注意：构建时 Vite 会将 public/ 目录中的文件复制到 dist/ 目录
 RUN npm run build
 
-# 验证构建结果（klinecharts 已通过 Vite 打包到 dist/ 中）
-RUN echo "[Dockerfile] Build completed. klinecharts is bundled by Vite."
+# 验证构建结果（@klinecharts/pro 已通过 Vite 打包到 dist/ 中）
+RUN echo "[Dockerfile] Build completed. @klinecharts/pro is bundled by Vite."
 
 # 验证构建结果
 RUN if [ -d dist ]; then \
