@@ -358,7 +358,10 @@ class MarketDataFetcher:
                     logger.debug(f'[Indicators] No klines data for {symbol} {label}')
                     continue
                 
-                # 提取收盘价和成交量（使用列表推导式提高效率）
+                # 提取完整的OHLCV数据（finta库需要完整的OHLCV数据）
+                opens = []
+                highs = []
+                lows = []
                 closes = []
                 volumes = []
                 timestamps = []
@@ -367,16 +370,20 @@ class MarketDataFetcher:
                     try:
                         # 如果是字典格式（新的实现）
                         if isinstance(item, dict):
-                            closes.append(float(item['close']))
-                            volumes.append(float(item['volume']))
+                            opens.append(float(item.get('open', 0)))
+                            highs.append(float(item.get('high', 0)))
+                            lows.append(float(item.get('low', 0)))
+                            closes.append(float(item.get('close', 0)))
+                            volumes.append(float(item.get('volume', 0)))
                             timestamps.append(int(item['open_time']) if item.get('open_time') else 0)
                         # 如果是列表格式（旧的实现）
                         elif isinstance(item, (list, tuple)) and len(item) > 4:
-                            closes.append(float(item[4]))
-                            if len(item) > 5:
-                                volumes.append(float(item[5]))
-                            if len(item) > 0:
-                                timestamps.append(int(item[0]))
+                            opens.append(float(item[1]) if len(item) > 1 else 0.0)
+                            highs.append(float(item[2]) if len(item) > 2 else 0.0)
+                            lows.append(float(item[3]) if len(item) > 3 else 0.0)
+                            closes.append(float(item[4]) if len(item) > 4 else 0.0)
+                            volumes.append(float(item[5]) if len(item) > 5 else 0.0)
+                            timestamps.append(int(item[0]) if len(item) > 0 and item[0] else 0)
                     except (ValueError, TypeError, KeyError):
                         continue
                 
@@ -412,8 +419,11 @@ class MarketDataFetcher:
                     logger.warning(f'[Indicators] Failed to parse kline data for {symbol} {label}: {e}')
                     continue
                 
-                # 创建pandas DataFrame用于技术指标计算
+                # 创建pandas DataFrame用于技术指标计算（finta需要完整的OHLCV数据）
                 df = pd.DataFrame({
+                    'open': opens,
+                    'high': highs,
+                    'low': lows,
                     'close': closes,
                     'volume': volumes
                 })
@@ -657,7 +667,10 @@ class MarketDataFetcher:
                     logger.debug(f'[Indicators] No klines data for {symbol} {label}')
                     continue
                 
-                # 提取收盘价和成交量（使用列表推导式提高效率）
+                # 提取完整的OHLCV数据（finta库需要完整的OHLCV数据）
+                opens = []
+                highs = []
+                lows = []
                 closes = []
                 volumes = []
                 for item in klines:
@@ -665,13 +678,18 @@ class MarketDataFetcher:
                     try:
                         # 如果是字典格式（新的实现）
                         if isinstance(item, dict):
-                            closes.append(float(item['close']))
-                            volumes.append(float(item['volume']))
+                            opens.append(float(item.get('open', 0)))
+                            highs.append(float(item.get('high', 0)))
+                            lows.append(float(item.get('low', 0)))
+                            closes.append(float(item.get('close', 0)))
+                            volumes.append(float(item.get('volume', 0)))
                         # 如果是列表格式（旧的实现）
                         elif isinstance(item, (list, tuple)) and len(item) > 4:
-                            closes.append(float(item[4]))
-                            if len(item) > 5:
-                                volumes.append(float(item[5]))
+                            opens.append(float(item[1]) if len(item) > 1 else 0.0)
+                            highs.append(float(item[2]) if len(item) > 2 else 0.0)
+                            lows.append(float(item[3]) if len(item) > 3 else 0.0)
+                            closes.append(float(item[4]) if len(item) > 4 else 0.0)
+                            volumes.append(float(item[5]) if len(item) > 5 else 0.0)
                     except (ValueError, TypeError, KeyError):
                         continue
                 
@@ -707,8 +725,11 @@ class MarketDataFetcher:
                     logger.warning(f'[Indicators] Failed to parse kline data for {symbol} {label}: {e}')
                     continue
                 
-                # 创建pandas DataFrame用于技术指标计算
+                # 创建pandas DataFrame用于技术指标计算（finta需要完整的OHLCV数据）
                 df = pd.DataFrame({
+                    'open': opens,
+                    'high': highs,
+                    'low': lows,
                     'close': closes,
                     'volume': volumes
                 })
