@@ -20,14 +20,14 @@
         </div>
       </div>
       <div class="modal-body kline-modal-body">
-        <div ref="chartContainer" style="width: 100%; height: 600px;"></div>
+        <div :id="chartContainerId" style="width: 100%; height: 600px;"></div>
       </div>
     </div>
   </div>
 </template>
 
 <script setup>
-import { ref, onUnmounted, watch, nextTick } from 'vue'
+import { ref, onMounted, onUnmounted, watch, nextTick } from 'vue'
 // 使用 npm 安装的 klinecharts（按官网要求）
 import { init, dispose } from 'klinecharts'
 
@@ -48,7 +48,8 @@ const props = defineProps({
 
 const emit = defineEmits(['close', 'interval-change'])
 
-const chartContainer = ref(null)
+// 生成唯一的容器 ID（使用 ref 确保 ID 固定）
+const chartContainerId = ref(`kline-chart-${Math.random().toString(36).substr(2, 9)}`)
 const chart = ref(null)
 const currentInterval = ref(props.interval)
 const title = ref(`${props.symbol} - K线图`)
@@ -65,24 +66,29 @@ const timeframes = [
 
 // 初始化图表
 const initChart = async () => {
-  if (!chartContainer.value) return
-
   await nextTick()
 
   try {
-    // 如果图表已存在，先销毁
-    if (chart.value && chartContainer.value) {
-      dispose(chartContainer.value)
-      chart.value = null
-    }
-
-    // 创建新图表（使用 npm 安装的 klinecharts）
-    if (!init) {
-      console.error('[KLineChart] klinecharts library not loaded')
+    const containerId = chartContainerId.value
+    const containerElement = document.getElementById(containerId)
+    
+    if (!containerElement) {
+      console.error('[KLineChart] Container element not found:', containerId)
       return
     }
 
-    chart.value = init(chartContainer.value)
+    // 如果图表已存在，先销毁
+    if (chart.value) {
+      try {
+        dispose(containerId)
+      } catch (e) {
+        console.warn('[KLineChart] Error disposing chart:', e)
+      }
+      chart.value = null
+    }
+
+    // 创建新图表（使用容器 ID，参考示例代码）
+    chart.value = init(containerId)
     
     if (!chart.value) {
       console.error('[KLineChart] Failed to initialize chart')
@@ -109,16 +115,16 @@ const initChart = async () => {
     const period = periodMap[currentInterval.value] || periodMap['5m']
     chart.value.setPeriod(period)
 
-    // 设置数据加载器
+    // 设置数据加载器（参考示例代码格式）
     chart.value.setDataLoader({
       getBars: async ({ callback, symbol, interval, from, to }) => {
         try {
           // 调用后端API获取K线数据
-          const response = await fetch(`/api/market/klines?symbol=${symbol}&interval=${interval}&limit=500`)
+          const response = await fetch(`/api/market/klines?symbol=${symbol || props.symbol}&interval=${interval || currentInterval.value}&limit=500`)
           const data = await response.json()
           
           if (data.success && data.data) {
-            // 转换数据格式
+            // 转换数据格式（参考示例代码格式）
             const bars = data.data.map(kline => ({
               timestamp: new Date(kline.kline_start_time).getTime(),
               open: parseFloat(kline.open),
@@ -185,8 +191,13 @@ watch(() => props.visible, (newVal) => {
       initChart()
     })
   } else {
-    if (chart.value && chartContainer.value) {
-      dispose(chartContainer.value)
+    // 销毁图表（使用容器 ID）
+    if (chart.value) {
+      try {
+        dispose(chartContainerId.value)
+      } catch (e) {
+        console.warn('[KLineChart] Error disposing chart:', e)
+      }
       chart.value = null
     }
   }
@@ -197,16 +208,21 @@ watch(() => props.symbol, (newVal) => {
   if (newVal && props.visible && chart.value) {
     title.value = `${newVal} - K线图`
     chart.value.setSymbol({ ticker: newVal })
+    // 重新加载数据
     if (chart.value.reload) {
       chart.value.reload()
     }
   }
 })
 
-// 组件卸载时清理
+// 组件卸载时清理（参考示例代码使用 onUnmounted）
 onUnmounted(() => {
-  if (chart.value && chartContainer.value) {
-    dispose(chartContainer.value)
+  if (chart.value) {
+    try {
+      dispose(chartContainerId.value)
+    } catch (e) {
+      console.warn('[KLineChart] Error disposing chart on unmount:', e)
+    }
     chart.value = null
   }
 })

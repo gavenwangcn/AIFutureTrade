@@ -137,7 +137,30 @@ const socketProxy = createProxyMiddleware({
 app.use('/socket.io', socketProxy);
 
 // ------------------------------------------------------------------------------
-// 5. 前端路由（SPA支持）
+// 5. /lib/ 路径文件服务（KLineChart等库文件）
+// ------------------------------------------------------------------------------
+// 提供 /lib/ 路径的文件服务，映射到 public/lib/ 或 dist/lib/
+app.get('/lib/*', (req, res, next) => {
+    const libPath = req.path.replace('/lib/', '');
+    const libDir = fs.existsSync(distPath) 
+        ? path.join(distPath, 'lib')
+        : path.join(publicPath, 'lib');
+    const filePath = path.join(libDir, libPath);
+    
+    // 安全检查：确保文件路径在lib目录内
+    if (!filePath.startsWith(libDir)) {
+        return res.status(403).send('Forbidden');
+    }
+    
+    if (fs.existsSync(filePath) && fs.statSync(filePath).isFile()) {
+        res.sendFile(filePath);
+    } else {
+        res.status(404).send(`File not found: ${req.path}`);
+    }
+});
+
+// ------------------------------------------------------------------------------
+// 6. 前端路由（SPA支持）
 // ------------------------------------------------------------------------------
 // 所有其他请求返回 index.html（用于前端路由）
 // 注意：必须在静态文件服务之后，Express会先尝试静态文件，找不到才到这里
@@ -147,8 +170,9 @@ app.get('*', (req, res, next) => {
     const staticExtensions = ['.css', '.js', '.svg', '.png', '.jpg', '.jpeg', '.gif', '.ico', '.woff', '.woff2', '.ttf', '.eot', '.json'];
     const ext = path.extname(req.path).toLowerCase();
     
-    // 排除特定路径（如 /lib/, /api/, /socket.io/）
-    if (req.path.startsWith('/lib/') || req.path.startsWith('/api/') || req.path.startsWith('/socket.io/')) {
+    // 排除特定路径（如 /api/, /socket.io/）
+    // 注意：/lib/ 路径已经在上面单独处理了
+    if (req.path.startsWith('/api/') || req.path.startsWith('/socket.io/')) {
         return res.status(404).send(`File not found: ${req.path}`);
     }
     

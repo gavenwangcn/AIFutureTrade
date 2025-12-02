@@ -722,6 +722,14 @@ def index():
     """Main page route"""
     return render_template('index.html')
 
+@app.route('/lib/<path:filename>')
+def serve_lib_file(filename):
+    """Serve files from static/lib/ directory"""
+    from flask import send_from_directory
+    import os
+    lib_path = os.path.join(app.root_path, 'static', 'lib')
+    return send_from_directory(lib_path, filename)
+
 # ============ Provider API Endpoints ============
 
 @app.route('/api/providers', methods=['GET'])
