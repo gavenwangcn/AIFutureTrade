@@ -511,7 +511,35 @@
         </div>
     </div>
 
+    <!-- K线图弹框 -->
+    <div id="klineModal" class="modal">
+        <div class="modal-content kline-modal-content">
+            <div class="modal-header">
+                <h3 id="klineModalTitle">K线图</h3>
+                <div class="kline-toolbar">
+                    <div class="kline-timeframes">
+                        <button class="timeframe-btn active" data-interval="1m">1分钟</button>
+                        <button class="timeframe-btn" data-interval="5m">5分钟</button>
+                        <button class="timeframe-btn" data-interval="15m">15分钟</button>
+                        <button class="timeframe-btn" data-interval="1h">1小时</button>
+                        <button class="timeframe-btn" data-interval="4h">4小时</button>
+                        <button class="timeframe-btn" data-interval="1d">1天</button>
+                        <button class="timeframe-btn" data-interval="1w">1周</button>
+                    </div>
+                    <button class="btn-icon" id="klineModalClose">
+                        <i class="bi bi-x-lg"></i>
+                    </button>
+                </div>
+            </div>
+            <div class="modal-body kline-modal-body">
+                <div id="klineChartContainer" style="width: 100%; height: 600px;"></div>
+            </div>
+        </div>
+    </div>
+
     <script src="https://cdn.socket.io/4.7.5/socket.io.min.js" integrity="sha384-5ZMcnnbYTS8ZJmyATLulQqnGX+HGwccPt6DVJFWG0FjhuLocMewS17EwM5JrgU6G" crossorigin="anonymous"></script>
+    <!-- KLineChart库 -->
+    <script src="https://unpkg.com/klinecharts@latest/dist/klinecharts.min.js"></script>
     <script src="/static/app.js"></script>
 </body>
 </html>

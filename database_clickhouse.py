@@ -1794,6 +1794,96 @@ class ClickHouseDatabase:
             )
 
     # ==================================================================
+    # Market Klines 模块：数据查询
+    # ==================================================================
+    
+    def get_market_klines(
+        self,
+        symbol: str,
+        interval: str,
+        limit: int = 500,
+        start_time: Optional[datetime] = None,
+        end_time: Optional[datetime] = None
+    ) -> List[Dict[str, Any]]:
+        """查询K线数据
+        
+        Args:
+            symbol: 交易对符号（如 'BTCUSDT'）
+            interval: 时间间隔（'1m', '5m', '15m', '1h', '4h', '1d', '1w'）
+            limit: 返回的最大记录数，默认500
+            start_time: 开始时间（可选）
+            end_time: 结束时间（可选）
+            
+        Returns:
+            K线数据列表，每条数据包含：
+            - timestamp: 时间戳（毫秒）
+            - open: 开盘价
+            - high: 最高价
+            - low: 最低价
+            - close: 收盘价
+            - volume: 成交量
+            - turnover: 成交额
+            - buyVolume: 买入成交量
+            - buyTurnover: 买入成交额
+        """
+        table_name = self.market_klines_tables.get(interval)
+        if not table_name:
+            logger.warning(f"[ClickHouse] Unsupported interval: {interval}")
+            return []
+        
+        try:
+            # 构建查询SQL
+            where_conditions = [f"symbol = '{symbol.upper()}'"]
+            
+            if start_time:
+                where_conditions.append(f"kline_end_time >= '{start_time.strftime('%Y-%m-%d %H:%M:%S')}'")
+            if end_time:
+                where_conditions.append(f"kline_end_time <= '{end_time.strftime('%Y-%m-%d %H:%M:%S')}'")
+            
+            where_clause = " AND ".join(where_conditions)
+            
+            query = f"""
+            SELECT 
+                toUnixTimestamp(kline_end_time) * 1000 as timestamp,
+                open_price as open,
+                high_price as high,
+                low_price as low,
+                close_price as close,
+                base_volume as volume,
+                quote_volume as turnover,
+                taker_buy_base_volume as buyVolume,
+                taker_buy_quote_volume as buyTurnover
+            FROM {table_name}
+            WHERE {where_clause}
+            ORDER BY kline_end_time ASC
+            LIMIT {limit}
+            """
+            
+            result = self.query(query)
+            
+            # 转换为字典列表
+            klines = []
+            for row in result:
+                klines.append({
+                    'timestamp': int(row[0]),
+                    'open': float(row[1]),
+                    'high': float(row[2]),
+                    'low': float(row[3]),
+                    'close': float(row[4]),
+                    'volume': float(row[5]),
+                    'turnover': float(row[6]),
+                    'buyVolume': float(row[7]),
+                    'buyTurnover': float(row[8])
+                })
+            
+            logger.debug(f"[ClickHouse] Retrieved {len(klines)} klines for {symbol} {interval}")
+            return klines
+            
+        except Exception as exc:
+            logger.error(f"[ClickHouse] Failed to get klines: {exc}", exc_info=True)
+            return []
+    
+    # ==================================================================
     # Market Klines 模块：数据清理
     # ==================================================================
     

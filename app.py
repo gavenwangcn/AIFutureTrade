@@ -1237,8 +1237,69 @@ def control_clickhouse_leaderboard():
     elif action == 'stop':
         stop_clickhouse_leaderboard_sync()
         return jsonify({'message': 'ClickHouse leaderboard sync stopped', 'running': False})
-    else:
-        return jsonify({'error': 'Invalid action. Use "start" or "stop"'}), 400
+
+@app.route('/api/market/klines', methods=['GET'])
+def get_market_klines():
+    """获取K线历史数据
+    
+    参数:
+        symbol: 交易对符号（如 'BTCUSDT'）
+        interval: 时间间隔（'1m', '5m', '15m', '1h', '4h', '1d', '1w'）
+        limit: 返回的最大记录数，默认500
+        start_time: 开始时间（可选，ISO格式字符串）
+        end_time: 结束时间（可选，ISO格式字符串）
+    """
+    try:
+        from database_clickhouse import ClickHouseDatabase
+        from datetime import datetime
+        
+        symbol = request.args.get('symbol', '').upper()
+        interval = request.args.get('interval', '5m')
+        limit = request.args.get('limit', type=int) or 500
+        start_time_str = request.args.get('start_time')
+        end_time_str = request.args.get('end_time')
+        
+        if not symbol:
+            return jsonify({'error': 'symbol parameter is required'}), 400
+        
+        # 验证interval
+        valid_intervals = ['1m', '5m', '15m', '1h', '4h', '1d', '1w']
+        if interval not in valid_intervals:
+            return jsonify({'error': f'invalid interval. Must be one of: {valid_intervals}'}), 400
+        
+        # 解析时间参数
+        start_time = None
+        end_time = None
+        if start_time_str:
+            try:
+                start_time = datetime.fromisoformat(start_time_str.replace('Z', '+00:00'))
+            except ValueError:
+                return jsonify({'error': 'invalid start_time format. Use ISO format'}), 400
+        if end_time_str:
+            try:
+                end_time = datetime.fromisoformat(end_time_str.replace('Z', '+00:00'))
+            except ValueError:
+                return jsonify({'error': 'invalid end_time format. Use ISO format'}), 400
+        
+        # 查询K线数据
+        clickhouse_db = ClickHouseDatabase(auto_init_tables=False)
+        klines = clickhouse_db.get_market_klines(
+            symbol=symbol,
+            interval=interval,
+            limit=limit,
+            start_time=start_time,
+            end_time=end_time
+        )
+        
+        return jsonify({
+            'symbol': symbol,
+            'interval': interval,
+            'data': klines
+        })
+        
+    except Exception as e:
+        logger.error(f"Failed to get klines: {e}", exc_info=True)
+        return jsonify({'error': str(e)}), 500
 
 @socketio.on('leaderboard:request')
 def handle_leaderboard_request(payload=None):
@@ -1250,6 +1311,87 @@ def handle_leaderboard_request(payload=None):
         emit('leaderboard:update', data)
     except Exception as exc:
         emit('leaderboard:error', {'message': str(exc)})
+
+@socketio.on('klines:subscribe')
+def handle_klines_subscribe(payload=None):
+    """WebSocket handler for K线订阅请求
+    
+    参数:
+        symbol: 交易对符号（如 'BTCUSDT'）
+        interval: 时间间隔（'1m', '5m', '15m', '1h', '4h', '1d', '1w'）
+    """
+    payload = payload or {}
+    symbol = payload.get('symbol', '').upper()
+    interval = payload.get('interval', '5m')
+    
+    if not symbol:
+        emit('klines:error', {'message': 'symbol is required'})
+        return
+    
+    valid_intervals = ['1m', '5m', '15m', '1h', '4h', '1d', '1w']
+    if interval not in valid_intervals:
+        emit('klines:error', {'message': f'invalid interval. Must be one of: {valid_intervals}'})
+        return
+    
+    # 加入房间（按symbol和interval分组）
+    room = f'klines:{symbol}:{interval}'
+    from flask_socketio import join_room
+    join_room(room)
+    
+    logger.info(f"Client subscribed to klines: {symbol} {interval}")
+    emit('klines:subscribed', {'symbol': symbol, 'interval': interval})
+
+@socketio.on('klines:unsubscribe')
+def handle_klines_unsubscribe(payload=None):
+    """WebSocket handler for K线取消订阅"""
+    payload = payload or {}
+    symbol = payload.get('symbol', '').upper()
+    interval = payload.get('interval', '5m')
+    
+    room = f'klines:{symbol}:{interval}'
+    from flask_socketio import leave_room
+    leave_room(room)
+    
+    logger.info(f"Client unsubscribed from klines: {symbol} {interval}")
+    emit('klines:unsubscribed', {'symbol': symbol, 'interval': interval})
+
+def push_realtime_kline(symbol: str, interval: str):
+    """推送实时K线数据到订阅的客户端"""
+    try:
+        if not market_fetcher._futures_client:
+            return
+        
+        # 获取最新K线数据
+        contract_symbol = market_fetcher._futures_client.format_symbol(symbol)
+        klines = market_fetcher._futures_client.get_klines(
+            contract_symbol,
+            interval,
+            limit=1
+        )
+        
+        if klines and len(klines) > 0:
+            latest_kline = klines[-1]
+            # 转换为标准格式
+            kline_data = {
+                'timestamp': int(latest_kline.get('close_time', latest_kline.get('open_time', 0))),
+                'open': float(latest_kline.get('open', 0)),
+                'high': float(latest_kline.get('high', 0)),
+                'low': float(latest_kline.get('low', 0)),
+                'close': float(latest_kline.get('close', 0)),
+                'volume': float(latest_kline.get('volume', 0)),
+                'turnover': float(latest_kline.get('quote_asset_volume', 0))
+            }
+            
+            # 推送到订阅的房间
+            room = f'klines:{contract_symbol}:{interval}'
+            socketio.emit('klines:update', {
+                'symbol': contract_symbol,
+                'interval': interval,
+                'kline': kline_data
+            }, room=room)
+            
+    except Exception as e:
+        logger.error(f"Failed to push realtime kline for {symbol} {interval}: {e}", exc_info=True)
 
 # ============ Settings API Endpoints ============
 

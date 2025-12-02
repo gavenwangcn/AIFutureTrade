@@ -1344,7 +1344,7 @@ class TradingApp {
         const indicatorsSection = this.buildIndicatorsSection(data.timeframes || {});
 
         return `
-            <div class="price-item" data-symbol="${symbol}">
+            <div class="price-item" data-symbol="${symbol}" onclick="app.openKlineChart('${symbol}', '${data.contract_symbol || symbol}USDT')" style="cursor: pointer;">
                 <div class="price-head">
                     <div class="price-info">
                         <div class="price-symbol">${symbol}</div>
@@ -2635,7 +2635,7 @@ class TradingApp {
                     const changeDisplay = changeValue >= 0 ? `+${changeValue.toFixed(2)}%` : `${changeValue.toFixed(2)}%`;
                     
                     return `
-                        <div class="leaderboard-item">
+                        <div class="leaderboard-item" onclick="app.openKlineChart('${symbol}', '${contractSymbol}')" style="cursor: pointer;">
                             <span class="leaderboard-rank">${rank}</span>
                             <div class="leaderboard-symbol">
                                 <strong>${symbol}</strong>
@@ -2674,7 +2674,7 @@ class TradingApp {
                     const changeDisplay = `${changeValue.toFixed(2)}%`;
                     
                     return `
-                        <div class="leaderboard-item">
+                        <div class="leaderboard-item" onclick="app.openKlineChart('${symbol}', '${contractSymbol}')" style="cursor: pointer;">
                             <span class="leaderboard-rank">${rank}</span>
                             <div class="leaderboard-symbol">
                                 <strong>${symbol}</strong>
@@ -3029,5 +3029,267 @@ class TradingApp {
         return model ? (model.name || `模型 #${modelId}`) : `模型 #${modelId}`;
     }
 }
+
+// ============ K线图组件 ============
+
+class KLineChartManager {
+    constructor() {
+        this.chart = null;
+        this.currentSymbol = null;
+        this.currentInterval = '5m';
+        this.subscribedRooms = new Set();
+        this.historicalDataLoaded = false;
+    }
+
+    /**
+     * 初始化K线图
+     * @param {string} containerId - 容器ID
+     * @param {string} symbol - 交易对符号
+     * @param {string} interval - 时间间隔
+     */
+    init(containerId, symbol, interval = '5m') {
+        // 检查KLineChart是否加载
+        if (typeof klinecharts === 'undefined' && typeof window.klinecharts === 'undefined') {
+            console.error('KLineChart library not loaded');
+            return;
+        }
+
+        this.currentSymbol = symbol;
+        this.currentInterval = interval;
+        this.historicalDataLoaded = false;
+
+        // 获取容器元素
+        const container = document.getElementById(containerId);
+        if (!container) {
+            console.error(`Container ${containerId} not found`);
+            return;
+        }
+
+        // 创建图表实例 - 使用正确的API
+        const initFn = klinecharts?.init || window.klinecharts?.init;
+        if (!initFn) {
+            console.error('KLineChart init function not found');
+            return;
+        }
+
+        this.chart = initFn(container);
+        
+        // 设置主题为暗色
+        if (this.chart.setTheme) {
+            this.chart.setTheme('dark');
+        }
+
+        // 添加技术指标
+        this.addIndicators();
+
+        // 加载历史数据
+        this.loadHistoricalData(symbol, interval);
+
+        // 订阅实时数据
+        this.subscribeRealtimeData(symbol, interval);
+    }
+
+    /**
+     * 添加技术指标
+     */
+    addIndicators() {
+        if (!this.chart) return;
+
+        // 添加MA均线
+        this.chart.createIndicator('MA', false, { id: 'candle_pane' });
+        
+        // 添加MACD
+        this.chart.createIndicator('MACD', false);
+        
+        // 添加RSI
+        this.chart.createIndicator('RSI', false);
+        
+        // 添加VOL成交量
+        this.chart.createIndicator('VOL', false);
+    }
+
+    /**
+     * 加载历史K线数据
+     * @param {string} symbol - 交易对符号
+     * @param {string} interval - 时间间隔
+     */
+    async loadHistoricalData(symbol, interval) {
+        try {
+            const response = await fetch(`/api/market/klines?symbol=${symbol}&interval=${interval}&limit=500`);
+            const result = await response.json();
+            
+            if (result.data && result.data.length > 0) {
+                // 转换数据格式为KLineChart需要的格式
+                const klineData = result.data.map(item => ({
+                    timestamp: item.timestamp,
+                    open: item.open,
+                    high: item.high,
+                    low: item.low,
+                    close: item.close,
+                    volume: item.volume,
+                    turnover: item.turnover
+                }));
+
+                // 应用数据到图表
+                this.chart.applyNewData(klineData);
+                this.historicalDataLoaded = true;
+                
+                console.log(`[KLineChart] Loaded ${klineData.length} historical klines for ${symbol} ${interval}`);
+            }
+        } catch (error) {
+            console.error('[KLineChart] Failed to load historical data:', error);
+        }
+    }
+
+    /**
+     * 订阅实时K线数据
+     * @param {string} symbol - 交易对符号
+     * @param {string} interval - 时间间隔
+     */
+    subscribeRealtimeData(symbol, interval) {
+        if (!window.app || !window.app.socket) {
+            console.error('[KLineChart] Socket not available');
+            return;
+        }
+
+        const room = `${symbol}:${interval}`;
+        if (this.subscribedRooms.has(room)) {
+            return; // 已经订阅
+        }
+
+        // 订阅WebSocket
+        window.app.socket.emit('klines:subscribe', { symbol, interval });
+        this.subscribedRooms.add(room);
+
+        // 监听实时K线更新
+        window.app.socket.on('klines:update', (data) => {
+            if (data.symbol === symbol && data.interval === interval) {
+                this.updateKline(data.kline);
+            }
+        });
+    }
+
+    /**
+     * 更新K线数据
+     * @param {object} klineData - K线数据
+     */
+    updateKline(klineData) {
+        if (!this.chart) return;
+
+        const kline = {
+            timestamp: klineData.timestamp,
+            open: klineData.open,
+            high: klineData.high,
+            low: klineData.low,
+            close: klineData.close,
+            volume: klineData.volume,
+            turnover: klineData.turnover
+        };
+
+        // 更新或添加K线
+        this.chart.updateData(kline);
+    }
+
+    /**
+     * 切换时间间隔
+     * @param {string} interval - 新的时间间隔
+     */
+    async switchInterval(interval) {
+        if (this.currentInterval === interval) return;
+
+        // 取消之前的订阅
+        if (this.currentSymbol && this.currentInterval) {
+            const oldRoom = `${this.currentSymbol}:${this.currentInterval}`;
+            if (window.app && window.app.socket) {
+                window.app.socket.emit('klines:unsubscribe', {
+                    symbol: this.currentSymbol,
+                    interval: this.currentInterval
+                });
+            }
+            this.subscribedRooms.delete(oldRoom);
+        }
+
+        this.currentInterval = interval;
+
+        // 重新加载数据
+        if (this.currentSymbol) {
+            await this.loadHistoricalData(this.currentSymbol, interval);
+            this.subscribeRealtimeData(this.currentSymbol, interval);
+        }
+    }
+
+    /**
+     * 销毁图表
+     */
+    destroy() {
+        // 取消所有订阅
+        if (window.app && window.app.socket) {
+            this.subscribedRooms.forEach(room => {
+                const [symbol, interval] = room.split(':');
+                window.app.socket.emit('klines:unsubscribe', { symbol, interval });
+            });
+        }
+        this.subscribedRooms.clear();
+
+        // 销毁图表
+        if (this.chart) {
+            this.chart.destroy();
+            this.chart = null;
+        }
+
+        this.currentSymbol = null;
+        this.currentInterval = '5m';
+        this.historicalDataLoaded = false;
+    }
+}
+
+// 在TradingApp类中添加K线图相关方法
+TradingApp.prototype.openKlineChart = function(symbol, contractSymbol = null) {
+    const displaySymbol = contractSymbol || symbol;
+    const modal = document.getElementById('klineModal');
+    const title = document.getElementById('klineModalTitle');
+    
+    title.textContent = `${displaySymbol} - K线图`;
+    modal.style.display = 'block';
+
+    // 初始化K线图
+    if (!this.klineChartManager) {
+        this.klineChartManager = new KLineChartManager();
+    }
+
+    // 使用合约符号（如果有）或基础符号
+    const chartSymbol = contractSymbol || `${symbol}USDT`;
+    this.klineChartManager.init('klineChartContainer', chartSymbol, '5m');
+
+    // 绑定时间间隔切换事件
+    const timeframeBtns = document.querySelectorAll('.timeframe-btn');
+    timeframeBtns.forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            timeframeBtns.forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            const interval = btn.dataset.interval;
+            this.klineChartManager.switchInterval(interval);
+        });
+    });
+
+    // 绑定关闭事件
+    const closeBtn = document.getElementById('klineModalClose');
+    closeBtn.onclick = () => {
+        modal.style.display = 'none';
+        if (this.klineChartManager) {
+            this.klineChartManager.destroy();
+        }
+    };
+
+    // 点击外部关闭
+    modal.onclick = (e) => {
+        if (e.target === modal) {
+            modal.style.display = 'none';
+            if (this.klineChartManager) {
+                this.klineChartManager.destroy();
+            }
+        }
+    };
+};
 
 const app = new TradingApp();
