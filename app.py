@@ -30,7 +30,13 @@ app = Flask(__name__)
 # CORS配置：允许前端服务访问
 # 注意：在生产环境中，应该限制具体的域名，而不是使用通配符
 CORS(app, resources={
-    r"/api/*": {"origins": "*"},  # 允许所有来源（生产环境应限制）
+    r"/api/*": {
+        "origins": "*",  # 允许所有来源（生产环境应限制）
+        "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],  # 明确支持所有HTTP方法
+        "allow_headers": ["Content-Type", "Authorization"],  # 允许的请求头
+        "expose_headers": ["Content-Type"],  # 暴露的响应头
+        "supports_credentials": False  # 不支持凭证
+    },
     r"/socket.io/*": {"origins": "*"}  # 允许所有来源（生产环境应限制）
 })
 # 使用eventlet作为异步模式以获得更好的性能
@@ -717,6 +723,17 @@ def _ensure_background_services():
         _init_background_services()
         _background_services_initialized = True
 
+@app.after_request
+def after_request(response):
+    """添加 CORS 响应头，确保所有请求都能正确处理"""
+    # 对于所有 API 请求，添加 CORS 头
+    if request.path.startswith('/api/'):
+        response.headers.add('Access-Control-Allow-Origin', '*')
+        response.headers.add('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS')
+        response.headers.add('Access-Control-Allow-Headers', 'Content-Type, Authorization')
+        response.headers.add('Access-Control-Max-Age', '3600')
+    return response
+
 @app.route('/')
 def index():
     """Main page route"""
@@ -754,14 +771,24 @@ def add_provider():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
-@app.route('/api/providers/<int:provider_id>', methods=['DELETE'])
+@app.route('/api/providers/<int:provider_id>', methods=['DELETE', 'OPTIONS'])
 def delete_provider(provider_id):
     """Delete API provider"""
+    # 处理 OPTIONS 预检请求
+    if request.method == 'OPTIONS':
+        response = jsonify({})
+        response.headers.add('Access-Control-Allow-Origin', '*')
+        response.headers.add('Access-Control-Allow-Methods', 'DELETE, OPTIONS')
+        response.headers.add('Access-Control-Allow-Headers', 'Content-Type')
+        return response
+    
     try:
         db.delete_provider(provider_id)
-        return jsonify({'message': 'Provider deleted successfully'})
+        logger.info(f"Provider {provider_id} deleted successfully")
+        return jsonify({'success': True, 'message': 'Provider deleted successfully'})
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        logger.error(f"Failed to delete provider {provider_id}: {e}", exc_info=True)
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 @app.route('/api/providers/models', methods=['POST'])
 def fetch_provider_models():
@@ -849,14 +876,24 @@ def add_future_config():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
-@app.route('/api/futures/<int:future_id>', methods=['DELETE'])
+@app.route('/api/futures/<int:future_id>', methods=['DELETE', 'OPTIONS'])
 def delete_future_config(future_id):
     """Delete future configuration"""
+    # 处理 OPTIONS 预检请求
+    if request.method == 'OPTIONS':
+        response = jsonify({})
+        response.headers.add('Access-Control-Allow-Origin', '*')
+        response.headers.add('Access-Control-Allow-Methods', 'DELETE, OPTIONS')
+        response.headers.add('Access-Control-Allow-Headers', 'Content-Type')
+        return response
+    
     try:
         db.delete_future(future_id)
-        return jsonify({'message': 'Future deleted successfully'})
+        logger.info(f"Future {future_id} deleted successfully")
+        return jsonify({'success': True, 'message': 'Future deleted successfully'})
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        logger.error(f"Failed to delete future {future_id}: {e}", exc_info=True)
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 # ============ Model API Endpoints ============
 
@@ -908,9 +945,17 @@ def add_model():
         logger.error(f"Failed to add model: {e}")
         return jsonify({'error': str(e)}), 500
 
-@app.route('/api/models/<int:model_id>', methods=['DELETE'])
+@app.route('/api/models/<int:model_id>', methods=['DELETE', 'OPTIONS'])
 def delete_model(model_id):
     """Delete trading model"""
+    # 处理 OPTIONS 预检请求
+    if request.method == 'OPTIONS':
+        response = jsonify({})
+        response.headers.add('Access-Control-Allow-Origin', '*')
+        response.headers.add('Access-Control-Allow-Methods', 'DELETE, OPTIONS')
+        response.headers.add('Access-Control-Allow-Headers', 'Content-Type')
+        return response
+    
     try:
         model = db.get_model(model_id)
         model_name = model['name'] if model else f"ID-{model_id}"
@@ -920,10 +965,10 @@ def delete_model(model_id):
             del trading_engines[model_id]
 
         logger.info(f"Model {model_id} ({model_name}) deleted")
-        return jsonify({'message': 'Model deleted successfully'})
+        return jsonify({'success': True, 'message': 'Model deleted successfully'})
     except Exception as e:
-        logger.error(f"Delete model {model_id} failed: {e}")
-        return jsonify({'error': str(e)}), 500
+        logger.error(f"Delete model {model_id} failed: {e}", exc_info=True)
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 @app.route('/api/models/<int:model_id>/portfolio', methods=['GET'])
 def get_portfolio(model_id):

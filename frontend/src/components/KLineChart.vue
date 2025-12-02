@@ -138,19 +138,20 @@ const initChart = async () => {
     // 如果图表库支持主题设置，可以通过 CSS 或其他方式实现
     // 暂时跳过主题设置，避免错误
     
-    // 设置交易对
+    // 设置交易对（可选，某些版本可能不需要）
     if (typeof chartInstance.setSymbol === 'function') {
       try {
         chartInstance.setSymbol({ ticker: props.symbol })
+        console.log('[KLineChart] Symbol set:', props.symbol)
       } catch (e) {
-        console.error('[KLineChart] setSymbol failed:', e)
+        console.warn('[KLineChart] setSymbol failed (non-critical):', e)
       }
     } else {
-      console.error('[KLineChart] setSymbol method not available')
-      return
+      console.warn('[KLineChart] setSymbol method not available (may not be required in this version)')
+      // 不返回，继续初始化，因为 symbol 可以通过 setDataLoader 传递
     }
     
-    // 设置周期
+    // 设置周期（可选，某些版本可能不需要）
     const periodMap = {
       '1m': { span: 1, type: 'minute' },
       '5m': { span: 5, type: 'minute' },
@@ -165,23 +166,31 @@ const initChart = async () => {
     if (typeof chartInstance.setPeriod === 'function') {
       try {
         chartInstance.setPeriod(period)
+        console.log('[KLineChart] Period set:', period)
       } catch (e) {
-        console.error('[KLineChart] setPeriod failed:', e)
+        console.warn('[KLineChart] setPeriod failed (non-critical):', e)
       }
     } else {
-      console.error('[KLineChart] setPeriod method not available')
+      console.warn('[KLineChart] setPeriod method not available (may not be required in this version)')
+      // 不返回，继续初始化，因为 period 可以通过 setDataLoader 传递
     }
 
-    // 设置数据加载器（参考示例代码格式）
+    // 设置数据加载器（这是必需的，用于加载K线数据）
     if (typeof chartInstance.setDataLoader === 'function') {
       try {
         chartInstance.setDataLoader({
           getBars: async ({ callback, symbol, interval, from, to }) => {
             try {
+              // 使用传入的 symbol 和 interval，如果没有则使用 props 中的值
+              const requestSymbol = symbol || props.symbol
+              const requestInterval = interval || currentInterval.value
+              
+              console.log('[KLineChart] Loading data for:', { requestSymbol, requestInterval, from, to })
+              
               // 调用后端API获取K线数据
               const data = await marketApi.getKlines(
-                symbol || props.symbol,
-                interval || currentInterval.value,
+                requestSymbol,
+                requestInterval,
                 500
               )
               
@@ -203,6 +212,7 @@ const initChart = async () => {
                   volume: parseFloat(kline.volume) || 0
                 })).filter(bar => bar.timestamp > 0) // 过滤无效数据
                 
+                console.log('[KLineChart] Data loaded:', bars.length, 'bars')
                 callback(bars)
               } else {
                 console.warn('[KLineChart] No data received or invalid format:', data)
@@ -214,11 +224,44 @@ const initChart = async () => {
             }
           }
         })
+        console.log('[KLineChart] Data loader set successfully')
       } catch (e) {
         console.error('[KLineChart] setDataLoader failed:', e)
+        throw e // 重新抛出错误，因为这是必需的
       }
     } else {
-      console.error('[KLineChart] setDataLoader method not available')
+      console.error('[KLineChart] setDataLoader method not available - this is required!')
+      // 如果 setDataLoader 不可用，尝试直接加载数据
+      // 某些版本的 klinecharts 可能需要不同的初始化方式
+      try {
+        // 尝试直接加载初始数据
+        const data = await marketApi.getKlines(props.symbol, currentInterval.value, 500)
+        if (data && data.data && Array.isArray(data.data)) {
+          const bars = data.data.map(kline => ({
+            timestamp: typeof kline.timestamp === 'number' 
+              ? kline.timestamp 
+              : (kline.kline_start_time 
+                  ? new Date(kline.kline_start_time).getTime() 
+                  : Date.now()),
+            open: parseFloat(kline.open) || 0,
+            high: parseFloat(kline.high) || 0,
+            low: parseFloat(kline.low) || 0,
+            close: parseFloat(kline.close) || 0,
+            volume: parseFloat(kline.volume) || 0
+          })).filter(bar => bar.timestamp > 0)
+          
+          // 如果图表实例有 loadMore 或其他方法，尝试使用
+          if (typeof chartInstance.loadMore === 'function') {
+            chartInstance.loadMore(bars)
+          } else if (typeof chartInstance.updateData === 'function') {
+            chartInstance.updateData(bars)
+          } else {
+            console.warn('[KLineChart] No method available to load data directly')
+          }
+        }
+      } catch (error) {
+        console.error('[KLineChart] Failed to load initial data:', error)
+      }
     }
 
     console.log('[KLineChart] Chart initialized successfully')
@@ -232,7 +275,7 @@ const handleTimeframeChange = (interval) => {
   currentInterval.value = interval
   emit('interval-change', interval)
   
-  if (chart.value && typeof chart.value.setPeriod === 'function') {
+  if (chart.value) {
     const periodMap = {
       '1m': { span: 1, type: 'minute' },
       '5m': { span: 5, type: 'minute' },
@@ -244,15 +287,30 @@ const handleTimeframeChange = (interval) => {
     }
     
     const period = periodMap[interval] || periodMap['5m']
-    try {
-      chart.value.setPeriod(period)
-      
-      // 重新加载数据
-      if (typeof chart.value.reload === 'function') {
-        chart.value.reload()
+    
+    // 尝试设置周期（如果方法可用）
+    if (typeof chart.value.setPeriod === 'function') {
+      try {
+        chart.value.setPeriod(period)
+        console.log('[KLineChart] Period changed to:', period)
+      } catch (e) {
+        console.warn('[KLineChart] setPeriod failed (non-critical):', e)
       }
-    } catch (e) {
-      console.error('[KLineChart] Error changing timeframe:', e)
+    }
+    
+    // 重新加载数据
+    if (typeof chart.value.reload === 'function') {
+      try {
+        chart.value.reload()
+      } catch (e) {
+        console.warn('[KLineChart] reload failed:', e)
+        // 如果 reload 失败，重新初始化图表
+        initChart()
+      }
+    } else {
+      // 如果没有 reload 方法，重新初始化图表以加载新周期的数据
+      console.log('[KLineChart] Reloading chart for new interval')
+      initChart()
     }
   }
 }
@@ -289,16 +347,27 @@ watch(() => props.visible, async (newVal) => {
 watch(() => props.symbol, (newVal) => {
   if (newVal && props.visible && chart.value) {
     title.value = `${newVal} - K线图`
+    // 如果 setSymbol 可用，尝试设置 symbol
     if (typeof chart.value.setSymbol === 'function') {
       try {
         chart.value.setSymbol({ ticker: newVal })
-        // 重新加载数据
-        if (typeof chart.value.reload === 'function') {
-          chart.value.reload()
-        }
       } catch (e) {
-        console.error('[KLineChart] Error updating symbol:', e)
+        console.warn('[KLineChart] setSymbol failed (non-critical):', e)
       }
+    }
+    // 重新加载数据（通过 reload 或重新初始化数据加载器）
+    if (typeof chart.value.reload === 'function') {
+      try {
+        chart.value.reload()
+      } catch (e) {
+        console.warn('[KLineChart] reload failed:', e)
+        // 如果 reload 失败，重新初始化图表
+        initChart()
+      }
+    } else {
+      // 如果没有 reload 方法，重新初始化图表
+      console.log('[KLineChart] Reloading chart for new symbol')
+      initChart()
     }
   }
 })

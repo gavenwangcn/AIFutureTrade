@@ -96,49 +96,112 @@ export function useTradingApp() {
    */
   const initWebSocket = () => {
     try {
+      // 如果已经存在连接，先断开
+      if (socket.value && socket.value.connected) {
+        console.log('[WebSocket] 断开现有连接')
+        socket.value.disconnect()
+      }
+
       socket.value = createSocketConnection()
 
+      // 连接成功事件
       socket.value.on('connect', () => {
-        console.log('[WebSocket] 已连接到服务器')
+        console.log('[WebSocket] ✅ 已连接到服务器')
+        leaderboardStatus.value = '已连接，等待数据...'
+        
         // 连接成功后请求初始涨跌幅榜数据
+        console.log('[WebSocket] 请求初始涨跌幅榜数据')
         socket.value.emit('leaderboard:request', { limit: 10 })
       })
 
+      // 涨跌幅榜更新事件（后端自动推送）
       socket.value.on('leaderboard:update', async (data) => {
-        console.log('[WebSocket] 收到涨跌幅榜更新', data)
+        console.log('[WebSocket] 📊 收到涨跌幅榜自动更新', data)
+        
         if (data && (data.gainers || data.losers)) {
+          // 更新涨幅榜和跌幅榜数据
           leaderboardGainers.value = Array.isArray(data.gainers) ? data.gainers : []
           leaderboardLosers.value = Array.isArray(data.losers) ? data.losers : []
-          const updateTime = new Date().toLocaleTimeString('zh-CN')
-          leaderboardStatus.value = `最后更新: ${updateTime}`
           
-          // 触发更新动画
+          // 更新状态时间戳
+          const updateTime = new Date()
+          const timeStr = updateTime.toLocaleTimeString('zh-CN', { 
+            hour12: false,
+            hour: '2-digit',
+            minute: '2-digit',
+            second: '2-digit'
+          })
+          leaderboardStatus.value = `最后更新: ${timeStr}`
+          
+          // 触发更新动画效果
           await nextTick()
           const statusEl = document.querySelector('.status-indicator')
           if (statusEl) {
-            statusEl.classList.remove('updating')
+            // 移除之前的动画类
+            statusEl.classList.remove('updating', 'updated')
+            // 添加更新动画
             statusEl.classList.add('updated')
             setTimeout(() => {
               statusEl.classList.remove('updated')
             }, 1000)
           }
+          
+          console.log(`[WebSocket] ✅ 涨跌幅榜已更新: 涨幅榜 ${leaderboardGainers.value.length} 条, 跌幅榜 ${leaderboardLosers.value.length} 条`)
+        } else {
+          console.warn('[WebSocket] ⚠️ 收到无效的涨跌幅榜数据:', data)
         }
       })
 
+      // 涨跌幅榜错误事件
       socket.value.on('leaderboard:error', (error) => {
-        console.error('[WebSocket] 涨跌幅榜更新错误', error)
+        console.error('[WebSocket] ❌ 涨跌幅榜更新错误', error)
         leaderboardStatus.value = '更新失败'
+        
+        // 更新错误状态指示器
+        const statusEl = document.querySelector('.status-indicator')
+        if (statusEl) {
+          statusEl.classList.add('error')
+          setTimeout(() => {
+            statusEl.classList.remove('error')
+          }, 3000)
+        }
       })
 
-      socket.value.on('disconnect', () => {
-        console.log('[WebSocket] 已断开连接')
+      // 连接断开事件
+      socket.value.on('disconnect', (reason) => {
+        console.warn('[WebSocket] ⚠️ 已断开连接:', reason)
+        leaderboardStatus.value = '连接断开'
       })
 
-      socket.value.on('error', (error) => {
-        console.error('[WebSocket] 连接错误:', error)
+      // 重新连接事件
+      socket.value.on('reconnect', (attemptNumber) => {
+        console.log(`[WebSocket] 🔄 重新连接成功 (尝试 ${attemptNumber} 次)`)
+        leaderboardStatus.value = '已重连，等待数据...'
+        // 重新连接后请求数据
+        socket.value.emit('leaderboard:request', { limit: 10 })
       })
+
+      // 连接错误事件
+      socket.value.on('connect_error', (error) => {
+        console.error('[WebSocket] ❌ 连接错误:', error)
+        leaderboardStatus.value = '连接失败'
+      })
+
+      // 重连尝试事件
+      socket.value.on('reconnect_attempt', (attemptNumber) => {
+        console.log(`[WebSocket] 🔄 尝试重新连接 (第 ${attemptNumber} 次)...`)
+        leaderboardStatus.value = `重连中 (${attemptNumber})...`
+      })
+
+      // 重连失败事件
+      socket.value.on('reconnect_failed', () => {
+        console.error('[WebSocket] ❌ 重新连接失败')
+        leaderboardStatus.value = '重连失败'
+      })
+
     } catch (error) {
-      console.error('[WebSocket] 初始化失败:', error)
+      console.error('[WebSocket] ❌ 初始化失败:', error)
+      leaderboardStatus.value = 'WebSocket 初始化失败'
     }
   }
 

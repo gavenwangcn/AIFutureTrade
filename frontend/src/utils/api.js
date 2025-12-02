@@ -28,15 +28,36 @@ export async function apiRequest(endpoint, options = {}) {
     
     // 检查响应状态
     if (!response.ok) {
-      const errorData = await response.json().catch(() => ({ 
-        error: `HTTP ${response.status}: ${response.statusText}` 
-      }))
-      throw new Error(errorData.error || `请求失败: ${response.status}`)
+      let errorData = {}
+      try {
+        errorData = await response.json()
+      } catch (parseError) {
+        // 如果响应不是JSON，则使用状态文本
+        errorData = { error: `HTTP ${response.status}: ${response.statusText}` }
+      }
+      const errorMessage = errorData.error || errorData.message || `请求失败: ${response.status}`
+      throw new Error(errorMessage)
     }
 
-    // 解析 JSON 响应
-    const data = await response.json()
-    return data
+    // 对于 DELETE 请求，可能返回 204 No Content，没有响应体
+    if (response.status === 204 || response.headers.get('content-length') === '0') {
+      return { success: true, message: '操作成功' }
+    }
+
+    // 尝试解析 JSON 响应
+    const contentType = response.headers.get('content-type')
+    if (contentType && contentType.includes('application/json')) {
+      try {
+        const data = await response.json()
+        return data
+      } catch (parseError) {
+        // 如果解析失败，返回空对象
+        return { success: true }
+      }
+    }
+    
+    // 如果没有 JSON 内容，返回成功状态
+    return { success: true }
   } catch (error) {
     // 网络错误或其他错误
     if (error instanceof TypeError && error.message.includes('fetch')) {

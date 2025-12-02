@@ -651,6 +651,20 @@ body {
     text-transform: uppercase;
     margin-bottom: 12px;
     letter-spacing: 0.5px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.section-header i {
+    font-size: 14px;
+    color: var(--text-3);
+    cursor: pointer;
+    transition: color 0.2s ease;
+}
+
+.section-header i:hover {
+    color: var(--primary);
 }
 
 /* Model List */
@@ -705,11 +719,49 @@ body {
 }
 
 /* Market Prices */
+.market-header-actions {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 12px;
+    padding: 0 4px;
+}
+
+.btn-config-contract {
+    background: var(--primary);
+    color: white;
+    border: none;
+    border-radius: 6px;
+    padding: 6px 12px;
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    box-shadow: 0 2px 8px rgba(51, 112, 255, 0.2);
+}
+
+.btn-config-contract:hover {
+    background: var(--info);
+    box-shadow: 0 4px 12px rgba(51, 112, 255, 0.3);
+    transform: translateY(-1px);
+}
+
+.btn-config-contract:active {
+    transform: translateY(0);
+    box-shadow: 0 2px 6px rgba(51, 112, 255, 0.2);
+}
+
+.market-count {
+    font-size: 13px;
+    color: var(--text-2);
+    font-weight: 500;
+}
+
 .market-prices {
     display: flex;
     flex-direction: column;
     gap: 12px;
-    max-height: calc(100vh - 200px);
+    max-height: calc(100vh - 280px);
     overflow-y: auto;
     padding-right: 4px;
 }
@@ -771,15 +823,111 @@ body {
 .price-item {
     display: flex;
     flex-direction: column;
-    gap: 10px;
-    padding: 12px 14px;
-    background: rgba(255, 255, 255, 0.9);
+    padding: 16px;
+    background: var(--bg-1);
     border-radius: 12px;
-    border: 1px solid rgba(255, 255, 255, 0.4);
-    box-shadow: 0 8px 20px rgba(15, 23, 42, 0.06);
+    border: 1px solid var(--border-1);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
     position: relative;
     overflow: hidden;
+    transition: all 0.2s ease;
     min-width: 0; /* 防止内容溢出 */
+}
+
+.price-item:hover {
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+    transform: translateY(-2px);
+    border-color: var(--primary);
+}
+
+.price-card {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 16px;
+}
+
+.price-left {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    flex: 1;
+    min-width: 0;
+}
+
+.price-symbol-large {
+    font-size: 20px;
+    font-weight: 700;
+    color: var(--text-1);
+    line-height: 1.2;
+}
+
+.price-contract-name {
+    font-size: 12px;
+    color: var(--text-3);
+    line-height: 1.3;
+}
+
+.price-right {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 6px;
+    flex-shrink: 0;
+}
+
+.price-value-large {
+    font-size: 18px;
+    font-weight: 700;
+    color: var(--text-1);
+    line-height: 1.2;
+    white-space: nowrap;
+}
+
+.price-change-with-arrow {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 13px;
+    font-weight: 600;
+    line-height: 1.2;
+}
+
+.price-change-with-arrow.positive {
+    color: var(--danger);
+}
+
+.price-change-with-arrow.negative {
+    color: var(--success);
+}
+
+.change-arrow {
+    font-size: 12px;
+    line-height: 1;
+}
+
+.change-value {
+    font-weight: 600;
+}
+
+.price-volume-chinese {
+    font-size: 12px;
+    color: var(--text-2);
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    white-space: nowrap;
+}
+
+.price-volume-chinese .volume-label {
+    color: var(--text-3);
+    font-size: 12px;
+}
+
+.price-volume-chinese .volume-value {
+    color: var(--text-2);
+    font-weight: 500;
+    font-size: 12px;
 }
 
 .price-item::after {

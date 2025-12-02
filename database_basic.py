@@ -1078,7 +1078,12 @@ class Database:
                 ORDER BY sort_order DESC, created_at DESC, symbol ASC
             """)
             columns = ["id", "symbol", "contract_symbol", "name", "exchange", "link", "sort_order", "created_at"]
-            return self._rows_to_dicts(rows, columns)
+            results = self._rows_to_dicts(rows, columns)
+            # 转换 ID 为 int 以保持与前端兼容性（类似 get_all_providers 和 get_all_models）
+            for result in results:
+                if result.get('id'):
+                    result['id'] = self._uuid_to_int(result['id'])
+            return results
         except Exception as e:
             logger.error(f"[Database] Failed to get futures: {e}")
             return []

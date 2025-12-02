@@ -130,14 +130,25 @@ const handleSave = async () => {
 const handleDelete = async (futureId) => {
   if (!confirm('确定要删除该合约吗？')) return
   
+  loading.value = true
+  error.value = null
+  
   try {
-    await futuresApi.delete(futureId)
-    alert('合约删除成功')
-    await loadFutures()
-    emit('refresh')
+    const result = await futuresApi.delete(futureId)
+    if (result.success !== false) {
+      alert('合约删除成功')
+      await loadFutures()
+      emit('delete', futureId) // 触发删除事件
+      emit('refresh') // 触发刷新事件
+    } else {
+      throw new Error(result.error || '删除失败')
+    }
   } catch (err) {
     console.error('[FutureConfigModal] Error deleting future:', err)
-    alert('删除合约失败')
+    error.value = err.message || '删除合约失败'
+    alert(`删除合约失败: ${err.message || '未知错误'}`)
+  } finally {
+    loading.value = false
   }
 }
 

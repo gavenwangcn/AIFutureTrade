@@ -115,6 +115,12 @@
             <span>市场行情</span>
             <i class="bi bi-graph-up-arrow"></i>
           </div>
+          <div class="market-header-actions">
+            <button class="btn-config-contract" @click="showFutureConfigModal = true">
+              配置合约
+            </button>
+            <span class="market-count">{{ marketPrices.length }}个</span>
+          </div>
           <div class="market-prices">
             <template v-if="marketPrices.length > 0">
               <div
@@ -124,19 +130,20 @@
                 @click="openKlineChartFromMarket(price.symbol, price.contract_symbol)"
                 style="cursor: pointer;"
               >
-                <div class="price-head">
-                  <div class="price-info">
-                    <div class="price-symbol">{{ price.symbol }}</div>
-                    <div v-if="price.name" class="price-name">{{ price.name }}</div>
+                <div class="price-card">
+                  <div class="price-left">
+                    <div class="price-symbol-large">{{ price.symbol }}</div>
+                    <div class="price-contract-name">{{ price.name || `${price.symbol}永续合约` }}</div>
                   </div>
-                  <div class="price-metrics">
-                    <div class="price-value">${{ formatPrice(price.price) }}</div>
-                    <div class="price-change" :class="price.change_24h >= 0 ? 'positive' : 'negative'">
-                      {{ price.change_24h >= 0 ? '+' : '' }}{{ (price.change_24h || 0).toFixed(2) }}%
+                  <div class="price-right">
+                    <div class="price-value-large">${{ formatPrice(price.price) }}</div>
+                    <div class="price-change-with-arrow" :class="price.change_24h >= 0 ? 'positive' : 'negative'">
+                      <span class="change-arrow">{{ price.change_24h >= 0 ? '▲' : '▼' }}</span>
+                      <span class="change-value">{{ (Math.abs(price.change_24h) || 0).toFixed(2) }}%</span>
                     </div>
-                    <div v-if="price.daily_volume" class="price-volume">
-                      <span class="volume-label">当日成交额：</span>
-                      <span class="volume-value">${{ formatCurrency(price.daily_volume) }}</span>
+                    <div v-if="price.daily_volume" class="price-volume-chinese">
+                      <span class="volume-label">当日成交额: </span>
+                      <span class="volume-value">{{ formatVolumeChinese(price.daily_volume) }}</span>
                     </div>
                   </div>
                 </div>
