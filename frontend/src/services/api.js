@@ -92,9 +92,22 @@ export const marketApi = {
 
   /**
    * 获取K线数据
+   * @param {string} symbol - 交易对符号
+   * @param {string} interval - 时间间隔
+   * @param {number} limit - 返回的最大记录数，默认500
+   * @param {string} startTime - 开始时间（可选，ISO格式字符串）
+   * @param {string} endTime - 结束时间（可选，ISO格式字符串）
    */
-  getKlines: (symbol, interval, limit = 500) => 
-    apiGet('/api/market/klines', { symbol, interval, limit }),
+  getKlines: (symbol, interval, limit = 500, startTime = null, endTime = null) => {
+    const params = { symbol, interval, limit }
+    if (startTime) {
+      params.start_time = startTime
+    }
+    if (endTime) {
+      params.end_time = endTime
+    }
+    return apiGet('/api/market/klines', params)
+  },
 
   /**
    * 获取技术指标

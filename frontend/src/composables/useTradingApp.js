@@ -3,7 +3,7 @@
  * 提供交易应用的主要业务逻辑和状态管理
  */
 
-import { ref, computed, nextTick } from 'vue'
+import { ref, computed, nextTick, onUnmounted } from 'vue'
 import { createSocketConnection } from '../utils/websocket.js'
 import { modelApi, marketApi } from '../services/api.js'
 import * as echarts from 'echarts'
@@ -69,6 +69,8 @@ export function useTradingApp() {
   
   // WebSocket连接
   const socket = ref(null)
+  let websocketMonitorInterval = null // WebSocket 监控定时器
+  let leaderboardRefreshInterval = null // 涨跌榜自动刷新定时器（30秒轮询备用方案）
   
   // ECharts 实例
   const accountChart = ref(null)
@@ -273,7 +275,6 @@ export function useTradingApp() {
       })
 
       // 添加连接状态检查（定期检查连接状态）
-      let connectionCheckInterval = null
       const checkConnection = () => {
         if (socket.value) {
           const isConnected = socket.value.connected
@@ -289,22 +290,53 @@ export function useTradingApp() {
       }
       
       // 每30秒检查一次连接状态
-      connectionCheckInterval = setInterval(checkConnection, 30000)
+      websocketMonitorInterval = setInterval(checkConnection, 30000)
       
       // 在连接断开时清理定时器
       socket.value.on('disconnect', () => {
-        if (connectionCheckInterval) {
-          clearInterval(connectionCheckInterval)
-          connectionCheckInterval = null
+        if (websocketMonitorInterval) {
+          clearInterval(websocketMonitorInterval)
+          websocketMonitorInterval = null
         }
       })
-      
-      // 存储定时器引用以便清理
-      socket.value._connectionCheckInterval = connectionCheckInterval
 
     } catch (error) {
       console.error('[WebSocket] ❌ 初始化失败:', error)
       leaderboardStatus.value = 'WebSocket 初始化失败'
+    }
+  }
+
+  /**
+   * 启动涨跌榜自动刷新（30秒轮询备用方案）
+   * 参考原始 app.js 的 startLeaderboardAutoRefresh 逻辑
+   */
+  const startLeaderboardAutoRefresh = () => {
+    // 清除已有定时器
+    if (leaderboardRefreshInterval) {
+      clearInterval(leaderboardRefreshInterval)
+      leaderboardRefreshInterval = null
+    }
+
+    // 立即获取一次数据
+    loadLeaderboard(false)
+
+    // 每30秒自动刷新一次（作为WebSocket的备用方案）
+    leaderboardRefreshInterval = setInterval(() => {
+      console.log('[TradingApp] 30秒轮询：自动刷新涨跌榜数据（备用方案）')
+      loadLeaderboard(false)
+    }, 30000) // 30秒
+
+    console.log('[TradingApp] ✅ 涨跌榜自动刷新已启动（30秒轮询备用方案）')
+  }
+
+  /**
+   * 停止涨跌榜自动刷新
+   */
+  const stopLeaderboardAutoRefresh = () => {
+    if (leaderboardRefreshInterval) {
+      clearInterval(leaderboardRefreshInterval)
+      leaderboardRefreshInterval = null
+      console.log('[TradingApp] 涨跌榜自动刷新已停止')
     }
   }
 
@@ -860,6 +892,9 @@ export function useTradingApp() {
         loadLeaderboard()
       ])
       
+      // 启动涨跌榜自动刷新（30秒轮询备用方案）
+      startLeaderboardAutoRefresh()
+      
       console.log('[TradingApp] ✅ 初始数据加载完成')
       
       // 如果没有选中的模型，默认显示聚合视图
@@ -1189,6 +1224,24 @@ export function useTradingApp() {
     const leverage = modelLeverageMap.value[modelId] ?? models.value.find(m => m.id === modelId)?.leverage ?? 10
     return leverage === 0 ? 'AI' : `${leverage}x`
   }
+
+  // ============ 生命周期钩子 ============
+  
+  // 组件卸载时清理资源
+  onUnmounted(() => {
+    // 停止涨跌榜自动刷新
+    stopLeaderboardAutoRefresh()
+    
+    // 清理 WebSocket 连接
+    if (socket.value) {
+      console.log('[WebSocket] 组件卸载，断开 WebSocket 连接')
+      socket.value.disconnect()
+    }
+    if (websocketMonitorInterval) {
+      clearInterval(websocketMonitorInterval)
+      console.log('[WebSocket Monitor] 停止监控定时器')
+    }
+  })
 
   // ============ 返回 API ============
   

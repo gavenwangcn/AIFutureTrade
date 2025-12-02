@@ -105,9 +105,23 @@ export class CustomDatafeed {
       // Pro 版本可能会请求较大的时间范围，我们需要获取足够的数据
       const limit = 500
 
-      // 调用后端 API 获取 K 线数据
-      // 注意：后端可能不支持 start_time 和 end_time 参数，我们先获取所有数据再过滤
-      const response = await marketApi.getKlines(ticker, interval, limit)
+      // 将时间戳转换为 ISO 格式字符串（后端期望的格式）
+      // from 和 to 是毫秒时间戳，需要转换为 ISO 格式
+      const startTimeISO = new Date(from).toISOString()
+      const endTimeISO = new Date(to).toISOString()
+
+      console.log('[CustomDatafeed] Requesting K-line data with time range:', {
+        ticker,
+        interval,
+        limit,
+        startTimeISO,
+        endTimeISO,
+        fromTimestamp: from,
+        toTimestamp: to
+      })
+
+      // 调用后端 API 获取 K 线数据，传入时间范围参数
+      const response = await marketApi.getKlines(ticker, interval, limit, startTimeISO, endTimeISO)
 
       if (!response || !response.data || !Array.isArray(response.data)) {
         console.warn('[CustomDatafeed] Invalid response format:', response)
