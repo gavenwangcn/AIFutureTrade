@@ -1461,10 +1461,8 @@ def check_update():
 # ============ Main Entry Point ============
 
 if __name__ == '__main__':
-    import webbrowser
-
     logger.info("\n" + "=" * 60)
-    logger.info("AICoinTrade - Starting...")
+    logger.info("AICoinTrade Backend Service - Starting...")
     logger.info("=" * 60)
     logger.info("Initializing database...")
 
@@ -1497,23 +1495,11 @@ if __name__ == '__main__':
     logger.info("✅ 所有涨跌幅榜相关工作线程已启动完成")
 
     logger.info("\n" + "=" * 60)
-    logger.info("AICoinTrade is running!")
-    logger.info("Server: http://localhost:5002")
+    logger.info("AICoinTrade Backend Service is running!")
+    logger.info("API Server: http://0.0.0.0:5002")
+    logger.info("WebSocket Server: ws://0.0.0.0:5002")
     logger.info("Press Ctrl+C to stop")
     logger.info("=" * 60 + "\n")
-
-    def open_browser():
-        """Open browser after server starts"""
-        time.sleep(1.5)
-        url = "http://localhost:5002"
-        try:
-            webbrowser.open(url)
-            logger.info(f"Browser opened: {url}")
-        except Exception as e:
-            logger.warning(f"Could not open browser: {e}")
-
-    browser_thread = threading.Thread(target=open_browser, daemon=True)
-    browser_thread.start()
 
     # 开发环境：使用Werkzeug服务器
     # 生产环境：使用gunicorn + eventlet（见Dockerfile和gunicorn_config.py）
