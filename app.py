@@ -28,15 +28,16 @@ import sys
 
 app = Flask(__name__)
 # CORS配置：允许前端服务访问
+# 注意：在生产环境中，应该限制具体的域名，而不是使用通配符
 CORS(app, resources={
-    r"/api/*": {"origins": ["http://localhost:3000", "http://frontend:3000"]},
-    r"/socket.io/*": {"origins": ["http://localhost:3000", "http://frontend:3000"]}
+    r"/api/*": {"origins": "*"},  # 允许所有来源（生产环境应限制）
+    r"/socket.io/*": {"origins": "*"}  # 允许所有来源（生产环境应限制）
 })
 # 使用eventlet作为异步模式以获得更好的性能
 # async_mode='eventlet' 提供更好的并发性能
 socketio = SocketIO(
     app, 
-    cors_allowed_origins="*",
+    cors_allowed_origins="*",  # Socket.IO允许所有来源
     async_mode='eventlet',  # 使用eventlet异步模式
     logger=False,  # 禁用SocketIO日志以减少开销
     engineio_logger=False,  # 禁用EngineIO日志

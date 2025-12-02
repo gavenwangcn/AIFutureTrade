@@ -27,9 +27,19 @@ try {
 
     // 检查源目录是否存在
     if (!fs.existsSync(sourceDir)) {
-        console.warn(`[KLineChart] Source directory not found: ${sourceDir}`);
-        console.warn('[KLineChart] KLineChart files will be served from node_modules');
+        console.error(`[KLineChart] ✗ Source directory not found: ${sourceDir}`);
+        console.error('[KLineChart] Please run: npm install klinecharts');
+        console.warn('[KLineChart] KLineChart files will be served from node_modules (if available)');
         process.exit(0); // 退出码0表示成功，不会中断构建
+    }
+    
+    // 检查源文件是否存在
+    const sourceFile = path.join(sourceDir, 'klinecharts.min.js');
+    if (!fs.existsSync(sourceFile)) {
+        console.error(`[KLineChart] ✗ Source file not found: ${sourceFile}`);
+        console.error('[KLineChart] Please check if klinecharts package is correctly installed');
+        console.warn('[KLineChart] KLineChart files will be served from node_modules (if available)');
+        process.exit(0);
     }
 
     // 复制文件

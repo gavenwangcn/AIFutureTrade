@@ -1,130 +1,145 @@
-# 前端服务说明
+# AIFutureTrade 前端服务
 
-## 目录结构
+## 概述
 
-```
-frontend/
-├── Dockerfile              # Docker构建文件
-├── package.json            # Node.js依赖配置
-├── server.js               # Express服务器入口文件
-├── README.md               # 本文件
-├── scripts/                # 构建脚本目录
-│   ├── copy-klinecharts.js      # 复制KLineChart库脚本
-│   └── sync-static-assets.js    # 同步静态资源脚本
-└── public/                 # 静态文件目录（对外提供服务）
-    ├── index.html          # 前端页面入口
-    ├── app.js              # 前端JavaScript代码
-    ├── style.css           # 样式文件
-    ├── favicon.svg         # 网站图标
-    └── lib/                # 第三方库目录（KLineChart等）
-        └── klinecharts.min.js
-```
+前端服务使用 Node.js Express 提供静态文件服务和 API/WebSocket 代理。
 
-## 功能说明
-
-### 1. Express服务器 (`server.js`)
-- 提供静态文件服务（CSS、JS、图片等）
-- 代理API请求到后端服务（`/api/*` → `http://backend:5002/api/*`）
-- 代理WebSocket请求（`/socket.io/*` → `http://backend:5002/socket.io/*`）
-- 提供KLineChart库文件服务（`/lib/*`）
-
-### 2. 构建脚本 (`scripts/`)
-
-#### `sync-static-assets.js`
-- 从项目根目录的 `static/` 目录同步静态资源到 `public/`
-- 同步的文件：`style.css`、`favicon.svg`
-- 支持多个路径查找（本地开发、Docker构建）
-
-#### `copy-klinecharts.js`
-- 从 `node_modules/klinecharts/dist/` 复制KLineChart库文件到 `public/lib/`
-- 确保KLineChart库文件可用于前端服务
-
-### 3. 静态资源 (`public/`)
-- `index.html`: 前端页面入口，包含所有HTML结构
-- `app.js`: 前端JavaScript逻辑，包括K线图管理、WebSocket通信等
-- `style.css`: 页面样式文件
-- `favicon.svg`: 网站图标
-
-## 开发指南
+## 快速开始
 
 ### 本地开发
 
-```bash
-# 进入前端目录
-cd frontend
+1. **安装依赖**（必须）：
+   ```bash
+   cd frontend
+   npm install
+   ```
+   
+   这会自动安装 `klinecharts` 等依赖，并执行 `postinstall` 脚本复制 KLineChart 库文件。
 
-# 安装依赖
-npm install
+2. **验证 KLineChart 安装**：
+   ```bash
+   # 检查 node_modules 中是否有 klinecharts
+   ls node_modules/klinecharts/dist/
+   
+   # 检查是否已复制到 public/lib
+   ls public/lib/klinecharts.min.js
+   ```
 
-# 启动开发服务器（端口3000）
-npm run dev
-# 或
-npm start
-```
+3. **手动复制 KLineChart 文件**（如果需要）：
+   ```bash
+   npm run copy-assets
+   ```
 
-### 构建静态资源
+4. **启动开发服务器**：
+   ```bash
+   npm start
+   # 或
+   npm run dev
+   ```
 
-```bash
-# 同步静态资源
-npm run sync-static
+### Docker 构建
 
-# 复制KLineChart库
-npm run copy-assets
-
-# 或执行完整构建
-npm run build
-```
-
-### 环境变量
-
-- `FRONTEND_PORT`: 前端服务端口（默认3000）
-- `BACKEND_URL`: 后端API地址（默认http://localhost:5002）
-
-## Docker构建
-
-### 构建镜像
+Dockerfile 会自动处理依赖安装和文件复制：
 
 ```bash
 # 从项目根目录构建
-docker build -f frontend/Dockerfile -t aifuturetrade-frontend .
+docker compose build frontend
 
-# 或使用docker-compose
-docker-compose build frontend
+# 或直接启动（会自动构建）
+docker compose up -d frontend
 ```
 
-### 运行容器
+## KLineChart 库文件
+
+根据 [KLineChart 官方文档](https://klinecharts.com/guide/quick-start)，KLineChart 需要通过 npm 安装：
 
 ```bash
-# 使用docker-compose（推荐）
-docker-compose up -d frontend
-
-# 或直接运行
-docker run -p 3000:3000 \
-  -e BACKEND_URL=http://backend:5002 \
-  -e FRONTEND_PORT=3000 \
-  aifuturetrade-frontend
+npm install klinecharts
 ```
+
+### 文件位置
+
+- **源文件**：`node_modules/klinecharts/dist/klinecharts.min.js`
+- **复制目标**：`public/lib/klinecharts.min.js`
+- **备用位置**：如果复制失败，`server.js` 会从 `node_modules` 直接提供文件
+
+### 文件复制脚本
+
+`scripts/copy-klinecharts.js` 脚本会：
+1. 检查 `node_modules/klinecharts/dist/` 是否存在
+2. 创建 `public/lib/` 目录（如果不存在）
+3. 复制所有文件到 `public/lib/`
+
+### 故障排除
+
+如果 `klinecharts.min.js` 文件无法加载：
+
+1. **检查依赖是否安装**：
+   ```bash
+   cd frontend
+   npm install
+   ```
+
+2. **检查文件是否存在**：
+   ```bash
+   # 检查源文件
+   ls node_modules/klinecharts/dist/klinecharts.min.js
+   
+   # 检查复制后的文件
+   ls public/lib/klinecharts.min.js
+   ```
+
+3. **手动复制文件**：
+   ```bash
+   npm run copy-assets
+   ```
+
+4. **检查服务器日志**：
+   - 启动时会显示 KLineChart 文件位置
+   - 如果文件不存在，会显示警告信息
+
+5. **Docker 环境**：
+   ```bash
+   # 检查容器内文件
+   docker exec aifuturetrade-frontend ls -la /app/public/lib/
+   docker exec aifuturetrade-frontend ls -la /app/node_modules/klinecharts/dist/
+   ```
+
+## 项目结构
+
+```
+frontend/
+├── public/              # 静态文件目录
+│   ├── index.html      # 主HTML文件
+│   ├── app.js          # 前端应用JavaScript
+│   ├── style.css       # 样式文件
+│   └── lib/            # KLineChart库文件（由脚本复制）
+│       └── klinecharts.min.js
+├── scripts/            # 构建脚本
+│   ├── copy-klinecharts.js      # 复制KLineChart文件
+│   └── sync-static-assets.js   # 同步静态资源
+├── server.js           # Express服务器
+├── package.json        # npm配置
+└── Dockerfile          # Docker构建文件
+```
+
+## 环境变量
+
+- `FRONTEND_PORT`: 前端服务端口（默认：3000）
+- `BACKEND_URL`: 后端API地址（默认：http://localhost:5002）
+
+## 脚本说明
+
+- `npm start`: 启动服务器
+- `npm run dev`: 启动开发服务器（同 start）
+- `npm run build`: 同步静态资源并复制KLineChart文件
+- `npm run sync-static`: 同步静态资源（从 static/ 到 public/）
+- `npm run copy-assets`: 复制KLineChart库文件
+- `npm run install-deps`: 安装依赖
 
 ## 注意事项
 
-1. **构建上下文**: Docker构建时使用项目根目录作为构建上下文，以便访问 `static/` 目录
-2. **静态资源同步**: 构建时会自动同步 `static/` 目录的文件到 `public/`
-3. **KLineChart库**: 优先使用 `public/lib/` 中的文件，如果不存在则从 `node_modules` 提供
-4. **路由处理**: 所有非静态资源的请求都会返回 `index.html`（用于前端路由）
-
-## 故障排查
-
-### 样式丢失
-- 检查 `public/style.css` 文件是否存在
-- 运行 `npm run sync-static` 同步静态资源
-
-### KLineChart加载失败
-- 检查 `public/lib/klinecharts.min.js` 文件是否存在
-- 运行 `npm run copy-assets` 复制KLineChart库
-- 检查服务器日志中的文件检查结果
-
-### API请求失败
-- 检查 `BACKEND_URL` 环境变量是否正确
-- 确认后端服务是否运行
-- 查看浏览器控制台的网络请求
-
+1. **必须运行 `npm install`**：KLineChart 需要通过 npm 安装，不能直接从 CDN 使用（根据项目要求）
+2. **postinstall 脚本**：安装依赖后会自动执行文件复制
+3. **备用方案**：如果文件复制失败，`server.js` 会从 `node_modules` 直接提供文件
+4. **Docker 构建**：Dockerfile 会确保依赖安装和文件复制正确执行

@@ -33,40 +33,81 @@ const BACKEND_URL = process.env.BACKEND_URL || 'http://localhost:5002';
 // ------------------------------------------------------------------------------
 // 1. 静态文件服务
 // ------------------------------------------------------------------------------
-// 提供 public/ 目录下的静态文件（CSS、JS、图片等）
-// 必须在所有路由之前，确保静态资源正确加载
-app.use(express.static(path.join(__dirname, 'public'), {
-    maxAge: '1d', // 缓存1天
-    etag: true,
-    lastModified: true,
-    setHeaders: (res, filePath) => {
-        // 确保CSS文件有正确的Content-Type
-        if (filePath.endsWith('.css')) {
-            res.setHeader('Content-Type', 'text/css; charset=utf-8');
+// 优先提供构建后的 dist/ 目录（生产环境）
+// 如果不存在，则提供 public/ 目录（开发环境）
+const distPath = path.join(__dirname, 'dist');
+const publicPath = path.join(__dirname, 'public');
+
+if (fs.existsSync(distPath)) {
+    // 生产环境：提供构建后的文件
+    app.use(express.static(distPath, {
+        maxAge: '1d',
+        etag: true,
+        lastModified: true,
+        setHeaders: (res, filePath) => {
+            if (filePath.endsWith('.css')) {
+                res.setHeader('Content-Type', 'text/css; charset=utf-8');
+            }
+            if (filePath.endsWith('.js')) {
+                res.setHeader('Content-Type', 'application/javascript; charset=utf-8');
+            }
+            if (filePath.endsWith('.svg')) {
+                res.setHeader('Content-Type', 'image/svg+xml');
+            }
         }
-        // 确保JS文件有正确的Content-Type
-        if (filePath.endsWith('.js')) {
-            res.setHeader('Content-Type', 'application/javascript; charset=utf-8');
+    }));
+    console.log(`[Frontend Server] Serving from: ${distPath} (production build)`);
+} else {
+    // 开发环境：提供 public/ 目录
+    app.use(express.static(publicPath, {
+        maxAge: '1d',
+        etag: true,
+        lastModified: true,
+        setHeaders: (res, filePath) => {
+            if (filePath.endsWith('.css')) {
+                res.setHeader('Content-Type', 'text/css; charset=utf-8');
+            }
+            if (filePath.endsWith('.js')) {
+                res.setHeader('Content-Type', 'application/javascript; charset=utf-8');
+            }
+            if (filePath.endsWith('.svg')) {
+                res.setHeader('Content-Type', 'image/svg+xml');
+            }
         }
-        // 确保SVG文件有正确的Content-Type
-        if (filePath.endsWith('.svg')) {
-            res.setHeader('Content-Type', 'image/svg+xml');
-        }
-    }
-}));
+    }));
+    console.log(`[Frontend Server] Serving from: ${publicPath} (development)`);
+}
 
 // ------------------------------------------------------------------------------
 // 2. KLineChart库文件服务
 // ------------------------------------------------------------------------------
-// 优先从 public/lib/ 提供，如果不存在则从 node_modules/ 提供
+// 优先级：dist/lib/ > public/lib/ > node_modules/klinecharts/dist/
 // 必须在静态文件服务之后，API代理之前
-const libPath = path.join(__dirname, 'public', 'lib');
+const distLibPath = path.join(__dirname, 'dist', 'lib');
+const publicLibPath = path.join(__dirname, 'public', 'lib');
 const nodeModulesLibPath = path.join(__dirname, 'node_modules', 'klinecharts', 'dist');
 
-// 检查并配置KLineChart库路径
-if (fs.existsSync(libPath) && fs.readdirSync(libPath).length > 0) {
-    // 如果public/lib存在且有文件，使用它（npm run copy-assets已复制）
-    app.use('/lib', express.static(libPath, {
+let klineChartSource = null;
+let klineChartPath = null;
+
+// 按优先级检查 klinecharts 文件位置
+if (fs.existsSync(distLibPath) && fs.existsSync(path.join(distLibPath, 'klinecharts.min.js'))) {
+    // 生产环境：优先使用构建后的 dist/lib/
+    klineChartSource = 'dist/lib (production build)';
+    klineChartPath = distLibPath;
+} else if (fs.existsSync(publicLibPath) && fs.existsSync(path.join(publicLibPath, 'klinecharts.min.js'))) {
+    // 开发环境：使用 public/lib/
+    klineChartSource = 'public/lib (development)';
+    klineChartPath = publicLibPath;
+} else if (fs.existsSync(nodeModulesLibPath) && fs.existsSync(path.join(nodeModulesLibPath, 'klinecharts.min.js'))) {
+    // 备用方案：从 node_modules 提供
+    klineChartSource = 'node_modules (fallback)';
+    klineChartPath = nodeModulesLibPath;
+}
+
+// 配置 KLineChart 库文件服务
+if (klineChartPath) {
+    app.use('/lib', express.static(klineChartPath, {
         maxAge: '1d',
         etag: true,
         setHeaders: (res, filePath) => {
@@ -75,40 +116,21 @@ if (fs.existsSync(libPath) && fs.readdirSync(libPath).length > 0) {
             }
         }
     }));
-    console.log(`[Frontend Server] Serving KLineChart from: ${libPath}`);
+    console.log(`[Frontend Server] Serving KLineChart from: ${klineChartSource}`);
+    console.log(`[Frontend Server]   Path: ${klineChartPath}`);
     
     // 验证文件是否存在
-    const klineChartFile = path.join(libPath, 'klinecharts.min.js');
+    const klineChartFile = path.join(klineChartPath, 'klinecharts.min.js');
     if (fs.existsSync(klineChartFile)) {
-        console.log(`[Frontend Server] ✓ KLineChart file found: ${klineChartFile}`);
+        const stats = fs.statSync(klineChartFile);
+        console.log(`[Frontend Server] ✓ KLineChart file found: ${klineChartFile} (${(stats.size / 1024).toFixed(2)} KB)`);
     } else {
         console.warn(`[Frontend Server] ✗ KLineChart file not found: ${klineChartFile}`);
     }
 } else {
-    // 否则直接从node_modules提供
-    if (fs.existsSync(nodeModulesLibPath)) {
-        app.use('/lib', express.static(nodeModulesLibPath, {
-            maxAge: '1d',
-            etag: true,
-            setHeaders: (res, filePath) => {
-                if (filePath.endsWith('.js')) {
-                    res.setHeader('Content-Type', 'application/javascript; charset=utf-8');
-                }
-            }
-        }));
-        console.log(`[Frontend Server] Serving KLineChart from: ${nodeModulesLibPath}`);
-        
-        // 验证文件是否存在
-        const klineChartFile = path.join(nodeModulesLibPath, 'klinecharts.min.js');
-        if (fs.existsSync(klineChartFile)) {
-            console.log(`[Frontend Server] ✓ KLineChart file found: ${klineChartFile}`);
-        } else {
-            console.warn(`[Frontend Server] ✗ KLineChart file not found: ${klineChartFile}`);
-        }
-    } else {
-        console.error(`[Frontend Server] ✗ KLineChart library not found in both ${libPath} and ${nodeModulesLibPath}`);
-        console.error(`[Frontend Server] Please run: npm install && npm run copy-assets`);
-    }
+    console.error(`[Frontend Server] ✗ KLineChart library not found in any location`);
+    console.error(`[Frontend Server]   Checked: dist/lib/, public/lib/, node_modules/klinecharts/dist/`);
+    console.error(`[Frontend Server]   Please run: npm install klinecharts && npm run copy-assets`);
 }
 
 // ------------------------------------------------------------------------------
@@ -133,12 +155,34 @@ app.use('/api', createProxyMiddleware({
 // 4. WebSocket代理
 // ------------------------------------------------------------------------------
 // 将 /socket.io/* 请求代理到后端服务
-app.use('/socket.io', createProxyMiddleware({
+// 注意：Socket.IO使用长轮询和WebSocket，需要正确配置代理
+// http-proxy-middleware在配置了ws:true后会自动处理WebSocket升级
+const socketProxy = createProxyMiddleware({
     target: BACKEND_URL,
     changeOrigin: true,
-    ws: true,
-    logLevel: 'warn'
-}));
+    ws: true, // 启用WebSocket代理（包括HTTP长轮询和WebSocket升级）
+    logLevel: 'warn',
+    onProxyReq: (proxyReq, req, res) => {
+        console.log(`[Socket.IO Proxy] ${req.method} ${req.url} -> ${BACKEND_URL}${req.url}`);
+    },
+    onProxyReqWs: (proxyReq, req, socket) => {
+        console.log(`[Socket.IO Proxy] WS upgrade ${req.url} -> ${BACKEND_URL}${req.url}`);
+    },
+    onError: (err, req, res) => {
+        console.error(`[Socket.IO Proxy Error] ${req.url}:`, err.message);
+        if (!res.headersSent) {
+            res.status(500).json({ error: 'Socket.IO proxy error' });
+        }
+    },
+    onProxyError: (err, req, socket) => {
+        console.error('[Socket.IO Proxy WS Error]', err.message);
+        if (socket && !socket.destroyed) {
+            socket.destroy();
+        }
+    }
+});
+
+app.use('/socket.io', socketProxy);
 
 // ------------------------------------------------------------------------------
 // 5. 前端路由（SPA支持）
@@ -163,7 +207,11 @@ app.get('*', (req, res, next) => {
     }
     
     // 其他请求返回index.html（用于前端路由）
-    res.sendFile(path.join(__dirname, 'public', 'index.html'));
+    // 优先使用构建后的文件，否则使用开发文件
+    const indexPath = fs.existsSync(distPath) 
+        ? path.join(distPath, 'index.html')
+        : path.join(publicPath, 'index.html');
+    res.sendFile(indexPath);
 });
 
 // ==============================================================================
@@ -214,6 +262,13 @@ const server = app.listen(PORT, () => {
 // ==============================================================================
 // WebSocket升级处理
 // ==============================================================================
+// 注意：http-proxy-middleware在配置了ws:true后会自动处理WebSocket升级
+// 这里我们只需要监听upgrade事件，确保Socket.IO请求被正确路由
+// socketProxy中间件会自动处理WebSocket升级请求
 server.on('upgrade', (request, socket, head) => {
-    // WebSocket请求由代理中间件处理
+    // Socket.IO的WebSocket升级由socketProxy中间件自动处理
+    // 这里只是记录日志
+    if (request.url && request.url.startsWith('/socket.io/')) {
+        console.log(`[WebSocket Upgrade] ${request.url} -> ${BACKEND_URL}${request.url}`);
+    }
 });

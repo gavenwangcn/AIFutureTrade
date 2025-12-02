@@ -4,9 +4,11 @@
   "description": "Frontend application for AIFutureTrade",
   "type": "module",
   "scripts": {
-    "dev": "node server.js",
-    "start": "node server.js",
-    "build": "npm run sync-static && npm run copy-assets",
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "server": "node server.js",
+    "start": "npm run build && npm run server",
     "sync-static": "node scripts/sync-static-assets.js",
     "copy-assets": "node scripts/copy-klinecharts.js",
     "install-deps": "npm install",
@@ -15,9 +17,13 @@
   "dependencies": {
     "express": "^4.18.2",
     "http-proxy-middleware": "^2.0.6",
-    "klinecharts": "^9.0.0"
+    "klinecharts": "^9.0.0",
+    "vue": "^3.4.21"
   },
-  "devDependencies": {},
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^5.0.4",
+    "vite": "^5.1.6"
+  },
   "engines": {
     "node": ">=16.0.0",
     "npm": ">=8.0.0"
