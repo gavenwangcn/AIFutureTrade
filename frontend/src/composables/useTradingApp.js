@@ -97,31 +97,74 @@ export function useTradingApp() {
   const initWebSocket = () => {
     try {
       // 如果已经存在连接，先断开
-      if (socket.value && socket.value.connected) {
-        console.log('[WebSocket] 断开现有连接')
-        socket.value.disconnect()
+      if (socket.value) {
+        if (socket.value.connected) {
+          console.log('[WebSocket] 断开现有连接')
+          socket.value.disconnect()
+        }
+        // 移除所有事件监听器
+        socket.value.removeAllListeners()
       }
 
       socket.value = createSocketConnection()
 
       // 连接成功事件
       socket.value.on('connect', () => {
-        console.log('[WebSocket] ✅ 已连接到服务器')
+        console.log('[WebSocket] ✅ ========== 已连接到服务器 ==========')
+        console.log('[WebSocket] Socket ID:', socket.value.id)
+        console.log('[WebSocket] 连接状态:', {
+          connected: socket.value.connected,
+          disconnected: socket.value.disconnected,
+          id: socket.value.id
+        })
         leaderboardStatus.value = '已连接，等待数据...'
         
+        // 验证事件监听器是否已注册
+        const registeredEvents = socket.value.eventNames()
+        console.log('[WebSocket] 已注册的事件监听器:', Array.from(registeredEvents))
+        console.log('[WebSocket] leaderboard:update 监听器已注册:', socket.value.hasListeners('leaderboard:update'))
+        
         // 连接成功后请求初始涨跌幅榜数据
-        console.log('[WebSocket] 请求初始涨跌幅榜数据')
-        socket.value.emit('leaderboard:request', { limit: 10 })
+        console.log('[WebSocket] 📤 发送 leaderboard:request 事件，请求初始涨跌幅榜数据')
+        try {
+          socket.value.emit('leaderboard:request', { limit: 10 })
+          console.log('[WebSocket] ✅ leaderboard:request 事件已发送')
+        } catch (e) {
+          console.error('[WebSocket] ❌ 发送 leaderboard:request 失败:', e)
+        }
       })
 
       // 涨跌幅榜更新事件（后端自动推送）
       socket.value.on('leaderboard:update', async (data) => {
-        console.log('[WebSocket] 📊 收到涨跌幅榜自动更新', data)
+        console.log('[WebSocket] 📊 ========== 收到涨跌幅榜自动更新 ==========')
+        console.log('[WebSocket] 原始数据:', data)
+        console.log('[WebSocket] 数据类型:', typeof data)
+        console.log('[WebSocket] 数据是否为对象:', data && typeof data === 'object')
+        console.log('[WebSocket] 数据详情:', {
+          hasGainers: !!data?.gainers,
+          gainersType: Array.isArray(data?.gainers) ? 'array' : typeof data?.gainers,
+          gainersCount: Array.isArray(data?.gainers) ? data.gainers.length : (data?.gainers ? 'not-array' : 0),
+          hasLosers: !!data?.losers,
+          losersType: Array.isArray(data?.losers) ? 'array' : typeof data?.losers,
+          losersCount: Array.isArray(data?.losers) ? data.losers.length : (data?.losers ? 'not-array' : 0),
+          dataKeys: data ? Object.keys(data) : []
+        })
         
         if (data && (data.gainers || data.losers)) {
           // 更新涨幅榜和跌幅榜数据
-          leaderboardGainers.value = Array.isArray(data.gainers) ? data.gainers : []
-          leaderboardLosers.value = Array.isArray(data.losers) ? data.losers : []
+          const newGainers = Array.isArray(data.gainers) ? data.gainers : []
+          const newLosers = Array.isArray(data.losers) ? data.losers : []
+          
+          console.log('[WebSocket] 处理后的数据:', {
+            newGainersCount: newGainers.length,
+            newLosersCount: newLosers.length,
+            currentGainersCount: leaderboardGainers.value.length,
+            currentLosersCount: leaderboardLosers.value.length
+          })
+          
+          // 更新数据（无论是否变化，因为后端推送的数据应该是最新的）
+          leaderboardGainers.value = newGainers
+          leaderboardLosers.value = newLosers
           
           // 更新状态时间戳
           const updateTime = new Date()
@@ -133,22 +176,34 @@ export function useTradingApp() {
           })
           leaderboardStatus.value = `最后更新: ${timeStr}`
           
+          console.log(`[WebSocket] ✅ 涨跌幅榜数据已更新: 涨幅榜 ${newGainers.length} 条, 跌幅榜 ${newLosers.length} 条`)
+          
           // 触发更新动画效果
           await nextTick()
           const statusEl = document.querySelector('.status-indicator')
           if (statusEl) {
             // 移除之前的动画类
-            statusEl.classList.remove('updating', 'updated')
+            statusEl.classList.remove('updating', 'updated', 'error')
             // 添加更新动画
             statusEl.classList.add('updated')
             setTimeout(() => {
               statusEl.classList.remove('updated')
             }, 1000)
+            console.log('[WebSocket] ✅ 状态指示器动画已触发')
+          } else {
+            console.warn('[WebSocket] ⚠️ 未找到状态指示器元素')
           }
           
-          console.log(`[WebSocket] ✅ 涨跌幅榜已更新: 涨幅榜 ${leaderboardGainers.value.length} 条, 跌幅榜 ${leaderboardLosers.value.length} 条`)
+          console.log('[WebSocket] ========== 涨跌幅榜更新完成 ==========')
         } else {
           console.warn('[WebSocket] ⚠️ 收到无效的涨跌幅榜数据:', data)
+          console.warn('[WebSocket] 数据验证:', {
+            hasData: !!data,
+            hasGainers: !!data?.gainers,
+            hasLosers: !!data?.losers,
+            gainersIsArray: Array.isArray(data?.gainers),
+            losersIsArray: Array.isArray(data?.losers)
+          })
         }
       })
 
@@ -184,6 +239,12 @@ export function useTradingApp() {
       // 连接错误事件
       socket.value.on('connect_error', (error) => {
         console.error('[WebSocket] ❌ 连接错误:', error)
+        console.error('[WebSocket] 错误详情:', {
+          message: error.message,
+          description: error.description,
+          context: error.context,
+          type: error.type
+        })
         leaderboardStatus.value = '连接失败'
       })
 
@@ -198,6 +259,36 @@ export function useTradingApp() {
         console.error('[WebSocket] ❌ 重新连接失败')
         leaderboardStatus.value = '重连失败'
       })
+
+      // 添加连接状态检查（定期检查连接状态）
+      let connectionCheckInterval = null
+      const checkConnection = () => {
+        if (socket.value) {
+          const isConnected = socket.value.connected
+          if (!isConnected && socket.value.disconnected) {
+            console.warn('[WebSocket] ⚠️ 检测到连接断开，尝试重新连接...')
+            try {
+              socket.value.connect()
+            } catch (e) {
+              console.error('[WebSocket] 重新连接失败:', e)
+            }
+          }
+        }
+      }
+      
+      // 每30秒检查一次连接状态
+      connectionCheckInterval = setInterval(checkConnection, 30000)
+      
+      // 在连接断开时清理定时器
+      socket.value.on('disconnect', () => {
+        if (connectionCheckInterval) {
+          clearInterval(connectionCheckInterval)
+          connectionCheckInterval = null
+        }
+      })
+      
+      // 存储定时器引用以便清理
+      socket.value._connectionCheckInterval = connectionCheckInterval
 
     } catch (error) {
       console.error('[WebSocket] ❌ 初始化失败:', error)
@@ -724,16 +815,40 @@ export function useTradingApp() {
    */
   const initApp = async () => {
     try {
-      // 初始化 WebSocket
+      console.log('[TradingApp] 🚀 开始初始化应用...')
+      
+      // 先初始化 WebSocket（确保连接建立）
+      console.log('[TradingApp] 初始化 WebSocket 连接...')
       initWebSocket()
       
+      // 等待一小段时间确保 WebSocket 连接建立
+      await new Promise(resolve => setTimeout(resolve, 500))
+      
+      // 检查 WebSocket 连接状态
+      if (socket.value) {
+        console.log('[TradingApp] WebSocket 连接状态:', {
+          connected: socket.value.connected,
+          disconnected: socket.value.disconnected,
+          id: socket.value.id
+        })
+        
+        // 如果已经连接，立即请求数据
+        if (socket.value.connected) {
+          console.log('[TradingApp] WebSocket 已连接，请求初始涨跌幅榜数据')
+          socket.value.emit('leaderboard:request', { limit: 10 })
+        }
+      }
+      
       // 并行加载初始数据
+      console.log('[TradingApp] 加载初始数据...')
       await Promise.all([
         loadModels(),
         loadProviders(),
         loadMarketPrices(),
         loadLeaderboard()
       ])
+      
+      console.log('[TradingApp] ✅ 初始数据加载完成')
       
       // 如果没有选中的模型，默认显示聚合视图
       if (!currentModelId.value && models.value.length > 0) {
@@ -746,8 +861,10 @@ export function useTradingApp() {
           loadConversations()
         ])
       }
+      
+      console.log('[TradingApp] ✅ 应用初始化完成')
     } catch (error) {
-      console.error('[TradingApp] Initialization error:', error)
+      console.error('[TradingApp] ❌ 初始化错误:', error)
     }
   }
 

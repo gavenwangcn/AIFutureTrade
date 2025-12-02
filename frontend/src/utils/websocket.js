@@ -42,7 +42,22 @@ export function createSocketConnection(options = {}) {
 
   const socket = io(backendUrl, defaultOptions)
   
-  console.log('[WebSocket] Connecting to:', backendUrl || 'current origin (via proxy)')
+  console.log('[WebSocket] 🔌 正在连接到:', backendUrl || 'current origin (via proxy)')
+  console.log('[WebSocket] 连接配置:', {
+    path: defaultOptions.path,
+    transports: defaultOptions.transports,
+    reconnection: defaultOptions.reconnection,
+    autoConnect: defaultOptions.autoConnect
+  })
+  
+  // 添加连接状态日志
+  socket.on('connect', () => {
+    console.log('[WebSocket] ✅ 连接成功，Socket ID:', socket.id)
+  })
+  
+  socket.on('connect_error', (error) => {
+    console.error('[WebSocket] ❌ 连接错误:', error.message || error)
+  })
   
   return socket
 }
