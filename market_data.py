@@ -397,8 +397,10 @@ class MarketDataFetcher:
                     # 兼容旧的列表格式和新的字典格式
                     if isinstance(latest_kline, dict):
                         # 新的字典格式
+                        open_time_ms = int(latest_kline['open_time']) if latest_kline.get('open_time') else None
                         kline_data = {
-                            'open_time': int(latest_kline['open_time']) if latest_kline.get('open_time') else None,
+                            'open_time': open_time_ms,
+                            'open_time_date': datetime.fromtimestamp(open_time_ms / 1000, tz=timezone.utc).strftime('%Y-%m-%d %H:%M:%S') if open_time_ms else None,
                             'open': float(latest_kline['open']) if latest_kline.get('open') else 0.0,
                             'high': float(latest_kline['high']) if latest_kline.get('high') else 0.0,
                             'low': float(latest_kline['low']) if latest_kline.get('low') else 0.0,
@@ -407,8 +409,10 @@ class MarketDataFetcher:
                         }
                     else:
                         # 旧的列表格式
+                        open_time_ms = int(latest_kline[0]) if len(latest_kline) > 0 and latest_kline[0] else None
                         kline_data = {
-                            'open_time': int(latest_kline[0]) if len(latest_kline) > 0 and latest_kline[0] else None,
+                            'open_time': open_time_ms,
+                            'open_time_date': datetime.fromtimestamp(open_time_ms / 1000, tz=timezone.utc).strftime('%Y-%m-%d %H:%M:%S') if open_time_ms else None,
                             'open': float(latest_kline[1]) if len(latest_kline) > 1 else 0.0,
                             'high': float(latest_kline[2]) if len(latest_kline) > 2 else 0.0,
                             'low': float(latest_kline[3]) if len(latest_kline) > 3 else 0.0,
@@ -460,8 +464,18 @@ class MarketDataFetcher:
                                 macd['dif'] = float(macd_df['MACD'].iloc[-1])
                             if 'SIGNAL' in macd_df.columns:
                                 macd['dea'] = float(macd_df['SIGNAL'].iloc[-1])
+                            # 计算BAR值：BAR = DIF - DEA（简单模式，不乘以2）
+                            # 如果finta的HISTOGRAM列有值且不为0，使用它；否则手动计算
                             if 'HISTOGRAM' in macd_df.columns:
-                                macd['bar'] = float(macd_df['HISTOGRAM'].iloc[-1])
+                                histogram_value = macd_df['HISTOGRAM'].iloc[-1]
+                                if pd.notna(histogram_value) and histogram_value != 0:
+                                    macd['bar'] = float(histogram_value)
+                                else:
+                                    # 如果HISTOGRAM为0或NaN，手动计算：BAR = DIF - DEA
+                                    macd['bar'] = macd['dif'] - macd['dea']
+                            else:
+                                # 如果没有HISTOGRAM列，手动计算
+                                macd['bar'] = macd['dif'] - macd['dea']
                     except Exception as e:
                         logger.warning(f'[MACD] 无法计算MACD: {e}')
                 else:
@@ -698,8 +712,10 @@ class MarketDataFetcher:
                     # 兼容旧的列表格式和新的字典格式
                     if isinstance(latest_kline, dict):
                         # 新的字典格式
+                        open_time_ms = int(latest_kline['open_time']) if latest_kline.get('open_time') else None
                         kline_data = {
-                            'open_time': int(latest_kline['open_time']) if latest_kline.get('open_time') else None,
+                            'open_time': open_time_ms,
+                            'open_time_date': datetime.fromtimestamp(open_time_ms / 1000, tz=timezone.utc).strftime('%Y-%m-%d %H:%M:%S') if open_time_ms else None,
                             'open': float(latest_kline['open']) if latest_kline.get('open') else 0.0,
                             'high': float(latest_kline['high']) if latest_kline.get('high') else 0.0,
                             'low': float(latest_kline['low']) if latest_kline.get('low') else 0.0,
@@ -708,8 +724,10 @@ class MarketDataFetcher:
                         }
                     else:
                         # 旧的列表格式
+                        open_time_ms = int(latest_kline[0]) if len(latest_kline) > 0 and latest_kline[0] else None
                         kline_data = {
-                            'open_time': int(latest_kline[0]) if len(latest_kline) > 0 and latest_kline[0] else None,
+                            'open_time': open_time_ms,
+                            'open_time_date': datetime.fromtimestamp(open_time_ms / 1000, tz=timezone.utc).strftime('%Y-%m-%d %H:%M:%S') if open_time_ms else None,
                             'open': float(latest_kline[1]) if len(latest_kline) > 1 else 0.0,
                             'high': float(latest_kline[2]) if len(latest_kline) > 2 else 0.0,
                             'low': float(latest_kline[3]) if len(latest_kline) > 3 else 0.0,
@@ -761,8 +779,18 @@ class MarketDataFetcher:
                                 macd['dif'] = float(macd_df['MACD'].iloc[-1])
                             if 'SIGNAL' in macd_df.columns:
                                 macd['dea'] = float(macd_df['SIGNAL'].iloc[-1])
+                            # 计算BAR值：BAR = DIF - DEA（简单模式，不乘以2）
+                            # 如果finta的HISTOGRAM列有值且不为0，使用它；否则手动计算
                             if 'HISTOGRAM' in macd_df.columns:
-                                macd['bar'] = float(macd_df['HISTOGRAM'].iloc[-1])
+                                histogram_value = macd_df['HISTOGRAM'].iloc[-1]
+                                if pd.notna(histogram_value) and histogram_value != 0:
+                                    macd['bar'] = float(histogram_value)
+                                else:
+                                    # 如果HISTOGRAM为0或NaN，手动计算：BAR = DIF - DEA
+                                    macd['bar'] = macd['dif'] - macd['dea']
+                            else:
+                                # 如果没有HISTOGRAM列，手动计算
+                                macd['bar'] = macd['dif'] - macd['dea']
                     except Exception as e:
                         logger.warning(f'[MACD] 无法计算MACD: {e}')
                 else:
