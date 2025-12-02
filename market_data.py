@@ -518,18 +518,13 @@ class MarketDataFetcher:
                     vol_data['buy_vol'] = 0
                     vol_data['sell_vol'] = 0
                 
-                # 计算均量线（MAVOL）
+                # 计算均量线（MAVOL）- 使用pandas的rolling方法直接计算，更可靠
                 for length in mavol_lengths:
                     if len(volumes) >= length:
                         try:
-                            mavol_series = ta.SMA(df[['volume']], period=length)
-                            if mavol_series is not None and not mavol_series.empty:
-                                vol_data[f'mavol{length}'] = float(mavol_series.iloc[-1])
-                            else:
-                                vol_data[f'mavol{length}'] = 0.0
-                                logger.warning(
-                                    f'[VOL] 无法计算MAVOL{length}: finta返回空结果'
-                                )
+                            # 直接使用pandas的rolling方法计算volume的移动平均
+                            mavol_value = df['volume'].rolling(window=length, min_periods=length).mean().iloc[-1]
+                            vol_data[f'mavol{length}'] = float(mavol_value) if pd.notna(mavol_value) else 0.0
                         except Exception as e:
                             vol_data[f'mavol{length}'] = 0.0
                             logger.warning(
@@ -793,23 +788,18 @@ class MarketDataFetcher:
                     except Exception as e:
                         logger.warning(f'[RSI] 无法计算RSI9: {e}')
                 
-                # 计算VOL指标（成交量）和均量线（MAVOL）使用pandas-ta
+                # 计算VOL指标（成交量）和均量线（MAVOL）
                 vol_data = {}
                 # VOL：最新一根K线的成交量
                 vol_data['vol'] = volumes[-1] if volumes else 0.0
                 
-                # 计算均量线（MAVOL）
+                # 计算均量线（MAVOL）- 使用pandas的rolling方法直接计算，更可靠
                 for length in mavol_lengths:
                     if len(volumes) >= length:
                         try:
-                            mavol_series = ta.SMA(df[['volume']], period=length)
-                            if mavol_series is not None and not mavol_series.empty:
-                                vol_data[f'mavol{length}'] = float(mavol_series.iloc[-1])
-                            else:
-                                vol_data[f'mavol{length}'] = 0.0
-                                logger.warning(
-                                    f'[VOL] 无法计算MAVOL{length}: finta返回空结果'
-                                )
+                            # 直接使用pandas的rolling方法计算volume的移动平均
+                            mavol_value = df['volume'].rolling(window=length, min_periods=length).mean().iloc[-1]
+                            vol_data[f'mavol{length}'] = float(mavol_value) if pd.notna(mavol_value) else 0.0
                         except Exception as e:
                             vol_data[f'mavol{length}'] = 0.0
                             logger.warning(
