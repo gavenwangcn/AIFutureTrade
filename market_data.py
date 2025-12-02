@@ -8,7 +8,7 @@ import config as app_config
 from datetime import datetime, timezone
 from typing import Dict, List, Optional
 import pandas as pd
-import pandas_ta as ta
+from finta import TA as ta
 
 from binance_futures import BinanceFuturesClient
 from database_clickhouse import ClickHouseDatabase
@@ -418,87 +418,112 @@ class MarketDataFetcher:
                     'volume': volumes
                 })
                 
-                # 实时计算MA值（简单移动平均）使用pandas-ta
+                # 实时计算MA值（简单移动平均）使用finta
                 ma_values = {}
                 for length in ma_lengths:
                     if len(closes) >= length:
-                        ma_series = ta.sma(df['close'], length=length)
-                        if ma_series is not None and not ma_series.empty:
-                            ma_values[f'ma{length}'] = float(ma_series.iloc[-1])
-                        else:
+                        try:
+                            ma_series = ta.SMA(df, period=length)
+                            if ma_series is not None and not ma_series.empty:
+                                ma_values[f'ma{length}'] = float(ma_series.iloc[-1])
+                            else:
+                                ma_values[f'ma{length}'] = 0.0
+                        except Exception as e:
                             ma_values[f'ma{length}'] = 0.0
+                            logger.warning(
+                                f'[MA] 无法计算MA{length}: {e}'
+                            )
                     else:
                         ma_values[f'ma{length}'] = 0.0
                         logger.warning(
                             f'[MA] 数据不足: MA{length}需要至少{length}根K线数据，实际只有{len(closes)}根，无法计算'
                         )
                 
-                # 实时计算MACD指标使用pandas-ta
+                # 实时计算MACD指标使用finta
                 macd = {'dif': 0.0, 'dea': 0.0, 'bar': 0.0}
                 if len(closes) >= 26:  # MACD需要至少26个数据点
-                    macd_df = ta.macd(df['close'], fast=12, slow=26, signal=9)
-                    if macd_df is not None and not macd_df.empty:
-                        # pandas-ta返回的列名可能因版本而异，尝试几种常见的命名
-                        dif_col = None
-                        dea_col = None
-                        bar_col = None
-                        
-                        # 查找对应的列
-                        for col in macd_df.columns:
-                            if 'MACDh' in col or 'histogram' in col or 'bar' in col.lower():
-                                bar_col = col
-                            elif 'MACDs' in col or 'signal' in col:
-                                dea_col = col
-                            elif 'MACD_' in col or 'macd' in col.lower():
-                                dif_col = col
-                        
-                        # 如果找不到标准列名，使用索引
-                        if dif_col is None and len(macd_df.columns) >= 1:
-                            dif_col = macd_df.columns[0]
-                        if dea_col is None and len(macd_df.columns) >= 2:
-                            dea_col = macd_df.columns[1]
-                        if bar_col is None and len(macd_df.columns) >= 3:
-                            bar_col = macd_df.columns[2]
-                        
-                        # 获取最新值
-                        if dif_col and dif_col in macd_df.columns:
-                            macd['dif'] = float(macd_df[dif_col].iloc[-1])
-                        if dea_col and dea_col in macd_df.columns:
-                            macd['dea'] = float(macd_df[dea_col].iloc[-1])
-                        if bar_col and bar_col in macd_df.columns:
-                            macd['bar'] = float(macd_df[bar_col].iloc[-1])
+                    try:
+                        macd_df = ta.MACD(df, period_fast=12, period_slow=26, signal=9)
+                        if macd_df is not None and not macd_df.empty:
+                            # finta返回固定的列名: MACD, SIGNAL, HISTOGRAM
+                            if 'MACD' in macd_df.columns:
+                                macd['dif'] = float(macd_df['MACD'].iloc[-1])
+                            if 'SIGNAL' in macd_df.columns:
+                                macd['dea'] = float(macd_df['SIGNAL'].iloc[-1])
+                            if 'HISTOGRAM' in macd_df.columns:
+                                macd['bar'] = float(macd_df['HISTOGRAM'].iloc[-1])
+                    except Exception as e:
+                        logger.warning(f'[MACD] 无法计算MACD: {e}')
                 else:
                     logger.warning(f'[MACD] 数据不足: 需要至少26个数据点，实际只有{len(closes)}个')
                 
-                # 实时计算RSI指标使用pandas-ta
+                # 实时计算RSI指标使用finta
                 rsi = {'rsi6': 50.0, 'rsi9': 50.0}
                 # 计算RSI(6)
                 if len(closes) >= 7:  # RSI(6)需要至少7个数据点
-                    rsi6_series = ta.rsi(df['close'], length=6)
-                    if rsi6_series is not None and not rsi6_series.empty:
-                        rsi['rsi6'] = float(rsi6_series.iloc[-1])
+                    try:
+                        rsi6_series = ta.RSI(df, period=6)
+                        if rsi6_series is not None and not rsi6_series.empty:
+                            rsi['rsi6'] = float(rsi6_series.iloc[-1])
+                    except Exception as e:
+                        logger.warning(f'[RSI] 无法计算RSI6: {e}')
                 
                 # 计算RSI(9)
                 if len(closes) >= 10:  # RSI(9)需要至少10个数据点
-                    rsi9_series = ta.rsi(df['close'], length=9)
-                    if rsi9_series is not None and not rsi9_series.empty:
-                        rsi['rsi9'] = float(rsi9_series.iloc[-1])
+                    try:
+                        rsi9_series = ta.RSI(df, period=9)
+                        if rsi9_series is not None and not rsi9_series.empty:
+                            rsi['rsi9'] = float(rsi9_series.iloc[-1])
+                    except Exception as e:
+                        logger.warning(f'[RSI] 无法计算RSI9: {e}')
                 
                 # 计算VOL指标（成交量）和均量线（MAVOL）使用pandas-ta
                 vol_data = {}
                 # VOL：最新一根K线的成交量
                 vol_data['vol'] = volumes[-1] if volumes else 0.0
                 
+                # 获取最新K线的买入成交量和卖出成交量
+                # 从klines中提取买入成交量数据
+                buy_volumes = []
+                for item in klines:
+                    try:
+                        # 如果是字典格式（新的实现）
+                        if isinstance(item, dict):
+                            buy_volume = float(item.get('taker_buy_base_volume', 0))
+                            buy_volumes.append(buy_volume)
+                        # 如果是列表格式（旧的实现）
+                        elif isinstance(item, (list, tuple)) and len(item) > 10:
+                            buy_volume = float(item[9])  # taker_buy_base_volume 是第10个元素（索引9）
+                            buy_volumes.append(buy_volume)
+                        else:
+                            buy_volumes.append(0)
+                    except (ValueError, TypeError, IndexError):
+                        buy_volumes.append(0)
+                
+                # 计算最新K线的买入量和卖出量
+                if buy_volumes:
+                    vol_data['buy_vol'] = buy_volumes[-1]
+                    vol_data['sell_vol'] = volumes[-1] - buy_volumes[-1] if volumes else 0
+                else:
+                    vol_data['buy_vol'] = 0
+                    vol_data['sell_vol'] = 0
+                
                 # 计算均量线（MAVOL）
                 for length in mavol_lengths:
                     if len(volumes) >= length:
-                        mavol_series = ta.sma(df['volume'], length=length)
-                        if mavol_series is not None and not mavol_series.empty:
-                            vol_data[f'mavol{length}'] = float(mavol_series.iloc[-1])
-                        else:
+                        try:
+                            mavol_series = ta.SMA(df[['volume']], period=length)
+                            if mavol_series is not None and not mavol_series.empty:
+                                vol_data[f'mavol{length}'] = float(mavol_series.iloc[-1])
+                            else:
+                                vol_data[f'mavol{length}'] = 0.0
+                                logger.warning(
+                                    f'[VOL] 无法计算MAVOL{length}: finta返回空结果'
+                                )
+                        except Exception as e:
                             vol_data[f'mavol{length}'] = 0.0
                             logger.warning(
-                                f'[VOL] 无法计算MAVOL{length}: pandas-ta返回空结果'
+                                f'[VOL] 无法计算MAVOL{length}: {e}'
                             )
                     else:
                         # 数据不足：使用所有可用数据的平均值
@@ -688,71 +713,64 @@ class MarketDataFetcher:
                     'volume': volumes
                 })
                 
-                # 实时计算MA值（简单移动平均）使用pandas-ta
+                # 实时计算MA值（简单移动平均）使用finta
                 ma_values = {}
                 for length in ma_lengths:
                     if len(closes) >= length:
-                        ma_series = ta.sma(df['close'], length=length)
-                        if ma_series is not None and not ma_series.empty:
-                            ma_values[f'ma{length}'] = float(ma_series.iloc[-1])
-                        else:
+                        try:
+                            ma_series = ta.SMA(df, period=length)
+                            if ma_series is not None and not ma_series.empty:
+                                ma_values[f'ma{length}'] = float(ma_series.iloc[-1])
+                            else:
+                                ma_values[f'ma{length}'] = 0.0
+                        except Exception as e:
                             ma_values[f'ma{length}'] = 0.0
+                            logger.warning(
+                                f'[MA] 无法计算MA{length}: {e}'
+                            )
                     else:
                         ma_values[f'ma{length}'] = 0.0
                         logger.warning(
                             f'[MA] 数据不足: MA{length}需要至少{length}根K线数据，实际只有{len(closes)}根，无法计算'
                         )
                 
-                # 实时计算MACD指标使用pandas-ta
+                # 实时计算MACD指标使用finta
                 macd = {'dif': 0.0, 'dea': 0.0, 'bar': 0.0}
                 if len(closes) >= 26:  # MACD需要至少26个数据点
-                    macd_df = ta.macd(df['close'], fast=12, slow=26, signal=9)
-                    if macd_df is not None and not macd_df.empty:
-                        # pandas-ta返回的列名可能因版本而异，尝试几种常见的命名
-                        dif_col = None
-                        dea_col = None
-                        bar_col = None
-                        
-                        # 查找对应的列
-                        for col in macd_df.columns:
-                            if 'MACDh' in col or 'histogram' in col or 'bar' in col.lower():
-                                bar_col = col
-                            elif 'MACDs' in col or 'signal' in col:
-                                dea_col = col
-                            elif 'MACD_' in col or 'macd' in col.lower():
-                                dif_col = col
-                        
-                        # 如果找不到标准列名，使用索引
-                        if dif_col is None and len(macd_df.columns) >= 1:
-                            dif_col = macd_df.columns[0]
-                        if dea_col is None and len(macd_df.columns) >= 2:
-                            dea_col = macd_df.columns[1]
-                        if bar_col is None and len(macd_df.columns) >= 3:
-                            bar_col = macd_df.columns[2]
-                        
-                        # 获取最新值
-                        if dif_col and dif_col in macd_df.columns:
-                            macd['dif'] = float(macd_df[dif_col].iloc[-1])
-                        if dea_col and dea_col in macd_df.columns:
-                            macd['dea'] = float(macd_df[dea_col].iloc[-1])
-                        if bar_col and bar_col in macd_df.columns:
-                            macd['bar'] = float(macd_df[bar_col].iloc[-1])
+                    try:
+                        macd_df = ta.MACD(df, period_fast=12, period_slow=26, signal=9)
+                        if macd_df is not None and not macd_df.empty:
+                            # finta返回固定的列名: MACD, SIGNAL, HISTOGRAM
+                            if 'MACD' in macd_df.columns:
+                                macd['dif'] = float(macd_df['MACD'].iloc[-1])
+                            if 'SIGNAL' in macd_df.columns:
+                                macd['dea'] = float(macd_df['SIGNAL'].iloc[-1])
+                            if 'HISTOGRAM' in macd_df.columns:
+                                macd['bar'] = float(macd_df['HISTOGRAM'].iloc[-1])
+                    except Exception as e:
+                        logger.warning(f'[MACD] 无法计算MACD: {e}')
                 else:
                     logger.warning(f'[MACD] 数据不足: 需要至少26个数据点，实际只有{len(closes)}个')
                 
-                # 实时计算RSI指标使用pandas-ta
+                # 实时计算RSI指标使用finta
                 rsi = {'rsi6': 50.0, 'rsi9': 50.0}
                 # 计算RSI(6)
                 if len(closes) >= 7:  # RSI(6)需要至少7个数据点
-                    rsi6_series = ta.rsi(df['close'], length=6)
-                    if rsi6_series is not None and not rsi6_series.empty:
-                        rsi['rsi6'] = float(rsi6_series.iloc[-1])
+                    try:
+                        rsi6_series = ta.RSI(df, period=6)
+                        if rsi6_series is not None and not rsi6_series.empty:
+                            rsi['rsi6'] = float(rsi6_series.iloc[-1])
+                    except Exception as e:
+                        logger.warning(f'[RSI] 无法计算RSI6: {e}')
                 
                 # 计算RSI(9)
                 if len(closes) >= 10:  # RSI(9)需要至少10个数据点
-                    rsi9_series = ta.rsi(df['close'], length=9)
-                    if rsi9_series is not None and not rsi9_series.empty:
-                        rsi['rsi9'] = float(rsi9_series.iloc[-1])
+                    try:
+                        rsi9_series = ta.RSI(df, period=9)
+                        if rsi9_series is not None and not rsi9_series.empty:
+                            rsi['rsi9'] = float(rsi9_series.iloc[-1])
+                    except Exception as e:
+                        logger.warning(f'[RSI] 无法计算RSI9: {e}')
                 
                 # 计算VOL指标（成交量）和均量线（MAVOL）使用pandas-ta
                 vol_data = {}
@@ -762,13 +780,19 @@ class MarketDataFetcher:
                 # 计算均量线（MAVOL）
                 for length in mavol_lengths:
                     if len(volumes) >= length:
-                        mavol_series = ta.sma(df['volume'], length=length)
-                        if mavol_series is not None and not mavol_series.empty:
-                            vol_data[f'mavol{length}'] = float(mavol_series.iloc[-1])
-                        else:
+                        try:
+                            mavol_series = ta.SMA(df[['volume']], period=length)
+                            if mavol_series is not None and not mavol_series.empty:
+                                vol_data[f'mavol{length}'] = float(mavol_series.iloc[-1])
+                            else:
+                                vol_data[f'mavol{length}'] = 0.0
+                                logger.warning(
+                                    f'[VOL] 无法计算MAVOL{length}: finta返回空结果'
+                                )
+                        except Exception as e:
                             vol_data[f'mavol{length}'] = 0.0
                             logger.warning(
-                                f'[VOL] 无法计算MAVOL{length}: pandas-ta返回空结果'
+                                f'[VOL] 无法计算MAVOL{length}: {e}'
                             )
                     else:
                         # 数据不足：使用所有可用数据的平均值

@@ -2894,15 +2894,19 @@ class TradingApp {
             }
             
             // 成交量（VOL）指标
-            // VOL数据格式：{vol: 当前周期成交量, mavol5: 5周期均量线, mavol10: 10周期均量线}
+            // VOL数据格式：{vol: 当前周期成交量, buy_vol: 买入量, sell_vol: 卖出量, mavol5: 5周期均量线, mavol10: 10周期均量线}
             if (data.vol !== undefined && data.vol !== null) {
                 let volValue = null;
+                let buyVolValue = null;
+                let sellVolValue = null;
                 let mavol5Value = null;
                 let mavol10Value = null;
                 
                 // 兼容新旧格式：可能是对象或数值
                 if (typeof data.vol === 'object') {
                     volValue = data.vol.vol;
+                    buyVolValue = data.vol.buy_vol;
+                    sellVolValue = data.vol.sell_vol;
                     mavol5Value = data.vol.mavol5;
                     mavol10Value = data.vol.mavol10;
                 } else {
@@ -2910,11 +2914,25 @@ class TradingApp {
                     volValue = data.vol;
                 }
                 
-                // 显示VOL值
+                // 显示VOL值，带颜色区分买入/卖出量
                 if (volValue !== undefined && volValue !== null) {
                     const vol = parseFloat(volValue);
                     if (!isNaN(vol) && vol > 0) {
-                        parts.push(`VOL: ${this.formatCompactUsd(vol)}`);
+                        let volDisplay = `VOL: ${this.formatCompactUsd(vol)}`;
+                        
+                        // 如果有买入/卖出量数据，添加颜色区分显示
+                        if (buyVolValue !== undefined && buyVolValue !== null && 
+                            sellVolValue !== undefined && sellVolValue !== null) {
+                            const buyVol = parseFloat(buyVolValue);
+                            const sellVol = parseFloat(sellVolValue);
+                            
+                            if (!isNaN(buyVol) && !isNaN(sellVol) && (buyVol > 0 || sellVol > 0)) {
+                                // 使用红色表示买入量，绿色表示卖出量
+                                volDisplay = `VOL: <span style="color: #ff4d4f;">↑${this.formatCompactUsd(buyVol)}</span>/<span style="color: #52c41a;">↓${this.formatCompactUsd(sellVol)}</span>`;
+                            }
+                        }
+                        
+                        parts.push(volDisplay);
                     }
                 }
                 
