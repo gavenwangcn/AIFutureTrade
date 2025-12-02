@@ -1,10 +1,14 @@
 version: '3.8'
 
 services:
-  web:
-    build: .
+  # 后端服务（Python Flask API）
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: aifuturetrade-backend
     ports:
-      - "5002:5002"  # Web服务端口，Flask应用
+      - "5002:5002"  # 后端API端口
     volumes:
       - ./data:/app/data
     environment:
@@ -12,13 +16,44 @@ services:
       - USE_GUNICORN=true
       - FLASK_ENV=production
     restart: unless-stopped
+    networks:
+      - aifuturetrade-network
+
+  # 前端服务（Node.js Express）
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      # 注意：默认情况下，如果镜像已存在，docker compose up 不会重新构建
+      # 需要代码变化时重新构建，请使用: docker compose up -d --build
+    container_name: aifuturetrade-frontend
+    ports:
+      - "3000:3000"  # 前端服务端口
+    environment:
+      - BACKEND_URL=http://backend:5002
+      - FRONTEND_PORT=3000
+    depends_on:
+      - backend
+    restart: unless-stopped
+    networks:
+      - aifuturetrade-network
+
+  # 异步代理服务（后台数据同步）
   async-agent:
-    build: .
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: aifuturetrade-async-agent
     command: ["python", "async_agent.py", "--task", "all"]
     # 注意：async-agent 是后台数据同步服务，不需要暴露端口
-    # 不设置 ports 映射，避免端口冲突
-    # 启动所有任务服务：market_tickers, kline_sync, kline_cleanup
     volumes:
       - ./data:/app/data
+    depends_on:
+      - backend
     restart: unless-stopped
+    networks:
+      - aifuturetrade-network
 
+networks:
+  aifuturetrade-network:
+    driver: bridge

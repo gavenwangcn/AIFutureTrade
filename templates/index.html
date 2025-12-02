@@ -538,8 +538,38 @@
     </div>
 
     <script src="https://cdn.socket.io/4.7.5/socket.io.min.js" integrity="sha384-5ZMcnnbYTS8ZJmyATLulQqnGX+HGwccPt6DVJFWG0FjhuLocMewS17EwM5JrgU6G" crossorigin="anonymous"></script>
-    <!-- KLineChart库 -->
-    <script src="https://unpkg.com/klinecharts@latest/dist/klinecharts.min.js"></script>
+    <!-- KLineChart库 - 优先使用本地构建版本，如果不存在则使用CDN -->
+    <script>
+        // 智能加载KLineChart：优先本地构建版本，失败则使用CDN
+        (function() {
+            // 检查本地文件是否存在
+            fetch('/static/lib/klinecharts.min.js', { method: 'HEAD' })
+                .then(response => {
+                    if (response.ok) {
+                        // 本地文件存在，使用本地版本
+                        const script = document.createElement('script');
+                        script.src = '/static/lib/klinecharts.min.js';
+                        document.head.appendChild(script);
+                    } else {
+                        // 本地文件不存在，使用CDN
+                        loadKLineChartFromCDN();
+                    }
+                })
+                .catch(() => {
+                    // 请求失败，使用CDN
+                    loadKLineChartFromCDN();
+                });
+            
+            function loadKLineChartFromCDN() {
+                const script = document.createElement('script');
+                script.src = 'https://unpkg.com/klinecharts@latest/dist/klinecharts.min.js';
+                script.onerror = function() {
+                    console.error('Failed to load KLineChart from CDN');
+                };
+                document.head.appendChild(script);
+            }
+        })();
+    </script>
     <script src="/static/app.js"></script>
 </body>
 </html>

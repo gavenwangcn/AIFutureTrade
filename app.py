@@ -27,7 +27,11 @@ import sys
 # ============ Application Initialization ============
 
 app = Flask(__name__)
-CORS(app)
+# CORS配置：允许前端服务访问
+CORS(app, resources={
+    r"/api/*": {"origins": ["http://localhost:3000", "http://frontend:3000"]},
+    r"/socket.io/*": {"origins": ["http://localhost:3000", "http://frontend:3000"]}
+})
 # 使用eventlet作为异步模式以获得更好的性能
 # async_mode='eventlet' 提供更好的并发性能
 socketio = SocketIO(
