@@ -120,9 +120,21 @@ export function useTradingApp() {
         leaderboardStatus.value = '已连接，等待数据...'
         
         // 验证事件监听器是否已注册
-        const registeredEvents = socket.value.eventNames()
-        console.log('[WebSocket] 已注册的事件监听器:', Array.from(registeredEvents))
-        console.log('[WebSocket] leaderboard:update 监听器已注册:', socket.value.hasListeners('leaderboard:update'))
+        // 注意：Socket.IO 客户端可能不支持 eventNames() 方法，使用 hasListeners() 检查
+        try {
+          if (typeof socket.value.hasListeners === 'function') {
+            console.log('[WebSocket] leaderboard:update 监听器已注册:', socket.value.hasListeners('leaderboard:update'))
+          }
+          // 尝试获取已注册的事件（如果支持）
+          if (typeof socket.value.eventNames === 'function') {
+            const registeredEvents = socket.value.eventNames()
+            console.log('[WebSocket] 已注册的事件监听器:', Array.from(registeredEvents))
+          } else {
+            console.log('[WebSocket] eventNames() 方法不可用，跳过事件列表检查')
+          }
+        } catch (e) {
+          console.warn('[WebSocket] 检查事件监听器时出错:', e)
+        }
         
         // 连接成功后请求初始涨跌幅榜数据
         console.log('[WebSocket] 📤 发送 leaderboard:request 事件，请求初始涨跌幅榜数据')
