@@ -10,6 +10,17 @@ FROM node:18-slim
 
 WORKDIR /app
 
+# 配置 npm 镜像源（使用淘宝镜像以提高下载速度和稳定性）
+# 可以通过构建参数 NPM_REGISTRY 覆盖默认镜像源
+# 例如：docker build --build-arg NPM_REGISTRY=https://registry.npmjs.org
+ARG NPM_REGISTRY=https://registry.npmmirror.com
+RUN npm config set registry ${NPM_REGISTRY} && \
+    npm config set fetch-retries 5 && \
+    npm config set fetch-retry-mintimeout 20000 && \
+    npm config set fetch-retry-maxtimeout 120000 && \
+    npm config set fetch-timeout 300000 && \
+    echo "[Dockerfile] npm registry configured to: ${NPM_REGISTRY}"
+
 # ==============================================================================
 # 阶段1：安装依赖
 # ==============================================================================
@@ -20,10 +31,14 @@ COPY frontend/scripts/ scripts/
 # 安装npm依赖（包括 klinecharts）
 # 按官网要求：npm install klinecharts
 # 注意：klinecharts 将通过 npm 安装，然后在 Vue 组件中通过 ES6 import 使用
+# 添加重试机制以提高网络不稳定时的成功率
 RUN if [ -f package-lock.json ]; then \
-        npm ci; \
+        npm ci --legacy-peer-deps || \
+        (echo "[Dockerfile] npm ci failed, retrying with npm install..." && \
+         rm -f package-lock.json && \
+         npm install --legacy-peer-deps); \
     else \
-        npm install; \
+        npm install --legacy-peer-deps; \
     fi
 
 # 验证 klinecharts 是否已正确安装
