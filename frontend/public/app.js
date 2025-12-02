@@ -258,7 +258,15 @@ class TradingApp {
 
         try {
             // 连接到WebSocket服务器
-            this.socket = io();
+            // 注意：前端服务器会代理 /socket.io/* 到后端，所以使用相对路径即可
+            // 如果需要直接连接后端，可以使用：io('http://localhost:5002')
+            this.socket = io({
+                path: '/socket.io',
+                transports: ['websocket', 'polling'],
+                reconnection: true,
+                reconnectionDelay: 1000,
+                reconnectionAttempts: 5
+            });
             
             // 监听涨跌幅榜更新事件
             this.socket.on('leaderboard:update', (data) => {
@@ -2791,11 +2799,44 @@ class KLineChartManager {
             klinechartsLib = window.klinecharts;
         }
         
+        // 如果还没加载，等待一下再试（可能是异步加载）
         if (!klinechartsLib) {
-            console.error('KLineChart library not loaded. Please ensure /lib/klinecharts.min.js is loaded.');
-            return;
+            // 检查脚本标签是否已加载
+            const scriptTags = document.querySelectorAll('script[src*="klinecharts"]');
+            if (scriptTags.length > 0) {
+                // 脚本标签存在，但库还没加载，等待一下
+                console.warn('[KLineChart] Script tag found but library not loaded yet, waiting...');
+                setTimeout(() => {
+                    let lib = null;
+                    if (typeof klinecharts !== 'undefined') {
+                        lib = klinecharts;
+                    } else if (typeof window.klinecharts !== 'undefined') {
+                        lib = window.klinecharts;
+                    }
+                    if (lib) {
+                        console.log('[KLineChart] Library loaded after delay');
+                        this._initChartInternal(containerId, symbol, interval, lib);
+                    } else {
+                        console.error('[KLineChart] Library still not loaded after delay');
+                        console.error('[KLineChart] Please check if /lib/klinecharts.min.js is accessible');
+                    }
+                }, 500);
+                return;
+            } else {
+                console.error('[KLineChart] Library not loaded and script tag not found');
+                console.error('[KLineChart] Please ensure /lib/klinecharts.min.js is loaded in index.html');
+                return;
+            }
         }
-
+        
+        this._initChartInternal(containerId, symbol, interval, klinechartsLib);
+    }
+    
+    /**
+     * 初始化图表（内部方法）
+     * @private
+     */
+    _initChartInternal(containerId, symbol, interval, klinechartsLib) {
         this.currentSymbol = symbol;
         this.currentInterval = interval;
         this.historicalDataLoaded = false;
@@ -2803,14 +2844,15 @@ class KLineChartManager {
         // 获取容器元素
         const container = document.getElementById(containerId);
         if (!container) {
-            console.error(`Container ${containerId} not found`);
+            console.error(`[KLineChart] Container ${containerId} not found`);
             return;
         }
 
         // 创建图表实例 - 使用klinecharts库的init函数
         const initFn = klinechartsLib.init;
         if (!initFn || typeof initFn !== 'function') {
-            console.error('KLineChart init function not found. Library:', klinechartsLib);
+            console.error('[KLineChart] init function not found. Library:', klinechartsLib);
+            console.error('[KLineChart] Available methods:', Object.keys(klinechartsLib));
             return;
         }
 
@@ -2821,8 +2863,10 @@ class KLineChartManager {
             if (this.chart && this.chart.setTheme) {
                 this.chart.setTheme('dark');
             }
+            
+            console.log('[KLineChart] Chart initialized successfully');
         } catch (error) {
-            console.error('Failed to initialize KLineChart:', error);
+            console.error('[KLineChart] Failed to initialize chart:', error);
             return;
         }
 

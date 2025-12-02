@@ -538,10 +538,14 @@
     </div>
 
     <!-- Socket.IO客户端 -->
-    <!-- 移除integrity属性以避免SRI检查失败，或使用正确的hash -->
+    <!-- 注意：移除integrity属性以避免SRI检查失败 -->
     <script src="https://cdn.socket.io/4.7.5/socket.io.min.js" crossorigin="anonymous"></script>
+    
     <!-- KLineChart库 - 使用本地npm安装的版本（不使用CDN） -->
-    <script src="/lib/klinecharts.min.js"></script>
+    <!-- 注意：如果加载失败，会在控制台显示错误信息 -->
+    <script src="/lib/klinecharts.min.js" onerror="console.error('Failed to load KLineChart from /lib/klinecharts.min.js')"></script>
+    
+    <!-- 前端应用JavaScript -->
     <script src="/app.js"></script>
 </body>
 </html>
