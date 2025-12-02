@@ -28,6 +28,5 @@ Dockerfile
 .env
 .env.local
 
-# 脚本目录（构建时不需要）
-scripts/
+# 注意：scripts/ 目录需要在构建时使用（postinstall脚本），所以不能排除
 
