@@ -1,3 +1,10 @@
+# ==============================================================================
+# Docker 构建忽略文件（根目录）
+# ==============================================================================
+# 注意：此文件用于后端Dockerfile构建
+# 前端Dockerfile构建时，需要访问frontend/目录，所以不能排除
+# ==============================================================================
+
 # Python
 __pycache__/
 *.py[cod]
@@ -11,15 +18,15 @@ ENV/
 pip-log.txt
 pip-delete-this-directory.txt
 
-# Node.js (根目录)
+# Node.js (根目录，但不排除frontend/node_modules)
 node_modules/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 package-lock.json
 
-# Frontend目录（后端Dockerfile不需要）
-frontend/
+# 注意：frontend/ 目录不能排除，因为前端Dockerfile需要访问它
+# 后端Dockerfile会在COPY指令中排除frontend目录（通过精确的COPY路径）
 
 # IDE
 .vscode/
@@ -58,4 +65,3 @@ docker-compose.yml
 *.log
 .env
 .env.local
-
