@@ -1022,7 +1022,7 @@ class ClickHouseDatabase:
         ORDER BY (side, rank, symbol, create_datetime_long)
         """
         self.command(ddl)
-        logger.info("[ClickHouse] Ensured table %s exists", self.leaderboard_table)
+        logger.debug("[ClickHouse] Ensured table %s exists", self.leaderboard_table)
 
     # ==================================================================
     # Leaderboard 模块：数据查询
@@ -1210,18 +1210,18 @@ class ClickHouseDatabase:
             top_n: 涨跌幅前N名数量
         """
         try:
-            logger.info("[ClickHouse] 🚀 开始涨跌幅榜同步...")
-            logger.info("[ClickHouse] 📋 同步参数: top_n=%s (查询所有数据，不限制时间窗口)", top_n)
+            logger.debug("[ClickHouse] 🚀 开始涨跌幅榜同步...")
+            logger.debug("[ClickHouse] 📋 同步参数: top_n=%s (查询所有数据，不限制时间窗口)", top_n)
             
             # 重要：检查表是否存在，不存在则创建
-            logger.info("[ClickHouse] 🔍 检查leaderboard表是否存在...")
+            logger.debug("[ClickHouse] 🔍 检查leaderboard表是否存在...")
             table_exists = self._check_table_exists(self.leaderboard_table)
             if not table_exists:
-                logger.info("[ClickHouse] 📋 leaderboard表不存在，创建表...")
+                logger.debug("[ClickHouse] 📋 leaderboard表不存在，创建表...")
                 self.ensure_leaderboard_table()
-                logger.info("[ClickHouse] ✅ leaderboard表创建完成")
+                logger.debug("[ClickHouse] ✅ leaderboard表创建完成")
             else:
-                logger.info("[ClickHouse] ✅ leaderboard表已存在")
+                logger.debug("[ClickHouse] ✅ leaderboard表已存在")
             
             # 查询涨幅榜前N名（查询所有数据，按涨跌幅排序）
             logger.debug("[ClickHouse] 🔍 查询涨幅榜前%s名（从所有数据中排序）...", top_n)
@@ -1249,7 +1249,7 @@ class ClickHouseDatabase:
                 return
             
             # 准备插入数据
-            logger.info("[ClickHouse] 📝 准备插入数据...")
+            logger.debug("[ClickHouse] 📝 准备插入数据...")
             all_rows = []
             column_names = [
                 "event_time", "symbol", "price_change", "price_change_percent", "side",
@@ -1273,7 +1273,7 @@ class ClickHouseDatabase:
             )
             
             # 添加涨幅榜数据（带排名）
-            logger.info("[ClickHouse] 📊 处理涨幅榜数据...")
+            logger.debug("[ClickHouse] 📊 处理涨幅榜数据...")
             for idx, row in enumerate(gainers, 1):
                 symbol = row.get("symbol", "")
                 base_volume_raw = row.get("base_volume")
@@ -1312,10 +1312,10 @@ class ClickHouseDatabase:
                     batch_time_long,  # create_datetime_long，同一批次使用相同的毫秒级时间戳
                 ]
                 all_rows.append(row_data)
-            logger.info("[ClickHouse] ✅ 涨幅榜数据处理完成，共 %s 条", len(gainers))
+            logger.debug("[ClickHouse] ✅ 涨幅榜数据处理完成，共 %s 条", len(gainers))
             
             # 添加跌幅榜数据（带排名）
-            logger.info("[ClickHouse] 📊 处理跌幅榜数据...")
+            logger.debug("[ClickHouse] 📊 处理跌幅榜数据...")
             for idx, row in enumerate(losers, 1):
                 symbol = row.get("symbol", "")
                 base_volume_raw = row.get("base_volume")
@@ -1354,16 +1354,16 @@ class ClickHouseDatabase:
                     batch_time_long,  # create_datetime_long，同一批次使用相同的毫秒级时间戳
                 ]
                 all_rows.append(row_data)
-            logger.info("[ClickHouse] ✅ 跌幅榜数据处理完成，共 %s 条", len(losers))
+            logger.debug("[ClickHouse] ✅ 跌幅榜数据处理完成，共 %s 条", len(losers))
             
             if all_rows:
-                logger.info("[ClickHouse] 💾 准备批量插入数据到ClickHouse，共 %s 条...", len(all_rows))
+                logger.debug("[ClickHouse] 💾 准备批量插入数据到ClickHouse，共 %s 条...", len(all_rows))
 
                 # 使用锁防止并发执行插入，避免并发批次交织
                 with ClickHouseDatabase._sync_leaderboard_lock:
                     # 直接使用 ClickHouse 批量插入，不再使用临时表/全量替换方案
                     self.insert_rows(self.leaderboard_table, all_rows, column_names)
-                    logger.info(
+                    logger.debug(
                         "[ClickHouse] ✅ 批量插入完成，本次批次时间戳: %s (create_datetime_long=%s), 涨幅: %d 条, 跌幅: %d 条",
                         batch_time.isoformat(),
                         batch_time_long,
@@ -1530,6 +1530,8 @@ class ClickHouseDatabase:
         try:
             from datetime import datetime, timezone
             
+            logger.debug("[ClickHouse] 🔧 初始化清理参数 | 保留时间: %s 分钟", minutes)
+            
             # 计算当前时间减去指定分钟数后的毫秒级时间戳
             current_time = datetime.now(timezone.utc)
             cutoff_time = current_time
@@ -1538,6 +1540,12 @@ class ClickHouseDatabase:
             
             stats['cutoff_timestamp_ms'] = cutoff_timestamp_ms
             stats['cutoff_time'] = cutoff_time_str
+            
+            logger.debug(
+                "[ClickHouse] ✅ 清理参数计算完成 | 截止时间戳(ms): %s | 截止时间: %s",
+                cutoff_timestamp_ms,
+                cutoff_time_str,
+            )
             
             # 记录当前时间和截止时间的详细信息，用于调试时区问题
             logger.info(
@@ -1606,11 +1614,23 @@ class ClickHouseDatabase:
             """
             
             logger.info("[ClickHouse] 🔨 执行删除操作...")
-            self.command(delete_sql)
+            logger.debug("[ClickHouse] 📝 DELETE SQL: %s", delete_sql.strip())
+            
+            try:
+                self.command(delete_sql)
+                logger.info("[ClickHouse] ✅ DELETE 操作已成功提交到 ClickHouse（异步执行）")
+            except Exception as delete_exc:
+                logger.error(
+                    "[ClickHouse] ❌ DELETE 操作提交失败 | 错误: %s",
+                    delete_exc,
+                    exc_info=True,
+                )
+                raise  # 重新抛出异常，让上层处理
             
             # 查询清理后的数据量（由于DELETE是异步的，这里只是估算）
             try:
                 # 等待一小段时间让DELETE操作开始执行
+                logger.debug("[ClickHouse] ⏳ 等待 500ms 让 DELETE 操作开始执行...")
                 time.sleep(0.5)  # 等待500ms
                 
                 def _execute_count_after(client):
@@ -1618,13 +1638,21 @@ class ClickHouseDatabase:
                     return result.result_rows[0][0] if result.result_rows else 0
                 
                 stats['total_after'] = self._with_connection(_execute_count_after)
+                logger.info(
+                    "[ClickHouse] 📊 清理后数据量查询完成 | 当前数据量: %s 条（注意：DELETE 是异步的，实际删除可能尚未完成）",
+                    stats['total_after'],
+                )
             except Exception as count_after_exc:
                 logger.warning(
-                    "[ClickHouse] ⚠️ 查询清理后数据量时出错: %s",
+                    "[ClickHouse] ⚠️ 查询清理后数据量时出错: %s (使用估算值)",
                     count_after_exc,
                 )
                 # 估算清理后的数据量
                 stats['total_after'] = stats['total_before'] - stats['to_delete_count']
+                logger.info(
+                    "[ClickHouse] 📊 使用估算值 | 清理后数据量(估算): %s 条",
+                    stats['total_after'],
+                )
             
             cleanup_end_time = time.time()
             stats['execution_time'] = cleanup_end_time - cleanup_start_time

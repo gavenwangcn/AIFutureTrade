@@ -35,11 +35,24 @@ async def cleanup_old_leaderboard(minutes: int = 10) -> dict:
     )
     
     try:
+        logger.debug("[LeaderboardCleanup] 🔌 正在初始化 ClickHouse 数据库连接...")
         db = ClickHouseDatabase(auto_init_tables=False)
+        logger.debug("[LeaderboardCleanup] ✅ ClickHouse 数据库连接已建立")
+        
+        logger.debug("[LeaderboardCleanup] 📞 调用 cleanup_old_leaderboard 方法...")
         stats = db.cleanup_old_leaderboard(minutes=minutes)
+        logger.debug("[LeaderboardCleanup] ✅ cleanup_old_leaderboard 方法执行完成")
         
         cleanup_end_time = time.time()
         total_execution_time = cleanup_end_time - cleanup_start_time
+        
+        # 检查是否有错误
+        if stats.get('error'):
+            logger.error(
+                "[LeaderboardCleanup] ❌ 清理任务返回错误 | 错误信息: %s",
+                stats.get('error'),
+            )
+            return stats
         
         # 记录详细的清理结果
         logger.info(
@@ -59,11 +72,27 @@ async def cleanup_old_leaderboard(minutes: int = 10) -> dict:
                 reduction_percent,
                 stats.get('cutoff_time', 'N/A'),
             )
+        else:
+            logger.info("[LeaderboardCleanup] ℹ️ 清理前数据量为 0，无需清理")
+        
+        # 验证清理是否成功
+        if stats.get('to_delete_count', 0) > 0:
+            logger.info(
+                "[LeaderboardCleanup] ✅ 清理操作已成功提交 | 待删除: %s 条数据（ClickHouse 异步执行中）",
+                stats.get('to_delete_count', 0),
+            )
+        else:
+            logger.info("[LeaderboardCleanup] ℹ️ 没有需要清理的数据")
         
         # 性能警告
         if total_execution_time > 30:
             logger.warning(
                 "[LeaderboardCleanup] ⚠️ 清理任务执行时间较长: %.3f 秒，建议检查数据库性能",
+                total_execution_time,
+            )
+        elif total_execution_time > 10:
+            logger.info(
+                "[LeaderboardCleanup] ⏱️ 清理任务执行时间: %.3f 秒（正常范围）",
                 total_execution_time,
             )
         
@@ -138,7 +167,25 @@ async def run_cleanup_scheduler() -> None:
             
             stats = await cleanup_old_leaderboard(retention_minutes)
             if stats:
-                total_cleaned += stats.get('to_delete_count', 0)
+                deleted_count = stats.get('to_delete_count', 0)
+                total_cleaned += deleted_count
+                if deleted_count > 0:
+                    logger.info(
+                        "[LeaderboardCleanup] ✅ [第 %s 次] 清理任务成功 | 本次清理: %s 条 | 累计清理: %s 条",
+                        cycle_count,
+                        deleted_count,
+                        total_cleaned,
+                    )
+                else:
+                    logger.debug(
+                        "[LeaderboardCleanup] ℹ️ [第 %s 次] 清理任务完成 | 本次无需清理数据",
+                        cycle_count,
+                    )
+            else:
+                logger.warning(
+                    "[LeaderboardCleanup] ⚠️ [第 %s 次] 清理任务返回空结果",
+                    cycle_count,
+                )
             
             # 每10次清理输出一次汇总统计
             if cycle_count % 10 == 0:

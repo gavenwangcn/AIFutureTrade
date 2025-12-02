@@ -103,19 +103,38 @@ const initChart = async () => {
     // 如果图表已存在，先销毁
     if (chart.value) {
       try {
-        chart.value.destroy()
+        // 检查 chart.value 是否为有效对象且 destroy 方法是否存在
+        if (chart.value && typeof chart.value === 'object' && typeof chart.value.destroy === 'function') {
+          chart.value.destroy()
+          console.log('[KLineChart] Chart destroyed successfully')
+        } else {
+          console.warn('[KLineChart] Chart instance is invalid or destroy method not available:', {
+            hasChart: !!chart.value,
+            chartType: typeof chart.value,
+            hasDestroy: chart.value && typeof chart.value.destroy === 'function'
+          })
+        }
       } catch (e) {
-        console.warn('[KLineChart] Error destroying chart:', e)
+        console.error('[KLineChart] Error destroying chart:', e)
+      } finally {
+        chart.value = null
       }
-      chart.value = null
     }
 
     // 如果 Datafeed 已存在，先清理
     if (datafeed.value) {
       try {
-        datafeed.value.destroy()
+        // 检查 datafeed.value 是否为有效对象且 destroy 方法是否存在
+        if (datafeed.value && typeof datafeed.value === 'object' && typeof datafeed.value.destroy === 'function') {
+          datafeed.value.destroy()
+          console.log('[KLineChart] Datafeed destroyed successfully')
+        } else {
+          console.warn('[KLineChart] Datafeed instance is invalid or destroy method not available')
+        }
       } catch (e) {
-        console.warn('[KLineChart] Error destroying datafeed:', e)
+        console.error('[KLineChart] Error destroying datafeed:', e)
+      } finally {
+        datafeed.value = null
       }
     }
 
@@ -133,14 +152,34 @@ const initChart = async () => {
     console.log('[KLineChart] Period:', period)
 
     // 创建 KLineChart Pro 实例
-    chart.value = new KLineChartPro({
-      container: containerElement,
-      symbol: symbolInfo,
-      period: period,
-      datafeed: datafeed.value
-    })
+    try {
+      chart.value = new KLineChartPro({
+        container: containerElement,
+        symbol: symbolInfo,
+        period: period,
+        datafeed: datafeed.value
+      })
 
-    console.log('[KLineChart] Chart initialized successfully')
+      // 验证图表实例是否创建成功
+      if (!chart.value || typeof chart.value !== 'object') {
+        throw new Error('KLineChartPro instance creation failed: invalid instance')
+      }
+
+      // 验证 destroy 方法是否存在（用于后续清理）
+      if (typeof chart.value.destroy !== 'function') {
+        console.warn('[KLineChart] Warning: destroy method not found on chart instance, cleanup may fail')
+      }
+
+      console.log('[KLineChart] Chart initialized successfully', {
+        hasChart: !!chart.value,
+        chartType: typeof chart.value,
+        hasDestroy: typeof chart.value.destroy === 'function'
+      })
+    } catch (initError) {
+      console.error('[KLineChart] Failed to create chart instance:', initError)
+      chart.value = null
+      throw initError
+    }
 
   } catch (error) {
     console.error('[KLineChart] Failed to initialize chart:', error)
@@ -190,20 +229,34 @@ watch(() => props.visible, async (newVal) => {
     // 销毁图表和 Datafeed
     if (chart.value) {
       try {
-        chart.value.destroy()
+        // 检查 chart.value 是否为有效对象且 destroy 方法是否存在
+        if (chart.value && typeof chart.value === 'object' && typeof chart.value.destroy === 'function') {
+          chart.value.destroy()
+          console.log('[KLineChart] Chart destroyed successfully (visible=false)')
+        } else {
+          console.warn('[KLineChart] Chart instance is invalid or destroy method not available (visible=false)')
+        }
       } catch (e) {
-        console.warn('[KLineChart] Error destroying chart:', e)
+        console.error('[KLineChart] Error destroying chart (visible=false):', e)
+      } finally {
+        chart.value = null
       }
-      chart.value = null
     }
     
     if (datafeed.value) {
       try {
-        datafeed.value.destroy()
+        // 检查 datafeed.value 是否为有效对象且 destroy 方法是否存在
+        if (datafeed.value && typeof datafeed.value === 'object' && typeof datafeed.value.destroy === 'function') {
+          datafeed.value.destroy()
+          console.log('[KLineChart] Datafeed destroyed successfully (visible=false)')
+        } else {
+          console.warn('[KLineChart] Datafeed instance is invalid or destroy method not available (visible=false)')
+        }
       } catch (e) {
-        console.warn('[KLineChart] Error destroying datafeed:', e)
+        console.error('[KLineChart] Error destroying datafeed (visible=false):', e)
+      } finally {
+        datafeed.value = null
       }
-      datafeed.value = null
     }
   }
 }, { immediate: false })
@@ -236,20 +289,34 @@ watch(() => props.symbol, async (newVal) => {
 onUnmounted(() => {
   if (chart.value) {
     try {
-      chart.value.destroy()
+      // 检查 chart.value 是否为有效对象且 destroy 方法是否存在
+      if (chart.value && typeof chart.value === 'object' && typeof chart.value.destroy === 'function') {
+        chart.value.destroy()
+        console.log('[KLineChart] Chart destroyed successfully (unmount)')
+      } else {
+        console.warn('[KLineChart] Chart instance is invalid or destroy method not available (unmount)')
+      }
     } catch (e) {
-      console.warn('[KLineChart] Error destroying chart on unmount:', e)
+      console.error('[KLineChart] Error destroying chart on unmount:', e)
+    } finally {
+      chart.value = null
     }
-    chart.value = null
   }
   
   if (datafeed.value) {
     try {
-      datafeed.value.destroy()
+      // 检查 datafeed.value 是否为有效对象且 destroy 方法是否存在
+      if (datafeed.value && typeof datafeed.value === 'object' && typeof datafeed.value.destroy === 'function') {
+        datafeed.value.destroy()
+        console.log('[KLineChart] Datafeed destroyed successfully (unmount)')
+      } else {
+        console.warn('[KLineChart] Datafeed instance is invalid or destroy method not available (unmount)')
+      }
     } catch (e) {
-      console.warn('[KLineChart] Error destroying datafeed on unmount:', e)
+      console.error('[KLineChart] Error destroying datafeed on unmount:', e)
+    } finally {
+      datafeed.value = null
     }
-    datafeed.value = null
   }
 })
 </script>
