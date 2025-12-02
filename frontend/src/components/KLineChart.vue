@@ -30,6 +30,8 @@
 import { ref, onMounted, onUnmounted, watch, nextTick } from 'vue'
 // 使用 npm 安装的 klinecharts（按官网要求）
 import { init, dispose } from 'klinecharts'
+// API 配置
+import { API_BASE_URL } from '../config/api.js'
 
 // 检查 klinecharts 是否正确导入
 console.log('[KLineChart] klinecharts imported:', { init: typeof init, dispose: typeof dispose })
@@ -139,7 +141,7 @@ const initChart = async () => {
       getBars: async ({ callback, symbol, interval, from, to }) => {
         try {
           // 调用后端API获取K线数据
-          const response = await fetch(`/api/market/klines?symbol=${symbol || props.symbol}&interval=${interval || currentInterval.value}&limit=500`)
+          const response = await fetch(`${API_BASE_URL}/api/market/klines?symbol=${symbol || props.symbol}&interval=${interval || currentInterval.value}&limit=500`)
           const data = await response.json()
           
           if (data.success && data.data) {

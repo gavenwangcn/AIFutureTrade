@@ -1,6 +1,8 @@
 import { ref } from 'vue'
 // Socket.IO 客户端（通过 npm 安装）
 import { io } from 'socket.io-client'
+// API 配置
+import { API_BASE_URL } from '../config/api.js'
 
 export function useTradingApp() {
   // 状态
@@ -53,13 +55,23 @@ export function useTradingApp() {
   // 初始化WebSocket
   const initWebSocket = () => {
     try {
-      // 获取后端 URL
-      // 开发环境：使用相对路径（通过 Vite 代理）
-      // 生产环境：使用环境变量或默认值
       const isDev = import.meta.env.DEV
-      const backendUrl = isDev 
-        ? undefined  // 使用相对路径，通过 Vite 代理
-        : (import.meta.env.VITE_BACKEND_URL || 'http://localhost:5002')
+      
+      // 获取后端 URL（与 API 配置保持一致）
+      let backendUrl
+      if (import.meta.env.VITE_BACKEND_URL) {
+        // 如果设置了完整的后端URL，直接使用
+        backendUrl = import.meta.env.VITE_BACKEND_URL
+      } else if (isDev) {
+        // 开发环境：使用相对路径，通过 Vite 代理
+        backendUrl = undefined
+      } else {
+        // 生产环境：使用当前域名+配置的端口
+        const backendPort = import.meta.env.VITE_BACKEND_PORT || '5002'
+        const protocol = window.location.protocol
+        const hostname = window.location.hostname
+        backendUrl = `${protocol}//${hostname}:${backendPort}`
+      }
       
       socket.value = io(backendUrl, {
         path: '/socket.io',
@@ -95,7 +107,7 @@ export function useTradingApp() {
   // 加载模型列表
   const loadModels = async () => {
     try {
-      const response = await fetch('/api/models')
+      const response = await fetch(`${API_BASE_URL}/api/models`)
       const data = await response.json()
       if (data.success) {
         models.value = data.models || []
@@ -108,7 +120,7 @@ export function useTradingApp() {
   // 加载市场行情
   const loadMarketPrices = async () => {
     try {
-      const response = await fetch('/api/market/prices')
+      const response = await fetch(`${API_BASE_URL}/api/market/prices`)
       const data = await response.json()
       if (data.success) {
         marketPrices.value = data.prices || []
@@ -121,7 +133,7 @@ export function useTradingApp() {
   // 加载涨跌幅榜
   const loadLeaderboard = async () => {
     try {
-      const response = await fetch('/api/market/leaderboard?limit=10')
+      const response = await fetch(`${API_BASE_URL}/api/market/leaderboard?limit=10`)
       const data = await response.json()
       if (data.success) {
         leaderboardGainers.value = data.gainers || []
@@ -137,10 +149,18 @@ export function useTradingApp() {
   const loadPortfolio = async () => {
     try {
       if (!currentModelId.value) return
-      const response = await fetch(`/api/portfolio/${currentModelId.value}`)
+      const response = await fetch(`${API_BASE_URL}/api/models/${currentModelId.value}/portfolio`)
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`)
+      }
       const data = await response.json()
-      if (data.success) {
-        portfolio.value = data.portfolio || portfolio.value
+      if (data.portfolio) {
+        portfolio.value = {
+          totalValue: data.portfolio.total_value || 0,
+          availableCash: data.portfolio.available_cash || 0,
+          realizedPnl: data.portfolio.realized_pnl || 0,
+          unrealizedPnl: data.portfolio.unrealized_pnl || 0
+        }
       }
     } catch (error) {
       console.error('[TradingApp] Error loading portfolio:', error)
@@ -151,10 +171,13 @@ export function useTradingApp() {
   const loadPositions = async () => {
     try {
       if (!currentModelId.value) return
-      const response = await fetch(`/api/positions/${currentModelId.value}`)
+      const response = await fetch(`${API_BASE_URL}/api/models/${currentModelId.value}/portfolio`)
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`)
+      }
       const data = await response.json()
-      if (data.success) {
-        positions.value = data.positions || []
+      if (data.portfolio && data.portfolio.positions) {
+        positions.value = data.portfolio.positions || []
       }
     } catch (error) {
       console.error('[TradingApp] Error loading positions:', error)
@@ -165,11 +188,12 @@ export function useTradingApp() {
   const loadTrades = async () => {
     try {
       if (!currentModelId.value) return
-      const response = await fetch(`/api/trades/${currentModelId.value}`)
-      const data = await response.json()
-      if (data.success) {
-        trades.value = data.trades || []
+      const response = await fetch(`${API_BASE_URL}/api/models/${currentModelId.value}/trades`)
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`)
       }
+      const data = await response.json()
+      trades.value = data.trades || []
     } catch (error) {
       console.error('[TradingApp] Error loading trades:', error)
     }
@@ -179,11 +203,12 @@ export function useTradingApp() {
   const loadConversations = async () => {
     try {
       if (!currentModelId.value) return
-      const response = await fetch(`/api/conversations/${currentModelId.value}`)
-      const data = await response.json()
-      if (data.success) {
-        conversations.value = data.conversations || []
+      const response = await fetch(`${API_BASE_URL}/api/models/${currentModelId.value}/conversations`)
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`)
       }
+      const data = await response.json()
+      conversations.value = data.conversations || []
     } catch (error) {
       console.error('[TradingApp] Error loading conversations:', error)
     }
@@ -212,7 +237,7 @@ export function useTradingApp() {
   const handleExecute = async () => {
     if (!currentModelId.value) return
     try {
-      const response = await fetch(`/api/models/${currentModelId.value}/execute`, { method: 'POST' })
+      const response = await fetch(`${API_BASE_URL}/api/models/${currentModelId.value}/execute`, { method: 'POST' })
       const data = await response.json()
       if (data.success) {
         console.log('[TradingApp] Execute success')
@@ -226,7 +251,7 @@ export function useTradingApp() {
   const handlePauseAuto = async () => {
     if (!currentModelId.value) return
     try {
-      const response = await fetch(`/api/models/${currentModelId.value}/pause`, { method: 'POST' })
+      const response = await fetch(`${API_BASE_URL}/api/models/${currentModelId.value}/auto-trading`, { method: 'POST' })
       const data = await response.json()
       if (data.success) {
         console.log('[TradingApp] Pause success')
