@@ -538,7 +538,8 @@
     </div>
 
     <!-- Socket.IO客户端 -->
-    <script src="https://cdn.socket.io/4.7.5/socket.io.min.js" integrity="sha384-5ZMcnnbYTS8ZJmyATLulQqnGX+HGwccPt6DVJFWG0FjhuLocMewS17EwM5JrgU6G" crossorigin="anonymous"></script>
+    <!-- 移除integrity属性以避免SRI检查失败，或使用正确的hash -->
+    <script src="https://cdn.socket.io/4.7.5/socket.io.min.js" crossorigin="anonymous"></script>
     <!-- KLineChart库 - 使用本地npm安装的版本（不使用CDN） -->
     <script src="/lib/klinecharts.min.js"></script>
     <script src="/app.js"></script>

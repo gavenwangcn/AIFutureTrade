@@ -22,8 +22,8 @@ services:
   # 前端服务（Node.js Express）
   frontend:
     build:
-      context: ./frontend
-      dockerfile: Dockerfile
+      context: .  # 使用项目根目录作为构建上下文，以便访问static目录
+      dockerfile: ./frontend/Dockerfile
       # 注意：默认情况下，如果镜像已存在，docker compose up 不会重新构建
       # 需要代码变化时重新构建，请使用: docker compose up -d --build
     container_name: aifuturetrade-frontend

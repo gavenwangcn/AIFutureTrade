@@ -1,19 +1,25 @@
+# ==============================================================================
+# 前端 Docker 构建忽略文件
+# ==============================================================================
+
 # Node.js
 node_modules/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+package-lock.json
 
-# IDE
+# IDE和编辑器
 .vscode/
 .idea/
 *.swp
 *.swo
 *~
-
-# OS
 .DS_Store
+
+# OS文件
 Thumbs.db
+.DS_Store
 
 # Git
 .git/
@@ -23,10 +29,28 @@ Thumbs.db
 Dockerfile
 .dockerignore
 
-# 其他
+# 日志文件
 *.log
+npm-debug.log*
+
+# 环境变量文件
 .env
 .env.local
+.env.*.local
+
+# 临时文件
+tmp/
+temp/
+*.tmp
+
+# 测试文件
+test/
+tests/
+*.test.js
+*.spec.js
+
+# 文档（构建时不需要）
+README.md
+docs/
 
 # 注意：scripts/ 目录需要在构建时使用（postinstall脚本），所以不能排除
-
