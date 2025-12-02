@@ -337,8 +337,8 @@ class MarketDataFetcher:
                 }
                 limit = limit_map.get(label, 120)  # 默认获取120根K线
                 
-                # 构造币安API需要的交易对符号（统一转为大写）
-                symbol_key = symbol.upper()
+                # 构造币安API需要的交易对符号（添加计价资产后缀，如BTC -> BTCUSDT）
+                symbol_key = self._futures_client.format_symbol(symbol)
                 
                 # 从币安期货API获取K线数据
                 # 不指定startTime和endTime时，API默认返回最新的limit根K线数据

@@ -237,18 +237,18 @@ def exercise_binance_futures_client(api_key: str, api_secret: str) -> None:
         # 计算BTC的技术指标
         indicators = market_fetcher.calculate_technical_indicators("BTC")
         
-        if indicators and 'timeframes' in indicators:
-            logging.info("Successfully calculated technical indicators")
-            timeframes = indicators['timeframes']
-            
-            # 以JSON格式打印所有timeframes信息
-            logging.info("All timeframes data in JSON format:")
-            logging.info(json.dumps(timeframes, indent=2, default=str))
+        # 打印完整的接口返回值JSON格式
+        logging.info("=" * 80)
+        logging.info("calculate_technical_indicators() 返回值 (JSON格式):")
+        logging.info("=" * 80)
+        if indicators:
+            logging.info(json.dumps(indicators, indent=2, default=str, ensure_ascii=False))
         else:
-            logging.warning("Failed to calculate technical indicators or no data returned")
+            logging.warning("返回值为空或None")
+        logging.info("=" * 80)
             
     except Exception as e:
-        logging.error(f"Error calculating technical indicators: {e}")
+        logging.error(f"Error calculating technical indicators: {e}", exc_info=True)
 
     logging.info("All BinanceFuturesClient method calls completed.")
 
