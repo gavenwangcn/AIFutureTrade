@@ -150,14 +150,34 @@ class ClickHouseConnectionPool:
         Args:
             client: The ClickHouse client instance to release
         """
+        if not client:
+            return
+        
         try:
             # Check if the client is still valid by sending a simple query
-            client.query("SELECT 1")
-            self._pool.put(client)
-            logger.debug(f"[ClickHouse] Released connection back to pool")
+            # 使用超时和异常处理，避免长时间阻塞
+            try:
+                client.query("SELECT 1", settings={'max_execution_time': 2})
+                self._pool.put(client)
+                logger.debug(f"[ClickHouse] Released connection back to pool")
+            except Exception as query_error:
+                # 连接可能已损坏，尝试关闭它
+                logger.warning(f"[ClickHouse] Connection health check failed: {query_error}, closing connection")
+                try:
+                    if hasattr(client, 'close'):
+                        client.close()
+                except Exception as close_error:
+                    logger.debug(f"[ClickHouse] Error closing invalid connection: {close_error}")
+                with self._lock:
+                    self._current_connections -= 1
         except Exception as e:
-            # If the client is invalid, close it and don't return it to the pool
+            # 如果检查连接时发生其他错误，也关闭连接
             logger.error(f"[ClickHouse] Connection is invalid, closing it: {e}")
+            try:
+                if hasattr(client, 'close'):
+                    client.close()
+            except Exception as close_error:
+                logger.debug(f"[ClickHouse] Error closing invalid connection: {close_error}")
             with self._lock:
                 self._current_connections -= 1
     
@@ -237,6 +257,8 @@ class ClickHouseDatabase:
         This method acquires a connection from the pool, executes the given function
         with the connection as the first argument, and then releases the connection back to the pool.
         
+        支持自动重试机制，当遇到网络错误时会自动重试（最多3次）。
+        
         Args:
             func: The function to execute
             *args: Positional arguments to pass to the function
@@ -244,15 +266,80 @@ class ClickHouseDatabase:
             
         Returns:
             The result of the function call
+            
+        Raises:
+            Exception: 如果重试3次后仍然失败，抛出最后一个异常
         """
-        client = self._pool.acquire()
-        if not client:
-            raise Exception("Failed to acquire ClickHouse connection")
+        max_retries = 3
+        retry_delay = 0.5  # 初始重试延迟（秒）
         
-        try:
-            return func(client, *args, **kwargs)
-        finally:
-            self._pool.release(client)
+        for attempt in range(max_retries):
+            client = None
+            connection_acquired = False
+            try:
+                client = self._pool.acquire()
+                if not client:
+                    raise Exception("Failed to acquire ClickHouse connection")
+                connection_acquired = True
+                
+                # 执行函数
+                result = func(client, *args, **kwargs)
+                
+                # 成功执行，释放连接并返回结果
+                self._pool.release(client)
+                return result
+                
+            except Exception as e:
+                # 记录错误信息
+                error_type = type(e).__name__
+                error_msg = str(e)
+                
+                # 判断是否为网络/协议错误，需要重试
+                is_network_error = any(keyword in error_msg.lower() for keyword in [
+                    'connection', 'broken', 'aborted', 'protocol', 'chunk', 
+                    'badstatusline', 'invalidchunklength', 'timeout', 'reset',
+                    'httperror', 'urlerror'
+                ]) or any(keyword in error_type.lower() for keyword in [
+                    'connection', 'protocol', 'timeout', 'httperror', 'urlerror'
+                ])
+                
+                # 如果已获取连接，需要处理连接（关闭或释放）
+                if connection_acquired and client:
+                    try:
+                        # 尝试关闭可能已损坏的连接
+                        if hasattr(client, 'close'):
+                            client.close()
+                    except Exception as close_error:
+                        logger.debug(f"[ClickHouse] Error closing failed connection: {close_error}")
+                    # 减少连接计数（因为连接已损坏，不能放回池中）
+                    with self._pool._lock:
+                        if self._pool._current_connections > 0:
+                            self._pool._current_connections -= 1
+                
+                # 判断是否需要重试
+                if attempt < max_retries - 1:
+                    # 计算等待时间（指数退避）
+                    wait_time = retry_delay * (2 ** attempt)
+                    
+                    if is_network_error:
+                        logger.warning(
+                            f"[ClickHouse] Network/Protocol error on attempt {attempt + 1}/{max_retries}: "
+                            f"{error_type}: {error_msg}. Retrying in {wait_time:.2f} seconds..."
+                        )
+                    else:
+                        logger.warning(
+                            f"[ClickHouse] Error on attempt {attempt + 1}/{max_retries}: "
+                            f"{error_type}: {error_msg}. Retrying in {wait_time:.2f} seconds..."
+                        )
+                    
+                    time.sleep(wait_time)
+                    continue
+                else:
+                    # 最后一次尝试失败，抛出异常
+                    logger.error(
+                        f"[ClickHouse] Failed after {max_retries} attempts. Last error: {error_type}: {error_msg}"
+                    )
+                    raise
 
     # ==================================================================
     # 通用数据库操作方法
@@ -268,6 +355,24 @@ class ClickHouseDatabase:
             client.command(sql)
         
         self._with_connection(_execute_command)
+    
+    def query(self, sql: str) -> List[Tuple]:
+        """执行查询并返回结果。
+        
+        注意：ClickHouse 的参数化查询支持有限，这里直接执行 SQL 字符串。
+        所有参数都应该在调用前通过字符串格式化安全地嵌入到 SQL 中。
+        
+        Args:
+            sql: 要执行的 SQL 查询字符串
+            
+        Returns:
+            查询结果的行列表，每行是一个元组
+        """
+        def _execute_query(client):
+            result = client.query(sql)
+            return result.result_rows
+        
+        return self._with_connection(_execute_query)
     
     def _check_table_exists(self, table_name: str) -> bool:
         """Check if a table exists in ClickHouse.
