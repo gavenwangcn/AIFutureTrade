@@ -233,8 +233,7 @@ def _leaderboard_loop():
     5. 收到停止信号时退出循环
     """
     thread_id = threading.current_thread().ident
-    logger.info(f"[Leaderboard Worker-{thread_id}] ========== 涨跌幅榜同步循环启动 ==========")
-    logger.info(f"[Leaderboard Worker-{thread_id}] 刷新间隔: {LEADERBOARD_REFRESH_INTERVAL} 秒")
+    logger.info(f"[Leaderboard Worker-{thread_id}] 涨跌幅榜同步循环启动，刷新间隔: {LEADERBOARD_REFRESH_INTERVAL} 秒")
     
     wait_seconds = max(5, LEADERBOARD_REFRESH_INTERVAL)
     cycle_count = 0
@@ -243,80 +242,31 @@ def _leaderboard_loop():
         cycle_count += 1
         cycle_start_time = datetime.now()
         
-        logger.info(f"[Leaderboard Worker-{thread_id}] [循环 #{cycle_count}] ========== 开始同步涨跌幅榜 ==========")
-        logger.info(f"[Leaderboard Worker-{thread_id}] [循环 #{cycle_count}] 同步时间: {cycle_start_time.strftime('%Y-%m-%d %H:%M:%S')}")
-        
         try:
             # 调用同步方法（不强制刷新，使用缓存机制）
-            logger.info(f"[Leaderboard Worker-{thread_id}] [循环 #{cycle_count}] [步骤1] 调用 sync_leaderboard 同步数据...")
-            sync_start_time = datetime.now()
-            
             data = market_fetcher.sync_leaderboard(force=False)
             
-            sync_duration = (datetime.now() - sync_start_time).total_seconds()
-            logger.info(f"[Leaderboard Worker-{thread_id}] [循环 #{cycle_count}] [步骤1] 数据同步完成, 耗时: {sync_duration:.2f} 秒")
-            
-            # 检查同步结果
+            # 检查同步结果并推送
             if data:
-                gainers = data.get('gainers', [])
-                losers = data.get('losers', [])
-                gainers_count = len(gainers) if gainers else 0
-                losers_count = len(losers) if losers else 0
-                
-                logger.info(f"[Leaderboard Worker-{thread_id}] [循环 #{cycle_count}] [步骤2] 同步数据统计: "
-                           f"涨幅榜={gainers_count} 条, 跌幅榜={losers_count} 条")
-                
-                # 记录涨幅榜前3名（如果有）
-                if gainers_count > 0:
-                    top_gainers = gainers[:3]
-                    for idx, entry in enumerate(top_gainers):
-                        logger.info(f"[Leaderboard Worker-{thread_id}] [循环 #{cycle_count}] [步骤2.1] 涨幅榜 #{idx+1}: "
-                                   f"{entry.get('symbol', 'N/A')} "
-                                   f"价格=${entry.get('price', 0):.4f} "
-                                   f"涨跌幅={entry.get('change_percent', 0):.2f}% "
-                                   f"成交量=${entry.get('quote_volume', 0):.2f}")
-                
-                # 记录跌幅榜前3名（如果有）
-                if losers_count > 0:
-                    top_losers = losers[:3]
-                    for idx, entry in enumerate(top_losers):
-                        logger.info(f"[Leaderboard Worker-{thread_id}] [循环 #{cycle_count}] [步骤2.2] 跌幅榜 #{idx+1}: "
-                                   f"{entry.get('symbol', 'N/A')} "
-                                   f"价格=${entry.get('price', 0):.4f} "
-                                   f"涨跌幅={entry.get('change_percent', 0):.2f}% "
-                                   f"成交量=${entry.get('quote_volume', 0):.2f}")
+                gainers_count = len(data.get('gainers', [])) if data.get('gainers') else 0
+                losers_count = len(data.get('losers', [])) if data.get('losers') else 0
                 
                 # 通过 WebSocket 推送到前端
-                logger.info(f"[Leaderboard Worker-{thread_id}] [循环 #{cycle_count}] [步骤3] 通过 WebSocket 推送数据到前端...")
-                emit_start_time = datetime.now()
-                
                 socketio.emit('leaderboard:update', data)
                 
-                emit_duration = (datetime.now() - emit_start_time).total_seconds()
-                logger.info(f"[Leaderboard Worker-{thread_id}] [循环 #{cycle_count}] [步骤3] WebSocket 推送完成, 耗时: {emit_duration:.3f} 秒")
-                
             else:
-                logger.warning(f"[Leaderboard Worker-{thread_id}] [循环 #{cycle_count}] [步骤2] 同步返回空数据，跳过推送")
+                logger.warning(f"[Leaderboard Worker-{thread_id}] [循环 #{cycle_count}] 同步返回空数据，跳过推送")
                 
         except Exception as exc:
             cycle_duration = (datetime.now() - cycle_start_time).total_seconds()
-            logger.error(f"[Leaderboard Worker-{thread_id}] [循环 #{cycle_count}] ========== 涨跌幅榜同步失败 ==========")
-            logger.error(f"[Leaderboard Worker-{thread_id}] [循环 #{cycle_count}] 错误信息: {exc}")
-            logger.error(f"[Leaderboard Worker-{thread_id}] [循环 #{cycle_count}] 失败耗时: {cycle_duration:.2f} 秒")
+            logger.error(f"[Leaderboard Worker-{thread_id}] [循环 #{cycle_count}] 涨跌幅榜同步失败: {exc}, 耗时: {cycle_duration:.2f} 秒")
             import traceback
             logger.error(f"[Leaderboard Worker-{thread_id}] [循环 #{cycle_count}] 错误堆栈:\n{traceback.format_exc()}")
-        
-        # 计算本次循环总耗时
-        cycle_duration = (datetime.now() - cycle_start_time).total_seconds()
-        logger.info(f"[Leaderboard Worker-{thread_id}] [循环 #{cycle_count}] ========== 同步循环完成 ==========")
-        logger.info(f"[Leaderboard Worker-{thread_id}] [循环 #{cycle_count}] 本次循环耗时: {cycle_duration:.2f} 秒")
-        logger.info(f"[Leaderboard Worker-{thread_id}] [循环 #{cycle_count}] 等待 {wait_seconds} 秒后开始下一次循环...")
         
         # 等待指定间隔（可被停止事件中断）
         leaderboard_stop_event.wait(wait_seconds)
     
-    logger.info(f"[Leaderboard Worker-{thread_id}] ========== 涨跌幅榜同步循环停止 ==========")
-    logger.info(f"[Leaderboard Worker-{thread_id}] 总循环次数: {cycle_count}")
+    logger.info(f"[Leaderboard Worker-{thread_id}] 涨跌幅榜同步循环停止，总循环次数: {cycle_count}")
 
 def _clickhouse_leaderboard_loop():
     """
@@ -354,18 +304,13 @@ def _clickhouse_leaderboard_loop():
     
     # 获取当前线程ID，用于日志标识
     thread_id = threading.current_thread().ident
-    logger.info(f"[ClickHouse Leaderboard Worker-{thread_id}] ========== ClickHouse 涨幅榜同步循环启动 ==========")
     
     # 获取配置参数，带默认值
     sync_interval = getattr(app_config, 'CLICKHOUSE_LEADERBOARD_SYNC_INTERVAL', 2)
     time_window = getattr(app_config, 'CLICKHOUSE_LEADERBOARD_TIME_WINDOW', 5)  # 已废弃，保留以兼容
     top_n = getattr(app_config, 'CLICKHOUSE_LEADERBOARD_TOP_N', 10)
     
-    # 记录配置信息
-    logger.info(f"[ClickHouse Leaderboard Worker-{thread_id}] 配置信息:")
-    logger.info(f"[ClickHouse Leaderboard Worker-{thread_id}]   同步间隔: {sync_interval} 秒")
-    logger.info(f"[ClickHouse Leaderboard Worker-{thread_id}]   查询范围: 所有数据（已移除时间窗口限制）")
-    logger.info(f"[ClickHouse Leaderboard Worker-{thread_id}]   前N名数量: {top_n}")
+    logger.info(f"[ClickHouse Leaderboard Worker-{thread_id}] ClickHouse 涨幅榜同步循环启动，同步间隔: {sync_interval} 秒，前N名数量: {top_n}")
     
     # 确保等待时间至少为1秒
     wait_seconds = max(1, sync_interval)
@@ -373,97 +318,56 @@ def _clickhouse_leaderboard_loop():
     db = None
     
     # 在循环外创建ClickHouseDatabase实例，避免频繁创建和销毁连接
-    logger.info(f"[ClickHouse Leaderboard Worker-{thread_id}] 正在初始化ClickHouse连接...")
     try:
         db = ClickHouseDatabase(auto_init_tables=True)
-        logger.info(f"[ClickHouse Leaderboard Worker-{thread_id}] ✅ ClickHouse连接初始化成功")
     except Exception as exc:
-        logger.error(f"[ClickHouse Leaderboard Worker-{thread_id}] ❌ 初始化ClickHouse连接失败: {exc}")
-        logger.error(f"[ClickHouse Leaderboard Worker-{thread_id}] ❌ 将在循环中重试初始化")
+        logger.error(f"[ClickHouse Leaderboard Worker-{thread_id}] 初始化ClickHouse连接失败: {exc}，将在循环中重试初始化")
         # 不直接返回，而是在循环中重试
     
     # 立即执行第一次同步（启动时立即刷新数据）
-    logger.info(f"[ClickHouse Leaderboard Worker-{thread_id}] 🚀 启动时立即执行第一次同步...")
     cycle_count += 1
     cycle_start_time = datetime.now()
-    
-    logger.info(f"[ClickHouse Leaderboard Worker-{thread_id}] [循环 #{cycle_count}] 🚀 开始同步...")
-    logger.info(f"[ClickHouse Leaderboard Worker-{thread_id}] [循环 #{cycle_count}] 同步时间: {cycle_start_time.strftime('%Y-%m-%d %H:%M:%S')}")
     
     try:
         # 如果数据库连接未初始化，尝试重新初始化
         if db is None:
-            logger.info(f"[ClickHouse Leaderboard Worker-{thread_id}] [循环 #{cycle_count}] 重新初始化ClickHouse连接...")
             db = ClickHouseDatabase(auto_init_tables=True)
-            logger.info(f"[ClickHouse Leaderboard Worker-{thread_id}] [循环 #{cycle_count}] ✅ ClickHouse连接初始化成功")
         
         # 执行同步逻辑
-        logger.debug(f"[ClickHouse Leaderboard Worker-{thread_id}] [循环 #{cycle_count}] 调用db.sync_leaderboard()")
         db.sync_leaderboard(
             time_window_seconds=time_window,
             top_n=top_n
         )
-        
-        # 计算同步耗时
-        cycle_duration = (datetime.now() - cycle_start_time).total_seconds()
-        logger.info(
-            f"[ClickHouse Leaderboard Worker-{thread_id}] [循环 #{cycle_count}] ✅ 同步完成, 耗时: {cycle_duration:.3f} 秒"
-        )
-        logger.info(f"[ClickHouse Leaderboard Worker-{thread_id}] [循环 #{cycle_count}] ✅ 启动时首次同步成功")
     except Exception as exc:
         # 处理同步失败的情况，但不退出循环
         cycle_duration = (datetime.now() - cycle_start_time).total_seconds()
-        logger.error(
-            f"[ClickHouse Leaderboard Worker-{thread_id}] [循环 #{cycle_count}] ❌ 启动时首次同步失败: {exc}, 耗时: {cycle_duration:.3f} 秒"
-        )
-        # 记录详细的错误堆栈
+        logger.error(f"[ClickHouse Leaderboard Worker-{thread_id}] [循环 #{cycle_count}] 启动时首次同步失败: {exc}, 耗时: {cycle_duration:.3f} 秒")
         import traceback
-        error_stack = traceback.format_exc()
-        logger.error(f"[ClickHouse Leaderboard Worker-{thread_id}] [循环 #{cycle_count}] ❌ 错误堆栈: {error_stack}")
-        logger.info(f"[ClickHouse Leaderboard Worker-{thread_id}] [循环 #{cycle_count}] ⚠️  将继续重试，不会退出")
+        logger.error(f"[ClickHouse Leaderboard Worker-{thread_id}] [循环 #{cycle_count}] 错误堆栈:\n{traceback.format_exc()}")
     
     # 主循环：定期执行同步任务（永不退出，除非收到停止信号）
-    logger.info(f"[ClickHouse Leaderboard Worker-{thread_id}] 进入主同步循环（将持续运行，不会自动暂停）")
     while not clickhouse_leaderboard_stop_event.is_set():
         cycle_count += 1
         cycle_start_time = datetime.now()
         
-        logger.info(f"[ClickHouse Leaderboard Worker-{thread_id}] [循环 #{cycle_count}] 🚀 开始同步...")
-        logger.info(f"[ClickHouse Leaderboard Worker-{thread_id}] [循环 #{cycle_count}] 同步时间: {cycle_start_time.strftime('%Y-%m-%d %H:%M:%S')}")
-        
         try:
             # 如果数据库连接丢失，尝试重新初始化
             if db is None:
-                logger.info(f"[ClickHouse Leaderboard Worker-{thread_id}] [循环 #{cycle_count}] 重新初始化ClickHouse连接...")
                 db = ClickHouseDatabase(auto_init_tables=True)
-                logger.info(f"[ClickHouse Leaderboard Worker-{thread_id}] [循环 #{cycle_count}] ✅ ClickHouse连接初始化成功")
             
             # 执行同步逻辑
-            logger.debug(f"[ClickHouse Leaderboard Worker-{thread_id}] [循环 #{cycle_count}] 调用db.sync_leaderboard()")
             db.sync_leaderboard(
                 time_window_seconds=time_window,
                 top_n=top_n
             )
             
-            # 计算同步耗时
-            cycle_duration = (datetime.now() - cycle_start_time).total_seconds()
-            logger.info(
-                f"[ClickHouse Leaderboard Worker-{thread_id}] [循环 #{cycle_count}] ✅ 同步完成, 耗时: {cycle_duration:.3f} 秒"
-            )
-            logger.info(f"[ClickHouse Leaderboard Worker-{thread_id}] [循环 #{cycle_count}] 💤 等待 {wait_seconds} 秒后开始下一次同步")
-            
         except Exception as exc:
             # 处理同步失败的情况，但不退出循环，继续重试
             cycle_duration = (datetime.now() - cycle_start_time).total_seconds()
-            logger.error(
-                f"[ClickHouse Leaderboard Worker-{thread_id}] [循环 #{cycle_count}] ❌ 同步失败: {exc}, 耗时: {cycle_duration:.3f} 秒"
-            )
-            # 记录详细的错误堆栈
+            logger.error(f"[ClickHouse Leaderboard Worker-{thread_id}] [循环 #{cycle_count}] 同步失败: {exc}, 耗时: {cycle_duration:.3f} 秒")
             import traceback
             error_stack = traceback.format_exc()
-            logger.error(f"[ClickHouse Leaderboard Worker-{thread_id}] [循环 #{cycle_count}] ❌ 错误堆栈: {error_stack}")
-            logger.info(f"[ClickHouse Leaderboard Worker-{thread_id}] [循环 #{cycle_count}] ⚠️  将继续重试，不会退出")
-            logger.info(f"[ClickHouse Leaderboard Worker-{thread_id}] [循环 #{cycle_count}] 💤 等待 {wait_seconds} 秒后重试")
+            logger.error(f"[ClickHouse Leaderboard Worker-{thread_id}] [循环 #{cycle_count}] 错误堆栈: {error_stack}")
             # 标记数据库连接可能已失效，下次循环时重新初始化
             db = None
         
@@ -475,9 +379,7 @@ def _clickhouse_leaderboard_loop():
             break
     
     # 循环结束，记录停止信息
-    logger.info(f"[ClickHouse Leaderboard Worker-{thread_id}] ========== ClickHouse 涨幅榜同步循环停止 ==========")
-    logger.info(f"[ClickHouse Leaderboard Worker-{thread_id}] 📊 总循环次数: {cycle_count}")
-    logger.info(f"[ClickHouse Leaderboard Worker-{thread_id}] 👋 涨跌幅榜同步线程已停止")
+    logger.info(f"[ClickHouse Leaderboard Worker-{thread_id}] ClickHouse 涨幅榜同步循环停止，总循环次数: {cycle_count}")
     
     # 更新运行状态
     global clickhouse_leaderboard_running
@@ -1340,6 +1242,7 @@ def get_market_klines():
                 return jsonify({'error': 'invalid end_time format. Use ISO format'}), 400
         
         # 查询K线数据
+        logger.info(f"[API] 获取K线数据请求: symbol={symbol}, interval={interval}, limit={limit}, start_time={start_time_str}, end_time={end_time_str}")
         clickhouse_db = ClickHouseDatabase(auto_init_tables=False)
         klines = clickhouse_db.get_market_klines(
             symbol=symbol,
@@ -1349,14 +1252,31 @@ def get_market_klines():
             end_time=end_time
         )
         
-        return jsonify({
+        # 记录返回数据信息
+        klines_count = len(klines) if klines else 0
+        logger.info(f"[API] K线数据查询完成: symbol={symbol}, interval={interval}, 返回数据条数={klines_count}")
+        
+        if klines_count > 0:
+            # 记录第一条和最后一条数据的时间戳（用于调试）
+            first_kline = klines[0]
+            last_kline = klines[-1]
+            first_timestamp = first_kline.get('timestamp', 'N/A')
+            last_timestamp = last_kline.get('timestamp', 'N/A')
+            logger.info(f"[API] K线数据时间范围: 第一条timestamp={first_timestamp}, 最后一条timestamp={last_timestamp}")
+            
+            # 记录第一条数据的详细信息（用于调试数据格式）
+            logger.debug(f"[API] K线数据示例（第一条）: {first_kline}")
+        
+        response_data = {
             'symbol': symbol,
             'interval': interval,
             'data': klines
-        })
+        }
+        
+        return jsonify(response_data)
         
     except Exception as e:
-        logger.error(f"Failed to get klines: {e}", exc_info=True)
+        logger.error(f"[API] 获取K线数据失败: symbol={symbol}, interval={interval}, error={e}", exc_info=True)
         return jsonify({'error': str(e)}), 500
 
 @socketio.on('leaderboard:request')
