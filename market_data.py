@@ -7,6 +7,8 @@ import threading
 import config as app_config
 from datetime import datetime, timezone
 from typing import Dict, List, Optional
+import pandas as pd
+import pandas_ta as ta
 
 from binance_futures import BinanceFuturesClient
 from database_clickhouse import ClickHouseDatabase
@@ -246,34 +248,300 @@ class MarketDataFetcher:
 
     def calculate_technical_indicators(self, symbol: str) -> Dict:
         """
-        计算技术指标（实时计算，无缓存）
+        实时计算指定交易对的技术指标（使用pandas-ta库优化）
         
-        此方法用于 AI 交易决策，需要最高实时性，每次调用都实时计算所有指标。
-        不再使用任何缓存机制，确保数据的最新性。
+        技术指标说明：
+        1. MA（移动平均线）：反映价格趋势方向和强度
+           - MA5：5周期均线（短期趋势）
+           - MA20：20周期均线（中期趋势）
+           - MA60：60周期均线（中长期趋势）
+           - MA99：99周期均线（长期趋势，币圈中部分交易者视为牛熊分界线）
+           
+        2. MACD（指数平滑异同移动平均线）：判断买卖时机和趋势强度
+           - DIF（差离值）：快线与慢线的差值
+           - DEA（信号线）：DIF的移动平均线
+           - BAR（柱状线）：DIF与DEA的差值（简化版，不乘以2）
+           
+        3. RSI（相对强弱指数）：衡量超买超卖状态
+           - RSI6：6周期RSI（短期敏感度）
+           - RSI9：9周期RSI（中期平衡点）
+           
+        4. VOL（成交量）和均量线（MAVOL）：辅助判断资金流向和趋势可靠性
+           - VOL：当前K线的成交量（该周期内的成交总量）
+           - MAVOL5：5周期成交量均线（短期资金热度）
+           - MAVOL10：10周期成交量均线（中期资金趋势）
+           
+        币圈特点说明：
+        - 7×24小时连续交易，无休市时间
+        - 波动剧烈，需要多时间框架结合分析
+        - 技术指标滞后性明显，需结合基本面分析
         
         Args:
-            symbol: 交易对符号（如 'BTC'）
+            symbol: 交易对符号（如 BTCUSDT）
             
         Returns:
-            格式：{'timeframes': {1w: {kline: {}, ma: {}, macd: {}, rsi: {}, vol: {}}, 1d: {...}}}
+            包含各时间框架技术指标的嵌套字典，结构如下：
+            {
+                'BTCUSDT': {
+                    '1w': {
+                        'kline': {...},
+                        'ma': {'ma5': ..., 'ma20': ..., 'ma60': ..., 'ma99': ...},
+                        'macd': {'dif': ..., 'dea': ..., 'bar': ...},
+                        'rsi': {'rsi6': ..., 'rsi9': ...},
+                        'vol': {'vol': ..., 'mavol5': ..., 'mavol10': ...}
+                    },
+                    '1d': {...},
+                    '4h': {...},
+                    '1h': {...},
+                    '15m': {...},
+                    '5m': {...},
+                    '1m': {...}
+                }
+            }
         """
-        try:
-            timeframe_data = self._get_timeframe_indicators(symbol)
-            # 新格式：{symbol: {1w: {...}, 1d: {...}}}
-            # 提取 symbol 对应的数据
-            if timeframe_data and symbol in timeframe_data:
-                return {'timeframes': timeframe_data[symbol]}
-            return {}
-        except Exception as e:
-            self._log_api_error(
-                api_name="技术指标",
-                scenario="技术指标计算",
-                error_type="计算错误",
-                symbol=symbol,
-                error_msg=f"计算技术指标时发生错误: {str(e)[:200]}",
-                level="ERROR"
-            )
-            return {}
+        logger.debug(f'[Indicators] 开始计算技术指标: {symbol}')
+        
+        # 定义时间框架映射关系（标签: Binance API周期标识符）
+        timeframe_mapping = {
+            '1w': '1w',   # 周线：观察长期趋势和牛熊转换
+            '1d': '1d',   # 日线：观察中期趋势和重要支撑阻力
+            '4h': '4h',   # 4小时线：日内短线交易的重要参考
+            '1h': '1h',   # 1小时线：短线交易的主要依据
+            '15m': '15m', # 15分钟线：捕捉短期波动和入场点
+            '5m': '5m',   # 5分钟线：超短线交易的精确参考
+            '1m': '1m'    # 1分钟线：极短线交易的微观信号
+        }
+        
+        # 定义各指标的计算周期参数
+        ma_lengths = [5, 20, 60, 99]         # MA均线周期
+        mavol_lengths = [5, 10, 60]          # 成交量均线周期
+        
+        # 存储各时间框架的数据
+        timeframe_data = {}
+        
+        # 为每个时间框架计算技术指标
+        for label, interval in timeframe_mapping.items():
+            try:
+                logger.debug(f'[Indicators] Processing {symbol} {label} ({interval})')
+                
+                # 根据不同时间框架设置不同的K线数量限制
+                # 短周期需要更多数据以保证指标准确性
+                limit_map = {
+                    '1w': 120,   # 周线：获取120周数据（约2.3年）
+                    '1d': 120,   # 日线：获取120天数据（约4个月）
+                    '4h': 120,   # 4小时线：获取120根4小时K线（约20天）
+                    '1h': 120,   # 1小时线：获取120根1小时K线（约5天）
+                    '15m': 120,  # 15分钟线：获取120根15分钟K线（约1.25天）
+                    '5m': 120,   # 5分钟线：获取120根5分钟K线（约10小时）
+                    '1m': 120    # 1分钟线：获取120根1分钟K线（约2小时）
+                }
+                limit = limit_map.get(label, 120)  # 默认获取120根K线
+                
+                # 构造币安API需要的交易对符号（统一转为大写）
+                symbol_key = symbol.upper()
+                
+                # 从币安期货API获取K线数据
+                # 不指定startTime和endTime时，API默认返回最新的limit根K线数据
+                # 这正好符合我们的需求：获取最新的K线数据用于指标计算
+                klines = self._futures_client.get_klines(
+                    symbol_key, 
+                    interval, 
+                    limit=limit
+                )
+                
+                logger.debug(
+                    f'[Indicators] 获取K线数据: symbol={symbol}, interval={interval}, limit={limit}, '
+                    f'返回{len(klines) if klines else 0}根K线'
+                )
+                
+                if not klines or len(klines) == 0:
+                    logger.debug(f'[Indicators] No klines data for {symbol} {label}')
+                    continue
+                
+                # 提取收盘价和成交量（使用列表推导式提高效率）
+                closes = []
+                volumes = []
+                timestamps = []
+                for item in klines:
+                    # 兼容旧的列表格式和新的字典格式
+                    try:
+                        # 如果是字典格式（新的实现）
+                        if isinstance(item, dict):
+                            closes.append(float(item['close']))
+                            volumes.append(float(item['volume']))
+                            timestamps.append(int(item['open_time']) if item.get('open_time') else 0)
+                        # 如果是列表格式（旧的实现）
+                        elif isinstance(item, (list, tuple)) and len(item) > 4:
+                            closes.append(float(item[4]))
+                            if len(item) > 5:
+                                volumes.append(float(item[5]))
+                            if len(item) > 0:
+                                timestamps.append(int(item[0]))
+                    except (ValueError, TypeError, KeyError):
+                        continue
+                
+                if not closes or len(closes) < 2:
+                    logger.debug(f'[Indicators] Insufficient data for {symbol} {label}: {len(closes)} closes')
+                    continue
+                
+                # 获取最新一根K线数据
+                latest_kline = klines[-1]
+                try:
+                    # 兼容旧的列表格式和新的字典格式
+                    if isinstance(latest_kline, dict):
+                        # 新的字典格式
+                        kline_data = {
+                            'open_time': int(latest_kline['open_time']) if latest_kline.get('open_time') else None,
+                            'open': float(latest_kline['open']) if latest_kline.get('open') else 0.0,
+                            'high': float(latest_kline['high']) if latest_kline.get('high') else 0.0,
+                            'low': float(latest_kline['low']) if latest_kline.get('low') else 0.0,
+                            'close': float(latest_kline['close']) if latest_kline.get('close') else 0.0,
+                            'volume': float(latest_kline['volume']) if latest_kline.get('volume') else 0.0
+                        }
+                    else:
+                        # 旧的列表格式
+                        kline_data = {
+                            'open_time': int(latest_kline[0]) if len(latest_kline) > 0 and latest_kline[0] else None,
+                            'open': float(latest_kline[1]) if len(latest_kline) > 1 else 0.0,
+                            'high': float(latest_kline[2]) if len(latest_kline) > 2 else 0.0,
+                            'low': float(latest_kline[3]) if len(latest_kline) > 3 else 0.0,
+                            'close': float(latest_kline[4]) if len(latest_kline) > 4 else 0.0,
+                            'volume': float(latest_kline[5]) if len(latest_kline) > 5 else 0.0
+                        }
+                except (ValueError, TypeError, IndexError) as e:
+                    logger.warning(f'[Indicators] Failed to parse kline data for {symbol} {label}: {e}')
+                    continue
+                
+                # 创建pandas DataFrame用于技术指标计算
+                df = pd.DataFrame({
+                    'close': closes,
+                    'volume': volumes
+                })
+                
+                # 实时计算MA值（简单移动平均）使用pandas-ta
+                ma_values = {}
+                for length in ma_lengths:
+                    if len(closes) >= length:
+                        ma_series = ta.sma(df['close'], length=length)
+                        if ma_series is not None and not ma_series.empty:
+                            ma_values[f'ma{length}'] = float(ma_series.iloc[-1])
+                        else:
+                            ma_values[f'ma{length}'] = 0.0
+                    else:
+                        ma_values[f'ma{length}'] = 0.0
+                        logger.warning(
+                            f'[MA] 数据不足: MA{length}需要至少{length}根K线数据，实际只有{len(closes)}根，无法计算'
+                        )
+                
+                # 实时计算MACD指标使用pandas-ta
+                macd = {'dif': 0.0, 'dea': 0.0, 'bar': 0.0}
+                if len(closes) >= 26:  # MACD需要至少26个数据点
+                    macd_df = ta.macd(df['close'], fast=12, slow=26, signal=9)
+                    if macd_df is not None and not macd_df.empty:
+                        # pandas-ta返回的列名可能因版本而异，尝试几种常见的命名
+                        dif_col = None
+                        dea_col = None
+                        bar_col = None
+                        
+                        # 查找对应的列
+                        for col in macd_df.columns:
+                            if 'MACDh' in col or 'histogram' in col or 'bar' in col.lower():
+                                bar_col = col
+                            elif 'MACDs' in col or 'signal' in col:
+                                dea_col = col
+                            elif 'MACD_' in col or 'macd' in col.lower():
+                                dif_col = col
+                        
+                        # 如果找不到标准列名，使用索引
+                        if dif_col is None and len(macd_df.columns) >= 1:
+                            dif_col = macd_df.columns[0]
+                        if dea_col is None and len(macd_df.columns) >= 2:
+                            dea_col = macd_df.columns[1]
+                        if bar_col is None and len(macd_df.columns) >= 3:
+                            bar_col = macd_df.columns[2]
+                        
+                        # 获取最新值
+                        if dif_col and dif_col in macd_df.columns:
+                            macd['dif'] = float(macd_df[dif_col].iloc[-1])
+                        if dea_col and dea_col in macd_df.columns:
+                            macd['dea'] = float(macd_df[dea_col].iloc[-1])
+                        if bar_col and bar_col in macd_df.columns:
+                            macd['bar'] = float(macd_df[bar_col].iloc[-1])
+                else:
+                    logger.warning(f'[MACD] 数据不足: 需要至少26个数据点，实际只有{len(closes)}个')
+                
+                # 实时计算RSI指标使用pandas-ta
+                rsi = {'rsi6': 50.0, 'rsi9': 50.0}
+                # 计算RSI(6)
+                if len(closes) >= 7:  # RSI(6)需要至少7个数据点
+                    rsi6_series = ta.rsi(df['close'], length=6)
+                    if rsi6_series is not None and not rsi6_series.empty:
+                        rsi['rsi6'] = float(rsi6_series.iloc[-1])
+                
+                # 计算RSI(9)
+                if len(closes) >= 10:  # RSI(9)需要至少10个数据点
+                    rsi9_series = ta.rsi(df['close'], length=9)
+                    if rsi9_series is not None and not rsi9_series.empty:
+                        rsi['rsi9'] = float(rsi9_series.iloc[-1])
+                
+                # 计算VOL指标（成交量）和均量线（MAVOL）使用pandas-ta
+                vol_data = {}
+                # VOL：最新一根K线的成交量
+                vol_data['vol'] = volumes[-1] if volumes else 0.0
+                
+                # 计算均量线（MAVOL）
+                for length in mavol_lengths:
+                    if len(volumes) >= length:
+                        mavol_series = ta.sma(df['volume'], length=length)
+                        if mavol_series is not None and not mavol_series.empty:
+                            vol_data[f'mavol{length}'] = float(mavol_series.iloc[-1])
+                        else:
+                            vol_data[f'mavol{length}'] = 0.0
+                            logger.warning(
+                                f'[VOL] 无法计算MAVOL{length}: pandas-ta返回空结果'
+                            )
+                    else:
+                        # 数据不足：使用所有可用数据的平均值
+                        if len(volumes) > 0:
+                            vol_data[f'mavol{length}'] = sum(volumes) / len(volumes)
+                            logger.warning(
+                                f'[VOL] 数据不足: MAVOL{length}需要{length}个数据点，实际只有{len(volumes)}个，使用所有可用数据计算'
+                            )
+                        else:
+                            vol_data[f'mavol{length}'] = 0.0
+                            logger.warning(f'[VOL] 无数据: 无法计算MAVOL{length}')
+                
+                # 组装该时间框架的数据
+                timeframe_data[label] = {
+                    'kline': kline_data,
+                    'ma': ma_values,
+                    'macd': macd,
+                    'rsi': rsi,
+                    'vol': vol_data
+                }
+                
+                # 记录计算成功的日志（仅在DEBUG级别）
+                logger.debug(
+                    f'[Indicators] {symbol} {label} 指标计算完成: '
+                    f'MA5={ma_values.get("ma5", 0):.2f}, '
+                    f'MACD_DIF={macd.get("dif", 0):.4f}, '
+                    f'RSI6={rsi.get("rsi6", 0):.2f}, '
+                    f'VOL={vol_data.get("vol", 0):.2f}, '
+                    f'MAVOL5={vol_data.get("mavol5", 0):.2f}'
+                )
+                
+            except Exception as e:
+                logger.warning(
+                    f"[技术指标] 计算 {symbol} {label} 时间框架指标失败: {e}",
+                    exc_info=True
+                )
+                continue
+
+        # 直接返回结果，不使用缓存（保证实时性）
+        result = {symbol: timeframe_data}
+        logger.debug(f'[Indicators] Calculated indicators for {symbol}: {len(timeframe_data)} timeframes')
+        
+        return result
 
     def _get_timeframe_indicators(self, symbol: str) -> Dict:
         """
@@ -414,19 +682,104 @@ class MarketDataFetcher:
                     logger.warning(f'[Indicators] Failed to parse kline data for {symbol} {label}: {e}')
                     continue
                 
-                # 实时计算MA值（简单移动平均）
-                ma_values = self._calculate_ma_values(closes, ma_lengths)
+                # 创建pandas DataFrame用于技术指标计算
+                df = pd.DataFrame({
+                    'close': closes,
+                    'volume': volumes
+                })
                 
-                # 实时计算MACD指标
-                macd = self._calculate_macd(closes)
+                # 实时计算MA值（简单移动平均）使用pandas-ta
+                ma_values = {}
+                for length in ma_lengths:
+                    if len(closes) >= length:
+                        ma_series = ta.sma(df['close'], length=length)
+                        if ma_series is not None and not ma_series.empty:
+                            ma_values[f'ma{length}'] = float(ma_series.iloc[-1])
+                        else:
+                            ma_values[f'ma{length}'] = 0.0
+                    else:
+                        ma_values[f'ma{length}'] = 0.0
+                        logger.warning(
+                            f'[MA] 数据不足: MA{length}需要至少{length}根K线数据，实际只有{len(closes)}根，无法计算'
+                        )
                 
-                # 实时计算RSI指标
-                rsi = self._calculate_rsi(closes)
+                # 实时计算MACD指标使用pandas-ta
+                macd = {'dif': 0.0, 'dea': 0.0, 'bar': 0.0}
+                if len(closes) >= 26:  # MACD需要至少26个数据点
+                    macd_df = ta.macd(df['close'], fast=12, slow=26, signal=9)
+                    if macd_df is not None and not macd_df.empty:
+                        # pandas-ta返回的列名可能因版本而异，尝试几种常见的命名
+                        dif_col = None
+                        dea_col = None
+                        bar_col = None
+                        
+                        # 查找对应的列
+                        for col in macd_df.columns:
+                            if 'MACDh' in col or 'histogram' in col or 'bar' in col.lower():
+                                bar_col = col
+                            elif 'MACDs' in col or 'signal' in col:
+                                dea_col = col
+                            elif 'MACD_' in col or 'macd' in col.lower():
+                                dif_col = col
+                        
+                        # 如果找不到标准列名，使用索引
+                        if dif_col is None and len(macd_df.columns) >= 1:
+                            dif_col = macd_df.columns[0]
+                        if dea_col is None and len(macd_df.columns) >= 2:
+                            dea_col = macd_df.columns[1]
+                        if bar_col is None and len(macd_df.columns) >= 3:
+                            bar_col = macd_df.columns[2]
+                        
+                        # 获取最新值
+                        if dif_col and dif_col in macd_df.columns:
+                            macd['dif'] = float(macd_df[dif_col].iloc[-1])
+                        if dea_col and dea_col in macd_df.columns:
+                            macd['dea'] = float(macd_df[dea_col].iloc[-1])
+                        if bar_col and bar_col in macd_df.columns:
+                            macd['bar'] = float(macd_df[bar_col].iloc[-1])
+                else:
+                    logger.warning(f'[MACD] 数据不足: 需要至少26个数据点，实际只有{len(closes)}个')
                 
-                # 计算VOL指标（成交量）和均量线（MAVOL）
-                # VOL：当前K线的成交量（该周期内的成交总量）
-                # MAVOL：成交量移动平均线，用于过滤短期波动
-                vol_data = self._calculate_vol_indicators(volumes, mavol_lengths)
+                # 实时计算RSI指标使用pandas-ta
+                rsi = {'rsi6': 50.0, 'rsi9': 50.0}
+                # 计算RSI(6)
+                if len(closes) >= 7:  # RSI(6)需要至少7个数据点
+                    rsi6_series = ta.rsi(df['close'], length=6)
+                    if rsi6_series is not None and not rsi6_series.empty:
+                        rsi['rsi6'] = float(rsi6_series.iloc[-1])
+                
+                # 计算RSI(9)
+                if len(closes) >= 10:  # RSI(9)需要至少10个数据点
+                    rsi9_series = ta.rsi(df['close'], length=9)
+                    if rsi9_series is not None and not rsi9_series.empty:
+                        rsi['rsi9'] = float(rsi9_series.iloc[-1])
+                
+                # 计算VOL指标（成交量）和均量线（MAVOL）使用pandas-ta
+                vol_data = {}
+                # VOL：最新一根K线的成交量
+                vol_data['vol'] = volumes[-1] if volumes else 0.0
+                
+                # 计算均量线（MAVOL）
+                for length in mavol_lengths:
+                    if len(volumes) >= length:
+                        mavol_series = ta.sma(df['volume'], length=length)
+                        if mavol_series is not None and not mavol_series.empty:
+                            vol_data[f'mavol{length}'] = float(mavol_series.iloc[-1])
+                        else:
+                            vol_data[f'mavol{length}'] = 0.0
+                            logger.warning(
+                                f'[VOL] 无法计算MAVOL{length}: pandas-ta返回空结果'
+                            )
+                    else:
+                        # 数据不足：使用所有可用数据的平均值
+                        if len(volumes) > 0:
+                            vol_data[f'mavol{length}'] = sum(volumes) / len(volumes)
+                            logger.warning(
+                                f'[VOL] 数据不足: MAVOL{length}需要{length}个数据点，实际只有{len(volumes)}个，使用所有可用数据计算'
+                            )
+                        else:
+                            vol_data[f'mavol{length}'] = 0.0
+                            logger.warning(f'[VOL] 无数据: 无法计算MAVOL{length}')
                 
                 # 组装该时间框架的数据
                 timeframe_data[label] = {
@@ -460,347 +813,7 @@ class MarketDataFetcher:
         
         return result
 
-    def _calculate_ma_values(self, closes: List[float], ma_lengths: List[int]) -> Dict[str, float]:
-        """
-        计算简单移动平均（MA）值（币圈标准计算方式）
-        
-        MA（Moving Average，移动平均线）是某一时间段内标的资产收盘价的算术平均值。
-        这是简单移动平均（SMA），核心作用是过滤短期价格波动、反映中长期趋势方向。
-        
-        MA标准计算公式（币圈与股票市场完全一致）：
-        MA(n) = （第1期收盘价 + 第2期收盘价 + ... + 第n期收盘价）÷ n
-        
-        计算逻辑：
-        1. 收盘价列表按时间顺序从旧到新排列（最新的在最后）
-        2. 取最近n期的收盘价（即最后n个收盘价）
-        3. 求和后除以n得到MA值
-        
-        示例（MA5计算）：
-        假设收盘价列表：[42000, 43500, 42800, 44200, 43900, 45000, 44500, 46000, 45800, 47000]
-        取最后5个：45000, 44500, 46000, 45800, 47000
-        MA5 = (45000 + 44500 + 46000 + 45800 + 47000) ÷ 5 = 45660
-        
-        周期说明：
-        - MA5：5周期均线（短期趋势）
-        - MA20：20周期均线（中期趋势）
-        - MA60：60周期均线（中长期趋势）
-        - MA99：99周期均线（长期趋势，币圈中部分交易者视为牛熊分界线）
-        
-        注意：
-        - 币圈7×24小时交易，周期划分以自然时间单位为准（日/小时/分钟）
-        - 计算MA99需至少99根对应周期的K线数据
-        - 数据不足时返回0.0，并记录警告日志
-        
-        Args:
-            closes: 收盘价列表（按时间顺序从旧到新排列，最新的在最后）
-            ma_lengths: MA周期列表，如 [5, 20, 60, 99]
-            
-        Returns:
-            包含各周期MA值的字典，如 {'ma5': 100.5, 'ma20': 98.3, 'ma60': 99.2, 'ma99': 98.8}
-            如果数据不足，对应周期的MA值为0.0
-        """
-        ma_values = {}
-        
-        for length in ma_lengths:
-            if len(closes) >= length:
-                # 数据充足：使用最近N个收盘价的算术平均值
-                # 取最后N个收盘价（最新的在最后，符合文档要求）
-                recent_closes = closes[-length:]
-                # MA(n) = 最近n期收盘价之和 ÷ n
-                ma_value = sum(recent_closes) / length
-                ma_values[f'ma{length}'] = ma_value
-            else:
-                # 数据不足：根据文档，应返回None或0，不计算MA值
-                # 这里返回0.0，表示无法计算（数据不足）
-                ma_values[f'ma{length}'] = 0.0
-                logger.warning(
-                    f'[MA] 数据不足: MA{length}需要至少{length}根K线数据，实际只有{len(closes)}根，无法计算'
-                )
-        
-        return ma_values
 
-
-    def _calculate_macd(self, closes: List[float]) -> Dict[str, float]:
-        """
-        计算MACD指标（指数平滑异同移动平均线）- 简化版
-        
-        MACD标准计算公式：
-        1. 计算快速EMA(12)和慢速EMA(26)
-        2. 计算DIF（差离值）= EMA(12) - EMA(26)
-        3. 计算DEA（信号线）= DIF的9日EMA
-        4. 计算BAR（柱状线）= DIF - DEA（简化版，不乘以2）
-        
-        注意：MACD的BAR有两种计算方式：
-        - 方式1：BAR = (DIF - DEA) × 2（常用版，放大视觉效果）
-        - 方式2：BAR = DIF - DEA（简化版，直接差值）
-        这里使用简化版方式2
-        
-        Args:
-            closes: 收盘价列表（按时间顺序，最新的在最后）
-            
-        Returns:
-            包含DIF、DEA、BAR的字典，如果数据不足则返回默认值
-        """
-        # 需要至少26个数据点才能计算EMA(26)
-        if len(closes) < 26:
-            logger.warning(f'[MACD] 数据不足: 需要至少26个数据点，实际只有{len(closes)}个')
-            return {'dif': 0.0, 'dea': 0.0, 'bar': 0.0}
-        
-        # 步骤1：计算EMA(12)和EMA(26)的历史序列
-        ema12_series = self._calculate_ema_series(closes, 12)
-        ema26_series = self._calculate_ema_series(closes, 26)
-        
-        # 步骤2：计算DIF序列 = EMA(12) - EMA(26)
-        dif_series = [ema12_series[i] - ema26_series[i] for i in range(len(closes))]
-        
-        # 获取最新的DIF值
-        dif = dif_series[-1]
-        
-        # 步骤3：计算DEA（DIF的9日EMA，也称为信号线）
-        # 需要至少9个DIF值才能计算DEA
-        if len(dif_series) < 9:
-            logger.warning(f'[MACD] DIF序列不足: 需要至少9个DIF值，实际只有{len(dif_series)}个')
-            return {'dif': dif, 'dea': 0.0, 'bar': 0.0}
-        
-        dea = self._calculate_ema(dif_series, 9)
-        
-        # 步骤4：计算BAR = DIF - DEA（简化版，不乘以2）
-        bar = dif - dea
-        
-        return {
-            'dif': dif,
-            'dea': dea,
-            'bar': bar
-        }
-
-    def _calculate_ema_series(self, closes: List[float], period: int) -> List[float]:
-        """
-        计算EMA序列（返回所有历史EMA值）
-        
-        EMA标准计算公式：
-        - 平滑系数（multiplier）= 2 / (period + 1)
-        - 第一个EMA值 = 前period个数据的简单移动平均（SMA）
-        - 后续EMA值 = 今日价格 × multiplier + 昨日EMA × (1 - multiplier)
-        即：EMA(today) = Price(today) × (2/(N+1)) + EMA(yesterday) × ((N-1)/(N+1))
-        
-        为了保持序列长度一致，前period-1个数据点使用简单移动平均作为初始值。
-        
-        Args:
-            closes: 收盘价列表（按时间顺序，最新的在最后）
-            period: EMA周期（如12、26）
-            
-        Returns:
-            EMA值序列，长度与closes相同
-        """
-        if len(closes) < period:
-            # 数据不足时，返回简单移动平均
-            avg = sum(closes) / len(closes) if closes else 0.0
-            return [avg] * len(closes)
-        
-        multiplier = 2.0 / (period + 1)
-        ema_series = []
-        
-        # 前period-1个数据点使用简单移动平均（逐步增加窗口）
-        # 这样可以保持序列长度一致，但前几个值不是真正的EMA
-        for i in range(period - 1):
-            if i == 0:
-                ema_series.append(closes[0])
-            else:
-                avg = sum(closes[:i+1]) / (i + 1)
-                ema_series.append(avg)
-        
-        # 从第period个数据点开始，使用标准EMA计算
-        # 初始化：第一个有效EMA值使用前period个数据的简单平均（SMA）
-        ema = sum(closes[:period]) / period
-        ema_series.append(ema)
-        
-        # 递推计算后续EMA值
-        # EMA公式：EMA(today) = Price(today) × multiplier + EMA(yesterday) × (1 - multiplier)
-        # 等价于：EMA(today) = EMA(yesterday) + (Price(today) - EMA(yesterday)) × multiplier
-        for price in closes[period:]:
-            ema = (price - ema) * multiplier + ema
-            ema_series.append(ema)
-        
-        return ema_series
-
-    def _calculate_ema(self, values: List[float], period: int) -> float:
-        """
-        计算指数移动平均线（EMA）的最终值
-        
-        公式：EMA(n) = 今日值 × (2/(n+1)) + 昨日EMA × ((n-1)/(n+1))
-        
-        Args:
-            values: 数值列表（可以是收盘价或DIF序列）
-            period: EMA周期
-            
-        Returns:
-            EMA的最终值
-        """
-        if len(values) < period:
-            return sum(values) / len(values) if values else 0.0
-        
-        multiplier = 2.0 / (period + 1)
-        # 初始化：使用前period个数据的简单平均
-        ema = sum(values[:period]) / period
-        
-        # 递推计算：EMA = 今日值 × multiplier + 昨日EMA × (1 - multiplier)
-        for value in values[period:]:
-            ema = (value - ema) * multiplier + ema
-        
-        return ema
-
-    def _calculate_rsi(self, closes: List[float]) -> Dict[str, float]:
-        """
-        计算RSI（相对强弱指数）指标
-        
-        RSI计算过程：
-        1. 计算每日涨跌幅度（涨幅和跌幅分开统计）
-        2. 使用平滑平均计算平均涨幅和平均跌幅
-        3. 计算RS = 平均涨幅 ÷ 平均跌幅
-        4. 计算RSI = 100 - (100 ÷ (1 + RS))
-        
-        返回RSI(6)和RSI(9)两个值。
-        
-        Args:
-            closes: 收盘价列表
-            
-        Returns:
-            包含rsi6和rsi9的字典，如果数据不足则返回默认值
-        """
-        result = {'rsi6': 50.0, 'rsi9': 50.0}
-        
-        # 计算RSI(6)
-        if len(closes) >= 7:  # 需要至少7个数据点（6个周期+1个用于计算变化）
-            rsi6 = self._calculate_rsi_single(closes, 6)
-            result['rsi6'] = rsi6
-        
-        # 计算RSI(9)
-        if len(closes) >= 10:  # 需要至少10个数据点（9个周期+1个用于计算变化）
-            rsi9 = self._calculate_rsi_single(closes, 9)
-            result['rsi9'] = rsi9
-        
-        return result
-
-    def _calculate_rsi_single(self, closes: List[float], period: int) -> float:
-        """
-        计算单个周期的RSI值（使用Wilder's Smoothing Method）
-        
-        RSI标准计算公式（Wilder's Method）：
-        1. 计算价格变化：change = close[i] - close[i-1]
-        2. 分离涨幅和跌幅：
-           - gain = change if change > 0 else 0
-           - loss = -change if change < 0 else 0
-        3. 计算初始平均涨幅和跌幅（前period个周期）：
-           - avg_gain = sum(gains[:period]) / period
-           - avg_loss = sum(losses[:period]) / period
-        4. 使用Wilder's平滑方法计算后续平均值：
-           - avg_gain = (avg_gain * (period - 1) + current_gain) / period
-           - avg_loss = (avg_loss * (period - 1) + current_loss) / period
-        5. 计算RS = avg_gain / avg_loss
-        6. 计算RSI = 100 - (100 / (1 + RS))
-        
-        Args:
-            closes: 收盘价列表（按时间顺序，最新的在最后）
-            period: RSI周期（如6、9、14）
-            
-        Returns:
-            RSI值（0-100之间）
-        """
-        if len(closes) < period + 1:
-            logger.warning(f'[RSI] 数据不足: 需要至少{period + 1}个数据点，实际只有{len(closes)}个')
-            return 50.0
-        
-        # 步骤1：计算每日涨跌幅度
-        changes = [closes[i] - closes[i - 1] for i in range(1, len(closes))]
-        gains = [change if change > 0 else 0.0 for change in changes]
-        losses = [-change if change < 0 else 0.0 for change in changes]
-        
-        # 步骤2：计算初始平均涨幅和平均跌幅（前period个周期）
-        initial_gains = gains[:period]
-        initial_losses = losses[:period]
-        avg_gain = sum(initial_gains) / period
-        avg_loss = sum(initial_losses) / period
-        
-        # 步骤3：使用Wilder's平滑方法计算后续平均值
-        # Wilder's平滑公式：新平均值 = (旧平均值 × (周期-1) + 当前值) / 周期
-        for i in range(period, len(gains)):
-            avg_gain = (avg_gain * (period - 1) + gains[i]) / period
-            avg_loss = (avg_loss * (period - 1) + losses[i]) / period
-        
-        # 步骤4：计算RS = 平均涨幅 ÷ 平均跌幅
-        if avg_loss == 0:
-            # 如果平均跌幅为0，说明没有下跌，RSI应该为100
-            return 100.0
-        
-        rs = avg_gain / avg_loss
-        
-        # 步骤5：计算RSI = 100 - (100 / (1 + RS))
-        rsi = 100 - (100 / (1 + rs))
-        
-        # 确保RSI值在0-100范围内
-        rsi = max(0.0, min(100.0, rsi))
-        
-        return rsi
-
-    def _calculate_vol_indicators(self, volumes: List[float], mavol_lengths: List[int]) -> Dict[str, float]:
-        """
-        计算VOL指标（成交量）和均量线（MAVOL）
-        
-        VOL指标定义：
-        - VOL（Volume，成交量）：某一时间段内标的资产的成交总量
-        - 每根K线对应一个VOL值，表示该周期内的成交总量
-        
-        均量线（MAVOL）定义：
-        - MAVOL-n = 过去n个周期的VOL总和 ÷ n
-        - 用于过滤短期波动，识别成交量趋势
-        - 常用参数：5周期（短期）、10周期（中期）
-        
-        计算逻辑：
-        1. VOL = 最新一根K线的成交量（当前周期的成交总量）
-        2. MAVOL-n = 过去n个周期成交量的简单移动平均
-        
-        注意：
-        - 币圈VOL以基础货币数量为单位（如BTC/USDT交易对，VOL单位为BTC）
-        - 数据来源于Binance API的K线数据，已包含对应周期的成交量
-        
-        Args:
-            volumes: 成交量列表（按时间顺序，最新的在最后）
-            mavol_lengths: 均量线周期列表，如 [5, 10, 60]
-            
-        Returns:
-            包含VOL和MAVOL值的字典，格式：
-            {
-                'vol': 当前周期成交量,
-                'mavol5': 5周期均量线,
-                'mavol10': 10周期均量线
-            }
-        """
-        result = {}
-        
-        # 1. 计算VOL：最新一根K线的成交量
-        vol = volumes[-1] if volumes else 0.0
-        result['vol'] = vol
-        
-        # 2. 计算均量线（MAVOL）
-        for length in mavol_lengths:
-            if len(volumes) >= length:
-                # 数据充足：使用最近N个周期的成交量平均值
-                recent_volumes = volumes[-length:]
-                mavol_value = sum(recent_volumes) / length
-                result[f'mavol{length}'] = mavol_value
-            else:
-                # 数据不足：使用所有可用数据的平均值
-                if len(volumes) > 0:
-                    mavol_value = sum(volumes) / len(volumes)
-                    result[f'mavol{length}'] = mavol_value
-                    logger.warning(
-                        f'[VOL] 数据不足: MAVOL{length}需要{length}个数据点，实际只有{len(volumes)}个，使用所有可用数据计算'
-                    )
-                else:
-                    result[f'mavol{length}'] = 0.0
-                    logger.warning(f'[VOL] 无数据: 无法计算MAVOL{length}')
-        
-        return result
 
     # ============ Leaderboard Methods ============
 

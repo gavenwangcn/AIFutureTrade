@@ -10,3 +10,4 @@ gunicorn>=21.2.0
 eventlet>=0.33.3
 python-engineio>=4.7.1
 python-socketio>=5.9.0
+pandas-ta>=0.3.14
