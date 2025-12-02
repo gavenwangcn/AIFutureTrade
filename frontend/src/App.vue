@@ -17,8 +17,14 @@
           </div>
         </div>
         <div class="header-right">
-          <button class="btn-icon" @click="handleRefresh" title="刷新">
-            <i class="bi bi-arrow-repeat"></i>
+          <button 
+            class="btn-icon" 
+            :class="{ refreshing: isRefreshingAll }"
+            @click="handleRefresh" 
+            title="刷新"
+            :disabled="isRefreshingAll"
+          >
+            <i class="bi bi-arrow-repeat" :class="{ spin: isRefreshingAll }"></i>
           </button>
           <button class="btn-icon" :class="{ active: loggerEnabled }" @click="toggleLogger" title="开启/关闭日志输出">
             <i class="bi" :class="loggerEnabled ? 'bi-play-fill' : 'bi-pause-fill'"></i>
@@ -184,9 +190,20 @@
               <p class="section-description">与市场行情模块保持一致的多维指标，横屏布局实时洞察强势与弱势合约。</p>
             </div>
             <div class="leaderboard-meta">
-              <span class="status-indicator">{{ leaderboardStatus }}</span>
-              <button class="btn-secondary" @click="refreshLeaderboard">
-                <i class="bi bi-lightning-charge"></i> 手动刷新
+              <span 
+                class="status-indicator" 
+                :class="{ updating: isRefreshingLeaderboard }"
+              >
+                {{ leaderboardStatus }}
+              </span>
+              <button 
+                class="btn-secondary" 
+                :class="{ refreshing: isRefreshingLeaderboard }"
+                @click="refreshLeaderboard"
+                :disabled="isRefreshingLeaderboard"
+              >
+                <i class="bi bi-lightning-charge" :class="{ spin: isRefreshingLeaderboard }"></i> 
+                {{ isRefreshingLeaderboard ? '刷新中...' : '手动刷新' }}
               </button>
               <button 
                 class="btn-secondary" 
@@ -496,6 +513,8 @@ const {
   leaderboardGainers,
   leaderboardLosers,
   leaderboardStatus,
+  isRefreshingLeaderboard,
+  isRefreshingAll,
   portfolio,
   accountValueHistory,
   aggregatedChartData,

@@ -82,6 +82,21 @@
     font-weight: 600;
     background: var(--bg-3);
     color: var(--text-2);
+    transition: all 0.3s ease;
+    position: relative;
+}
+
+.status-indicator.updating {
+    animation: statusPulse 1s ease-in-out infinite;
+    background: rgba(51, 112, 255, 0.15);
+    color: var(--primary);
+    font-weight: 700;
+}
+
+.status-indicator.updated {
+    animation: statusFlash 0.5s ease-out;
+    background: rgba(0, 180, 42, 0.15);
+    color: var(--success);
 }
 
 .status-indicator.success {
@@ -439,10 +454,13 @@ body {
     border-radius: var(--radius);
     cursor: pointer;
     font-size: 14px;
-    transition: background 0.2s ease, color 0.2s ease, border-color 0.2s ease;
+    transition: all 0.2s ease;
     display: inline-flex;
     align-items: center;
     gap: 6px;
+    position: relative;
+    user-select: none;
+    -webkit-tap-highlight-color: transparent;
 }
 
 .btn-primary {
@@ -454,6 +472,19 @@ body {
 
 .btn-primary:hover {
     box-shadow: 0 15px 25px rgba(63, 140, 255, 0.45);
+    transform: translateY(-1px);
+}
+
+.btn-primary:active {
+    transform: translateY(0);
+    box-shadow: 0 5px 15px rgba(63, 140, 255, 0.3);
+    background: linear-gradient(135deg, #6a4dff, #2d7aff);
+}
+
+.btn-primary:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+    transform: none;
 }
 
 .btn-secondary {
@@ -466,6 +497,39 @@ body {
 
 .btn-secondary:hover {
     background: rgba(255, 255, 255, 0.95);
+    transform: translateY(-1px);
+    box-shadow: 0 10px 20px rgba(15, 23, 42, 0.12);
+}
+
+.btn-secondary:active {
+    transform: translateY(0);
+    box-shadow: 0 4px 10px rgba(15, 23, 42, 0.1);
+    background: rgba(255, 255, 255, 1);
+    border-color: var(--primary);
+    color: var(--primary);
+}
+
+.btn-secondary:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+    transform: none;
+}
+
+.btn-secondary.refreshing {
+    position: relative;
+    pointer-events: none;
+}
+
+.btn-secondary.refreshing::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    border-radius: var(--radius);
+    background: rgba(51, 112, 255, 0.1);
+    animation: pulse 1.5s ease-in-out infinite;
 }
 
 .btn-icon {
@@ -477,13 +541,21 @@ body {
     justify-content: center;
     border: 1px solid var(--border-1);
     box-shadow: none;
-    transition: background 0.2s ease, color 0.2s ease, border-color 0.2s ease;
+    transition: all 0.2s ease;
 }
 
 .btn-icon:hover {
     background: var(--bg-3);
     border-color: var(--border-2);
     color: var(--primary);
+    transform: scale(1.05);
+}
+
+.btn-icon:active {
+    transform: scale(0.95);
+    background: var(--primary);
+    color: white;
+    border-color: var(--primary);
 }
 
 .btn-icon.active {
@@ -495,6 +567,15 @@ body {
 .btn-icon.active:hover {
     background: var(--info);
     border-color: var(--info);
+    transform: scale(1.05);
+}
+
+.btn-icon.refreshing {
+    pointer-events: none;
+}
+
+.btn-icon.refreshing i {
+    animation: spin 1s linear infinite;
 }
 
 #refreshBtn {
@@ -2112,5 +2193,33 @@ body {
 .price-item:hover {
     background: var(--bg-3);
     transition: background 0.2s;
+}
+
+/* 刷新动画 */
+@keyframes statusPulse {
+    0%, 100% {
+        opacity: 1;
+        transform: scale(1);
+    }
+    50% {
+        opacity: 0.8;
+        transform: scale(1.02);
+    }
+}
+
+@keyframes statusFlash {
+    0% {
+        opacity: 1;
+        transform: scale(1);
+    }
+    50% {
+        opacity: 0.9;
+        transform: scale(1.05);
+        box-shadow: 0 0 10px rgba(0, 180, 42, 0.3);
+    }
+    100% {
+        opacity: 1;
+        transform: scale(1);
+    }
 }
 

@@ -23,6 +23,8 @@ export function useTradingApp() {
   const leaderboardGainers = ref([])
   const leaderboardLosers = ref([])
   const leaderboardStatus = ref('等待数据...')
+  const isRefreshingLeaderboard = ref(false)
+  const isRefreshingAll = ref(false)
   
   // 投资组合状态
   const portfolio = ref({
@@ -102,12 +104,24 @@ export function useTradingApp() {
         socket.value.emit('leaderboard:request', { limit: 10 })
       })
 
-      socket.value.on('leaderboard:update', (data) => {
+      socket.value.on('leaderboard:update', async (data) => {
         console.log('[WebSocket] 收到涨跌幅榜更新', data)
         if (data && (data.gainers || data.losers)) {
           leaderboardGainers.value = Array.isArray(data.gainers) ? data.gainers : []
           leaderboardLosers.value = Array.isArray(data.losers) ? data.losers : []
-          leaderboardStatus.value = `最后更新: ${new Date().toLocaleTimeString()}`
+          const updateTime = new Date().toLocaleTimeString('zh-CN')
+          leaderboardStatus.value = `最后更新: ${updateTime}`
+          
+          // 触发更新动画
+          await nextTick()
+          const statusEl = document.querySelector('.status-indicator')
+          if (statusEl) {
+            statusEl.classList.remove('updating')
+            statusEl.classList.add('updated')
+            setTimeout(() => {
+              statusEl.classList.remove('updated')
+            }, 1000)
+          }
         }
       })
 
@@ -182,14 +196,33 @@ export function useTradingApp() {
    */
   const loadLeaderboard = async (force = false) => {
     loading.value.leaderboard = true
+    isRefreshingLeaderboard.value = true
     errors.value.leaderboard = null
+    
+    // 更新状态为刷新中
+    if (force) {
+      leaderboardStatus.value = '正在刷新...'
+    }
+    
     try {
       const data = await marketApi.getLeaderboard(10, force)
       // 后端返回格式：{ success: true, gainers: [], losers: [] } 或直接返回 { gainers: [], losers: [] }
       if (data.success !== false) {
         leaderboardGainers.value = data.gainers || []
         leaderboardLosers.value = data.losers || []
-        leaderboardStatus.value = `最后更新: ${new Date().toLocaleTimeString()}`
+        const updateTime = new Date().toLocaleTimeString('zh-CN')
+        leaderboardStatus.value = `最后更新: ${updateTime}`
+        
+        // 触发更新动画
+        await nextTick()
+        const statusEl = document.querySelector('.status-indicator')
+        if (statusEl) {
+          statusEl.classList.remove('updating')
+          statusEl.classList.add('updated')
+          setTimeout(() => {
+            statusEl.classList.remove('updated')
+          }, 1000)
+        }
       }
     } catch (error) {
       console.error('[TradingApp] Error loading leaderboard:', error)
@@ -197,6 +230,7 @@ export function useTradingApp() {
       leaderboardStatus.value = '更新失败'
     } finally {
       loading.value.leaderboard = false
+      isRefreshingLeaderboard.value = false
     }
   }
 
@@ -655,26 +689,6 @@ export function useTradingApp() {
   }
 
   /**
-   * 刷新所有数据
-   */
-  const handleRefresh = async () => {
-    await Promise.all([
-      loadModels(),
-      loadMarketPrices(),
-      loadLeaderboard()
-    ])
-    
-    if (currentModelId.value) {
-      await Promise.all([
-        loadPortfolio(),
-        loadPositions(),
-        loadTrades(),
-        loadConversations()
-      ])
-    }
-  }
-
-  /**
    * 切换日志开关
    */
   const toggleLogger = () => {
@@ -731,8 +745,40 @@ export function useTradingApp() {
   /**
    * 刷新涨跌幅榜
    */
-  const refreshLeaderboard = () => {
-    loadLeaderboard(true) // 强制刷新
+  const refreshLeaderboard = async () => {
+    // 添加刷新中状态
+    const statusEl = document.querySelector('.status-indicator')
+    if (statusEl) {
+      statusEl.classList.add('updating')
+    }
+    await loadLeaderboard(true) // 强制刷新
+  }
+  
+  /**
+   * 刷新所有数据
+   */
+  const handleRefresh = async () => {
+    isRefreshingAll.value = true
+    try {
+      await Promise.all([
+        loadModels(),
+        loadMarketPrices(),
+        loadLeaderboard(true) // 强制刷新涨跌幅榜
+      ])
+      
+      if (currentModelId.value) {
+        await Promise.all([
+          loadPortfolio(),
+          loadPositions(),
+          loadTrades(),
+          loadConversations()
+        ])
+      } else if (isAggregatedView.value) {
+        await loadAggregatedData()
+      }
+    } finally {
+      isRefreshingAll.value = false
+    }
   }
 
   /**
@@ -966,6 +1012,8 @@ export function useTradingApp() {
     leaderboardGainers,
     leaderboardLosers,
     leaderboardStatus,
+    isRefreshingLeaderboard,
+    isRefreshingAll,
     portfolio,
     accountValueHistory,
     aggregatedChartData,
