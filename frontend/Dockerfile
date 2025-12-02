@@ -1,8 +1,9 @@
 # ==============================================================================
 # 前端服务 Dockerfile
 # ==============================================================================
-# 用途：构建 Node.js Express 前端服务镜像
+# 用途：构建 Vue + Vite 前端应用镜像
 # 构建上下文：项目根目录（通过 docker-compose.yml 配置）
+# 注意：使用 Vite 构建，生产环境建议使用 nginx 提供静态文件服务
 # ==============================================================================
 
 FROM node:18-slim
@@ -45,7 +46,6 @@ RUN if [ -d node_modules/klinecharts ]; then \
 COPY frontend/src/ src/
 COPY frontend/index.html ./
 COPY frontend/vite.config.js ./
-COPY frontend/server.js ./
 
 # 复制静态资源（用于开发环境回退）
 COPY frontend/public/ public/
@@ -82,5 +82,7 @@ RUN if [ -d dist ]; then \
 # ==============================================================================
 EXPOSE 3000
 
-# 启动前端服务器
-CMD ["npm", "start"]
+# 启动 Vite 预览服务器（用于开发/测试）
+# 注意：生产环境建议使用 nginx 或其他静态文件服务器来提供 dist/ 目录
+# 如果需要代理 API，请在 nginx 中配置反向代理
+CMD ["npm", "run", "preview", "--", "--host", "0.0.0.0", "--port", "3000"]

@@ -2,7 +2,7 @@
 
 ## 概述
 
-前端服务使用 Node.js Express 提供静态文件服务和 API/WebSocket 代理。
+前端服务使用 Vue 3 + Vite 构建。开发环境使用 Vite 开发服务器（支持代理），生产环境使用 Vite 预览服务器或 nginx。
 
 ## 快速开始
 
@@ -25,16 +25,20 @@
    ls public/lib/klinecharts.min.js
    ```
 
-3. **手动复制 KLineChart 文件**（如果需要）：
-   ```bash
-   npm run copy-assets
-   ```
+3. **KLineChart 库**：
+   - KLineChart 通过 npm 安装，在 Vue 组件中通过 ES6 import 使用
+   - Vite 构建时会自动打包，无需手动复制文件
 
 4. **启动开发服务器**：
    ```bash
-   npm start
-   # 或
+   # 开发环境（支持代理）
    npm run dev
+   
+   # 生产构建 + 预览
+   npm run build
+   npm run preview
+   # 或
+   npm start
    ```
 
 ### Docker 构建
@@ -61,14 +65,15 @@ npm install klinecharts
 
 - **源文件**：`node_modules/klinecharts/dist/klinecharts.min.js`
 - **复制目标**：`public/lib/klinecharts.min.js`
-- **备用位置**：如果复制失败，`server.js` 会从 `node_modules` 直接提供文件
+- **使用方式**：通过 npm 安装，在 Vue 组件中通过 ES6 import 使用，Vite 构建时会自动打包
 
-### 文件复制脚本
+### KLineChart 使用方式
 
-`scripts/copy-klinecharts.js` 脚本会：
-1. 检查 `node_modules/klinecharts/dist/` 是否存在
-2. 创建 `public/lib/` 目录（如果不存在）
-3. 复制所有文件到 `public/lib/`
+KLineChart 通过 npm 安装后，在 Vue 组件中直接导入使用：
+```javascript
+import { init, dispose } from 'klinecharts'
+```
+Vite 构建时会自动打包 klinecharts，无需手动复制文件。
 
 ### 故障排除
 
@@ -80,18 +85,13 @@ npm install klinecharts
    npm install
    ```
 
-2. **检查文件是否存在**：
+2. **检查 klinecharts 是否正确安装**：
    ```bash
-   # 检查源文件
-   ls node_modules/klinecharts/dist/klinecharts.min.js
+   # 检查 node_modules 中是否有 klinecharts
+   ls node_modules/klinecharts/
    
-   # 检查复制后的文件
-   ls public/lib/klinecharts.min.js
-   ```
-
-3. **手动复制文件**：
-   ```bash
-   npm run copy-assets
+   # 检查 package.json 中是否包含 klinecharts
+   grep klinecharts package.json
    ```
 
 4. **检查服务器日志**：
@@ -115,10 +115,14 @@ frontend/
 │   ├── style.css       # 样式文件
 │   └── lib/            # KLineChart库文件（由脚本复制）
 │       └── klinecharts.min.js
+├── src/                # Vue 组件源代码
+│   ├── components/     # Vue 组件
+│   ├── composables/    # Vue Composables
+│   └── main.js         # 入口文件
 ├── scripts/            # 构建脚本
-│   ├── copy-klinecharts.js      # 复制KLineChart文件
-│   └── sync-static-assets.js   # 同步静态资源
-├── server.js           # Express服务器
+│   └── sync-static-assets.js   # 同步静态资源（从 static/ 到 public/）
+├── index.html          # HTML 模板
+├── vite.config.js      # Vite 配置
 ├── package.json        # npm配置
 └── Dockerfile          # Docker构建文件
 ```
@@ -130,16 +134,17 @@ frontend/
 
 ## 脚本说明
 
-- `npm start`: 启动服务器
-- `npm run dev`: 启动开发服务器（同 start）
-- `npm run build`: 同步静态资源并复制KLineChart文件
+- `npm run dev`: 启动 Vite 开发服务器（支持代理）
+- `npm run build`: 构建生产版本
+- `npm run preview`: 预览生产构建（不支持代理）
+- `npm start`: 构建并预览生产版本
 - `npm run sync-static`: 同步静态资源（从 static/ 到 public/）
-- `npm run copy-assets`: 复制KLineChart库文件
-- `npm run install-deps`: 安装依赖
 
 ## 注意事项
 
 1. **必须运行 `npm install`**：KLineChart 需要通过 npm 安装，不能直接从 CDN 使用（根据项目要求）
 2. **postinstall 脚本**：安装依赖后会自动执行文件复制
-3. **备用方案**：如果文件复制失败，`server.js` 会从 `node_modules` 直接提供文件
-4. **Docker 构建**：Dockerfile 会确保依赖安装和文件复制正确执行
+3. **开发环境**：使用 `npm run dev`，Vite 开发服务器支持代理配置
+4. **生产环境**：使用 `npm run build` 构建，然后使用 `npm run preview` 预览，或使用 nginx 提供静态文件服务和反向代理
+5. **Docker 构建**：Dockerfile 会确保依赖安装和文件复制正确执行
+6. **代理配置**：开发环境的代理配置在 `vite.config.js` 中，生产环境建议使用 nginx 配置反向代理

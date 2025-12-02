@@ -7,15 +7,13 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "server": "node server.js",
-    "start": "npm run build && npm run server",
+    "start": "npm run build && npm run preview",
     "sync-static": "node scripts/sync-static-assets.js",
     "postinstall": "npm run sync-static"
   },
   "dependencies": {
-    "express": "^4.18.2",
-    "http-proxy-middleware": "^2.0.6",
     "klinecharts": "^9.0.0",
+    "socket.io-client": "^4.7.5",
     "vue": "^3.4.21"
   },
   "devDependencies": {

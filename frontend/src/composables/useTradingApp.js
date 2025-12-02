@@ -1,12 +1,6 @@
 import { ref } from 'vue'
-
-// Socket.IO 客户端（通过 script 标签加载，不使用 npm 包）
-const getSocketIO = () => {
-  if (typeof window !== 'undefined' && window.io) {
-    return window.io
-  }
-  return null
-}
+// Socket.IO 客户端（通过 npm 安装）
+import { io } from 'socket.io-client'
 
 export function useTradingApp() {
   // 状态
@@ -59,19 +53,26 @@ export function useTradingApp() {
   // 初始化WebSocket
   const initWebSocket = () => {
     try {
-      const io = getSocketIO()
-      if (!io) {
-        console.warn('[WebSocket] socket.io 未加载，使用轮询方式更新涨跌幅榜')
-        return
-      }
+      // 获取后端 URL
+      // 开发环境：使用相对路径（通过 Vite 代理）
+      // 生产环境：使用环境变量或默认值
+      const isDev = import.meta.env.DEV
+      const backendUrl = isDev 
+        ? undefined  // 使用相对路径，通过 Vite 代理
+        : (import.meta.env.VITE_BACKEND_URL || 'http://localhost:5002')
       
-      socket.value = io({
+      socket.value = io(backendUrl, {
         path: '/socket.io',
         transports: ['websocket', 'polling'],
         reconnection: true,
         reconnectionDelay: 1000,
-        reconnectionAttempts: 5
+        reconnectionAttempts: 5,
+        // 跨域配置
+        withCredentials: false,
+        autoConnect: true
       })
+      
+      console.log('[WebSocket] Connecting to:', backendUrl || 'current origin (via proxy)')
 
       socket.value.on('connect', () => {
         console.log('[WebSocket] 已连接到服务器')

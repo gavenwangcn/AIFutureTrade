@@ -38,6 +38,12 @@ export default defineConfig({
         ws: true
       }
     }
+  },
+  preview: {
+    port: 3000,
+    host: '0.0.0.0'
+    // 注意：vite preview 不支持代理配置
+    // 生产环境建议使用 nginx 提供静态文件服务和反向代理
   }
 })
 

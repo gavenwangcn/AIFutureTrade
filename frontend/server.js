@@ -229,7 +229,7 @@ const server = app.listen(PORT, () => {
         console.log(`[Frontend Server]   /lib/klinecharts.min.js: ✓ Found in node_modules (will be served)`);
     } else {
         console.error(`[Frontend Server]   /lib/klinecharts.min.js: ✗ Missing`);
-        console.error(`[Frontend Server]   Please run: npm install && npm run copy-assets`);
+        console.error(`[Frontend Server]   Note: This file is no longer needed. KLineChart is bundled by Vite via npm install.`);
     }
     
     console.log('='.repeat(60));
