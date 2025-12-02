@@ -199,7 +199,11 @@
             <div class="leaderboard-meta">
               <span 
                 class="status-indicator" 
-                :class="{ updating: isRefreshingLeaderboard }"
+                :class="{
+                  updating: leaderboardStatusType === 'updating',
+                  success: leaderboardStatusType === 'success',
+                  error: leaderboardStatusType === 'error'
+                }"
               >
                 {{ leaderboardStatus }}
               </span>
@@ -520,6 +524,7 @@ const {
   leaderboardGainers,
   leaderboardLosers,
   leaderboardStatus,
+  leaderboardStatusType,
   isRefreshingLeaderboard,
   isRefreshingAll,
   portfolio,

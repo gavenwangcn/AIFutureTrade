@@ -1057,8 +1057,8 @@ class ClickHouseDatabase:
         Returns:
             List[Dict[str, Any]]: 行情数据字典列表
         """
-        logger.info(f"[ClickHouse] 📊 开始查询所有行情数据...")
-        logger.info(f"[ClickHouse] 📋 查询参数: side={side}, top_n={top_n} (已移除时间窗口限制)")
+        logger.debug(f"[ClickHouse] 📊 开始查询所有行情数据...")
+        logger.debug(f"[ClickHouse] 📋 查询参数: side={side}, top_n={top_n} (已移除时间窗口限制)")
         
         # 构建查询SQL：去重，取每个symbol最新的event_time
         # 重要：只查询side字段不为空字符串的数据（side=''表示价格异步刷新服务还没刷新，没有涨跌数据）
@@ -1067,12 +1067,12 @@ class ClickHouseDatabase:
                 # 涨幅榜：查询price_change_percent>0且side不为空的合约，按price_change_percent降序排序
                 where_clause = "price_change_percent > 0 AND side != '' AND side IS NOT NULL"
                 order_by = "price_change_percent DESC"
-                logger.info(f"[ClickHouse] 📈 涨幅榜查询: {where_clause}, 排序: {order_by}")
+                logger.debug(f"[ClickHouse] 📈 涨幅榜查询: {where_clause}, 排序: {order_by}")
             else:  # loser
                 # 跌幅榜：查询price_change_percent<0且side不为空的合约，按price_change_percent升序排序（跌幅最大的排在前面）
                 where_clause = "price_change_percent < 0 AND side != '' AND side IS NOT NULL"
                 order_by = "price_change_percent ASC"
-                logger.info(f"[ClickHouse] 📉 跌幅榜查询: {where_clause}, 排序: {order_by}")
+                logger.debug(f"[ClickHouse] 📉 跌幅榜查询: {where_clause}, 排序: {order_by}")
             
             query = f"""
             SELECT 
@@ -1149,9 +1149,9 @@ class ClickHouseDatabase:
         def _execute_query(client):
             return client.query(query)
         
-        logger.info(f"[ClickHouse] 📝 执行查询: {query[:100]}...")
+        logger.debug(f"[ClickHouse] 📝 执行查询: {query[:100]}...")
         result = self._with_connection(_execute_query)
-        logger.info(f"[ClickHouse] ✅ 查询执行完成")
+        logger.debug(f"[ClickHouse] ✅ 查询执行完成")
         
         # 转换为字典列表
         columns = [
@@ -1175,7 +1175,7 @@ class ClickHouseDatabase:
                     f"base_volume: {row_dict.get('base_volume')}, quote_volume: {row_dict.get('quote_volume')}"
                 )
         
-        logger.info(f"[ClickHouse] 📊 查询结果: 共 {len(rows)} 条数据")
+        logger.debug(f"[ClickHouse] 📊 查询结果: 共 {len(rows)} 条数据")
         return rows
 
     # ==================================================================
@@ -1224,22 +1224,22 @@ class ClickHouseDatabase:
                 logger.info("[ClickHouse] ✅ leaderboard表已存在")
             
             # 查询涨幅榜前N名（查询所有数据，按涨跌幅排序）
-            logger.info("[ClickHouse] 🔍 查询涨幅榜前%s名（从所有数据中排序）...", top_n)
+            logger.debug("[ClickHouse] 🔍 查询涨幅榜前%s名（从所有数据中排序）...", top_n)
             gainers = self.query_recent_tickers(
                 time_window_seconds=time_window_seconds,
                 side='gainer',
                 top_n=top_n
             )
-            logger.info("[ClickHouse] ✅ 涨幅榜查询完成，共 %s 条数据", len(gainers))
+            logger.debug("[ClickHouse] ✅ 涨幅榜查询完成，共 %s 条数据", len(gainers))
             
             # 查询跌幅榜前N名（查询所有数据，按涨跌幅排序）
-            logger.info("[ClickHouse] 🔍 查询跌幅榜前%s名（从所有数据中排序）...", top_n)
+            logger.debug("[ClickHouse] 🔍 查询跌幅榜前%s名（从所有数据中排序）...", top_n)
             losers = self.query_recent_tickers(
                 time_window_seconds=time_window_seconds,
                 side='loser',
                 top_n=top_n
             )
-            logger.info("[ClickHouse] ✅ 跌幅榜查询完成，共 %s 条数据", len(losers))
+            logger.debug("[ClickHouse] ✅ 跌幅榜查询完成，共 %s 条数据", len(losers))
             
             # 重要：检查是否有有效数据（side字段不为空）
             # 如果涨幅榜和跌幅榜都没有数据，说明价格异步刷新服务还没刷新，此时不应该执行同步

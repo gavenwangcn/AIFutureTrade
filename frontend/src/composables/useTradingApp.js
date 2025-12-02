@@ -23,6 +23,7 @@ export function useTradingApp() {
   const leaderboardGainers = ref([])
   const leaderboardLosers = ref([])
   const leaderboardStatus = ref('等待数据...')
+  const leaderboardStatusType = ref('default') // 'updating' | 'success' | 'error' | 'default'
   const isRefreshingLeaderboard = ref(false)
   const isRefreshingAll = ref(false)
   
@@ -120,6 +121,7 @@ export function useTradingApp() {
           id: socket.value.id
         })
         leaderboardStatus.value = '已连接，等待数据...'
+        leaderboardStatusType.value = 'default'
         
         // 验证事件监听器是否已注册
         // 注意：Socket.IO 客户端可能不支持 eventNames() 方法，使用 hasListeners() 检查
@@ -176,37 +178,38 @@ export function useTradingApp() {
             currentLosersCount: leaderboardLosers.value.length
           })
           
+          // 先设置更新中状态（黄色）
+          leaderboardStatus.value = '正在更新...'
+          leaderboardStatusType.value = 'updating'
+          
           // 更新数据（无论是否变化，因为后端推送的数据应该是最新的）
           leaderboardGainers.value = newGainers
           leaderboardLosers.value = newLosers
           
-          // 更新状态时间戳
-          const updateTime = new Date()
-          const timeStr = updateTime.toLocaleTimeString('zh-CN', { 
-            hour12: false,
-            hour: '2-digit',
-            minute: '2-digit',
-            second: '2-digit'
-          })
-          leaderboardStatus.value = `最后更新: ${timeStr}`
+          // 检查是否有数据
+          if (newGainers.length > 0 || newLosers.length > 0) {
+            // 更新成功：显示日期时间格式（绿色）
+            const updateTime = new Date()
+            const dateStr = updateTime.toLocaleDateString('zh-CN', {
+              year: 'numeric',
+              month: '2-digit',
+              day: '2-digit'
+            })
+            const timeStr = updateTime.toLocaleTimeString('zh-CN', {
+              hour12: false,
+              hour: '2-digit',
+              minute: '2-digit',
+              second: '2-digit'
+            })
+            leaderboardStatus.value = `最后更新: ${dateStr} ${timeStr}`
+            leaderboardStatusType.value = 'success'
+          } else {
+            // 没有数据：显示更新失败（白色）
+            leaderboardStatus.value = '更新失败'
+            leaderboardStatusType.value = 'error'
+          }
           
           console.log(`[WebSocket] ✅ 涨跌幅榜数据已更新: 涨幅榜 ${newGainers.length} 条, 跌幅榜 ${newLosers.length} 条`)
-          
-          // 触发更新动画效果
-          await nextTick()
-          const statusEl = document.querySelector('.status-indicator')
-          if (statusEl) {
-            // 移除之前的动画类
-            statusEl.classList.remove('updating', 'updated', 'error')
-            // 添加更新动画
-            statusEl.classList.add('updated')
-            setTimeout(() => {
-              statusEl.classList.remove('updated')
-            }, 1000)
-            console.log('[WebSocket] ✅ 状态指示器动画已触发')
-          } else {
-            console.warn('[WebSocket] ⚠️ 未找到状态指示器元素')
-          }
           
           console.log('[WebSocket] ========== 涨跌幅榜更新完成 ==========')
         } else {
@@ -240,12 +243,14 @@ export function useTradingApp() {
       socket.value.on('disconnect', (reason) => {
         console.warn('[WebSocket] ⚠️ 已断开连接:', reason)
         leaderboardStatus.value = '连接断开'
+        leaderboardStatusType.value = 'error'
       })
 
       // 重新连接事件
       socket.value.on('reconnect', (attemptNumber) => {
         console.log(`[WebSocket] 🔄 重新连接成功 (尝试 ${attemptNumber} 次)`)
         leaderboardStatus.value = '已重连，等待数据...'
+        leaderboardStatusType.value = 'default'
         // 重新连接后请求数据
         socket.value.emit('leaderboard:request', { limit: 10 })
       })
@@ -260,6 +265,7 @@ export function useTradingApp() {
           type: error.type
         })
         leaderboardStatus.value = '连接失败'
+        leaderboardStatusType.value = 'error'
       })
 
       // 重连尝试事件
@@ -397,35 +403,53 @@ export function useTradingApp() {
     isRefreshingLeaderboard.value = true
     errors.value.leaderboard = null
     
-    // 更新状态为刷新中
-    if (force) {
-      leaderboardStatus.value = '正在刷新...'
-    }
+    // 更新状态为刷新中（黄色）
+    leaderboardStatus.value = '正在更新...'
+    leaderboardStatusType.value = 'updating'
     
     try {
       const data = await marketApi.getLeaderboard(10, force)
       // 后端返回格式：{ success: true, gainers: [], losers: [] } 或直接返回 { gainers: [], losers: [] }
       if (data.success !== false) {
-        leaderboardGainers.value = data.gainers || []
-        leaderboardLosers.value = data.losers || []
-        const updateTime = new Date().toLocaleTimeString('zh-CN')
-        leaderboardStatus.value = `最后更新: ${updateTime}`
+        const gainers = data.gainers || []
+        const losers = data.losers || []
         
-        // 触发更新动画
-        await nextTick()
-        const statusEl = document.querySelector('.status-indicator')
-        if (statusEl) {
-          statusEl.classList.remove('updating')
-          statusEl.classList.add('updated')
-          setTimeout(() => {
-            statusEl.classList.remove('updated')
-          }, 1000)
+        // 检查是否有数据
+        if (gainers.length > 0 || losers.length > 0) {
+          leaderboardGainers.value = gainers
+          leaderboardLosers.value = losers
+          
+          // 更新成功：显示日期时间格式（绿色）
+          const updateTime = new Date()
+          const dateStr = updateTime.toLocaleDateString('zh-CN', {
+            year: 'numeric',
+            month: '2-digit',
+            day: '2-digit'
+          })
+          const timeStr = updateTime.toLocaleTimeString('zh-CN', {
+            hour12: false,
+            hour: '2-digit',
+            minute: '2-digit',
+            second: '2-digit'
+          })
+          leaderboardStatus.value = `最后更新: ${dateStr} ${timeStr}`
+          leaderboardStatusType.value = 'success'
+        } else {
+          // 没有数据：显示更新失败（白色）
+          leaderboardStatus.value = '更新失败'
+          leaderboardStatusType.value = 'error'
         }
+      } else {
+        // 更新失败：显示更新失败（白色）
+        leaderboardStatus.value = '更新失败'
+        leaderboardStatusType.value = 'error'
       }
     } catch (error) {
       console.error('[TradingApp] Error loading leaderboard:', error)
       errors.value.leaderboard = error.message
+      // 更新失败：显示更新失败（白色）
       leaderboardStatus.value = '更新失败'
+      leaderboardStatusType.value = 'error'
     } finally {
       loading.value.leaderboard = false
       isRefreshingLeaderboard.value = false
@@ -1257,6 +1281,7 @@ export function useTradingApp() {
     leaderboardGainers,
     leaderboardLosers,
     leaderboardStatus,
+    leaderboardStatusType,
     isRefreshingLeaderboard,
     isRefreshingAll,
     portfolio,

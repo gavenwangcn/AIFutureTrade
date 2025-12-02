@@ -88,8 +88,8 @@
 
 .status-indicator.updating {
     animation: statusPulse 1s ease-in-out infinite;
-    background: rgba(51, 112, 255, 0.15);
-    color: var(--primary);
+    background: rgba(255, 193, 7, 0.2);
+    color: #ffc107;
     font-weight: 700;
 }
 
@@ -100,13 +100,15 @@
 }
 
 .status-indicator.success {
-    background: rgba(25, 190, 107, 0.15);
-    color: var(--success);
+    background: rgba(0, 180, 42, 0.15);
+    color: #00b42a;
+    font-weight: 600;
 }
 
 .status-indicator.error {
-    background: rgba(255, 86, 48, 0.15);
-    color: var(--danger);
+    background: rgba(255, 255, 255, 0.9);
+    color: var(--text-2);
+    border: 1px solid var(--border-1);
 }
 
 .status-indicator.warning,
