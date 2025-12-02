@@ -62,7 +62,12 @@ export const modelApi = {
   /**
    * 设置杠杆
    */
-  setLeverage: (modelId, leverage) => apiPost(`/api/models/${modelId}/leverage`, { leverage })
+  setLeverage: (modelId, leverage) => apiPost(`/api/models/${modelId}/leverage`, { leverage }),
+
+  /**
+   * 获取聚合投资组合数据
+   */
+  getAggregatedPortfolio: () => apiGet('/api/aggregated/portfolio')
 }
 
 /**
@@ -77,7 +82,13 @@ export const marketApi = {
   /**
    * 获取涨跌幅榜
    */
-  getLeaderboard: (limit = 10) => apiGet('/api/market/leaderboard', { limit }),
+  getLeaderboard: (limit = 10, force = false) => {
+    const params = { limit }
+    if (force) {
+      params.force = 1
+    }
+    return apiGet('/api/market/leaderboard', params)
+  },
 
   /**
    * 获取K线数据

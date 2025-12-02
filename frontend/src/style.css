@@ -196,6 +196,17 @@
     color: var(--text-3);
 }
 
+.leaderboard-symbol-name {
+    font-weight: 600;
+    color: var(--text-1);
+    font-size: 14px;
+}
+
+.leaderboard-symbol-desc {
+    font-size: 12px;
+    color: var(--text-3);
+}
+
 .leaderboard-price {
     font-size: 16px;
     font-weight: 600;
