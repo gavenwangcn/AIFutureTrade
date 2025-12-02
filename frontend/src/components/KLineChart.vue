@@ -31,6 +31,9 @@ import { ref, onMounted, onUnmounted, watch, nextTick } from 'vue'
 // 使用 npm 安装的 klinecharts（按官网要求）
 import { init, dispose } from 'klinecharts'
 
+// 检查 klinecharts 是否正确导入
+console.log('[KLineChart] klinecharts imported:', { init: typeof init, dispose: typeof dispose })
+
 const props = defineProps({
   visible: {
     type: Boolean,
@@ -48,8 +51,8 @@ const props = defineProps({
 
 const emit = defineEmits(['close', 'interval-change'])
 
-// 生成唯一的容器 ID（使用 ref 确保 ID 固定）
-const chartContainerId = ref(`kline-chart-${Math.random().toString(36).substr(2, 9)}`)
+// 生成唯一的容器 ID（使用 ref 确保 ID 固定，避免使用已废弃的 substr）
+const chartContainerId = ref(`kline-chart-${Math.random().toString(36).slice(2, 11)}`)
 const chart = ref(null)
 const currentInterval = ref(props.interval)
 const title = ref(`${props.symbol} - K线图`)
@@ -66,7 +69,10 @@ const timeframes = [
 
 // 初始化图表
 const initChart = async () => {
+  // 等待 DOM 完全渲染
   await nextTick()
+  // 额外等待一小段时间确保容器元素已完全渲染
+  await new Promise(resolve => setTimeout(resolve, 100))
 
   try {
     const containerId = chartContainerId.value
@@ -74,6 +80,7 @@ const initChart = async () => {
     
     if (!containerElement) {
       console.error('[KLineChart] Container element not found:', containerId)
+      console.error('[KLineChart] Available elements:', Array.from(document.querySelectorAll('[id^="kline-chart"]')).map(el => el.id))
       return
     }
 
@@ -88,12 +95,24 @@ const initChart = async () => {
     }
 
     // 创建新图表（使用容器 ID，参考示例代码）
+    // 注意：init 可以接受容器 ID 字符串或 DOM 元素
+    console.log('[KLineChart] Initializing chart with container ID:', containerId)
+    console.log('[KLineChart] Container element:', containerElement)
+    console.log('[KLineChart] Init function:', init)
+    
+    if (typeof init !== 'function') {
+      console.error('[KLineChart] init is not a function:', typeof init)
+      return
+    }
+    
     chart.value = init(containerId)
     
     if (!chart.value) {
-      console.error('[KLineChart] Failed to initialize chart')
+      console.error('[KLineChart] Failed to initialize chart - init returned:', chart.value)
       return
     }
+    
+    console.log('[KLineChart] Chart instance created:', chart.value)
 
     // 设置主题
     chart.value.setTheme('dark')
@@ -183,13 +202,15 @@ const handleClose = () => {
 }
 
 // 监听 visible 变化
-watch(() => props.visible, (newVal) => {
+watch(() => props.visible, async (newVal) => {
   if (newVal) {
     title.value = `${props.symbol} - K线图`
     currentInterval.value = props.interval
-    nextTick(() => {
-      initChart()
-    })
+    // 等待 DOM 更新后再初始化
+    await nextTick()
+    // 确保容器元素已渲染
+    await new Promise(resolve => setTimeout(resolve, 50))
+    initChart()
   } else {
     // 销毁图表（使用容器 ID）
     if (chart.value) {
@@ -201,7 +222,7 @@ watch(() => props.visible, (newVal) => {
       chart.value = null
     }
   }
-})
+}, { immediate: false })
 
 // 监听 symbol 变化
 watch(() => props.symbol, (newVal) => {

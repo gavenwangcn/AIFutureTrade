@@ -360,9 +360,11 @@ const klineChartInterval = ref('5m')
 const activeTab = ref('positions')
 
 const openKlineChart = (symbol) => {
+  console.log('[App] Opening KLineChart for symbol:', symbol)
   klineChartSymbol.value = symbol
   klineChartInterval.value = '5m'
   showKlineChart.value = true
+  console.log('[App] showKlineChart set to:', showKlineChart.value)
 }
 
 const handleKlineIntervalChange = (interval) => {
