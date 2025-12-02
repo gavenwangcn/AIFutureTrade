@@ -15,7 +15,12 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 // 路径配置
-const sourceDir = path.join(__dirname, '..', 'node_modules', 'klinecharts', 'dist');
+// klinecharts 9.0.0+ 版本的文件可能在 dist/umd/ 目录中
+const possibleSourceDirs = [
+    path.join(__dirname, '..', 'node_modules', 'klinecharts', 'dist', 'umd'),
+    path.join(__dirname, '..', 'node_modules', 'klinecharts', 'dist'),
+    path.join(__dirname, '..', 'node_modules', 'klinecharts')
+];
 const targetDir = path.join(__dirname, '..', 'public', 'lib');
 
 try {
@@ -25,26 +30,48 @@ try {
         console.log(`[KLineChart] Created directory: ${targetDir}`);
     }
 
-    // 检查源目录是否存在
-    if (!fs.existsSync(sourceDir)) {
-        console.error(`[KLineChart] ✗ Source directory not found: ${sourceDir}`);
+    // 查找源目录（按优先级检查多个可能的位置）
+    let sourceDir = null;
+    for (const dir of possibleSourceDirs) {
+        if (fs.existsSync(dir)) {
+            // 检查是否有 klinecharts.min.js 或类似的 .min.js 文件
+            const files = fs.readdirSync(dir);
+            const minJsFiles = files.filter(f => f.endsWith('.min.js'));
+            
+            if (minJsFiles.length > 0 || files.some(f => f.includes('klinecharts'))) {
+                sourceDir = dir;
+                console.log(`[KLineChart] Found source directory: ${dir}`);
+                break;
+            }
+        }
+    }
+
+    if (!sourceDir) {
+        console.error(`[KLineChart] ✗ Source directory not found in any of: ${possibleSourceDirs.join(', ')}`);
         console.error('[KLineChart] Please run: npm install klinecharts');
         console.warn('[KLineChart] KLineChart files will be served from node_modules (if available)');
         process.exit(0); // 退出码0表示成功，不会中断构建
     }
     
-    // 检查源文件是否存在
-    const sourceFile = path.join(sourceDir, 'klinecharts.min.js');
-    if (!fs.existsSync(sourceFile)) {
-        console.error(`[KLineChart] ✗ Source file not found: ${sourceFile}`);
-        console.error('[KLineChart] Please check if klinecharts package is correctly installed');
-        console.warn('[KLineChart] KLineChart files will be served from node_modules (if available)');
-        process.exit(0);
+    // 检查源文件是否存在（优先查找 klinecharts.min.js）
+    const preferredFile = path.join(sourceDir, 'klinecharts.min.js');
+    const hasPreferredFile = fs.existsSync(preferredFile);
+    
+    if (!hasPreferredFile) {
+        // 查找其他 .min.js 文件
+        const files = fs.readdirSync(sourceDir);
+        const minJsFiles = files.filter(f => f.endsWith('.min.js'));
+        if (minJsFiles.length === 0) {
+            console.warn(`[KLineChart] ⚠ No .min.js files found in ${sourceDir}`);
+            console.warn('[KLineChart] Available files:', files.join(', '));
+            console.warn('[KLineChart] Will copy all files from source directory');
+        }
     }
 
     // 复制文件
     const files = fs.readdirSync(sourceDir);
     let copiedCount = 0;
+    let minJsFile = null;
 
     files.forEach(file => {
         const sourceFile = path.join(sourceDir, file);
@@ -53,10 +80,40 @@ try {
         if (fs.statSync(sourceFile).isFile()) {
             fs.copyFileSync(sourceFile, targetFile);
             copiedCount++;
+            console.log(`[KLineChart] Copied: ${file}`);
+            
+            // 记录 .min.js 文件
+            if (file.endsWith('.min.js')) {
+                minJsFile = file;
+            }
         }
     });
 
-    console.log(`[KLineChart] Copied ${copiedCount} files to ${targetDir}`);
+    console.log(`[KLineChart] ✓ Copied ${copiedCount} files to ${targetDir}`);
+    
+    // 验证关键文件是否存在，如果文件名不同则创建符号链接或重命名
+    const targetKlineChartFile = path.join(targetDir, 'klinecharts.min.js');
+    if (fs.existsSync(targetKlineChartFile)) {
+        console.log(`[KLineChart] ✓ klinecharts.min.js found in target directory`);
+    } else if (minJsFile && minJsFile !== 'klinecharts.min.js') {
+        // 如果找到其他 .min.js 文件，创建符号链接或复制为 klinecharts.min.js
+        const sourceMinJsFile = path.join(targetDir, minJsFile);
+        try {
+            fs.copyFileSync(sourceMinJsFile, targetKlineChartFile);
+            console.log(`[KLineChart] ✓ Created klinecharts.min.js from ${minJsFile}`);
+        } catch (error) {
+            console.warn(`[KLineChart] ⚠ Could not create klinecharts.min.js from ${minJsFile}:`, error.message);
+            console.warn(`[KLineChart] Note: Update index.html to use /lib/${minJsFile} instead`);
+        }
+    } else {
+        // 查找其他可能的文件名
+        const targetFiles = fs.readdirSync(targetDir);
+        const minJsFiles = targetFiles.filter(f => f.endsWith('.min.js'));
+        if (minJsFiles.length > 0) {
+            console.log(`[KLineChart] ⚠ klinecharts.min.js not found, but found: ${minJsFiles.join(', ')}`);
+            console.log(`[KLineChart] Note: Update index.html to use /lib/${minJsFiles[0]} or rename the file`);
+        }
+    }
 } catch (error) {
     console.warn('[KLineChart] Error copying files:', error.message);
     console.warn('[KLineChart] KLineChart files will be served from node_modules');

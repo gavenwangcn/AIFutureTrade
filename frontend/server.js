@@ -79,59 +79,11 @@ if (fs.existsSync(distPath)) {
 }
 
 // ------------------------------------------------------------------------------
-// 2. KLineChart库文件服务
+// 2. KLineChart库文件服务（已移除）
 // ------------------------------------------------------------------------------
-// 优先级：dist/lib/ > public/lib/ > node_modules/klinecharts/dist/
-// 必须在静态文件服务之后，API代理之前
-const distLibPath = path.join(__dirname, 'dist', 'lib');
-const publicLibPath = path.join(__dirname, 'public', 'lib');
-const nodeModulesLibPath = path.join(__dirname, 'node_modules', 'klinecharts', 'dist');
-
-let klineChartSource = null;
-let klineChartPath = null;
-
-// 按优先级检查 klinecharts 文件位置
-if (fs.existsSync(distLibPath) && fs.existsSync(path.join(distLibPath, 'klinecharts.min.js'))) {
-    // 生产环境：优先使用构建后的 dist/lib/
-    klineChartSource = 'dist/lib (production build)';
-    klineChartPath = distLibPath;
-} else if (fs.existsSync(publicLibPath) && fs.existsSync(path.join(publicLibPath, 'klinecharts.min.js'))) {
-    // 开发环境：使用 public/lib/
-    klineChartSource = 'public/lib (development)';
-    klineChartPath = publicLibPath;
-} else if (fs.existsSync(nodeModulesLibPath) && fs.existsSync(path.join(nodeModulesLibPath, 'klinecharts.min.js'))) {
-    // 备用方案：从 node_modules 提供
-    klineChartSource = 'node_modules (fallback)';
-    klineChartPath = nodeModulesLibPath;
-}
-
-// 配置 KLineChart 库文件服务
-if (klineChartPath) {
-    app.use('/lib', express.static(klineChartPath, {
-        maxAge: '1d',
-        etag: true,
-        setHeaders: (res, filePath) => {
-            if (filePath.endsWith('.js')) {
-                res.setHeader('Content-Type', 'application/javascript; charset=utf-8');
-            }
-        }
-    }));
-    console.log(`[Frontend Server] Serving KLineChart from: ${klineChartSource}`);
-    console.log(`[Frontend Server]   Path: ${klineChartPath}`);
-    
-    // 验证文件是否存在
-    const klineChartFile = path.join(klineChartPath, 'klinecharts.min.js');
-    if (fs.existsSync(klineChartFile)) {
-        const stats = fs.statSync(klineChartFile);
-        console.log(`[Frontend Server] ✓ KLineChart file found: ${klineChartFile} (${(stats.size / 1024).toFixed(2)} KB)`);
-    } else {
-        console.warn(`[Frontend Server] ✗ KLineChart file not found: ${klineChartFile}`);
-    }
-} else {
-    console.error(`[Frontend Server] ✗ KLineChart library not found in any location`);
-    console.error(`[Frontend Server]   Checked: dist/lib/, public/lib/, node_modules/klinecharts/dist/`);
-    console.error(`[Frontend Server]   Please run: npm install klinecharts && npm run copy-assets`);
-}
+// 注意：klinecharts 现在通过 npm 安装，在 Vue 组件中通过 ES6 import 使用
+// Vite 构建时会自动打包 klinecharts，不再需要单独提供文件服务
+console.log(`[Frontend Server] KLineChart is bundled by Vite (via npm install klinecharts)`);
 
 // ------------------------------------------------------------------------------
 // 3. API代理

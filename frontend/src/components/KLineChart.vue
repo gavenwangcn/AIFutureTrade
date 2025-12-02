@@ -28,14 +28,8 @@
 
 <script setup>
 import { ref, onUnmounted, watch, nextTick } from 'vue'
-// 使用全局 klinecharts（通过 script 标签加载）
-// 在 index.html 中通过 <script src="/lib/klinecharts.min.js"> 加载
-const getKlinecharts = () => {
-  if (typeof window !== 'undefined') {
-    return window.klinecharts || window.klinechartsLib
-  }
-  return null
-}
+// 使用 npm 安装的 klinecharts（按官网要求）
+import { init, dispose } from 'klinecharts'
 
 const props = defineProps({
   visible: {
@@ -78,22 +72,17 @@ const initChart = async () => {
   try {
     // 如果图表已存在，先销毁
     if (chart.value && chartContainer.value) {
-      const klinechartsLib = getKlinecharts()
-      if (klinechartsLib && klinechartsLib.dispose) {
-        klinechartsLib.dispose(chartContainer.value)
-      }
+      dispose(chartContainer.value)
       chart.value = null
     }
 
-    // 获取 klinecharts 库
-    const klinechartsLib = getKlinecharts()
-    if (!klinechartsLib || !klinechartsLib.init) {
+    // 创建新图表（使用 npm 安装的 klinecharts）
+    if (!init) {
       console.error('[KLineChart] klinecharts library not loaded')
       return
     }
 
-    // 创建新图表
-    chart.value = klinechartsLib.init(chartContainer.value)
+    chart.value = init(chartContainer.value)
     
     if (!chart.value) {
       console.error('[KLineChart] Failed to initialize chart')
@@ -197,10 +186,7 @@ watch(() => props.visible, (newVal) => {
     })
   } else {
     if (chart.value && chartContainer.value) {
-      const klinechartsLib = getKlinecharts()
-      if (klinechartsLib && klinechartsLib.dispose) {
-        klinechartsLib.dispose(chartContainer.value)
-      }
+      dispose(chartContainer.value)
       chart.value = null
     }
   }
@@ -220,10 +206,7 @@ watch(() => props.symbol, (newVal) => {
 // 组件卸载时清理
 onUnmounted(() => {
   if (chart.value && chartContainer.value) {
-    const klinechartsLib = getKlinecharts()
-    if (klinechartsLib && klinechartsLib.dispose) {
-      klinechartsLib.dispose(chartContainer.value)
-    }
+    dispose(chartContainer.value)
     chart.value = null
   }
 })

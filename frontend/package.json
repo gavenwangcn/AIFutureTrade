@@ -10,9 +10,7 @@
     "server": "node server.js",
     "start": "npm run build && npm run server",
     "sync-static": "node scripts/sync-static-assets.js",
-    "copy-assets": "node scripts/copy-klinecharts.js",
-    "install-deps": "npm install",
-    "postinstall": "npm run sync-static && npm run copy-assets"
+    "postinstall": "npm run sync-static"
   },
   "dependencies": {
     "express": "^4.18.2",
