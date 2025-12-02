@@ -41,16 +41,25 @@ RUN if [ -f package-lock.json ]; then \
         npm install --legacy-peer-deps; \
     fi
 
-# 验证 @klinecharts/pro 是否已正确安装
+# 验证 @klinecharts/pro 和 klinecharts 是否已正确安装
+# 注意：@klinecharts/pro 依赖 klinecharts 作为 peer dependency
 RUN if [ -d node_modules/@klinecharts/pro ]; then \
         echo "[Dockerfile] ✓ @klinecharts/pro package installed via npm"; \
-        echo "[Dockerfile] Package version:"; \
+        echo "[Dockerfile] @klinecharts/pro version:"; \
         cat node_modules/@klinecharts/pro/package.json | grep '"version"' || echo "Version not found"; \
-        echo "[Dockerfile] Package structure:"; \
-        ls -la node_modules/@klinecharts/pro/ | head -10; \
     else \
         echo "[Dockerfile] ✗ @klinecharts/pro package not found in node_modules"; \
         echo "[Dockerfile] Please ensure '@klinecharts/pro' is listed in package.json dependencies"; \
+        exit 1; \
+    fi
+
+RUN if [ -d node_modules/klinecharts ]; then \
+        echo "[Dockerfile] ✓ klinecharts package installed via npm (required by @klinecharts/pro)"; \
+        echo "[Dockerfile] klinecharts version:"; \
+        cat node_modules/klinecharts/package.json | grep '"version"' || echo "Version not found"; \
+    else \
+        echo "[Dockerfile] ✗ klinecharts package not found in node_modules"; \
+        echo "[Dockerfile] klinecharts is required as a peer dependency of @klinecharts/pro"; \
         exit 1; \
     fi
 
