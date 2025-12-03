@@ -2161,35 +2161,20 @@ class ClickHouseDatabase:
             result = self.query(check_query)
             exists = result and result[0] and int(result[0][0]) > 0
             
-            if exists:
-                # IP+port已存在，执行UPDATE操作
-                update_query = f"""
-                ALTER TABLE {self.market_data_agent_table} UPDATE 
-                    status = '{status}', 
-                    connection_count = {connection_count}, 
-                    assigned_symbol_count = {assigned_symbol_count}, 
-                    assigned_symbols = '{assigned_symbols_json}', 
-                    error_log = '{error_log}', 
-                    last_heartbeat = '{last_heartbeat.strftime('%Y-%m-%d %H:%M:%S')}', 
-                    update_time = '{update_time.strftime('%Y-%m-%d %H:%M:%S')}' 
-                WHERE ip = '{ip}' AND port = {port}
-                """
-                self.command(update_query)
-                logger.debug("[ClickHouse] Updated agent: %s:%s", ip, port)
-            else:
-                # IP+port不存在，执行INSERT操作
-                column_names = [
-                    "ip", "port", "status", "connection_count", "assigned_symbol_count",
-                    "assigned_symbols", "error_log", "last_heartbeat", "update_time"
-                ]
-                
-                row_data = [
-                    ip, port, status, connection_count, assigned_symbol_count,
-                    assigned_symbols_json, error_log, last_heartbeat, update_time
-                ]
-                
-                self.insert_rows(self.market_data_agent_table, [row_data], column_names)
-                logger.debug("[ClickHouse] Inserted agent: %s:%s", ip, port)
+            # 对于ReplacingMergeTree，使用INSERT语句替代UPDATE，让引擎自动保留最新版本
+            # 这避免了直接UPDATE版本列导致的错误
+            column_names = [
+                "ip", "port", "status", "connection_count", "assigned_symbol_count",
+                "assigned_symbols", "error_log", "last_heartbeat", "update_time"
+            ]
+            
+            row_data = [
+                ip, port, status, connection_count, assigned_symbol_count,
+                assigned_symbols_json, error_log, last_heartbeat, update_time
+            ]
+            
+            self.insert_rows(self.market_data_agent_table, [row_data], column_names)
+            logger.debug("[ClickHouse] Upserted agent: %s:%s", ip, port)
             
             # 执行OPTIMIZE TABLE，确保数据实时一致性
             optimize_query = f"OPTIMIZE TABLE {self.market_data_agent_table} FINAL"
