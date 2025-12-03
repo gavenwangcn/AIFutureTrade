@@ -91,15 +91,8 @@ class DataAgentKlineManager:
     def __init__(self, db: ClickHouseDatabase, max_connections: int = 1000):
         self._db = db
         self._max_connections = max_connections
-        configuration_ws_streams = ConfigurationWebSocketStreams(
-            stream_url=os.getenv(
-                "STREAM_URL",
-                DERIVATIVES_TRADING_USDS_FUTURES_WS_STREAMS_PROD_URL,
-            )
-        )
-        self._client = DerivativesTradingUsdsFutures(
-            config_ws_streams=configuration_ws_streams
-        )
+        # 客户端将在第一次使用时初始化，避免事件循环冲突
+        self._client = None
         # 跟踪活跃连接: {(symbol, interval): KlineStreamConnection}
         self._active_connections: Dict[Tuple[str, str], KlineStreamConnection] = {}
         self._lock = asyncio.Lock()
@@ -114,12 +107,12 @@ class DataAgentKlineManager:
         self._last_subscription_time = datetime.now(timezone.utc)
         self._subscriptions_in_last_second = 0
         
+        # 标记是否正在关闭
+        self._is_closing = False
+        
         # 启动定期检查任务
         self._check_task = asyncio.create_task(self._periodic_connection_check())
         self._ping_task = asyncio.create_task(self._periodic_ping())
-        
-        # 标记是否正在关闭
-        self._is_closing = False
     
     async def _handle_kline_message(self, symbol: str, interval: str, message: Any) -> None:
         """处理K线消息并插入数据库。"""
@@ -130,6 +123,19 @@ class DataAgentKlineManager:
                 logger.debug("[DataAgentKline] Inserted kline: %s %s", symbol, interval)
         except Exception as e:
             logger.error("[DataAgentKline] Error handling kline message: %s", e, exc_info=True)
+    
+    async def _init_client(self) -> None:
+        """初始化客户端，确保在事件循环中创建。"""
+        if self._client is None:
+            configuration_ws_streams = ConfigurationWebSocketStreams(
+                stream_url=os.getenv(
+                    "STREAM_URL",
+                    DERIVATIVES_TRADING_USDS_FUTURES_WS_STREAMS_PROD_URL,
+                )
+            )
+            self._client = DerivativesTradingUsdsFutures(
+                config_ws_streams=configuration_ws_streams
+            )
     
     async def add_stream(self, symbol: str, interval: str) -> bool:
         """添加K线流。
@@ -168,6 +174,9 @@ class DataAgentKlineManager:
                 return False
             
             try:
+                # 确保客户端已初始化（在事件循环中）
+                await self._init_client()
+                
                 # 控制订阅频率，确保每秒不超过10个订阅消息
                 await self._rate_limit_subscription()
                 
@@ -390,8 +399,9 @@ class DataAgentKlineManager:
 class DataAgentCommandHandler(BaseHTTPRequestHandler):
     """处理data_agent的HTTP指令请求。"""
     
-    def __init__(self, kline_manager: DataAgentKlineManager, *args, **kwargs):
+    def __init__(self, kline_manager: DataAgentKlineManager, main_loop: asyncio.AbstractEventLoop, *args, **kwargs):
         self.kline_manager = kline_manager
+        self._main_loop = main_loop
         super().__init__(*args, **kwargs)
     
     def do_GET(self):
@@ -443,33 +453,39 @@ class DataAgentCommandHandler(BaseHTTPRequestHandler):
     
     def _handle_get_connection_count(self):
         """处理获取连接数请求。"""
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
         try:
-            count = loop.run_until_complete(self.kline_manager.get_connection_count())
+            # 使用主事件循环执行异步操作
+            coro = self.kline_manager.get_connection_count()
+            future = asyncio.run_coroutine_threadsafe(coro, self._main_loop)
+            count = future.result()  # 等待结果
             self._send_json({"connection_count": count})
-        finally:
-            loop.close()
+        except Exception as e:
+            logger.error("[DataAgentCommand] Error in get_connection_count: %s", e, exc_info=True)
+            self._send_error(500, str(e))
     
     def _handle_get_connection_list(self):
         """处理获取连接列表请求。"""
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
         try:
-            connections = loop.run_until_complete(self.kline_manager.get_connection_list())
+            # 使用主事件循环执行异步操作
+            coro = self.kline_manager.get_connection_list()
+            future = asyncio.run_coroutine_threadsafe(coro, self._main_loop)
+            connections = future.result()  # 等待结果
             self._send_json({"connections": connections, "count": len(connections)})
-        finally:
-            loop.close()
+        except Exception as e:
+            logger.error("[DataAgentCommand] Error in get_connection_list: %s", e, exc_info=True)
+            self._send_error(500, str(e))
     
     def _handle_get_symbols(self):
         """处理获取symbol列表请求。"""
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
         try:
-            symbols = loop.run_until_complete(self.kline_manager.get_symbols())
+            # 使用主事件循环执行异步操作
+            coro = self.kline_manager.get_symbols()
+            future = asyncio.run_coroutine_threadsafe(coro, self._main_loop)
+            symbols = future.result()  # 等待结果
             self._send_json({"symbols": sorted(list(symbols)), "count": len(symbols)})
-        finally:
-            loop.close()
+        except Exception as e:
+            logger.error("[DataAgentCommand] Error in get_symbols: %s", e, exc_info=True)
+            self._send_error(500, str(e))
     
     def _handle_add_stream(self):
         """处理添加K线流请求。"""
@@ -484,16 +500,18 @@ class DataAgentCommandHandler(BaseHTTPRequestHandler):
             self._send_error(400, "Missing symbol or interval")
             return
         
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
         try:
-            success = loop.run_until_complete(self.kline_manager.add_stream(symbol, interval))
+            # 使用主事件循环执行异步操作
+            coro = self.kline_manager.add_stream(symbol, interval)
+            future = asyncio.run_coroutine_threadsafe(coro, self._main_loop)
+            success = future.result()  # 等待结果
             if success:
                 self._send_json({"status": "ok", "message": f"Added stream for {symbol} {interval}"})
             else:
                 self._send_error(500, f"Failed to add stream for {symbol} {interval}")
-        finally:
-            loop.close()
+        except Exception as e:
+            logger.error("[DataAgentCommand] Error in add_stream: %s", e, exc_info=True)
+            self._send_error(500, str(e))
     
     def _handle_remove_stream(self):
         """处理移除K线流请求。"""
@@ -508,16 +526,18 @@ class DataAgentCommandHandler(BaseHTTPRequestHandler):
             self._send_error(400, "Missing symbol or interval")
             return
         
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
         try:
-            success = loop.run_until_complete(self.kline_manager.remove_stream(symbol, interval))
+            # 使用主事件循环执行异步操作
+            coro = self.kline_manager.remove_stream(symbol, interval)
+            future = asyncio.run_coroutine_threadsafe(coro, self._main_loop)
+            success = future.result()  # 等待结果
             if success:
                 self._send_json({"status": "ok", "message": f"Removed stream for {symbol} {interval}"})
             else:
                 self._send_error(500, f"Failed to remove stream for {symbol} {interval}")
-        finally:
-            loop.close()
+        except Exception as e:
+            logger.error("[DataAgentCommand] Error in remove_stream: %s", e, exc_info=True)
+            self._send_error(500, str(e))
     
     def _send_json(self, data: Dict[str, Any]):
         """发送JSON响应。"""
@@ -538,10 +558,10 @@ class DataAgentCommandHandler(BaseHTTPRequestHandler):
         logger.debug("[DataAgentCommand] %s", format % args)
 
 
-def create_handler(kline_manager: DataAgentKlineManager):
+def create_handler(kline_manager: DataAgentKlineManager, main_loop: asyncio.AbstractEventLoop):
     """创建请求处理器工厂函数。"""
     def handler(*args, **kwargs):
-        return DataAgentCommandHandler(kline_manager, *args, **kwargs)
+        return DataAgentCommandHandler(kline_manager, main_loop, *args, **kwargs)
     return handler
 
 
@@ -551,7 +571,8 @@ async def run_data_agent_command_server(
     port: int = 9999
 ) -> None:
     """运行data_agent的HTTP指令服务器。"""
-    handler = create_handler(kline_manager)
+    main_loop = asyncio.get_event_loop()
+    handler = create_handler(kline_manager, main_loop)
     server = HTTPServer((host, port), handler)
     logger.info("[DataAgent] Command server started on %s:%s", host, port)
     
