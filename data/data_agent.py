@@ -620,7 +620,30 @@ class DataAgentCommandHandler(BaseHTTPRequestHandler):
     
     def _handle_ping(self):
         """处理ping请求。"""
-        self._send_json({"status": "ok", "message": "pong"})
+        request_start_time = datetime.now(timezone.utc)
+        client_address = f"{self.client_address[0]}:{self.client_address[1]}"
+        
+        logger.info(
+            "[DataAgentCommand] 📥 [Ping请求] 收到来自 %s 的健康检查请求 (路径: %s)",
+            client_address, self.path
+        )
+        
+        try:
+            response_data = {"status": "ok", "message": "pong"}
+            self._send_json(response_data)
+            
+            request_duration = (datetime.now(timezone.utc) - request_start_time).total_seconds()
+            logger.info(
+                "[DataAgentCommand] 📤 [Ping响应] 已向 %s 发送健康检查响应: %s (耗时: %.3fs)",
+                client_address, response_data, request_duration
+            )
+        except Exception as e:
+            request_duration = (datetime.now(timezone.utc) - request_start_time).total_seconds()
+            logger.error(
+                "[DataAgentCommand] ❌ [Ping响应] 向 %s 发送健康检查响应失败 (耗时: %.3fs): %s",
+                client_address, request_duration, e, exc_info=True
+            )
+            raise
     
     def _handle_get_connection_count(self):
         """处理获取连接数请求。"""

@@ -137,19 +137,28 @@ const initChart = async () => {
     // 如果图表已存在，先销毁
     if (chart.value) {
       try {
-        // 检查 chart.value 是否为有效对象且 destroy 方法是否存在
-        if (chart.value && typeof chart.value === 'object' && typeof chart.value.destroy === 'function') {
-          chart.value.destroy()
-          console.log('[KLineChart] Chart destroyed successfully')
-        } else {
-          console.warn('[KLineChart] Chart instance is invalid or destroy method not available:', {
-            hasChart: !!chart.value,
-            chartType: typeof chart.value,
-            hasDestroy: chart.value && typeof chart.value.destroy === 'function'
-          })
+        // 尝试多种销毁方法（根据官方文档，可能使用不同的方法名）
+        if (chart.value && typeof chart.value === 'object') {
+          if (typeof chart.value.destroy === 'function') {
+            chart.value.destroy()
+            console.log('[KLineChart] Chart destroyed using destroy() method')
+          } else if (typeof chart.value.dispose === 'function') {
+            chart.value.dispose()
+            console.log('[KLineChart] Chart destroyed using dispose() method')
+          } else {
+            // 如果没有销毁方法，尝试清空容器内容
+            if (containerElement) {
+              containerElement.innerHTML = ''
+              console.log('[KLineChart] Chart container cleared (no destroy method found)')
+            }
+          }
         }
       } catch (e) {
         console.error('[KLineChart] Error destroying chart:', e)
+        // 即使销毁失败，也清空容器
+        if (containerElement) {
+          containerElement.innerHTML = ''
+        }
       } finally {
         chart.value = null
       }
@@ -185,10 +194,40 @@ const initChart = async () => {
     console.log('[KLineChart] SymbolInfo:', symbolInfo)
     console.log('[KLineChart] Period:', period)
 
-    // 创建 KLineChart Pro 实例
+    // 创建 KLineChart Pro 实例（严格按照官方文档）
     try {
+      // 确保容器元素为空（避免重复初始化问题）
+      if (containerElement.innerHTML.trim() !== '') {
+        console.warn('[KLineChart] Container element is not empty, clearing it...')
+        containerElement.innerHTML = ''
+        // 等待DOM更新
+        await new Promise(resolve => setTimeout(resolve, 50))
+      }
+
+      // 验证容器元素尺寸
+      const rect = containerElement.getBoundingClientRect()
+      if (rect.width === 0 || rect.height === 0) {
+        console.error('[KLineChart] Container element has zero dimensions:', {
+          width: rect.width,
+          height: rect.height,
+          computedStyle: {
+            width: window.getComputedStyle(containerElement).width,
+            height: window.getComputedStyle(containerElement).height,
+            display: window.getComputedStyle(containerElement).display
+          }
+        })
+        throw new Error(`Container element has zero dimensions: ${rect.width}x${rect.height}`)
+      }
+
+      console.log('[KLineChart] Creating KLineChartPro instance with:', {
+        containerId,
+        containerSize: { width: rect.width, height: rect.height },
+        symbol: symbolInfo,
+        period: period
+      })
+
       chart.value = new KLineChartPro({
-        container: containerElement,
+        container: containerElement,  // 直接传入DOM元素，不是ID
         symbol: symbolInfo,
         period: period,
         datafeed: datafeed.value
@@ -199,20 +238,22 @@ const initChart = async () => {
         throw new Error('KLineChartPro instance creation failed: invalid instance')
       }
 
-      // 验证 destroy 方法是否存在（用于后续清理）
-      if (typeof chart.value.destroy !== 'function') {
-        console.warn('[KLineChart] Warning: destroy method not found on chart instance, cleanup may fail')
-      }
-
       console.log('[KLineChart] Chart initialized successfully', {
         hasChart: !!chart.value,
         chartType: typeof chart.value,
-        hasDestroy: typeof chart.value.destroy === 'function'
+        chartMethods: Object.keys(chart.value).filter(key => typeof chart.value[key] === 'function').slice(0, 10)
       })
     } catch (initError) {
-      console.error('[KLineChart] Failed to create chart instance:', initError)
+      console.error('[KLineChart] Failed to create chart instance:', initError, {
+        containerId,
+        containerExists: !!containerElement,
+        containerSize: containerElement ? {
+          width: containerElement.offsetWidth,
+          height: containerElement.offsetHeight
+        } : null
+      })
       chart.value = null
-      throw initError
+      // 不抛出错误，避免影响UI
     }
 
   } catch (error) {
@@ -262,37 +303,7 @@ watch(() => props.visible, async (newVal) => {
     initChart()
   } else {
     // 销毁图表和 Datafeed
-    if (chart.value) {
-      try {
-        // 检查 chart.value 是否为有效对象且 destroy 方法是否存在
-        if (chart.value && typeof chart.value === 'object' && typeof chart.value.destroy === 'function') {
-          chart.value.destroy()
-          console.log('[KLineChart] Chart destroyed successfully (visible=false)')
-        } else {
-          console.warn('[KLineChart] Chart instance is invalid or destroy method not available (visible=false)')
-        }
-      } catch (e) {
-        console.error('[KLineChart] Error destroying chart (visible=false):', e)
-      } finally {
-        chart.value = null
-      }
-    }
-    
-    if (datafeed.value) {
-      try {
-        // 检查 datafeed.value 是否为有效对象且 destroy 方法是否存在
-        if (datafeed.value && typeof datafeed.value === 'object' && typeof datafeed.value.destroy === 'function') {
-          datafeed.value.destroy()
-          console.log('[KLineChart] Datafeed destroyed successfully (visible=false)')
-        } else {
-          console.warn('[KLineChart] Datafeed instance is invalid or destroy method not available (visible=false)')
-        }
-      } catch (e) {
-        console.error('[KLineChart] Error destroying datafeed (visible=false):', e)
-      } finally {
-        datafeed.value = null
-      }
-    }
+    await destroyChart()
   }
 }, { immediate: false })
 
@@ -320,39 +331,64 @@ watch(() => props.symbol, async (newVal) => {
   }
 })
 
-// 组件卸载时清理
-onUnmounted(() => {
-  if (chart.value) {
-    try {
-      // 检查 chart.value 是否为有效对象且 destroy 方法是否存在
-      if (chart.value && typeof chart.value === 'object' && typeof chart.value.destroy === 'function') {
-        chart.value.destroy()
-        console.log('[KLineChart] Chart destroyed successfully (unmount)')
-      } else {
-        console.warn('[KLineChart] Chart instance is invalid or destroy method not available (unmount)')
-      }
-    } catch (e) {
-      console.error('[KLineChart] Error destroying chart on unmount:', e)
-    } finally {
-      chart.value = null
-    }
-  }
-  
+// 统一的销毁函数
+const destroyChart = async () => {
+  // 销毁 Datafeed
   if (datafeed.value) {
     try {
-      // 检查 datafeed.value 是否为有效对象且 destroy 方法是否存在
       if (datafeed.value && typeof datafeed.value === 'object' && typeof datafeed.value.destroy === 'function') {
         datafeed.value.destroy()
-        console.log('[KLineChart] Datafeed destroyed successfully (unmount)')
-      } else {
-        console.warn('[KLineChart] Datafeed instance is invalid or destroy method not available (unmount)')
+        console.log('[KLineChart] Datafeed destroyed successfully')
       }
     } catch (e) {
-      console.error('[KLineChart] Error destroying datafeed on unmount:', e)
+      console.error('[KLineChart] Error destroying datafeed:', e)
     } finally {
       datafeed.value = null
     }
   }
+
+  // 销毁图表
+  if (chart.value) {
+    try {
+      const containerElement = document.getElementById(chartContainerId.value)
+      
+      if (chart.value && typeof chart.value === 'object') {
+        // 尝试多种销毁方法
+        if (typeof chart.value.destroy === 'function') {
+          chart.value.destroy()
+          console.log('[KLineChart] Chart destroyed using destroy() method')
+        } else if (typeof chart.value.dispose === 'function') {
+          chart.value.dispose()
+          console.log('[KLineChart] Chart destroyed using dispose() method')
+        } else {
+          // 如果没有销毁方法，清空容器
+          if (containerElement) {
+            containerElement.innerHTML = ''
+            console.log('[KLineChart] Chart container cleared (no destroy method found)')
+          }
+        }
+      }
+      
+      // 清空容器内容（确保完全清理）
+      if (containerElement) {
+        containerElement.innerHTML = ''
+      }
+    } catch (e) {
+      console.error('[KLineChart] Error destroying chart:', e)
+      // 即使销毁失败，也清空容器
+      const containerElement = document.getElementById(chartContainerId.value)
+      if (containerElement) {
+        containerElement.innerHTML = ''
+      }
+    } finally {
+      chart.value = null
+    }
+  }
+}
+
+// 组件卸载时清理
+onUnmounted(() => {
+  destroyChart()
 })
 </script>
 
@@ -478,6 +514,9 @@ onUnmounted(() => {
   background: #1a1a1a;
   position: relative;
   overflow: hidden;
+  display: block;
+  /* 确保容器有明确的尺寸 */
+  box-sizing: border-box;
 }
 
 /* 确保K线图表库内部元素不受全局样式影响 */
@@ -489,23 +528,39 @@ onUnmounted(() => {
 .kline-modal :deep(.klinecharts-pro) {
   width: 100% !important;
   height: 100% !important;
-  min-height: 600px;
+  min-height: 600px !important;
   background-color: #1a1a1a !important;
+  display: block !important;
+  position: relative !important;
 }
 
 .kline-modal :deep(.klinecharts-pro-container) {
   width: 100% !important;
   height: 100% !important;
+  min-height: 600px !important;
   background-color: #1a1a1a !important;
+  display: block !important;
+  position: relative !important;
 }
 
 .kline-modal :deep(.klinecharts-pro-chart-container) {
   width: 100% !important;
   height: 100% !important;
+  min-height: 600px !important;
   background-color: #1a1a1a !important;
+  display: block !important;
+  position: relative !important;
 }
 
 .kline-modal :deep(canvas) {
+  display: block !important;
+  width: 100% !important;
+  height: 100% !important;
+  position: relative !important;
+}
+
+/* 确保图表库的根元素正确显示 */
+.kline-modal :deep([class*="klinecharts"]) {
   display: block !important;
   width: 100% !important;
   height: 100% !important;

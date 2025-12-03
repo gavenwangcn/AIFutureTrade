@@ -608,27 +608,134 @@ class DataAgentManager:
     
     # ============ Agent健康检查和状态查询 ============
     
-    async def check_agent_health(self, ip: str, port: int) -> bool:
+    async def check_agent_health(self, ip: str, port: int, retries: int = 2) -> bool:
         """检查agent健康状态（主动探测）。
+        
+        使用重试机制和更长的超时时间，避免在agent处理请求时误判为离线。
         
         Args:
             ip: agent的IP地址
             port: agent的端口号
+            retries: 重试次数（默认2次，总共最多3次尝试）
         
         Returns:
             健康返回True，不健康返回False
         """
-        try:
-            async with aiohttp.ClientSession() as session:
-                url = f"http://{ip}:{port}/ping"
-                async with session.get(url, timeout=aiohttp.ClientTimeout(total=5)) as response:
-                    if response.status == 200:
-                        data = await response.json()
-                        return data.get("status") == "ok"
-                    return False
-        except Exception as e:
-            logger.debug("[DataAgentManager] Health check failed for %s:%s: %s", ip, port, e)
-            return False
+        # 增加超时时间到15秒，避免agent处理请求时无法及时响应
+        health_check_timeout = 15
+        url = f"http://{ip}:{port}/ping"
+        
+        logger.info(
+            "[DataAgentManager] 🔍 [健康检查] 开始检查 agent %s:%s (超时: %ss, 最多重试: %s次)",
+            ip, port, health_check_timeout, retries
+        )
+        
+        for attempt in range(retries + 1):
+            attempt_start_time = datetime.now(timezone.utc)
+            try:
+                logger.info(
+                    "[DataAgentManager] 📤 [健康检查] 发送ping请求到 %s:%s (尝试 %s/%s) - URL: %s",
+                    ip, port, attempt + 1, retries + 1, url
+                )
+                
+                async with aiohttp.ClientSession() as session:
+                    async with session.get(url, timeout=aiohttp.ClientTimeout(total=health_check_timeout)) as response:
+                        attempt_duration = (datetime.now(timezone.utc) - attempt_start_time).total_seconds()
+                        
+                        logger.info(
+                            "[DataAgentManager] 📥 [健康检查] 收到 %s:%s 的响应 (尝试 %s/%s) - "
+                            "状态码: %s, 耗时: %.3fs",
+                            ip, port, attempt + 1, retries + 1, response.status, attempt_duration
+                        )
+                        
+                        if response.status == 200:
+                            data = await response.json()
+                            logger.info(
+                                "[DataAgentManager] ✅ [健康检查] %s:%s 响应数据: %s (尝试 %s/%s)",
+                                ip, port, data, attempt + 1, retries + 1
+                            )
+                            
+                            if data.get("status") == "ok":
+                                total_duration = (datetime.now(timezone.utc) - attempt_start_time).total_seconds()
+                                if attempt > 0:
+                                    logger.info(
+                                        "[DataAgentManager] ✅ [健康检查] %s:%s 健康检查成功 (重试 %s 次后成功, 总耗时: %.3fs)",
+                                        ip, port, attempt, total_duration
+                                    )
+                                else:
+                                    logger.info(
+                                        "[DataAgentManager] ✅ [健康检查] %s:%s 健康检查成功 (首次尝试成功, 耗时: %.3fs)",
+                                        ip, port, total_duration
+                                    )
+                                return True
+                            else:
+                                logger.warning(
+                                    "[DataAgentManager] ⚠️  [健康检查] %s:%s 响应状态不是'ok': %s (尝试 %s/%s)",
+                                    ip, port, data.get("status"), attempt + 1, retries + 1
+                                )
+                        else:
+                            logger.warning(
+                                "[DataAgentManager] ⚠️  [健康检查] %s:%s 返回非200状态码: %s (尝试 %s/%s)",
+                                ip, port, response.status, attempt + 1, retries + 1
+                            )
+                        
+                        # 如果状态码不是200，记录警告但继续重试
+                        if attempt < retries:
+                            logger.info(
+                                "[DataAgentManager] 🔄 [健康检查] %s:%s 状态码 %s，准备重试...",
+                                ip, port, response.status
+                            )
+            except asyncio.TimeoutError:
+                attempt_duration = (datetime.now(timezone.utc) - attempt_start_time).total_seconds()
+                if attempt < retries:
+                    logger.warning(
+                        "[DataAgentManager] ⏱️  [健康检查] %s:%s 请求超时 (尝试 %s/%s, 耗时: %.3fs, 超时设置: %ss), 等待2秒后重试...",
+                        ip, port, attempt + 1, retries + 1, attempt_duration, health_check_timeout
+                    )
+                else:
+                    logger.error(
+                        "[DataAgentManager] ❌ [健康检查] %s:%s 请求超时 (尝试 %s/%s, 耗时: %.3fs, 超时设置: %ss), 所有尝试均失败",
+                        ip, port, retries + 1, retries + 1, attempt_duration, health_check_timeout
+                    )
+            except aiohttp.ClientConnectorError as e:
+                attempt_duration = (datetime.now(timezone.utc) - attempt_start_time).total_seconds()
+                if attempt < retries:
+                    logger.warning(
+                        "[DataAgentManager] 🔌 [健康检查] %s:%s 连接错误 (尝试 %s/%s, 耗时: %.3fs): %s, 等待2秒后重试...",
+                        ip, port, attempt + 1, retries + 1, attempt_duration, str(e)
+                    )
+                else:
+                    logger.error(
+                        "[DataAgentManager] ❌ [健康检查] %s:%s 连接错误 (尝试 %s/%s, 耗时: %.3fs): %s, 所有尝试均失败",
+                        ip, port, retries + 1, retries + 1, attempt_duration, str(e)
+                    )
+            except Exception as e:
+                attempt_duration = (datetime.now(timezone.utc) - attempt_start_time).total_seconds()
+                if attempt < retries:
+                    logger.warning(
+                        "[DataAgentManager] ⚠️  [健康检查] %s:%s 请求异常 (尝试 %s/%s, 耗时: %.3fs): %s, 等待2秒后重试...",
+                        ip, port, attempt + 1, retries + 1, attempt_duration, str(e), exc_info=True
+                    )
+                else:
+                    logger.error(
+                        "[DataAgentManager] ❌ [健康检查] %s:%s 请求异常 (尝试 %s/%s, 耗时: %.3fs): %s, 所有尝试均失败",
+                        ip, port, retries + 1, retries + 1, attempt_duration, str(e), exc_info=True
+                    )
+            
+            # 如果不是最后一次尝试，等待一段时间后重试
+            if attempt < retries:
+                logger.info(
+                    "[DataAgentManager] ⏳ [健康检查] %s:%s 等待2秒后进行第 %s 次重试...",
+                    ip, port, attempt + 2
+                )
+                await asyncio.sleep(2)  # 等待2秒后重试
+        
+        total_duration = (datetime.now(timezone.utc) - attempt_start_time).total_seconds()
+        logger.error(
+            "[DataAgentManager] ❌ [健康检查] %s:%s 健康检查最终失败 (总耗时: %.3fs, 尝试次数: %s)",
+            ip, port, total_duration, retries + 1
+        )
+        return False
     
     async def get_agent_connection_list(self, ip: str, port: int) -> List[Dict[str, Any]]:
         """获取agent的真实连接列表（确认真实有长连接stream引用对象）。
@@ -813,31 +920,65 @@ class DataAgentManager:
         1. 清空agent的symbol持有信息
         2. 更新agent状态到数据库
         3. 标记需要重新分配的symbol（由全量同步任务处理）
+        
+        使用更宽松的健康检查策略：
+        - 增加健康检查超时时间（15秒）
+        - 添加重试机制（最多3次尝试）
+        - 避免在agent处理请求时误判为离线
         """
         async with self._lock:
             agents_to_check = list(self._agents.items())
         
         for key, agent in agents_to_check:
+            check_start_time = datetime.now(timezone.utc)
+            logger.info(
+                "[DataAgentManager] 🔍 [状态检查] 开始检查 agent %s:%s (当前状态: %s)",
+                agent.ip, agent.port, agent.status
+            )
+            
             # 检查心跳超时
             if agent.last_heartbeat:
                 timeout_seconds = (datetime.now(timezone.utc) - agent.last_heartbeat).total_seconds()
+                logger.info(
+                    "[DataAgentManager] ⏰ [状态检查] agent %s:%s 上次心跳时间: %s (距今: %.1f 秒, 超时阈值: %s 秒)",
+                    agent.ip, agent.port, agent.last_heartbeat.isoformat(), timeout_seconds, self._heartbeat_timeout
+                )
+                
+                # 只有当心跳超时时间超过阈值时才进行健康检查
+                # 这样可以避免频繁的健康检查，给agent更多时间处理请求
                 if timeout_seconds > self._heartbeat_timeout:
-                    # 心跳超时，执行主动探测
-                    is_healthy = await self.check_agent_health(agent.ip, agent.port)
+                    # 心跳超时，执行主动探测（带重试）
+                    logger.warning(
+                        "[DataAgentManager] ⚠️  [状态检查] agent %s:%s 心跳超时 (%.1f 秒 > %s 秒)，开始执行健康检查...",
+                        agent.ip, agent.port, timeout_seconds, self._heartbeat_timeout
+                    )
+                    is_healthy = await self.check_agent_health(agent.ip, agent.port, retries=2)
+                    
+                    health_check_duration = (datetime.now(timezone.utc) - check_start_time).total_seconds()
+                    
                     async with self._lock:
                         if key not in self._agents:
+                            logger.warning(
+                                "[DataAgentManager] ⚠️  [状态检查] agent %s:%s 在健康检查过程中被移除，跳过状态更新",
+                                agent.ip, agent.port
+                            )
                             continue
                             
                         if is_healthy:
                             # agent恢复在线（只更新内存状态，数据库由agent自己更新）
+                            logger.info(
+                                "[DataAgentManager] ✅ [状态检查] agent %s:%s 健康检查通过，状态恢复为在线 (健康检查耗时: %.3fs)",
+                                agent.ip, agent.port, health_check_duration
+                            )
                             self._agents[key].status = "online"
                             self._agents[key].last_heartbeat = datetime.now(timezone.utc)
                             self._agents[key].error_log = ""
                         else:
                             # agent离线，清空symbol持有信息并更新数据库
-                            logger.warning(
-                                "[DataAgentManager] ⚠️  Agent %s:%s 离线，清空symbol持有信息...", 
-                                agent.ip, agent.port
+                            # 只有在多次健康检查都失败的情况下才标记为离线
+                            logger.error(
+                                "[DataAgentManager] ❌ [状态检查] agent %s:%s 健康检查失败（心跳超时 %.1f 秒），标记为离线... (健康检查耗时: %.3fs)", 
+                                agent.ip, agent.port, timeout_seconds, health_check_duration
                             )
                             
                             # 记录离线前的symbol信息（用于日志）
@@ -853,7 +994,7 @@ class DataAgentManager:
                             self._agents[key].assigned_symbols = set()
                             self._agents[key].assigned_symbol_count = 0
                             self._agents[key].connection_count = 0
-                            self._agents[key].error_log = f"Agent offline since {datetime.now(timezone.utc).isoformat()}"
+                            self._agents[key].error_log = f"Agent offline since {datetime.now(timezone.utc).isoformat()} (health check failed after {timeout_seconds:.1f}s timeout)"
                             
                             # 更新数据库中的agent状态（agent已离线，无法自己更新）
                             await self._update_agent_in_db(self._agents[key], create_if_not_exists=False)
@@ -863,6 +1004,50 @@ class DataAgentManager:
                                 "将在下次全量同步时重新分配symbol",
                                 agent.ip, agent.port
                             )
+            else:
+                # 如果没有心跳记录，也进行健康检查
+                logger.warning(
+                    "[DataAgentManager] ⚠️  [状态检查] agent %s:%s 无心跳记录，开始执行健康检查...",
+                    agent.ip, agent.port
+                )
+                is_healthy = await self.check_agent_health(agent.ip, agent.port, retries=2)
+                
+                health_check_duration = (datetime.now(timezone.utc) - check_start_time).total_seconds()
+                
+                async with self._lock:
+                    if key not in self._agents:
+                        logger.warning(
+                            "[DataAgentManager] ⚠️  [状态检查] agent %s:%s 在健康检查过程中被移除，跳过状态更新",
+                            agent.ip, agent.port
+                        )
+                        continue
+                    
+                    if is_healthy:
+                        logger.info(
+                            "[DataAgentManager] ✅ [状态检查] agent %s:%s 无心跳记录但健康检查通过，状态设置为在线 (健康检查耗时: %.3fs)",
+                            agent.ip, agent.port, health_check_duration
+                        )
+                        self._agents[key].status = "online"
+                        self._agents[key].last_heartbeat = datetime.now(timezone.utc)
+                        self._agents[key].error_log = ""
+                    else:
+                        # 如果没有心跳记录且健康检查失败，标记为离线
+                        logger.error(
+                            "[DataAgentManager] ❌ [状态检查] agent %s:%s 无心跳记录且健康检查失败，标记为离线 (健康检查耗时: %.3fs)",
+                            agent.ip, agent.port, health_check_duration
+                        )
+                        self._agents[key].status = "offline"
+                        self._agents[key].assigned_symbols = set()
+                        self._agents[key].assigned_symbol_count = 0
+                        self._agents[key].connection_count = 0
+                        self._agents[key].error_log = f"Agent offline since {datetime.now(timezone.utc).isoformat()} (no heartbeat and health check failed)"
+                        await self._update_agent_in_db(self._agents[key], create_if_not_exists=False)
+            
+            check_duration = (datetime.now(timezone.utc) - check_start_time).total_seconds()
+            logger.info(
+                "[DataAgentManager] ✅ [状态检查] agent %s:%s 检查完成 (最终状态: %s, 总耗时: %.3fs)",
+                agent.ip, agent.port, self._agents[key].status if key in self._agents else "removed", check_duration
+            )
     
     # ============ 数据库操作 ============
     
