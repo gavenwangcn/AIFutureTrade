@@ -3196,9 +3196,33 @@ class KLineChartManager {
      * @param {string} interval - 时间间隔
      */
     init(containerId, symbol, interval = '5m') {
+        // 检查基础KLineChart库是否加载
+        if (typeof klinecharts === 'undefined' && typeof window.klinecharts === 'undefined') {
+            console.error('[KLineChartPro] Base KLineChart library not loaded. Please ensure klinecharts.min.js is loaded first.');
+            // 尝试等待库加载
+            setTimeout(() => {
+                if (typeof klinecharts !== 'undefined' || typeof window.klinecharts !== 'undefined') {
+                    console.log('[KLineChartPro] Base library loaded, retrying initialization...');
+                    this.init(containerId, symbol, interval);
+                } else {
+                    console.error('[KLineChartPro] Base library still not available after wait');
+                }
+            }, 500);
+            return;
+        }
+
         // 检查KLineChartPro是否加载
         if (typeof klinechartspro === 'undefined' && typeof window.klinechartspro === 'undefined') {
-            console.error('[KLineChartPro] Library not loaded');
+            console.error('[KLineChartPro] KLineChartPro library not loaded');
+            // 尝试等待库加载
+            setTimeout(() => {
+                if (typeof klinechartspro !== 'undefined' || typeof window.klinechartspro !== 'undefined') {
+                    console.log('[KLineChartPro] Pro library loaded, retrying initialization...');
+                    this.init(containerId, symbol, interval);
+                } else {
+                    console.error('[KLineChartPro] Pro library still not available after wait');
+                }
+            }, 500);
             return;
         }
 
