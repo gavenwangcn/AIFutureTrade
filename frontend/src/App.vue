@@ -45,10 +45,6 @@
             <i class="bi bi-sliders"></i>
             策略配置
           </button>
-          <button class="btn-secondary" @click="showFutureConfigModal = true">
-            <i class="bi bi-list-check"></i>
-            合约配置
-          </button>
           <button class="btn-secondary" @click="showApiProviderModal = true">
             <i class="bi bi-cloud-plus"></i>
             API提供方
@@ -116,9 +112,6 @@
             <i class="bi bi-graph-up-arrow"></i>
           </div>
           <div class="market-header-actions">
-            <button class="btn-config-contract" @click="showFutureConfigModal = true">
-              配置合约
-            </button>
             <span class="market-count">{{ marketPrices.length }}个</span>
           </div>
           <div class="market-prices">

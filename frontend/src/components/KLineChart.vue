@@ -393,6 +393,7 @@ onUnmounted(() => {
 </script>
 
 <style scoped>
+/* 基础布局样式 - 仅保留必要的布局 */
 .kline-modal {
   position: fixed;
   top: 0;
@@ -404,12 +405,10 @@ onUnmounted(() => {
   align-items: center;
   justify-content: center;
   z-index: 10000;
-  backdrop-filter: blur(4px);
 }
 
 .kline-modal-content {
-  background: var(--bg-secondary, #1a1a2e);
-  border-radius: 12px;
+  background: #1a1a2e;
   width: 95%;
   max-width: 1400px;
   max-height: 90vh;
@@ -429,9 +428,8 @@ onUnmounted(() => {
 
 .kline-modal .modal-header h3 {
   margin: 0;
-  color: var(--text-primary, #fff);
+  color: #fff;
   font-size: 18px;
-  font-weight: 600;
 }
 
 .kline-toolbar {
@@ -449,52 +447,26 @@ onUnmounted(() => {
   padding: 6px 12px;
   background: rgba(255, 255, 255, 0.1);
   border: 1px solid rgba(255, 255, 255, 0.2);
-  border-radius: 6px;
-  color: var(--text-secondary, #ccc);
+  color: #ccc;
   cursor: pointer;
-  transition: all 0.3s;
   font-size: 13px;
-  font-weight: 500;
-}
-
-.kline-modal .timeframe-btn:hover {
-  background: rgba(255, 255, 255, 0.2);
 }
 
 .kline-modal .timeframe-btn.active {
-  background: var(--primary-color, #4a90e2);
-  border-color: var(--primary-color, #4a90e2);
+  background: #4a90e2;
   color: #fff;
 }
 
 .kline-modal .btn-icon {
   background: transparent;
   border: none;
-  color: var(--text-secondary, #ccc);
+  color: #ccc;
   cursor: pointer;
   padding: 8px;
-  border-radius: 6px;
-  transition: all 0.3s;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   font-size: 18px;
-  line-height: 1;
-  min-width: 32px;
-  min-height: 32px;
-}
-
-.kline-modal .btn-icon i {
-  display: inline-block;
-  font-style: normal;
-  font-variant: normal;
-  text-rendering: auto;
-  line-height: 1;
-}
-
-.kline-modal .btn-icon:hover {
-  background: rgba(255, 255, 255, 0.1);
-  color: var(--text-primary, #fff);
 }
 
 .kline-modal-body {
@@ -515,16 +487,14 @@ onUnmounted(() => {
   position: relative;
   overflow: hidden;
   display: block;
-  /* 确保容器有明确的尺寸 */
   box-sizing: border-box;
 }
 
-/* 确保K线图表库内部元素不受全局样式影响 */
+/* KlineChart库相关样式 - 仅保留必要的样式隔离 */
 .kline-chart-container :deep(*) {
   box-sizing: border-box;
 }
 
-/* 隔离K线图表库的样式，防止全局样式干扰 */
 .kline-modal :deep(.klinecharts-pro) {
   width: 100% !important;
   height: 100% !important;
@@ -559,24 +529,9 @@ onUnmounted(() => {
   position: relative !important;
 }
 
-/* 确保图表库的根元素正确显示 */
 .kline-modal :deep([class*="klinecharts"]) {
   display: block !important;
   width: 100% !important;
   height: 100% !important;
-}
-
-/* 确保Bootstrap Icons字体正确加载 */
-.kline-modal .bi {
-  font-family: "bootstrap-icons" !important;
-  font-weight: normal !important;
-  font-style: normal !important;
-  font-variant: normal !important;
-  text-transform: none !important;
-  line-height: 1 !important;
-  vertical-align: -0.125em !important;
-  -webkit-font-smoothing: antialiased !important;
-  -moz-osx-font-smoothing: grayscale !important;
-  display: inline-block !important;
 }
 </style>
