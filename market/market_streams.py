@@ -220,11 +220,12 @@ def _normalize_kline(message_data: Any) -> Optional[Dict[str, Any]]:
                     return ms
                 return datetime.fromtimestamp(float(ms) / 1000.0, tz=timezone.utc)
             except (TypeError, ValueError):
-                return datetime.now(timezone.utc)
+                # Return a default datetime instead of None to prevent NULL values
+                return datetime.fromtimestamp(0, tz=timezone.utc)
         
         return {
             "event_time": ms_to_datetime(event_time),
-            "symbol": symbol.upper(),
+            "symbol": symbol.upper() if symbol else "",
             "contract_type": contract_type or "PERPETUAL",
             "kline_start_time": ms_to_datetime(k.get("t") or k.get("kline_start_time", 0)),
             "kline_end_time": ms_to_datetime(k.get("T") or k.get("kline_end_time", 0)),

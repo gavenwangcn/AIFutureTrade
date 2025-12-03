@@ -1920,25 +1920,26 @@ class ClickHouseDatabase:
                 )
                 continue
 
+            # 确保所有字段都有默认值，防止None值导致插入失败
             values = (
-                row.get("event_time"),
-                row.get("symbol", ""),
-                row.get("contract_type", ""),
-                row.get("kline_start_time"),
-                row.get("kline_end_time"),
+                row.get("event_time") or datetime.fromtimestamp(0, tz=timezone.utc),
+                row.get("symbol", "") or "",
+                row.get("contract_type", "") or "",
+                row.get("kline_start_time") or datetime.fromtimestamp(0, tz=timezone.utc),
+                row.get("kline_end_time") or datetime.fromtimestamp(0, tz=timezone.utc),
                 interval,
-                row.get("first_trade_id", 0),
-                row.get("last_trade_id", 0),
-                row.get("open_price", 0.0),
-                row.get("close_price", 0.0),
-                row.get("high_price", 0.0),
-                row.get("low_price", 0.0),
-                row.get("base_volume", 0.0),
-                row.get("trade_count", 0),
-                row.get("is_closed", 0),
-                row.get("quote_volume", 0.0),
-                row.get("taker_buy_base_volume", 0.0),
-                row.get("taker_buy_quote_volume", 0.0),
+                _to_int(row.get("first_trade_id", 0)),
+                _to_int(row.get("last_trade_id", 0)),
+                _to_float(row.get("open_price", 0.0)),
+                _to_float(row.get("close_price", 0.0)),
+                _to_float(row.get("high_price", 0.0)),
+                _to_float(row.get("low_price", 0.0)),
+                _to_float(row.get("base_volume", 0.0)),
+                _to_int(row.get("trade_count", 0)),
+                _to_int(row.get("is_closed", 0)),
+                _to_float(row.get("quote_volume", 0.0)),
+                _to_float(row.get("taker_buy_base_volume", 0.0)),
+                _to_float(row.get("taker_buy_quote_volume", 0.0)),
             )
             bucketed.setdefault(table_name, []).append(values)
 
