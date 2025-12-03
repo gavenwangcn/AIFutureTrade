@@ -834,7 +834,7 @@ class DataAgentManager:
                             self._agents[key].last_heartbeat = datetime.now(timezone.utc)
                             self._agents[key].error_log = ""
                         else:
-                            # agent离线，清空symbol持有信息（只更新内存状态，数据库由agent自己更新）
+                            # agent离线，清空symbol持有信息并更新数据库
                             logger.warning(
                                 "[DataAgentManager] ⚠️  Agent %s:%s 离线，清空symbol持有信息...", 
                                 agent.ip, agent.port
@@ -848,16 +848,19 @@ class DataAgentManager:
                                     agent.ip, agent.port, len(offline_symbols), sorted(list(offline_symbols))[:10]
                                 )
                             
-                            # 清空agent的symbol持有信息（只更新内存状态）
+                            # 清空agent的symbol持有信息并更新状态
                             self._agents[key].status = "offline"
                             self._agents[key].assigned_symbols = set()
                             self._agents[key].assigned_symbol_count = 0
                             self._agents[key].connection_count = 0
                             self._agents[key].error_log = f"Agent offline since {datetime.now(timezone.utc).isoformat()}"
                             
+                            # 更新数据库中的agent状态（agent已离线，无法自己更新）
+                            await self._update_agent_in_db(self._agents[key], create_if_not_exists=False)
+                            
                             logger.info(
-                                "[DataAgentManager] ✅ Agent %s:%s 状态已更新（symbol信息已清空），"
-                                "将在下次全量同步时重新分配symbol（数据库状态由agent自己更新）",
+                                "[DataAgentManager] ✅ Agent %s:%s 状态已更新为离线（symbol信息已清空），"
+                                "将在下次全量同步时重新分配symbol",
                                 agent.ip, agent.port
                             )
     

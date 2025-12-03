@@ -67,12 +67,10 @@ async def run_data_manager_service(duration: Optional[int] = None) -> None:
     # 获取配置
     register_host = '0.0.0.0'
     register_port = getattr(app_config, 'DATA_AGENT_REGISTER_PORT', 8888)
-    symbol_check_interval = getattr(app_config, 'DATA_AGENT_SYMBOL_CHECK_INTERVAL', 30)
     status_check_interval = getattr(app_config, 'DATA_AGENT_STATUS_CHECK_INTERVAL', 60)
     
     logger.info("[DataManager] 📋 配置信息:")
     logger.info("[DataManager]   - 注册服务地址: %s:%s", register_host, register_port)
-    logger.info("[DataManager]   - Symbol 检查间隔: %s 秒", symbol_check_interval)
     logger.info("[DataManager]   - 状态检查间隔: %s 秒", status_check_interval)
     
     # 启动HTTP服务器（用于接收 data_agent 的注册和心跳）
