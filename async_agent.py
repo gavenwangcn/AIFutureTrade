@@ -205,83 +205,71 @@ async def _run_data_agent_manager(duration: Optional[int] = None) -> None:
 
 async def _run_kline_services(duration: Optional[int] = None) -> None:
     """
-    同时运行K线同步服务和清理服务
-    这两个服务会作为后台任务持续运行
+    运行K线清理服务
+    注意：K线同步服务已被data_agent_manager取代，不再使用
     """
-    _, run_kline_sync_agent = _lazy_import_market_streams()
     run_cleanup_scheduler = _lazy_import_kline_cleanup()
     
-    check_interval = getattr(app_config, 'KLINE_SYNC_CHECK_INTERVAL', 10)
-    
-    # 创建两个后台任务
-    sync_task = asyncio.create_task(run_kline_sync_agent(check_interval=check_interval))
+    # 仅创建清理服务任务（移除了kline_sync）
     cleanup_task = asyncio.create_task(run_cleanup_scheduler())
     
-    logger.info("[AsyncAgent] Started K-line sync and cleanup services")
+    logger.info("[AsyncAgent] Started K-line cleanup service only (kline_sync replaced by data_agent_manager)")
     
-    # 等待两个任务（如果duration指定，则等待指定时间后停止）
+    # 等待任务（如果duration指定，则等待指定时间后停止）
     if duration:
         await asyncio.sleep(duration)
-        sync_task.cancel()
         cleanup_task.cancel()
         with contextlib.suppress(asyncio.CancelledError):
-            await sync_task
             await cleanup_task
     else:
-        # 持续运行，等待任一任务完成或取消
-        done, pending = await asyncio.wait(
-            {sync_task, cleanup_task},
-            return_when=asyncio.FIRST_COMPLETED
-        )
-        # 取消另一个任务
-        for task in pending:
-            task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await task
+        # 持续运行，等待任务完成或取消
+        await cleanup_task
 
 
 async def _run_all_services(duration: Optional[int] = None) -> None:
     """
     同时运行所有任务服务：
     - market_tickers: 市场ticker数据流
-    - kline_sync: K线同步服务
+    - data_agent_manager: 数据代理管理器（负责K线数据同步）
     - kline_cleanup: K线清理服务
     - price_refresh: 价格刷新服务
     - leaderboard_cleanup: 涨跌榜清理服务
+    注意：kline_sync服务已被data_agent_manager取代，不再使用
     """
-    run_market_ticker_stream, run_kline_sync_agent = _lazy_import_market_streams()
+    run_market_ticker_stream, _ = _lazy_import_market_streams()
     run_kline_cleanup_scheduler = _lazy_import_kline_cleanup()
     run_price_refresh_scheduler = _lazy_import_price_refresh()
     run_leaderboard_cleanup_scheduler = _lazy_import_leaderboard_cleanup()
     
-    check_interval = getattr(app_config, 'KLINE_SYNC_CHECK_INTERVAL', 10)
-    
     # 创建所有后台任务
     market_tickers_task = asyncio.create_task(run_market_ticker_stream(run_seconds=duration))
-    sync_task = asyncio.create_task(run_kline_sync_agent(check_interval=check_interval))
+    
+    # 使用现有的_run_data_agent_manager函数来启动完整的data_agent_manager服务
+    data_agent_task = asyncio.create_task(_run_data_agent_manager(duration))
+    
     kline_cleanup_task = asyncio.create_task(run_kline_cleanup_scheduler())
     price_refresh_task = asyncio.create_task(run_price_refresh_scheduler())
     leaderboard_cleanup_task = asyncio.create_task(run_leaderboard_cleanup_scheduler())
     
-    logger.info("[AsyncAgent] Started all services: market_tickers, kline_sync, kline_cleanup, price_refresh, leaderboard_cleanup")
+    logger.info("[AsyncAgent] Started all services: market_tickers, data_agent_manager, kline_cleanup, price_refresh, leaderboard_cleanup")
     
     # 等待所有任务（如果duration指定，则等待指定时间后停止）
     if duration:
         await asyncio.sleep(duration)
         market_tickers_task.cancel()
-        sync_task.cancel()
+        data_agent_task.cancel()
         kline_cleanup_task.cancel()
         price_refresh_task.cancel()
         leaderboard_cleanup_task.cancel()
         with contextlib.suppress(asyncio.CancelledError):
             await market_tickers_task
-            await sync_task
+            await data_agent_task
             await kline_cleanup_task
             await price_refresh_task
             await leaderboard_cleanup_task
     else:
         # 持续运行，等待任一任务完成或取消
-        all_tasks = {market_tickers_task, sync_task, kline_cleanup_task, price_refresh_task, leaderboard_cleanup_task}
+        all_tasks = {market_tickers_task, data_agent_task, kline_cleanup_task, price_refresh_task, leaderboard_cleanup_task}
         done, pending = await asyncio.wait(
             all_tasks,
             return_when=asyncio.FIRST_COMPLETED

@@ -9,7 +9,7 @@ DEBUG = False
 
 # Performance Settings
 # Gunicorn配置（生产环境）
-GUNICORN_WORKERS = int(os.getenv('GUNICORN_WORKERS', '4'))  # Worker进程数，建议为CPU核心数*2+1
+GUNICORN_WORKERS = int(os.getenv('GUNICORN_WORKERS', '5'))  # Worker进程数，建议为CPU核心数*2+1
 GUNICORN_WORKER_CLASS = os.getenv('GUNICORN_WORKER_CLASS', 'eventlet')  # 使用eventlet异步worker
 GUNICORN_WORKER_CONNECTIONS = int(os.getenv('GUNICORN_WORKER_CONNECTIONS', '1000'))  # 每个worker的最大连接数
 GUNICORN_TIMEOUT = int(os.getenv('GUNICORN_TIMEOUT', '120'))  # Worker超时时间（秒）
@@ -51,7 +51,7 @@ DATA_AGENT_SYMBOL_CHECK_INTERVAL = int(os.getenv('DATA_AGENT_SYMBOL_CHECK_INTERV
 DATA_AGENT_STATUS_CHECK_INTERVAL = int(os.getenv('DATA_AGENT_STATUS_CHECK_INTERVAL', '60'))  # 检查data_agent状态间隔（秒）
 
 # 价格刷新服务配置
-PRICE_REFRESH_CRON = os.getenv('PRICE_REFRESH_CRON', '*/5 * * * *')  # Cron表达式，默认每3分钟执行一次
+PRICE_REFRESH_CRON = os.getenv('PRICE_REFRESH_CRON', '*/5 * * * *')  # Cron表达式，默认每5分钟执行一次
 PRICE_REFRESH_MAX_PER_MINUTE = int(os.getenv('PRICE_REFRESH_MAX_PER_MINUTE', '1000'))  # 每分钟最多刷新的symbol数量
 
 
@@ -59,8 +59,6 @@ PRICE_REFRESH_MAX_PER_MINUTE = int(os.getenv('PRICE_REFRESH_MAX_PER_MINUTE', '10
 AUTO_TRADING = True
 TRADING_INTERVAL = 5  # seconds
 
-# Market Data
-MARKET_API_CACHE = 2  # seconds
 
 # Refresh Rates (frontend)
 MARKET_REFRESH = 2000  # ms - align with futures indicator frequency
