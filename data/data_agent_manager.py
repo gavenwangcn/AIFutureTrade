@@ -82,7 +82,7 @@ class DataAgentManager:
         self._db = db
         self._agents: Dict[tuple, DataAgentInfo] = {}  # {(ip, port): DataAgentInfo}
         self._lock = asyncio.Lock()
-        self._max_connections_per_agent = getattr(app_config, 'DATA_AGENT_MAX_CONNECTIONS', 1000)
+        self._max_symbols_per_agent = getattr(app_config, 'DATA_AGENT_MAX_SYMBOL', 100)
         self._heartbeat_timeout = getattr(app_config, 'DATA_AGENT_HEARTBEAT_TIMEOUT', 60)
         
         # 全局指令队列：确保所有agent的指令顺序执行并返回结果
@@ -281,9 +281,14 @@ class DataAgentManager:
                 current_status = result.get("current_status", {})
                 agent.connection_count = current_status.get("connection_count", 0)
                 
-                # 更新symbol列表
+                # 更新symbol列表（现在返回的是symbol字符串列表，不包含interval）
                 symbols_list = current_status.get("symbols", [])
-                agent.assigned_symbols = {item["symbol"] for item in symbols_list}
+                if symbols_list and isinstance(symbols_list[0], dict):
+                    # 兼容旧格式：包含intervals的对象
+                    agent.assigned_symbols = {item["symbol"] for item in symbols_list}
+                else:
+                    # 新格式：直接是symbol字符串列表
+                    agent.assigned_symbols = set(symbols_list) if symbols_list else set()
                 agent.assigned_symbol_count = len(agent.assigned_symbols)
                 
                 # 更新数据库
@@ -329,9 +334,14 @@ class DataAgentManager:
                 agent = self._agents[key]
                 agent.connection_count = status.get("connection_count", 0)
                 
-                # 更新symbol列表
+                # 更新symbol列表（现在返回的是symbol字符串列表，不包含interval）
                 symbols_list = status.get("symbols", [])
-                agent.assigned_symbols = {item["symbol"] for item in symbols_list}
+                if symbols_list and isinstance(symbols_list[0], dict):
+                    # 兼容旧格式：包含intervals的对象
+                    agent.assigned_symbols = {item["symbol"] for item in symbols_list}
+                else:
+                    # 新格式：直接是symbol字符串列表
+                    agent.assigned_symbols = set(symbols_list) if symbols_list else set()
                 agent.assigned_symbol_count = len(agent.assigned_symbols)
                 
                 # 更新数据库
@@ -738,11 +748,11 @@ class DataAgentManager:
         )
         return await self._enqueue_command(ip, port, command)
     
-    async def find_best_agent(self, required_connections: int = 1) -> Optional[tuple]:
-        """查找最适合的agent（负载最低）。
+    async def find_best_agent(self, required_symbols: int = 1) -> Optional[tuple]:
+        """查找最适合的agent（负载最低，基于symbol数量）。
         
         Args:
-            required_connections: 需要的连接数
+            required_symbols: 需要的symbol数量
         
         Returns:
             (ip, port)元组，如果没有可用agent则返回None
@@ -751,14 +761,16 @@ class DataAgentManager:
             available_agents = []
             for key, agent in self._agents.items():
                 if agent.status == "online":
-                    available = self._max_connections_per_agent - agent.connection_count
-                    if available >= required_connections:
+                    # 检查agent当前持有的symbol数量
+                    current_symbol_count = agent.assigned_symbol_count
+                    available = self._max_symbols_per_agent - current_symbol_count
+                    if available >= required_symbols:
                         available_agents.append((key, agent, available))
             
             if not available_agents:
                 return None
             
-            # 选择可用连接数最多的agent
+            # 选择可用symbol数量最多的agent（负载最低）
             available_agents.sort(key=lambda x: x[2], reverse=True)
             return available_agents[0][0]
     
@@ -805,32 +817,29 @@ class DataAgentManager:
             offline_agent: 离线的agent
             symbols: 该agent负责的symbol集合
         """
-        intervals = ['1m', '5m', '15m', '1h', '4h', '1d', '1w']
-        
         for symbol in symbols:
-            for interval in intervals:
-                # 查找最适合的可用agent
-                agent_key = await self.find_best_agent(required_connections=1)
-                if agent_key:
-                    new_ip, new_port = agent_key
-                    logger.debug("[DataAgentManager] 尝试将离线agent %s:%s 的 %s %s 重新分配到 %s:%s", 
-                               offline_agent.ip, offline_agent.port, symbol, interval, new_ip, new_port)
-                    
-                    # 重新添加流到新agent
-                    try:
-                        success = await self.add_stream_to_agent(new_ip, new_port, symbol, interval)
-                        if success:
-                            logger.info("[DataAgentManager] ✅ 成功将 %s %s 从 %s:%s 重新分配到 %s:%s", 
-                                      symbol, interval, offline_agent.ip, offline_agent.port, new_ip, new_port)
-                        else:
-                            logger.warning("[DataAgentManager] ⚠️  重新分配 %s %s 失败，将在下次同步时重试", 
-                                         symbol, interval)
-                    except Exception as e:
-                        logger.error("[DataAgentManager] ❌ 重新分配 %s %s 时出错: %s", 
-                                   symbol, interval, e, exc_info=True)
-                else:
-                    logger.warning("[DataAgentManager] ⚠️  没有可用的agent来重新分配 %s %s，将在下次同步时重试", 
-                                 symbol, interval)
+            # 查找最适合的可用agent（需要1个symbol）
+            agent_key = await self.find_best_agent(required_symbols=1)
+            if agent_key:
+                new_ip, new_port = agent_key
+                logger.debug("[DataAgentManager] 尝试将离线agent %s:%s 的 %s 重新分配到 %s:%s", 
+                           offline_agent.ip, offline_agent.port, symbol, new_ip, new_port)
+                
+                # 重新添加symbol到新agent（会为symbol创建7个interval的连接）
+                try:
+                    result = await self.add_symbols_to_agent(new_ip, new_port, [symbol])
+                    if result and result.get("status") == "ok":
+                        logger.info("[DataAgentManager] ✅ 成功将 %s 从 %s:%s 重新分配到 %s:%s", 
+                                  symbol, offline_agent.ip, offline_agent.port, new_ip, new_port)
+                    else:
+                        logger.warning("[DataAgentManager] ⚠️  重新分配 %s 失败，将在下次同步时重试", 
+                                     symbol)
+                except Exception as e:
+                    logger.error("[DataAgentManager] ❌ 重新分配 %s 时出错: %s", 
+                               symbol, e, exc_info=True)
+            else:
+                logger.warning("[DataAgentManager] ⚠️  没有可用的agent来重新分配 %s，将在下次同步时重试", 
+                             symbol)
     
     async def refresh_all_agents_status(self) -> None:
         """刷新所有agent的状态到数据库（使用/status接口获取详细连接状态）。
@@ -849,9 +858,14 @@ class DataAgentManager:
                     if key in self._agents:
                         agent = self._agents[key]
                         agent.connection_count = status.get("connection_count", 0)
-                        # 从status中提取symbol列表
+                        # 从status中提取symbol列表（现在是symbol字符串列表，不包含interval）
                         symbols_list = status.get("symbols", [])
-                        agent.assigned_symbols = {item["symbol"] for item in symbols_list}
+                        if symbols_list and isinstance(symbols_list[0], dict):
+                            # 兼容旧格式：包含intervals的对象
+                            agent.assigned_symbols = {item["symbol"] for item in symbols_list}
+                        else:
+                            # 新格式：直接是symbol字符串列表
+                            agent.assigned_symbols = set(symbols_list) if symbols_list else set()
                         agent.assigned_symbol_count = len(agent.assigned_symbols)
             else:
                 # 如果获取状态失败，尝试使用旧方法（不通过队列，仅用于备用）
@@ -916,6 +930,34 @@ class DataAgentManager:
                            agent.ip, agent.port, e)
         
         return allocated_pairs
+    
+    async def get_all_allocated_symbols(self) -> Set[str]:
+        """获取所有已分配的symbol（不包含interval信息）。
+        
+        Returns:
+            已分配的symbol集合
+        """
+        async with self._lock:
+            online_agents = [agent for agent in self._agents.values() if agent.status == "online"]
+        
+        allocated_symbols = set()
+        
+        for agent in online_agents:
+            try:
+                # 直接使用agent内存中的symbol集合（更高效）
+                allocated_symbols.update(agent.assigned_symbols)
+            except Exception as e:
+                logger.debug("[DataAgentManager] Failed to get symbols for %s:%s: %s", 
+                           agent.ip, agent.port, e)
+                # 备用方法：通过API获取
+                try:
+                    symbols = await self.get_agent_symbols(agent.ip, agent.port)
+                    allocated_symbols.update(symbols)
+                except Exception as e2:
+                    logger.debug("[DataAgentManager] Failed to get symbols via API for %s:%s: %s", 
+                               agent.ip, agent.port, e2)
+        
+        return allocated_symbols
 
 
 class DataAgentManagerHTTPHandler(BaseHTTPRequestHandler):

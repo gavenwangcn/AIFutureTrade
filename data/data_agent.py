@@ -88,9 +88,11 @@ class KlineStreamConnection:
 class DataAgentKlineManager:
     """管理所有K线WebSocket连接。"""
     
-    def __init__(self, db: ClickHouseDatabase, max_connections: int = 1000):
+    def __init__(self, db: ClickHouseDatabase, max_symbols: int = 100):
         self._db = db
-        self._max_connections = max_connections
+        # 每个symbol有7个interval，所以最大连接数 = max_symbols * 7
+        self._max_connections = max_symbols * len(KLINE_INTERVALS)
+        self._max_symbols = max_symbols
         # 客户端将在第一次使用时初始化，避免事件循环冲突
         self._client = None
         # 跟踪活跃连接: {(symbol, interval): KlineStreamConnection}
@@ -151,7 +153,8 @@ class DataAgentKlineManager:
             logger.warning("[DataAgentKline] Unsupported interval: %s", interval)
             return False
         
-        key = (symbol.upper(), interval)
+        symbol_upper = symbol.upper()
+        key = (symbol_upper, interval)
         
         async with self._lock:
             # 检查map中是否已经构建过对应的symbol+interval的同步链接
@@ -169,11 +172,17 @@ class DataAgentKlineManager:
                     logger.debug("[DataAgentKline] Error closing expired connection: %s", e)
                 del self._active_connections[key]
             
-            # 检查连接数限制
-            if len(self._active_connections) >= self._max_connections:
+            # 检查symbol数量限制（每个symbol有7个interval）
+            # 计算当前已持有的symbol数量
+            current_symbols = set()
+            for key, conn in self._active_connections.items():
+                current_symbols.add(conn.symbol)
+            
+            # 如果当前symbol不在已持有的symbol中，检查是否超过最大symbol数量
+            if symbol_upper not in current_symbols and len(current_symbols) >= self._max_symbols:
                 logger.warning(
-                    "[DataAgentKline] Max connections reached (%s), cannot add %s %s",
-                    self._max_connections, symbol, interval
+                    "[DataAgentKline] Max symbols reached (%s), cannot add %s %s",
+                    self._max_symbols, symbol, interval
                 )
                 return False
             
@@ -361,14 +370,8 @@ class DataAgentKlineManager:
         Returns:
             包含总连接数和详细symbol列表的字典
             {
-                "connection_count": int,
-                "symbols": [
-                    {
-                        "symbol": str,
-                        "intervals": [str, ...]
-                    },
-                    ...
-                ]
+                "connection_count": int,  # 总连接数（根据symbol数量 * 7个interval计算）
+                "symbols": [str, ...]  # symbol列表，不包含interval信息
             }
         """
         async with self._lock:
@@ -376,27 +379,17 @@ class DataAgentKlineManager:
             await self.cleanup_expired_connections()
             await self._cleanup_broken_connections()
             
-            # 按symbol分组统计intervals
-            symbol_map: Dict[str, List[str]] = {}
+            # 获取所有唯一的symbol（不包含interval信息）
+            symbols_set = set()
             for key, conn in self._active_connections.items():
-                symbol = conn.symbol
-                interval = conn.interval
-                if symbol not in symbol_map:
-                    symbol_map[symbol] = []
-                symbol_map[symbol].append(interval)
+                symbols_set.add(conn.symbol)
             
-            # 构建返回格式
-            symbols_list = [
-                {
-                    "symbol": symbol,
-                    "intervals": sorted(intervals)
-                }
-                for symbol, intervals in symbol_map.items()
-            ]
+            # 计算总连接数（每个symbol有7个interval）
+            connection_count = len(symbols_set) * len(KLINE_INTERVALS)
             
             return {
-                "connection_count": len(self._active_connections),
-                "symbols": sorted(symbols_list, key=lambda x: x["symbol"])
+                "connection_count": connection_count,
+                "symbols": sorted(list(symbols_set))
             }
     
     async def _cleanup_broken_connections(self) -> None:
@@ -883,7 +876,7 @@ async def send_heartbeat(register_ip: str, register_port: int, agent_ip: str, ag
 
 
 async def run_data_agent(
-    max_connections: int = 1000,
+    max_symbols: int = 100,
     command_host: str = '0.0.0.0',
     command_port: int = 9999,
     register_ip: Optional[str] = None,
@@ -893,7 +886,7 @@ async def run_data_agent(
     """运行data_agent主服务。
     
     Args:
-        max_connections: 最大连接数
+        max_symbols: 最大symbol数量（每个symbol会自动创建7个interval的连接）
         command_host: 指令服务器监听地址
         command_port: 指令服务器端口
         register_ip: async_agent的IP地址（用于注册和心跳）
@@ -901,7 +894,7 @@ async def run_data_agent(
         agent_ip: 当前data_agent的IP地址（用于注册）
     """
     db = ClickHouseDatabase()
-    kline_manager = DataAgentKlineManager(db, max_connections=max_connections)
+    kline_manager = DataAgentKlineManager(db, max_symbols=max_symbols)
     
     # 启动指令服务器
     command_task = asyncio.create_task(
@@ -1009,7 +1002,7 @@ def _setup_logging() -> None:
 def main() -> int:
     _setup_logging()
     
-    max_connections = getattr(app_config, 'DATA_AGENT_MAX_CONNECTIONS', 1000)
+    max_symbols = getattr(app_config, 'DATA_AGENT_MAX_SYMBOL', 100)
     command_host = '0.0.0.0'
     command_port = getattr(app_config, 'DATA_AGENT_PORT', 9999)
     register_ip = getattr(app_config, 'DATA_AGENT_REGISTER_IP', None)
@@ -1018,7 +1011,7 @@ def main() -> int:
     
     try:
         asyncio.run(run_data_agent(
-            max_connections=max_connections,
+            max_symbols=max_symbols,
             command_host=command_host,
             command_port=command_port,
             register_ip=register_ip,

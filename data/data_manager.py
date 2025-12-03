@@ -115,7 +115,6 @@ async def run_data_manager_service(duration: Optional[int] = None) -> None:
                 
                 # 定义需要处理的所有symbol（新增的+已有的）
                 symbols_to_process = list(symbol_set)
-                intervals = ['1m', '5m', '15m', '1h', '4h', '1d', '1w']
                 
                 success_count = 0
                 failed_assignments = 0
@@ -127,19 +126,19 @@ async def run_data_manager_service(duration: Optional[int] = None) -> None:
                 # 为所有symbol（包括新增和已有的）分配或重新分配agent
                 logger.info("[DataManager] [Symbol同步 #%s] 🚀 开始检查和分配 symbol agent...", cycle_count)
                 
-                # 批量分配symbol到agent（每个symbol需要7个连接，对应7个interval）
+                # 批量分配symbol到agent（每个symbol会自动创建7个interval的连接）
                 symbols_per_agent: Dict[tuple, List[str]] = {}  # {(ip, port): [symbols]}
                 
                 for symbol in symbols_to_process:
-                    # 查找最适合的agent（需要7个连接，对应7个interval）
-                    agent_key = await manager.find_best_agent(required_connections=7)
+                    # 查找最适合的agent（需要1个symbol）
+                    agent_key = await manager.find_best_agent(required_symbols=1)
                     if agent_key:
                         ip, port = agent_key
                         if (ip, port) not in symbols_per_agent:
                             symbols_per_agent[(ip, port)] = []
                         symbols_per_agent[(ip, port)].append(symbol)
                     else:
-                        failed_assignments += 7  # 每个symbol失败相当于7个interval失败
+                        failed_assignments += 1  # 每个symbol失败计数
                         logger.warning("[DataManager] [Symbol同步 #%s] ⚠️  没有可用的 agent 用于 %s", 
                                      cycle_count, symbol)
                 
@@ -171,8 +170,8 @@ async def run_data_manager_service(duration: Optional[int] = None) -> None:
                                 cycle_count, ip, port, current_status.get("connection_count", 0)
                             )
                         else:
-                            # 批量失败，每个symbol算7个失败
-                            failed_assignments += len(batch_symbols) * 7
+                            # 批量失败，每个symbol算1个失败
+                            failed_assignments += len(batch_symbols)
                             logger.warning(
                                 "[DataManager] [Symbol同步 #%s] ⚠️  批量分配失败，agent %s:%s",
                                 cycle_count, ip, port
@@ -181,58 +180,76 @@ async def run_data_manager_service(duration: Optional[int] = None) -> None:
                 logger.info("[DataManager] [Symbol同步 #%s] 📊 分配统计: 成功 %s, 失败 %s", 
                           cycle_count, total_assignments, failed_assignments)
                 
-                # 检查所有symbol-interval对是否都已分配
-                logger.info("[DataManager] [Symbol同步 #%s] 🧐 开始检查所有 symbol-interval 分配状态...", cycle_count)
+                # 检查所有symbol是否都已分配（不再检查symbol-interval对）
+                logger.info("[DataManager] [Symbol同步 #%s] 🧐 开始检查所有 symbol 分配状态...", cycle_count)
                 
-                # 获取所有需要的symbol-interval对
-                required_pairs = set()
-                for symbol in symbol_set:
-                    for interval in intervals:
-                        required_pairs.add((symbol, interval))
+                # 获取所有已分配的symbol
+                allocated_symbols_set = await manager.get_all_allocated_symbols()
                 
-                # 获取当前已分配的symbol-interval对
-                allocated_pairs = await manager.get_all_allocated_symbol_intervals()
+                # 找出缺失的symbol
+                missing_symbols = symbol_set - allocated_symbols_set
                 
-                # 找出缺失的symbol-interval对
-                missing_pairs = required_pairs - allocated_pairs
-                
-                if missing_pairs:
-                    logger.warning("[DataManager] [Symbol同步 #%s] ⚠️  发现 %s 个缺失的 symbol-interval 分配", 
-                                 cycle_count, len(missing_pairs))
+                if missing_symbols:
+                    logger.warning("[DataManager] [Symbol同步 #%s] ⚠️  发现 %s 个缺失的 symbol 分配", 
+                                 cycle_count, len(missing_symbols))
                     
-                    # 尝试为缺失的symbol-interval对重新分配agent
-                    logger.info("[DataManager] [Symbol同步 #%s] 🚀 开始为缺失的 symbol-interval 重新分配 agent...", cycle_count)
+                    # 尝试为缺失的symbol重新分配agent（批量处理）
+                    logger.info("[DataManager] [Symbol同步 #%s] 🚀 开始为缺失的 symbol 重新分配 agent...", cycle_count)
                     
-                    missing_total = 0
+                    batch_size = getattr(app_config, 'DATA_AGENT_BATCH_SYMBOL_SIZE', 20)
+                    missing_symbols_list = list(missing_symbols)
+                    
+                    # 按agent分组symbol
+                    symbols_per_agent: Dict[tuple, List[str]] = {}
+                    
+                    for symbol in missing_symbols_list:
+                        agent_key = await manager.find_best_agent(required_symbols=1)
+                        if agent_key:
+                            ip, port = agent_key
+                            if (ip, port) not in symbols_per_agent:
+                                symbols_per_agent[(ip, port)] = []
+                            symbols_per_agent[(ip, port)].append(symbol)
+                    
+                    missing_total = len(missing_symbols_list)
                     missing_success = 0
                     missing_failed = 0
                     
-                    for symbol, interval in missing_pairs:
-                        missing_total += 1
-                        agent_key = await manager.find_best_agent(required_connections=1)
-                        if agent_key:
-                            ip, port = agent_key
-                            logger.debug("[DataManager] [Symbol同步 #%s] 尝试重新分配缺失的 %s %s 到 agent %s:%s", 
-                                       cycle_count, symbol, interval, ip, port)
+                    # 批量下发指令到各个agent
+                    for (ip, port), symbols in symbols_per_agent.items():
+                        # 分批处理，每批不超过batch_size个symbol
+                        for i in range(0, len(symbols), batch_size):
+                            batch_symbols = symbols[i:i + batch_size]
+                            logger.info(
+                                "[DataManager] [Symbol同步 #%s] 🚀 批量重新分配 %s 个缺失的 symbol 到 agent %s:%s (批次 %s/%s)",
+                                cycle_count, len(batch_symbols), ip, port, 
+                                i // batch_size + 1, (len(symbols) + batch_size - 1) // batch_size
+                            )
                             
-                            success = await manager.add_stream_to_agent(ip, port, symbol, interval)
-                            if success:
-                                missing_success += 1
-                                logger.info("[DataManager] [Symbol同步 #%s] ✅ 成功重新分配缺失的 %s %s 到 %s:%s", 
-                                          cycle_count, symbol, interval, ip, port)
+                            result = await manager.add_symbols_to_agent(ip, port, batch_symbols, batch_size)
+                            if result and result.get("status") == "ok":
+                                missing_success += len(batch_symbols)
+                                logger.info(
+                                    "[DataManager] [Symbol同步 #%s] ✅ 成功批量重新分配 %s 个缺失的 symbol 到 %s:%s",
+                                    cycle_count, len(batch_symbols), ip, port
+                                )
                             else:
-                                missing_failed += 1
-                                logger.warning("[DataManager] [Symbol同步 #%s] ⚠️  重新分配失败缺失的 %s %s 到 %s:%s", 
-                                             cycle_count, symbol, interval, ip, port)
-                        else:
+                                missing_failed += len(batch_symbols)
+                                logger.warning(
+                                    "[DataManager] [Symbol同步 #%s] ⚠️  批量重新分配失败，agent %s:%s",
+                                    cycle_count, ip, port
+                                )
+                    
+                    # 处理没有找到agent的symbol
+                    for symbol in missing_symbols_list:
+                        if not any(symbol in symbols for symbols in symbols_per_agent.values()):
                             missing_failed += 1
-                            logger.warning("[DataManager] [Symbol同步 #%s] ⚠️  没有可用的 agent 用于缺失的 %s %s", 
-                                         cycle_count, symbol, interval)
+                            logger.warning("[DataManager] [Symbol同步 #%s] ⚠️  没有可用的 agent 用于缺失的 %s", 
+                                         cycle_count, symbol)
                     
                     logger.info("[DataManager] [Symbol同步 #%s] 📊 缺失分配修复统计: 总缺失 %s, 成功修复 %s, 修复失败 %s", 
                               cycle_count, missing_total, missing_success, missing_failed)
                 else:
-                    logger.info("[DataManager] [Symbol同步 #%s] ✅ 所有 symbol-interval 对都已正确分配", cycle_count)
+                    logger.info("[DataManager] [Symbol同步 #%s] ✅ 所有 symbol 都已正确分配", cycle_count)
                 
                 # 更新已分配的symbol集合
                 allocated_symbols.update(new_symbols)
@@ -309,8 +326,8 @@ async def run_data_manager_service(duration: Optional[int] = None) -> None:
             failed_symbols = []
             
             for symbol in symbols_list:
-                # 查找最适合的agent（需要7个连接，对应7个interval）
-                agent_key = await manager.find_best_agent(required_connections=7)
+                # 查找最适合的agent（需要1个symbol）
+                agent_key = await manager.find_best_agent(required_symbols=1)
                 if agent_key:
                     ip, port = agent_key
                     if (ip, port) not in symbols_per_agent:
