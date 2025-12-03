@@ -57,7 +57,7 @@ async def kline_candlestick_streams():
     connection = None
     try:
         connection = await client.websocket_streams.create_connection()
-
+        
         # 计算昨天和今天的日期
         today = datetime.now()
         yesterday = today - timedelta(days=1)
@@ -65,7 +65,12 @@ async def kline_candlestick_streams():
         print(f"正在获取A2ZUSDT日K线数据...")
         print(f"今天日期: {today.strftime('%Y-%m-%d')}")
         print(f"昨天日期: {yesterday.strftime('%Y-%m-%d')}")
-
+        
+        # 控制订阅频率，确保符合要求（每秒不超过10个订阅消息）
+        print(f"[WebSocketTest] 订阅前等待1秒，确保不超过订阅频率限制...")
+        await asyncio.sleep(1)
+        
+        # 订阅K线流
         stream = await connection.kline_candlestick_streams(
             symbol="A2ZUSDT",
             interval="1d",
@@ -73,6 +78,9 @@ async def kline_candlestick_streams():
         
         # 存储接收到的K线数据
         received_klines = []
+        
+        # 连接创建时间，用于检查连接有效期
+        connection_created_at = datetime.now()
         
         def on_message(data):
             # 只处理完结的K线数据
@@ -112,20 +120,44 @@ async def kline_candlestick_streams():
                     logging.error(f"Data keys: {data.keys()}")
 
         stream.on("message", on_message)
-
+        
+        # 定期发送ping请求，保持连接活跃
+        async def send_ping():
+            while len(received_klines) < 2:
+                try:
+                    if connection and hasattr(connection, 'ping'):
+                        await connection.ping()
+                        print(f"[WebSocketTest] 发送ping请求")
+                    await asyncio.sleep(5)  # 每5秒发送一次ping
+                except Exception as e:
+                    logging.error(f"Error sending ping: {e}")
+                    break
+        
+        ping_task = asyncio.create_task(send_ping())
+        
         # 等待足够长的时间以接收K线数据
         await asyncio.sleep(10)
+        
+        # 取消ping任务
+        ping_task.cancel()
         
         if received_klines:
             print(f"总共接收到 {len(received_klines)} 条K线数据")
         else:
             print("未接收到任何K线数据，请稍后重试")
             
+        # 检查连接有效期
+        connection_duration = datetime.now() - connection_created_at
+        print(f"[WebSocketTest] 连接持续时间: {connection_duration}")
+        if connection_duration > timedelta(hours=24):
+            print(f"[WebSocketTest] 连接已超过24小时有效期，应重新连接")
+            
     except Exception as e:
         logging.error(f"kline_candlestick_streams() error: {e}")
     finally:
         if connection:
             await connection.close_connection(close_session=True)
+            print(f"[WebSocketTest] 连接已关闭")
 
 
 if __name__ == "__main__":

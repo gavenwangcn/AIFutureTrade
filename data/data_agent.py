@@ -103,6 +103,23 @@ class DataAgentKlineManager:
         # 跟踪活跃连接: {(symbol, interval): KlineStreamConnection}
         self._active_connections: Dict[Tuple[str, str], KlineStreamConnection] = {}
         self._lock = asyncio.Lock()
+        
+        # WebSocket连接管理配置
+        self._connection_max_age = WS_CONNECTION_MAX_AGE
+        self._ping_interval = timedelta(minutes=5)  # 每5分钟发送一次ping
+        self._reconnect_delay = timedelta(seconds=5)  # 重连延迟
+        self._max_subscriptions_per_second = 10  # 每秒最多10个订阅消息
+        
+        # 跟踪上一次订阅时间，用于控制订阅频率
+        self._last_subscription_time = datetime.now(timezone.utc)
+        self._subscriptions_in_last_second = 0
+        
+        # 启动定期检查任务
+        self._check_task = asyncio.create_task(self._periodic_connection_check())
+        self._ping_task = asyncio.create_task(self._periodic_ping())
+        
+        # 标记是否正在关闭
+        self._is_closing = False
     
     async def _handle_kline_message(self, symbol: str, interval: str, message: Any) -> None:
         """处理K线消息并插入数据库。"""
@@ -151,6 +168,9 @@ class DataAgentKlineManager:
                 return False
             
             try:
+                # 控制订阅频率，确保每秒不超过10个订阅消息
+                await self._rate_limit_subscription()
+                
                 # 根据SDK最佳实践，为每个symbol-interval对创建独立的WebSocket连接
                 # 这是SDK推荐的方式，每个连接可以处理多个流，但为了隔离和管理方便，每个symbol-interval使用独立连接
                 connection = await self._client.websocket_streams.create_connection()
@@ -263,8 +283,99 @@ class DataAgentKlineManager:
                 symbols.add(conn.symbol)
             return symbols
     
+    async def _periodic_connection_check(self) -> None:
+        """定期检查连接状态，处理过期连接和重连。"""
+        while not self._is_closing:
+            try:
+                await asyncio.sleep(3600)  # 每小时检查一次
+                
+                async with self._lock:
+                    # 复制当前连接列表，避免在迭代过程中修改
+                    connections_to_check = list(self._active_connections.items())
+                
+                for key, conn in connections_to_check:
+                    try:
+                        # 检查连接是否接近过期（剩余时间少于1小时）
+                        time_until_expiry = conn.created_at + self._connection_max_age - datetime.now(timezone.utc)
+                        if time_until_expiry < timedelta(hours=1):
+                            logger.info("[DataAgentKline] Connection %s %s is approaching expiry, reconnecting...", 
+                                      conn.symbol, conn.interval)
+                            
+                            # 重新连接
+                            async with self._lock:
+                                if key in self._active_connections:
+                                    # 先关闭旧连接
+                                    await self._active_connections[key].close()
+                                    del self._active_connections[key]
+                                    
+                                    # 再创建新连接
+                                    await self.add_stream(conn.symbol, conn.interval)
+                    except Exception as e:
+                        logger.error("[DataAgentKline] Error handling connection %s %s: %s", 
+                                  conn.symbol, conn.interval, e, exc_info=True)
+            except asyncio.CancelledError:
+                logger.info("[DataAgentKline] Periodic connection check task cancelled")
+                raise
+            except Exception as e:
+                logger.error("[DataAgentKline] Error in periodic connection check: %s", e, exc_info=True)
+    
+    async def _periodic_ping(self) -> None:
+        """定期发送ping请求，保持WebSocket连接活跃。"""
+        while not self._is_closing:
+            try:
+                await asyncio.sleep(self._ping_interval.total_seconds())
+                
+                async with self._lock:
+                    # 复制当前连接列表，避免在迭代过程中修改
+                    connections = list(self._active_connections.values())
+                
+                for conn in connections:
+                    try:
+                        # 发送ping请求
+                        if conn.connection and hasattr(conn.connection, 'ping'):
+                            await conn.connection.ping()
+                            logger.debug("[DataAgentKline] Sent ping to %s %s", conn.symbol, conn.interval)
+                    except Exception as e:
+                        logger.error("[DataAgentKline] Error sending ping to %s %s: %s", 
+                                  conn.symbol, conn.interval, e)
+            except asyncio.CancelledError:
+                logger.info("[DataAgentKline] Periodic ping task cancelled")
+                raise
+            except Exception as e:
+                logger.error("[DataAgentKline] Error in periodic ping: %s", e, exc_info=True)
+    
+    async def _rate_limit_subscription(self) -> None:
+        """控制订阅频率，确保每秒不超过10个订阅消息。"""
+        current_time = datetime.now(timezone.utc)
+        time_since_last_subscription = current_time - self._last_subscription_time
+        
+        # 如果已经过了1秒，重置计数器
+        if time_since_last_subscription > timedelta(seconds=1):
+            self._last_subscription_time = current_time
+            self._subscriptions_in_last_second = 1
+            return
+        
+        # 如果在1秒内订阅次数已达上限，等待剩余时间
+        self._subscriptions_in_last_second += 1
+        if self._subscriptions_in_last_second > self._max_subscriptions_per_second:
+            wait_time = timedelta(seconds=1) - time_since_last_subscription
+            logger.debug("[DataAgentKline] Subscription rate limit reached, waiting %s seconds...", 
+                       wait_time.total_seconds())
+            await asyncio.sleep(wait_time.total_seconds())
+            # 重置计数器
+            self._last_subscription_time = datetime.now(timezone.utc)
+            self._subscriptions_in_last_second = 1
+    
     async def cleanup_all(self) -> None:
         """清理所有连接。"""
+        self._is_closing = True
+        
+        # 取消后台任务
+        if hasattr(self, '_check_task'):
+            self._check_task.cancel()
+        if hasattr(self, '_ping_task'):
+            self._ping_task.cancel()
+        
         async with self._lock:
             keys = list(self._active_connections.keys())
             for key in keys:
