@@ -152,10 +152,18 @@ class DataAgentKlineManager:
             
             try:
                 connection = await self._client.websocket_streams.create_connection()
+                if not connection:
+                    logger.error("[DataAgentKline] Failed to create WebSocket connection: connection is None")
+                    return False
+                
                 stream = await connection.kline_candlestick_streams(
                     symbol=symbol.lower(),
                     interval=interval
                 )
+                if not stream:
+                    logger.error("[DataAgentKline] Failed to create kline stream: stream is None")
+                    await connection.close_connection()
+                    return False
                 
                 # 设置消息处理器
                 def handler(data: Any) -> None:
@@ -174,8 +182,32 @@ class DataAgentKlineManager:
                 self._active_connections[key] = conn
                 logger.info("[DataAgentKline] Added stream: %s %s", symbol, interval)
                 return True
+            except asyncio.CancelledError:
+                logger.info("[DataAgentKline] Add stream task cancelled: %s %s", symbol, interval)
+                raise
+            except RuntimeError as e:
+                if "Event loop is closed" in str(e):
+                    logger.error("[DataAgentKline] Failed to add stream %s %s: Event loop is closed", symbol, interval)
+                else:
+                    logger.error("[DataAgentKline] Failed to add stream %s %s: %s", symbol, interval, e)
+                return False
+            except AttributeError as e:
+                logger.error("[DataAgentKline] Failed to add stream %s %s: %s", symbol, interval, e)
+                # 如果连接已创建但添加流失败，尝试关闭连接
+                if 'connection' in locals() and connection:
+                    try:
+                        await connection.close_connection()
+                    except Exception as close_e:
+                        logger.debug("[DataAgentKline] Failed to close connection: %s", close_e)
+                return False
             except Exception as e:
                 logger.error("[DataAgentKline] Failed to add stream %s %s: %s", symbol, interval, e)
+                # 如果连接已创建但添加流失败，尝试关闭连接
+                if 'connection' in locals() and connection:
+                    try:
+                        await connection.close_connection()
+                    except Exception as close_e:
+                        logger.debug("[DataAgentKline] Failed to close connection: %s", close_e)
                 return False
     
     async def remove_stream(self, symbol: str, interval: str) -> bool:
