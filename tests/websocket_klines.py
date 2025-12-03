@@ -137,11 +137,30 @@ async def kline_candlestick_streams():
         # 
         # ping_task = asyncio.create_task(send_ping())
         
-        # 等待足够长的时间以接收K线数据
-        await asyncio.sleep(10)
+        # 创建事件，用于等待数据接收完成
+        data_received_event = asyncio.Event()
         
-        # 取消ping任务（已注释掉ping_task创建，所以也注释掉取消代码）
-        # ping_task.cancel()
+        # 修改消息处理器，当收到足够数据时设置事件
+        original_on_message = on_message
+        
+        def enhanced_on_message(data):
+            original_on_message(data)
+            # 当收集到足够的数据后取消订阅并设置事件
+            if len(received_klines) >= 2:
+                asyncio.create_task(stream.unsubscribe())
+                data_received_event.set()
+        
+        # 替换消息处理器
+        stream.on("message", enhanced_on_message)
+        
+        # 等待数据接收完成，最多等待60秒
+        print("[WebSocketTest] 等待接收K线数据，最多等待60秒...")
+        try:
+            # 等待数据接收完成，最多等待60秒
+            await asyncio.wait_for(data_received_event.wait(), timeout=60)
+            print("[WebSocketTest] 数据接收完成，正在处理...")
+        except asyncio.TimeoutError:
+            print("[WebSocketTest] 数据接收超时，可能没有新的K线数据生成")
         
         if received_klines:
             print(f"总共接收到 {len(received_klines)} 条K线数据")
