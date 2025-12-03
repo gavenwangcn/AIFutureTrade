@@ -39,10 +39,13 @@ package-lock.json
 .DS_Store
 Thumbs.db
 
-# 数据文件
-data/
+# 数据文件（排除数据存储目录，但保留 Python 包目录）
+# 注意：data/ Python 包目录需要被包含，所以不在这里排除
+# 数据文件通过其他方式排除（如 *.db）
 *.db
 *.db-journal
+data/*.db
+data/*.db-journal
 
 # 测试
 tests/
