@@ -14,6 +14,7 @@ import config as app_config
 MARKET_TICKER_TABLE = "24_market_tickers"
 LEADERBOARD_TABLE = "futures_leaderboard"
 MARKET_KLINES_TABLE = "market_klines"
+MARKET_DATA_AGENT_TABLE = "market_data_agent"
 
 logger = logging.getLogger(__name__)
 
@@ -221,6 +222,7 @@ class ClickHouseDatabase:
         
         self.market_ticker_table = MARKET_TICKER_TABLE
         self.leaderboard_table = getattr(app_config, 'CLICKHOUSE_LEADERBOARD_TABLE', LEADERBOARD_TABLE)
+        self.market_data_agent_table = MARKET_DATA_AGENT_TABLE
 
         # K线表前缀（默认 market_klines），按不同 interval 拆分为多张表：
         # market_klines_1w, market_klines_1d, market_klines_4h, market_klines_1h,
@@ -245,6 +247,7 @@ class ClickHouseDatabase:
             # Initialize tables using the connection pool
             self.ensure_market_ticker_table()
             self.ensure_leaderboard_table()
+            self.ensure_market_data_agent_table()
             self.ensure_market_klines_table()
     
     # ==================================================================
@@ -1593,6 +1596,30 @@ class ClickHouseDatabase:
         except Exception as exc:
             logger.error("[ClickHouse] Failed to get leaderboard symbols: %s", exc, exc_info=True)
             return []
+    
+    def get_all_market_ticker_symbols(self) -> List[str]:
+        """获取24_market_tickers表中所有不同的交易对符号。
+        
+        Returns:
+            去重后的交易对符号列表
+        """
+        try:
+            query = f"""
+            SELECT DISTINCT symbol
+            FROM {self.market_ticker_table}
+            WHERE symbol != '' AND symbol LIKE '%USDT'
+            ORDER BY symbol
+            """
+            
+            def _execute_query(client):
+                return client.query(query)
+            
+            result = self._with_connection(_execute_query)
+            symbols = [row[0] for row in result.result_rows if row[0]]
+            return symbols
+        except Exception as exc:
+            logger.error("[ClickHouse] Failed to get all market ticker symbols: %s", exc, exc_info=True)
+            return []
 
     # ==================================================================
     # Leaderboard 模块：数据清理
@@ -2055,6 +2082,193 @@ class ClickHouseDatabase:
         except Exception as exc:
             logger.error("[ClickHouse] Failed to cleanup old klines: %s", exc, exc_info=True)
             return 0
+    
+    # ==================================================================
+    # Market Data Agent 模块：表管理
+    # ==================================================================
+    
+    def ensure_market_data_agent_table(self) -> None:
+        """创建market_data_agent表（如果不存在）。
+        
+        表结构：
+        - ip: String - data_agent的IP地址
+        - port: UInt16 - data_agent的端口号
+        - status: String - 状态（online/offline）
+        - connection_count: UInt32 - 当前使用的长链接数量
+        - assigned_symbol_count: UInt32 - 已分配的合约数量
+        - assigned_symbols: String - 已分配的合约列表（JSON格式）
+        - error_log: String - 异常日志
+        - last_heartbeat: DateTime - 最后心跳时间
+        - register_time: DateTime - 注册时间
+        - update_time: DateTime - 更新时间
+        """
+        ddl = f"""
+        CREATE TABLE IF NOT EXISTS {self.market_data_agent_table} (
+            ip String,
+            port UInt16,
+            status String,
+            connection_count UInt32,
+            assigned_symbol_count UInt32,
+            assigned_symbols String,
+            error_log String,
+            last_heartbeat DateTime,
+            register_time DateTime DEFAULT now(),
+            update_time DateTime DEFAULT now()
+        )
+        ENGINE = ReplacingMergeTree(update_time)
+        ORDER BY (ip, port)
+        """
+        self.command(ddl)
+        logger.info("[ClickHouse] Ensured table %s exists", self.market_data_agent_table)
+    
+    def upsert_market_data_agent(self, agent_data: Dict[str, Any]) -> None:
+        """更新或插入data_agent信息。
+        
+        Args:
+            agent_data: 包含agent信息的字典，必须包含ip和port字段
+        """
+        import json
+        from datetime import datetime, timezone
+        
+        ip = agent_data.get("ip", "")
+        port = agent_data.get("port", 0)
+        status = agent_data.get("status", "offline")
+        connection_count = agent_data.get("connection_count", 0)
+        assigned_symbol_count = agent_data.get("assigned_symbol_count", 0)
+        assigned_symbols = agent_data.get("assigned_symbols", [])
+        error_log = agent_data.get("error_log", "")
+        last_heartbeat = agent_data.get("last_heartbeat")
+        
+        if not ip or port == 0:
+            logger.warning("[ClickHouse] Invalid agent data: missing ip or port")
+            return
+        
+        # 转换assigned_symbols为JSON字符串
+        assigned_symbols_json = json.dumps(assigned_symbols, ensure_ascii=False)
+        
+        # 处理时间字段
+        if isinstance(last_heartbeat, (int, float)):
+            last_heartbeat = datetime.fromtimestamp(last_heartbeat, tz=timezone.utc)
+        elif not isinstance(last_heartbeat, datetime):
+            last_heartbeat = datetime.now(timezone.utc)
+        
+        update_time = datetime.now(timezone.utc)
+        
+        # 直接插入新记录，ReplacingMergeTree会自动根据(ip, port)去重，保留update_time最大的记录
+        column_names = [
+            "ip", "port", "status", "connection_count", "assigned_symbol_count",
+            "assigned_symbols", "error_log", "last_heartbeat", "update_time"
+        ]
+        
+        row_data = [
+            ip, port, status, connection_count, assigned_symbol_count,
+            assigned_symbols_json, error_log, last_heartbeat, update_time
+        ]
+        
+        self.insert_rows(self.market_data_agent_table, [row_data], column_names)
+        logger.debug("[ClickHouse] Upserted agent: %s:%s", ip, port)
+    
+    def get_market_data_agents(self, status: Optional[str] = None) -> List[Dict[str, Any]]:
+        """获取所有data_agent信息。
+        
+        Args:
+            status: 可选，过滤状态（online/offline）
+        
+        Returns:
+            data_agent信息列表
+        """
+        import json
+        
+        try:
+            query = f"""
+            SELECT 
+                ip, port, status, connection_count, assigned_symbol_count,
+                assigned_symbols, error_log, last_heartbeat, register_time, update_time
+            FROM {self.market_data_agent_table}
+            """
+            if status:
+                query += f" WHERE status = '{status}'"
+            query += " ORDER BY ip, port"
+            
+            def _execute_query(client):
+                return client.query(query)
+            
+            result = self._with_connection(_execute_query)
+            agents = []
+            for row in result.result_rows:
+                try:
+                    assigned_symbols = json.loads(row[5]) if row[5] else []
+                except (json.JSONDecodeError, TypeError):
+                    assigned_symbols = []
+                
+                agents.append({
+                    "ip": row[0],
+                    "port": row[1],
+                    "status": row[2],
+                    "connection_count": row[3],
+                    "assigned_symbol_count": row[4],
+                    "assigned_symbols": assigned_symbols,
+                    "error_log": row[6] or "",
+                    "last_heartbeat": row[7],
+                    "register_time": row[8],
+                    "update_time": row[9],
+                })
+            return agents
+        except Exception as exc:
+            logger.error("[ClickHouse] Failed to get market data agents: %s", exc, exc_info=True)
+            return []
+    
+    def get_market_data_agent(self, ip: str, port: int) -> Optional[Dict[str, Any]]:
+        """获取指定data_agent信息。
+        
+        Args:
+            ip: agent的IP地址
+            port: agent的端口号
+        
+        Returns:
+            agent信息字典，如果不存在则返回None
+        """
+        import json
+        
+        try:
+            query = f"""
+            SELECT 
+                ip, port, status, connection_count, assigned_symbol_count,
+                assigned_symbols, error_log, last_heartbeat, register_time, update_time
+            FROM {self.market_data_agent_table}
+            WHERE ip = '{ip}' AND port = {port}
+            ORDER BY update_time DESC
+            LIMIT 1
+            """
+            
+            def _execute_query(client):
+                return client.query(query)
+            
+            result = self._with_connection(_execute_query)
+            if not result.result_rows:
+                return None
+            
+            row = result.result_rows[0]
+            try:
+                assigned_symbols = json.loads(row[5]) if row[5] else []
+            except (json.JSONDecodeError, TypeError):
+                assigned_symbols = []
+            
+            return {
+                "ip": row[0],
+                "port": row[1],
+                "status": row[2],
+                "connection_count": row[3],
+                "assigned_symbol_count": row[4],
+                "assigned_symbols": assigned_symbols,
+                "error_log": row[6] or "",
+                "last_heartbeat": row[7],
+                "register_time": row[8],
+                "update_time": row[9],
+            }
+        except Exception as exc:
+            logger.error("[ClickHouse] Failed to get market data agent: %s", exc, exc_info=True)
+            return None
 
 
 # ==================================================================

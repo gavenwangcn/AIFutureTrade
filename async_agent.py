@@ -45,6 +45,12 @@ def _lazy_import_leaderboard_cleanup():
     return run_cleanup_scheduler
 
 
+def _lazy_import_data_agent_manager():
+    """延迟导入data_agent_manager模块"""
+    from data_agent_manager import DataAgentManager, run_manager_http_server
+    return DataAgentManager, run_manager_http_server
+
+
 async def _run_market_tickers(duration: Optional[int] = None) -> None:
     run_market_ticker_stream, _ = _lazy_import_market_streams()
     await run_market_ticker_stream(run_seconds=duration)
@@ -76,6 +82,125 @@ async def _run_leaderboard_cleanup(duration: Optional[int] = None) -> None:
     """运行涨跌榜清理服务"""
     run_cleanup_scheduler = _lazy_import_leaderboard_cleanup()
     await run_cleanup_scheduler()
+
+
+async def _run_data_agent_manager(duration: Optional[int] = None) -> None:
+    """运行data_agent管理服务"""
+    DataAgentManager, run_manager_http_server = _lazy_import_data_agent_manager()
+    from database_clickhouse import ClickHouseDatabase
+    
+    db = ClickHouseDatabase()
+    manager = DataAgentManager(db)
+    
+    # 获取配置
+    register_host = '0.0.0.0'
+    register_port = getattr(app_config, 'DATA_AGENT_REGISTER_PORT', 8888)
+    symbol_check_interval = getattr(app_config, 'DATA_AGENT_SYMBOL_CHECK_INTERVAL', 30)
+    status_check_interval = getattr(app_config, 'DATA_AGENT_STATUS_CHECK_INTERVAL', 60)
+    
+    # 启动HTTP服务器
+    http_task = asyncio.create_task(
+        run_manager_http_server(manager, register_host, register_port)
+    )
+    
+    # 已分配的symbol集合（用于检测新增）
+    allocated_symbols: Set[str] = set()
+    
+    async def sync_symbols_task():
+        """同步symbol任务：检查新增symbol并分配任务"""
+        while True:
+            try:
+                await asyncio.sleep(symbol_check_interval)
+                
+                # 获取所有market ticker中的symbol
+                symbols = await asyncio.to_thread(db.get_all_market_ticker_symbols)
+                symbol_set = set(symbols)
+                
+                # 找出新增的symbol
+                new_symbols = symbol_set - allocated_symbols
+                
+                if new_symbols:
+                    logger.info("[DataAgentManager] Found %s new symbols: %s", len(new_symbols), sorted(new_symbols)[:10])
+                    
+                    # 为每个新symbol的所有interval分配任务
+                    intervals = ['1m', '5m', '15m', '1h', '4h', '1d', '1w']
+                    for symbol in new_symbols:
+                        for interval in intervals:
+                            # 查找最适合的agent
+                            agent_key = await manager.find_best_agent(required_connections=1)
+                            if agent_key:
+                                ip, port = agent_key
+                                success = await manager.add_stream_to_agent(ip, port, symbol, interval)
+                                if success:
+                                    logger.info("[DataAgentManager] Assigned %s %s to %s:%s", symbol, interval, ip, port)
+                                else:
+                                    logger.warning("[DataAgentManager] Failed to assign %s %s to %s:%s", symbol, interval, ip, port)
+                            else:
+                                logger.warning("[DataAgentManager] No available agent for %s %s", symbol, interval)
+                    
+                    # 更新已分配的symbol集合
+                    allocated_symbols.update(new_symbols)
+                
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:
+                logger.error("[DataAgentManager] Error in sync_symbols_task: %s", e, exc_info=True)
+    
+    async def status_check_task():
+        """状态检查任务：定时检查agent状态并刷新到数据库"""
+        while True:
+            try:
+                await asyncio.sleep(status_check_interval)
+                
+                # 检查所有agent的健康状态
+                await manager.check_all_agents_health()
+                
+                # 刷新所有agent的状态到数据库
+                await manager.refresh_all_agents_status()
+                
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:
+                logger.error("[DataAgentManager] Error in status_check_task: %s", e, exc_info=True)
+    
+    # 启动初始同步
+    try:
+        symbols = await asyncio.to_thread(db.get_all_market_ticker_symbols)
+        allocated_symbols = set(symbols)
+        logger.info("[DataAgentManager] Initialized with %s symbols", len(allocated_symbols))
+    except Exception as e:
+        logger.error("[DataAgentManager] Failed to initialize symbols: %s", e, exc_info=True)
+    
+    # 启动后台任务
+    sync_task = asyncio.create_task(sync_symbols_task())
+    status_task = asyncio.create_task(status_check_task())
+    
+    logger.info("[DataAgentManager] Started data agent manager service")
+    
+    try:
+        if duration:
+            await asyncio.sleep(duration)
+            http_task.cancel()
+            sync_task.cancel()
+            status_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await http_task
+                await sync_task
+                await status_task
+        else:
+            # 持续运行
+            done, pending = await asyncio.wait(
+                {http_task, sync_task, status_task},
+                return_when=asyncio.FIRST_COMPLETED
+            )
+            for task in pending:
+                task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await task
+    except asyncio.CancelledError:
+        raise
+    finally:
+        logger.info("[DataAgentManager] Data agent manager service stopped")
 
 
 async def _run_kline_services(duration: Optional[int] = None) -> None:
@@ -175,6 +300,7 @@ TASK_REGISTRY: Dict[str, Callable[[Optional[int]], Awaitable[None]]] = {
     "kline_services": _run_kline_services,  # 同时运行同步和清理服务
     "price_refresh": _run_price_refresh,  # 价格刷新服务
     "leaderboard_cleanup": _run_leaderboard_cleanup,  # 涨跌榜清理服务
+    "data_agent_manager": _run_data_agent_manager,  # data_agent管理服务
     "all": _run_all_services,  # 运行所有任务服务
 }
 

@@ -40,6 +40,16 @@ KLINE_SYNC_CHECK_INTERVAL = int(os.getenv('KLINE_SYNC_CHECK_INTERVAL', '10'))  #
 KLINE_CLEANUP_CRON = os.getenv('KLINE_CLEANUP_CRON', '0 */1 * * *')  # Cron表达式，默认每1小时执行一次
 KLINE_CLEANUP_RETENTION_DAYS = int(os.getenv('KLINE_CLEANUP_RETENTION_DAYS', '14'))  # 保留天数，默认2天（48小时）
 
+# Data Agent配置
+DATA_AGENT_MAX_CONNECTIONS = int(os.getenv('DATA_AGENT_MAX_CONNECTIONS', '1000'))  # 每个data_agent最多连接数
+DATA_AGENT_PORT = int(os.getenv('DATA_AGENT_PORT', '9999'))  # data_agent指令接口端口
+DATA_AGENT_REGISTER_IP = os.getenv('DATA_AGENT_REGISTER_IP', '127.0.0.1')  # data_agent注册IP
+DATA_AGENT_REGISTER_PORT = int(os.getenv('DATA_AGENT_REGISTER_PORT', '8888'))  # data_agent注册端口
+DATA_AGENT_HEARTBEAT_INTERVAL = int(os.getenv('DATA_AGENT_HEARTBEAT_INTERVAL', '30'))  # 心跳间隔（秒）
+DATA_AGENT_HEARTBEAT_TIMEOUT = int(os.getenv('DATA_AGENT_HEARTBEAT_TIMEOUT', '60'))  # 心跳超时（秒）
+DATA_AGENT_SYMBOL_CHECK_INTERVAL = int(os.getenv('DATA_AGENT_SYMBOL_CHECK_INTERVAL', '30'))  # 检查新增symbol间隔（秒）
+DATA_AGENT_STATUS_CHECK_INTERVAL = int(os.getenv('DATA_AGENT_STATUS_CHECK_INTERVAL', '60'))  # 检查data_agent状态间隔（秒）
+
 # 价格刷新服务配置
 PRICE_REFRESH_CRON = os.getenv('PRICE_REFRESH_CRON', '*/5 * * * *')  # Cron表达式，默认每3分钟执行一次
 PRICE_REFRESH_MAX_PER_MINUTE = int(os.getenv('PRICE_REFRESH_MAX_PER_MINUTE', '1000'))  # 每分钟最多刷新的symbol数量
