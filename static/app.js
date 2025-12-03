@@ -2573,7 +2573,7 @@ class TradingApp {
                     const rank = item.rank || 0;
                     const symbol = item.symbol || item.contract_symbol || 'N/A';
                     const contractSymbol = item.contract_symbol || symbol;
-                    const price = this.formatNumber(item.price || 0, 4);
+                    const price = this.formatNumber(item.price || 0, 6);
                     const changePercent = item.change_percent !== undefined 
                         ? item.change_percent 
                         : (item.priceChangePercent !== undefined ? item.priceChangePercent : 0);
@@ -2612,7 +2612,7 @@ class TradingApp {
                     const rank = item.rank || 0;
                     const symbol = item.symbol || item.contract_symbol || 'N/A';
                     const contractSymbol = item.contract_symbol || symbol;
-                    const price = this.formatNumber(item.price || 0, 4);
+                    const price = this.formatNumber(item.price || 0, 6);
                     const changePercent = item.change_percent !== undefined 
                         ? item.change_percent 
                         : (item.priceChangePercent !== undefined ? item.priceChangePercent : 0);

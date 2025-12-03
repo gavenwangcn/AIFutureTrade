@@ -237,7 +237,7 @@
                     <span class="leaderboard-symbol-name">{{ item.symbol }}</span>
                     <span v-if="item.name" class="leaderboard-symbol-desc">{{ item.name }}</span>
                   </div>
-                  <div class="leaderboard-price">${{ formatPrice(item.price) }}</div>
+                  <div class="leaderboard-price">${{ formatLeaderboardPrice(item.price) }}</div>
                   <div class="leaderboard-change positive">+{{ (item.change_percent || item.change || 0).toFixed(2) }}%</div>
                   <div v-if="item.quote_volume" class="leaderboard-volume">
                     <span class="volume-label">成交额</span>
@@ -256,7 +256,7 @@
                     <span class="leaderboard-symbol-name">{{ item.symbol }}</span>
                     <span v-if="item.name" class="leaderboard-symbol-desc">{{ item.name }}</span>
                   </div>
-                  <div class="leaderboard-price">${{ formatPrice(item.price) }}</div>
+                  <div class="leaderboard-price">${{ formatLeaderboardPrice(item.price) }}</div>
                   <div class="leaderboard-change negative">{{ (item.change_percent || item.change || 0).toFixed(2) }}%</div>
                   <div v-if="item.quote_volume" class="leaderboard-volume">
                     <span class="volume-label">成交额</span>
@@ -560,6 +560,7 @@ const {
   getProviderName,
   getLeverageText,
   formatPrice,
+  formatLeaderboardPrice,
   formatCurrency,
   formatPnl,
   getPnlClass,
