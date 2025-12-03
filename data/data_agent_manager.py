@@ -269,9 +269,58 @@ class DataAgentManager:
                             if is_healthy:
                                 self._agents[key].status = "online"
                                 self._agents[key].last_heartbeat = datetime.now(timezone.utc)
+                                await self._update_agent_in_db(self._agents[key])
                             else:
+                                # agent离线，需要重新分配其负责的symbol
+                                logger.warning("[DataAgentManager] Agent %s:%s 离线，开始重新分配其负责的symbol...", 
+                                             agent.ip, agent.port)
+                                
+                                # 获取该agent当前的symbol列表
+                                symbols_on_agent = await self.get_agent_symbols(agent.ip, agent.port)
+                                logger.info("[DataAgentManager] Agent %s:%s 负责的symbol数量: %s", 
+                                          agent.ip, agent.port, len(symbols_on_agent))
+                                
+                                # 更新agent状态为离线
                                 self._agents[key].status = "offline"
-                            await self._update_agent_in_db(self._agents[key])
+                                await self._update_agent_in_db(self._agents[key])
+                                
+                                # 重新分配该agent的symbol到其他可用agent
+                                if symbols_on_agent:
+                                    await self._reassign_agent_symbols(agent, symbols_on_agent)
+    
+    async def _reassign_agent_symbols(self, offline_agent: DataAgentInfo, symbols: Set[str]) -> None:
+        """重新分配离线agent的symbol到其他可用agent。
+        
+        Args:
+            offline_agent: 离线的agent
+            symbols: 该agent负责的symbol集合
+        """
+        intervals = ['1m', '5m', '15m', '1h', '4h', '1d', '1w']
+        
+        for symbol in symbols:
+            for interval in intervals:
+                # 查找最适合的可用agent
+                agent_key = await self.find_best_agent(required_connections=1)
+                if agent_key:
+                    new_ip, new_port = agent_key
+                    logger.debug("[DataAgentManager] 尝试将离线agent %s:%s 的 %s %s 重新分配到 %s:%s", 
+                               offline_agent.ip, offline_agent.port, symbol, interval, new_ip, new_port)
+                    
+                    # 重新添加流到新agent
+                    try:
+                        success = await self.add_stream_to_agent(new_ip, new_port, symbol, interval)
+                        if success:
+                            logger.info("[DataAgentManager] ✅ 成功将 %s %s 从 %s:%s 重新分配到 %s:%s", 
+                                      symbol, interval, offline_agent.ip, offline_agent.port, new_ip, new_port)
+                        else:
+                            logger.warning("[DataAgentManager] ⚠️  重新分配 %s %s 失败，将在下次同步时重试", 
+                                         symbol, interval)
+                    except Exception as e:
+                        logger.error("[DataAgentManager] ❌ 重新分配 %s %s 时出错: %s", 
+                                   symbol, interval, e, exc_info=True)
+                else:
+                    logger.warning("[DataAgentManager] ⚠️  没有可用的agent来重新分配 %s %s，将在下次同步时重试", 
+                                 symbol, interval)
     
     async def refresh_all_agents_status(self) -> None:
         """刷新所有agent的状态到数据库。"""
@@ -311,6 +360,32 @@ class DataAgentManager:
         """获取所有agent信息。"""
         async with self._lock:
             return list(self._agents.values())
+    
+    async def get_all_allocated_symbol_intervals(self) -> Set[tuple]:
+        """获取所有已分配的symbol-interval对。
+        
+        Returns:
+            已分配的(symbol, interval)集合
+        """
+        async with self._lock:
+            online_agents = [agent for agent in self._agents.values() if agent.status == "online"]
+        
+        allocated_pairs = set()
+        
+        for agent in online_agents:
+            try:
+                # 获取agent当前的连接列表
+                connections = await self.get_agent_connection_list(agent.ip, agent.port)
+                for conn in connections:
+                    symbol = conn.get("symbol")
+                    interval = conn.get("interval")
+                    if symbol and interval:
+                        allocated_pairs.add((symbol, interval))
+            except Exception as e:
+                logger.debug("[DataAgentManager] Failed to get connections for %s:%s: %s", 
+                           agent.ip, agent.port, e)
+        
+        return allocated_pairs
 
 
 class DataAgentManagerHTTPHandler(BaseHTTPRequestHandler):

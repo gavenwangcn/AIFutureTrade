@@ -92,7 +92,7 @@ async def run_data_manager_service(duration: Optional[int] = None) -> None:
     allocated_symbols: Set[str] = set()
     
     async def sync_symbols_task():
-        """同步symbol任务：检查新增symbol并分配任务"""
+        """同步symbol任务：检查新增symbol并分配任务，同时检查已有symbol的分配状态"""
         logger.info("[DataManager] 🔄 Symbol 同步任务启动")
         cycle_count = 0
         
@@ -101,59 +101,120 @@ async def run_data_manager_service(duration: Optional[int] = None) -> None:
                 cycle_count += 1
                 await asyncio.sleep(symbol_check_interval)
                 
-                logger.debug("[DataManager] [Symbol同步 #%s] 开始检查新增 symbol...", cycle_count)
+                logger.debug("[DataManager] [Symbol同步 #%s] 开始检查 symbol...", cycle_count)
                 
                 # 获取所有market ticker中的symbol
                 symbols = await asyncio.to_thread(db.get_all_market_ticker_symbols)
                 symbol_set = set(symbols)
                 
-                logger.debug("[DataManager] [Symbol同步 #%s] 当前数据库中有 %s 个 symbol", 
+                logger.info("[DataManager] [Symbol同步 #%s] 当前数据库中有 %s 个 symbol", 
                            cycle_count, len(symbol_set))
                 
                 # 找出新增的symbol
                 new_symbols = symbol_set - allocated_symbols
                 
+                # 定义需要处理的所有symbol（新增的+已有的）
+                symbols_to_process = list(symbol_set)
+                intervals = ['1m', '5m', '15m', '1h', '4h', '1d', '1w']
+                
+                total_assignments = 0
+                failed_assignments = 0
+                
                 if new_symbols:
                     logger.info("[DataManager] [Symbol同步 #%s] ✨ 发现 %s 个新增 symbol: %s", 
                               cycle_count, len(new_symbols), sorted(list(new_symbols))[:10])
-                    
-                    # 为每个新symbol的所有interval分配任务
-                    intervals = ['1m', '5m', '15m', '1h', '4h', '1d', '1w']
-                    total_assignments = 0
-                    failed_assignments = 0
-                    
-                    for symbol in new_symbols:
-                        for interval in intervals:
-                            # 查找最适合的agent
-                            agent_key = await manager.find_best_agent(required_connections=1)
-                            if agent_key:
-                                ip, port = agent_key
-                                logger.debug("[DataManager] [Symbol同步 #%s] 尝试分配 %s %s 到 agent %s:%s", 
-                                           cycle_count, symbol, interval, ip, port)
-                                
-                                success = await manager.add_stream_to_agent(ip, port, symbol, interval)
-                                if success:
-                                    total_assignments += 1
-                                    logger.info("[DataManager] [Symbol同步 #%s] ✅ 成功分配 %s %s 到 %s:%s", 
+                
+                # 为所有symbol（包括新增和已有的）分配或重新分配agent
+                logger.info("[DataManager] [Symbol同步 #%s] 🚀 开始检查和分配 symbol agent...", cycle_count)
+                
+                for symbol in symbols_to_process:
+                    for interval in intervals:
+                        # 查找最适合的agent
+                        agent_key = await manager.find_best_agent(required_connections=1)
+                        if agent_key:
+                            ip, port = agent_key
+                            logger.debug("[DataManager] [Symbol同步 #%s] 尝试分配 %s %s 到 agent %s:%s", 
+                                       cycle_count, symbol, interval, ip, port)
+                            
+                            # 直接添加流，不管是否已经存在（agent会处理重复情况）
+                            success = await manager.add_stream_to_agent(ip, port, symbol, interval)
+                            if success:
+                                total_assignments += 1
+                                if symbol in new_symbols:
+                                    logger.info("[DataManager] [Symbol同步 #%s] ✅ 成功分配新增 %s %s 到 %s:%s", 
                                               cycle_count, symbol, interval, ip, port)
                                 else:
-                                    failed_assignments += 1
-                                    logger.warning("[DataManager] [Symbol同步 #%s] ⚠️  分配失败 %s %s 到 %s:%s", 
-                                                 cycle_count, symbol, interval, ip, port)
+                                    logger.debug("[DataManager] [Symbol同步 #%s] ✅ 成功确认/重新分配 %s %s 到 %s:%s", 
+                                               cycle_count, symbol, interval, ip, port)
                             else:
                                 failed_assignments += 1
-                                logger.warning("[DataManager] [Symbol同步 #%s] ⚠️  没有可用的 agent 用于 %s %s", 
-                                             cycle_count, symbol, interval)
+                                logger.warning("[DataManager] [Symbol同步 #%s] ⚠️  分配失败 %s %s 到 %s:%s", 
+                                             cycle_count, symbol, interval, ip, port)
+                        else:
+                            failed_assignments += 1
+                            logger.warning("[DataManager] [Symbol同步 #%s] ⚠️  没有可用的 agent 用于 %s %s", 
+                                         cycle_count, symbol, interval)
+                
+                logger.info("[DataManager] [Symbol同步 #%s] 📊 分配统计: 成功 %s, 失败 %s", 
+                          cycle_count, total_assignments, failed_assignments)
+                
+                # 检查所有symbol-interval对是否都已分配
+                logger.info("[DataManager] [Symbol同步 #%s] 🧐 开始检查所有 symbol-interval 分配状态...", cycle_count)
+                
+                # 获取所有需要的symbol-interval对
+                required_pairs = set()
+                for symbol in symbol_set:
+                    for interval in intervals:
+                        required_pairs.add((symbol, interval))
+                
+                # 获取当前已分配的symbol-interval对
+                allocated_pairs = await manager.get_all_allocated_symbol_intervals()
+                
+                # 找出缺失的symbol-interval对
+                missing_pairs = required_pairs - allocated_pairs
+                
+                if missing_pairs:
+                    logger.warning("[DataManager] [Symbol同步 #%s] ⚠️  发现 %s 个缺失的 symbol-interval 分配", 
+                                 cycle_count, len(missing_pairs))
                     
-                    logger.info("[DataManager] [Symbol同步 #%s] 📊 分配统计: 成功 %s, 失败 %s", 
-                              cycle_count, total_assignments, failed_assignments)
+                    # 尝试为缺失的symbol-interval对重新分配agent
+                    logger.info("[DataManager] [Symbol同步 #%s] 🚀 开始为缺失的 symbol-interval 重新分配 agent...", cycle_count)
                     
-                    # 更新已分配的symbol集合
-                    allocated_symbols.update(new_symbols)
-                    logger.info("[DataManager] [Symbol同步 #%s] 📝 已分配 symbol 总数: %s", 
-                              cycle_count, len(allocated_symbols))
+                    missing_total = 0
+                    missing_success = 0
+                    missing_failed = 0
+                    
+                    for symbol, interval in missing_pairs:
+                        missing_total += 1
+                        agent_key = await manager.find_best_agent(required_connections=1)
+                        if agent_key:
+                            ip, port = agent_key
+                            logger.debug("[DataManager] [Symbol同步 #%s] 尝试重新分配缺失的 %s %s 到 agent %s:%s", 
+                                       cycle_count, symbol, interval, ip, port)
+                            
+                            success = await manager.add_stream_to_agent(ip, port, symbol, interval)
+                            if success:
+                                missing_success += 1
+                                logger.info("[DataManager] [Symbol同步 #%s] ✅ 成功重新分配缺失的 %s %s 到 %s:%s", 
+                                          cycle_count, symbol, interval, ip, port)
+                            else:
+                                missing_failed += 1
+                                logger.warning("[DataManager] [Symbol同步 #%s] ⚠️  重新分配失败缺失的 %s %s 到 %s:%s", 
+                                             cycle_count, symbol, interval, ip, port)
+                        else:
+                            missing_failed += 1
+                            logger.warning("[DataManager] [Symbol同步 #%s] ⚠️  没有可用的 agent 用于缺失的 %s %s", 
+                                         cycle_count, symbol, interval)
+                    
+                    logger.info("[DataManager] [Symbol同步 #%s] 📊 缺失分配修复统计: 总缺失 %s, 成功修复 %s, 修复失败 %s", 
+                              cycle_count, missing_total, missing_success, missing_failed)
                 else:
-                    logger.debug("[DataManager] [Symbol同步 #%s] 没有新增 symbol", cycle_count)
+                    logger.info("[DataManager] [Symbol同步 #%s] ✅ 所有 symbol-interval 对都已正确分配", cycle_count)
+                
+                # 更新已分配的symbol集合
+                allocated_symbols.update(new_symbols)
+                logger.info("[DataManager] [Symbol同步 #%s] 📝 已分配 symbol 总数: %s", 
+                          cycle_count, len(allocated_symbols))
                 
             except asyncio.CancelledError:
                 logger.info("[DataManager] [Symbol同步] 任务被取消")
@@ -214,6 +275,39 @@ async def run_data_manager_service(duration: Optional[int] = None) -> None:
         if allocated_symbols:
             logger.info("[DataManager] 📋 初始 symbol 列表（前20个）: %s", 
                       sorted(list(allocated_symbols))[:20])
+            
+            # 为初始symbol分配agent
+            logger.info("[DataManager] 🚀 开始为初始 symbol 分配 agent...")
+            intervals = ['1m', '5m', '15m', '1h', '4h', '1d', '1w']
+            total_assignments = 0
+            failed_assignments = 0
+            
+            for symbol in allocated_symbols:
+                for interval in intervals:
+                    # 查找最适合的agent
+                    agent_key = await manager.find_best_agent(required_connections=1)
+                    if agent_key:
+                        ip, port = agent_key
+                        logger.debug("[DataManager] [初始分配] 尝试分配 %s %s 到 agent %s:%s", 
+                                   symbol, interval, ip, port)
+                        
+                        success = await manager.add_stream_to_agent(ip, port, symbol, interval)
+                        if success:
+                            total_assignments += 1
+                            logger.debug("[DataManager] [初始分配] ✅ 成功分配 %s %s 到 %s:%s", 
+                                       symbol, interval, ip, port)
+                        else:
+                            failed_assignments += 1
+                            logger.warning("[DataManager] [初始分配] ⚠️  分配失败 %s %s 到 %s:%s", 
+                                         symbol, interval, ip, port)
+                    else:
+                        failed_assignments += 1
+                        logger.warning("[DataManager] [初始分配] ⚠️  没有可用的 agent 用于 %s %s", 
+                                     symbol, interval)
+            
+            logger.info("[DataManager] 📊 初始分配统计: 成功 %s, 失败 %s", 
+                      total_assignments, failed_assignments)
+            logger.info("[DataManager] ✅ 初始 agent 分配完成")
     except Exception as e:
         logger.error("[DataManager] ❌ 初始同步失败: %s", e, exc_info=True)
         # 不抛出异常，允许服务继续运行
