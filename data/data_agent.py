@@ -994,7 +994,7 @@ async def run_data_agent(
                 await asyncio.sleep(update_interval)
                 
                 # 获取当前agent状态
-                status = await kline_manager.get_status()
+                status = await kline_manager.get_connection_status()
                 connection_count = status.get("connection_count", 0)
                 symbols_list = status.get("symbols", [])
                 assigned_symbol_count = len(symbols_list)

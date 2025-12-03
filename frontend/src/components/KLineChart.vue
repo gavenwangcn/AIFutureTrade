@@ -1,29 +1,31 @@
 <template>
-  <div class="kline-modal" v-if="visible" @click.self="handleClose">
-    <div class="modal-content kline-modal-content">
-      <div class="modal-header">
-        <h3>{{ title }}</h3>
-        <div class="kline-toolbar">
-          <div class="kline-timeframes">
-            <button
-              v-for="tf in timeframes"
-              :key="tf.value"
-              :class="['timeframe-btn', { active: currentInterval === tf.value }]"
-              @click="handleTimeframeChange(tf.value)"
-            >
-              {{ tf.label }}
+  <Teleport to="body">
+    <div class="kline-modal" v-if="visible" @click.self="handleClose">
+      <div class="modal-content kline-modal-content">
+        <div class="modal-header">
+          <h3>{{ title }}</h3>
+          <div class="kline-toolbar">
+            <div class="kline-timeframes">
+              <button
+                v-for="tf in timeframes"
+                :key="tf.value"
+                :class="['timeframe-btn', { active: currentInterval === tf.value }]"
+                @click="handleTimeframeChange(tf.value)"
+              >
+                {{ tf.label }}
+              </button>
+            </div>
+            <button class="btn-icon" @click="handleClose">
+              <i class="bi bi-x-lg"></i>
             </button>
           </div>
-          <button class="btn-icon" @click="handleClose">
-            <i class="bi bi-x-lg"></i>
-          </button>
+        </div>
+        <div class="kline-modal-body">
+          <div :id="chartContainerId" class="kline-chart-container"></div>
         </div>
       </div>
-      <div class="kline-modal-body">
-        <div :id="chartContainerId" class="kline-chart-container"></div>
-      </div>
     </div>
-  </div>
+  </Teleport>
 </template>
 
 <script setup>
@@ -87,17 +89,49 @@ const symbolToSymbolInfo = (symbol) => {
 
 // 初始化图表
 const initChart = async () => {
-  // 等待 DOM 完全渲染
+  // 等待 DOM 完全渲染，增加延迟并添加重试机制
   await nextTick()
-  await new Promise(resolve => setTimeout(resolve, 200))
+  
+  const containerId = chartContainerId.value
+  let containerElement = document.getElementById(containerId)
+  
+  // 如果容器元素不存在，重试最多5次，每次等待100ms
+  let retryCount = 0
+  const maxRetries = 5
+  while (!containerElement && retryCount < maxRetries) {
+    await new Promise(resolve => setTimeout(resolve, 100))
+    containerElement = document.getElementById(containerId)
+    retryCount++
+    if (containerElement) {
+      console.log(`[KLineChart] Container element found after ${retryCount} retries`)
+      break
+    }
+  }
+  
+  // 额外等待确保DOM完全渲染
+  await new Promise(resolve => setTimeout(resolve, 100))
 
   try {
-    const containerId = chartContainerId.value
-    const containerElement = document.getElementById(containerId)
-    
     if (!containerElement) {
-      console.error('[KLineChart] Container element not found:', containerId)
+      console.error('[KLineChart] Container element not found after retries:', containerId)
+      console.error('[KLineChart] Available elements with similar IDs:', 
+        Array.from(document.querySelectorAll('[id^="kline-chart-"]')).map(el => el.id))
       return
+    }
+    
+    // 确保容器元素可见且有尺寸
+    if (containerElement.offsetWidth === 0 || containerElement.offsetHeight === 0) {
+      console.warn('[KLineChart] Container element has zero dimensions, waiting...')
+      await new Promise(resolve => setTimeout(resolve, 200))
+      // 再次检查
+      if (containerElement.offsetWidth === 0 || containerElement.offsetHeight === 0) {
+        console.error('[KLineChart] Container element still has zero dimensions:', {
+          width: containerElement.offsetWidth,
+          height: containerElement.offsetHeight,
+          display: window.getComputedStyle(containerElement).display,
+          visibility: window.getComputedStyle(containerElement).visibility
+        })
+      }
     }
 
     // 如果图表已存在，先销毁
@@ -221,9 +255,10 @@ watch(() => props.visible, async (newVal) => {
   if (newVal) {
     title.value = `${props.symbol} - K线图`
     currentInterval.value = props.interval
-    // 等待 DOM 更新后再初始化
+    // 等待 DOM 更新后再初始化，增加延迟确保DOM完全渲染
     await nextTick()
-    await new Promise(resolve => setTimeout(resolve, 100))
+    // 增加延迟时间，确保模态框和容器元素完全渲染
+    await new Promise(resolve => setTimeout(resolve, 300))
     initChart()
   } else {
     // 销毁图表和 Datafeed
@@ -332,7 +367,8 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 1000;
+  z-index: 10000;
+  backdrop-filter: blur(4px);
 }
 
 .kline-modal-content {
@@ -406,6 +442,18 @@ onUnmounted(() => {
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  font-size: 18px;
+  line-height: 1;
+  min-width: 32px;
+  min-height: 32px;
+}
+
+.kline-modal .btn-icon i {
+  display: inline-block;
+  font-style: normal;
+  font-variant: normal;
+  text-rendering: auto;
+  line-height: 1;
 }
 
 .kline-modal .btn-icon:hover {
@@ -441,9 +489,39 @@ onUnmounted(() => {
 .kline-modal :deep(.klinecharts-pro) {
   width: 100% !important;
   height: 100% !important;
+  min-height: 600px;
+  background-color: #1a1a1a !important;
+}
+
+.kline-modal :deep(.klinecharts-pro-container) {
+  width: 100% !important;
+  height: 100% !important;
+  background-color: #1a1a1a !important;
+}
+
+.kline-modal :deep(.klinecharts-pro-chart-container) {
+  width: 100% !important;
+  height: 100% !important;
+  background-color: #1a1a1a !important;
 }
 
 .kline-modal :deep(canvas) {
-  display: block;
+  display: block !important;
+  width: 100% !important;
+  height: 100% !important;
+}
+
+/* 确保Bootstrap Icons字体正确加载 */
+.kline-modal .bi {
+  font-family: "bootstrap-icons" !important;
+  font-weight: normal !important;
+  font-style: normal !important;
+  font-variant: normal !important;
+  text-transform: none !important;
+  line-height: 1 !important;
+  vertical-align: -0.125em !important;
+  -webkit-font-smoothing: antialiased !important;
+  -moz-osx-font-smoothing: grayscale !important;
+  display: inline-block !important;
 }
 </style>
