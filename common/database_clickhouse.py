@@ -2154,69 +2154,35 @@ class ClickHouseDatabase:
         
         update_time = datetime.now(timezone.utc)
         
-        # 格式化时间字符串
-        last_heartbeat_str = last_heartbeat.strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
-        update_time_str = update_time.strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
-        
         try:
-            # 1. 尝试更新现有记录
-            update_query = f"""
-            ALTER TABLE {self.market_data_agent_table} UPDATE 
-                status = '{status}',
-                connection_count = {connection_count},
-                assigned_symbol_count = {assigned_symbol_count},
-                assigned_symbols = '{assigned_symbols_json}',
-                error_log = '{error_log}',
-                last_heartbeat = '{last_heartbeat_str}',
-                update_time = '{update_time_str}'
-            WHERE ip = '{ip}' AND port = {port}
-            """
+            # 使用INSERT语句插入新行，ReplacingMergeTree会自动根据(ip, port)去重，保留update_time最大的记录
+            column_names = [
+                "ip", "port", "status", "connection_count", "assigned_symbol_count",
+                "assigned_symbols", "error_log", "last_heartbeat", "update_time"
+            ]
             
-            self.command(update_query)
+            row_data = [
+                ip, port, status, connection_count, assigned_symbol_count,
+                assigned_symbols_json, error_log, last_heartbeat, update_time
+            ]
             
-            # 2. 检查是否有记录被更新
-            check_query = f"""
-            SELECT count() FROM {self.market_data_agent_table} 
-            WHERE ip = '{ip}' AND port = {port}
-            """
+            self.insert_rows(self.market_data_agent_table, [row_data], column_names)
+            logger.debug("[ClickHouse] Upserted agent: %s:%s", ip, port)
             
-            result = self.query(check_query)
-            if result and result[0] and int(result[0][0]) == 0:
-                # 没有记录被更新，说明记录不存在，执行插入
-                insert_query = f"""
-                INSERT INTO {self.market_data_agent_table} (
-                    ip, port, status, connection_count, assigned_symbol_count,
-                    assigned_symbols, error_log, last_heartbeat, update_time
-                ) VALUES (
-                    '{ip}', {port}, '{status}', {connection_count}, {assigned_symbol_count},
-                    '{assigned_symbols_json}', '{error_log}', '{last_heartbeat_str}', '{update_time_str}'
-                )
-                """
-                
-                self.command(insert_query)
-                logger.debug("[ClickHouse] Inserted new agent: %s:%s", ip, port)
+            # 定期执行OPTIMIZE TABLE，确保重复行被及时清理
+            # 每10次插入执行一次OPTIMIZE TABLE
+            if hasattr(self, '_upsert_count'):
+                self._upsert_count += 1
             else:
-                logger.debug("[ClickHouse] Updated existing agent: %s:%s", ip, port)
+                self._upsert_count = 1
+                
+            if self._upsert_count % 10 == 0:
+                optimize_query = f"OPTIMIZE TABLE {self.market_data_agent_table} FINAL"
+                self.command(optimize_query)
+                logger.debug("[ClickHouse] Optimized table %s", self.market_data_agent_table)
                 
         except Exception as e:
             logger.error("[ClickHouse] Failed to upsert agent %s:%s: %s", ip, port, e)
-            
-            # 如果更新失败，尝试插入（可能是因为表结构问题或其他异常）
-            try:
-                column_names = [
-                    "ip", "port", "status", "connection_count", "assigned_symbol_count",
-                    "assigned_symbols", "error_log", "last_heartbeat", "update_time"
-                ]
-                
-                row_data = [
-                    ip, port, status, connection_count, assigned_symbol_count,
-                    assigned_symbols_json, error_log, last_heartbeat, update_time
-                ]
-                
-                self.insert_rows(self.market_data_agent_table, [row_data], column_names)
-                logger.debug("[ClickHouse] Fallback insert for agent: %s:%s", ip, port)
-            except Exception as insert_error:
-                logger.error("[ClickHouse] Fallback insert failed for agent %s:%s: %s", ip, port, insert_error)
     
     def get_market_data_agents(self, status: Optional[str] = None) -> List[Dict[str, Any]]:
         """获取所有data_agent信息。

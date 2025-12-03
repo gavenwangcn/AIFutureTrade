@@ -393,6 +393,8 @@ class DataAgentManagerHTTPHandler(BaseHTTPRequestHandler):
     
     def __init__(self, manager: DataAgentManager, *args, **kwargs):
         self.manager = manager
+        # 存储管理manager的事件循环
+        self._event_loop = asyncio.get_event_loop()
         super().__init__(*args, **kwargs)
     
     def do_POST(self):
@@ -426,16 +428,21 @@ class DataAgentManagerHTTPHandler(BaseHTTPRequestHandler):
             self._send_error(400, "Missing ip or port")
             return
         
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
         try:
-            success = loop.run_until_complete(self.manager.register_agent(ip, port))
+            # 使用manager创建时的事件循环来执行异步操作
+            # 不创建新的事件循环，避免锁绑定问题
+            success = asyncio.run_coroutine_threadsafe(
+                self.manager.register_agent(ip, port),
+                self._event_loop
+            ).result(timeout=10)
+            
             if success:
                 self._send_json({"status": "ok", "message": f"Registered agent {ip}:{port}"})
             else:
                 self._send_error(500, "Failed to register agent")
-        finally:
-            loop.close()
+        except Exception as e:
+            logger.error("[DataAgentManagerHTTP] Error handling register request: %s", e, exc_info=True)
+            self._send_error(500, str(e))
     
     def _handle_heartbeat(self, data: Dict[str, Any]):
         """处理心跳请求。"""
@@ -446,16 +453,21 @@ class DataAgentManagerHTTPHandler(BaseHTTPRequestHandler):
             self._send_error(400, "Missing ip or port")
             return
         
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
         try:
-            success = loop.run_until_complete(self.manager.heartbeat(ip, port))
+            # 使用manager创建时的事件循环来执行异步操作
+            # 不创建新的事件循环，避免锁绑定问题
+            success = asyncio.run_coroutine_threadsafe(
+                self.manager.heartbeat(ip, port),
+                self._event_loop
+            ).result(timeout=10)
+            
             if success:
                 self._send_json({"status": "ok", "message": "Heartbeat received"})
             else:
                 self._send_error(404, "Agent not found")
-        finally:
-            loop.close()
+        except Exception as e:
+            logger.error("[DataAgentManagerHTTP] Error handling heartbeat request: %s", e, exc_info=True)
+            self._send_error(500, str(e))
     
     def _send_json(self, data: Dict[str, Any]):
         """发送JSON响应。"""
