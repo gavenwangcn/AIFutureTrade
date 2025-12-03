@@ -541,17 +541,31 @@ class DataAgentCommandHandler(BaseHTTPRequestHandler):
     
     def _send_json(self, data: Dict[str, Any]):
         """发送JSON响应。"""
-        self.send_response(200)
-        self.send_header('Content-Type', 'application/json')
-        self.end_headers()
-        self.wfile.write(json.dumps(data, ensure_ascii=False).encode('utf-8'))
+        try:
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json')
+            self.end_headers()
+            self.wfile.write(json.dumps(data, ensure_ascii=False).encode('utf-8'))
+        except BrokenPipeError:
+            # 客户端已断开连接，记录日志但不抛出异常
+            logger.debug("[DataAgentCommand] Broken pipe error when sending JSON response")
+        except Exception as e:
+            # 其他异常情况
+            logger.warning("[DataAgentCommand] Error when sending JSON response: %s", e)
     
     def _send_error(self, code: int, message: str):
         """发送错误响应。"""
-        self.send_response(code)
-        self.send_header('Content-Type', 'application/json')
-        self.end_headers()
-        self.wfile.write(json.dumps({"error": message}, ensure_ascii=False).encode('utf-8'))
+        try:
+            self.send_response(code)
+            self.send_header('Content-Type', 'application/json')
+            self.end_headers()
+            self.wfile.write(json.dumps({"error": message}, ensure_ascii=False).encode('utf-8'))
+        except BrokenPipeError:
+            # 客户端已断开连接，记录日志但不抛出异常
+            logger.debug("[DataAgentCommand] Broken pipe error when sending error response")
+        except Exception as e:
+            # 其他异常情况
+            logger.warning("[DataAgentCommand] Error when sending error response: %s", e)
     
     def log_message(self, format, *args):
         """重写日志方法，使用自定义logger。"""
