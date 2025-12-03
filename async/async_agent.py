@@ -16,6 +16,12 @@ if sys.version_info < (3, 10):
         "Please upgrade Python or use Python 3.10+ in your Docker image."
     )
 
+# 添加项目根目录到Python路径（用于Docker容器中运行）
+from pathlib import Path
+project_root = Path(__file__).parent.parent
+if str(project_root) not in sys.path:
+    sys.path.insert(0, str(project_root))
+
 import common.config as app_config
 
 logger = logging.getLogger(__name__)
@@ -29,19 +35,19 @@ def _lazy_import_market_streams():
 
 def _lazy_import_kline_cleanup():
     """延迟导入kline_cleanup模块"""
-    from async.kline_cleanup import run_cleanup_scheduler
+    from .kline_cleanup import run_cleanup_scheduler
     return run_cleanup_scheduler
 
 
 def _lazy_import_price_refresh():
     """延迟导入price_refresh_service模块"""
-    from async.price_refresh_service import run_price_refresh_scheduler
+    from .price_refresh_service import run_price_refresh_scheduler
     return run_price_refresh_scheduler
 
 
 def _lazy_import_leaderboard_cleanup():
     """延迟导入leaderboard_cleanup模块"""
-    from async.leaderboard_cleanup import run_cleanup_scheduler
+    from .leaderboard_cleanup import run_cleanup_scheduler
     return run_cleanup_scheduler
 
 

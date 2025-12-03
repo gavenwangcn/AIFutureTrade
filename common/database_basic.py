@@ -5,10 +5,10 @@ Database management module - ClickHouse implementation
 import json
 import logging
 import uuid
-import config as app_config
+import common.config as app_config
 from datetime import datetime, timezone
 from typing import List, Dict, Optional, Any, Callable, Tuple
-from database_clickhouse import ClickHouseConnectionPool
+from common.database_clickhouse import ClickHouseConnectionPool
 
 logger = logging.getLogger(__name__)
 

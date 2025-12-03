@@ -25,6 +25,12 @@ if sys.version_info < (3, 10):
         "Please upgrade Python or use Python 3.10+ in your Docker image."
     )
 
+# 添加项目根目录到Python路径（用于Docker容器中运行）
+from pathlib import Path
+project_root = Path(__file__).parent.parent
+if str(project_root) not in sys.path:
+    sys.path.insert(0, str(project_root))
+
 from binance_sdk_derivatives_trading_usds_futures.derivatives_trading_usds_futures import (
     DERIVATIVES_TRADING_USDS_FUTURES_WS_STREAMS_PROD_URL,
     ConfigurationWebSocketStreams,

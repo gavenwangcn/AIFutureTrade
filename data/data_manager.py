@@ -23,8 +23,14 @@ if sys.version_info < (3, 10):
         "Please upgrade Python or use Python 3.10+ in your Docker image."
     )
 
+# 添加项目根目录到Python路径（用于Docker容器中运行）
+from pathlib import Path
+project_root = Path(__file__).parent.parent
+if str(project_root) not in sys.path:
+    sys.path.insert(0, str(project_root))
+
 import common.config as app_config
-from data.data_agent_manager import DataAgentManager, run_manager_http_server
+from .data_agent_manager import DataAgentManager, run_manager_http_server
 from common.database_clickhouse import ClickHouseDatabase
 
 logger = logging.getLogger(__name__)

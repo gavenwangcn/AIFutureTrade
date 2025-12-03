@@ -89,6 +89,8 @@ services:
     volumes:
       - ./data:/app/data
     environment:
+      # 设置PYTHONPATH，确保可以找到所有模块
+      - PYTHONPATH=/app
       # ClickHouse配置
       - CLICKHOUSE_HOST=${CLICKHOUSE_HOST}
       - CLICKHOUSE_PORT=${CLICKHOUSE_PORT}
@@ -138,6 +140,8 @@ services:
     depends_on:
       - async-agent
     environment:
+      # 设置PYTHONPATH，确保可以找到所有模块
+      - PYTHONPATH=/app
       # ClickHouse配置
       - CLICKHOUSE_HOST=${CLICKHOUSE_HOST}
       - CLICKHOUSE_PORT=${CLICKHOUSE_PORT}
@@ -177,6 +181,8 @@ services:
     depends_on:
       - data-manager
     environment:
+      # 设置PYTHONPATH，确保可以找到所有模块
+      - PYTHONPATH=/app
       # ClickHouse配置
       - CLICKHOUSE_HOST=${CLICKHOUSE_HOST}
       - CLICKHOUSE_PORT=${CLICKHOUSE_PORT}
