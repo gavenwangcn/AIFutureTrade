@@ -391,10 +391,10 @@ class DataAgentManager:
 class DataAgentManagerHTTPHandler(BaseHTTPRequestHandler):
     """处理async_agent的HTTP请求（注册、心跳等）。"""
     
-    def __init__(self, manager: DataAgentManager, *args, **kwargs):
+    def __init__(self, manager: DataAgentManager, event_loop: asyncio.AbstractEventLoop, *args, **kwargs):
         self.manager = manager
-        # 存储管理manager的事件循环
-        self._event_loop = asyncio.get_event_loop()
+        # 使用传入的事件循环，而不是尝试获取当前线程的事件循环
+        self._event_loop = event_loop
         super().__init__(*args, **kwargs)
     
     def do_POST(self):
@@ -488,10 +488,10 @@ class DataAgentManagerHTTPHandler(BaseHTTPRequestHandler):
         logger.debug("[DataAgentManagerHTTP] %s", format % args)
 
 
-def create_manager_handler(manager: DataAgentManager):
+def create_manager_handler(manager: DataAgentManager, event_loop: asyncio.AbstractEventLoop):
     """创建请求处理器工厂函数。"""
     def handler(*args, **kwargs):
-        return DataAgentManagerHTTPHandler(manager, *args, **kwargs)
+        return DataAgentManagerHTTPHandler(manager, event_loop, *args, **kwargs)
     return handler
 
 
@@ -501,7 +501,9 @@ async def run_manager_http_server(
     port: int = 8888
 ) -> None:
     """运行manager的HTTP服务器。"""
-    handler = create_manager_handler(manager)
+    # 获取当前事件循环
+    current_loop = asyncio.get_running_loop()
+    handler = create_manager_handler(manager, current_loop)
     server = HTTPServer((host, port), handler)
     logger.info("[DataAgentManager] HTTP server started on %s:%s", host, port)
     
