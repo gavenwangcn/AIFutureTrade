@@ -73,7 +73,7 @@ async def kline_candlestick_streams():
         # 订阅K线流
         stream = await connection.kline_candlestick_streams(
             symbol="A2ZUSDT",
-            interval="1d",
+            interval="1m",
         )
         
         # 存储接收到的K线数据
