@@ -2117,6 +2117,7 @@ class ClickHouseDatabase:
         )
         ENGINE = ReplacingMergeTree(update_time)
         ORDER BY (ip, port)
+        PRIMARY KEY (ip, port)
         """
         self.command(ddl)
         logger.info("[ClickHouse] Ensured table %s exists", self.market_data_agent_table)
@@ -2155,34 +2156,48 @@ class ClickHouseDatabase:
         update_time = datetime.now(timezone.utc)
         
         try:
-            # 使用INSERT语句插入新行，ReplacingMergeTree会自动根据(ip, port)去重，保留update_time最大的记录
-            column_names = [
-                "ip", "port", "status", "connection_count", "assigned_symbol_count",
-                "assigned_symbols", "error_log", "last_heartbeat", "update_time"
-            ]
+            # 检查是否已存在该IP+port的记录
+            check_query = f"SELECT count() FROM {self.market_data_agent_table} WHERE ip = '{ip}' AND port = {port}"
+            result = self.query(check_query)
+            exists = result and result[0] and int(result[0][0]) > 0
             
-            row_data = [
-                ip, port, status, connection_count, assigned_symbol_count,
-                assigned_symbols_json, error_log, last_heartbeat, update_time
-            ]
-            
-            self.insert_rows(self.market_data_agent_table, [row_data], column_names)
-            logger.debug("[ClickHouse] Upserted agent: %s:%s", ip, port)
-            
-            # 定期执行OPTIMIZE TABLE，确保重复行被及时清理
-            # 每10次插入执行一次OPTIMIZE TABLE
-            if hasattr(self, '_upsert_count'):
-                self._upsert_count += 1
+            if exists:
+                # IP+port已存在，执行UPDATE操作
+                update_query = f"""
+                ALTER TABLE {self.market_data_agent_table} UPDATE 
+                    status = '{status}', 
+                    connection_count = {connection_count}, 
+                    assigned_symbol_count = {assigned_symbol_count}, 
+                    assigned_symbols = '{assigned_symbols_json}', 
+                    error_log = '{error_log}', 
+                    last_heartbeat = '{last_heartbeat.strftime('%Y-%m-%d %H:%M:%S')}', 
+                    update_time = '{update_time.strftime('%Y-%m-%d %H:%M:%S')}' 
+                WHERE ip = '{ip}' AND port = {port}
+                """
+                self.command(update_query)
+                logger.debug("[ClickHouse] Updated agent: %s:%s", ip, port)
             else:
-                self._upsert_count = 1
+                # IP+port不存在，执行INSERT操作
+                column_names = [
+                    "ip", "port", "status", "connection_count", "assigned_symbol_count",
+                    "assigned_symbols", "error_log", "last_heartbeat", "update_time"
+                ]
                 
-            if self._upsert_count % 10 == 0:
-                optimize_query = f"OPTIMIZE TABLE {self.market_data_agent_table} FINAL"
-                self.command(optimize_query)
-                logger.debug("[ClickHouse] Optimized table %s", self.market_data_agent_table)
+                row_data = [
+                    ip, port, status, connection_count, assigned_symbol_count,
+                    assigned_symbols_json, error_log, last_heartbeat, update_time
+                ]
+                
+                self.insert_rows(self.market_data_agent_table, [row_data], column_names)
+                logger.debug("[ClickHouse] Inserted agent: %s:%s", ip, port)
+            
+            # 执行OPTIMIZE TABLE，确保数据实时一致性
+            optimize_query = f"OPTIMIZE TABLE {self.market_data_agent_table} FINAL"
+            self.command(optimize_query)
+            logger.debug("[ClickHouse] Optimized table %s", self.market_data_agent_table)
                 
         except Exception as e:
-            logger.error("[ClickHouse] Failed to upsert agent %s:%s: %s", ip, port, e)
+            logger.error("[ClickHouse] Failed to upsert agent %s:%s: %s", ip, port, e, exc_info=True)
     
     def get_market_data_agents(self, status: Optional[str] = None) -> List[Dict[str, Any]]:
         """获取所有data_agent信息。
