@@ -197,6 +197,22 @@ class DataAgentKlineManager:
                 # 这是SDK推荐的方式，每个连接可以处理多个流，但为了隔离和管理方便，每个symbol-interval使用独立连接
                 connection = await self._client.websocket_streams.create_connection()
                 
+                # 设置连接级别的错误处理器（处理连接错误）
+                def connection_error_handler(error: Any) -> None:
+                    logger.error("[DataAgentKline] Connection error for %s %s: %s", symbol, interval, error)
+                    asyncio.create_task(self._remove_broken_connection(symbol, interval))
+                
+                # 如果连接对象支持错误事件，注册错误处理器
+                # 注意：某些SDK版本可能不支持"error"事件，使用try-except避免崩溃
+                if hasattr(connection, 'on'):
+                    try:
+                        connection.on("error", connection_error_handler)
+                    except (AttributeError, TypeError, ValueError) as e:
+                        logger.debug("[DataAgentKline] Connection does not support 'error' event or event already registered: %s", e)
+                    except Exception as e:
+                        # 捕获所有其他异常，避免因为事件注册失败导致整个流创建失败
+                        logger.warning("[DataAgentKline] Failed to register connection error handler (non-critical): %s", e)
+                
                 # 订阅K线流
                 stream = await connection.kline_candlestick_streams(
                     symbol=symbol.lower(),
@@ -207,13 +223,22 @@ class DataAgentKlineManager:
                 def handler(data: Any) -> None:
                     asyncio.create_task(self._handle_kline_message(symbol, interval, data))
                 
-                # 设置错误处理器，当连接异常时从map中删除
-                def error_handler(error: Any) -> None:
+                # 设置流级别的错误处理器，当流异常时从map中删除
+                def stream_error_handler(error: Any) -> None:
                     logger.error("[DataAgentKline] Stream error for %s %s: %s", symbol, interval, error)
                     asyncio.create_task(self._remove_broken_connection(symbol, interval))
                 
                 stream.on("message", handler)
-                stream.on("error", error_handler)
+                # 尝试注册流级别的错误处理器（如果SDK支持）
+                # 注意：某些SDK版本可能不支持"error"事件，使用try-except避免崩溃
+                try:
+                    if hasattr(stream, 'on'):
+                        stream.on("error", stream_error_handler)
+                except (AttributeError, TypeError, ValueError) as e:
+                    logger.debug("[DataAgentKline] Stream does not support 'error' event or event already registered: %s", e)
+                except Exception as e:
+                    # 捕获所有其他异常，避免因为事件注册失败导致整个流创建失败
+                    logger.warning("[DataAgentKline] Failed to register stream error handler (non-critical): %s", e)
                 
                 conn = KlineStreamConnection(
                     symbol=symbol,
