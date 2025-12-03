@@ -13,15 +13,8 @@ from binance_sdk_derivatives_trading_usds_futures.derivatives_trading_usds_futur
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 
-# Create configuration for the WebSocket Streams
-configuration_ws_streams = ConfigurationWebSocketStreams(
-    stream_url=os.getenv(
-        "STREAM_URL", DERIVATIVES_TRADING_USDS_FUTURES_WS_STREAMS_PROD_URL
-    )
-)
-
-# Initialize DerivativesTradingUsdsFutures client
-client = DerivativesTradingUsdsFutures(config_ws_streams=configuration_ws_streams)
+# 注意：将客户端初始化移到函数内部，确保每次测试都使用新的实例
+# 避免模块级别初始化可能导致的事件循环问题
 
 
 def print_kline_data(kline_data, day_label):
@@ -56,7 +49,26 @@ def print_kline_data(kline_data, day_label):
 async def kline_candlestick_streams():
     connection = None
     try:
+        # 确保在正确的事件循环中运行
+        current_loop = asyncio.get_running_loop()
+        print(f"[WebSocketTest] 当前事件循环: {current_loop}, 状态: {'运行中' if current_loop.is_running() else '已关闭'}")
+        
+        # 创建配置并初始化客户端（在函数内部，每次测试使用新实例）
+        print(f"[WebSocketTest] 正在初始化客户端...")
+        configuration_ws_streams = ConfigurationWebSocketStreams(
+            stream_url=os.getenv(
+                "STREAM_URL", DERIVATIVES_TRADING_USDS_FUTURES_WS_STREAMS_PROD_URL
+            )
+        )
+        client = DerivativesTradingUsdsFutures(
+            config_ws_streams=configuration_ws_streams
+        )
+        print(f"[WebSocketTest] 客户端初始化成功")
+        
+        # 创建WebSocket连接
+        print(f"[WebSocketTest] 正在创建WebSocket连接...")
         connection = await client.websocket_streams.create_connection()
+        print(f"[WebSocketTest] WebSocket连接创建成功: {connection}")
         
         # 计算昨天和今天的日期
         today = datetime.now()
