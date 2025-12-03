@@ -47,12 +47,12 @@ async def kline_candlestick_streams():
         today = datetime.now()
         yesterday = today - timedelta(days=1)
         
-        print(f"正在获取BTCUSDT日K线数据...")
+        print(f"正在获取A2ZUSDT日K线数据...")
         print(f"今天日期: {today.strftime('%Y-%m-%d')}")
         print(f"昨天日期: {yesterday.strftime('%Y-%m-%d')}")
 
         stream = await connection.kline_candlestick_streams(
-            symbol="btcusdt",
+            symbol="A2ZUSDT",
             interval="1d",
         )
         
