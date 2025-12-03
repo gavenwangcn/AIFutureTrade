@@ -19,8 +19,8 @@
           </button>
         </div>
       </div>
-      <div class="modal-body kline-modal-body">
-        <div :id="chartContainerId" style="width: 100%; height: 600px;"></div>
+      <div class="kline-modal-body">
+        <div :id="chartContainerId" class="kline-chart-container"></div>
       </div>
     </div>
   </div>
@@ -343,19 +343,23 @@ onUnmounted(() => {
   max-height: 90vh;
   display: flex;
   flex-direction: column;
+  overflow: hidden;
 }
 
-.modal-header {
+.kline-modal .modal-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
   padding: 20px;
   border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  flex-shrink: 0;
 }
 
-.modal-header h3 {
+.kline-modal .modal-header h3 {
   margin: 0;
   color: var(--text-primary, #fff);
+  font-size: 18px;
+  font-weight: 600;
 }
 
 .kline-toolbar {
@@ -369,7 +373,7 @@ onUnmounted(() => {
   gap: 8px;
 }
 
-.timeframe-btn {
+.kline-modal .timeframe-btn {
   padding: 6px 12px;
   background: rgba(255, 255, 255, 0.1);
   border: 1px solid rgba(255, 255, 255, 0.2);
@@ -377,19 +381,21 @@ onUnmounted(() => {
   color: var(--text-secondary, #ccc);
   cursor: pointer;
   transition: all 0.3s;
+  font-size: 13px;
+  font-weight: 500;
 }
 
-.timeframe-btn:hover {
+.kline-modal .timeframe-btn:hover {
   background: rgba(255, 255, 255, 0.2);
 }
 
-.timeframe-btn.active {
+.kline-modal .timeframe-btn.active {
   background: var(--primary-color, #4a90e2);
   border-color: var(--primary-color, #4a90e2);
   color: #fff;
 }
 
-.btn-icon {
+.kline-modal .btn-icon {
   background: transparent;
   border: none;
   color: var(--text-secondary, #ccc);
@@ -397,21 +403,47 @@ onUnmounted(() => {
   padding: 8px;
   border-radius: 6px;
   transition: all 0.3s;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 
-.btn-icon:hover {
+.kline-modal .btn-icon:hover {
   background: rgba(255, 255, 255, 0.1);
   color: var(--text-primary, #fff);
 }
 
-.modal-body {
+.kline-modal-body {
   flex: 1;
-  padding: 20px;
+  padding: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.kline-chart-container {
+  width: 100%;
+  height: 100%;
+  min-height: 600px;
+  flex: 1;
+  background: #1a1a1a;
+  position: relative;
   overflow: hidden;
 }
 
-.kline-modal-body {
-  display: flex;
-  flex-direction: column;
+/* 确保K线图表库内部元素不受全局样式影响 */
+.kline-chart-container :deep(*) {
+  box-sizing: border-box;
+}
+
+/* 隔离K线图表库的样式，防止全局样式干扰 */
+.kline-modal :deep(.klinecharts-pro) {
+  width: 100% !important;
+  height: 100% !important;
+}
+
+.kline-modal :deep(canvas) {
+  display: block;
 }
 </style>

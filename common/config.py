@@ -49,8 +49,11 @@ DATA_AGENT_REGISTER_PORT = int(os.getenv('DATA_AGENT_REGISTER_PORT', '8888'))  #
 DATA_AGENT_HEARTBEAT_INTERVAL = int(os.getenv('DATA_AGENT_HEARTBEAT_INTERVAL', '30'))  # 心跳间隔（秒）
 DATA_AGENT_HEARTBEAT_TIMEOUT = int(os.getenv('DATA_AGENT_HEARTBEAT_TIMEOUT', '60'))  # 心跳超时（秒）
 DATA_AGENT_BATCH_SYMBOL_SIZE = int(os.getenv('DATA_AGENT_BATCH_SYMBOL_SIZE', '20'))  # 批量添加symbol时每批最多处理的symbol数量
-DATA_AGENT_SYMBOL_CHECK_INTERVAL = int(os.getenv('DATA_AGENT_SYMBOL_CHECK_INTERVAL', '30'))  # 检查新增symbol间隔（秒）
+DATA_AGENT_SYMBOL_CHECK_INTERVAL = int(os.getenv('DATA_AGENT_SYMBOL_CHECK_INTERVAL', '30'))  # 检查新增symbol间隔（秒）- 已废弃，使用DATA_AGENT_FULL_SYNC_INTERVAL
 DATA_AGENT_STATUS_CHECK_INTERVAL = int(os.getenv('DATA_AGENT_STATUS_CHECK_INTERVAL', '60'))  # 检查data_agent状态间隔（秒）
+DATA_AGENT_COMMAND_TIMEOUT = int(os.getenv('DATA_AGENT_COMMAND_TIMEOUT', '120'))  # 命令执行超时（秒），防止agent不响应时阻塞队列
+DATA_AGENT_FULL_SYNC_INTERVAL = int(os.getenv('DATA_AGENT_FULL_SYNC_INTERVAL', '180'))  # 全量同步任务执行间隔（秒），默认3分钟
+DATA_AGENT_SELF_UPDATE_INTERVAL = int(os.getenv('DATA_AGENT_SELF_UPDATE_INTERVAL', '60'))  # agent自己定时更新状态到数据库的间隔（秒），默认1分钟
 
 # 价格刷新服务配置
 PRICE_REFRESH_CRON = os.getenv('PRICE_REFRESH_CRON', '*/5 * * * *')  # Cron表达式，默认每5分钟执行一次

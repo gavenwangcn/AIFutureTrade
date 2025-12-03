@@ -869,37 +869,6 @@ async def register_to_async_agent(register_ip: str, register_port: int, agent_ip
         return False
 
 
-async def send_heartbeat(register_ip: str, register_port: int, agent_ip: str, agent_port: int) -> bool:
-    """发送心跳到async_agent。
-    
-    Args:
-        register_ip: async_agent的IP地址
-        register_port: async_agent的端口号
-        agent_ip: 当前data_agent的IP地址
-        agent_port: 当前data_agent的端口号
-    
-    Returns:
-        成功返回True，失败返回False
-    """
-    import aiohttp
-    
-    try:
-        async with aiohttp.ClientSession() as session:
-            url = f"http://{register_ip}:{register_port}/heartbeat"
-            payload = {"ip": agent_ip, "port": agent_port}
-            async with session.post(
-                url,
-                json=payload,
-                timeout=aiohttp.ClientTimeout(total=5)
-            ) as response:
-                if response.status == 200:
-                    return True
-                return False
-    except Exception as e:
-        logger.debug("[DataAgent] Failed to send heartbeat: %s", e)
-        return False
-
-
 async def run_data_agent(
     max_symbols: int = 100,
     command_host: str = '0.0.0.0',
@@ -931,16 +900,18 @@ async def run_data_agent(
     
     # 注册到async_agent（只注册一次，之后由manager主动轮询状态）
     register_task_obj = None
+    # 确保agent_ip已定义（用于后续的定时更新任务）
+    if not agent_ip:
+        # 自动获取本机IP
+        try:
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            s.connect(("8.8.8.8", 80))
+            agent_ip = s.getsockname()[0]
+            s.close()
+        except Exception:
+            agent_ip = "127.0.0.1"
+    
     if register_ip and register_port:
-        if not agent_ip:
-            # 自动获取本机IP
-            try:
-                s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-                s.connect(("8.8.8.8", 80))
-                agent_ip = s.getsockname()[0]
-                s.close()
-            except Exception:
-                agent_ip = "127.0.0.1"
         
         async def register_once_task():
             """注册任务：只尝试注册一次，成功后不再重试
@@ -999,9 +970,56 @@ async def run_data_agent(
     
     cleanup_task_obj = asyncio.create_task(cleanup_task())
     
+    # 定期更新agent状态到数据库（只更新不新建）
+    # 使用闭包变量确保agent_ip和command_port可用
+    final_agent_ip = agent_ip or "127.0.0.1"
+    final_command_port = command_port
+    
+    async def self_update_status_task():
+        """定时更新agent自己的状态到数据库（只更新不新建）。"""
+        from datetime import datetime, timezone
+        import common.config as app_config
+        
+        update_interval = getattr(app_config, 'DATA_AGENT_SELF_UPDATE_INTERVAL', 60)  # 默认1分钟
+        
+        # 等待注册完成（最多等待60秒）
+        if register_task_obj:
+            try:
+                await asyncio.wait_for(register_task_obj, timeout=60)
+            except (asyncio.TimeoutError, asyncio.CancelledError):
+                pass
+        
+        while True:
+            try:
+                await asyncio.sleep(update_interval)
+                
+                # 获取当前agent状态
+                status = await kline_manager.get_status()
+                connection_count = status.get("connection_count", 0)
+                symbols_list = status.get("symbols", [])
+                assigned_symbol_count = len(symbols_list)
+                
+                # 只更新connection_count和assigned_symbol_count字段，其他字段不更新
+                db.update_agent_connection_info(
+                    final_agent_ip,
+                    final_command_port,
+                    connection_count,
+                    assigned_symbol_count
+                )
+                logger.debug(
+                    "[DataAgent] Updated own connection info to DB: %s:%s, connections: %s, symbols: %s",
+                    final_agent_ip, final_command_port, connection_count, assigned_symbol_count
+                )
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:
+                logger.error("[DataAgent] Error in self-update status task: %s", e, exc_info=True)
+    
+    self_update_task_obj = asyncio.create_task(self_update_status_task())
+    
     try:
         logger.info("[DataAgent] Data agent started")
-        tasks = [command_task, cleanup_task_obj]
+        tasks = [command_task, cleanup_task_obj, self_update_task_obj]
         if register_task_obj:
             tasks.append(register_task_obj)
         await asyncio.gather(*tasks)
@@ -1010,6 +1028,7 @@ async def run_data_agent(
     finally:
         command_task.cancel()
         cleanup_task_obj.cancel()
+        self_update_task_obj.cancel()
         if register_task_obj:
             register_task_obj.cancel()
         await kline_manager.cleanup_all()

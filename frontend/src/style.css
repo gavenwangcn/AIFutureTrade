@@ -2287,57 +2287,8 @@ body {
     background: var(--text-3);
 }
 
-/* K线图弹框样式 */
-.kline-modal-content {
-    max-width: 95vw;
-    width: 1400px;
-    max-height: 95vh;
-}
-
-.kline-modal-body {
-    padding: 0;
-    overflow: hidden;
-}
-
-.kline-toolbar {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    gap: 16px;
-    padding: 12px 20px;
-    border-bottom: 1px solid var(--border-1);
-}
-
-.kline-timeframes {
-    display: flex;
-    gap: 8px;
-}
-
-.timeframe-btn {
-    padding: 6px 12px;
-    border: 1px solid var(--border-1);
-    background: var(--bg-2);
-    border-radius: 4px;
-    cursor: pointer;
-    font-size: 13px;
-    transition: all 0.2s;
-}
-
-.timeframe-btn:hover {
-    background: var(--bg-3);
-    border-color: var(--primary);
-}
-
-.timeframe-btn.active {
-    background: var(--primary);
-    color: white;
-    border-color: var(--primary);
-}
-
-#klineChartContainer {
-    background: #1a1a1a;
-    border-radius: 0 0 var(--radius) var(--radius);
-}
+/* K线图弹框样式 - 已移至组件内部，此处保留用于向后兼容 */
+/* 注意：K线图相关样式应在 KLineChart.vue 组件内定义，避免全局样式冲突 */
 
 .leaderboard-item:hover,
 .price-item:hover {

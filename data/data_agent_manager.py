@@ -24,10 +24,13 @@ logger = logging.getLogger(__name__)
 
 class AgentCommandType(Enum):
     """Agent命令类型枚举"""
-    ADD_SYMBOLS = "add_symbols"
-    ADD_STREAM = "add_stream"
-    GET_STATUS = "get_status"
+    ADD_SYMBOLS = "add_symbols"  # K线监听服务构建任务，需要队列管理
+    GET_STATUS = "get_status"  # 状态查询，不需要队列管理
     # 探活操作不进入队列，可以并行执行
+    
+    def requires_queue(self) -> bool:
+        """判断该命令类型是否需要队列管理"""
+        return self == AgentCommandType.ADD_SYMBOLS
 
 
 class AgentCommand:
@@ -71,12 +74,14 @@ class DataAgentManager:
     """管理所有data_agent。
     
     使用内部消息队列机制确保与各agent的通讯命令顺序执行：
-    - 全局指令队列：所有agent的指令都进入全局队列，确保顺序执行并返回结果
-    - 所有操作（add_symbols_to_agent, add_stream_to_agent, get_agent_status）都通过全局队列顺序执行
+    - 全局指令队列：K线监听服务构建任务（ADD_SYMBOLS）进入全局队列，确保顺序执行并返回结果
+    - 所有操作（add_symbols_to_agent, get_agent_status）都通过全局队列顺序执行
     - 探活操作（check_agent_health）不进入队列，可以并行执行
     - 确保正在下发指令时，不会同时做同步检查，避免数据不一致
     - 保证下发给各个agent指令执行并返回结果的顺序
     """
+    
+    # ============ 初始化 ============
     
     def __init__(self, db: ClickHouseDatabase):
         self._db = db
@@ -84,6 +89,7 @@ class DataAgentManager:
         self._lock = asyncio.Lock()
         self._max_symbols_per_agent = getattr(app_config, 'DATA_AGENT_MAX_SYMBOL', 100)
         self._heartbeat_timeout = getattr(app_config, 'DATA_AGENT_HEARTBEAT_TIMEOUT', 60)
+        self._command_timeout = getattr(app_config, 'DATA_AGENT_COMMAND_TIMEOUT', 120)  # 命令执行超时
         
         # 全局指令队列：确保所有agent的指令顺序执行并返回结果
         # 所有agent的指令都进入这个全局队列，按顺序执行并返回结果
@@ -92,6 +98,8 @@ class DataAgentManager:
         self._global_command_queue: asyncio.Queue = asyncio.Queue()
         self._global_queue_processor: Optional[asyncio.Task] = None
         self._global_queue_lock = asyncio.Lock()
+    
+    # ============ 命令执行相关方法 ============
     
     async def _execute_command(self, ip: str, port: int, command: AgentCommand) -> Any:
         """执行指令（指令执行端根据指令获取数据并执行）。
@@ -106,15 +114,14 @@ class DataAgentManager:
         Returns:
             执行结果（包括数据库操作和后续处理都完成后才返回）
         """
-        if command.command_type == AgentCommandType.ADD_SYMBOLS:
+        # 检查是否是注册命令
+        if command.params.get("_is_register", False):
+            return await self._execute_register_command(ip, port)
+        elif command.command_type == AgentCommandType.ADD_SYMBOLS:
             # 根据指令参数获取symbols列表
             symbols = command.params.get("symbols", [])
             max_batch_size = command.params.get("max_batch_size", 20)
             return await self._execute_add_symbols_command(ip, port, symbols, max_batch_size)
-        elif command.command_type == AgentCommandType.ADD_STREAM:
-            symbol = command.params.get("symbol")
-            interval = command.params.get("interval")
-            return await self._execute_add_stream_command(ip, port, symbol, interval)
         elif command.command_type == AgentCommandType.GET_STATUS:
             return await self._execute_get_status_command(ip, port)
         else:
@@ -149,14 +156,15 @@ class DataAgentManager:
         symbols: List[str],
         max_batch_size: int
     ) -> Optional[Dict[str, Any]]:
-        """执行添加symbols指令（先查询数据库过滤已构建的symbol）。
+        """执行添加symbols指令（先查询数据库和真实连接状态，过滤已构建的symbol）。
         
         1. 查询market_data_agent表，获取已构建的symbol
-        2. 过滤掉已构建的symbol，只构建未构建的
-        3. 执行构建操作
-        4. 等待agent返回结果
-        5. 更新数据库（插入或更新market_data_agent表）
-        6. 完成后续处理逻辑
+        2. 检查agent的真实连接状态（确认真实有长连接stream引用对象）
+        3. 过滤掉已有真实连接的symbol，只构建未构建的
+        4. 执行构建操作
+        5. 等待agent返回结果
+        6. 更新数据库（插入或更新market_data_agent表）
+        7. 完成后续处理逻辑
         
         Args:
             ip: agent的IP地址
@@ -173,13 +181,34 @@ class DataAgentManager:
         # 1. 查询数据库，获取已构建的symbol
         existing_symbols = await self._get_agent_existing_symbols(ip, port)
         
-        # 2. 过滤掉已构建的symbol
-        symbols_to_build = [s for s in symbols if s.upper() not in existing_symbols]
+        # 2. 检查agent的真实连接状态（确认真实有长连接stream引用对象）
+        real_connections = await self.check_agent_real_connections(ip, port)
+        
+        # 3. 过滤掉已有真实连接的symbol（数据库中有记录且真实连接存在）
+        symbols_to_build = []
+        skipped_with_real_conn = []
+        skipped_db_only = []
+        
+        for symbol in symbols:
+            symbol_upper = symbol.upper()
+            if symbol_upper in real_connections and real_connections[symbol_upper]:
+                # 有真实连接，跳过
+                skipped_with_real_conn.append(symbol_upper)
+            elif symbol_upper in existing_symbols:
+                # 数据库中有记录但没有真实连接，需要重新构建
+                symbols_to_build.append(symbol_upper)
+                logger.debug(
+                    "[DataAgentManager] Symbol %s exists in DB but no real connection, will rebuild",
+                    symbol_upper
+                )
+            else:
+                # 完全新的symbol，需要构建
+                symbols_to_build.append(symbol_upper)
         
         if not symbols_to_build:
             logger.info(
-                "[DataAgentManager] All symbols already built for %s:%s: %s",
-                ip, port, symbols
+                "[DataAgentManager] All symbols already have real connections for %s:%s: %s (skipped: %s)",
+                ip, port, len(skipped_with_real_conn), skipped_with_real_conn[:5]
             )
             # 即使没有新symbol，也要返回当前状态
             status = await self._get_agent_status_internal(ip, port)
@@ -187,57 +216,24 @@ class DataAgentManager:
                 "status": "ok",
                 "results": [],
                 "current_status": status,
-                "skipped_count": len(symbols)
+                "skipped_count": len(symbols),
+                "skipped_with_real_conn": len(skipped_with_real_conn)
             }
         
         logger.info(
-            "[DataAgentManager] Filtered symbols for %s:%s: %s already built, %s to build",
-            ip, port, len(existing_symbols), len(symbols_to_build)
+            "[DataAgentManager] Filtered symbols for %s:%s: %s with real connections, %s in DB only, %s to build",
+            ip, port, len(skipped_with_real_conn), len(skipped_db_only), len(symbols_to_build)
         )
         
-        # 3. 执行构建操作
+        # 4. 执行构建操作
         result = await self._add_symbols_to_agent_internal(ip, port, symbols_to_build, max_batch_size)
         
-        # 4. 等待agent返回结果后，更新数据库
+        # 5. 等待agent返回结果后，更新数据库
         if result and result.get("status") == "ok":
-            # 5. 更新数据库（插入或更新market_data_agent表）
+            # 6. 更新数据库（插入或更新market_data_agent表）
             await self._update_agent_status_after_add_symbols(ip, port, result)
         
-        # 6. 完成后续处理逻辑，返回结果
-        return result
-    
-    async def _execute_add_stream_command(
-        self,
-        ip: str,
-        port: int,
-        symbol: str,
-        interval: str
-    ) -> bool:
-        """执行添加stream指令。
-        
-        1. 执行构建操作
-        2. 等待agent返回结果
-        3. 更新数据库
-        4. 完成后续处理逻辑
-        
-        Args:
-            ip: agent的IP地址
-            port: agent的端口号
-            symbol: 交易对符号
-            interval: 时间间隔
-        
-        Returns:
-            执行结果（包括数据库操作完成后才返回）
-        """
-        # 1. 执行构建操作
-        result = await self._add_stream_to_agent_internal(ip, port, symbol, interval)
-        
-        # 2. 等待agent返回结果后，更新数据库
-        if result:
-            # 3. 更新数据库
-            await self._update_agent_status_after_add_stream(ip, port, symbol, interval)
-        
-        # 4. 完成后续处理逻辑，返回结果
+        # 7. 完成后续处理逻辑，返回结果
         return result
     
     async def _execute_get_status_command(self, ip: str, port: int) -> Optional[Dict[str, Any]]:
@@ -299,25 +295,6 @@ class DataAgentManager:
                 ip, port, e, exc_info=True
             )
     
-    async def _update_agent_status_after_add_stream(
-        self,
-        ip: str,
-        port: int,
-        symbol: str,
-        interval: str
-    ) -> None:
-        """在添加stream后更新agent状态到数据库。"""
-        try:
-            # 获取最新状态并更新
-            status = await self._get_agent_status_internal(ip, port)
-            if status:
-                await self._update_agent_status_from_status(ip, port, status)
-        except Exception as e:
-            logger.error(
-                "[DataAgentManager] Failed to update agent status after add stream for %s:%s: %s",
-                ip, port, e, exc_info=True
-            )
-    
     async def _update_agent_status_from_status(
         self,
         ip: str,
@@ -352,6 +329,8 @@ class DataAgentManager:
                 ip, port, e, exc_info=True
             )
     
+    # ============ 全局队列管理 ============
+    
     async def _process_global_command_queue(self) -> None:
         """处理全局指令队列，确保所有agent的指令顺序执行并返回结果。
         
@@ -359,6 +338,7 @@ class DataAgentManager:
         1. 所有agent的指令按顺序执行
         2. 每个指令完全执行完成（包括数据库操作和后续处理）后才执行下一个
         3. 指令返回结果的顺序与执行顺序一致
+        4. 即使某个agent不响应，也会超时后继续处理下一个指令，避免阻塞队列
         """
         logger.debug("[DataAgentManager] Global command queue processor started")
         
@@ -377,12 +357,34 @@ class DataAgentManager:
                 future = command_data.get("future")
                 
                 try:
-                    # 执行指令（包括数据库操作和后续处理）
-                    result = await self._execute_command(ip, port, command)
-                    
-                    # 确保指令完全执行完成（包括数据库操作）后才返回结果
-                    if future and not future.done():
-                        future.set_result(result)
+                    # 执行指令（包括数据库操作和后续处理），添加超时保护
+                    # 即使agent不响应，也会在超时后继续处理下一个指令
+                    try:
+                        result = await asyncio.wait_for(
+                            self._execute_command(ip, port, command),
+                            timeout=self._command_timeout
+                        )
+                        
+                        # 确保指令完全执行完成（包括数据库操作）后才返回结果
+                        if future and not future.done():
+                            future.set_result(result)
+                    except asyncio.TimeoutError:
+                        # 超时处理：agent不响应，记录错误但继续处理下一个指令
+                        timeout_error = TimeoutError(
+                            f"Command {command.command_type} for {ip}:{port} timed out after {self._command_timeout}s"
+                        )
+                        logger.error(
+                            "[DataAgentManager] ⚠️  Command timeout for %s:%s (command: %s, timeout: %ss). "
+                            "Continuing with next command to avoid blocking queue.",
+                            ip, port, command.command_type, self._command_timeout
+                        )
+                        if future and not future.done():
+                            future.set_exception(timeout_error)
+                        # 标记agent可能有问题
+                        async with self._lock:
+                            key = (ip, port)
+                            if key in self._agents:
+                                self._agents[key].error_log = f"Command timeout: {command.command_type}"
                 except Exception as e:
                     logger.error(
                         "[DataAgentManager] Error executing global command %s for %s:%s: %s",
@@ -393,6 +395,7 @@ class DataAgentManager:
                 finally:
                     self._global_command_queue.task_done()
                     # 确保当前指令的所有操作都完成后，才处理下一个指令
+                    # 即使超时或出错，也会继续处理下一个指令，避免阻塞队列
                     
             except asyncio.CancelledError:
                 logger.debug("[DataAgentManager] Global command queue processor cancelled")
@@ -402,6 +405,16 @@ class DataAgentManager:
                     "[DataAgentManager] Error in global command queue processor: %s",
                     e, exc_info=True
                 )
+                # 即使出现未预期的错误，也要标记任务完成，避免阻塞队列
+                try:
+                    command_data = self._global_command_queue.get_nowait()
+                    if command_data:
+                        future = command_data.get("future")
+                        if future and not future.done():
+                            future.set_exception(e)
+                        self._global_command_queue.task_done()
+                except asyncio.QueueEmpty:
+                    pass
     
     async def _enqueue_command(
         self,
@@ -409,11 +422,12 @@ class DataAgentManager:
         port: int,
         command: AgentCommand
     ) -> Any:
-        """将指令加入全局队列，等待执行结果。
+        """将指令加入全局队列或直接执行。
         
-        所有agent的指令都进入全局队列，确保顺序执行并返回结果。
-        指令不带业务数据，只包含指令信息，执行端根据指令获取数据并执行。
-        这样可以防止内部并发，解决并发带来的数据不一致问题。
+        只有K线监听服务构建任务（ADD_SYMBOLS）进入全局队列，确保顺序执行并返回结果。
+        其他命令（GET_STATUS等）直接执行，不进入队列。
+        
+        添加了超时保护，即使agent不响应也不会无限等待。
         
         Args:
             ip: agent的IP地址
@@ -422,7 +436,93 @@ class DataAgentManager:
         
         Returns:
             指令执行结果（包括数据库操作和后续处理都完成后才返回）
+            如果超时，会抛出TimeoutError异常
         """
+        # 只有ADD_SYMBOLS命令需要队列管理
+        if command.command_type.requires_queue():
+            # 确保全局队列处理器已启动
+            async with self._global_queue_lock:
+                if self._global_queue_processor is None or self._global_queue_processor.done():
+                    self._global_queue_processor = asyncio.create_task(
+                        self._process_global_command_queue()
+                    )
+                    logger.debug("[DataAgentManager] Started global command queue processor")
+            
+            future = asyncio.Future()
+            
+            # 将指令加入全局队列（只有ADD_SYMBOLS进入队列）
+            await self._global_command_queue.put({
+                "ip": ip,
+                "port": port,
+                "command": command,
+                "future": future
+            })
+            
+            # 等待执行结果（包括数据库操作和后续处理都完成后才返回）
+            # 添加超时保护，防止agent不响应时无限等待
+            # 超时时间比队列处理器的超时时间稍长，确保队列处理器先超时
+            try:
+                return await asyncio.wait_for(future, timeout=self._command_timeout + 10)
+            except asyncio.TimeoutError:
+                logger.error(
+                    "[DataAgentManager] ⚠️  Command enqueue timeout for %s:%s (command: %s). "
+                    "Future may not be set by queue processor.",
+                    ip, port, command.command_type
+                )
+                # 如果future还没有被设置，设置一个超时异常
+                if not future.done():
+                    future.set_exception(
+                        TimeoutError(
+                            f"Command enqueue timeout for {ip}:{port} after {self._command_timeout + 10}s"
+                        )
+                    )
+                raise
+        else:
+            # 其他命令直接执行，不进入队列
+            logger.debug(
+                "[DataAgentManager] Command %s for %s:%s executed directly (no queue)",
+                command.command_type, ip, port
+            )
+            try:
+                return await asyncio.wait_for(
+                    self._execute_command(ip, port, command),
+                    timeout=self._command_timeout
+                )
+            except asyncio.TimeoutError:
+                logger.error(
+                    "[DataAgentManager] ⚠️  Direct command timeout for %s:%s (command: %s)",
+                    ip, port, command.command_type
+                )
+                raise TimeoutError(
+                    f"Direct command timeout for {ip}:{port} after {self._command_timeout}s"
+                )
+    
+    # ============ Agent注册和心跳 ============
+    
+    async def register_agent(self, ip: str, port: int) -> bool:
+        """注册data_agent（使用队列方式防止并发注册）。
+        
+        Args:
+            ip: agent的IP地址
+            port: agent的端口号
+        
+        Returns:
+            成功返回True，失败返回False
+        """
+        import uuid
+        
+        # 使用队列方式防止并发注册
+        command = AgentCommand(
+            AgentCommandType.ADD_SYMBOLS,  # 复用队列机制，但实际执行注册逻辑
+            command_id=str(uuid.uuid4()),
+            _is_register=True,  # 标记为注册命令
+            ip=ip,
+            port=port
+        )
+        
+        # 将注册命令加入队列（复用全局队列机制）
+        future = asyncio.Future()
+        
         # 确保全局队列处理器已启动
         async with self._global_queue_lock:
             if self._global_queue_processor is None or self._global_queue_processor.done():
@@ -431,22 +531,26 @@ class DataAgentManager:
                 )
                 logger.debug("[DataAgentManager] Started global command queue processor")
         
-        future = asyncio.Future()
-        
-        # 将指令加入全局队列（所有agent的指令都进入这个队列）
         await self._global_command_queue.put({
             "ip": ip,
             "port": port,
             "command": command,
-            "future": future
+            "future": future,
+            "is_register": True  # 标记为注册操作
         })
         
-        # 等待执行结果（包括数据库操作和后续处理都完成后才返回）
-        # 这样可以保证指令执行并返回结果的顺序
-        return await future
+        try:
+            # 等待注册完成
+            result = await asyncio.wait_for(future, timeout=10)
+            return result
+        except asyncio.TimeoutError:
+            logger.error("[DataAgentManager] ⚠️  Register timeout for %s:%s", ip, port)
+            return False
     
-    async def register_agent(self, ip: str, port: int) -> bool:
-        """注册data_agent。
+    async def _execute_register_command(self, ip: str, port: int) -> bool:
+        """执行注册命令（内部方法，在队列中执行）。
+        
+        注册后立即将agent状态设置为"online"并更新到数据库。
         
         Args:
             ip: agent的IP地址
@@ -459,20 +563,26 @@ class DataAgentManager:
             key = (ip, port)
             if key in self._agents:
                 agent = self._agents[key]
+                # 重新注册时，确保状态设置为online
                 agent.status = "online"
                 agent.last_heartbeat = datetime.now(timezone.utc)
+                agent.error_log = ""  # 清空错误日志
                 if agent.register_time is None:
                     agent.register_time = datetime.now(timezone.utc)
+                logger.info("[DataAgentManager] ✅ Re-registered agent: %s:%s, status set to online", ip, port)
             else:
                 agent = DataAgentInfo(ip, port)
+                # 新注册时，状态设置为online
                 agent.status = "online"
                 agent.last_heartbeat = datetime.now(timezone.utc)
                 agent.register_time = datetime.now(timezone.utc)
+                agent.error_log = ""  # 初始化错误日志为空
                 self._agents[key] = agent
-                logger.info("[DataAgentManager] Registered agent: %s:%s", ip, port)
+                logger.info("[DataAgentManager] ✅ Registered new agent: %s:%s, status set to online", ip, port)
             
-            # 更新数据库
-            await self._update_agent_in_db(agent)
+            # 注册时创建新记录到数据库，状态设置为"online"（create_if_not_exists=True）
+            await self._update_agent_in_db(agent, create_if_not_exists=True)
+            logger.info("[DataAgentManager] ✅ Agent %s:%s status 'online' saved to database", ip, port)
             return True
     
     async def heartbeat(self, ip: str, port: int) -> bool:
@@ -496,6 +606,8 @@ class DataAgentManager:
             await self._update_agent_in_db(agent)
             return True
     
+    # ============ Agent健康检查和状态查询 ============
+    
     async def check_agent_health(self, ip: str, port: int) -> bool:
         """检查agent健康状态（主动探测）。
         
@@ -518,37 +630,15 @@ class DataAgentManager:
             logger.debug("[DataAgentManager] Health check failed for %s:%s: %s", ip, port, e)
             return False
     
-    async def get_agent_connection_count(self, ip: str, port: int) -> Optional[int]:
-        """获取agent的连接数。
-        
-        Args:
-            ip: agent的IP地址
-            port: agent的端口号
-        
-        Returns:
-            连接数，失败返回None
-        """
-        try:
-            async with aiohttp.ClientSession() as session:
-                url = f"http://{ip}:{port}/connections/count"
-                async with session.get(url, timeout=aiohttp.ClientTimeout(total=5)) as response:
-                    if response.status == 200:
-                        data = await response.json()
-                        return data.get("connection_count")
-                    return None
-        except Exception as e:
-            logger.debug("[DataAgentManager] Failed to get connection count for %s:%s: %s", ip, port, e)
-            return None
-    
     async def get_agent_connection_list(self, ip: str, port: int) -> List[Dict[str, Any]]:
-        """获取agent的连接列表。
+        """获取agent的真实连接列表（确认真实有长连接stream引用对象）。
         
         Args:
             ip: agent的IP地址
             port: agent的端口号
         
         Returns:
-            连接列表
+            连接列表，每个连接包含symbol和interval等信息
         """
         try:
             async with aiohttp.ClientSession() as session:
@@ -556,7 +646,10 @@ class DataAgentManager:
                 async with session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as response:
                     if response.status == 200:
                         data = await response.json()
-                        return data.get("connections", [])
+                        # 兼容不同的响应格式
+                        if isinstance(data, dict):
+                            return data.get("connections", [])
+                        return []
                     return []
         except Exception as e:
             logger.debug("[DataAgentManager] Failed to get connection list for %s:%s: %s", ip, port, e)
@@ -584,45 +677,7 @@ class DataAgentManager:
             logger.debug("[DataAgentManager] Failed to get symbols for %s:%s: %s", ip, port, e)
             return set()
     
-    async def _add_stream_to_agent_internal(self, ip: str, port: int, symbol: str, interval: str) -> bool:
-        """内部方法：向agent下发添加K线流的指令。"""
-        try:
-            async with aiohttp.ClientSession() as session:
-                url = f"http://{ip}:{port}/streams/add"
-                payload = {"symbol": symbol, "interval": interval}
-                async with session.post(
-                    url,
-                    json=payload,
-                    timeout=aiohttp.ClientTimeout(total=10)
-                ) as response:
-                    if response.status == 200:
-                        data = await response.json()
-                        return data.get("status") == "ok"
-                    return False
-        except Exception as e:
-            logger.error("[DataAgentManager] Failed to add stream to %s:%s: %s", ip, port, e)
-            return False
-    
-    async def add_stream_to_agent(self, ip: str, port: int, symbol: str, interval: str) -> bool:
-        """向agent下发添加K线流的指令（通过消息队列顺序执行）。
-        
-        Args:
-            ip: agent的IP地址
-            port: agent的端口号
-            symbol: 交易对符号
-            interval: 时间间隔
-        
-        Returns:
-            成功返回True，失败返回False（包括数据库操作完成后才返回）
-        """
-        import uuid
-        command = AgentCommand(
-            AgentCommandType.ADD_STREAM,
-            command_id=str(uuid.uuid4()),
-            symbol=symbol,
-            interval=interval
-        )
-        return await self._enqueue_command(ip, port, command)
+    # ============ Symbol分配相关方法 ============
     
     async def _add_symbols_to_agent_internal(
         self, 
@@ -631,13 +686,19 @@ class DataAgentManager:
         symbols: List[str],
         max_batch_size: int = 20
     ) -> Optional[Dict[str, Any]]:
-        """内部方法：批量向agent下发添加symbol的指令。"""
+        """内部方法：批量向agent下发添加symbol的指令。
+        
+        添加了超时保护，确保即使agent不响应也不会无限等待。
+        """
         if not symbols:
             return None
         
         # 分批处理，每批不超过max_batch_size个symbol
         batch_size = getattr(app_config, 'DATA_AGENT_BATCH_SYMBOL_SIZE', max_batch_size)
         all_results = []
+        
+        # 计算合理的超时时间：每批最多30秒，但不超过总命令超时时间
+        batch_timeout = min(30, self._command_timeout // 2)
         
         for i in range(0, len(symbols), batch_size):
             batch_symbols = symbols[i:i + batch_size]
@@ -648,7 +709,7 @@ class DataAgentManager:
                     async with session.post(
                         url,
                         json=payload,
-                        timeout=aiohttp.ClientTimeout(total=60)  # 批量操作可能需要更长时间
+                        timeout=aiohttp.ClientTimeout(total=batch_timeout)  # 使用合理的超时时间
                     ) as response:
                         if response.status == 200:
                             data = await response.json()
@@ -662,6 +723,12 @@ class DataAgentManager:
                                 "[DataAgentManager] Failed to add symbols batch to %s:%s: status %s",
                                 ip, port, response.status
                             )
+            except asyncio.TimeoutError:
+                logger.error(
+                    "[DataAgentManager] ⚠️  Timeout adding symbols batch to %s:%s (batch size: %s, timeout: %ss)",
+                    ip, port, len(batch_symbols), batch_timeout
+                )
+                # 超时后继续处理下一批，不中断整个流程
             except Exception as e:
                 logger.error(
                     "[DataAgentManager] Failed to add symbols batch to %s:%s: %s",
@@ -682,7 +749,13 @@ class DataAgentManager:
             }
         except Exception as e:
             logger.error("[DataAgentManager] Failed to get final status from %s:%s: %s", ip, port, e)
-            return None
+            # 即使获取状态失败，也返回部分结果
+            return {
+                "status": "partial",
+                "results": all_results,
+                "current_status": None,
+                "error": str(e)
+            }
     
     async def add_symbols_to_agent(
         self, 
@@ -731,51 +804,16 @@ class DataAgentManager:
             logger.debug("[DataAgentManager] Failed to get status for %s:%s: %s", ip, port, e)
             return None
     
-    async def get_agent_status(self, ip: str, port: int) -> Optional[Dict[str, Any]]:
-        """获取agent的连接状态（通过消息队列顺序执行）。
-        
-        Args:
-            ip: agent的IP地址
-            port: agent的端口号
-        
-        Returns:
-            连接状态字典，失败返回None（包括数据库操作完成后才返回）
-        """
-        import uuid
-        command = AgentCommand(
-            AgentCommandType.GET_STATUS,
-            command_id=str(uuid.uuid4())
-        )
-        return await self._enqueue_command(ip, port, command)
-    
-    async def find_best_agent(self, required_symbols: int = 1) -> Optional[tuple]:
-        """查找最适合的agent（负载最低，基于symbol数量）。
-        
-        Args:
-            required_symbols: 需要的symbol数量
-        
-        Returns:
-            (ip, port)元组，如果没有可用agent则返回None
-        """
-        async with self._lock:
-            available_agents = []
-            for key, agent in self._agents.items():
-                if agent.status == "online":
-                    # 检查agent当前持有的symbol数量
-                    current_symbol_count = agent.assigned_symbol_count
-                    available = self._max_symbols_per_agent - current_symbol_count
-                    if available >= required_symbols:
-                        available_agents.append((key, agent, available))
-            
-            if not available_agents:
-                return None
-            
-            # 选择可用symbol数量最多的agent（负载最低）
-            available_agents.sort(key=lambda x: x[2], reverse=True)
-            return available_agents[0][0]
+    # ============ Agent批量管理 ============
     
     async def check_all_agents_health(self) -> None:
-        """检查所有agent的健康状态。"""
+        """检查所有agent的健康状态。
+        
+        当发现agent下线时，会：
+        1. 清空agent的symbol持有信息
+        2. 更新agent状态到数据库
+        3. 标记需要重新分配的symbol（由全量同步任务处理）
+        """
         async with self._lock:
             agents_to_check = list(self._agents.items())
         
@@ -787,104 +825,51 @@ class DataAgentManager:
                     # 心跳超时，执行主动探测
                     is_healthy = await self.check_agent_health(agent.ip, agent.port)
                     async with self._lock:
-                        if key in self._agents:
-                            if is_healthy:
-                                self._agents[key].status = "online"
-                                self._agents[key].last_heartbeat = datetime.now(timezone.utc)
-                                await self._update_agent_in_db(self._agents[key])
-                            else:
-                                # agent离线，需要重新分配其负责的symbol
-                                logger.warning("[DataAgentManager] Agent %s:%s 离线，开始重新分配其负责的symbol...", 
-                                             agent.ip, agent.port)
-                                
-                                # 获取该agent当前的symbol列表
-                                symbols_on_agent = await self.get_agent_symbols(agent.ip, agent.port)
-                                logger.info("[DataAgentManager] Agent %s:%s 负责的symbol数量: %s", 
-                                          agent.ip, agent.port, len(symbols_on_agent))
-                                
-                                # 更新agent状态为离线
-                                self._agents[key].status = "offline"
-                                await self._update_agent_in_db(self._agents[key])
-                                
-                                # 重新分配该agent的symbol到其他可用agent
-                                if symbols_on_agent:
-                                    await self._reassign_agent_symbols(agent, symbols_on_agent)
+                        if key not in self._agents:
+                            continue
+                            
+                        if is_healthy:
+                            # agent恢复在线（只更新内存状态，数据库由agent自己更新）
+                            self._agents[key].status = "online"
+                            self._agents[key].last_heartbeat = datetime.now(timezone.utc)
+                            self._agents[key].error_log = ""
+                        else:
+                            # agent离线，清空symbol持有信息（只更新内存状态，数据库由agent自己更新）
+                            logger.warning(
+                                "[DataAgentManager] ⚠️  Agent %s:%s 离线，清空symbol持有信息...", 
+                                agent.ip, agent.port
+                            )
+                            
+                            # 记录离线前的symbol信息（用于日志）
+                            offline_symbols = set(self._agents[key].assigned_symbols)
+                            if offline_symbols:
+                                logger.info(
+                                    "[DataAgentManager] Agent %s:%s 离线前负责的symbol数量: %s, symbols: %s", 
+                                    agent.ip, agent.port, len(offline_symbols), sorted(list(offline_symbols))[:10]
+                                )
+                            
+                            # 清空agent的symbol持有信息（只更新内存状态）
+                            self._agents[key].status = "offline"
+                            self._agents[key].assigned_symbols = set()
+                            self._agents[key].assigned_symbol_count = 0
+                            self._agents[key].connection_count = 0
+                            self._agents[key].error_log = f"Agent offline since {datetime.now(timezone.utc).isoformat()}"
+                            
+                            logger.info(
+                                "[DataAgentManager] ✅ Agent %s:%s 状态已更新（symbol信息已清空），"
+                                "将在下次全量同步时重新分配symbol（数据库状态由agent自己更新）",
+                                agent.ip, agent.port
+                            )
     
-    async def _reassign_agent_symbols(self, offline_agent: DataAgentInfo, symbols: Set[str]) -> None:
-        """重新分配离线agent的symbol到其他可用agent。
+    # ============ 数据库操作 ============
+    
+    async def _update_agent_in_db(self, agent: DataAgentInfo, create_if_not_exists: bool = False) -> None:
+        """更新agent信息到数据库。
         
         Args:
-            offline_agent: 离线的agent
-            symbols: 该agent负责的symbol集合
+            agent: agent信息对象
+            create_if_not_exists: 如果记录不存在是否创建，False时只更新不新建（默认False）
         """
-        for symbol in symbols:
-            # 查找最适合的可用agent（需要1个symbol）
-            agent_key = await self.find_best_agent(required_symbols=1)
-            if agent_key:
-                new_ip, new_port = agent_key
-                logger.debug("[DataAgentManager] 尝试将离线agent %s:%s 的 %s 重新分配到 %s:%s", 
-                           offline_agent.ip, offline_agent.port, symbol, new_ip, new_port)
-                
-                # 重新添加symbol到新agent（会为symbol创建7个interval的连接）
-                try:
-                    result = await self.add_symbols_to_agent(new_ip, new_port, [symbol])
-                    if result and result.get("status") == "ok":
-                        logger.info("[DataAgentManager] ✅ 成功将 %s 从 %s:%s 重新分配到 %s:%s", 
-                                  symbol, offline_agent.ip, offline_agent.port, new_ip, new_port)
-                    else:
-                        logger.warning("[DataAgentManager] ⚠️  重新分配 %s 失败，将在下次同步时重试", 
-                                     symbol)
-                except Exception as e:
-                    logger.error("[DataAgentManager] ❌ 重新分配 %s 时出错: %s", 
-                               symbol, e, exc_info=True)
-            else:
-                logger.warning("[DataAgentManager] ⚠️  没有可用的agent来重新分配 %s，将在下次同步时重试", 
-                             symbol)
-    
-    async def refresh_all_agents_status(self) -> None:
-        """刷新所有agent的状态到数据库（使用/status接口获取详细连接状态）。
-        
-        注意：get_agent_status 已经通过队列执行并更新了数据库，这里主要是确保内存状态同步。
-        """
-        async with self._lock:
-            agents_to_refresh = list(self._agents.items())
-        
-        for key, agent in agents_to_refresh:
-            # 使用/status接口获取详细的连接状态（通过队列顺序执行，已更新数据库）
-            # 这里只需要同步内存状态
-            status = await self.get_agent_status(agent.ip, agent.port)
-            if status is not None:
-                async with self._lock:
-                    if key in self._agents:
-                        agent = self._agents[key]
-                        agent.connection_count = status.get("connection_count", 0)
-                        # 从status中提取symbol列表（现在是symbol字符串列表，不包含interval）
-                        symbols_list = status.get("symbols", [])
-                        if symbols_list and isinstance(symbols_list[0], dict):
-                            # 兼容旧格式：包含intervals的对象
-                            agent.assigned_symbols = {item["symbol"] for item in symbols_list}
-                        else:
-                            # 新格式：直接是symbol字符串列表
-                            agent.assigned_symbols = set(symbols_list) if symbols_list else set()
-                        agent.assigned_symbol_count = len(agent.assigned_symbols)
-            else:
-                # 如果获取状态失败，尝试使用旧方法（不通过队列，仅用于备用）
-                async with self._lock:
-                    if key in self._agents:
-                        agent = self._agents[key]
-                        connection_count = await self.get_agent_connection_count(agent.ip, agent.port)
-                        if connection_count is not None:
-                            agent.connection_count = connection_count
-                        
-                        symbols = await self.get_agent_symbols(agent.ip, agent.port)
-                        agent.assigned_symbols = symbols
-                        agent.assigned_symbol_count = len(symbols)
-                        
-                        # 备用方法也需要更新数据库
-                        await self._update_agent_in_db(agent)
-    
-    async def _update_agent_in_db(self, agent: DataAgentInfo) -> None:
-        """更新agent信息到数据库。"""
         try:
             agent_data = {
                 "ip": agent.ip,
@@ -896,69 +881,76 @@ class DataAgentManager:
                 "error_log": agent.error_log,
                 "last_heartbeat": agent.last_heartbeat,
             }
-            await asyncio.to_thread(self._db.upsert_market_data_agent, agent_data)
+            await asyncio.to_thread(
+                self._db.upsert_market_data_agent, 
+                agent_data, 
+                create_if_not_exists
+            )
         except Exception as e:
             logger.error("[DataAgentManager] Failed to update agent in DB: %s", e, exc_info=True)
+    
+    # ============ 查询方法 ============
     
     async def get_all_agents(self) -> List[DataAgentInfo]:
         """获取所有agent信息。"""
         async with self._lock:
             return list(self._agents.values())
     
-    async def get_all_allocated_symbol_intervals(self) -> Set[tuple]:
-        """获取所有已分配的symbol-interval对。
+    async def get_online_agents_from_db(self) -> Dict[tuple, Dict[str, Any]]:
+        """从数据库查询所有在线agent及其已分配的symbol信息。
         
         Returns:
-            已分配的(symbol, interval)集合
+            {(ip, port): agent_info} 字典，agent_info包含assigned_symbols等信息
         """
-        async with self._lock:
-            online_agents = [agent for agent in self._agents.values() if agent.status == "online"]
-        
-        allocated_pairs = set()
-        
-        for agent in online_agents:
-            try:
-                # 获取agent当前的连接列表
-                connections = await self.get_agent_connection_list(agent.ip, agent.port)
-                for conn in connections:
-                    symbol = conn.get("symbol")
-                    interval = conn.get("interval")
-                    if symbol and interval:
-                        allocated_pairs.add((symbol, interval))
-            except Exception as e:
-                logger.debug("[DataAgentManager] Failed to get connections for %s:%s: %s", 
-                           agent.ip, agent.port, e)
-        
-        return allocated_pairs
+        try:
+            agents_data = await asyncio.to_thread(self._db.get_market_data_agents, status="online")
+            result = {}
+            for agent_data in agents_data:
+                key = (agent_data["ip"], agent_data["port"])
+                result[key] = {
+                    "ip": agent_data["ip"],
+                    "port": agent_data["port"],
+                    "assigned_symbols": set(agent_data.get("assigned_symbols", [])),
+                    "assigned_symbol_count": agent_data.get("assigned_symbol_count", 0),
+                    "connection_count": agent_data.get("connection_count", 0),
+                    "status": agent_data.get("status", "offline")
+                }
+            return result
+        except Exception as e:
+            logger.error("[DataAgentManager] Failed to get online agents from DB: %s", e, exc_info=True)
+            return {}
     
-    async def get_all_allocated_symbols(self) -> Set[str]:
-        """获取所有已分配的symbol（不包含interval信息）。
+    async def check_agent_real_connections(self, ip: str, port: int) -> Dict[str, bool]:
+        """检查agent的真实连接状态（确认真实有长连接stream引用对象）。
+        
+        Args:
+            ip: agent的IP地址
+            port: agent的端口号
         
         Returns:
-            已分配的symbol集合
+            {symbol: has_real_connection} 字典，表示每个symbol是否有真实连接
         """
-        async with self._lock:
-            online_agents = [agent for agent in self._agents.values() if agent.status == "online"]
-        
-        allocated_symbols = set()
-        
-        for agent in online_agents:
-            try:
-                # 直接使用agent内存中的symbol集合（更高效）
-                allocated_symbols.update(agent.assigned_symbols)
-            except Exception as e:
-                logger.debug("[DataAgentManager] Failed to get symbols for %s:%s: %s", 
-                           agent.ip, agent.port, e)
-                # 备用方法：通过API获取
-                try:
-                    symbols = await self.get_agent_symbols(agent.ip, agent.port)
-                    allocated_symbols.update(symbols)
-                except Exception as e2:
-                    logger.debug("[DataAgentManager] Failed to get symbols via API for %s:%s: %s", 
-                               agent.ip, agent.port, e2)
-        
-        return allocated_symbols
+        try:
+            # 通过/connections/list接口获取真实的连接列表
+            connections = await self.get_agent_connection_list(ip, port)
+            symbol_connections = {}
+            
+            for conn in connections:
+                symbol = conn.get("symbol")
+                if symbol:
+                    # 如果连接列表中存在该symbol的连接，说明有真实连接
+                    symbol_connections[symbol.upper()] = True
+            
+            return symbol_connections
+        except Exception as e:
+            logger.warning(
+                "[DataAgentManager] Failed to check real connections for %s:%s: %s",
+                ip, port, e
+            )
+            return {}
 
+
+# ============ HTTP请求处理器 ============
 
 class DataAgentManagerHTTPHandler(BaseHTTPRequestHandler):
     """处理async_agent的HTTP请求（注册、心跳等）。"""
@@ -1066,6 +1058,8 @@ class DataAgentManagerHTTPHandler(BaseHTTPRequestHandler):
         """重写日志方法。"""
         logger.debug("[DataAgentManagerHTTP] %s", format % args)
 
+
+# ============ HTTP服务器相关 ============
 
 def create_manager_handler(manager: DataAgentManager, event_loop: asyncio.AbstractEventLoop):
     """创建请求处理器工厂函数。"""
