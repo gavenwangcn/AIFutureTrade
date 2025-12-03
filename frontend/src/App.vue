@@ -45,6 +45,10 @@
             <i class="bi bi-sliders"></i>
             策略配置
           </button>
+          <button class="btn-secondary" @click="showFutureConfigModal = true">
+            <i class="bi bi-list-check"></i>
+            合约配置
+          </button>
           <button class="btn-secondary" @click="showApiProviderModal = true">
             <i class="bi bi-cloud-plus"></i>
             API提供方
@@ -112,6 +116,9 @@
             <i class="bi bi-graph-up-arrow"></i>
           </div>
           <div class="market-header-actions">
+            <button class="btn-config-contract" @click="showFutureConfigModal = true">
+              配置合约
+            </button>
             <span class="market-count">{{ marketPrices.length }}个</span>
           </div>
           <div class="market-prices">
@@ -192,11 +199,7 @@
             <div class="leaderboard-meta">
               <span 
                 class="status-indicator" 
-                :class="{
-                  updating: leaderboardStatusType === 'updating',
-                  success: leaderboardStatusType === 'success',
-                  error: leaderboardStatusType === 'error'
-                }"
+                :class="{ updating: isRefreshingLeaderboard }"
               >
                 {{ leaderboardStatus }}
               </span>
@@ -230,7 +233,7 @@
                     <span class="leaderboard-symbol-name">{{ item.symbol }}</span>
                     <span v-if="item.name" class="leaderboard-symbol-desc">{{ item.name }}</span>
                   </div>
-                  <div class="leaderboard-price">${{ formatLeaderboardPrice(item.price) }}</div>
+                  <div class="leaderboard-price">${{ formatPrice(item.price) }}</div>
                   <div class="leaderboard-change positive">+{{ (item.change_percent || item.change || 0).toFixed(2) }}%</div>
                   <div v-if="item.quote_volume" class="leaderboard-volume">
                     <span class="volume-label">成交额</span>
@@ -249,7 +252,7 @@
                     <span class="leaderboard-symbol-name">{{ item.symbol }}</span>
                     <span v-if="item.name" class="leaderboard-symbol-desc">{{ item.name }}</span>
                   </div>
-                  <div class="leaderboard-price">${{ formatLeaderboardPrice(item.price) }}</div>
+                  <div class="leaderboard-price">${{ formatPrice(item.price) }}</div>
                   <div class="leaderboard-change negative">{{ (item.change_percent || item.change || 0).toFixed(2) }}%</div>
                   <div v-if="item.quote_volume" class="leaderboard-volume">
                     <span class="volume-label">成交额</span>
@@ -517,7 +520,6 @@ const {
   leaderboardGainers,
   leaderboardLosers,
   leaderboardStatus,
-  leaderboardStatusType,
   isRefreshingLeaderboard,
   isRefreshingAll,
   portfolio,
@@ -553,7 +555,6 @@ const {
   getProviderName,
   getLeverageText,
   formatPrice,
-  formatLeaderboardPrice,
   formatCurrency,
   formatPnl,
   getPnlClass,

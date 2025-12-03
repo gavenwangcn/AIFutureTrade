@@ -88,8 +88,8 @@
 
 .status-indicator.updating {
     animation: statusPulse 1s ease-in-out infinite;
-    background: rgba(255, 193, 7, 0.2);
-    color: #ffc107;
+    background: rgba(51, 112, 255, 0.15);
+    color: var(--primary);
     font-weight: 700;
 }
 
@@ -100,15 +100,13 @@
 }
 
 .status-indicator.success {
-    background: rgba(0, 180, 42, 0.15);
-    color: #00b42a;
-    font-weight: 600;
+    background: rgba(25, 190, 107, 0.15);
+    color: var(--success);
 }
 
 .status-indicator.error {
-    background: rgba(255, 255, 255, 0.9);
-    color: var(--text-2);
-    border: 1px solid var(--border-1);
+    background: rgba(255, 86, 48, 0.15);
+    color: var(--danger);
 }
 
 .status-indicator.warning,
@@ -2287,8 +2285,57 @@ body {
     background: var(--text-3);
 }
 
-/* K线图弹框样式 - 已移至组件内部，此处保留用于向后兼容 */
-/* 注意：K线图相关样式应在 KLineChart.vue 组件内定义，避免全局样式冲突 */
+/* K线图弹框样式 */
+.kline-modal-content {
+    max-width: 95vw;
+    width: 1400px;
+    max-height: 95vh;
+}
+
+.kline-modal-body {
+    padding: 0;
+    overflow: hidden;
+}
+
+.kline-toolbar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 16px;
+    padding: 12px 20px;
+    border-bottom: 1px solid var(--border-1);
+}
+
+.kline-timeframes {
+    display: flex;
+    gap: 8px;
+}
+
+.timeframe-btn {
+    padding: 6px 12px;
+    border: 1px solid var(--border-1);
+    background: var(--bg-2);
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 13px;
+    transition: all 0.2s;
+}
+
+.timeframe-btn:hover {
+    background: var(--bg-3);
+    border-color: var(--primary);
+}
+
+.timeframe-btn.active {
+    background: var(--primary);
+    color: white;
+    border-color: var(--primary);
+}
+
+#klineChartContainer {
+    background: #1a1a1a;
+    border-radius: 0 0 var(--radius) var(--radius);
+}
 
 .leaderboard-item:hover,
 .price-item:hover {
