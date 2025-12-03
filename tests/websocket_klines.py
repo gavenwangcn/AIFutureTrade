@@ -27,15 +27,30 @@ client = DerivativesTradingUsdsFutures(config_ws_streams=configuration_ws_stream
 def print_kline_data(kline_data, day_label):
     """打印K线数据用于测试验证"""
     print(f"\n=== {day_label} K线数据 ===")
-    print(f"开盘时间: {datetime.fromtimestamp(kline_data['k']['t'] / 1000).strftime('%Y-%m-%d %H:%M:%S')}")
-    print(f"收盘时间: {datetime.fromtimestamp(kline_data['k']['T'] / 1000).strftime('%Y-%m-%d %H:%M:%S')}")
-    print(f"开盘价: {kline_data['k']['o']}")
-    print(f"最高价: {kline_data['k']['h']}")
-    print(f"最低价: {kline_data['k']['l']}")
-    print(f"收盘价: {kline_data['k']['c']}")
-    print(f"成交量: {kline_data['k']['v']}")
-    print(f"成交笔数: {kline_data['k']['n']}")
-    print(f"是否完结: {kline_data['k']['x']}")
+    # 处理SDK返回的对象，而不是字典
+    if hasattr(kline_data, 'k'):
+        # 这是SDK返回的对象
+        k_data = kline_data.k
+        print(f"开盘时间: {datetime.fromtimestamp(k_data.t / 1000).strftime('%Y-%m-%d %H:%M:%S')}")
+        print(f"收盘时间: {datetime.fromtimestamp(k_data.T / 1000).strftime('%Y-%m-%d %H:%M:%S')}")
+        print(f"开盘价: {k_data.o}")
+        print(f"最高价: {k_data.h}")
+        print(f"最低价: {k_data.l}")
+        print(f"收盘价: {k_data.c}")
+        print(f"成交量: {k_data.v}")
+        print(f"成交笔数: {k_data.n}")
+        print(f"是否完结: {k_data.x}")
+    else:
+        # 兼容旧版或字典格式
+        print(f"开盘时间: {datetime.fromtimestamp(kline_data['k']['t'] / 1000).strftime('%Y-%m-%d %H:%M:%S')}")
+        print(f"收盘时间: {datetime.fromtimestamp(kline_data['k']['T'] / 1000).strftime('%Y-%m-%d %H:%M:%S')}")
+        print(f"开盘价: {kline_data['k']['o']}")
+        print(f"最高价: {kline_data['k']['h']}")
+        print(f"最低价: {kline_data['k']['l']}")
+        print(f"收盘价: {kline_data['k']['c']}")
+        print(f"成交量: {kline_data['k']['v']}")
+        print(f"成交笔数: {kline_data['k']['n']}")
+        print(f"是否完结: {kline_data['k']['x']}")
     print("========================\n")
 
 async def kline_candlestick_streams():
@@ -61,20 +76,40 @@ async def kline_candlestick_streams():
         
         def on_message(data):
             # 只处理完结的K线数据
-            if data['k']['x']:  # x表示K线是否完结
-                received_klines.append(data)
-                # 判断这是今天的还是昨天的K线
-                kline_date = datetime.fromtimestamp(data['k']['t'] / 1000).date()
-                if kline_date == today.date():
-                    print_kline_data(data, "今天")
-                elif kline_date == yesterday.date():
-                    print_kline_data(data, "昨天")
-                else:
-                    print_kline_data(data, f"{kline_date}")
+            is_final = False
+            kline_date = None
             
-            # 当收集到足够的数据后取消订阅
-            if len(received_klines) >= 2:
-                asyncio.create_task(stream.unsubscribe())
+            try:
+                # 处理SDK返回的对象
+                if hasattr(data, 'k'):
+                    # 这是SDK返回的对象
+                    is_final = data.k.x
+                    kline_date = datetime.fromtimestamp(data.k.t / 1000).date()
+                else:
+                    # 兼容旧版或字典格式
+                    is_final = data['k']['x']
+                    kline_date = datetime.fromtimestamp(data['k']['t'] / 1000).date()
+                
+                if is_final:
+                    received_klines.append(data)
+                    # 判断这是今天的还是昨天的K线
+                    if kline_date == today.date():
+                        print_kline_data(data, "今天")
+                    elif kline_date == yesterday.date():
+                        print_kline_data(data, "昨天")
+                    else:
+                        print_kline_data(data, f"{kline_date}")
+                
+                # 当收集到足够的数据后取消订阅
+                if len(received_klines) >= 2:
+                    asyncio.create_task(stream.unsubscribe())
+            except Exception as e:
+                logging.error(f"Error in on_message: {e}, data: {type(data)}")
+                # 打印数据的属性，便于调试
+                if hasattr(data, '__dict__'):
+                    logging.error(f"Data attributes: {data.__dict__}")
+                elif isinstance(data, dict):
+                    logging.error(f"Data keys: {data.keys()}")
 
         stream.on("message", on_message)
 
