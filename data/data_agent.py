@@ -154,15 +154,19 @@ class DataAgentKlineManager:
         key = (symbol.upper(), interval)
         
         async with self._lock:
-            # 检查是否已存在
+            # 检查map中是否已经构建过对应的symbol+interval的同步链接
             if key in self._active_connections:
                 conn = self._active_connections[key]
-                # 如果连接未过期，直接返回
-                if not conn.is_expired():
-                    logger.debug("[DataAgentKline] Stream already exists: %s %s", symbol, interval)
+                # 检查连接是否仍然活跃且未过期
+                if conn.is_active and not conn.is_expired():
+                    logger.debug("[DataAgentKline] Stream already exists and is active: %s %s", symbol, interval)
                     return True
-                # 如果连接已过期，先关闭
-                await conn.close()
+                # 如果连接不活跃或已过期，先关闭并从map中删除
+                logger.info("[DataAgentKline] Existing connection is inactive or expired, removing: %s %s", symbol, interval)
+                try:
+                    await conn.close()
+                except Exception as e:
+                    logger.debug("[DataAgentKline] Error closing expired connection: %s", e)
                 del self._active_connections[key]
             
             # 检查连接数限制
@@ -194,7 +198,13 @@ class DataAgentKlineManager:
                 def handler(data: Any) -> None:
                     asyncio.create_task(self._handle_kline_message(symbol, interval, data))
                 
+                # 设置错误处理器，当连接异常时从map中删除
+                def error_handler(error: Any) -> None:
+                    logger.error("[DataAgentKline] Stream error for %s %s: %s", symbol, interval, error)
+                    asyncio.create_task(self._remove_broken_connection(symbol, interval))
+                
                 stream.on("message", handler)
+                stream.on("error", error_handler)
                 
                 conn = KlineStreamConnection(
                     symbol=symbol,
@@ -212,13 +222,88 @@ class DataAgentKlineManager:
                 raise
             except Exception as e:
                 logger.error("[DataAgentKline] Failed to add stream %s %s: %s", symbol, interval, e)
-                # 如果连接已创建但添加流失败，尝试关闭连接
+                # 如果连接已创建但添加流失败，尝试关闭连接并从map中删除
                 if 'connection' in locals() and connection:
                     try:
                         await connection.close_connection()
                     except Exception as close_e:
                         logger.debug("[DataAgentKline] Failed to close connection: %s", close_e)
+                # 确保从map中删除
+                async with self._lock:
+                    if key in self._active_connections:
+                        del self._active_connections[key]
                 return False
+    
+    async def _remove_broken_connection(self, symbol: str, interval: str) -> None:
+        """移除断开的连接（从map中删除）。"""
+        key = (symbol.upper(), interval)
+        async with self._lock:
+            if key in self._active_connections:
+                conn = self._active_connections[key]
+                conn.is_active = False
+                try:
+                    await conn.close()
+                except Exception as e:
+                    logger.debug("[DataAgentKline] Error closing broken connection: %s", e)
+                del self._active_connections[key]
+                logger.info("[DataAgentKline] Removed broken connection: %s %s", symbol, interval)
+    
+    async def add_symbol_streams(self, symbol: str) -> Dict[str, Any]:
+        """为指定symbol添加所有interval的K线流（7个interval）。
+        
+        在构建每个interval的监听连接前，会检查map中是否已经存在对应的连接。
+        
+        Args:
+            symbol: 交易对符号
+        
+        Returns:
+            包含成功和失败数量的字典
+            {
+                "success_count": int,
+                "failed_count": int,
+                "total_count": int,
+                "skipped_count": int  # 已存在的连接数量
+            }
+        """
+        symbol_upper = symbol.upper()
+        success_count = 0
+        failed_count = 0
+        skipped_count = 0
+        
+        # 先检查map中已经存在的连接
+        async with self._lock:
+            existing_intervals = set()
+            for interval in KLINE_INTERVALS:
+                key = (symbol_upper, interval)
+                if key in self._active_connections:
+                    conn = self._active_connections[key]
+                    if conn.is_active and not conn.is_expired():
+                        existing_intervals.add(interval)
+        
+        # 只为不存在的interval创建连接
+        for interval in KLINE_INTERVALS:
+            if interval in existing_intervals:
+                skipped_count += 1
+                logger.debug("[DataAgentKline] Skipping %s %s (already exists in map)", symbol, interval)
+                continue
+            
+            try:
+                # add_stream内部会再次检查map，确保不会重复创建
+                success = await self.add_stream(symbol, interval)
+                if success:
+                    success_count += 1
+                else:
+                    failed_count += 1
+            except Exception as e:
+                logger.error("[DataAgentKline] Failed to add stream %s %s: %s", symbol, interval, e)
+                failed_count += 1
+        
+        return {
+            "success_count": success_count,
+            "failed_count": failed_count,
+            "skipped_count": skipped_count,
+            "total_count": len(KLINE_INTERVALS)
+        }
     
     async def remove_stream(self, symbol: str, interval: str) -> bool:
         """移除K线流。
@@ -265,14 +350,76 @@ class DataAgentKlineManager:
     async def get_connection_count(self) -> int:
         """获取当前连接数。"""
         async with self._lock:
-            # 先清理过期连接
+            # 先清理过期连接和断开的连接
             await self.cleanup_expired_connections()
+            await self._cleanup_broken_connections()
             return len(self._active_connections)
+    
+    async def get_connection_status(self) -> Dict[str, Any]:
+        """获取当前连接状态（JSON格式）。
+        
+        Returns:
+            包含总连接数和详细symbol列表的字典
+            {
+                "connection_count": int,
+                "symbols": [
+                    {
+                        "symbol": str,
+                        "intervals": [str, ...]
+                    },
+                    ...
+                ]
+            }
+        """
+        async with self._lock:
+            # 先清理过期连接和断开的连接
+            await self.cleanup_expired_connections()
+            await self._cleanup_broken_connections()
+            
+            # 按symbol分组统计intervals
+            symbol_map: Dict[str, List[str]] = {}
+            for key, conn in self._active_connections.items():
+                symbol = conn.symbol
+                interval = conn.interval
+                if symbol not in symbol_map:
+                    symbol_map[symbol] = []
+                symbol_map[symbol].append(interval)
+            
+            # 构建返回格式
+            symbols_list = [
+                {
+                    "symbol": symbol,
+                    "intervals": sorted(intervals)
+                }
+                for symbol, intervals in symbol_map.items()
+            ]
+            
+            return {
+                "connection_count": len(self._active_connections),
+                "symbols": sorted(symbols_list, key=lambda x: x["symbol"])
+            }
+    
+    async def _cleanup_broken_connections(self) -> None:
+        """清理断开的连接（检查连接是否仍然活跃）。"""
+        broken_keys = []
+        for key, conn in self._active_connections.items():
+            if not conn.is_active:
+                broken_keys.append(key)
+        
+        for key in broken_keys:
+            conn = self._active_connections[key]
+            try:
+                await conn.close()
+            except Exception as e:
+                logger.debug("[DataAgentKline] Error closing broken connection: %s", e)
+            del self._active_connections[key]
+            logger.info("[DataAgentKline] Cleaned up broken connection: %s %s", key[0], key[1])
     
     async def get_connection_list(self) -> List[Dict[str, Any]]:
         """获取当前所有连接的详细信息。"""
         async with self._lock:
             await self.cleanup_expired_connections()
+            await self._cleanup_broken_connections()
             connections = []
             for key, conn in self._active_connections.items():
                 connections.append({
@@ -423,6 +570,9 @@ class DataAgentCommandHandler(BaseHTTPRequestHandler):
             elif path == '/symbols':
                 # 获取当前同步的symbol列表
                 self._handle_get_symbols()
+            elif path == '/status':
+                # 获取连接状态（JSON格式：总连接数和symbol列表）
+                self._handle_get_status()
             else:
                 self._send_error(404, "Not Found")
         except Exception as e:
@@ -441,6 +591,9 @@ class DataAgentCommandHandler(BaseHTTPRequestHandler):
             elif path == '/streams/remove':
                 # 移除K线流
                 self._handle_remove_stream()
+            elif path == '/symbols/add':
+                # 批量添加symbol（为每个symbol创建7个interval的流）
+                self._handle_add_symbols()
             else:
                 self._send_error(404, "Not Found")
         except Exception as e:
@@ -485,6 +638,57 @@ class DataAgentCommandHandler(BaseHTTPRequestHandler):
             self._send_json({"symbols": sorted(list(symbols)), "count": len(symbols)})
         except Exception as e:
             logger.error("[DataAgentCommand] Error in get_symbols: %s", e, exc_info=True)
+            self._send_error(500, str(e))
+    
+    def _handle_get_status(self):
+        """处理获取连接状态请求（返回JSON格式：总连接数和symbol列表）。"""
+        try:
+            coro = self.kline_manager.get_connection_status()
+            future = asyncio.run_coroutine_threadsafe(coro, self._main_loop)
+            status = future.result()
+            self._send_json({"status": "ok", **status})
+        except Exception as e:
+            logger.error("[DataAgentCommand] Error in get_status: %s", e, exc_info=True)
+            self._send_error(500, str(e))
+    
+    def _handle_add_symbols(self):
+        """处理批量添加symbol请求（为每个symbol创建7个interval的流）。"""
+        content_length = int(self.headers.get('Content-Length', 0))
+        body = self.rfile.read(content_length)
+        data = json.loads(body.decode('utf-8'))
+        
+        symbols = data.get('symbols', [])
+        if not symbols or not isinstance(symbols, list):
+            self._send_error(400, "Missing or invalid symbols list")
+            return
+        
+        try:
+            results = []
+            for symbol in symbols:
+                symbol = symbol.upper().strip()
+                if not symbol:
+                    continue
+                
+                coro = self.kline_manager.add_symbol_streams(symbol)
+                future = asyncio.run_coroutine_threadsafe(coro, self._main_loop)
+                result = future.result()
+                results.append({
+                    "symbol": symbol,
+                    **result
+                })
+            
+            # 获取当前连接状态
+            status_coro = self.kline_manager.get_connection_status()
+            status_future = asyncio.run_coroutine_threadsafe(status_coro, self._main_loop)
+            status = status_future.result()
+            
+            self._send_json({
+                "status": "ok",
+                "results": results,
+                "current_status": status
+            })
+        except Exception as e:
+            logger.error("[DataAgentCommand] Error in add_symbols: %s", e, exc_info=True)
             self._send_error(500, str(e))
     
     def _handle_add_stream(self):
@@ -624,18 +828,23 @@ async def register_to_async_agent(register_ip: str, register_port: int, agent_ip
     """
     import aiohttp
     
+    # 使用连接器确保连接正确关闭，避免CLOSE_WAIT状态
+    # force_close=True 确保连接在使用后立即关闭
+    connector = aiohttp.TCPConnector(limit=10, limit_per_host=5, force_close=True)
+    timeout = aiohttp.ClientTimeout(total=10, connect=5)
+    
     try:
-        async with aiohttp.ClientSession() as session:
+        async with aiohttp.ClientSession(connector=connector, timeout=timeout) as session:
             url = f"http://{register_ip}:{register_port}/register"
             payload = {"ip": agent_ip, "port": agent_port}
-            async with session.post(
-                url,
-                json=payload,
-                timeout=aiohttp.ClientTimeout(total=10)
-            ) as response:
+            async with session.post(url, json=payload) as response:
+                # 确保响应体被完全读取，避免连接处于CLOSE_WAIT状态
                 if response.status == 200:
                     data = await response.json()
                     return data.get("status") == "ok"
+                else:
+                    # 即使状态码不是200，也要读取响应体以确保连接正确关闭
+                    await response.read()
                 return False
     except Exception as e:
         logger.error("[DataAgent] Failed to register to async_agent: %s", e)
@@ -702,9 +911,8 @@ async def run_data_agent(
     # 等待服务器启动
     await asyncio.sleep(1)
     
-    # 注册到async_agent（带重试机制）
-    heartbeat_task_obj = None
-    register_retry_task_obj = None
+    # 注册到async_agent（只注册一次，之后由manager主动轮询状态）
+    register_task_obj = None
     if register_ip and register_port:
         if not agent_ip:
             # 自动获取本机IP
@@ -716,67 +924,49 @@ async def run_data_agent(
             except Exception:
                 agent_ip = "127.0.0.1"
         
-        # 使用 Event 来管理注册状态
-        registered_event = asyncio.Event()
-        register_retry_interval = 10  # 重试间隔（秒）
-        
-        async def register_retry_task():
-            """注册重试任务，定期尝试注册直到成功"""
+        async def register_once_task():
+            """注册任务：只尝试注册一次，成功后不再重试
+            
+            注意：注册成功后，agent的状态将由manager通过主动轮询来维护，
+            不需要agent自己发送心跳。manager会通过market_data_agent表中的
+            agent ip+port调用固定的接口（如/ping）来检查agent状态。
+            """
+            max_retries = 5  # 最多重试5次
+            retry_interval = 10  # 重试间隔（秒）
             retry_count = 0
             
-            while True:
+            while retry_count < max_retries:
                 try:
                     retry_count += 1
-                    logger.info("[DataAgent] Attempting to register to async_agent at %s:%s (attempt %s)...", 
-                               register_ip, register_port, retry_count)
+                    logger.info("[DataAgent] Attempting to register to async_agent at %s:%s (attempt %s/%s)...", 
+                               register_ip, register_port, retry_count, max_retries)
                     
                     success = await register_to_async_agent(register_ip, register_port, agent_ip, command_port)
                     if success:
-                        registered_event.set()
-                        logger.info("[DataAgent] Successfully registered to async_agent at %s:%s", 
+                        logger.info("[DataAgent] ✅ Successfully registered to async_agent at %s:%s", 
                                    register_ip, register_port)
-                        break  # 注册成功，退出循环
+                        logger.info("[DataAgent] 📝 Note: Agent status will be maintained by manager through active polling")
+                        return  # 注册成功，退出任务
                     else:
-                        logger.warning("[DataAgent] Failed to register to async_agent, will retry in %s seconds", 
-                                      register_retry_interval)
-                        await asyncio.sleep(register_retry_interval)
+                        if retry_count < max_retries:
+                            logger.warning("[DataAgent] Failed to register to async_agent, will retry in %s seconds (attempt %s/%s)", 
+                                          retry_interval, retry_count, max_retries)
+                            await asyncio.sleep(retry_interval)
+                        else:
+                            logger.error("[DataAgent] ❌ Failed to register after %s attempts, giving up", max_retries)
+                            logger.error("[DataAgent] ⚠️  Agent will continue running but may not be managed by manager")
                 except asyncio.CancelledError:
                     raise
                 except Exception as e:
-                    logger.warning("[DataAgent] Registration attempt failed: %s, will retry in %s seconds", 
-                                  e, register_retry_interval)
-                    await asyncio.sleep(register_retry_interval)
+                    if retry_count < max_retries:
+                        logger.warning("[DataAgent] Registration attempt failed: %s, will retry in %s seconds (attempt %s/%s)", 
+                                      e, retry_interval, retry_count, max_retries)
+                        await asyncio.sleep(retry_interval)
+                    else:
+                        logger.error("[DataAgent] ❌ Registration failed after %s attempts: %s", max_retries, e)
         
-        # 启动注册重试任务
-        register_retry_task_obj = asyncio.create_task(register_retry_task())
-        
-        # 定期发送心跳（仅在注册成功后）
-        heartbeat_interval = getattr(app_config, 'DATA_AGENT_HEARTBEAT_INTERVAL', 30)
-        
-        async def heartbeat_task():
-            """心跳任务，等待注册成功后再开始发送心跳"""
-            # 等待注册成功
-            await registered_event.wait()
-            
-            # 注册成功后开始发送心跳
-            while True:
-                try:
-                    await asyncio.sleep(heartbeat_interval)
-                    success = await send_heartbeat(register_ip, register_port, agent_ip, command_port)
-                    if not success:
-                        # 心跳失败，可能连接已断开，尝试重新注册
-                        logger.warning("[DataAgent] Heartbeat failed, attempting to re-register...")
-                        registered_event.clear()
-                        # 重新启动注册任务
-                        asyncio.create_task(register_retry_task())
-                        # 等待重新注册成功
-                        await registered_event.wait()
-                except asyncio.CancelledError:
-                    raise
-                except Exception as e:
-                    logger.error("[DataAgent] Error in heartbeat task: %s", e, exc_info=True)
-        
-        heartbeat_task_obj = asyncio.create_task(heartbeat_task())
+        # 启动注册任务（只注册一次）
+        register_task_obj = asyncio.create_task(register_once_task())
     
     # 定期清理过期连接
     async def cleanup_task():
@@ -794,20 +984,16 @@ async def run_data_agent(
     try:
         logger.info("[DataAgent] Data agent started")
         tasks = [command_task, cleanup_task_obj]
-        if heartbeat_task_obj:
-            tasks.append(heartbeat_task_obj)
-        if register_retry_task_obj:
-            tasks.append(register_retry_task_obj)
+        if register_task_obj:
+            tasks.append(register_task_obj)
         await asyncio.gather(*tasks)
     except asyncio.CancelledError:
         raise
     finally:
         command_task.cancel()
         cleanup_task_obj.cancel()
-        if heartbeat_task_obj:
-            heartbeat_task_obj.cancel()
-        if register_retry_task_obj:
-            register_retry_task_obj.cancel()
+        if register_task_obj:
+            register_task_obj.cancel()
         await kline_manager.cleanup_all()
         logger.info("[DataAgent] Data agent stopped")
 

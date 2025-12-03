@@ -117,7 +117,7 @@ async def run_data_manager_service(duration: Optional[int] = None) -> None:
                 symbols_to_process = list(symbol_set)
                 intervals = ['1m', '5m', '15m', '1h', '4h', '1d', '1w']
                 
-                total_assignments = 0
+                success_count = 0
                 failed_assignments = 0
                 
                 if new_symbols:
@@ -127,33 +127,56 @@ async def run_data_manager_service(duration: Optional[int] = None) -> None:
                 # 为所有symbol（包括新增和已有的）分配或重新分配agent
                 logger.info("[DataManager] [Symbol同步 #%s] 🚀 开始检查和分配 symbol agent...", cycle_count)
                 
+                # 批量分配symbol到agent（每个symbol需要7个连接，对应7个interval）
+                symbols_per_agent: Dict[tuple, List[str]] = {}  # {(ip, port): [symbols]}
+                
                 for symbol in symbols_to_process:
-                    for interval in intervals:
-                        # 查找最适合的agent
-                        agent_key = await manager.find_best_agent(required_connections=1)
-                        if agent_key:
-                            ip, port = agent_key
-                            logger.debug("[DataManager] [Symbol同步 #%s] 尝试分配 %s %s 到 agent %s:%s", 
-                                       cycle_count, symbol, interval, ip, port)
+                    # 查找最适合的agent（需要7个连接，对应7个interval）
+                    agent_key = await manager.find_best_agent(required_connections=7)
+                    if agent_key:
+                        ip, port = agent_key
+                        if (ip, port) not in symbols_per_agent:
+                            symbols_per_agent[(ip, port)] = []
+                        symbols_per_agent[(ip, port)].append(symbol)
+                    else:
+                        failed_assignments += 7  # 每个symbol失败相当于7个interval失败
+                        logger.warning("[DataManager] [Symbol同步 #%s] ⚠️  没有可用的 agent 用于 %s", 
+                                     cycle_count, symbol)
+                
+                # 批量下发指令到各个agent
+                batch_size = getattr(app_config, 'DATA_AGENT_BATCH_SYMBOL_SIZE', 20)
+                for (ip, port), symbols in symbols_per_agent.items():
+                    # 分批处理，每批不超过batch_size个symbol
+                    for i in range(0, len(symbols), batch_size):
+                        batch_symbols = symbols[i:i + batch_size]
+                        logger.info(
+                            "[DataManager] [Symbol同步 #%s] 🚀 批量分配 %s 个 symbol 到 agent %s:%s (批次 %s/%s)",
+                            cycle_count, len(batch_symbols), ip, port, 
+                            i // batch_size + 1, (len(symbols) + batch_size - 1) // batch_size
+                        )
+                        
+                        result = await manager.add_symbols_to_agent(ip, port, batch_symbols, batch_size)
+                        if result and result.get("status") == "ok":
+                            # 统计成功和失败数量
+                            results = result.get("results", [])
+                            for r in results:
+                                success_count += r.get("success_count", 0)
+                                failed_count = r.get("failed_count", 0)
+                                failed_assignments += failed_count
                             
-                            # 直接添加流，不管是否已经存在（agent会处理重复情况）
-                            success = await manager.add_stream_to_agent(ip, port, symbol, interval)
-                            if success:
-                                total_assignments += 1
-                                if symbol in new_symbols:
-                                    logger.info("[DataManager] [Symbol同步 #%s] ✅ 成功分配新增 %s %s 到 %s:%s", 
-                                              cycle_count, symbol, interval, ip, port)
-                                else:
-                                    logger.debug("[DataManager] [Symbol同步 #%s] ✅ 成功确认/重新分配 %s %s 到 %s:%s", 
-                                               cycle_count, symbol, interval, ip, port)
-                            else:
-                                failed_assignments += 1
-                                logger.warning("[DataManager] [Symbol同步 #%s] ⚠️  分配失败 %s %s 到 %s:%s", 
-                                             cycle_count, symbol, interval, ip, port)
+                            # 获取当前状态
+                            current_status = result.get("current_status", {})
+                            logger.info(
+                                "[DataManager] [Symbol同步 #%s] ✅ 批量分配完成，agent %s:%s 当前连接数: %s",
+                                cycle_count, ip, port, current_status.get("connection_count", 0)
+                            )
                         else:
-                            failed_assignments += 1
-                            logger.warning("[DataManager] [Symbol同步 #%s] ⚠️  没有可用的 agent 用于 %s %s", 
-                                         cycle_count, symbol, interval)
+                            # 批量失败，每个symbol算7个失败
+                            failed_assignments += len(batch_symbols) * 7
+                            logger.warning(
+                                "[DataManager] [Symbol同步 #%s] ⚠️  批量分配失败，agent %s:%s",
+                                cycle_count, ip, port
+                            )
                 
                 logger.info("[DataManager] [Symbol同步 #%s] 📊 分配统计: 成功 %s, 失败 %s", 
                           cycle_count, total_assignments, failed_assignments)
@@ -276,37 +299,67 @@ async def run_data_manager_service(duration: Optional[int] = None) -> None:
             logger.info("[DataManager] 📋 初始 symbol 列表（前20个）: %s", 
                       sorted(list(allocated_symbols))[:20])
             
-            # 为初始symbol分配agent
+            # 为初始symbol分配agent（使用批量添加方法）
             logger.info("[DataManager] 🚀 开始为初始 symbol 分配 agent...")
-            intervals = ['1m', '5m', '15m', '1h', '4h', '1d', '1w']
-            total_assignments = 0
-            failed_assignments = 0
+            batch_size = getattr(app_config, 'DATA_AGENT_BATCH_SYMBOL_SIZE', 20)
+            symbols_list = list(allocated_symbols)
             
-            for symbol in allocated_symbols:
-                for interval in intervals:
-                    # 查找最适合的agent
-                    agent_key = await manager.find_best_agent(required_connections=1)
-                    if agent_key:
-                        ip, port = agent_key
-                        logger.debug("[DataManager] [初始分配] 尝试分配 %s %s 到 agent %s:%s", 
-                                   symbol, interval, ip, port)
+            # 按agent分组symbol
+            symbols_per_agent: Dict[tuple, List[str]] = {}
+            failed_symbols = []
+            
+            for symbol in symbols_list:
+                # 查找最适合的agent（需要7个连接，对应7个interval）
+                agent_key = await manager.find_best_agent(required_connections=7)
+                if agent_key:
+                    ip, port = agent_key
+                    if (ip, port) not in symbols_per_agent:
+                        symbols_per_agent[(ip, port)] = []
+                    symbols_per_agent[(ip, port)].append(symbol)
+                else:
+                    failed_symbols.append(symbol)
+            
+            total_success = 0
+            total_failed = 0
+            
+            # 批量下发指令到各个agent
+            for (ip, port), symbols in symbols_per_agent.items():
+                # 分批处理，每批不超过batch_size个symbol
+                for i in range(0, len(symbols), batch_size):
+                    batch_symbols = symbols[i:i + batch_size]
+                    logger.info(
+                        "[DataManager] [初始分配] 🚀 批量分配 %s 个 symbol 到 agent %s:%s (批次 %s/%s)",
+                        len(batch_symbols), ip, port,
+                        i // batch_size + 1, (len(symbols) + batch_size - 1) // batch_size
+                    )
+                    
+                    result = await manager.add_symbols_to_agent(ip, port, batch_symbols, batch_size)
+                    if result and result.get("status") == "ok":
+                        # 统计成功和失败数量
+                        results = result.get("results", [])
+                        for r in results:
+                            total_success += r.get("success_count", 0)
+                            total_failed += r.get("failed_count", 0)
                         
-                        success = await manager.add_stream_to_agent(ip, port, symbol, interval)
-                        if success:
-                            total_assignments += 1
-                            logger.debug("[DataManager] [初始分配] ✅ 成功分配 %s %s 到 %s:%s", 
-                                       symbol, interval, ip, port)
-                        else:
-                            failed_assignments += 1
-                            logger.warning("[DataManager] [初始分配] ⚠️  分配失败 %s %s 到 %s:%s", 
-                                         symbol, interval, ip, port)
+                        # 获取当前状态
+                        current_status = result.get("current_status", {})
+                        logger.info(
+                            "[DataManager] [初始分配] ✅ 批量分配完成，agent %s:%s 当前连接数: %s",
+                            ip, port, current_status.get("connection_count", 0)
+                        )
                     else:
-                        failed_assignments += 1
-                        logger.warning("[DataManager] [初始分配] ⚠️  没有可用的 agent 用于 %s %s", 
-                                     symbol, interval)
+                        # 批量失败，每个symbol算7个失败
+                        total_failed += len(batch_symbols) * 7
+                        logger.warning(
+                            "[DataManager] [初始分配] ⚠️  批量分配失败，agent %s:%s",
+                            ip, port
+                        )
+            
+            # 统计失败（没有可用agent的symbol）
+            total_failed += len(failed_symbols) * 7
             
             logger.info("[DataManager] 📊 初始分配统计: 成功 %s, 失败 %s", 
-                      total_assignments, failed_assignments)
+                      total_success, total_failed)
             logger.info("[DataManager] ✅ 初始 agent 分配完成")
     except Exception as e:
         logger.error("[DataManager] ❌ 初始同步失败: %s", e, exc_info=True)
