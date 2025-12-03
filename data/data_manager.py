@@ -30,7 +30,7 @@ if str(project_root) not in sys.path:
     sys.path.insert(0, str(project_root))
 
 import common.config as app_config
-from .data_agent_manager import DataAgentManager, run_manager_http_server
+from data.data_agent_manager import DataAgentManager, run_manager_http_server
 from common.database_clickhouse import ClickHouseDatabase
 
 logger = logging.getLogger(__name__)

@@ -35,20 +35,23 @@ def _lazy_import_market_streams():
 
 def _lazy_import_kline_cleanup():
     """延迟导入kline_cleanup模块"""
-    from .kline_cleanup import run_cleanup_scheduler
-    return run_cleanup_scheduler
+    import importlib
+    module = importlib.import_module('async.kline_cleanup')
+    return module.run_cleanup_scheduler
 
 
 def _lazy_import_price_refresh():
     """延迟导入price_refresh_service模块"""
-    from .price_refresh_service import run_price_refresh_scheduler
-    return run_price_refresh_scheduler
+    import importlib
+    module = importlib.import_module('async.price_refresh_service')
+    return module.run_price_refresh_scheduler
 
 
 def _lazy_import_leaderboard_cleanup():
     """延迟导入leaderboard_cleanup模块"""
-    from .leaderboard_cleanup import run_cleanup_scheduler
-    return run_cleanup_scheduler
+    import importlib
+    module = importlib.import_module('async.leaderboard_cleanup')
+    return module.run_cleanup_scheduler
 
 
 async def _run_market_tickers(duration: Optional[int] = None) -> None:
