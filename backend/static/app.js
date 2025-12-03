@@ -2765,13 +2765,428 @@ class TradingApp {
 
 // ============ K线图组件 ============
 
+/**
+ * 自定义数据接入类
+ * 实现 KLineChart Pro 版本的数据接入接口
+ */
+class CustomDatafeed {
+    constructor() {
+        this.socket = null;
+        this.subscriptions = new Map(); // 存储订阅信息: key = `${symbol.ticker}:${period.text}`, value = { callback, symbol, period }
+        this.marketPrices = []; // 缓存市场行情数据
+    }
+
+    /**
+     * 模糊搜索标的
+     * @param {string} search - 搜索关键词
+     * @returns {Promise<SymbolInfo[]>}
+     */
+    async searchSymbols(search = '') {
+        try {
+            console.log('[CustomDatafeed] Searching symbols:', search);
+            
+            // 获取市场行情数据
+            if (this.marketPrices.length === 0) {
+                const response = await fetch('/api/market/prices');
+                const result = await response.json();
+                if (result.data) {
+                    this.marketPrices = Object.keys(result.data).map(symbol => ({
+                        symbol,
+                        name: result.data[symbol].name || `${symbol}永续合约`,
+                        contract_symbol: result.data[symbol].contract_symbol || symbol
+                    }));
+                }
+            }
+
+            // 过滤匹配的标的
+            const searchUpper = search.toUpperCase();
+            const matched = this.marketPrices
+                .filter(item => {
+                    const symbol = item.symbol.toUpperCase();
+                    const name = (item.name || '').toUpperCase();
+                    return symbol.includes(searchUpper) || name.includes(searchUpper);
+                })
+                .slice(0, 20); // 限制返回数量
+
+            // 转换为 SymbolInfo 格式
+            const symbols = matched.map(item => ({
+                ticker: item.contract_symbol || item.symbol,
+                shortName: item.symbol.replace('USDT', ''),
+                name: item.name || `${item.symbol}永续合约`,
+                exchange: 'BINANCE',
+                market: 'futures',
+                priceCurrency: 'usd',
+                type: 'PERPETUAL'
+            }));
+
+            console.log('[CustomDatafeed] Found symbols:', symbols.length);
+            return symbols;
+        } catch (error) {
+            console.error('[CustomDatafeed] Error searching symbols:', error);
+            return [];
+        }
+    }
+
+    /**
+     * 获取历史K线数据
+     * @param {SymbolInfo} symbol - 标的信息
+     * @param {Period} period - 周期信息
+     * @param {number} from - 开始时间戳（毫秒）
+     * @param {number} to - 结束时间戳（毫秒）
+     * @returns {Promise<KLineData[]>}
+     */
+    async getHistoryKLineData(symbol, period, from, to) {
+        try {
+            console.log('[CustomDatafeed] Getting history K-line data:', {
+                ticker: symbol?.ticker || symbol,
+                period: period?.text || period,
+                from: new Date(from).toISOString(),
+                to: new Date(to).toISOString()
+            });
+
+            // 将 period 转换为后端支持的 interval
+            const interval = this.periodToInterval(period);
+            if (!interval) {
+                console.warn('[CustomDatafeed] Unsupported period:', period);
+                return [];
+            }
+
+            // 获取 ticker（支持 symbol 对象或字符串）
+            const ticker = symbol?.ticker || symbol;
+            if (!ticker) {
+                console.warn('[CustomDatafeed] Invalid symbol:', symbol);
+                return [];
+            }
+
+            // 计算需要的数据量（根据时间范围估算，但后端限制最多500条）
+            const limit = 500;
+
+            // 将时间戳转换为 ISO 格式字符串（后端期望的格式）
+            const startTimeISO = new Date(from).toISOString();
+            const endTimeISO = new Date(to).toISOString();
+
+            // 调用后端 API 获取 K 线数据
+            const params = new URLSearchParams({
+                symbol: ticker,
+                interval: interval,
+                limit: limit.toString()
+            });
+            if (startTimeISO) params.append('start_time', startTimeISO);
+            if (endTimeISO) params.append('end_time', endTimeISO);
+
+            const response = await fetch(`/api/market/klines?${params.toString()}`);
+            const result = await response.json();
+
+            if (!result || !result.data || !Array.isArray(result.data)) {
+                console.warn('[CustomDatafeed] Invalid response format:', result);
+                return [];
+            }
+
+            // 转换数据格式并过滤时间范围
+            const klines = result.data
+                .map(kline => {
+                    // 处理时间戳：确保是数字类型（毫秒）
+                    let timestamp = kline.timestamp;
+                    
+                    if (timestamp === null || timestamp === undefined) {
+                        if (kline.kline_start_time) {
+                            timestamp = typeof kline.kline_start_time === 'number' 
+                                ? kline.kline_start_time 
+                                : new Date(kline.kline_start_time).getTime();
+                        } else if (kline.kline_end_time) {
+                            timestamp = typeof kline.kline_end_time === 'number'
+                                ? kline.kline_end_time
+                                : new Date(kline.kline_end_time).getTime();
+                        } else {
+                            return null;
+                        }
+                    } else if (typeof timestamp === 'string') {
+                        timestamp = new Date(timestamp).getTime();
+                        if (isNaN(timestamp)) {
+                            return null;
+                        }
+                    } else if (typeof timestamp !== 'number') {
+                        return null;
+                    }
+
+                    // 确保时间戳是毫秒
+                    if (timestamp < 1e12) {
+                        timestamp = timestamp * 1000;
+                    }
+
+                    // 过滤时间范围
+                    if (timestamp < from || timestamp > to) {
+                        return null;
+                    }
+
+                    // 转换价格和成交量数据
+                    const open = parseFloat(kline.open);
+                    const high = parseFloat(kline.high);
+                    const low = parseFloat(kline.low);
+                    const close = parseFloat(kline.close);
+                    const volume = parseFloat(kline.volume) || 0;
+
+                    // 验证数据有效性
+                    if (isNaN(open) || isNaN(high) || isNaN(low) || isNaN(close) || close <= 0) {
+                        return null;
+                    }
+
+                    // 确保 high >= max(open, close) 和 low <= min(open, close)
+                    const maxPrice = Math.max(open, close);
+                    const minPrice = Math.min(open, close);
+                    const validHigh = Math.max(high, maxPrice);
+                    const validLow = Math.min(low, minPrice);
+
+                    return {
+                        timestamp: Math.floor(timestamp),
+                        open: open,
+                        high: validHigh,
+                        low: validLow,
+                        close: close,
+                        volume: volume
+                    };
+                })
+                .filter(kline => kline !== null && kline.timestamp > 0)
+                .sort((a, b) => a.timestamp - b.timestamp); // 按时间升序排序
+
+            console.log('[CustomDatafeed] Loaded K-line data:', {
+                total: klines.length,
+                firstTimestamp: klines.length > 0 ? new Date(klines[0].timestamp).toISOString() : null,
+                lastTimestamp: klines.length > 0 ? new Date(klines[klines.length - 1].timestamp).toISOString() : null
+            });
+
+            return klines;
+        } catch (error) {
+            console.error('[CustomDatafeed] Error getting history K-line data:', error);
+            return [];
+        }
+    }
+
+    /**
+     * 订阅标的在某个周期的实时数据
+     * @param {SymbolInfo} symbol - 标的信息
+     * @param {Period} period - 周期信息
+     * @param {Function} callback - 数据回调函数
+     */
+    subscribe(symbol, period, callback) {
+        try {
+            const ticker = symbol?.ticker || symbol;
+            const periodText = period?.text || period;
+            
+            console.log('[CustomDatafeed] Subscribing to real-time data:', {
+                ticker,
+                period: periodText
+            });
+
+            // 确保 WebSocket 连接已建立
+            if (!this.socket && window.app && window.app.socket) {
+                this.socket = window.app.socket;
+                
+                // 监听实时 K 线更新
+                this.socket.on('klines:update', (data) => {
+                    try {
+                        const symbol = data.symbol || data.ticker;
+                        const interval = data.interval || data.period;
+                        const key = `${symbol}:${interval}`;
+                        const subscription = this.subscriptions.get(key);
+                        
+                        if (subscription && subscription.callback) {
+                            const kline = data.kline || data.data || data;
+                            
+                            // 处理时间戳
+                            let timestamp = kline.timestamp;
+                            if (typeof timestamp === 'string') {
+                                timestamp = new Date(timestamp).getTime();
+                            } else if (typeof timestamp !== 'number') {
+                                if (kline.kline_start_time) {
+                                    timestamp = typeof kline.kline_start_time === 'number'
+                                        ? kline.kline_start_time
+                                        : new Date(kline.kline_start_time).getTime();
+                                } else if (kline.kline_end_time) {
+                                    timestamp = typeof kline.kline_end_time === 'number'
+                                        ? kline.kline_end_time
+                                        : new Date(kline.kline_end_time).getTime();
+                                } else {
+                                    timestamp = Date.now();
+                                }
+                            }
+                            
+                            // 确保时间戳是毫秒
+                            if (timestamp < 1e12) {
+                                timestamp = timestamp * 1000;
+                            }
+
+                            // 转换数据格式
+                            const klineData = {
+                                timestamp: Math.floor(timestamp),
+                                open: parseFloat(kline.open) || 0,
+                                high: parseFloat(kline.high) || 0,
+                                low: parseFloat(kline.low) || 0,
+                                close: parseFloat(kline.close) || 0,
+                                volume: parseFloat(kline.volume) || 0
+                            };
+                            
+                            // 验证数据有效性
+                            if (klineData.timestamp > 0 && klineData.close > 0) {
+                                subscription.callback(klineData);
+                            }
+                        }
+                    } catch (error) {
+                        console.error('[CustomDatafeed] Error processing real-time K-line update:', error);
+                    }
+                });
+            }
+
+            // 将 period 转换为后端支持的 interval
+            const interval = this.periodToInterval(period);
+            if (!interval) {
+                console.warn('[CustomDatafeed] Unsupported period for subscription:', period);
+                return;
+            }
+
+            // 存储订阅信息
+            const key = `${ticker}:${interval}`;
+            this.subscriptions.set(key, {
+                callback,
+                symbol,
+                period,
+                interval
+            });
+
+            // 向后端发送订阅请求
+            if (this.socket && this.socket.connected) {
+                this.socket.emit('klines:subscribe', {
+                    symbol: ticker,
+                    interval: interval
+                });
+                console.log('[CustomDatafeed] Subscription sent to backend:', { symbol: ticker, interval });
+            } else if (this.socket) {
+                // 等待连接后发送订阅
+                this.socket.once('connect', () => {
+                    this.socket.emit('klines:subscribe', {
+                        symbol: ticker,
+                        interval: interval
+                    });
+                    console.log('[CustomDatafeed] Subscription sent after connection:', { symbol: ticker, interval });
+                });
+            }
+        } catch (error) {
+            console.error('[CustomDatafeed] Error subscribing:', error);
+        }
+    }
+
+    /**
+     * 取消订阅标的在某个周期的实时数据
+     * @param {SymbolInfo} symbol - 标的信息
+     * @param {Period} period - 周期信息
+     */
+    unsubscribe(symbol, period) {
+        try {
+            const ticker = symbol?.ticker || symbol;
+            const periodText = period?.text || period;
+            
+            console.log('[CustomDatafeed] Unsubscribing from real-time data:', {
+                ticker,
+                period: periodText
+            });
+
+            // 将 period 转换为后端支持的 interval
+            const interval = this.periodToInterval(period);
+            if (!interval) {
+                console.warn('[CustomDatafeed] Cannot unsubscribe: invalid interval for period:', period);
+                return;
+            }
+
+            // 移除订阅信息
+            const key = `${ticker}:${interval}`;
+            const hadSubscription = this.subscriptions.has(key);
+            this.subscriptions.delete(key);
+
+            // 向后端发送取消订阅请求
+            if (this.socket && this.socket.connected && hadSubscription) {
+                this.socket.emit('klines:unsubscribe', {
+                    symbol: ticker,
+                    interval: interval
+                });
+                console.log('[CustomDatafeed] Unsubscription sent to backend:', { symbol: ticker, interval });
+            }
+        } catch (error) {
+            console.error('[CustomDatafeed] Error unsubscribing:', error);
+        }
+    }
+
+    /**
+     * 将 Pro 版本的 Period 转换为后端支持的 interval
+     * @param {Period} period - Pro 版本的周期对象
+     * @returns {string|null} - 后端支持的 interval 字符串
+     */
+    periodToInterval(period) {
+        if (!period) {
+            return null;
+        }
+
+        // 如果 period 是字符串，直接返回
+        if (typeof period === 'string') {
+            return period;
+        }
+
+        // 如果 period 有 text 属性，使用 text
+        if (period.text) {
+            const periodMap = {
+                '1m': '1m',
+                '3m': '3m',
+                '5m': '5m',
+                '15m': '15m',
+                '30m': '30m',
+                '1h': '1h',
+                '2h': '2h',
+                '4h': '4h',
+                '6h': '6h',
+                '12h': '12h',
+                '1d': '1d',
+                '1w': '1w'
+            };
+            return periodMap[period.text] || null;
+        }
+
+        // 如果 period 有 multiplier 和 timespan，尝试构建
+        if (period.multiplier && period.timespan) {
+            const timespanMap = {
+                'minute': 'm',
+                'hour': 'h',
+                'day': 'd',
+                'week': 'w'
+            };
+            const suffix = timespanMap[period.timespan];
+            if (suffix) {
+                return `${period.multiplier}${suffix}`;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * 清理资源
+     */
+    destroy() {
+        // 取消所有订阅
+        for (const [key, subscription] of this.subscriptions.entries()) {
+            this.unsubscribe(subscription.symbol, subscription.period);
+        }
+        this.subscriptions.clear();
+    }
+}
+
+/**
+ * K线图管理器 - 使用 KLineChartPro
+ */
 class KLineChartManager {
     constructor() {
         this.chart = null;
+        this.datafeed = null;
         this.currentSymbol = null;
         this.currentInterval = '5m';
-        this.subscribedRooms = new Set();
-        this.historicalDataLoaded = false;
     }
 
     /**
@@ -2781,146 +3196,91 @@ class KLineChartManager {
      * @param {string} interval - 时间间隔
      */
     init(containerId, symbol, interval = '5m') {
-        // 检查KLineChart是否加载
-        if (typeof klinecharts === 'undefined' && typeof window.klinecharts === 'undefined') {
-            console.error('KLineChart library not loaded');
+        // 检查KLineChartPro是否加载
+        if (typeof klinechartspro === 'undefined' && typeof window.klinechartspro === 'undefined') {
+            console.error('[KLineChartPro] Library not loaded');
+            return;
+        }
+
+        const KLineChartPro = klinechartspro?.KLineChartPro || window.klinechartspro?.KLineChartPro;
+        if (!KLineChartPro) {
+            console.error('[KLineChartPro] KLineChartPro class not found');
             return;
         }
 
         this.currentSymbol = symbol;
         this.currentInterval = interval;
-        this.historicalDataLoaded = false;
 
         // 获取容器元素
         const container = document.getElementById(containerId);
         if (!container) {
-            console.error(`Container ${containerId} not found`);
+            console.error(`[KLineChartPro] Container ${containerId} not found`);
             return;
         }
 
-        // 创建图表实例 - 使用正确的API
-        const initFn = klinecharts?.init || window.klinecharts?.init;
-        if (!initFn) {
-            console.error('KLineChart init function not found');
-            return;
-        }
+        // 清空容器
+        container.innerHTML = '';
 
-        this.chart = initFn(container);
-        
-        // 设置主题为暗色
-        if (this.chart.setTheme) {
-            this.chart.setTheme('dark');
-        }
+        // 创建自定义数据接入实例
+        this.datafeed = new CustomDatafeed();
 
-        // 添加技术指标
-        this.addIndicators();
-
-        // 加载历史数据
-        this.loadHistoricalData(symbol, interval);
-
-        // 订阅实时数据
-        this.subscribeRealtimeData(symbol, interval);
-    }
-
-    /**
-     * 添加技术指标
-     */
-    addIndicators() {
-        if (!this.chart) return;
-
-        // 添加MA均线
-        this.chart.createIndicator('MA', false, { id: 'candle_pane' });
-        
-        // 添加MACD
-        this.chart.createIndicator('MACD', false);
-        
-        // 添加RSI
-        this.chart.createIndicator('RSI', false);
-        
-        // 添加VOL成交量
-        this.chart.createIndicator('VOL', false);
-    }
-
-    /**
-     * 加载历史K线数据
-     * @param {string} symbol - 交易对符号
-     * @param {string} interval - 时间间隔
-     */
-    async loadHistoricalData(symbol, interval) {
-        try {
-            const response = await fetch(`/api/market/klines?symbol=${symbol}&interval=${interval}&limit=500`);
-            const result = await response.json();
-            
-            if (result.data && result.data.length > 0) {
-                // 转换数据格式为KLineChart需要的格式
-                const klineData = result.data.map(item => ({
-                    timestamp: item.timestamp,
-                    open: item.open,
-                    high: item.high,
-                    low: item.low,
-                    close: item.close,
-                    volume: item.volume,
-                    turnover: item.turnover
-                }));
-
-                // 应用数据到图表
-                this.chart.applyNewData(klineData);
-                this.historicalDataLoaded = true;
-                
-                console.log(`[KLineChart] Loaded ${klineData.length} historical klines for ${symbol} ${interval}`);
-            }
-        } catch (error) {
-            console.error('[KLineChart] Failed to load historical data:', error);
-        }
-    }
-
-    /**
-     * 订阅实时K线数据
-     * @param {string} symbol - 交易对符号
-     * @param {string} interval - 时间间隔
-     */
-    subscribeRealtimeData(symbol, interval) {
-        if (!window.app || !window.app.socket) {
-            console.error('[KLineChart] Socket not available');
-            return;
-        }
-
-        const room = `${symbol}:${interval}`;
-        if (this.subscribedRooms.has(room)) {
-            return; // 已经订阅
-        }
-
-        // 订阅WebSocket
-        window.app.socket.emit('klines:subscribe', { symbol, interval });
-        this.subscribedRooms.add(room);
-
-        // 监听实时K线更新
-        window.app.socket.on('klines:update', (data) => {
-            if (data.symbol === symbol && data.interval === interval) {
-                this.updateKline(data.kline);
-            }
-        });
-    }
-
-    /**
-     * 更新K线数据
-     * @param {object} klineData - K线数据
-     */
-    updateKline(klineData) {
-        if (!this.chart) return;
-
-        const kline = {
-            timestamp: klineData.timestamp,
-            open: klineData.open,
-            high: klineData.high,
-            low: klineData.low,
-            close: klineData.close,
-            volume: klineData.volume,
-            turnover: klineData.turnover
+        // 将 symbol 字符串转换为 SymbolInfo 对象
+        const symbolInfo = {
+            ticker: symbol,
+            shortName: symbol.replace('USDT', ''),
+            name: `${symbol}永续合约`,
+            exchange: 'BINANCE',
+            market: 'futures',
+            priceCurrency: 'usd',
+            type: 'PERPETUAL'
         };
 
-        // 更新或添加K线
-        this.chart.updateData(kline);
+        // 将 interval 字符串转换为 Period 对象
+        const period = this.intervalToPeriod(interval);
+
+        console.log('[KLineChartPro] Initializing chart:', {
+            symbol: symbolInfo,
+            period: period,
+            containerId: containerId
+        });
+
+        // 创建 KLineChartPro 实例
+        try {
+            this.chart = new KLineChartPro({
+                container: container,
+                symbol: symbolInfo,
+                period: period,
+                datafeed: this.datafeed
+            });
+
+            console.log('[KLineChartPro] Chart initialized successfully');
+        } catch (error) {
+            console.error('[KLineChartPro] Failed to create chart instance:', error);
+            this.chart = null;
+        }
+    }
+
+    /**
+     * 将 interval 字符串转换为 Period 对象
+     * @param {string} interval - 时间间隔字符串（如 '5m', '1h'）
+     * @returns {Period} - Period 对象
+     */
+    intervalToPeriod(interval) {
+        const periodMap = {
+            '1m': { multiplier: 1, timespan: 'minute', text: '1m' },
+            '3m': { multiplier: 3, timespan: 'minute', text: '3m' },
+            '5m': { multiplier: 5, timespan: 'minute', text: '5m' },
+            '15m': { multiplier: 15, timespan: 'minute', text: '15m' },
+            '30m': { multiplier: 30, timespan: 'minute', text: '30m' },
+            '1h': { multiplier: 1, timespan: 'hour', text: '1h' },
+            '2h': { multiplier: 2, timespan: 'hour', text: '2h' },
+            '4h': { multiplier: 4, timespan: 'hour', text: '4h' },
+            '6h': { multiplier: 6, timespan: 'hour', text: '6h' },
+            '12h': { multiplier: 12, timespan: 'hour', text: '12h' },
+            '1d': { multiplier: 1, timespan: 'day', text: '1d' },
+            '1w': { multiplier: 1, timespan: 'week', text: '1w' }
+        };
+        return periodMap[interval] || periodMap['5m'];
     }
 
     /**
@@ -2928,26 +3288,25 @@ class KLineChartManager {
      * @param {string} interval - 新的时间间隔
      */
     async switchInterval(interval) {
-        if (this.currentInterval === interval) return;
-
-        // 取消之前的订阅
-        if (this.currentSymbol && this.currentInterval) {
-            const oldRoom = `${this.currentSymbol}:${this.currentInterval}`;
-            if (window.app && window.app.socket) {
-                window.app.socket.emit('klines:unsubscribe', {
-                    symbol: this.currentSymbol,
-                    interval: this.currentInterval
-                });
-            }
-            this.subscribedRooms.delete(oldRoom);
-        }
+        if (this.currentInterval === interval || !this.chart) return;
 
         this.currentInterval = interval;
+        const period = this.intervalToPeriod(interval);
 
-        // 重新加载数据
-        if (this.currentSymbol) {
-            await this.loadHistoricalData(this.currentSymbol, interval);
-            this.subscribeRealtimeData(this.currentSymbol, interval);
+        try {
+            // 使用 setPeriod 方法切换周期
+            if (typeof this.chart.setPeriod === 'function') {
+                this.chart.setPeriod(period);
+                console.log('[KLineChartPro] Period changed successfully:', period);
+            } else {
+                console.warn('[KLineChartPro] setPeriod method not available, reinitializing chart');
+                // 如果 setPeriod 不可用，重新初始化图表
+                const containerId = this.chart.container?.id || 'klineChartContainer';
+                this.destroy();
+                this.init(containerId, this.currentSymbol, interval);
+            }
+        } catch (error) {
+            console.error('[KLineChartPro] Error changing period:', error);
         }
     }
 
@@ -2955,24 +3314,28 @@ class KLineChartManager {
      * 销毁图表
      */
     destroy() {
-        // 取消所有订阅
-        if (window.app && window.app.socket) {
-            this.subscribedRooms.forEach(room => {
-                const [symbol, interval] = room.split(':');
-                window.app.socket.emit('klines:unsubscribe', { symbol, interval });
-            });
+        // 销毁数据接入
+        if (this.datafeed) {
+            this.datafeed.destroy();
+            this.datafeed = null;
         }
-        this.subscribedRooms.clear();
 
         // 销毁图表
         if (this.chart) {
-            this.chart.destroy();
+            try {
+                if (typeof this.chart.destroy === 'function') {
+                    this.chart.destroy();
+                } else if (typeof this.chart.dispose === 'function') {
+                    this.chart.dispose();
+                }
+            } catch (error) {
+                console.error('[KLineChartPro] Error destroying chart:', error);
+            }
             this.chart = null;
         }
 
         this.currentSymbol = null;
         this.currentInterval = '5m';
-        this.historicalDataLoaded = false;
     }
 }
 
@@ -2981,6 +3344,11 @@ TradingApp.prototype.openKlineChart = function(symbol, contractSymbol = null) {
     const displaySymbol = contractSymbol || symbol;
     const modal = document.getElementById('klineModal');
     const title = document.getElementById('klineModalTitle');
+    
+    if (!modal || !title) {
+        console.error('[KLineChart] Modal elements not found');
+        return;
+    }
     
     title.textContent = `${displaySymbol} - K线图`;
     modal.style.display = 'block';
@@ -2991,28 +3359,42 @@ TradingApp.prototype.openKlineChart = function(symbol, contractSymbol = null) {
     }
 
     // 使用合约符号（如果有）或基础符号
-    const chartSymbol = contractSymbol || `${symbol}USDT`;
-    this.klineChartManager.init('klineChartContainer', chartSymbol, '5m');
+    const chartSymbol = contractSymbol || (symbol.includes('USDT') ? symbol : `${symbol}USDT`);
+    
+    // 等待模态框完全显示后再初始化图表
+    setTimeout(() => {
+        this.klineChartManager.init('klineChartContainer', chartSymbol, '5m');
+    }, 100);
 
-    // 绑定时间间隔切换事件
+    // 绑定时间间隔切换事件（移除旧的事件监听器，避免重复绑定）
     const timeframeBtns = document.querySelectorAll('.timeframe-btn');
     timeframeBtns.forEach(btn => {
-        btn.addEventListener('click', (e) => {
+        // 移除旧的事件监听器
+        const newBtn = btn.cloneNode(true);
+        btn.parentNode.replaceChild(newBtn, btn);
+        
+        // 添加新的事件监听器
+        newBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
             timeframeBtns.forEach(b => b.classList.remove('active'));
-            btn.classList.add('active');
-            const interval = btn.dataset.interval;
-            this.klineChartManager.switchInterval(interval);
+            newBtn.classList.add('active');
+            const interval = newBtn.dataset.interval;
+            if (this.klineChartManager) {
+                this.klineChartManager.switchInterval(interval);
+            }
         });
     });
 
     // 绑定关闭事件
     const closeBtn = document.getElementById('klineModalClose');
-    closeBtn.onclick = () => {
-        modal.style.display = 'none';
-        if (this.klineChartManager) {
-            this.klineChartManager.destroy();
-        }
-    };
+    if (closeBtn) {
+        closeBtn.onclick = () => {
+            modal.style.display = 'none';
+            if (this.klineChartManager) {
+                this.klineChartManager.destroy();
+            }
+        };
+    }
 
     // 点击外部关闭
     modal.onclick = (e) => {
