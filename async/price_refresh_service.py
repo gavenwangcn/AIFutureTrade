@@ -35,9 +35,9 @@ import sys
 from datetime import datetime, timezone, timedelta
 from typing import List, Optional
 
-import config as app_config
-from binance_futures import BinanceFuturesClient
-from database_clickhouse import ClickHouseDatabase
+import common.config as app_config
+from common.binance_futures import BinanceFuturesClient
+from common.database_clickhouse import ClickHouseDatabase
 
 logger = logging.getLogger(__name__)
 

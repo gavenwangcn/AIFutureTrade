@@ -84,7 +84,7 @@ services:
       context: .
       dockerfile: Dockerfile
     container_name: aifuturetrade-async-agent
-    command: ["python", "async_agent.py", "--task", "all"]
+    command: ["python", "async/async_agent.py", "--task", "all"]
     # 注意：async-agent 是后台数据同步服务，不需要暴露端口
     volumes:
       - ./data:/app/data
@@ -120,20 +120,62 @@ services:
       - aifuturetrade-network
 
   # ============================================================================
+  # Data Manager服务（数据代理管理器）
+  # ============================================================================
+  # 此服务负责管理所有 data_agent 实例，包括注册、心跳、任务分配等
+  data-manager:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: aifuturetrade-data-manager
+    command: ["python", "data/data_manager.py"]
+    # Data Manager服务端口（用于接收 data_agent 的注册和心跳）
+    ports:
+      - "8888:8888"  # Data Manager注册接口端口
+    volumes:
+      - ./data:/app/data
+    # 依赖 async-agent，确保 async-agent 先启动（提供 market_tickers 数据）
+    depends_on:
+      - async-agent
+    environment:
+      # ClickHouse配置
+      - CLICKHOUSE_HOST=${CLICKHOUSE_HOST}
+      - CLICKHOUSE_PORT=${CLICKHOUSE_PORT}
+      - CLICKHOUSE_USER=${CLICKHOUSE_USER}
+      - CLICKHOUSE_PASSWORD=${CLICKHOUSE_PASSWORD}
+      - CLICKHOUSE_DATABASE=${CLICKHOUSE_DATABASE}
+      - CLICKHOUSE_SECURE=${CLICKHOUSE_SECURE}
+      - CLICKHOUSE_MARKET_TICKER_TABLE=${CLICKHOUSE_MARKET_TICKER_TABLE}
+      - CLICKHOUSE_MARKET_KLINES_TABLE=${CLICKHOUSE_MARKET_KLINES_TABLE}
+      # Data Agent配置
+      - DATA_AGENT_MAX_CONNECTIONS=${DATA_AGENT_MAX_CONNECTIONS}
+      - DATA_AGENT_REGISTER_PORT=${DATA_AGENT_REGISTER_PORT}
+      - DATA_AGENT_HEARTBEAT_INTERVAL=${DATA_AGENT_HEARTBEAT_INTERVAL}
+      - DATA_AGENT_HEARTBEAT_TIMEOUT=${DATA_AGENT_HEARTBEAT_TIMEOUT}
+      - DATA_AGENT_SYMBOL_CHECK_INTERVAL=${DATA_AGENT_SYMBOL_CHECK_INTERVAL}
+      - DATA_AGENT_STATUS_CHECK_INTERVAL=${DATA_AGENT_STATUS_CHECK_INTERVAL}
+    restart: unless-stopped
+    networks:
+      - aifuturetrade-network
+
+  # ============================================================================
   # Data Agent服务（K线数据同步）
   # ============================================================================
+  # 注意：在 Docker 网络中，DATA_AGENT_REGISTER_IP 应设置为服务名 'data-manager'
   data-agent:
     build:
       context: .
       dockerfile: Dockerfile
     container_name: aifuturetrade-data-agent
-    command: ["python", "data_agent.py"]
+    command: ["python", "data/data_agent.py"]
     # Data Agent服务端口
     ports:
       - "9999:9999"  # Data Agent指令接口端口
     volumes:
       - ./data:/app/data
-    # 可选择性注册到async-agent，不强制依赖
+    # 依赖 data-manager，确保 data-manager 先启动（用于注册）
+    depends_on:
+      - data-manager
     environment:
       # ClickHouse配置
       - CLICKHOUSE_HOST=${CLICKHOUSE_HOST}
@@ -144,9 +186,11 @@ services:
       - CLICKHOUSE_SECURE=${CLICKHOUSE_SECURE}
       - CLICKHOUSE_MARKET_KLINES_TABLE=${CLICKHOUSE_MARKET_KLINES_TABLE}
       # Data Agent配置
+      # 注意：在 Docker 网络中，DATA_AGENT_REGISTER_IP 应设置为服务名 'data-manager'
+      # 如果未设置环境变量，使用 'data-manager' 作为默认值
       - DATA_AGENT_MAX_CONNECTIONS=${DATA_AGENT_MAX_CONNECTIONS}
       - DATA_AGENT_PORT=${DATA_AGENT_PORT}
-      - DATA_AGENT_REGISTER_IP=${DATA_AGENT_REGISTER_IP}
+      - DATA_AGENT_REGISTER_IP=${DATA_AGENT_REGISTER_IP:-data-manager}
       - DATA_AGENT_REGISTER_PORT=${DATA_AGENT_REGISTER_PORT}
       - DATA_AGENT_HEARTBEAT_INTERVAL=${DATA_AGENT_HEARTBEAT_INTERVAL}
       - DATA_AGENT_HEARTBEAT_TIMEOUT=${DATA_AGENT_HEARTBEAT_TIMEOUT}

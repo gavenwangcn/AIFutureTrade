@@ -1,4 +1,4 @@
-"""Manual connectivity test harness for binance_futures.BinanceFuturesClient.
+"""Manual connectivity test harness for common.binance_futures.BinanceFuturesClient.
 
 Usage:
     export BINANCE_API_KEY=...
@@ -7,7 +7,7 @@ Usage:
 
 This script first runs the official SDK sample (exchange_information) to verify
 that credentials, network access, and SDK wiring are correct. It then invokes
-key helper methods defined in binance_futures.BinanceFuturesClient and prints a
+key helper methods defined in common.binance_futures.BinanceFuturesClient and prints a
 few sample rows from each response so you can confirm live data is accessible.
 """
 
@@ -35,8 +35,10 @@ from binance_sdk_derivatives_trading_usds_futures.rest_api.models import (
     Ticker24hrPriceChangeStatisticsResponse,
 )
 
-from binance_futures import BinanceFuturesClient
-from config import BINANCE_API_KEY, BINANCE_API_SECRET
+from common.binance_futures import BinanceFuturesClient
+import common.config as config
+BINANCE_API_KEY = getattr(config, 'BINANCE_API_KEY', None)
+BINANCE_API_SECRET = getattr(config, 'BINANCE_API_SECRET', None)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -222,8 +224,8 @@ def exercise_binance_futures_client(api_key: str, api_secret: str) -> None:
     logging.info("Testing calculate_technical_indicators()...")
     try:
         # 导入MarketDataFetcher类
-        from market_data import MarketDataFetcher
-        from database_clickhouse import ClickHouseDatabase
+        from market.market_data import MarketDataFetcher
+        from common.database_clickhouse import ClickHouseDatabase
         import json
         
         # 创建MarketDataFetcher实例（需要数据库连接）

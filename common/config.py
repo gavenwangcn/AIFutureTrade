@@ -43,6 +43,7 @@ KLINE_CLEANUP_RETENTION_DAYS = int(os.getenv('KLINE_CLEANUP_RETENTION_DAYS', '14
 # Data Agent配置
 DATA_AGENT_MAX_CONNECTIONS = int(os.getenv('DATA_AGENT_MAX_CONNECTIONS', '1000'))  # 每个data_agent最多连接数
 DATA_AGENT_PORT = int(os.getenv('DATA_AGENT_PORT', '9999'))  # data_agent指令接口端口
+# data_agent注册IP：在Docker Compose中使用服务名 'async-agent'，本地开发使用 '127.0.0.1'
 DATA_AGENT_REGISTER_IP = os.getenv('DATA_AGENT_REGISTER_IP', '127.0.0.1')  # data_agent注册IP
 DATA_AGENT_REGISTER_PORT = int(os.getenv('DATA_AGENT_REGISTER_PORT', '8888'))  # data_agent注册端口
 DATA_AGENT_HEARTBEAT_INTERVAL = int(os.getenv('DATA_AGENT_HEARTBEAT_INTERVAL', '30'))  # 心跳间隔（秒）

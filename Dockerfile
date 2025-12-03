@@ -16,8 +16,13 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # 复制应用代码（排除frontend目录，由.dockerignore处理）
-# Python文件
-COPY *.py ./
+# 服务目录
+COPY backend/ backend/
+COPY async/ async/
+COPY data/ data/
+COPY common/ common/
+COPY trade/ trade/
+COPY market/ market/
 # 模板和静态文件目录
 COPY templates/ templates/
 COPY static/ static/
@@ -29,4 +34,4 @@ COPY derivatives_trading_usds_futures/ derivatives_trading_usds_futures/
 EXPOSE 5002
 
 # 使用gunicorn作为生产服务器
-CMD ["gunicorn", "--config", "gunicorn_config.py", "app:app"]
+CMD ["gunicorn", "--config", "gunicorn_config.py", "backend.app:app"]

@@ -1,10 +1,10 @@
-"""Executable integration checks for database_clickhouse.
+"""Executable integration checks for common.database_clickhouse.
 
 Run with:
 
     python tests/test_database_clickhouse.py
 
-The script reuses the main ClickHouse configuration from config.py and will
+The script reuses the main ClickHouse configuration from common.config and will
 exit with non-zero status if any check fails.
 """
 from __future__ import annotations
@@ -14,7 +14,7 @@ import sys
 import uuid
 from typing import Callable, List, Tuple
 
-from database_clickhouse import ClickHouseDatabase, MARKET_TICKER_TABLE
+from common.database_clickhouse import ClickHouseDatabase, MARKET_TICKER_TABLE
 
 
 def _require_clickhouse() -> ClickHouseDatabase:

@@ -9,7 +9,7 @@ from queue import Queue, Empty
 from typing import Any, Dict, Iterable, List, Optional, Callable, Tuple
 
 import clickhouse_connect
-import config as app_config
+import common.config as app_config
 
 MARKET_TICKER_TABLE = "24_market_tickers"
 LEADERBOARD_TABLE = "futures_leaderboard"

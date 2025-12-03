@@ -8,8 +8,8 @@ import logging
 import sys
 from datetime import datetime
 
-import config as app_config
-from database_clickhouse import ClickHouseDatabase
+import common.config as app_config
+from common.database_clickhouse import ClickHouseDatabase
 
 logger = logging.getLogger(__name__)
 

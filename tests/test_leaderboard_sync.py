@@ -4,8 +4,11 @@ Run with:
 
     python tests/test_leaderboard_sync.py
 
-The script reuses the main ClickHouse configuration from config.py and will
+The script reuses the main ClickHouse configuration from common.config and will
 exit with non-zero status if any check fails.
+
+Note: This test imports functions from backend.app, which requires the Flask
+application context to be properly initialized.
 """
 from __future__ import annotations
 
@@ -15,14 +18,14 @@ import threading
 import time
 from typing import Callable, List, Tuple
 
-from app import (
+from backend.app import (
     start_clickhouse_leaderboard_sync,
     stop_clickhouse_leaderboard_sync,
     clickhouse_leaderboard_stop_event,
     clickhouse_leaderboard_running,
     clickhouse_leaderboard_thread
 )
-from database_clickhouse import ClickHouseDatabase
+from common.database_clickhouse import ClickHouseDatabase
 
 
 def _require_clickhouse() -> ClickHouseDatabase:
@@ -50,7 +53,6 @@ def _check_leaderboard_sync_starts() -> None:
     assert not clickhouse_leaderboard_stop_event.is_set(), "Stop event should not be set after start"
     
     # Check that thread exists and is alive
-    from app import clickhouse_leaderboard_thread
     assert clickhouse_leaderboard_thread is not None, "Leaderboard thread should not be None"
     assert clickhouse_leaderboard_thread.is_alive(), "Leaderboard thread should be alive"
     

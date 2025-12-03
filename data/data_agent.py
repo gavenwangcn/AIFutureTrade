@@ -31,9 +31,9 @@ from binance_sdk_derivatives_trading_usds_futures.derivatives_trading_usds_futur
     DerivativesTradingUsdsFutures,
 )
 
-import config as app_config
-from database_clickhouse import ClickHouseDatabase
-from market_streams import _normalize_kline
+import common.config as app_config
+from common.database_clickhouse import ClickHouseDatabase
+from market.market_streams import _normalize_kline
 
 logger = logging.getLogger(__name__)
 
@@ -534,7 +534,9 @@ async def run_data_agent(
     # 等待服务器启动
     await asyncio.sleep(1)
     
-    # 注册到async_agent
+    # 注册到async_agent（带重试机制）
+    heartbeat_task_obj = None
+    register_retry_task_obj = None
     if register_ip and register_port:
         if not agent_ip:
             # 自动获取本机IP
@@ -546,29 +548,67 @@ async def run_data_agent(
             except Exception:
                 agent_ip = "127.0.0.1"
         
-        # 注册
-        registered = await register_to_async_agent(register_ip, register_port, agent_ip, command_port)
-        if registered:
-            logger.info("[DataAgent] Registered to async_agent at %s:%s", register_ip, register_port)
-        else:
-            logger.warning("[DataAgent] Failed to register to async_agent, will retry later")
+        # 使用 Event 来管理注册状态
+        registered_event = asyncio.Event()
+        register_retry_interval = 10  # 重试间隔（秒）
         
-        # 定期发送心跳
+        async def register_retry_task():
+            """注册重试任务，定期尝试注册直到成功"""
+            retry_count = 0
+            
+            while True:
+                try:
+                    retry_count += 1
+                    logger.info("[DataAgent] Attempting to register to async_agent at %s:%s (attempt %s)...", 
+                               register_ip, register_port, retry_count)
+                    
+                    success = await register_to_async_agent(register_ip, register_port, agent_ip, command_port)
+                    if success:
+                        registered_event.set()
+                        logger.info("[DataAgent] Successfully registered to async_agent at %s:%s", 
+                                   register_ip, register_port)
+                        break  # 注册成功，退出循环
+                    else:
+                        logger.warning("[DataAgent] Failed to register to async_agent, will retry in %s seconds", 
+                                      register_retry_interval)
+                        await asyncio.sleep(register_retry_interval)
+                except asyncio.CancelledError:
+                    raise
+                except Exception as e:
+                    logger.warning("[DataAgent] Registration attempt failed: %s, will retry in %s seconds", 
+                                  e, register_retry_interval)
+                    await asyncio.sleep(register_retry_interval)
+        
+        # 启动注册重试任务
+        register_retry_task_obj = asyncio.create_task(register_retry_task())
+        
+        # 定期发送心跳（仅在注册成功后）
         heartbeat_interval = getattr(app_config, 'DATA_AGENT_HEARTBEAT_INTERVAL', 30)
         
         async def heartbeat_task():
+            """心跳任务，等待注册成功后再开始发送心跳"""
+            # 等待注册成功
+            await registered_event.wait()
+            
+            # 注册成功后开始发送心跳
             while True:
                 try:
                     await asyncio.sleep(heartbeat_interval)
-                    await send_heartbeat(register_ip, register_port, agent_ip, command_port)
+                    success = await send_heartbeat(register_ip, register_port, agent_ip, command_port)
+                    if not success:
+                        # 心跳失败，可能连接已断开，尝试重新注册
+                        logger.warning("[DataAgent] Heartbeat failed, attempting to re-register...")
+                        registered_event.clear()
+                        # 重新启动注册任务
+                        asyncio.create_task(register_retry_task())
+                        # 等待重新注册成功
+                        await registered_event.wait()
                 except asyncio.CancelledError:
                     raise
                 except Exception as e:
                     logger.error("[DataAgent] Error in heartbeat task: %s", e, exc_info=True)
         
         heartbeat_task_obj = asyncio.create_task(heartbeat_task())
-    else:
-        heartbeat_task_obj = None
     
     # 定期清理过期连接
     async def cleanup_task():
@@ -588,6 +628,8 @@ async def run_data_agent(
         tasks = [command_task, cleanup_task_obj]
         if heartbeat_task_obj:
             tasks.append(heartbeat_task_obj)
+        if register_retry_task_obj:
+            tasks.append(register_retry_task_obj)
         await asyncio.gather(*tasks)
     except asyncio.CancelledError:
         raise
@@ -596,6 +638,8 @@ async def run_data_agent(
         cleanup_task_obj.cancel()
         if heartbeat_task_obj:
             heartbeat_task_obj.cancel()
+        if register_retry_task_obj:
+            register_retry_task_obj.cancel()
         await kline_manager.cleanup_all()
         logger.info("[DataAgent] Data agent stopped")
 

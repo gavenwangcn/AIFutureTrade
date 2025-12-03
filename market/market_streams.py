@@ -18,8 +18,8 @@ from binance_sdk_derivatives_trading_usds_futures.derivatives_trading_usds_futur
     DerivativesTradingUsdsFutures,
 )
 
-import config as app_config
-from database_clickhouse import ClickHouseDatabase
+import common.config as app_config
+from common.database_clickhouse import ClickHouseDatabase
 
 logger = logging.getLogger(__name__)
 
