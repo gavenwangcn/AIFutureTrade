@@ -154,7 +154,7 @@ async def kline_candlestick_streams():
         stream.on("message", enhanced_on_message)
         
         # 等待数据接收完成，最多等待60秒
-        print("[WebSocketTest] 等待接收K线数据，最多等待60秒...")
+        print("[WebSocketTest] 等待接收K线数据...")
         try:
             # 等待数据接收完成，最多等待60秒
             await asyncio.wait_for(data_received_event.wait(), timeout=60)
