@@ -2,9 +2,9 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
-
+ *
  * http://www.apache.org/licenses/LICENSE-2.0
-
+ *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -12,30 +12,23 @@
  * limitations under the License.
  */
 
-import { registerOverlay } from 'klinecharts'
+import { registerIndicator } from 'klinecharts'
 
-import overlays from './extension'
+import ma from './ma'
+import macd from './macd'
+import rsi from './rsi'
+import vol from './vol'
 
 // 注册自定义指标
-import '../indicators'
-
-import DefaultDatafeed from './DefaultDatafeed'
-import KLineChartPro from './KLineChartPro'
-
-import { load } from './i18n'
-
-import { Datafeed, SymbolInfo, Period, DatafeedSubscribeCallback, ChartProOptions, ChartPro } from './types'
-
-import './index.less'
-
-overlays.forEach(o => { registerOverlay(o) })
+registerIndicator(ma)
+registerIndicator(macd)
+registerIndicator(rsi)
+registerIndicator(vol)
 
 export {
-  DefaultDatafeed,
-  KLineChartPro,
-  load as loadLocales
+  ma,
+  macd,
+  rsi,
+  vol
 }
 
-export type {
-  Datafeed, SymbolInfo, Period, DatafeedSubscribeCallback, ChartProOptions, ChartPro
-}

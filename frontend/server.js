@@ -160,7 +160,41 @@ app.get('/lib/*', (req, res, next) => {
 });
 
 // ------------------------------------------------------------------------------
-// 6. 前端路由（SPA支持）
+// 6. /klinecharts-pro/ 路径文件服务（自定义构建的 klinecharts-pro）
+// ------------------------------------------------------------------------------
+// 提供 /klinecharts-pro/ 路径的文件服务
+// 优先使用挂载的构建产物，否则使用本地构建产物
+const klinechartsProDistPath = path.join(__dirname, 'klinecharts-pro-dist');
+const klinechartsProLocalPath = path.join(__dirname, '..', 'klinecharts-pro', 'dist');
+const klinechartsProPath = fs.existsSync(klinechartsProDistPath) 
+    ? klinechartsProDistPath 
+    : klinechartsProLocalPath;
+
+app.get('/klinecharts-pro/*', (req, res, next) => {
+    const filePath = req.path.replace('/klinecharts-pro/', '');
+    const fullPath = path.join(klinechartsProPath, filePath);
+    
+    // 安全检查：确保文件路径在dist目录内
+    if (!fullPath.startsWith(klinechartsProPath)) {
+        return res.status(403).send('Forbidden');
+    }
+    
+    if (fs.existsSync(fullPath) && fs.statSync(fullPath).isFile()) {
+        // 设置正确的Content-Type
+        const ext = path.extname(fullPath).toLowerCase();
+        if (ext === '.css') {
+            res.setHeader('Content-Type', 'text/css; charset=utf-8');
+        } else if (ext === '.js') {
+            res.setHeader('Content-Type', 'application/javascript; charset=utf-8');
+        }
+        res.sendFile(fullPath);
+    } else {
+        res.status(404).send(`File not found: ${req.path}`);
+    }
+});
+
+// ------------------------------------------------------------------------------
+// 7. 前端路由（SPA支持）
 // ------------------------------------------------------------------------------
 // 所有其他请求返回 index.html（用于前端路由）
 // 注意：必须在静态文件服务之后，Express会先尝试静态文件，找不到才到这里
@@ -170,9 +204,9 @@ app.get('*', (req, res, next) => {
     const staticExtensions = ['.css', '.js', '.svg', '.png', '.jpg', '.jpeg', '.gif', '.ico', '.woff', '.woff2', '.ttf', '.eot', '.json'];
     const ext = path.extname(req.path).toLowerCase();
     
-    // 排除特定路径（如 /api/, /socket.io/）
-    // 注意：/lib/ 路径已经在上面单独处理了
-    if (req.path.startsWith('/api/') || req.path.startsWith('/socket.io/')) {
+    // 排除特定路径（如 /api/, /socket.io/, /klinecharts-pro/）
+    // 注意：/lib/ 和 /klinecharts-pro/ 路径已经在上面单独处理了
+    if (req.path.startsWith('/api/') || req.path.startsWith('/socket.io/') || req.path.startsWith('/klinecharts-pro/')) {
         return res.status(404).send(`File not found: ${req.path}`);
     }
     

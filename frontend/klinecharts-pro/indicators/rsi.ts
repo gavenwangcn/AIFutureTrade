@@ -2,9 +2,9 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
-
+ *
  * http://www.apache.org/licenses/LICENSE-2.0
-
+ *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -14,11 +14,15 @@
 
 import { IndicatorTemplate, IndicatorSeries, LineType } from 'klinecharts'
 
+/**
+ * RSI（相对强弱指数）指标
+ * 支持 RSI6、RSI9
+ */
 const rsi: IndicatorTemplate = {
   name: 'RSI',
   shortName: 'RSI',
   series: IndicatorSeries.Normal,
-  calcParams: [6, 12, 24],
+  calcParams: [6, 9], // RSI6、RSI9
   precision: 2,
   shouldOhlc: false,
   shouldFormatBigNumber: false,
@@ -26,26 +30,24 @@ const rsi: IndicatorTemplate = {
   zLevel: 0,
   extendData: undefined,
   figures: [
-    { key: 'rsi1', title: 'RSI1', type: 'line' },
-    { key: 'rsi2', title: 'RSI2', type: 'line' },
-    { key: 'rsi3', title: 'RSI3', type: 'line' }
+    { key: 'rsi1', title: 'RSI6', type: 'line' },
+    { key: 'rsi2', title: 'RSI9', type: 'line' }
   ],
   minValue: 0,
   maxValue: 100,
   styles: {
     lines: [
       { color: '#FF9600', smooth: false, style: LineType.Solid, size: 1, dashedValue: [2, 2] },
-      { color: '#9D65C9', smooth: false, style: LineType.Solid, size: 1, dashedValue: [2, 2] },
-      { color: '#2196F3', smooth: false, style: LineType.Solid, size: 1, dashedValue: [2, 2] }
+      { color: '#9D65C9', smooth: false, style: LineType.Solid, size: 1, dashedValue: [2, 2] }
     ]
   },
   calc: (dataList, indicator) => {
     const { calcParams } = indicator
-    const result = []
+    const result: Array<Record<string, number>> = []
     
     // 计算每个周期的RSI值
     for (let i = 0; i < dataList.length; i++) {
-      const rsiValues = {}
+      const rsiValues: Record<string, number> = {}
       
       for (let j = 0; j < calcParams.length; j++) {
         const period = calcParams[j]

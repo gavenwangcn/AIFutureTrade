@@ -29,10 +29,58 @@
 </template>
 
 <script setup>
-import { ref, onMounted, onUnmounted, watch, nextTick } from 'vue'
-import { KLineChartPro } from '@klinecharts/pro'
-import '@klinecharts/pro/dist/klinecharts-pro.css'
+import { ref, onMounted, onUnmounted, watch, nextTick, onBeforeMount } from 'vue'
 import { CustomDatafeed } from '../utils/customDatafeed.js'
+
+// 动态加载自构建的 klinecharts-pro
+let KLineChartPro = null
+let klinechartsLoaded = false
+
+const loadKlinechartsPro = () => {
+  return new Promise((resolve, reject) => {
+    if (klinechartsLoaded && window.klinechartspro && window.klinechartspro.KLineChartPro) {
+      KLineChartPro = window.klinechartspro.KLineChartPro
+      resolve()
+      return
+    }
+
+    // 加载 CSS
+    const cssLink = document.createElement('link')
+    cssLink.rel = 'stylesheet'
+    cssLink.href = '/klinecharts-pro/klinecharts-pro.css'
+    document.head.appendChild(cssLink)
+
+    // 加载 klinecharts 基础库
+    const klinechartsScript = document.createElement('script')
+    klinechartsScript.src = '/klinecharts-pro/klinecharts.js'
+    klinechartsScript.onload = () => {
+      // 加载 klinecharts-pro
+      const proScript = document.createElement('script')
+      proScript.src = '/klinecharts-pro/klinecharts-pro.umd.js'
+      proScript.onload = () => {
+        if (window.klinechartspro && window.klinechartspro.KLineChartPro) {
+          KLineChartPro = window.klinechartspro.KLineChartPro
+          klinechartsLoaded = true
+          resolve()
+        } else {
+          reject(new Error('Failed to load KLineChartPro'))
+        }
+      }
+      proScript.onerror = () => reject(new Error('Failed to load klinecharts-pro.umd.js'))
+      document.body.appendChild(proScript)
+    }
+    klinechartsScript.onerror = () => reject(new Error('Failed to load klinecharts.js'))
+    document.body.appendChild(klinechartsScript)
+  })
+}
+
+onBeforeMount(async () => {
+  try {
+    await loadKlinechartsPro()
+  } catch (error) {
+    console.error('[KLineChart] Failed to load klinecharts-pro:', error)
+  }
+})
 
 // Props
 const props = defineProps({
@@ -95,6 +143,16 @@ const initChart = async () => {
   // Wait for DOM to be ready
   await nextTick()
   
+  // Ensure klinecharts-pro is loaded
+  if (!klinechartsLoaded || !KLineChartPro) {
+    try {
+      await loadKlinechartsPro()
+    } catch (error) {
+      console.error('[KLineChart] Failed to load klinecharts-pro:', error)
+      return
+    }
+  }
+  
   // Destroy existing chart if it exists
   destroyChart()
   
@@ -114,15 +172,27 @@ const initChart = async () => {
     const symbolInfo = symbolToSymbolInfo(props.symbol)
     const period = intervalToPeriod(currentInterval.value)
     
-    // Create KLineChartPro instance (following official documentation)
-// Set theme to light (default)
-chartInstance.value = new KLineChartPro({
-container: chartContainerRef.value,
-symbol: symbolInfo,
-period: period,
-datafeed: datafeedInstance.value,
-theme: 'light' // Explicitly set to light theme
-})
+    // Create KLineChartPro instance with default indicators
+    chartInstance.value = new KLineChartPro({
+      container: chartContainerRef.value,
+      symbol: symbolInfo,
+      period: period,
+      periods: [
+        { multiplier: 1, timespan: 'minute', text: '1m' },
+        { multiplier: 5, timespan: 'minute', text: '5m' },
+        { multiplier: 15, timespan: 'minute', text: '15m' },
+        { multiplier: 30, timespan: 'minute', text: '30m' },
+        { multiplier: 1, timespan: 'hour', text: '1h' },
+        { multiplier: 4, timespan: 'hour', text: '4h' },
+        { multiplier: 1, timespan: 'day', text: '1d' },
+        { multiplier: 1, timespan: 'week', text: '1w' }
+      ],
+      datafeed: datafeedInstance.value,
+      theme: 'light',
+      // 设置默认指标：主图指标 MA，副图指标 VOL
+      mainIndicators: ['MA'],
+      subIndicators: ['VOL']
+    })
     
     console.log('[KLineChart] Chart initialized successfully')
   } catch (error) {
@@ -356,5 +426,11 @@ onUnmounted(() => {
   --klinecharts-pro-text-color: #F8F8F8;
   --klinecharts-pro-text-second-color: #929AA5;
   --klinecharts-pro-border-color: #292929;
+}
+
+/* 确保全局样式正确加载 */
+:global(.klinecharts-pro) {
+  width: 100%;
+  height: 100%;
 }
 </style>

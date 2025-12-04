@@ -217,6 +217,7 @@ export class CustomDatafeed {
   /**
    * 订阅标的在某个周期的实时数据
    * 当标的和周期发生变化的时候触发
+   * 参考 klinecharts-pro/index.html 中的实现方式
    * @param {SymbolInfo} symbol - 标的信息
    * @param {Period} period - 周期信息
    * @param {Function} callback - 数据回调函数
@@ -292,8 +293,7 @@ export class CustomDatafeed {
                   timestamp: new Date(klineData.timestamp).toISOString()
                 })
                 
-                // Pro 版本的 callback 可能期望单个 K 线数据对象或数组
-                // 根据 Pro 版本的实现，通常传入单个对象
+                // Pro 版本的 callback 期望单个 K 线数据对象
                 subscription.callback(klineData)
               } else {
                 console.warn('[CustomDatafeed] Invalid real-time K-line data:', klineData)

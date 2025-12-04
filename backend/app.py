@@ -1316,7 +1316,18 @@ def handle_klines_subscribe(payload=None):
     from flask_socketio import join_room
     join_room(room)
     
-    logger.info(f"Client subscribed to klines: {symbol} {interval}")
+    # 记录订阅信息
+    with kline_push_lock:
+        kline_subscriptions[room] = {
+            'symbol': symbol,
+            'interval': interval,
+            'last_update_time': datetime.now()
+        }
+    
+    # 启动推送工作线程（如果还没有启动）
+    start_kline_push_worker()
+    
+    logger.info(f"Client subscribed to klines: {symbol} {interval}, room: {room}")
     emit('klines:subscribed', {'symbol': symbol, 'interval': interval})
 
 @socketio.on('klines:unsubscribe')
@@ -1330,8 +1341,19 @@ def handle_klines_unsubscribe(payload=None):
     from flask_socketio import leave_room
     leave_room(room)
     
-    logger.info(f"Client unsubscribed from klines: {symbol} {interval}")
+    # 移除订阅信息
+    with kline_push_lock:
+        if room in kline_subscriptions:
+            del kline_subscriptions[room]
+    
+    logger.info(f"Client unsubscribed from klines: {symbol} {interval}, room: {room}")
     emit('klines:unsubscribed', {'symbol': symbol, 'interval': interval})
+
+# K线实时推送相关变量
+kline_subscriptions = {}  # 存储订阅信息: {room: {symbol, interval, last_update_time}}
+kline_push_thread = None
+kline_push_stop_event = threading.Event()
+kline_push_lock = threading.Lock()
 
 def push_realtime_kline(symbol: str, interval: str):
     """推送实时K线数据到订阅的客户端"""
@@ -1370,6 +1392,55 @@ def push_realtime_kline(symbol: str, interval: str):
             
     except Exception as e:
         logger.error(f"Failed to push realtime kline for {symbol} {interval}: {e}", exc_info=True)
+
+def _kline_push_loop():
+    """后台循环任务：定期推送实时K线数据到订阅的客户端"""
+    thread_id = threading.current_thread().ident
+    logger.info(f"[KLine Push Worker-{thread_id}] K线实时推送循环启动")
+    
+    # 根据最小周期（1m）设置推送间隔
+    push_interval = 5  # 每5秒推送一次
+    
+    while not kline_push_stop_event.is_set():
+        try:
+            with kline_push_lock:
+                # 获取所有活跃的订阅
+                active_subscriptions = dict(kline_subscriptions)
+            
+            if not active_subscriptions:
+                # 没有订阅，等待一段时间后重试
+                kline_push_stop_event.wait(push_interval)
+                continue
+            
+            # 遍历所有订阅并推送数据
+            for room, subscription_info in active_subscriptions.items():
+                try:
+                    symbol = subscription_info.get('symbol')
+                    interval = subscription_info.get('interval')
+                    
+                    if symbol and interval:
+                        push_realtime_kline(symbol, interval)
+                except Exception as e:
+                    logger.error(f"[KLine Push Worker] Error pushing kline for {room}: {e}", exc_info=True)
+            
+            # 等待指定间隔
+            kline_push_stop_event.wait(push_interval)
+            
+        except Exception as e:
+            logger.error(f"[KLine Push Worker-{thread_id}] Error in push loop: {e}", exc_info=True)
+            kline_push_stop_event.wait(push_interval)
+    
+    logger.info(f"[KLine Push Worker-{thread_id}] K线实时推送循环停止")
+
+def start_kline_push_worker():
+    """启动K线实时推送工作线程"""
+    global kline_push_thread
+    if kline_push_thread and kline_push_thread.is_alive():
+        return
+    kline_push_stop_event.clear()
+    kline_push_thread = threading.Thread(target=_kline_push_loop, daemon=True, name="KLinePushWorker")
+    kline_push_thread.start()
+    logger.info("[KLine Push] K线实时推送工作线程已启动")
 
 # ============ Settings API Endpoints ============
 
