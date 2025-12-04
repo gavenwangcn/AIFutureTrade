@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # ==============================================================================
 # Docker Compose 配置文件
 # ==============================================================================
@@ -214,3 +215,78 @@ services:
 networks:
   aifuturetrade-network:
     driver: bridge
+=======
+# ==============================================================================
+# Docker Compose 配置文件
+# ==============================================================================
+# 注意：version字段在新版本Docker Compose中已废弃，但保留以兼容旧版本
+# 如果看到警告，可以安全地忽略或移除version字段
+# ==============================================================================
+
+services:
+  # ============================================================================
+  # 后端服务（Python Flask API）
+  # ============================================================================
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: aifuturetrade-backend
+    ports:
+      - "5002:5002"  # 后端API端口
+    volumes:
+      - ./data:/app/data
+    environment:
+      - DATABASE_PATH=/app/data/trading_bot.db
+      - USE_GUNICORN=true
+      - FLASK_ENV=production
+    restart: unless-stopped
+    networks:
+      - aifuturetrade-network
+
+  # ============================================================================
+  # 前端服务（Node.js Express）
+  # ============================================================================
+  frontend:
+    build:
+      context: .  # 使用项目根目录作为构建上下文，以便访问static目录
+      dockerfile: ./frontend/Dockerfile
+      # 注意：默认情况下，如果镜像已存在，docker compose up 不会重新构建
+      # 需要代码变化时重新构建，请使用: docker compose up -d --build
+    container_name: aifuturetrade-frontend
+    ports:
+      - "3000:3000"  # 前端服务端口
+    environment:
+      - BACKEND_URL=http://backend:5002
+      - FRONTEND_PORT=3000
+    depends_on:
+      - backend
+    restart: unless-stopped
+    networks:
+      - aifuturetrade-network
+
+  # ============================================================================
+  # 异步代理服务（后台数据同步）
+  # ============================================================================
+  async-agent:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: aifuturetrade-async-agent
+    command: ["python", "async_agent.py", "--task", "all"]
+    # 注意：async-agent 是后台数据同步服务，不需要暴露端口
+    volumes:
+      - ./data:/app/data
+    depends_on:
+      - backend
+    restart: unless-stopped
+    networks:
+      - aifuturetrade-network
+
+# ==============================================================================
+# 网络配置
+# ==============================================================================
+networks:
+  aifuturetrade-network:
+    driver: bridge
+>>>>>>> 67af25c5c7cb7448695b7e3844d3ee693d5c4712
