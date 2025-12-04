@@ -82,6 +82,9 @@ RUN if [ ! -d node_modules ]; then \
         exit 1; \
     fi
 
+# 修复可执行文件权限
+RUN find node_modules/.bin -type f -exec chmod +x {} \; 2>/dev/null || true
+
 # 复制源代码和配置文件
 COPY frontend/src/ ./src/
 COPY frontend/index.html ./
@@ -119,7 +122,8 @@ RUN if [ ! -f public/klinecharts-pro/klinecharts-pro.umd.js ] || \
     fi
 
 # 构建前端应用
-RUN npm run build
+# 直接使用 node 执行 vite，避免权限问题
+RUN node node_modules/vite/bin/vite.js build
 
 # 验证构建结果
 RUN if [ ! -d dist ]; then \
