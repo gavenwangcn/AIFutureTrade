@@ -41,12 +41,32 @@ RUN echo "[Dockerfile] =========================================" && \
 # 复制 klinecharts-pro 的 package.json 和 package-lock.json
 COPY frontend/klinecharts-pro/package.json frontend/klinecharts-pro/package-lock.json* ./klinecharts-pro/
 
-# 复制 klinecharts-pro 的 node_modules 目录（如果存在）
-# 注意：使用 COPY 命令复制整个 node_modules 目录
-COPY frontend/klinecharts-pro/node_modules ./klinecharts-pro/node_modules
-
 # 切换到 klinecharts-pro 目录
 WORKDIR /app/klinecharts-pro
+
+# 复制 klinecharts-pro 的 node_modules 目录（如果存在）
+# 注意：使用 RUN 命令检查并复制，因为 COPY 无法处理不存在的目录
+RUN if [ -d ../frontend/klinecharts-pro/node_modules ]; then \
+        echo "[Dockerfile] ✓ frontend/klinecharts-pro/node_modules found, copying..." && \
+        cp -r ../frontend/klinecharts-pro/node_modules ./node_modules && \
+        echo "[Dockerfile] ✓ node_modules copied successfully"; \
+    else \
+        echo "[Dockerfile] ⚠️  frontend/klinecharts-pro/node_modules not found, will install from registry"; \
+    fi
+
+# 如果 node_modules 不存在，从 registry 安装依赖
+RUN if [ ! -d node_modules ]; then \
+        echo "[Dockerfile] =========================================" && \
+        echo "[Dockerfile] Installing klinecharts-pro dependencies from registry" && \
+        echo "[Dockerfile] =========================================" && \
+        npm install --legacy-peer-deps 2>&1 | head -50 && \
+        echo "[Dockerfile] Installing peer dependency klinecharts..." && \
+        npm install klinecharts@latest --legacy-peer-deps --no-save 2>&1 | head -30 || \
+        (echo "[Dockerfile] ⚠️  Failed to install klinecharts, continuing..." && true) && \
+        echo "[Dockerfile] ✓ klinecharts-pro dependencies installed"; \
+    else \
+        echo "[Dockerfile] ✓ Using existing node_modules, skipping npm install"; \
+    fi
 
 # 验证 node_modules 是否存在
 RUN echo "[Dockerfile] =========================================" && \
@@ -61,8 +81,7 @@ RUN echo "[Dockerfile] =========================================" && \
         ([ -d node_modules/klinecharts ] && echo "[Dockerfile] ✓ klinecharts found") || echo "[Dockerfile] ✗ klinecharts not found"; \
         ([ -d node_modules/dts-bundle-generator ] && echo "[Dockerfile] ✓ dts-bundle-generator found") || echo "[Dockerfile] ✗ dts-bundle-generator not found"; \
     else \
-        echo "[Dockerfile] ✗ node_modules directory not found"; \
-        echo "[Dockerfile] Please ensure frontend/klinecharts-pro/node_modules exists"; \
+        echo "[Dockerfile] ✗ node_modules directory not found after installation"; \
         exit 1; \
     fi
 
@@ -128,8 +147,26 @@ WORKDIR /app
 COPY frontend/package.json frontend/package-lock.json* ./
 
 # 复制前端的 node_modules 目录（如果存在）
-# 注意：使用 COPY 命令复制整个 node_modules 目录
-COPY frontend/node_modules ./node_modules
+# 注意：使用 COPY 命令复制整个 node_modules 目录，但需要先检查是否存在
+# 如果 node_modules 不存在，则从 npm registry 安装依赖
+RUN if [ -d frontend/node_modules ]; then \
+        echo "[Dockerfile] ✓ frontend/node_modules found, copying..." && \
+        cp -r frontend/node_modules ./node_modules && \
+        echo "[Dockerfile] ✓ node_modules copied successfully"; \
+    else \
+        echo "[Dockerfile] ⚠️  frontend/node_modules not found, will install from registry"; \
+    fi
+
+# 如果 node_modules 不存在，从 registry 安装依赖
+RUN if [ ! -d node_modules ]; then \
+        echo "[Dockerfile] =========================================" && \
+        echo "[Dockerfile] Installing frontend dependencies from registry" && \
+        echo "[Dockerfile] =========================================" && \
+        npm install --legacy-peer-deps 2>&1 | head -50 && \
+        echo "[Dockerfile] ✓ Frontend dependencies installed"; \
+    else \
+        echo "[Dockerfile] ✓ Using existing node_modules, skipping npm install"; \
+    fi
 
 # 验证 node_modules 是否存在
 RUN echo "[Dockerfile] =========================================" && \
@@ -143,8 +180,7 @@ RUN echo "[Dockerfile] =========================================" && \
         ([ -d node_modules/vite ] && echo "[Dockerfile] ✓ vite found") || echo "[Dockerfile] ✗ vite not found"; \
         ([ -d node_modules/klinecharts ] && echo "[Dockerfile] ✓ klinecharts found") || echo "[Dockerfile] ✗ klinecharts not found"; \
     else \
-        echo "[Dockerfile] ✗ node_modules directory not found"; \
-        echo "[Dockerfile] Please ensure frontend/node_modules exists"; \
+        echo "[Dockerfile] ✗ node_modules directory not found after installation"; \
         exit 1; \
     fi
 

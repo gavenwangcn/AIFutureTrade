@@ -87,7 +87,21 @@ class KlineStreamConnection:
 
 
 class DataAgentKlineManager:
-    """管理所有K线WebSocket连接。"""
+    """管理所有K线WebSocket连接。
+    
+    该类负责管理多个交易对的K线数据WebSocket连接，每个交易对支持7个时间间隔（1m, 5m, 15m, 1h, 4h, 1d, 1w）。
+    主要功能包括：
+    - 客户端初始化和连接管理
+    - 流的添加、移除和批量操作
+    - 连接状态查询和监控
+    - 过期连接清理和重连
+    - K线消息处理和数据库存储
+    - 订阅频率控制
+    """
+    
+    # ============================================================================
+    # 初始化方法
+    # ============================================================================
     
     def __init__(self, db: ClickHouseDatabase, max_symbols: int = 100):
         self._db = db
@@ -117,18 +131,16 @@ class DataAgentKlineManager:
         self._check_task = asyncio.create_task(self._periodic_connection_check())
         self._ping_task = asyncio.create_task(self._periodic_ping())
     
-    async def _handle_kline_message(self, symbol: str, interval: str, message: Any) -> None:
-        """处理K线消息并插入数据库。"""
-        try:
-            normalized = _normalize_kline(message)
-            if normalized:
-                await asyncio.to_thread(self._db.insert_market_klines, [normalized])
-                logger.debug("[DataAgentKline] Inserted kline: %s %s", symbol, interval)
-        except Exception as e:
-            logger.error("[DataAgentKline] Error handling kline message: %s", e, exc_info=True)
+    # ============================================================================
+    # 客户端管理方法
+    # ============================================================================
     
     async def _init_client(self) -> None:
-        """初始化客户端，确保在事件循环中创建。"""
+        """初始化WebSocket客户端，确保在事件循环中创建。
+        
+        该方法采用懒加载策略，只在第一次需要时初始化客户端，避免事件循环冲突。
+        如果客户端已存在，则跳过初始化。
+        """
         if self._client is None:
             logger.info("[DataAgentKline] 🔧 [初始化客户端] 开始初始化WebSocket客户端...")
             stream_url = os.getenv(
@@ -160,6 +172,48 @@ class DataAgentKlineManager:
                 "[DataAgentKline] ⏭️  [初始化客户端] 客户端已存在，跳过初始化: %s",
                 type(self._client).__name__
             )
+    
+    # ============================================================================
+    # 定期任务方法
+    # ============================================================================
+    
+    async def _periodic_connection_check(self) -> None:
+        """初始化客户端，确保在事件循环中创建。"""
+        if self._client is None:
+            logger.info("[DataAgentKline] 🔧 [初始化客户端] 开始初始化WebSocket客户端...")
+            stream_url = os.getenv(
+                "STREAM_URL",
+                DERIVATIVES_TRADING_USDS_FUTURES_WS_STREAMS_PROD_URL,
+            )
+            logger.info(
+                "[DataAgentKline] 🔧 [初始化客户端] 使用流URL: %s",
+                stream_url
+            )
+            
+            configuration_ws_streams = ConfigurationWebSocketStreams(
+                stream_url=stream_url
+            )
+            logger.info(
+                "[DataAgentKline] 🔧 [初始化客户端] 创建配置对象完成: %s",
+                type(configuration_ws_streams).__name__
+            )
+            
+            self._client = DerivativesTradingUsdsFutures(
+                config_ws_streams=configuration_ws_streams
+            )
+            logger.info(
+                "[DataAgentKline] ✅ [初始化客户端] 客户端初始化完成: %s",
+                type(self._client).__name__
+            )
+        else:
+                logger.debug(
+                    "[DataAgentKline] ⏭️  [初始化客户端] 客户端已存在，跳过初始化: %s",
+                    type(self._client).__name__
+                )
+    
+    # ============================================================================
+    # 流管理方法
+    # ============================================================================
     
     async def add_stream(self, symbol: str, interval: str) -> bool:
         """添加K线流。
@@ -672,6 +726,15 @@ class DataAgentKlineManager:
                 return False
     
     async def _remove_broken_connection(self, symbol: str, interval: str) -> None:
+        """移除断开的连接（从map中删除）。
+        
+        当检测到连接错误或流错误时，调用此方法清理断开的连接。
+        该方法会标记连接为非活跃状态，关闭连接，并从活跃连接字典中删除。
+        
+        Args:
+            symbol: 交易对符号
+            interval: 时间间隔
+        """
         """移除断开的连接（从map中删除）。"""
         key = (symbol.upper(), interval)
         async with self._lock:
@@ -850,7 +913,11 @@ class DataAgentKlineManager:
                     del self._active_connections[key]
                 return False
     
-    async def cleanup_expired_connections(self) -> None:
+    # ============================================================================
+    # 状态查询方法
+    # ============================================================================
+    
+    async def get_connection_count(self) -> int:
         """清理过期的连接（超过24小时）。"""
         async with self._lock:
             expired_keys = []
@@ -864,7 +931,7 @@ class DataAgentKlineManager:
                 del self._active_connections[key]
                 logger.info("[DataAgentKline] Cleaned up expired connection: %s %s", key[0], key[1])
     
-    async def get_connection_count(self) -> int:
+    async def _cleanup_broken_connections(self) -> None:
         """获取当前连接数。"""
         async with self._lock:
             # 先清理过期连接和断开的连接
@@ -900,7 +967,7 @@ class DataAgentKlineManager:
                 "symbols": sorted(list(symbols_set))
             }
     
-    async def _cleanup_broken_connections(self) -> None:
+    async def get_connection_list(self) -> List[Dict[str, Any]]:
         """清理断开的连接（检查连接是否仍然活跃）。"""
         broken_keys = []
         for key, conn in self._active_connections.items():
@@ -916,7 +983,7 @@ class DataAgentKlineManager:
             del self._active_connections[key]
             logger.info("[DataAgentKline] Cleaned up broken connection: %s %s", key[0], key[1])
     
-    async def get_connection_list(self) -> List[Dict[str, Any]]:
+    async def cleanup_all(self) -> None:
         """获取当前所有连接的详细信息。"""
         async with self._lock:
             await self.cleanup_expired_connections()
@@ -940,41 +1007,52 @@ class DataAgentKlineManager:
                 symbols.add(conn.symbol)
             return symbols
     
-    async def _periodic_connection_check(self) -> None:
-        """定期检查连接状态，处理过期连接和重连。"""
-        while not self._is_closing:
-            try:
-                await asyncio.sleep(3600)  # 每小时检查一次
-                
-                async with self._lock:
-                    # 复制当前连接列表，避免在迭代过程中修改
-                    connections_to_check = list(self._active_connections.items())
-                
-                for key, conn in connections_to_check:
-                    try:
-                        # 检查连接是否接近过期（剩余时间少于1小时）
-                        time_until_expiry = conn.created_at + self._connection_max_age - datetime.now(timezone.utc)
-                        if time_until_expiry < timedelta(hours=1):
-                            logger.info("[DataAgentKline] Connection %s %s is approaching expiry, reconnecting...", 
-                                      conn.symbol, conn.interval)
-                            
-                            # 重新连接
-                            async with self._lock:
-                                if key in self._active_connections:
-                                    # 先关闭旧连接
-                                    await self._active_connections[key].close()
-                                    del self._active_connections[key]
-                                    
-                                    # 再创建新连接
-                                    await self.add_stream(conn.symbol, conn.interval)
-                    except Exception as e:
-                        logger.error("[DataAgentKline] Error handling connection %s %s: %s", 
-                                  conn.symbol, conn.interval, e, exc_info=True)
-            except asyncio.CancelledError:
-                logger.info("[DataAgentKline] Periodic connection check task cancelled")
-                raise
-            except Exception as e:
-                logger.error("[DataAgentKline] Error in periodic connection check: %s", e, exc_info=True)
+    # ============================================================================
+    # 消息处理方法
+    # ============================================================================
+    
+    async def _handle_kline_message(self, symbol: str, interval: str, message: Any) -> None:
+        """处理K线消息并插入数据库。
+        
+        当WebSocket接收到K线数据时，会调用此方法处理消息。
+        该方法会：
+        1. 规范化K线数据格式
+        2. 将数据插入ClickHouse数据库
+        
+        Args:
+            symbol: 交易对符号
+            interval: 时间间隔
+            message: 原始K线消息数据
+        """
+        try:
+            normalized = _normalize_kline(message)
+            if normalized:
+                await asyncio.to_thread(self._db.insert_market_klines, [normalized])
+                logger.debug("[DataAgentKline] Inserted kline: %s %s", symbol, interval)
+        except Exception as e:
+            logger.error("[DataAgentKline] Error handling kline message: %s", e, exc_info=True)
+    
+    # ============================================================================
+    # 清理方法
+    # ============================================================================
+    
+    async def cleanup_expired_connections(self) -> None:
+        """清理过期的连接（超过24小时）。
+        
+        该方法会检查所有活跃连接，找出已过期的连接（创建时间超过24小时），
+        然后关闭这些连接并从活跃连接字典中删除。
+        """
+        async with self._lock:
+            expired_keys = []
+            for key, conn in self._active_connections.items():
+                if conn.is_expired():
+                    expired_keys.append(key)
+            
+            for key in expired_keys:
+                conn = self._active_connections[key]
+                await conn.close()
+                del self._active_connections[key]
+                logger.info("[DataAgentKline] Cleaned up expired connection: %s %s", key[0], key[1])
     
     async def _periodic_ping(self) -> None:
         """定期发送ping请求，保持WebSocket连接活跃。"""
@@ -1003,6 +1081,10 @@ class DataAgentKlineManager:
                 raise
             except Exception as e:
                 logger.error("[DataAgentKline] Error in periodic ping: %s", e, exc_info=True)
+    
+    # ============================================================================
+    # 频率控制方法
+    # ============================================================================
     
     async def _rate_limit_subscription(self) -> None:
         """控制订阅频率，确保每秒不超过10个订阅消息。"""
@@ -1057,8 +1139,11 @@ class DataAgentKlineManager:
                 self._max_subscriptions_per_second,
                 rate_limit_duration
             )
-    
-    async def cleanup_all(self) -> None:
+
+
+# ============================================================================
+# HTTP服务器和处理器类
+# ============================================================================
         """清理所有连接。"""
         self._is_closing = True
         
@@ -1166,7 +1251,16 @@ class DataAgentStatusHandler(BaseHTTPRequestHandler):
 
 
 class DataAgentCommandHandler(BaseHTTPRequestHandler):
-    """处理data_agent的HTTP指令请求。"""
+    """处理data_agent的HTTP指令请求。
+    
+    该类处理所有来自async_agent的指令请求，包括：
+    - 添加/移除K线流
+    - 批量添加symbol
+    - 查询连接状态和列表
+    - 获取symbol列表
+    
+    所有异步操作都通过主事件循环执行，并设置了超时保护。
+    """
     
     def __init__(self, kline_manager: DataAgentKlineManager, main_loop: asyncio.AbstractEventLoop, *args, **kwargs):
         self.kline_manager = kline_manager
@@ -1202,7 +1296,13 @@ class DataAgentCommandHandler(BaseHTTPRequestHandler):
             self._send_error(500, str(e))
     
     def do_POST(self):
-        """处理POST请求。"""
+        """处理POST请求。
+        
+        支持的POST接口：
+        - /streams/add: 添加单个K线流
+        - /streams/remove: 移除单个K线流
+        - /symbols/add: 批量添加symbol（为每个symbol创建7个interval的流）
+        """
         request_start_time = datetime.now(timezone.utc)
         client_address = f"{self.client_address[0]}:{self.client_address[1]}"
         
