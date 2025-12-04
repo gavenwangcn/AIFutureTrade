@@ -19,7 +19,9 @@ RUN npm config set registry ${NPM_REGISTRY} && \
     npm config set fetch-retry-mintimeout 20000 && \
     npm config set fetch-retry-maxtimeout 120000 && \
     npm config set fetch-timeout 300000 && \
-    echo "[Dockerfile] npm registry configured to: ${NPM_REGISTRY}"
+    npm config set prefer-online true && \
+    echo "[Dockerfile] npm registry configured to: ${NPM_REGISTRY}" && \
+    echo "[Dockerfile] npm prefer-online enabled to always fetch latest from registry"
 
 # ==============================================================================
 # 阶段1：构建 klinecharts-pro 基础库
@@ -27,50 +29,78 @@ RUN npm config set registry ${NPM_REGISTRY} && \
 # 注意：为了确保代码变更时重新构建，源代码复制放在依赖安装之后
 # 这样当源代码文件变化时，Docker 会重新执行构建步骤
 
-# 复制 klinecharts-pro 的 package.json 和 package-lock.json
-COPY frontend/klinecharts-pro/package.json frontend/klinecharts-pro/package-lock.json* ./klinecharts-pro/
+# 复制 klinecharts-pro 的 package.json（不复制 package-lock.json，强制拉取最新依赖）
+COPY frontend/klinecharts-pro/package.json ./klinecharts-pro/
 
-# 切换到 klinecharts-pro 目录并安装依赖
+# 切换到 klinecharts-pro 目录并清理环境
 WORKDIR /app/klinecharts-pro
 
-# 安装 klinecharts-pro 依赖
+# 清理可能存在的 node_modules 和 package-lock.json，确保从 registry 拉取最新依赖
+RUN echo "[Dockerfile] Cleaning up any existing node_modules and lock files..." && \
+    rm -rf node_modules package-lock.json 2>/dev/null || true && \
+    echo "[Dockerfile] ✓ Cleanup completed"
+
+# 清理 npm 缓存，确保获取最新版本
+RUN echo "[Dockerfile] Clearing npm cache to ensure fresh downloads..." && \
+    npm cache clean --force 2>/dev/null || true && \
+    echo "[Dockerfile] ✓ npm cache cleared"
+
+# 安装 klinecharts-pro 依赖（不使用 package-lock.json，拉取最新版本）
 # 注意：klinecharts 是 peerDependency，npm install 默认不会安装 peer dependencies
-# 需要使用 --install-peer-deps 或显式安装 klinecharts
-RUN if [ -f package-lock.json ]; then \
-        npm ci --legacy-peer-deps || \
-        (echo "[Dockerfile] npm ci failed, retrying with npm install..." && \
-         rm -f package-lock.json && \
-         npm install --legacy-peer-deps); \
-    else \
-        npm install --legacy-peer-deps; \
-    fi
+# 使用 --no-package-lock 确保不生成 lock 文件，每次都拉取最新依赖
+RUN echo "[Dockerfile] Installing klinecharts-pro dependencies from registry (latest versions)..." && \
+    npm install --legacy-peer-deps --no-package-lock --prefer-online 2>&1 | head -50 && \
+    echo "[Dockerfile] ✓ klinecharts-pro dependencies installed"
 
 # 显式安装 peer dependency klinecharts（TypeScript 编译需要）
 # 注意：klinecharts 是 peerDependency，必须显式安装才能进行 TypeScript 编译
-# 移除 --no-save 参数，确保安装成功（Docker 构建环境不需要保持 package.json 不变）
 RUN echo "[Dockerfile] Installing peer dependency klinecharts for TypeScript compilation..." && \
     echo "[Dockerfile] npm version:" && \
     npm --version && \
     echo "[Dockerfile] Current working directory: $(pwd)" && \
     echo "[Dockerfile] Attempting to install klinecharts@^9.8.12..." && \
-    npm install klinecharts@^9.8.12 --legacy-peer-deps 2>&1 | head -30 || \
+    (npm install klinecharts@^9.8.12 --legacy-peer-deps 2>&1 | tee /tmp/klinecharts-install.log && \
+     [ -d node_modules/klinecharts ] && \
+     echo "[Dockerfile] ✓ klinecharts@^9.8.12 installed successfully") || \
     (echo "[Dockerfile] First attempt failed, trying latest version..." && \
-     npm install klinecharts@latest --legacy-peer-deps 2>&1 | head -30 || \
-     (echo "[Dockerfile] Second attempt failed, trying without version constraint..." && \
-      npm install klinecharts --legacy-peer-deps 2>&1 | head -30)) && \
-    echo "[Dockerfile] Installation command completed"
+     npm install klinecharts@latest --legacy-peer-deps 2>&1 | tee /tmp/klinecharts-install.log && \
+     [ -d node_modules/klinecharts ] && \
+     echo "[Dockerfile] ✓ klinecharts@latest installed successfully") || \
+    (echo "[Dockerfile] Second attempt failed, trying without version constraint..." && \
+     npm install klinecharts --legacy-peer-deps 2>&1 | tee /tmp/klinecharts-install.log && \
+     [ -d node_modules/klinecharts ] && \
+     echo "[Dockerfile] ✓ klinecharts installed successfully") || \
+    (echo "[Dockerfile] ✗ All installation attempts failed. Error log:" && \
+     cat /tmp/klinecharts-install.log 2>/dev/null | tail -100 || echo "No log file" && \
+     echo "[Dockerfile] Checking if klinecharts exists in npm registry..." && \
+     npm view klinecharts versions --json 2>&1 | head -20 || echo "Cannot query npm registry" && \
+     echo "[Dockerfile] Current node_modules contents:" && \
+     ls -la node_modules/ | grep -E "^d" | head -20 && \
+     exit 1) && \
+    echo "[Dockerfile] Verifying klinecharts installation..." && \
+    if [ ! -d node_modules/klinecharts ]; then \
+        echo "[Dockerfile] ✗ klinecharts directory not found after installation"; \
+        exit 1; \
+    fi && \
+    echo "[Dockerfile] ✓ klinecharts directory verified"
 
-# 验证 klinecharts 是否已安装
-RUN if [ -d node_modules/klinecharts ]; then \
+# 验证 klinecharts 是否已安装并显示详细信息
+RUN echo "[Dockerfile] Final verification of klinecharts installation..." && \
+    if [ -d node_modules/klinecharts ]; then \
         echo "[Dockerfile] ✓ klinecharts installed successfully"; \
         echo "[Dockerfile] klinecharts version:"; \
         cat node_modules/klinecharts/package.json | grep '"version"' || echo "Version not found"; \
+        echo "[Dockerfile] klinecharts directory structure:"; \
+        ls -la node_modules/klinecharts/ | head -10; \
         echo "[Dockerfile] klinecharts type definitions:"; \
-        ls -la node_modules/klinecharts/dist/*.d.ts 2>/dev/null | head -3 || echo "Type definitions not found"; \
+        ls -la node_modules/klinecharts/dist/*.d.ts 2>/dev/null | head -5 || echo "Type definitions not found in dist/"; \
+        find node_modules/klinecharts -name "*.d.ts" 2>/dev/null | head -5 || echo "No .d.ts files found"; \
     else \
         echo "[Dockerfile] ✗ klinecharts not found in node_modules"; \
+        echo "[Dockerfile] Installation log (if available):"; \
+        cat /tmp/klinecharts-install.log 2>/dev/null | tail -50 || echo "No log file"; \
         echo "[Dockerfile] Available packages:"; \
-        ls -la node_modules/ | grep -E "^d" | head -10; \
+        ls -la node_modules/ | grep -E "^d" | head -20; \
         exit 1; \
     fi
 
@@ -112,18 +142,23 @@ RUN if [ -d dist ] && [ -f dist/klinecharts-pro.umd.js ] && [ -f dist/klinechart
 # 切换回主工作目录
 WORKDIR /app
 
-# 复制前端依赖文件
-COPY frontend/package.json frontend/package-lock.json* ./
+# 复制前端依赖文件（不复制 package-lock.json，强制拉取最新依赖）
+COPY frontend/package.json ./
 
-# 安装前端npm依赖
-RUN if [ -f package-lock.json ]; then \
-        npm ci --legacy-peer-deps || \
-        (echo "[Dockerfile] npm ci failed, retrying with npm install..." && \
-         rm -f package-lock.json && \
-         npm install --legacy-peer-deps); \
-    else \
-        npm install --legacy-peer-deps; \
-    fi
+# 清理可能存在的 node_modules 和 package-lock.json
+RUN echo "[Dockerfile] Cleaning up any existing node_modules and lock files..." && \
+    rm -rf node_modules package-lock.json 2>/dev/null || true && \
+    echo "[Dockerfile] ✓ Cleanup completed"
+
+# 清理 npm 缓存，确保获取最新版本
+RUN echo "[Dockerfile] Clearing npm cache to ensure fresh downloads..." && \
+    npm cache clean --force 2>/dev/null || true && \
+    echo "[Dockerfile] ✓ npm cache cleared"
+
+# 安装前端npm依赖（不使用 package-lock.json，拉取最新版本）
+RUN echo "[Dockerfile] Installing frontend dependencies from registry (latest versions)..." && \
+    npm install --legacy-peer-deps --no-package-lock --prefer-online 2>&1 | head -50 && \
+    echo "[Dockerfile] ✓ Frontend dependencies installed"
 
 # 验证 klinecharts 是否已正确安装（klinecharts-pro 需要它作为 peer dependency）
 RUN if [ -d node_modules/klinecharts ]; then \
