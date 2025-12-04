@@ -41,9 +41,15 @@ RUN find node_modules/.bin -type f -exec chmod +x {} \; 2>/dev/null || true && \
     find node_modules -name "tsc" -type f -exec chmod +x {} \; 2>/dev/null || true
 
 # 构建 klinecharts-pro
-# 使用系统的 npm（/usr/bin/npm）而不是 node_modules 中的 npm
-# package.json 中的脚本已改为使用 node 直接调用，避免权限问题
-RUN /usr/bin/npm run build
+# 直接执行构建命令，避免 npm 路径问题
+# TypeScript 编译
+RUN node node_modules/typescript/bin/tsc
+
+# Vite 构建
+RUN node node_modules/vite/bin/vite.js build
+
+# 生成类型定义文件
+RUN node node_modules/dts-bundle-generator/dist/index.js --no-banner true --umd-module-name klinechartspro -o dist/index.d.ts src/index.ts
 
 # 验证构建结果
 RUN if [ -d dist ]; then \
