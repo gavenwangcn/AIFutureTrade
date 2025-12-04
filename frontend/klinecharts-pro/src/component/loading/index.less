@@ -1,4 +1,4 @@
-@import (reference) "../../base.less";
+@import (reference) '../../base.less';
 
 .@{prefix-cls}-loading {
   display: flex;
@@ -12,6 +12,34 @@
   height: 100%;
   z-index: 50;
   color: var(--klinecharts-pro-primary-color);
-  background-color: rgb(16, 17, 16);
-  opacity: 0.5;
+  .circle1,
+  .circle2,
+  .circle3 {
+    display: inline-block;
+    width: 10px;
+    height: 10px;
+    pointer-events: none;
+    border-radius: 50%;
+    background-color: currentColor;
+    animation: loading-anim 0.8s ease-in-out alternate infinite;
+  }
+  .circle1 {
+    animation-delay: 0.48s;
+  }
+  .circle2 {
+    margin-left: 0.2em;
+    margin-right: 0.2em;
+    animation-delay: 0.32s;
+  }
+  .circle3 {
+    animation-delay: 0.16s;
+  }
+  @keyframes loading-anim {
+    0% {
+      top: 0em;
+    }
+    100% {
+      margin-top: -2.2em;
+    }
+  }
 }

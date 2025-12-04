@@ -12,9 +12,10 @@ export default defineConfig({
       external: ['klinecharts'],
       output: {
         assetFileNames: (chunkInfo) => {
-          if (chunkInfo.name === 'style.css') {
+          if (chunkInfo.name.endsWith('.css')) {
             return 'klinecharts-pro.css'
           }
+          return chunkInfo.name;
         },
         globals: {
           klinecharts: 'klinecharts'

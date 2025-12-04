@@ -12,22 +12,20 @@
  * limitations under the License.
  */
 
-import zhCN from "./zh-CN.json";
-import zhTW from "./zh-TW.json";
-import enUS from "./en-US.json";
+import zhCN from './zh-CN.json'
+import enUS from './en-US.json'
 
 const locales = {
-  "zh-CN": zhCN,
-  "zh-TW": zhTW,
-  "en-US": enUS,
-};
+  'zh-CN': zhCN,
+  'en-US': enUS
+}
 
-export function load(key: string, ls: any) {
+export function load (key: string, ls: any) {
   // @ts-expect-error
-  locales[key] = ls;
+  locales[key] = ls
 }
 
 export default (key: string, locale: string) => {
   // @ts-expect-error
-  return locales[locale]?.[key] ?? key;
-};
+  return locales[locale]?.[key] ?? key
+}
