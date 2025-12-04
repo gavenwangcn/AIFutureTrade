@@ -4,6 +4,9 @@
 # 用途：构建 Vue + Vite 前端应用镜像，包含自定义 klinecharts-pro 组件
 # 构建上下文：项目根目录（通过 docker-compose.yml 配置）
 # 要求：必须存在 frontend/klinecharts-pro/node_modules（依赖都在这个目录下）
+#
+# 注意：如果网络较慢，请先配置 Docker 镜像加速器
+# 运行：sudo bash docker-registry-setup.sh
 # ==============================================================================
 
 FROM node:18-slim AS base
