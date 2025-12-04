@@ -28,8 +28,8 @@
   "license": "Apache-2.0",
   "private": false,
   "scripts": {
-    "build-core": "npx tsc && vite build",
-    "build-dts": "npx dts-bundle-generator --no-banner true --umd-module-name klinechartspro -o dist/index.d.ts src/index.ts",
+    "build-core": "node node_modules/typescript/bin/tsc && node node_modules/vite/bin/vite.js build",
+    "build-dts": "node node_modules/dts-bundle-generator/dist/index.js --no-banner true --umd-module-name klinechartspro -o dist/index.d.ts src/index.ts",
     "build": "npm run build-core && npm run build-dts",
     "docs:dev": "vitepress dev docs",
     "docs:build": "vitepress build docs",

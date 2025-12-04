@@ -35,7 +35,13 @@ RUN find node_modules/.bin -type f -exec chmod +x {} \; || true
 # 复制源代码
 COPY . .
 
+# 再次修复权限（复制文件可能会重置权限，特别是在 Windows 上）
+# 同时确保所有 node_modules/.bin 中的脚本都有执行权限
+RUN find node_modules/.bin -type f -exec chmod +x {} \; 2>/dev/null || true && \
+    find node_modules -name "tsc" -type f -exec chmod +x {} \; 2>/dev/null || true
+
 # 构建 klinecharts-pro
+# package.json 中的脚本已改为使用 node 直接调用，避免权限问题
 RUN npm run build
 
 # 验证构建结果
