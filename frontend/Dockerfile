@@ -22,16 +22,15 @@ RUN npm config set registry ${NPM_REGISTRY} && \
     echo "[Dockerfile] npm registry configured to: ${NPM_REGISTRY}"
 
 # ==============================================================================
-# 阶段1：安装依赖
+# 阶段1：构建 klinecharts-pro 基础库
 # ==============================================================================
-# 复制依赖文件和构建脚本（利用Docker缓存层）
-COPY frontend/package.json frontend/package-lock.json* ./
-COPY frontend/scripts/ scripts/
+# 复制 klinecharts-pro 的 package.json 和 package-lock.json
+COPY frontend/klinecharts-pro/package.json frontend/klinecharts-pro/package-lock.json* ./klinecharts-pro/
 
-# 安装npm依赖（包括 @klinecharts/pro）
-# 按官网要求：npm install @klinecharts/pro
-# 注意：@klinecharts/pro 将通过 npm 安装，然后在 Vue 组件中通过 ES6 import 使用
-# 添加重试机制以提高网络不稳定时的成功率
+# 切换到 klinecharts-pro 目录并安装依赖
+WORKDIR /app/klinecharts-pro
+
+# 安装 klinecharts-pro 依赖
 RUN if [ -f package-lock.json ]; then \
         npm ci --legacy-peer-deps || \
         (echo "[Dockerfile] npm ci failed, retrying with npm install..." && \
@@ -41,30 +40,67 @@ RUN if [ -f package-lock.json ]; then \
         npm install --legacy-peer-deps; \
     fi
 
-# 验证 @klinecharts/pro 和 klinecharts 是否已正确安装
-# 注意：@klinecharts/pro 依赖 klinecharts 作为 peer dependency
-RUN if [ -d node_modules/@klinecharts/pro ]; then \
-        echo "[Dockerfile] ✓ @klinecharts/pro package installed via npm"; \
-        echo "[Dockerfile] @klinecharts/pro version:"; \
-        cat node_modules/@klinecharts/pro/package.json | grep '"version"' || echo "Version not found"; \
-    else \
-        echo "[Dockerfile] ✗ @klinecharts/pro package not found in node_modules"; \
-        echo "[Dockerfile] Please ensure '@klinecharts/pro' is listed in package.json dependencies"; \
-        exit 1; \
-    fi
+# 修复 node_modules/.bin 中的可执行文件权限
+RUN find node_modules/.bin -type f -exec chmod +x {} \; 2>/dev/null || true
 
-RUN if [ -d node_modules/klinecharts ]; then \
-        echo "[Dockerfile] ✓ klinecharts package installed via npm (required by @klinecharts/pro)"; \
-        echo "[Dockerfile] klinecharts version:"; \
-        cat node_modules/klinecharts/package.json | grep '"version"' || echo "Version not found"; \
+# 复制 klinecharts-pro 源代码
+COPY frontend/klinecharts-pro/ ./
+
+# 再次修复权限
+RUN find node_modules/.bin -type f -exec chmod +x {} \; 2>/dev/null || true && \
+    find node_modules -name "tsc" -type f -exec chmod +x {} \; 2>/dev/null || true
+
+# 构建 klinecharts-pro
+RUN echo "[Dockerfile] Building klinecharts-pro..." && \
+    node node_modules/typescript/bin/tsc && \
+    node node_modules/vite/bin/vite.js build && \
+    (chmod +x node_modules/.bin/dts-bundle-generator 2>/dev/null || true) && \
+    (node_modules/.bin/dts-bundle-generator --no-banner true --umd-module-name klinechartspro -o dist/index.d.ts src/index.ts 2>/dev/null || \
+     echo "[Dockerfile] dts-bundle-generator skipped, TypeScript types already generated") && \
+    echo "[Dockerfile] ✓ klinecharts-pro build completed" && \
+    ls -la dist/ | head -10
+
+# 验证 klinecharts-pro 构建结果
+RUN if [ -d dist ] && [ -f dist/klinecharts-pro.umd.js ] && [ -f dist/klinecharts-pro.css ]; then \
+        echo "[Dockerfile] ✓ klinecharts-pro build successful"; \
     else \
-        echo "[Dockerfile] ✗ klinecharts package not found in node_modules"; \
-        echo "[Dockerfile] klinecharts is required as a peer dependency of @klinecharts/pro"; \
+        echo "[Dockerfile] ✗ klinecharts-pro build failed"; \
         exit 1; \
     fi
 
 # ==============================================================================
-# 阶段2：复制应用代码和构建
+# 阶段2：安装前端依赖
+# ==============================================================================
+# 切换回主工作目录
+WORKDIR /app
+
+# 复制前端依赖文件和构建脚本
+COPY frontend/package.json frontend/package-lock.json* ./
+COPY frontend/scripts/ scripts/
+
+# 安装前端npm依赖
+RUN if [ -f package-lock.json ]; then \
+        npm ci --legacy-peer-deps || \
+        (echo "[Dockerfile] npm ci failed, retrying with npm install..." && \
+         rm -f package-lock.json && \
+         npm install --legacy-peer-deps); \
+    else \
+        npm install --legacy-peer-deps; \
+    fi
+
+# 验证 klinecharts 是否已正确安装（klinecharts-pro 需要它作为 peer dependency）
+RUN if [ -d node_modules/klinecharts ]; then \
+        echo "[Dockerfile] ✓ klinecharts package installed via npm"; \
+        echo "[Dockerfile] klinecharts version:"; \
+        cat node_modules/klinecharts/package.json | grep '"version"' || echo "Version not found"; \
+    else \
+        echo "[Dockerfile] ✗ klinecharts package not found in node_modules"; \
+        echo "[Dockerfile] klinecharts is required as a peer dependency"; \
+        exit 1; \
+    fi
+
+# ==============================================================================
+# 阶段3：复制应用代码和准备静态资源
 # ==============================================================================
 # 复制前端应用源代码
 COPY frontend/src/ src/
@@ -78,31 +114,50 @@ COPY frontend/public/ public/
 RUN mkdir -p /tmp/static 2>/dev/null || true
 RUN if [ -d static ]; then cp -r static/* /tmp/static/ 2>/dev/null || true; fi
 
+# 将构建好的 klinecharts-pro 复制到 public/klinecharts-pro/ 目录
+# 这样前端可以通过 /klinecharts-pro/ 路径访问这些文件
+RUN mkdir -p public/klinecharts-pro && \
+    cp -r klinecharts-pro/dist/* public/klinecharts-pro/ && \
+    echo "[Dockerfile] ✓ Copied klinecharts-pro build artifacts to public/klinecharts-pro/" && \
+    ls -la public/klinecharts-pro/ | head -10
+
+# 复制 klinecharts 基础库到 public/klinecharts-pro/（如果需要）
+# klinecharts 应该已经通过 npm 安装，但我们需要将其 UMD 版本复制到 public
+RUN if [ -f node_modules/klinecharts/dist/klinecharts.umd.js ]; then \
+        cp node_modules/klinecharts/dist/klinecharts.umd.js public/klinecharts-pro/klinecharts.js && \
+        echo "[Dockerfile] ✓ Copied klinecharts base library"; \
+    elif [ -f node_modules/klinecharts/dist/umd/klinecharts.js ]; then \
+        cp node_modules/klinecharts/dist/umd/klinecharts.js public/klinecharts-pro/klinecharts.js && \
+        echo "[Dockerfile] ✓ Copied klinecharts base library"; \
+    else \
+        echo "[Dockerfile] Warning: klinecharts UMD file not found, checking available files..." && \
+        find node_modules/klinecharts/dist -name "*.js" -type f | head -5 || echo "No JS files found"; \
+    fi
+
 # 同步静态资源（从static/目录复制到public/目录）
 RUN npm run sync-static 2>&1 || echo "Static assets sync skipped"
 
-# 注意：@klinecharts/pro 不再需要复制到 public/lib/
-# @klinecharts/pro 将通过 npm 安装，在 Vue 组件中通过 ES6 import 使用
-# Vite 构建时会自动处理 @klinecharts/pro 的打包
-
+# ==============================================================================
+# 阶段4：构建前端应用
+# ==============================================================================
 # 构建Vue应用（生产环境）
 # 注意：构建时 Vite 会将 public/ 目录中的文件复制到 dist/ 目录
+# klinecharts-pro 的文件已经在 public/klinecharts-pro/ 中，会被自动复制到 dist/klinecharts-pro/
 RUN npm run build
 
-# 验证构建结果（@klinecharts/pro 已通过 Vite 打包到 dist/ 中）
-RUN echo "[Dockerfile] Build completed. @klinecharts/pro is bundled by Vite."
-
 # 验证构建结果
-RUN if [ -d dist ]; then \
+RUN echo "[Dockerfile] Frontend build completed. klinecharts-pro files are available in dist/klinecharts-pro/." && \
+    if [ -d dist ]; then \
         echo "[Dockerfile] ✓ Build successful, dist directory exists"; \
         ls -la dist/ | head -10; \
+        ls -la dist/klinecharts-pro/ 2>/dev/null || echo "klinecharts-pro directory not found in dist"; \
     else \
         echo "[Dockerfile] ✗ Build failed, dist directory not found"; \
         exit 1; \
     fi
 
 # ==============================================================================
-# 阶段4：暴露端口和启动服务
+# 阶段5：暴露端口和启动服务
 # ==============================================================================
 EXPOSE 3000
 

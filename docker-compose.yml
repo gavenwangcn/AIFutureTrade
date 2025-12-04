@@ -56,41 +56,14 @@ services:
       - aifuturetrade-network
 
   # ============================================================================
-  # klinecharts-pro 构建服务（自定义 K线图表库）
+  # 前端服务（Node.js Express + klinecharts-pro）
   # ============================================================================
-  klinecharts-pro-builder:
-    build:
-      context: ./frontend/klinecharts-pro
-      dockerfile: Dockerfile
-    container_name: aifuturetrade-klinecharts-pro-builder
-    # 此服务仅用于构建，构建产物通过 volume 挂载到前端服务
-    # 注意：构建在 Dockerfile 的 RUN 阶段完成，构建产物在镜像中
-    # volume 挂载会将主机目录挂载到容器，覆盖镜像中的内容
-    volumes:
-      - ./frontend/klinecharts-pro/dist:/app/dist
-    # 不暴露端口，仅用于构建
-    networks:
-      - aifuturetrade-network
-    # 使用健康检查确保构建产物存在
-    # 检查 dist 目录和关键文件是否存在
-    healthcheck:
-      test: ["CMD-SHELL", "test -d /app/dist && (test -f /app/dist/klinecharts-pro.js || test -f /app/dist/index.js)"]
-      interval: 5s
-      timeout: 3s
-      retries: 5
-      start_period: 90s  # 给构建足够的时间完成
-    # 启动时确保构建产物已复制到 volume 挂载目录
-    # 如果 volume 目录为空，从镜像中的构建产物复制（虽然通常构建已在 Dockerfile 中完成）
-    # 保持容器运行，确保健康检查可以执行
-    # frontend 会等待此服务的健康检查通过后才启动
-    command: sh -c "echo 'klinecharts-pro build completed' && if [ ! -f /app/dist/klinecharts-pro.js ] && [ -f /app/dist/index.js ]; then echo 'Build files verified'; fi && tail -f /dev/null"
-
-  # ============================================================================
-  # 前端服务（Node.js Express）
-  # ============================================================================
+  # 注意：此服务会在构建时先构建 klinecharts-pro 基础库，然后构建前端应用
+  # klinecharts-pro 的构建产物会自动复制到 public/klinecharts-pro/ 目录
+  # 前端页面通过 /klinecharts-pro/ 路径访问这些文件
   frontend:
     build:
-      context: .  # 使用项目根目录作为构建上下文，以便访问static目录
+      context: .  # 使用项目根目录作为构建上下文，以便访问static目录和klinecharts-pro
       dockerfile: ./frontend/Dockerfile
       # 注意：默认情况下，如果镜像已存在，docker compose up 不会重新构建
       # 需要代码变化时重新构建，请使用: docker compose up -d --build
@@ -100,14 +73,9 @@ services:
     environment:
       - BACKEND_URL=http://backend:5002
       - FRONTEND_PORT=3000
-    volumes:
-      # 挂载 klinecharts-pro 构建产物
-      - ./frontend/klinecharts-pro/dist:/app/klinecharts-pro-dist:ro
     depends_on:
       backend:
         condition: service_started
-      klinecharts-pro-builder:
-        condition: service_healthy  # 确保 klinecharts-pro 构建完成且健康检查通过
     restart: unless-stopped
     networks:
       - aifuturetrade-network

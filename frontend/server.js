@@ -163,12 +163,16 @@ app.get('/lib/*', (req, res, next) => {
 // 6. /klinecharts-pro/ 路径文件服务（自定义构建的 klinecharts-pro）
 // ------------------------------------------------------------------------------
 // 提供 /klinecharts-pro/ 路径的文件服务
-// 优先使用挂载的构建产物，否则使用本地构建产物
-const klinechartsProDistPath = path.join(__dirname, 'klinecharts-pro-dist');
+// 优先使用 dist/klinecharts-pro/（构建时从 public/klinecharts-pro/ 复制），
+// 否则使用 public/klinecharts-pro/（开发环境），最后回退到本地构建产物
+const klinechartsProDistPath = path.join(__dirname, 'dist', 'klinecharts-pro');
+const klinechartsProPublicPath = path.join(__dirname, 'public', 'klinecharts-pro');
 const klinechartsProLocalPath = path.join(__dirname, '..', 'klinecharts-pro', 'dist');
 const klinechartsProPath = fs.existsSync(klinechartsProDistPath) 
     ? klinechartsProDistPath 
-    : klinechartsProLocalPath;
+    : (fs.existsSync(klinechartsProPublicPath) 
+        ? klinechartsProPublicPath 
+        : klinechartsProLocalPath);
 
 app.get('/klinecharts-pro/*', (req, res, next) => {
     const filePath = req.path.replace('/klinecharts-pro/', '');
