@@ -23,9 +23,7 @@ COPY data/ data/
 COPY common/ common/
 COPY trade/ trade/
 COPY market/ market/
-# 模板和静态文件目录
-COPY templates/ templates/
-COPY static/ static/
+
 # 配置文件
 COPY gunicorn_config.py ./
 # SDK目录
