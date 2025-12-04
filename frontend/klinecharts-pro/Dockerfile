@@ -41,8 +41,9 @@ RUN find node_modules/.bin -type f -exec chmod +x {} \; 2>/dev/null || true && \
     find node_modules -name "tsc" -type f -exec chmod +x {} \; 2>/dev/null || true
 
 # 构建 klinecharts-pro
+# 使用系统的 npm（/usr/bin/npm）而不是 node_modules 中的 npm
 # package.json 中的脚本已改为使用 node 直接调用，避免权限问题
-RUN npm run build
+RUN /usr/bin/npm run build
 
 # 验证构建结果
 RUN if [ -d dist ]; then \
