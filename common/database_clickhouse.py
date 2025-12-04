@@ -1921,25 +1921,26 @@ class ClickHouseDatabase:
                 continue
 
             # 确保所有字段都有默认值，防止None值导致插入失败
+            # 使用辅助函数确保所有字段都经过规范化处理，不会传递None值
             values = (
-                row.get("event_time") or datetime.fromtimestamp(0, tz=timezone.utc),
-                row.get("symbol", "") or "",
-                row.get("contract_type", "") or "",
-                row.get("kline_start_time") or datetime.fromtimestamp(0, tz=timezone.utc),
-                row.get("kline_end_time") or datetime.fromtimestamp(0, tz=timezone.utc),
-                interval,
-                _to_int(row.get("first_trade_id", 0)),
-                _to_int(row.get("last_trade_id", 0)),
-                _to_float(row.get("open_price", 0.0)),
-                _to_float(row.get("close_price", 0.0)),
-                _to_float(row.get("high_price", 0.0)),
-                _to_float(row.get("low_price", 0.0)),
-                _to_float(row.get("base_volume", 0.0)),
-                _to_int(row.get("trade_count", 0)),
-                _to_int(row.get("is_closed", 0)),
-                _to_float(row.get("quote_volume", 0.0)),
-                _to_float(row.get("taker_buy_base_volume", 0.0)),
-                _to_float(row.get("taker_buy_quote_volume", 0.0)),
+                _to_datetime(row.get("event_time")),
+                str(row.get("symbol", "") or ""),
+                str(row.get("contract_type", "") or ""),
+                _to_datetime(row.get("kline_start_time")),
+                _to_datetime(row.get("kline_end_time")),
+                str(interval or ""),
+                _to_int(row.get("first_trade_id")),
+                _to_int(row.get("last_trade_id")),
+                _to_float(row.get("open_price")),
+                _to_float(row.get("close_price")),
+                _to_float(row.get("high_price")),
+                _to_float(row.get("low_price")),
+                _to_float(row.get("base_volume")),
+                _to_int(row.get("trade_count")),
+                _to_int(row.get("is_closed")),
+                _to_float(row.get("quote_volume")),
+                _to_float(row.get("taker_buy_base_volume")),
+                _to_float(row.get("taker_buy_quote_volume")),
             )
             bucketed.setdefault(table_name, []).append(values)
 
@@ -2123,11 +2124,12 @@ class ClickHouseDatabase:
         self.command(ddl)
         logger.info("[ClickHouse] Ensured table %s exists", self.market_data_agent_table)
     
-    def upsert_market_data_agent(self, agent_data: Dict[str, Any]) -> None:
+    def upsert_market_data_agent(self, agent_data: Dict[str, Any], create_if_not_exists: bool = True) -> None:
         """更新或插入data_agent信息。
         
         Args:
             agent_data: 包含agent信息的字典，必须包含ip和port字段
+            create_if_not_exists: 如果记录不存在是否创建，False时只更新不新建
         """
         import json
         from datetime import datetime, timezone
@@ -2162,6 +2164,11 @@ class ClickHouseDatabase:
             result = self.query(check_query)
             exists = result and result[0] and int(result[0][0]) > 0
             
+            # 如果记录不存在且不允许创建，直接返回
+            if not exists and not create_if_not_exists:
+                logger.debug("[ClickHouse] Agent %s:%s not found, skipping update (create_if_not_exists=False)", ip, port)
+                return
+            
             # 对于ReplacingMergeTree，使用INSERT语句替代UPDATE，让引擎自动保留最新版本
             # 这避免了直接UPDATE版本列导致的错误
             column_names = [
@@ -2175,7 +2182,7 @@ class ClickHouseDatabase:
             ]
             
             self.insert_rows(self.market_data_agent_table, [row_data], column_names)
-            logger.debug("[ClickHouse] Upserted agent: %s:%s", ip, port)
+            logger.debug("[ClickHouse] Upserted agent: %s:%s (exists=%s, create_if_not_exists=%s)", ip, port, exists, create_if_not_exists)
             
             # 执行OPTIMIZE TABLE，确保数据实时一致性
             optimize_query = f"OPTIMIZE TABLE {self.market_data_agent_table} FINAL"
@@ -2184,6 +2191,84 @@ class ClickHouseDatabase:
                 
         except Exception as e:
             logger.error("[ClickHouse] Failed to upsert agent %s:%s: %s", ip, port, e, exc_info=True)
+    
+    def update_agent_connection_info(self, ip: str, port: int, connection_count: int, assigned_symbol_count: int) -> None:
+        """只更新agent的连接信息（connection_count和assigned_symbol_count）。
+        
+        此方法用于agent自己定时更新状态，只更新这两个字段，不更新其他字段。
+        
+        Args:
+            ip: agent的IP地址
+            port: agent的端口号
+            connection_count: 连接数
+            assigned_symbol_count: 分配的symbol数量
+        """
+        if not ip or port == 0:
+            logger.warning("[ClickHouse] Invalid agent data: missing ip or port")
+            return
+        
+        try:
+            # 检查是否已存在该IP+port的记录
+            check_query = f"SELECT count() FROM {self.market_data_agent_table} WHERE ip = '{ip}' AND port = {port}"
+            result = self.query(check_query)
+            exists = result and result[0] and int(result[0][0]) > 0
+            
+            # 如果记录不存在，不创建（由manager注册时创建）
+            if not exists:
+                logger.debug("[ClickHouse] Agent %s:%s not found, skipping update (only update existing records)", ip, port)
+                return
+            
+            # 对于ReplacingMergeTree，使用INSERT语句，但只更新connection_count和assigned_symbol_count
+            # 其他字段从现有记录中获取（通过SELECT查询）
+            select_query = f"""
+            SELECT status, assigned_symbols, error_log, last_heartbeat
+            FROM {self.market_data_agent_table}
+            WHERE ip = '{ip}' AND port = {port}
+            ORDER BY update_time DESC
+            LIMIT 1
+            """
+            existing_data = self.query(select_query)
+            
+            if not existing_data or not existing_data.result_rows:
+                logger.warning("[ClickHouse] Agent %s:%s exists but cannot read existing data", ip, port)
+                return
+            
+            # 获取现有数据
+            row = existing_data.result_rows[0]
+            status = row[0] if row[0] else "offline"
+            assigned_symbols_json = row[1] if row[1] else "[]"
+            error_log = row[2] if row[2] else ""
+            last_heartbeat = row[3] if row[3] else datetime.now(timezone.utc)
+            
+            # 处理时间字段
+            if isinstance(last_heartbeat, (int, float)):
+                last_heartbeat = datetime.fromtimestamp(last_heartbeat, tz=timezone.utc)
+            elif not isinstance(last_heartbeat, datetime):
+                last_heartbeat = datetime.now(timezone.utc)
+            
+            update_time = datetime.now(timezone.utc)
+            
+            # 只更新connection_count和assigned_symbol_count，其他字段保持原值
+            column_names = [
+                "ip", "port", "status", "connection_count", "assigned_symbol_count",
+                "assigned_symbols", "error_log", "last_heartbeat", "update_time"
+            ]
+            
+            row_data = [
+                ip, port, status, connection_count, assigned_symbol_count,
+                assigned_symbols_json, error_log, last_heartbeat, update_time
+            ]
+            
+            self.insert_rows(self.market_data_agent_table, [row_data], column_names)
+            logger.debug("[ClickHouse] Updated agent connection info: %s:%s, connections: %s, symbols: %s", ip, port, connection_count, assigned_symbol_count)
+            
+            # 执行OPTIMIZE TABLE，确保数据实时一致性
+            optimize_query = f"OPTIMIZE TABLE {self.market_data_agent_table} FINAL"
+            self.command(optimize_query)
+            logger.debug("[ClickHouse] Optimized table %s", self.market_data_agent_table)
+                
+        except Exception as e:
+            logger.error("[ClickHouse] Failed to update agent connection info %s:%s: %s", ip, port, e, exc_info=True)
     
     def get_market_data_agents(self, status: Optional[str] = None) -> List[Dict[str, Any]]:
         """获取所有data_agent信息。
@@ -2291,6 +2376,40 @@ class ClickHouseDatabase:
 # ==================================================================
 # 辅助函数
 # ==================================================================
+
+def _to_int(value: Any) -> int:
+    """将值转换为整数，如果无法转换则返回0。
+    
+    Args:
+        value: 需要转换的值
+        
+    Returns:
+        整数，确保不为None
+    """
+    if value is None:
+        return 0
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _to_float(value: Any) -> float:
+    """将值转换为浮点数，如果无法转换则返回0.0。
+    
+    Args:
+        value: 需要转换的值
+        
+    Returns:
+        浮点数，确保不为None
+    """
+    if value is None:
+        return 0.0
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return 0.0
+
 
 def _to_datetime(value: Any) -> datetime:
     """将值转换为datetime对象，如果无法转换则返回当前UTC时间。

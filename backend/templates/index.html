@@ -538,9 +538,9 @@
     </div>
 
     <script src="https://cdn.socket.io/4.7.5/socket.io.min.js" integrity="sha384-5ZMcnnbYTS8ZJmyATLulQqnGX+HGwccPt6DVJFWG0FjhuLocMewS17EwM5JrgU6G" crossorigin="anonymous"></script>
-    <!-- KLineChart库 - 优先使用本地构建版本，如果不存在则使用CDN -->
+    <!-- KLineChart基础库 - 优先使用本地版本 -->
     <script>
-        // 智能加载KLineChart：优先本地构建版本，失败则使用CDN
+        // 智能加载KLineChart基础库：优先本地版本，失败则使用CDN
         (function() {
             const localPath = '/static/lib/klinecharts.min.js';
             const cdnPath = 'https://unpkg.com/klinecharts@latest/dist/klinecharts.min.js';
@@ -584,6 +584,9 @@
                 });
         })();
     </script>
+    <!-- KLineChart Pro库 - 使用CDN -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@klinecharts/pro@latest/dist/klinecharts-pro.css"/>
+    <script src="https://cdn.jsdelivr.net/npm/@klinecharts/pro@latest/dist/klinecharts-pro.umd.js"></script>
     <script src="/static/app.js"></script>
 </body>
 </html>

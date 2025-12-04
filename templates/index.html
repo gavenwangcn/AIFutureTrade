@@ -538,52 +538,9 @@
     </div>
 
     <script src="https://cdn.socket.io/4.7.5/socket.io.min.js" integrity="sha384-5ZMcnnbYTS8ZJmyATLulQqnGX+HGwccPt6DVJFWG0FjhuLocMewS17EwM5JrgU6G" crossorigin="anonymous"></script>
-    <!-- KLineChart库 - 优先使用本地构建版本，如果不存在则使用CDN -->
-    <script>
-        // 智能加载KLineChart：优先本地构建版本，失败则使用CDN
-        (function() {
-            const localPath = '/static/lib/klinecharts.min.js';
-            const cdnPath = 'https://unpkg.com/klinecharts@latest/dist/klinecharts.min.js';
-            
-            function loadScript(src, isCDN = false) {
-                return new Promise((resolve, reject) => {
-                    const script = document.createElement('script');
-                    script.src = src;
-                    script.onload = () => {
-                        console.log(`[KLineChart] Successfully loaded from ${isCDN ? 'CDN' : 'local'}: ${src}`);
-                        resolve();
-                    };
-                    script.onerror = () => {
-                        console.error(`[KLineChart] Failed to load from ${isCDN ? 'CDN' : 'local'}: ${src}`);
-                        reject(new Error(`Failed to load ${src}`));
-                    };
-                    document.head.appendChild(script);
-                });
-            }
-            
-            // 先尝试加载本地版本
-            fetch(localPath, { method: 'HEAD' })
-                .then(response => {
-                    if (response.ok) {
-                        // 本地文件存在，使用本地版本
-                        return loadScript(localPath, false);
-                    } else {
-                        // 本地文件不存在，使用CDN
-                        console.warn(`[KLineChart] Local file not found: ${localPath}, falling back to CDN`);
-                        return loadScript(cdnPath, true);
-                    }
-                })
-                .catch(error => {
-                    // 请求失败，使用CDN
-                    console.warn(`[KLineChart] Error checking local file: ${error.message}, falling back to CDN`);
-                    return loadScript(cdnPath, true);
-                })
-                .catch(error => {
-                    // CDN也失败了
-                    console.error('[KLineChart] Failed to load from both local and CDN. KLineChart functionality will not be available.');
-                });
-        })();
-    </script>
+    <!-- KLineChart Pro库 - 使用CDN -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@klinecharts/pro@latest/dist/klinecharts-pro.css"/>
+    <script src="https://cdn.jsdelivr.net/npm/@klinecharts/pro@latest/dist/klinecharts-pro.umd.js"></script>
     <script src="/static/app.js"></script>
 </body>
 </html>

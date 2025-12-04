@@ -1167,6 +1167,14 @@ export function useTradingApp() {
   }
 
   /**
+   * 格式化涨跌榜价格（保留6位小数）
+   */
+  const formatLeaderboardPrice = (price) => {
+    if (price === null || price === undefined) return '0.000000'
+    return parseFloat(price).toFixed(6)
+  }
+
+  /**
    * 格式化货币
    */
   const formatCurrency = (value) => {
@@ -1322,6 +1330,7 @@ export function useTradingApp() {
     getProviderName,
     getLeverageText,
     formatPrice,
+    formatLeaderboardPrice,
     formatCurrency,
     formatPnl,
     getPnlClass,
