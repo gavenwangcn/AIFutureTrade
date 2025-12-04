@@ -4,7 +4,7 @@
 # 用途：构建 Vue + Vite 前端应用镜像，包含自定义 klinecharts-pro 组件
 # 构建上下文：项目根目录（通过 docker-compose.yml 配置）
 # 注意：使用 Vite 构建，生产环境建议使用 nginx 提供静态文件服务
-# 要求：必须存在 frontend/klinecharts-pro/node_modules 和 frontend/node_modules
+# 要求：必须存在 frontend/klinecharts-pro/node_modules（依赖都在这个目录下）
 # ==============================================================================
 
 FROM node:18-slim AS base
@@ -84,14 +84,11 @@ FROM base AS frontend-builder
 WORKDIR /app
 
 # 复制前端依赖文件
-# 注意：构建前请确保 frontend/node_modules 存在
-# 如果不存在，请运行: cd frontend && npm install
 COPY frontend/package.json frontend/package-lock.json* ./
 
-# 复制前端 node_modules（必须存在）
-# 如果此步骤失败，说明 frontend/node_modules 不存在
-# 请先运行: cd frontend && npm install
-COPY frontend/node_modules ./node_modules
+# 复制 node_modules（从 klinecharts-pro 目录，因为依赖都在那里）
+# 注意：依赖目录在 frontend/klinecharts-pro/node_modules
+COPY frontend/klinecharts-pro/node_modules ./node_modules
 
 # 验证 node_modules 是否存在
 RUN echo "[Dockerfile] =========================================" && \
@@ -99,8 +96,7 @@ RUN echo "[Dockerfile] =========================================" && \
     echo "[Dockerfile] =========================================" && \
     if [ ! -d node_modules ]; then \
         echo "[Dockerfile] ✗ ERROR: node_modules directory not found!" && \
-        echo "[Dockerfile] Please ensure frontend/node_modules exists" && \
-        echo "[Dockerfile] Run: cd frontend && npm install" && \
+        echo "[Dockerfile] Please ensure frontend/klinecharts-pro/node_modules exists" && \
         exit 1; \
     fi && \
     echo "[Dockerfile] ✓ node_modules directory found" && \
@@ -176,19 +172,17 @@ FROM base AS runtime
 WORKDIR /app
 
 # 复制前端依赖文件
-# 注意：构建前请确保 frontend/node_modules 存在
 COPY frontend/package.json frontend/package-lock.json* ./
 
-# 复制前端 node_modules（必须存在）
-# 如果此步骤失败，说明 frontend/node_modules 不存在
-# 请先运行: cd frontend && npm install
-COPY frontend/node_modules ./node_modules
+# 复制 node_modules（从 klinecharts-pro 目录，因为依赖都在那里）
+# 注意：依赖目录在 frontend/klinecharts-pro/node_modules
+COPY frontend/klinecharts-pro/node_modules ./node_modules
 
 # 验证 node_modules 是否存在
 RUN echo "[Dockerfile] Verifying runtime node_modules..." && \
     if [ ! -d node_modules ]; then \
         echo "[Dockerfile] ✗ ERROR: node_modules directory not found!" && \
-        echo "[Dockerfile] Please ensure frontend/node_modules exists" && \
+        echo "[Dockerfile] Please ensure frontend/klinecharts-pro/node_modules exists" && \
         exit 1; \
     fi && \
     echo "[Dockerfile] ✓ Runtime node_modules verified"
