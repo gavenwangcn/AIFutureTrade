@@ -83,9 +83,14 @@ FROM base AS frontend-builder
 
 WORKDIR /app
 
-# 复制前端依赖文件和 node_modules（必须存在）
-# 注意：构建上下文是项目根目录，所以路径是 frontend/node_modules
+# 复制前端依赖文件
+# 注意：构建前请确保 frontend/node_modules 存在
+# 如果不存在，请运行: cd frontend && npm install
 COPY frontend/package.json frontend/package-lock.json* ./
+
+# 复制前端 node_modules（必须存在）
+# 如果此步骤失败，说明 frontend/node_modules 不存在
+# 请先运行: cd frontend && npm install
 COPY frontend/node_modules ./node_modules
 
 # 验证 node_modules 是否存在
@@ -95,6 +100,7 @@ RUN echo "[Dockerfile] =========================================" && \
     if [ ! -d node_modules ]; then \
         echo "[Dockerfile] ✗ ERROR: node_modules directory not found!" && \
         echo "[Dockerfile] Please ensure frontend/node_modules exists" && \
+        echo "[Dockerfile] Run: cd frontend && npm install" && \
         exit 1; \
     fi && \
     echo "[Dockerfile] ✓ node_modules directory found" && \
@@ -169,8 +175,13 @@ FROM base AS runtime
 
 WORKDIR /app
 
-# 复制前端依赖文件和 node_modules（用于运行预览服务器）
+# 复制前端依赖文件
+# 注意：构建前请确保 frontend/node_modules 存在
 COPY frontend/package.json frontend/package-lock.json* ./
+
+# 复制前端 node_modules（必须存在）
+# 如果此步骤失败，说明 frontend/node_modules 不存在
+# 请先运行: cd frontend && npm install
 COPY frontend/node_modules ./node_modules
 
 # 验证 node_modules 是否存在
