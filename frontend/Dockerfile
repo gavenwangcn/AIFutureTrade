@@ -46,11 +46,19 @@ RUN if [ -f package-lock.json ]; then \
     fi
 
 # 显式安装 peer dependency klinecharts（TypeScript 编译需要）
-# 使用 --save-peer 确保安装到 node_modules，但不修改 package.json
+# 注意：klinecharts 是 peerDependency，必须显式安装才能进行 TypeScript 编译
+# 移除 --no-save 参数，确保安装成功（Docker 构建环境不需要保持 package.json 不变）
 RUN echo "[Dockerfile] Installing peer dependency klinecharts for TypeScript compilation..." && \
-    npm install klinecharts@^9.8.12 --legacy-peer-deps --no-save || \
-    npm install klinecharts@latest --legacy-peer-deps --no-save || \
-    (echo "[Dockerfile] ⚠️  Failed to install klinecharts, TypeScript compilation may fail" && exit 1)
+    echo "[Dockerfile] npm version:" && \
+    npm --version && \
+    echo "[Dockerfile] Current working directory: $(pwd)" && \
+    echo "[Dockerfile] Attempting to install klinecharts@^9.8.12..." && \
+    npm install klinecharts@^9.8.12 --legacy-peer-deps 2>&1 | head -30 || \
+    (echo "[Dockerfile] First attempt failed, trying latest version..." && \
+     npm install klinecharts@latest --legacy-peer-deps 2>&1 | head -30 || \
+     (echo "[Dockerfile] Second attempt failed, trying without version constraint..." && \
+      npm install klinecharts --legacy-peer-deps 2>&1 | head -30)) && \
+    echo "[Dockerfile] Installation command completed"
 
 # 验证 klinecharts 是否已安装
 RUN if [ -d node_modules/klinecharts ]; then \
