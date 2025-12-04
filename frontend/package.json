@@ -7,9 +7,7 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "start": "npm run build && npm run preview",
-    "sync-static": "node scripts/sync-static-assets.js",
-    "postinstall": "npm run sync-static"
+    "start": "npm run build && npm run preview"
   },
   "dependencies": {
     "@klinecharts/pro": "latest",

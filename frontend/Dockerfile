@@ -81,9 +81,8 @@ RUN if [ -d dist ] && [ -f dist/klinecharts-pro.umd.js ] && [ -f dist/klinechart
 # 切换回主工作目录
 WORKDIR /app
 
-# 复制前端依赖文件和构建脚本
+# 复制前端依赖文件
 COPY frontend/package.json frontend/package-lock.json* ./
-COPY frontend/scripts/ scripts/
 
 # 安装前端npm依赖
 RUN if [ -f package-lock.json ]; then \
@@ -117,10 +116,6 @@ COPY frontend/vite.config.js ./
 # 复制静态资源（用于开发环境回退）
 COPY frontend/public/ public/
 
-# 复制项目根目录的static目录到临时位置（用于资源同步）
-RUN mkdir -p /tmp/static 2>/dev/null || true
-RUN if [ -d static ]; then cp -r static/* /tmp/static/ 2>/dev/null || true; fi
-
 # 将构建好的 klinecharts-pro 复制到 public/klinecharts-pro/ 目录
 # 这样前端可以通过 /klinecharts-pro/ 路径访问这些文件
 RUN mkdir -p public/klinecharts-pro && \
@@ -140,9 +135,6 @@ RUN if [ -f node_modules/klinecharts/dist/klinecharts.umd.js ]; then \
         echo "[Dockerfile] Warning: klinecharts UMD file not found, checking available files..." && \
         find node_modules/klinecharts/dist -name "*.js" -type f | head -5 || echo "No JS files found"; \
     fi
-
-# 同步静态资源（从static/目录复制到public/目录）
-RUN npm run sync-static 2>&1 || echo "Static assets sync skipped"
 
 # ==============================================================================
 # 阶段4：构建前端应用
