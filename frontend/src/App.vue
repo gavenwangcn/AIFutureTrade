@@ -49,6 +49,10 @@
             <i class="bi bi-cloud-plus"></i>
             API提供方
           </button>
+          <button class="btn-secondary" @click="showFutureConfigModal = true">
+            <i class="bi bi-file-earmark-plus"></i>
+            添加合约
+          </button>
           <button class="btn-primary" @click="showAddModelModal = true">
             <i class="bi bi-plus-lg"></i>
             添加模型

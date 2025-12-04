@@ -15,6 +15,10 @@
                 {{ tf.label }}
               </button>
             </div>
+            <button class="btn-secondary" @click="handleAddContract">
+              <i class="bi bi-plus-circle"></i>
+              添加合约
+            </button>
             <button class="close-btn" @click="handleClose">
               <i class="bi bi-x-lg"></i>
             </button>
@@ -230,6 +234,12 @@ const destroyChart = () => {
 onUnmounted(() => {
   destroyChart()
 })
+
+// Handle add contract
+const handleAddContract = () => {
+  // Dispatch a custom event to notify parent component
+  window.dispatchEvent(new CustomEvent('add-contract-requested'))
+}
 </script>
 
 <style scoped>
