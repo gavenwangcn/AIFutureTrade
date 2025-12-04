@@ -490,48 +490,10 @@ onUnmounted(() => {
   box-sizing: border-box;
 }
 
-/* KlineChart库相关样式 - 仅保留必要的样式隔离 */
+/* KlineChart库相关样式 - 只保留最基本的样式隔离 */
 .kline-chart-container :deep(*) {
   box-sizing: border-box;
 }
 
-.kline-modal :deep(.klinecharts-pro) {
-  width: 100% !important;
-  height: 100% !important;
-  min-height: 600px !important;
-  background-color: #1a1a1a !important;
-  display: block !important;
-  position: relative !important;
-}
-
-.kline-modal :deep(.klinecharts-pro-container) {
-  width: 100% !important;
-  height: 100% !important;
-  min-height: 600px !important;
-  background-color: #1a1a1a !important;
-  display: block !important;
-  position: relative !important;
-}
-
-.kline-modal :deep(.klinecharts-pro-chart-container) {
-  width: 100% !important;
-  height: 100% !important;
-  min-height: 600px !important;
-  background-color: #1a1a1a !important;
-  display: block !important;
-  position: relative !important;
-}
-
-.kline-modal :deep(canvas) {
-  display: block !important;
-  width: 100% !important;
-  height: 100% !important;
-  position: relative !important;
-}
-
-.kline-modal :deep([class*="klinecharts"]) {
-  display: block !important;
-  width: 100% !important;
-  height: 100% !important;
-}
+/* 移除过多的深度选择器，让klinecharts-pro使用自己的默认样式 */
 </style>
