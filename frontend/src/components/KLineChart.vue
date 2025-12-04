@@ -172,26 +172,18 @@ const initChart = async () => {
     const symbolInfo = symbolToSymbolInfo(props.symbol)
     const period = intervalToPeriod(currentInterval.value)
     
-    // Create KLineChartPro instance with default indicators
+    // Create KLineChartPro instance
+    // 使用 klinecharts-pro 中的默认配置（periods, mainIndicators, subIndicators）
+    // 默认配置在 frontend/klinecharts-pro/src/KLineChartPro.tsx 中定义
     chartInstance.value = new KLineChartPro({
       container: chartContainerRef.value,
       symbol: symbolInfo,
       period: period,
-      periods: [
-        { multiplier: 1, timespan: 'minute', text: '1m' },
-        { multiplier: 5, timespan: 'minute', text: '5m' },
-        { multiplier: 15, timespan: 'minute', text: '15m' },
-        { multiplier: 30, timespan: 'minute', text: '30m' },
-        { multiplier: 1, timespan: 'hour', text: '1h' },
-        { multiplier: 4, timespan: 'hour', text: '4h' },
-        { multiplier: 1, timespan: 'day', text: '1d' },
-        { multiplier: 1, timespan: 'week', text: '1w' }
-      ],
+      // periods 不指定，使用 klinecharts-pro 默认值：['1m', '5m', '15m', '1h', '4h', '1d', '1w']
+      // mainIndicators 不指定，使用 klinecharts-pro 默认值：['MA']
+      // subIndicators 不指定，使用 klinecharts-pro 默认值：['MA', 'RSI', 'MACD', 'VOL']
       datafeed: datafeedInstance.value,
-      theme: 'light',
-      // 设置默认指标：主图指标 MA，副图指标 VOL
-      mainIndicators: ['MA'],
-      subIndicators: ['VOL']
+      theme: 'light'
     })
     
     console.log('[KLineChart] Chart initialized successfully')

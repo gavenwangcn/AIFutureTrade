@@ -24,6 +24,9 @@ RUN npm config set registry ${NPM_REGISTRY} && \
 # ==============================================================================
 # 阶段1：构建 klinecharts-pro 基础库
 # ==============================================================================
+# 注意：为了确保代码变更时重新构建，源代码复制放在依赖安装之后
+# 这样当源代码文件变化时，Docker 会重新执行构建步骤
+
 # 复制 klinecharts-pro 的 package.json 和 package-lock.json
 COPY frontend/klinecharts-pro/package.json frontend/klinecharts-pro/package-lock.json* ./klinecharts-pro/
 
@@ -43,7 +46,8 @@ RUN if [ -f package-lock.json ]; then \
 # 修复 node_modules/.bin 中的可执行文件权限
 RUN find node_modules/.bin -type f -exec chmod +x {} \; 2>/dev/null || true
 
-# 复制 klinecharts-pro 源代码
+# 复制 klinecharts-pro 源代码（放在依赖安装之后，确保代码变更时重新构建）
+# 注意：如果源代码文件发生变化，Docker 会重新执行此步骤及后续的构建步骤
 COPY frontend/klinecharts-pro/ ./
 
 # 再次修复权限
@@ -51,7 +55,10 @@ RUN find node_modules/.bin -type f -exec chmod +x {} \; 2>/dev/null || true && \
     find node_modules -name "tsc" -type f -exec chmod +x {} \; 2>/dev/null || true
 
 # 构建 klinecharts-pro
+# 注意：此步骤会在源代码文件变化时自动重新执行
 RUN echo "[Dockerfile] Building klinecharts-pro..." && \
+    echo "[Dockerfile] Source files timestamp:" && \
+    ls -la src/KLineChartPro.tsx 2>/dev/null | head -1 || echo "Source file not found" && \
     node node_modules/typescript/bin/tsc && \
     node node_modules/vite/bin/vite.js build && \
     (chmod +x node_modules/.bin/dts-bundle-generator 2>/dev/null || true) && \
