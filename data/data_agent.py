@@ -14,6 +14,7 @@ import sys
 from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional, Set, Tuple
 from http.server import HTTPServer, BaseHTTPRequestHandler
+from socketserver import ThreadingMixIn
 import threading
 import urllib.parse
 import socket
@@ -1075,6 +1076,11 @@ class DataAgentKlineManager:
                 del self._active_connections[key]
 
 
+class ThreadingHTTPServer(ThreadingMixIn, HTTPServer):
+    """支持多线程的HTTP服务器，每个请求在独立线程中处理，避免阻塞。"""
+    daemon_threads = True  # 设置为守护线程，主进程退出时自动退出
+
+
 class DataAgentStatusHandler(BaseHTTPRequestHandler):
     """处理data_agent的状态检查请求（独立端口，避免指令服务阻塞）。"""
     
@@ -1132,7 +1138,9 @@ class DataAgentStatusHandler(BaseHTTPRequestHandler):
             self.send_response(200)
             self.send_header('Content-Type', 'application/json')
             self.end_headers()
-            self.wfile.write(json.dumps(data, ensure_ascii=False).encode('utf-8'))
+            response_body = json.dumps(data, ensure_ascii=False).encode('utf-8')
+            self.wfile.write(response_body)
+            self.wfile.flush()  # 立即刷新输出缓冲区，确保响应立即发送
         except BrokenPipeError:
             logger.debug("[DataAgentStatus] Broken pipe error when sending JSON response")
         except Exception as e:
@@ -1144,7 +1152,9 @@ class DataAgentStatusHandler(BaseHTTPRequestHandler):
             self.send_response(code)
             self.send_header('Content-Type', 'application/json')
             self.end_headers()
-            self.wfile.write(json.dumps({"error": message}, ensure_ascii=False).encode('utf-8'))
+            error_body = json.dumps({"error": message}, ensure_ascii=False).encode('utf-8')
+            self.wfile.write(error_body)
+            self.wfile.flush()  # 立即刷新输出缓冲区，确保响应立即发送
         except BrokenPipeError:
             logger.debug("[DataAgentStatus] Broken pipe error when sending error response")
         except Exception as e:
@@ -1193,23 +1203,51 @@ class DataAgentCommandHandler(BaseHTTPRequestHandler):
     
     def do_POST(self):
         """处理POST请求。"""
+        request_start_time = datetime.now(timezone.utc)
+        client_address = f"{self.client_address[0]}:{self.client_address[1]}"
+        
+        logger.info(
+            "[DataAgentCommand] 📥 [POST请求] 收到来自 %s 的POST请求 (路径: %s, 时间: %s)",
+            client_address, self.path, request_start_time.isoformat()
+        )
+        logger.debug(
+            "[DataAgentCommand] 📥 [POST请求] 请求头: %s",
+            dict(self.headers)
+        )
+        
         try:
             parsed_path = urllib.parse.urlparse(self.path)
             path = parsed_path.path
             
+            logger.info(
+                "[DataAgentCommand] 📥 [POST请求] 解析路径: %s -> %s",
+                self.path, path
+            )
+            
             if path == '/streams/add':
                 # 添加K线流
+                logger.info("[DataAgentCommand] 📥 [POST请求] 路由到 /streams/add")
                 self._handle_add_stream()
             elif path == '/streams/remove':
                 # 移除K线流
+                logger.info("[DataAgentCommand] 📥 [POST请求] 路由到 /streams/remove")
                 self._handle_remove_stream()
             elif path == '/symbols/add':
                 # 批量添加symbol（为每个symbol创建7个interval的流）
+                logger.info("[DataAgentCommand] 📥 [POST请求] 路由到 /symbols/add")
                 self._handle_add_symbols()
             else:
+                logger.warning(
+                    "[DataAgentCommand] ⚠️  [POST请求] 未知路径: %s (来自 %s)",
+                    path, client_address
+                )
                 self._send_error(404, "Not Found")
         except Exception as e:
-            logger.error("[DataAgentCommand] Error handling POST request: %s", e, exc_info=True)
+            request_duration = (datetime.now(timezone.utc) - request_start_time).total_seconds()
+            logger.error(
+                "[DataAgentCommand] ❌ [POST请求] 处理请求失败 (路径: %s, 来自: %s, 耗时: %.3fs): %s",
+                self.path, client_address, request_duration, e, exc_info=True
+            )
             self._send_error(500, str(e))
     
     def _handle_ping(self):
@@ -1241,49 +1279,121 @@ class DataAgentCommandHandler(BaseHTTPRequestHandler):
     
     def _handle_get_connection_count(self):
         """处理获取连接数请求。"""
+        request_start_time = datetime.now(timezone.utc)
         try:
             # 使用主事件循环执行异步操作
             coro = self.kline_manager.get_connection_count()
             future = asyncio.run_coroutine_threadsafe(coro, self._main_loop)
-            count = future.result()  # 等待结果
+            # 添加超时保护，避免HTTP请求一直等待
+            count = future.result(timeout=10)  # 最多等待10秒
+            request_duration = (datetime.now(timezone.utc) - request_start_time).total_seconds()
+            logger.debug(
+                "[DataAgentCommand] ✅ [获取连接数] 成功 (耗时: %.3fs, 连接数: %s)",
+                request_duration, count
+            )
             self._send_json({"connection_count": count})
+        except TimeoutError:
+            request_duration = (datetime.now(timezone.utc) - request_start_time).total_seconds()
+            logger.error(
+                "[DataAgentCommand] ❌ [获取连接数] 超时 (耗时: %.3fs)",
+                request_duration
+            )
+            self._send_error(500, "Timeout getting connection count")
         except Exception as e:
-            logger.error("[DataAgentCommand] Error in get_connection_count: %s", e, exc_info=True)
+            request_duration = (datetime.now(timezone.utc) - request_start_time).total_seconds()
+            logger.error(
+                "[DataAgentCommand] ❌ [获取连接数] 错误 (耗时: %.3fs): %s",
+                request_duration, e, exc_info=True
+            )
             self._send_error(500, str(e))
     
     def _handle_get_connection_list(self):
         """处理获取连接列表请求。"""
+        request_start_time = datetime.now(timezone.utc)
         try:
             # 使用主事件循环执行异步操作
             coro = self.kline_manager.get_connection_list()
             future = asyncio.run_coroutine_threadsafe(coro, self._main_loop)
-            connections = future.result()  # 等待结果
+            # 添加超时保护，避免HTTP请求一直等待
+            connections = future.result(timeout=10)  # 最多等待10秒
+            request_duration = (datetime.now(timezone.utc) - request_start_time).total_seconds()
+            logger.debug(
+                "[DataAgentCommand] ✅ [获取连接列表] 成功 (耗时: %.3fs, 连接数: %s)",
+                request_duration, len(connections)
+            )
             self._send_json({"connections": connections, "count": len(connections)})
+        except TimeoutError:
+            request_duration = (datetime.now(timezone.utc) - request_start_time).total_seconds()
+            logger.error(
+                "[DataAgentCommand] ❌ [获取连接列表] 超时 (耗时: %.3fs)",
+                request_duration
+            )
+            self._send_error(500, "Timeout getting connection list")
         except Exception as e:
-            logger.error("[DataAgentCommand] Error in get_connection_list: %s", e, exc_info=True)
+            request_duration = (datetime.now(timezone.utc) - request_start_time).total_seconds()
+            logger.error(
+                "[DataAgentCommand] ❌ [获取连接列表] 错误 (耗时: %.3fs): %s",
+                request_duration, e, exc_info=True
+            )
             self._send_error(500, str(e))
     
     def _handle_get_symbols(self):
         """处理获取symbol列表请求。"""
+        request_start_time = datetime.now(timezone.utc)
         try:
             # 使用主事件循环执行异步操作
             coro = self.kline_manager.get_symbols()
             future = asyncio.run_coroutine_threadsafe(coro, self._main_loop)
-            symbols = future.result()  # 等待结果
+            # 添加超时保护，避免HTTP请求一直等待
+            symbols = future.result(timeout=10)  # 最多等待10秒
+            request_duration = (datetime.now(timezone.utc) - request_start_time).total_seconds()
+            logger.debug(
+                "[DataAgentCommand] ✅ [获取Symbol列表] 成功 (耗时: %.3fs, symbol数: %s)",
+                request_duration, len(symbols)
+            )
             self._send_json({"symbols": sorted(list(symbols)), "count": len(symbols)})
+        except TimeoutError:
+            request_duration = (datetime.now(timezone.utc) - request_start_time).total_seconds()
+            logger.error(
+                "[DataAgentCommand] ❌ [获取Symbol列表] 超时 (耗时: %.3fs)",
+                request_duration
+            )
+            self._send_error(500, "Timeout getting symbols")
         except Exception as e:
-            logger.error("[DataAgentCommand] Error in get_symbols: %s", e, exc_info=True)
+            request_duration = (datetime.now(timezone.utc) - request_start_time).total_seconds()
+            logger.error(
+                "[DataAgentCommand] ❌ [获取Symbol列表] 错误 (耗时: %.3fs): %s",
+                request_duration, e, exc_info=True
+            )
             self._send_error(500, str(e))
     
     def _handle_get_status(self):
         """处理获取连接状态请求（返回JSON格式：总连接数和symbol列表）。"""
+        request_start_time = datetime.now(timezone.utc)
         try:
             coro = self.kline_manager.get_connection_status()
             future = asyncio.run_coroutine_threadsafe(coro, self._main_loop)
-            status = future.result()
+            # 添加超时保护，避免HTTP请求一直等待
+            status = future.result(timeout=10)  # 最多等待10秒
+            request_duration = (datetime.now(timezone.utc) - request_start_time).total_seconds()
+            logger.debug(
+                "[DataAgentCommand] ✅ [获取状态] 成功 (耗时: %.3fs, 状态: %s)",
+                request_duration, status
+            )
             self._send_json({"status": "ok", **status})
+        except TimeoutError:
+            request_duration = (datetime.now(timezone.utc) - request_start_time).total_seconds()
+            logger.error(
+                "[DataAgentCommand] ❌ [获取状态] 超时 (耗时: %.3fs)",
+                request_duration
+            )
+            self._send_error(500, "Timeout getting status")
         except Exception as e:
-            logger.error("[DataAgentCommand] Error in get_status: %s", e, exc_info=True)
+            request_duration = (datetime.now(timezone.utc) - request_start_time).total_seconds()
+            logger.error(
+                "[DataAgentCommand] ❌ [获取状态] 错误 (耗时: %.3fs): %s",
+                request_duration, e, exc_info=True
+            )
             self._send_error(500, str(e))
     
     def _handle_add_symbols(self):
@@ -1477,6 +1587,7 @@ class DataAgentCommandHandler(BaseHTTPRequestHandler):
     
     def _handle_add_stream(self):
         """处理添加K线流请求。"""
+        request_start_time = datetime.now(timezone.utc)
         content_length = int(self.headers.get('Content-Length', 0))
         body = self.rfile.read(content_length)
         data = json.loads(body.decode('utf-8'))
@@ -1492,17 +1603,35 @@ class DataAgentCommandHandler(BaseHTTPRequestHandler):
             # 使用主事件循环执行异步操作
             coro = self.kline_manager.add_stream(symbol, interval)
             future = asyncio.run_coroutine_threadsafe(coro, self._main_loop)
-            success = future.result()  # 等待结果
+            # 添加超时保护，避免HTTP请求一直等待（添加流可能需要较长时间，设置30秒超时）
+            success = future.result(timeout=30)  # 最多等待30秒
+            request_duration = (datetime.now(timezone.utc) - request_start_time).total_seconds()
+            logger.info(
+                "[DataAgentCommand] ✅ [添加流] %s %s 完成 (耗时: %.3fs, 成功: %s)",
+                symbol, interval, request_duration, success
+            )
             if success:
                 self._send_json({"status": "ok", "message": f"Added stream for {symbol} {interval}"})
             else:
                 self._send_error(500, f"Failed to add stream for {symbol} {interval}")
+        except TimeoutError:
+            request_duration = (datetime.now(timezone.utc) - request_start_time).total_seconds()
+            logger.error(
+                "[DataAgentCommand] ❌ [添加流] %s %s 超时 (耗时: %.3fs)",
+                symbol, interval, request_duration
+            )
+            self._send_error(500, f"Timeout adding stream for {symbol} {interval}")
         except Exception as e:
-            logger.error("[DataAgentCommand] Error in add_stream: %s", e, exc_info=True)
+            request_duration = (datetime.now(timezone.utc) - request_start_time).total_seconds()
+            logger.error(
+                "[DataAgentCommand] ❌ [添加流] %s %s 错误 (耗时: %.3fs): %s",
+                symbol, interval, request_duration, e, exc_info=True
+            )
             self._send_error(500, str(e))
     
     def _handle_remove_stream(self):
         """处理移除K线流请求。"""
+        request_start_time = datetime.now(timezone.utc)
         content_length = int(self.headers.get('Content-Length', 0))
         body = self.rfile.read(content_length)
         data = json.loads(body.decode('utf-8'))
@@ -1518,13 +1647,30 @@ class DataAgentCommandHandler(BaseHTTPRequestHandler):
             # 使用主事件循环执行异步操作
             coro = self.kline_manager.remove_stream(symbol, interval)
             future = asyncio.run_coroutine_threadsafe(coro, self._main_loop)
-            success = future.result()  # 等待结果
+            # 添加超时保护，避免HTTP请求一直等待
+            success = future.result(timeout=10)  # 最多等待10秒
+            request_duration = (datetime.now(timezone.utc) - request_start_time).total_seconds()
+            logger.info(
+                "[DataAgentCommand] ✅ [移除流] %s %s 完成 (耗时: %.3fs, 成功: %s)",
+                symbol, interval, request_duration, success
+            )
             if success:
                 self._send_json({"status": "ok", "message": f"Removed stream for {symbol} {interval}"})
             else:
                 self._send_error(500, f"Failed to remove stream for {symbol} {interval}")
+        except TimeoutError:
+            request_duration = (datetime.now(timezone.utc) - request_start_time).total_seconds()
+            logger.error(
+                "[DataAgentCommand] ❌ [移除流] %s %s 超时 (耗时: %.3fs)",
+                symbol, interval, request_duration
+            )
+            self._send_error(500, f"Timeout removing stream for {symbol} {interval}")
         except Exception as e:
-            logger.error("[DataAgentCommand] Error in remove_stream: %s", e, exc_info=True)
+            request_duration = (datetime.now(timezone.utc) - request_start_time).total_seconds()
+            logger.error(
+                "[DataAgentCommand] ❌ [移除流] %s %s 错误 (耗时: %.3fs): %s",
+                symbol, interval, request_duration, e, exc_info=True
+            )
             self._send_error(500, str(e))
     
     def _send_json(self, data: Dict[str, Any]):
@@ -1533,7 +1679,13 @@ class DataAgentCommandHandler(BaseHTTPRequestHandler):
             self.send_response(200)
             self.send_header('Content-Type', 'application/json')
             self.end_headers()
-            self.wfile.write(json.dumps(data, ensure_ascii=False).encode('utf-8'))
+            response_body = json.dumps(data, ensure_ascii=False).encode('utf-8')
+            self.wfile.write(response_body)
+            self.wfile.flush()  # 立即刷新输出缓冲区，确保响应立即发送
+            logger.debug(
+                "[DataAgentCommand] 📤 [发送响应] JSON响应已发送 (大小: %s bytes)",
+                len(response_body)
+            )
         except BrokenPipeError:
             # 客户端已断开连接，记录日志但不抛出异常
             logger.debug("[DataAgentCommand] Broken pipe error when sending JSON response")
@@ -1547,7 +1699,13 @@ class DataAgentCommandHandler(BaseHTTPRequestHandler):
             self.send_response(code)
             self.send_header('Content-Type', 'application/json')
             self.end_headers()
-            self.wfile.write(json.dumps({"error": message}, ensure_ascii=False).encode('utf-8'))
+            error_body = json.dumps({"error": message}, ensure_ascii=False).encode('utf-8')
+            self.wfile.write(error_body)
+            self.wfile.flush()  # 立即刷新输出缓冲区，确保响应立即发送
+            logger.debug(
+                "[DataAgentCommand] 📤 [发送错误] 错误响应已发送 (状态码: %s, 大小: %s bytes)",
+                code, len(error_body)
+            )
         except BrokenPipeError:
             # 客户端已断开连接，记录日志但不抛出异常
             logger.debug("[DataAgentCommand] Broken pipe error when sending error response")
@@ -1580,23 +1738,50 @@ async def run_data_agent_command_server(
     port: int = 9999
 ) -> None:
     """运行data_agent的HTTP指令服务器。"""
+    logger.info("[DataAgent] 📡 [指令服务] 开始启动指令服务器 %s:%s...", host, port)
+    
     main_loop = asyncio.get_event_loop()
     handler = create_command_handler(kline_manager, main_loop)
-    server = HTTPServer((host, port), handler)
-    logger.info("[DataAgent] 📡 [指令服务] 启动指令服务器 %s:%s", host, port)
+    
+    try:
+        # 使用 ThreadingHTTPServer 确保每个请求在独立线程中处理，避免阻塞
+        server = ThreadingHTTPServer((host, port), handler)
+        logger.info("[DataAgent] ✅ [指令服务] HTTP服务器对象创建成功 %s:%s (使用多线程模式)", host, port)
+    except Exception as e:
+        logger.error("[DataAgent] ❌ [指令服务] 创建HTTP服务器失败 %s:%s: %s", host, port, e, exc_info=True)
+        raise
     
     def run_server():
         try:
+            logger.info("[DataAgent] 📡 [指令服务] 线程中启动服务器监听 %s:%s...", host, port)
             server.serve_forever()
+            logger.info("[DataAgent] 📡 [指令服务] 服务器已停止监听 %s:%s", host, port)
         except Exception as e:
-            logger.error("[DataAgent] ❌ [指令服务] 服务器运行异常: %s", e, exc_info=True)
+            logger.error("[DataAgent] ❌ [指令服务] 服务器运行异常 %s:%s: %s", host, port, e, exc_info=True)
     
     server_thread = threading.Thread(target=run_server, daemon=True, name="DataAgentCommandServer")
     server_thread.start()
+    logger.info("[DataAgent] ✅ [指令服务] 服务器线程已启动 (线程名: %s, 线程ID: %s)", 
+               server_thread.name, server_thread.ident)
     
-    # 等待服务器启动
-    await asyncio.sleep(0.5)
-    logger.info("[DataAgent] ✅ [指令服务] 指令服务器已启动并运行中")
+    # 等待服务器启动并验证
+    await asyncio.sleep(1)
+    
+    # 验证服务器是否真的在监听
+    import socket
+    try:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.settimeout(1)
+        result = sock.connect_ex((host if host != '0.0.0.0' else '127.0.0.1', port))
+        sock.close()
+        if result == 0:
+            logger.info("[DataAgent] ✅ [指令服务] 验证成功：端口 %s 正在监听", port)
+        else:
+            logger.warning("[DataAgent] ⚠️  [指令服务] 验证失败：端口 %s 可能未正确监听 (错误码: %s)", port, result)
+    except Exception as e:
+        logger.warning("[DataAgent] ⚠️  [指令服务] 验证端口时出错: %s", e)
+    
+    logger.info("[DataAgent] ✅ [指令服务] 指令服务器已启动并运行中 (监听地址: %s:%s)", host, port)
     
     try:
         # 保持运行
@@ -1617,7 +1802,8 @@ async def run_data_agent_status_server(
     """运行data_agent的HTTP状态检查服务器（独立端口，避免指令服务阻塞）。"""
     main_loop = asyncio.get_event_loop()
     handler = create_status_handler(kline_manager, main_loop)
-    server = HTTPServer((host, port), handler)
+    # 使用 ThreadingHTTPServer 确保每个请求在独立线程中处理，避免阻塞
+    server = ThreadingHTTPServer((host, port), handler)
     logger.info("[DataAgent] 💚 [状态服务] 启动状态检查服务器 %s:%s", host, port)
     
     def run_server():

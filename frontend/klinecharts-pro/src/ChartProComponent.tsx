@@ -16,7 +16,7 @@ import { createSignal, createEffect, onMount, Show, onCleanup, startTransition, 
 
 import {
   init, dispose, utils, Nullable, Chart, OverlayMode, Styles,
-  TooltipIconPosition, ActionType, PaneOptions, Indicator, DomPosition, FormatDateType
+  TooltipIconPosition, ActionType, PaneOptions, Indicator, DomPosition, FormatDateType, LoadDataType
 } from 'klinecharts'
 
 import lodashSet from 'lodash/set'
@@ -243,15 +243,43 @@ const ChartProComponent: Component<ChartProComponentProps> = props => {
       }
     })
     setSubIndicators(subIndicatorMap)
-    widget?.loadMore(timestamp => {
+    // 使用新的 setLoadDataCallback API 替代已废弃的 loadMore
+    widget?.setLoadDataCallback(params => {
+      // params.type: LoadDataType.Init | LoadDataType.Forward | LoadDataType.Backward
+      // params.data: 当前数据点（Nullable<KLineData>）
+      // params.callback: 回调函数，用于返回加载的数据
+      
+      // 只处理向前加载（Forward）的情况，向后加载（Backward）和初始化（Init）暂不处理
+      if (params.type !== LoadDataType.Forward) {
+        params.callback([], false)
+        return
+      }
+      
       loading = true
       const get = async () => {
-        const p = period()
-        const [to] = adjustFromTo(p, timestamp!, 1)
-        const [from] = adjustFromTo(p, to, 500)
-        const kLineDataList = await props.datafeed.getHistoryKLineData(symbol(), p, from, to)
-        widget?.applyMoreData(kLineDataList, kLineDataList.length > 0)
-        loading = false
+        try {
+          const p = period()
+          // 使用当前数据点的时间戳作为参考点
+          const timestamp = params.data?.timestamp
+          if (!timestamp) {
+            params.callback([], false)
+            loading = false
+            return
+          }
+          
+          const [to] = adjustFromTo(p, timestamp, 1)
+          const [from] = adjustFromTo(p, to, 500)
+          const kLineDataList = await props.datafeed.getHistoryKLineData(symbol(), p, from, to)
+          
+          // 使用新的 callback 方式返回数据，替代 applyMoreData
+          // callback 的第二个参数 more 表示是否还有更多数据
+          params.callback(kLineDataList, kLineDataList.length > 0)
+        } catch (error) {
+          console.error('[ChartProComponent] Error loading more data:', error)
+          params.callback([], false)
+        } finally {
+          loading = false
+        }
       }
       get()
     })

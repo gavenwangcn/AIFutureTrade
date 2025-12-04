@@ -815,15 +815,48 @@ class DataAgentManager:
         
         for i in range(0, len(symbols), batch_size):
             batch_symbols = symbols[i:i + batch_size]
+            batch_start_time = datetime.now(timezone.utc)
+            
+            logger.info(
+                "[DataAgentManager] 📤 [发送请求] 开始发送批量添加symbol请求到 %s:%s (批次: %s/%s, 数量: %s, 超时: %ss)",
+                ip, port, i // batch_size + 1, (len(symbols) + batch_size - 1) // batch_size,
+                len(batch_symbols), batch_timeout
+            )
+            logger.debug(
+                "[DataAgentManager] 📤 [发送请求] Symbols列表: %s",
+                batch_symbols[:10] if len(batch_symbols) > 10 else batch_symbols
+            )
+            
             try:
-                async with aiohttp.ClientSession() as session:
-                    url = f"http://{ip}:{port}/symbols/add"
-                    payload = {"symbols": batch_symbols}
+                url = f"http://{ip}:{port}/symbols/add"
+                payload = {"symbols": batch_symbols}
+                
+                logger.info(
+                    "[DataAgentManager] 📤 [发送请求] POST %s (payload size: %s bytes)",
+                    url, len(json.dumps(payload))
+                )
+                
+                # 使用连接器确保连接正确关闭
+                connector = aiohttp.TCPConnector(limit=10, limit_per_host=5, force_close=True)
+                timeout = aiohttp.ClientTimeout(total=batch_timeout, connect=5)
+                
+                async with aiohttp.ClientSession(connector=connector, timeout=timeout) as session:
+                    connect_start_time = datetime.now(timezone.utc)
+                    logger.debug(
+                        "[DataAgentManager] 📤 [发送请求] 开始建立连接 %s:%s...",
+                        ip, port
+                    )
+                    
                     async with session.post(
                         url,
                         json=payload,
-                        timeout=aiohttp.ClientTimeout(total=batch_timeout)  # 使用合理的超时时间
+                        headers={'Content-Type': 'application/json'}
                     ) as response:
+                        connect_duration = (datetime.now(timezone.utc) - connect_start_time).total_seconds()
+                        logger.info(
+                            "[DataAgentManager] ✅ [发送请求] 连接建立成功 %s:%s (耗时: %.3fs, 状态码: %s)",
+                            ip, port, connect_duration, response.status
+                        )
                         if response.status == 200:
                             data = await response.json()
                             if data.get("status") == "ok":
@@ -837,15 +870,29 @@ class DataAgentManager:
                                 ip, port, response.status
                             )
             except asyncio.TimeoutError:
+                batch_duration = (datetime.now(timezone.utc) - batch_start_time).total_seconds()
                 logger.error(
-                    "[DataAgentManager] ⚠️  Timeout adding symbols batch to %s:%s (batch size: %s, timeout: %ss)",
-                    ip, port, len(batch_symbols), batch_timeout
+                    "[DataAgentManager] ⚠️  [发送请求] 超时 %s:%s (批次大小: %s, 超时设置: %ss, 实际耗时: %.3fs)",
+                    ip, port, len(batch_symbols), batch_timeout, batch_duration
+                )
+                logger.error(
+                    "[DataAgentManager] ⚠️  [发送请求] 可能原因: 1) agent未启动 2) 端口未监听 3) 网络不通 4) agent处理过慢"
                 )
                 # 超时后继续处理下一批，不中断整个流程
-            except Exception as e:
+            except aiohttp.ClientConnectorError as e:
+                batch_duration = (datetime.now(timezone.utc) - batch_start_time).total_seconds()
                 logger.error(
-                    "[DataAgentManager] Failed to add symbols batch to %s:%s: %s",
-                    ip, port, e
+                    "[DataAgentManager] ❌ [发送请求] 连接错误 %s:%s (耗时: %.3fs): %s",
+                    ip, port, batch_duration, e
+                )
+                logger.error(
+                    "[DataAgentManager] ❌ [发送请求] 可能原因: 1) agent未启动 2) 端口未监听 3) Docker网络不通 4) IP地址错误"
+                )
+            except Exception as e:
+                batch_duration = (datetime.now(timezone.utc) - batch_start_time).total_seconds()
+                logger.error(
+                    "[DataAgentManager] ❌ [发送请求] 请求失败 %s:%s (耗时: %.3fs): %s",
+                    ip, port, batch_duration, e, exc_info=True
                 )
         
         # 如果所有批次都失败，返回None
