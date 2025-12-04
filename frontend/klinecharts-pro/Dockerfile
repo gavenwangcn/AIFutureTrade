@@ -29,6 +29,9 @@ RUN if [ -f package-lock.json ]; then \
         npm install --legacy-peer-deps; \
     fi
 
+# 修复 node_modules/.bin 中的可执行文件权限（解决 Permission denied 问题）
+RUN find node_modules/.bin -type f -exec chmod +x {} \; || true
+
 # 复制源代码
 COPY . .
 

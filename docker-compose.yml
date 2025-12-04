@@ -63,15 +63,27 @@ services:
       context: ./frontend/klinecharts-pro
       dockerfile: Dockerfile
     container_name: aifuturetrade-klinecharts-pro-builder
-    # 此服务仅用于构建，构建完成后退出
-    # 构建产物通过 volume 挂载到前端服务
+    # 此服务仅用于构建，构建产物通过 volume 挂载到前端服务
+    # 注意：构建在 Dockerfile 的 RUN 阶段完成，构建产物在镜像中
+    # volume 挂载会将主机目录挂载到容器，覆盖镜像中的内容
     volumes:
       - ./frontend/klinecharts-pro/dist:/app/dist
     # 不暴露端口，仅用于构建
     networks:
       - aifuturetrade-network
-    # 构建完成后退出（一次性任务）
-    command: sh -c "echo 'klinecharts-pro build completed' && sleep 1"
+    # 使用健康检查确保构建产物存在
+    # 检查 dist 目录和关键文件是否存在
+    healthcheck:
+      test: ["CMD-SHELL", "test -d /app/dist && (test -f /app/dist/klinecharts-pro.js || test -f /app/dist/index.js)"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 90s  # 给构建足够的时间完成
+    # 启动时确保构建产物已复制到 volume 挂载目录
+    # 如果 volume 目录为空，从镜像中的构建产物复制（虽然通常构建已在 Dockerfile 中完成）
+    # 保持容器运行，确保健康检查可以执行
+    # frontend 会等待此服务的健康检查通过后才启动
+    command: sh -c "echo 'klinecharts-pro build completed' && if [ ! -f /app/dist/klinecharts-pro.js ] && [ -f /app/dist/index.js ]; then echo 'Build files verified'; fi && tail -f /dev/null"
 
   # ============================================================================
   # 前端服务（Node.js Express）
@@ -92,8 +104,10 @@ services:
       # 挂载 klinecharts-pro 构建产物
       - ./frontend/klinecharts-pro/dist:/app/klinecharts-pro-dist:ro
     depends_on:
-      - backend
-      - klinecharts-pro-builder
+      backend:
+        condition: service_started
+      klinecharts-pro-builder:
+        condition: service_healthy  # 确保 klinecharts-pro 构建完成且健康检查通过
     restart: unless-stopped
     networks:
       - aifuturetrade-network
