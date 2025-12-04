@@ -36,6 +36,12 @@ COPY frontend/klinecharts-pro/indicators/ ./indicators/
 # 修复可执行文件权限
 RUN find node_modules/.bin -type f -exec chmod +x {} \; 2>/dev/null || true
 
+# 修复平台特定的原生模块（esbuild 等）
+# 从 Windows 复制的 node_modules 包含 Windows/macOS 版本，需要重新安装 Linux 版本
+RUN rm -rf node_modules/@esbuild && \
+    npm install --no-save --platform=linux --arch=x64 esbuild || \
+    npm rebuild esbuild --platform=linux --arch=x64 || true
+
 # 构建 klinecharts-pro
 # 在 Docker 容器中，直接使用 node 执行构建工具，避免符号链接问题
 RUN node node_modules/typescript/bin/tsc && \
