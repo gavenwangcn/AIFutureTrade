@@ -115,12 +115,14 @@ const initChart = async () => {
     const period = intervalToPeriod(currentInterval.value)
     
     // Create KLineChartPro instance (following official documentation)
-    chartInstance.value = new KLineChartPro({
-      container: chartContainerRef.value,
-      symbol: symbolInfo,
-      period: period,
-      datafeed: datafeedInstance.value
-    })
+// Set theme to light (default)
+chartInstance.value = new KLineChartPro({
+container: chartContainerRef.value,
+symbol: symbolInfo,
+period: period,
+datafeed: datafeedInstance.value,
+theme: 'light' // Explicitly set to light theme
+})
     
     console.log('[KLineChart] Chart initialized successfully')
   } catch (error) {
@@ -336,10 +338,20 @@ onUnmounted(() => {
 .kline-chart-container :deep(.klinecharts-pro) {
   width: 100%;
   height: 100%;
+  /* Light theme colors (default) */
+  --klinecharts-pro-primary-color: #1677ff;
+  --klinecharts-pro-hover-background-color: rgba(22, 119, 255, 0.15);
+  --klinecharts-pro-background-color: #FFFFFF;
+  --klinecharts-pro-popover-background-color: #FFFFFF;
+  --klinecharts-pro-text-color: #051441;
+  --klinecharts-pro-text-second-color: #76808F;
+  --klinecharts-pro-border-color: #ebedf1;
+  --klinecharts-pro-selected-color: rgba(22, 119, 255, 0.15);
 }
 
 /* Dark theme support */
 .kline-chart-container :deep(.klinecharts-pro[data-theme="dark"]) {
+  --klinecharts-pro-hover-background-color: rgba(22, 119, 255, 0.15);
   --klinecharts-pro-background-color: #151517;
   --klinecharts-pro-popover-background-color: #1c1c1f;
   --klinecharts-pro-text-color: #F8F8F8;
