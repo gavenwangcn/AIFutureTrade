@@ -27,6 +27,9 @@ package-lock.json
 
 # 注意：frontend/ 目录不能排除，因为前端Dockerfile需要访问它
 # 后端Dockerfile会在COPY指令中排除frontend目录（通过精确的COPY路径）
+# 前端Dockerfile需要包含 frontend/node_modules 和 frontend/klinecharts-pro/node_modules
+!frontend/node_modules/
+!frontend/klinecharts-pro/node_modules/
 
 # IDE
 .vscode/
