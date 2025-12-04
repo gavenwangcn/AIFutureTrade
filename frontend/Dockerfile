@@ -37,7 +37,10 @@ COPY frontend/klinecharts-pro/indicators/ ./indicators/
 RUN find node_modules/.bin -type f -exec chmod +x {} \; 2>/dev/null || true
 
 # 构建 klinecharts-pro
-RUN npm run build
+# 在 Docker 容器中，直接使用 node 执行构建工具，避免符号链接问题
+RUN node node_modules/typescript/bin/tsc && \
+    node node_modules/vite/bin/vite.js build && \
+    node node_modules/dts-bundle-generator/lib/index.js --no-banner true --umd-module-name klinechartspro -o dist/index.d.ts src/index.ts
 
 # 验证构建结果
 RUN if [ ! -d dist ] || [ ! -f dist/klinecharts-pro.umd.js ] || [ ! -f dist/klinecharts-pro.css ]; then \
