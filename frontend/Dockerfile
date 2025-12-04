@@ -5,11 +5,24 @@
 # 构建上下文：项目根目录（通过 docker-compose.yml 配置）
 # 注意：使用 Vite 构建，生产环境建议使用 nginx 提供静态文件服务
 # 要求：必须存在 frontend/klinecharts-pro/node_modules（依赖都在这个目录下）
+#
+# 构建优化：
+# - 使用多阶段构建减少最终镜像大小
+# - 优化层缓存顺序（不常变化的文件先复制）
+# - 使用系统 npm 避免 node_modules 符号链接问题
 # ==============================================================================
 
 FROM node:18-slim AS base
 
+# 设置工作目录
 WORKDIR /app
+
+# 设置环境变量（优化构建性能）
+ENV NODE_ENV=production \
+    NPM_CONFIG_LOGLEVEL=warn \
+    NPM_CONFIG_PROGRESS=false \
+    NPM_CONFIG_AUDIT=false \
+    NPM_CONFIG_FUND=false
 
 # ==============================================================================
 # 阶段1：构建 klinecharts-pro 基础库
@@ -18,9 +31,12 @@ FROM base AS klinecharts-pro-builder
 
 WORKDIR /app/klinecharts-pro
 
-# 复制 klinecharts-pro 的依赖文件和 node_modules（必须存在）
+# 优化：先复制依赖文件（不常变化，利用缓存）
 # 注意：构建上下文是项目根目录，所以路径是 frontend/klinecharts-pro/node_modules
 COPY frontend/klinecharts-pro/package.json frontend/klinecharts-pro/package-lock.json* ./
+
+# 复制 node_modules（必须存在）
+# 注意：node_modules 很大，放在单独的层以便缓存
 COPY frontend/klinecharts-pro/node_modules ./node_modules
 
 # 验证 node_modules 是否存在
@@ -43,24 +59,33 @@ RUN echo "[Dockerfile] Verifying klinecharts-pro dependencies..." && \
     ([ -d node_modules/dts-bundle-generator ] && echo "[Dockerfile] ✓ dts-bundle-generator found") || echo "[Dockerfile] ⚠️  dts-bundle-generator not found (optional)"
 
 # 修复可执行文件权限
+# 注意：从 Windows 复制的 node_modules 可能有符号链接问题
+# 我们使用系统自带的 npm，所以不需要修复 node_modules/.bin/npm
 RUN find node_modules/.bin -type f -exec chmod +x {} \; 2>/dev/null || true
 
-# 复制 klinecharts-pro 源代码和配置文件
+# 优化：先复制配置文件（不常变化），再复制源代码（经常变化）
+# 这样可以最大化利用 Docker 层缓存
 COPY frontend/klinecharts-pro/tsconfig.json frontend/klinecharts-pro/tsconfig.node.json ./
 COPY frontend/klinecharts-pro/vite.config.ts ./
 COPY frontend/klinecharts-pro/.babelrc.json ./
 COPY frontend/klinecharts-pro/.eslintrc.cjs ./
+
+# 复制源代码（这些文件变化最频繁，放在最后）
 COPY frontend/klinecharts-pro/src/ ./src/
 COPY frontend/klinecharts-pro/indicators/ ./indicators/
 
-# 再次修复权限
-RUN find node_modules/.bin -type f -exec chmod +x {} \; 2>/dev/null || true
+# 修复 npm 可执行文件（如果损坏）
+# 使用系统自带的 npm，而不是 node_modules 中的 npm
+RUN echo "[Dockerfile] Checking npm availability..." && \
+    which npm && \
+    npm --version && \
+    echo "[Dockerfile] ✓ Using system npm"
 
-# 构建 klinecharts-pro（使用 npm run build 命令）
+# 构建 klinecharts-pro（使用系统 npm）
 RUN echo "[Dockerfile] =========================================" && \
     echo "[Dockerfile] Building klinecharts-pro..." && \
     echo "[Dockerfile] =========================================" && \
-    npm run build && \
+    /usr/bin/npm run build && \
     echo "[Dockerfile] ✓ klinecharts-pro build completed" && \
     ls -la dist/ | head -10
 
@@ -83,11 +108,12 @@ FROM base AS frontend-builder
 
 WORKDIR /app
 
-# 复制前端依赖文件
+# 优化：先复制依赖文件（不常变化）
 COPY frontend/package.json frontend/package-lock.json* ./
 
 # 复制 node_modules（从 klinecharts-pro 目录，因为依赖都在那里）
 # 注意：依赖目录在 frontend/klinecharts-pro/node_modules
+# 优化：node_modules 很大，单独一层以便缓存
 COPY frontend/klinecharts-pro/node_modules ./node_modules
 
 # 验证 node_modules 是否存在
@@ -108,11 +134,13 @@ RUN echo "[Dockerfile] Verifying frontend dependencies..." && \
     ([ -d node_modules/vite ] && echo "[Dockerfile] ✓ vite found") || (echo "[Dockerfile] ✗ vite not found" && exit 1) && \
     ([ -d node_modules/klinecharts ] && echo "[Dockerfile] ✓ klinecharts found") || (echo "[Dockerfile] ✗ klinecharts not found" && exit 1)
 
-# 复制前端应用源代码和配置文件
-COPY frontend/src/ ./src/
-COPY frontend/index.html ./
+# 优化：先复制配置文件（不常变化），再复制源代码（经常变化）
 COPY frontend/vite.config.js ./
+COPY frontend/index.html ./
 COPY frontend/public/ ./public/
+
+# 复制源代码（这些文件变化最频繁，放在最后）
+COPY frontend/src/ ./src/
 
 # 从 klinecharts-pro-builder 阶段复制构建好的 klinecharts-pro
 COPY --from=klinecharts-pro-builder /app/klinecharts-pro/dist ./public/klinecharts-pro/
@@ -137,11 +165,11 @@ RUN echo "[Dockerfile] Copying klinecharts base library..." && \
     echo "[Dockerfile] klinecharts-pro public directory contents:" && \
     ls -lh public/klinecharts-pro/ 2>/dev/null || echo "public/klinecharts-pro directory not found"
 
-# 构建前端应用
+# 构建前端应用（使用系统 npm）
 RUN echo "[Dockerfile] =========================================" && \
     echo "[Dockerfile] Building frontend application..." && \
     echo "[Dockerfile] =========================================" && \
-    npm run build && \
+    /usr/bin/npm run build && \
     echo "[Dockerfile] ✓ Frontend build completed"
 
 # 验证构建结果
@@ -165,13 +193,20 @@ RUN echo "[Dockerfile] =========================================" && \
     fi
 
 # ==============================================================================
-# 阶段3：运行环境
+# 阶段3：运行环境（最小化镜像）
 # ==============================================================================
-FROM base AS runtime
+FROM node:18-slim AS runtime
 
+# 设置工作目录
 WORKDIR /app
 
-# 复制前端依赖文件
+# 设置环境变量
+ENV NODE_ENV=production \
+    NPM_CONFIG_LOGLEVEL=warn \
+    NPM_CONFIG_PROGRESS=false
+
+# 优化：只复制运行时需要的文件
+# 复制 package.json（用于运行 npm 命令）
 COPY frontend/package.json frontend/package-lock.json* ./
 
 # 复制 node_modules（从 klinecharts-pro 目录，因为依赖都在那里）
@@ -187,13 +222,24 @@ RUN echo "[Dockerfile] Verifying runtime node_modules..." && \
     fi && \
     echo "[Dockerfile] ✓ Runtime node_modules verified"
 
-# 从构建阶段复制构建产物
+# 从构建阶段复制构建产物（只复制 dist 目录，不包含源代码）
 COPY --from=frontend-builder /app/dist ./dist
+
+# 创建非 root 用户（安全最佳实践）
+RUN groupadd -r appuser && useradd -r -g appuser appuser && \
+    chown -R appuser:appuser /app
+
+# 切换到非 root 用户
+USER appuser
 
 # 暴露端口
 EXPOSE 3000
 
+# 健康检查（使用 Node.js 检查 HTTP 服务）
+HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
+    CMD node -e "require('http').get('http://localhost:3000', (r) => {process.exit(r.statusCode === 200 ? 0 : 1)}).on('error', () => process.exit(1))"
+
 # 启动 Vite 预览服务器（用于开发/测试）
 # 注意：生产环境建议使用 nginx 或其他静态文件服务器来提供 dist/ 目录
 # 如果需要代理 API，请在 nginx 中配置反向代理
-CMD ["npm", "run", "preview", "--", "--host", "0.0.0.0", "--port", "3000"]
+CMD ["/usr/bin/npm", "run", "preview", "--", "--host", "0.0.0.0", "--port", "3000"]
