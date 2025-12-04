@@ -21,22 +21,6 @@ services:
       - "5002:5002"  # 后端API端口
     volumes:
       - ./data:/app/data
-    # 健康检查（检查端口是否可访问）
-    healthcheck:
-      test: ["CMD", "python", "-c", "import socket; s=socket.socket(); s.settimeout(1); result=s.connect_ex(('localhost', 5002)); s.close(); exit(0 if result==0 else 1)"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 40s
-    # 资源限制（可选，根据实际需求调整）
-    deploy:
-      resources:
-        limits:
-          cpus: '2.0'
-          memory: 2G
-        reservations:
-          cpus: '1.0'
-          memory: 1G
     environment:
       # 基础配置
       - DATABASE_PATH=/app/data/trading_bot.db
@@ -84,10 +68,7 @@ services:
     build:
       context: .  # 使用项目根目录作为构建上下文，以便访问static目录和klinecharts-pro
       dockerfile: ./frontend/Dockerfile
-      # 构建参数（可选）
-      args:
-        # NODE_ENV: production  # 已在 Dockerfile 中设置
-      # 构建缓存配置
+      # 构建缓存配置（优化构建速度）
       cache_from:
         - aifuturetrade-frontend:latest
       # 注意：默认情况下，如果镜像已存在，docker compose up 不会重新构建
@@ -103,25 +84,9 @@ services:
       - BACKEND_URL=http://backend:5002
       - FRONTEND_PORT=3000
       - NODE_ENV=production
-    # 健康检查
-    healthcheck:
-      test: ["CMD", "node", "-e", "require('http').get('http://localhost:3000', (r) => {process.exit(r.statusCode === 200 ? 0 : 1)})"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 40s
-    # 资源限制（可选，根据实际需求调整）
-    deploy:
-      resources:
-        limits:
-          cpus: '1.0'
-          memory: 512M
-        reservations:
-          cpus: '0.5'
-          memory: 256M
     depends_on:
       backend:
-        condition: service_healthy  # 等待后端健康检查通过
+        condition: service_started
     restart: unless-stopped
     networks:
       - aifuturetrade-network

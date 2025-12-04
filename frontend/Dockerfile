@@ -193,14 +193,14 @@ RUN echo "[Dockerfile] =========================================" && \
     fi
 
 # ==============================================================================
-# 阶段3：运行环境（最小化镜像）
+# 阶段3：运行环境（最小化镜像，优化构建速度）
 # ==============================================================================
 FROM node:18-slim AS runtime
 
 # 设置工作目录
 WORKDIR /app
 
-# 设置环境变量
+# 设置环境变量（优化 npm 性能）
 ENV NODE_ENV=production \
     NPM_CONFIG_LOGLEVEL=warn \
     NPM_CONFIG_PROGRESS=false
@@ -225,19 +225,8 @@ RUN echo "[Dockerfile] Verifying runtime node_modules..." && \
 # 从构建阶段复制构建产物（只复制 dist 目录，不包含源代码）
 COPY --from=frontend-builder /app/dist ./dist
 
-# 创建非 root 用户（安全最佳实践）
-RUN groupadd -r appuser && useradd -r -g appuser appuser && \
-    chown -R appuser:appuser /app
-
-# 切换到非 root 用户
-USER appuser
-
 # 暴露端口
 EXPOSE 3000
-
-# 健康检查（使用 Node.js 检查 HTTP 服务）
-HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
-    CMD node -e "require('http').get('http://localhost:3000', (r) => {process.exit(r.statusCode === 200 ? 0 : 1)}).on('error', () => process.exit(1))"
 
 # 启动 Vite 预览服务器（用于开发/测试）
 # 注意：生产环境建议使用 nginx 或其他静态文件服务器来提供 dist/ 目录
