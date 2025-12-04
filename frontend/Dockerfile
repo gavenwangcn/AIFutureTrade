@@ -37,7 +37,7 @@ COPY frontend/klinecharts-pro/indicators/ ./indicators/
 RUN find node_modules/.bin -type f -exec chmod +x {} \; 2>/dev/null || true
 
 # 构建 klinecharts-pro
-RUN /usr/bin/npm run build
+RUN npm run build
 
 # 验证构建结果
 RUN if [ ! -d dist ] || [ ! -f dist/klinecharts-pro.umd.js ] || [ ! -f dist/klinecharts-pro.css ]; then \
@@ -67,20 +67,38 @@ COPY frontend/index.html ./
 COPY frontend/vite.config.js ./
 COPY frontend/public/ ./public/
 
+# 创建 klinecharts-pro 目录
+RUN mkdir -p public/klinecharts-pro
+
 # 从 klinecharts-pro-builder 复制构建产物
-COPY --from=klinecharts-pro-builder /app/klinecharts-pro/dist ./public/klinecharts-pro/
+# 前端需要：/klinecharts-pro/klinecharts-pro.css 和 /klinecharts-pro/klinecharts-pro.umd.js
+COPY --from=klinecharts-pro-builder /app/klinecharts-pro/dist/klinecharts-pro.umd.js ./public/klinecharts-pro/
+COPY --from=klinecharts-pro-builder /app/klinecharts-pro/dist/klinecharts-pro.css ./public/klinecharts-pro/
 
 # 复制 klinecharts 基础库
+# 前端需要：/klinecharts-pro/klinecharts.js
 RUN if [ -f node_modules/klinecharts/dist/klinecharts.umd.js ]; then \
         cp node_modules/klinecharts/dist/klinecharts.umd.js public/klinecharts-pro/klinecharts.js; \
     elif [ -f node_modules/klinecharts/dist/umd/klinecharts.js ]; then \
         cp node_modules/klinecharts/dist/umd/klinecharts.js public/klinecharts-pro/klinecharts.js; \
     elif [ -f node_modules/klinecharts/dist/klinecharts.js ]; then \
         cp node_modules/klinecharts/dist/klinecharts.js public/klinecharts-pro/klinecharts.js; \
+    else \
+        echo "ERROR: klinecharts.js not found" && \
+        exit 1; \
+    fi
+
+# 验证所有必需文件是否存在
+RUN if [ ! -f public/klinecharts-pro/klinecharts-pro.umd.js ] || \
+        [ ! -f public/klinecharts-pro/klinecharts-pro.css ] || \
+        [ ! -f public/klinecharts-pro/klinecharts.js ]; then \
+        echo "ERROR: Required klinecharts-pro files missing" && \
+        ls -la public/klinecharts-pro/ && \
+        exit 1; \
     fi
 
 # 构建前端应用
-RUN /usr/bin/npm run build
+RUN npm run build
 
 # 验证构建结果
 RUN if [ ! -d dist ]; then \
@@ -111,4 +129,4 @@ COPY --from=frontend-builder /app/dist ./dist
 EXPOSE 3000
 
 # 启动服务
-CMD ["/usr/bin/npm", "run", "preview", "--", "--host", "0.0.0.0", "--port", "3000"]
+CMD ["npm", "run", "preview", "--", "--host", "0.0.0.0", "--port", "3000"]
