@@ -49,7 +49,7 @@ export default class KLineChartPro implements ChartPro {
           watermark={options.watermark ?? (Logo as Node)}
           theme={options.theme ?? 'light'}
           locale={options.locale ?? 'zh-CN'}
-          drawingBarVisible={options.drawingBarVisible ?? true}
+          drawingBarVisible={options.drawingBarVisible ?? false}
           symbol={options.symbol}
           period={options.period}
           periods={
@@ -57,18 +57,15 @@ export default class KLineChartPro implements ChartPro {
               { multiplier: 1, timespan: 'minute', text: '1m' },
               { multiplier: 5, timespan: 'minute', text: '5m' },
               { multiplier: 15, timespan: 'minute', text: '15m' },
-              { multiplier: 1, timespan: 'hour', text: '1H' },
-              { multiplier: 2, timespan: 'hour', text: '2H' },
-              { multiplier: 4, timespan: 'hour', text: '4H' },
-              { multiplier: 1, timespan: 'day', text: 'D' },
-              { multiplier: 1, timespan: 'week', text: 'W' },
-              { multiplier: 1, timespan: 'month', text: 'M' },
-              { multiplier: 1, timespan: 'year', text: 'Y' }
+              { multiplier: 1, timespan: 'hour', text: '1h' },
+              { multiplier: 4, timespan: 'hour', text: '4h' },
+              { multiplier: 1, timespan: 'day', text: '1d' },
+              { multiplier: 1, timespan: 'week', text: '1w' }
             ]
           }
           timezone={options.timezone ?? 'Asia/Shanghai'}
           mainIndicators={options.mainIndicators ?? ['MA']}
-          subIndicators={options.subIndicators ?? ['VOL']}
+          subIndicators={options.subIndicators ?? ['MA', 'RSI', 'MACD', 'VOL']}
           datafeed={options.datafeed}/>
       ),
       this._container
