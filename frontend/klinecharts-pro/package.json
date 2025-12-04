@@ -1,0 +1,81 @@
+{
+  "name": "@yennis/klinecharts-pro",
+  "version": "0.0.7",
+  "description": "Financial chart built out of the box based on KLineChart.",
+  "type": "module",
+  "main": "./dist/klinecharts-pro.umd.js",
+  "module": "./dist/klinecharts-pro.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "LICENSE",
+    "README.md",
+    "dist/"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/linzeguang/klinecharts-pro"
+  },
+  "keywords": [
+    "klinecharts",
+    "pro",
+    "candlestick",
+    "finance",
+    "stock",
+    "chart",
+    "canvas"
+  ],
+  "author": "linzeguang",
+  "license": "Apache-2.0",
+  "private": false,
+  "scripts": {
+    "build-core": "tsc && vite build",
+    "build-dts": "dts-bundle-generator --no-banner true --umd-module-name klinechartspro -o dist/index.d.ts src/index.ts",
+    "build": "npm run build-core && npm run build-dts",
+    "build:dev": "npm run build-core && npm run build-dts && yalc push",
+    "docs:dev": "vitepress dev docs --host",
+    "docs:build": "vitepress build docs",
+    "docs:preview": "vitepress preview docs",
+    "docs:deploy": "npm run docs:build && gh-pages -d website",
+    "watch": "nodemon --ignore dist/ --ignore node_modules/ --ignore website/ --watch src/ -C -e js,jsx,ts,tsx,css,less --debug -x 'yarn build:dev'",
+    "release": "standard-version",
+    "postrelease": "git push && git push --tags --no-verify",
+    "version-tag:major": "npm run release -- --release-as major",
+    "version-tag:minor": "npm run release -- --release-as minor",
+    "version-tag:patch": "npm run release -- --release-as patch",
+    "version-tag:premajor": "npm run version-tag:major -- --prerelease",
+    "version-tag:preminor": "npm run version-tag:minor -- --prerelease",
+    "version-tag:prepatch": "npm run version-tag:patch -- --prerelease",
+    "version-tag:prerelease": "npm run release -- --prerelease"
+  },
+  "devDependencies": {
+    "@solidjs/testing-library": "^0.6.0",
+    "@testing-library/jest-dom": "^5.16.5",
+    "@types/lodash": "^4.14.191",
+    "@types/testing-library__jest-dom": "^5.14.5",
+    "@typescript-eslint/eslint-plugin": "^5.54.0",
+    "babel-preset-solid": "^1.6.10",
+    "dts-bundle-generator": "^7.2.0",
+    "eslint": "^8.35.0",
+    "eslint-config-standard-with-typescript": "^34.0.0",
+    "eslint-plugin-import": "^2.27.5",
+    "eslint-plugin-n": "^15.6.1",
+    "eslint-plugin-promise": "^6.1.1",
+    "gh-pages": "^5.0.0",
+    "less": "^4.1.3",
+    "less-loader": "^11.1.0",
+    "standard-version": "^9.5.0",
+    "typescript": "^4.9.5",
+    "vite": "^4.1.1",
+    "vite-plugin-solid": "^2.6.1",
+    "vitepress": "^1.0.0-alpha.75",
+    "vitest": "^0.28.4"
+  },
+  "dependencies": {
+    "klinecharts": "9.5.0",
+    "lodash": "^4.17.21",
+    "solid-js": "^1.6.11"
+  },
+  "peerDependencies": {
+    "klinecharts": ">=9.0.0"
+  }
+}
