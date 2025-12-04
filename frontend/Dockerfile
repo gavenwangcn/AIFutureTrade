@@ -34,6 +34,8 @@ COPY frontend/klinecharts-pro/package.json frontend/klinecharts-pro/package-lock
 WORKDIR /app/klinecharts-pro
 
 # 安装 klinecharts-pro 依赖
+# 注意：klinecharts 是 peerDependency，npm install 默认不会安装 peer dependencies
+# 需要使用 --install-peer-deps 或显式安装 klinecharts
 RUN if [ -f package-lock.json ]; then \
         npm ci --legacy-peer-deps || \
         (echo "[Dockerfile] npm ci failed, retrying with npm install..." && \
@@ -41,6 +43,27 @@ RUN if [ -f package-lock.json ]; then \
          npm install --legacy-peer-deps); \
     else \
         npm install --legacy-peer-deps; \
+    fi
+
+# 显式安装 peer dependency klinecharts（TypeScript 编译需要）
+# 使用 --save-peer 确保安装到 node_modules，但不修改 package.json
+RUN echo "[Dockerfile] Installing peer dependency klinecharts for TypeScript compilation..." && \
+    npm install klinecharts@^9.8.12 --legacy-peer-deps --no-save || \
+    npm install klinecharts@latest --legacy-peer-deps --no-save || \
+    (echo "[Dockerfile] ⚠️  Failed to install klinecharts, TypeScript compilation may fail" && exit 1)
+
+# 验证 klinecharts 是否已安装
+RUN if [ -d node_modules/klinecharts ]; then \
+        echo "[Dockerfile] ✓ klinecharts installed successfully"; \
+        echo "[Dockerfile] klinecharts version:"; \
+        cat node_modules/klinecharts/package.json | grep '"version"' || echo "Version not found"; \
+        echo "[Dockerfile] klinecharts type definitions:"; \
+        ls -la node_modules/klinecharts/dist/*.d.ts 2>/dev/null | head -3 || echo "Type definitions not found"; \
+    else \
+        echo "[Dockerfile] ✗ klinecharts not found in node_modules"; \
+        echo "[Dockerfile] Available packages:"; \
+        ls -la node_modules/ | grep -E "^d" | head -10; \
+        exit 1; \
     fi
 
 # 修复 node_modules/.bin 中的可执行文件权限
