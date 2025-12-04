@@ -37,18 +37,18 @@ const ma: IndicatorTemplate = {
   ],
   styles: {
     lines: [
-      { color: '#FF9600', smooth: false, style: LineType.Solid, size: 1 },
-      { color: '#9D65C9', smooth: false, style: LineType.Solid, size: 1 },
-      { color: '#2196F3', smooth: false, style: LineType.Solid, size: 1 },
-      { color: '#F23645', smooth: false, style: LineType.Solid, size: 1 }
+      { color: '#FF9600', smooth: false, style: LineType.Solid, size: 1, dashedValue: [2, 2] },
+      { color: '#9D65C9', smooth: false, style: LineType.Solid, size: 1, dashedValue: [2, 2] },
+      { color: '#2196F3', smooth: false, style: LineType.Solid, size: 1, dashedValue: [2, 2] },
+      { color: '#F23645', smooth: false, style: LineType.Solid, size: 1, dashedValue: [2, 2] }
     ]
   },
   calc: (dataList, indicator) => {
     const { calcParams } = indicator
-    const result = []
+    const result: Array<Record<string, number>> = []
     
     for (let i = 0; i < dataList.length; i++) {
-      const maValues = {}
+      const maValues: Record<string, number> = {}
       
       for (let j = 0; j < calcParams.length; j++) {
         const period = calcParams[j]

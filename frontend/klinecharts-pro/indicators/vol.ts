@@ -12,7 +12,7 @@
  * limitations under the License.
  */
 
-import { IndicatorTemplate, IndicatorSeries, LineType } from 'klinecharts'
+import { IndicatorTemplate, IndicatorSeries, LineType, PolygonType } from 'klinecharts'
 
 /**
  * VOL（成交量）指标
@@ -36,19 +36,27 @@ const vol: IndicatorTemplate = {
   ],
   styles: {
     bars: [
-      { color: '#2196F3', noStroke: false, strokeColor: '#2196F3', strokeSize: 1 }
+      { 
+        upColor: '#2196F3', 
+        downColor: '#2196F3',
+        noChangeColor: '#2196F3',
+        style: PolygonType.Fill,
+        borderSize: 1,
+        borderStyle: LineType.Solid,
+        borderDashedValue: [2, 2]
+      }
     ],
     lines: [
-      { color: '#FF9600', smooth: false, style: LineType.Solid, size: 1 },
-      { color: '#9D65C9', smooth: false, style: LineType.Solid, size: 1 }
+      { color: '#FF9600', smooth: false, style: LineType.Solid, size: 1, dashedValue: [2, 2] },
+      { color: '#9D65C9', smooth: false, style: LineType.Solid, size: 1, dashedValue: [2, 2] }
     ]
   },
   calc: (dataList, indicator) => {
     const { calcParams } = indicator
-    const result = []
+    const result: Array<Record<string, number>> = []
     
     for (let i = 0; i < dataList.length; i++) {
-      const volValues: any = {}
+      const volValues: Record<string, number> = {}
       
       // VOL：当前K线的成交量
       volValues.vol = dataList[i].volume || 0

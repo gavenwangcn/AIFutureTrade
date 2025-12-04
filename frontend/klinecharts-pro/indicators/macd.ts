@@ -12,7 +12,7 @@
  * limitations under the License.
  */
 
-import { IndicatorTemplate, IndicatorSeries, LineType } from 'klinecharts'
+import { IndicatorTemplate, IndicatorSeries, LineType, PolygonType } from 'klinecharts'
 
 /**
  * MACD（指数平滑异同移动平均线）指标
@@ -36,11 +36,19 @@ const macd: IndicatorTemplate = {
   ],
   styles: {
     lines: [
-      { color: '#FF9600', smooth: false, style: LineType.Solid, size: 1 },
-      { color: '#9D65C9', smooth: false, style: LineType.Solid, size: 1 }
+      { color: '#FF9600', smooth: false, style: LineType.Solid, size: 1, dashedValue: [2, 2] },
+      { color: '#9D65C9', smooth: false, style: LineType.Solid, size: 1, dashedValue: [2, 2] }
     ],
     bars: [
-      { color: '#2196F3', noStroke: false, strokeColor: '#2196F3', strokeSize: 1 }
+      { 
+        upColor: '#2196F3', 
+        downColor: '#2196F3',
+        noChangeColor: '#2196F3',
+        style: PolygonType.Fill,
+        borderSize: 1,
+        borderStyle: LineType.Solid,
+        borderDashedValue: [2, 2]
+      }
     ]
   },
   calc: (dataList, indicator) => {
@@ -49,11 +57,11 @@ const macd: IndicatorTemplate = {
     const slowPeriod = calcParams[1] || 26
     const signalPeriod = calcParams[2] || 9
     
-    const result = []
-    const emaFast = [] // 快线EMA
-    const emaSlow = [] // 慢线EMA
-    const dif = [] // 差离值
-    const dea = [] // 信号线
+    const result: Array<Record<string, number>> = []
+    const emaFast: number[] = [] // 快线EMA
+    const emaSlow: number[] = [] // 慢线EMA
+    const dif: number[] = [] // 差离值
+    const dea: number[] = [] // 信号线
     
     for (let i = 0; i < dataList.length; i++) {
       const close = dataList[i].close
