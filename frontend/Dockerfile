@@ -48,8 +48,17 @@ RUN rm -rf node_modules/@esbuild && \
 # 构建 klinecharts-pro
 # 在 Docker 容器中，直接使用 node 执行构建工具，避免符号链接问题
 RUN node node_modules/typescript/bin/tsc && \
-    node node_modules/vite/bin/vite.js build && \
-    node node_modules/dts-bundle-generator/lib/index.js --no-banner true --umd-module-name klinechartspro -o dist/index.d.ts src/index.ts
+    node node_modules/vite/bin/vite.js build
+
+# 生成类型定义文件
+# dts-bundle-generator 在 node_modules/.bin 中，但符号链接可能有问题，使用 node 直接执行
+RUN if [ -f node_modules/dts-bundle-generator/dist/index.js ]; then \
+        node node_modules/dts-bundle-generator/dist/index.js --no-banner true --umd-module-name klinechartspro -o dist/index.d.ts src/index.ts; \
+    elif [ -f node_modules/dts-bundle-generator/lib/index.js ]; then \
+        node node_modules/dts-bundle-generator/lib/index.js --no-banner true --umd-module-name klinechartspro -o dist/index.d.ts src/index.ts; \
+    else \
+        echo "WARNING: dts-bundle-generator not found, skipping type definition generation"; \
+    fi
 
 # 验证构建结果
 RUN if [ ! -d dist ] || [ ! -f dist/klinecharts-pro.umd.js ] || [ ! -f dist/klinecharts-pro.css ]; then \
