@@ -66,17 +66,8 @@ services:
   # 前端页面通过 /klinecharts-pro/ 路径访问这些文件
   frontend:
     build:
-      context: .  # 使用项目根目录作为构建上下文，以便访问static目录和klinecharts-pro
+      context: .
       dockerfile: ./frontend/Dockerfile
-      # 构建缓存配置（优化构建速度）
-      cache_from:
-        - aifuturetrade-frontend:latest
-      # 注意：默认情况下，如果镜像已存在，docker compose up 不会重新构建
-      # 需要代码变化时重新构建，请使用: docker compose up -d --build frontend
-      # 如果修改了 klinecharts-pro 源代码，必须重新构建才能生效：
-      # docker compose build --no-cache frontend  # 强制重新构建（不使用缓存）
-      # 或
-      # docker compose up -d --build frontend     # 增量构建（使用缓存，但会检测代码变化）
     container_name: aifuturetrade-frontend
     ports:
       - "3000:3000"  # 前端服务端口
