@@ -182,7 +182,8 @@ services:
     command: ["python", "data/data_agent.py"]
     # Data Agent服务端口
     ports:
-      - "9999:9999"  # Data Agent指令接口端口
+      - "9999:9999"  # Data Agent指令接口端口（用于接收指令，如添加symbol等）
+      - "9988:9988"  # Data Agent状态检查端口（独立端口，用于健康检查，避免指令服务阻塞）
     volumes:
       - ./data:/app/data
     # 依赖 data-manager，确保 data-manager 先启动（用于注册）

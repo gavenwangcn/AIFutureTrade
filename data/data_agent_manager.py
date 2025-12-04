@@ -85,11 +85,13 @@ class DataAgentManager:
     
     def __init__(self, db: ClickHouseDatabase):
         self._db = db
-        self._agents: Dict[tuple, DataAgentInfo] = {}  # {(ip, port): DataAgentInfo}
+        self._agents: Dict[tuple, DataAgentInfo] = {}  # {(ip, port): DataAgentInfo}，port是指令端口
         self._lock = asyncio.Lock()
         self._max_symbols_per_agent = getattr(app_config, 'DATA_AGENT_MAX_SYMBOL', 100)
         self._heartbeat_timeout = getattr(app_config, 'DATA_AGENT_HEARTBEAT_TIMEOUT', 60)
         self._command_timeout = getattr(app_config, 'DATA_AGENT_COMMAND_TIMEOUT', 120)  # 命令执行超时
+        # 状态检查端口（独立端口，避免指令服务阻塞）
+        self._status_port = getattr(app_config, 'DATA_AGENT_STATUS_PORT', 9988)
         
         # 全局指令队列：确保所有agent的指令顺序执行并返回结果
         # 所有agent的指令都进入这个全局队列，按顺序执行并返回结果
@@ -612,30 +614,34 @@ class DataAgentManager:
         """检查agent健康状态（主动探测）。
         
         使用重试机制和更长的超时时间，避免在agent处理请求时误判为离线。
+        注意：使用独立的状态检查端口（status_port），而不是指令端口（port），
+        避免指令服务阻塞时影响健康检查。
         
         Args:
             ip: agent的IP地址
-            port: agent的端口号
+            port: agent的指令端口号（仅用于日志，实际使用status_port）
             retries: 重试次数（默认2次，总共最多3次尝试）
         
         Returns:
             健康返回True，不健康返回False
         """
+        # 使用独立的状态检查端口，避免指令服务阻塞
+        status_port = self._status_port
         # 增加超时时间到15秒，避免agent处理请求时无法及时响应
         health_check_timeout = 15
-        url = f"http://{ip}:{port}/ping"
+        url = f"http://{ip}:{status_port}/ping"
         
         logger.info(
-            "[DataAgentManager] 🔍 [健康检查] 开始检查 agent %s:%s (超时: %ss, 最多重试: %s次)",
-            ip, port, health_check_timeout, retries
+            "[DataAgentManager] 🔍 [健康检查] 开始检查 agent %s:%s (状态端口: %s, 超时: %ss, 最多重试: %s次)",
+            ip, port, status_port, health_check_timeout, retries
         )
         
         for attempt in range(retries + 1):
             attempt_start_time = datetime.now(timezone.utc)
             try:
                 logger.info(
-                    "[DataAgentManager] 📤 [健康检查] 发送ping请求到 %s:%s (尝试 %s/%s) - URL: %s",
-                    ip, port, attempt + 1, retries + 1, url
+                    "[DataAgentManager] 📤 [健康检查] 发送ping请求到 %s:%s (状态端口: %s, 尝试 %s/%s) - URL: %s",
+                    ip, port, status_port, attempt + 1, retries + 1, url
                 )
                 
                 async with aiohttp.ClientSession() as session:

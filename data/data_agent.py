@@ -321,11 +321,51 @@ class DataAgentKlineManager:
                 "[DataAgentKline] 🔌 [添加流] 步骤3/6: 创建WebSocket连接 %s %s...",
                 symbol_upper, interval
             )
-            connection = await self._client.websocket_streams.create_connection()
+            logger.debug(
+                "[DataAgentKline] 🔌 [WebSocket创建] SDK调用前状态: client=%s, websocket_streams=%s",
+                type(self._client).__name__ if self._client else None,
+                type(self._client.websocket_streams).__name__ if self._client and hasattr(self._client, 'websocket_streams') else None
+            )
+            
+            # 记录SDK调用前的详细信息
+            sdk_call_start = datetime.now(timezone.utc)
+            logger.debug(
+                "[DataAgentKline] 🔌 [WebSocket创建] 开始调用SDK: self._client.websocket_streams.create_connection()"
+            )
+            
+            try:
+                connection = await self._client.websocket_streams.create_connection()
+                sdk_call_duration = (datetime.now(timezone.utc) - sdk_call_start).total_seconds()
+                logger.info(
+                    "[DataAgentKline] 🔌 [WebSocket创建] SDK调用完成 %s %s (SDK调用耗时: %.3fs, 连接对象: %s, 连接ID: %s)",
+                    symbol_upper, interval, sdk_call_duration, 
+                    type(connection).__name__,
+                    id(connection) if connection else None
+                )
+                logger.debug(
+                    "[DataAgentKline] 🔌 [WebSocket创建] 连接对象详细信息: %s, 属性: %s",
+                    connection,
+                    [attr for attr in dir(connection) if not attr.startswith('_')][:10] if connection else None
+                )
+            except asyncio.TimeoutError as e:
+                sdk_call_duration = (datetime.now(timezone.utc) - sdk_call_start).total_seconds()
+                logger.error(
+                    "[DataAgentKline] ❌ [WebSocket创建] SDK调用超时 %s %s (耗时: %.3fs): %s",
+                    symbol_upper, interval, sdk_call_duration, e
+                )
+                raise
+            except Exception as e:
+                sdk_call_duration = (datetime.now(timezone.utc) - sdk_call_start).total_seconds()
+                logger.error(
+                    "[DataAgentKline] ❌ [WebSocket创建] SDK调用异常 %s %s (耗时: %.3fs): %s",
+                    symbol_upper, interval, sdk_call_duration, e, exc_info=True
+                )
+                raise
+            
             create_conn_duration = (datetime.now(timezone.utc) - create_conn_start).total_seconds()
             logger.info(
-                "[DataAgentKline] ✅ [添加流] 步骤3/6: WebSocket连接创建成功 %s %s (耗时: %.3fs, 连接对象: %s)",
-                symbol_upper, interval, create_conn_duration, type(connection).__name__
+                "[DataAgentKline] ✅ [添加流] 步骤3/6: WebSocket连接创建成功 %s %s (总耗时: %.3fs, SDK调用耗时: %.3fs)",
+                symbol_upper, interval, create_conn_duration, sdk_call_duration
             )
             
             # 设置连接级别的错误处理器（处理连接错误）
@@ -382,14 +422,55 @@ class DataAgentKlineManager:
                 "[DataAgentKline] 📡 [添加流] 步骤5/6: 订阅K线流 %s %s (symbol=%s, interval=%s)...",
                 symbol_upper, interval, symbol.lower(), interval
             )
-            stream = await connection.kline_candlestick_streams(
-                symbol=symbol.lower(),
-                interval=interval
+            logger.debug(
+                "[DataAgentKline] 📡 [订阅流] SDK调用前状态: connection=%s, connection_id=%s",
+                type(connection).__name__ if connection else None,
+                id(connection) if connection else None
             )
+            
+            # 记录SDK订阅调用前的详细信息
+            subscribe_sdk_start = datetime.now(timezone.utc)
+            logger.debug(
+                "[DataAgentKline] 📡 [订阅流] 开始调用SDK: connection.kline_candlestick_streams(symbol='%s', interval='%s')",
+                symbol.lower(), interval
+            )
+            
+            try:
+                stream = await connection.kline_candlestick_streams(
+                    symbol=symbol.lower(),
+                    interval=interval
+                )
+                subscribe_sdk_duration = (datetime.now(timezone.utc) - subscribe_sdk_start).total_seconds()
+                logger.info(
+                    "[DataAgentKline] 📡 [订阅流] SDK调用完成 %s %s (SDK调用耗时: %.3fs, 流对象: %s, 流ID: %s)",
+                    symbol_upper, interval, subscribe_sdk_duration,
+                    type(stream).__name__,
+                    id(stream) if stream else None
+                )
+                logger.debug(
+                    "[DataAgentKline] 📡 [订阅流] 流对象详细信息: %s, 属性: %s",
+                    stream,
+                    [attr for attr in dir(stream) if not attr.startswith('_')][:10] if stream else None
+                )
+            except asyncio.TimeoutError as e:
+                subscribe_sdk_duration = (datetime.now(timezone.utc) - subscribe_sdk_start).total_seconds()
+                logger.error(
+                    "[DataAgentKline] ❌ [订阅流] SDK调用超时 %s %s (耗时: %.3fs): %s",
+                    symbol_upper, interval, subscribe_sdk_duration, e
+                )
+                raise
+            except Exception as e:
+                subscribe_sdk_duration = (datetime.now(timezone.utc) - subscribe_sdk_start).total_seconds()
+                logger.error(
+                    "[DataAgentKline] ❌ [订阅流] SDK调用异常 %s %s (耗时: %.3fs): %s",
+                    symbol_upper, interval, subscribe_sdk_duration, e, exc_info=True
+                )
+                raise
+            
             subscribe_duration = (datetime.now(timezone.utc) - subscribe_start).total_seconds()
             logger.info(
-                "[DataAgentKline] ✅ [添加流] 步骤5/6: K线流订阅成功 %s %s (耗时: %.3fs, 流对象: %s)",
-                symbol_upper, interval, subscribe_duration, type(stream).__name__
+                "[DataAgentKline] ✅ [添加流] 步骤5/6: K线流订阅成功 %s %s (总耗时: %.3fs, SDK调用耗时: %.3fs)",
+                symbol_upper, interval, subscribe_duration, subscribe_sdk_duration
             )
             
             # 设置消息处理器
@@ -400,7 +481,23 @@ class DataAgentKlineManager:
             )
             
             def handler(data: Any) -> None:
-                asyncio.create_task(self._handle_kline_message(symbol_upper, interval, data))
+                """K线消息处理器，记录消息接收时间，便于排查性能问题。"""
+                message_received_time = datetime.now(timezone.utc)
+                logger.debug(
+                    "[DataAgentKline] 📨 [消息处理] 收到K线消息 %s %s (消息时间: %s)",
+                    symbol_upper, interval, message_received_time.isoformat()
+                )
+                try:
+                    task = asyncio.create_task(self._handle_kline_message(symbol_upper, interval, data))
+                    logger.debug(
+                        "[DataAgentKline] 📨 [消息处理] 已创建异步任务处理消息 %s %s (任务ID: %s)",
+                        symbol_upper, interval, id(task)
+                    )
+                except Exception as e:
+                    logger.error(
+                        "[DataAgentKline] ❌ [消息处理] 创建异步任务失败 %s %s: %s",
+                        symbol_upper, interval, e, exc_info=True
+                    )
             
             # 设置流级别的错误处理器，当流异常时从map中删除
             def stream_error_handler(error: Any) -> None:
@@ -978,6 +1075,86 @@ class DataAgentKlineManager:
                 del self._active_connections[key]
 
 
+class DataAgentStatusHandler(BaseHTTPRequestHandler):
+    """处理data_agent的状态检查请求（独立端口，避免指令服务阻塞）。"""
+    
+    def __init__(self, kline_manager: DataAgentKlineManager, main_loop: asyncio.AbstractEventLoop, *args, **kwargs):
+        self.kline_manager = kline_manager
+        self._main_loop = main_loop
+        super().__init__(*args, **kwargs)
+    
+    def do_GET(self):
+        """处理GET请求（仅ping接口，用于健康检查）。"""
+        try:
+            parsed_path = urllib.parse.urlparse(self.path)
+            path = parsed_path.path
+            
+            if path == '/ping':
+                # 探测接口（轻量级，不阻塞）
+                self._handle_ping()
+            else:
+                self._send_error(404, "Not Found")
+        except Exception as e:
+            logger.error("[DataAgentStatus] Error handling GET request: %s", e, exc_info=True)
+            self._send_error(500, str(e))
+    
+    def _handle_ping(self):
+        """处理ping请求（轻量级响应，不执行任何异步操作）。"""
+        request_start_time = datetime.now(timezone.utc)
+        client_address = f"{self.client_address[0]}:{self.client_address[1]}"
+        
+        logger.debug(
+            "[DataAgentStatus] 📥 [Ping请求] 收到来自 %s 的健康检查请求 (路径: %s)",
+            client_address, self.path
+        )
+        
+        try:
+            # 轻量级响应，不执行任何异步操作，避免阻塞
+            response_data = {"status": "ok", "message": "pong"}
+            self._send_json(response_data)
+            
+            request_duration = (datetime.now(timezone.utc) - request_start_time).total_seconds()
+            logger.debug(
+                "[DataAgentStatus] 📤 [Ping响应] 已向 %s 发送健康检查响应: %s (耗时: %.3fs)",
+                client_address, response_data, request_duration
+            )
+        except Exception as e:
+            request_duration = (datetime.now(timezone.utc) - request_start_time).total_seconds()
+            logger.error(
+                "[DataAgentStatus] ❌ [Ping响应] 向 %s 发送健康检查响应失败 (耗时: %.3fs): %s",
+                client_address, request_duration, e, exc_info=True
+            )
+            raise
+    
+    def _send_json(self, data: Dict[str, Any]):
+        """发送JSON响应。"""
+        try:
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json')
+            self.end_headers()
+            self.wfile.write(json.dumps(data, ensure_ascii=False).encode('utf-8'))
+        except BrokenPipeError:
+            logger.debug("[DataAgentStatus] Broken pipe error when sending JSON response")
+        except Exception as e:
+            logger.warning("[DataAgentStatus] Error when sending JSON response: %s", e)
+    
+    def _send_error(self, code: int, message: str):
+        """发送错误响应。"""
+        try:
+            self.send_response(code)
+            self.send_header('Content-Type', 'application/json')
+            self.end_headers()
+            self.wfile.write(json.dumps({"error": message}, ensure_ascii=False).encode('utf-8'))
+        except BrokenPipeError:
+            logger.debug("[DataAgentStatus] Broken pipe error when sending error response")
+        except Exception as e:
+            logger.warning("[DataAgentStatus] Error when sending error response: %s", e)
+    
+    def log_message(self, format, *args):
+        """重写日志方法，使用自定义logger。"""
+        logger.debug("[DataAgentStatus] %s", format % args)
+
+
 class DataAgentCommandHandler(BaseHTTPRequestHandler):
     """处理data_agent的HTTP指令请求。"""
     
@@ -1115,8 +1292,8 @@ class DataAgentCommandHandler(BaseHTTPRequestHandler):
         client_address = f"{self.client_address[0]}:{self.client_address[1]}"
         
         logger.info(
-            "[DataAgentCommand] 📥 [添加Symbol] 收到来自 %s 的批量添加symbol请求",
-            client_address
+            "[DataAgentCommand] 📥 [添加Symbol] 收到来自 %s 的批量添加symbol请求 (时间: %s)",
+            client_address, request_start_time.isoformat()
         )
         
         try:
@@ -1157,13 +1334,23 @@ class DataAgentCommandHandler(BaseHTTPRequestHandler):
                     continue
                 
                 logger.info(
-                    "[DataAgentCommand] 🔨 [添加Symbol] 开始处理 symbol %s (%s/%s)",
-                    symbol_clean, idx + 1, len(symbols)
+                    "[DataAgentCommand] 🔨 [添加Symbol] 开始处理 symbol %s (%s/%s) (时间: %s)",
+                    symbol_clean, idx + 1, len(symbols), symbol_start_time.isoformat()
                 )
                 
                 try:
+                    logger.debug(
+                        "[DataAgentCommand] 🔨 [添加Symbol] 创建异步任务处理 symbol %s",
+                        symbol_clean
+                    )
                     coro = self.kline_manager.add_symbol_streams(symbol_clean)
+                    task_creation_start = datetime.now(timezone.utc)
                     future = asyncio.run_coroutine_threadsafe(coro, self._main_loop)
+                    task_creation_duration = (datetime.now(timezone.utc) - task_creation_start).total_seconds()
+                    logger.debug(
+                        "[DataAgentCommand] ✅ [添加Symbol] 异步任务创建完成 symbol %s (任务创建耗时: %.3fs)",
+                        symbol_clean, task_creation_duration
+                    )
                     
                     # 添加超时保护，避免无限等待
                     try:
@@ -1373,10 +1560,17 @@ class DataAgentCommandHandler(BaseHTTPRequestHandler):
         logger.debug("[DataAgentCommand] %s", format % args)
 
 
-def create_handler(kline_manager: DataAgentKlineManager, main_loop: asyncio.AbstractEventLoop):
-    """创建请求处理器工厂函数。"""
+def create_command_handler(kline_manager: DataAgentKlineManager, main_loop: asyncio.AbstractEventLoop):
+    """创建指令请求处理器工厂函数。"""
     def handler(*args, **kwargs):
         return DataAgentCommandHandler(kline_manager, main_loop, *args, **kwargs)
+    return handler
+
+
+def create_status_handler(kline_manager: DataAgentKlineManager, main_loop: asyncio.AbstractEventLoop):
+    """创建状态检查请求处理器工厂函数。"""
+    def handler(*args, **kwargs):
+        return DataAgentStatusHandler(kline_manager, main_loop, *args, **kwargs)
     return handler
 
 
@@ -1387,18 +1581,22 @@ async def run_data_agent_command_server(
 ) -> None:
     """运行data_agent的HTTP指令服务器。"""
     main_loop = asyncio.get_event_loop()
-    handler = create_handler(kline_manager, main_loop)
+    handler = create_command_handler(kline_manager, main_loop)
     server = HTTPServer((host, port), handler)
-    logger.info("[DataAgent] Command server started on %s:%s", host, port)
+    logger.info("[DataAgent] 📡 [指令服务] 启动指令服务器 %s:%s", host, port)
     
     def run_server():
-        server.serve_forever()
+        try:
+            server.serve_forever()
+        except Exception as e:
+            logger.error("[DataAgent] ❌ [指令服务] 服务器运行异常: %s", e, exc_info=True)
     
-    server_thread = threading.Thread(target=run_server, daemon=True)
+    server_thread = threading.Thread(target=run_server, daemon=True, name="DataAgentCommandServer")
     server_thread.start()
     
     # 等待服务器启动
     await asyncio.sleep(0.5)
+    logger.info("[DataAgent] ✅ [指令服务] 指令服务器已启动并运行中")
     
     try:
         # 保持运行
@@ -1408,7 +1606,42 @@ async def run_data_agent_command_server(
         raise
     finally:
         server.shutdown()
-        logger.info("[DataAgent] Command server stopped")
+        logger.info("[DataAgent] 🛑 [指令服务] 指令服务器已停止")
+
+
+async def run_data_agent_status_server(
+    kline_manager: DataAgentKlineManager,
+    host: str = '0.0.0.0',
+    port: int = 9988
+) -> None:
+    """运行data_agent的HTTP状态检查服务器（独立端口，避免指令服务阻塞）。"""
+    main_loop = asyncio.get_event_loop()
+    handler = create_status_handler(kline_manager, main_loop)
+    server = HTTPServer((host, port), handler)
+    logger.info("[DataAgent] 💚 [状态服务] 启动状态检查服务器 %s:%s", host, port)
+    
+    def run_server():
+        try:
+            server.serve_forever()
+        except Exception as e:
+            logger.error("[DataAgent] ❌ [状态服务] 服务器运行异常: %s", e, exc_info=True)
+    
+    server_thread = threading.Thread(target=run_server, daemon=True, name="DataAgentStatusServer")
+    server_thread.start()
+    
+    # 等待服务器启动
+    await asyncio.sleep(0.5)
+    logger.info("[DataAgent] ✅ [状态服务] 状态检查服务器已启动并运行中")
+    
+    try:
+        # 保持运行
+        while True:
+            await asyncio.sleep(1)
+    except asyncio.CancelledError:
+        raise
+    finally:
+        server.shutdown()
+        logger.info("[DataAgent] 🛑 [状态服务] 状态检查服务器已停止")
 
 
 async def register_to_async_agent(register_ip: str, register_port: int, agent_ip: str, agent_port: int) -> bool:
@@ -1452,6 +1685,8 @@ async def run_data_agent(
     max_symbols: int = 100,
     command_host: str = '0.0.0.0',
     command_port: int = 9999,
+    status_host: str = '0.0.0.0',
+    status_port: int = 9988,
     register_ip: Optional[str] = None,
     register_port: Optional[int] = None,
     agent_ip: Optional[str] = None
@@ -1461,7 +1696,9 @@ async def run_data_agent(
     Args:
         max_symbols: 最大symbol数量（每个symbol会自动创建7个interval的连接）
         command_host: 指令服务器监听地址
-        command_port: 指令服务器端口
+        command_port: 指令服务器端口（用于接收指令，如添加symbol等）
+        status_host: 状态检查服务器监听地址
+        status_port: 状态检查服务器端口（用于健康检查，独立端口避免指令服务阻塞）
         register_ip: async_agent的IP地址（用于注册和心跳）
         register_port: async_agent的端口号
         agent_ip: 当前data_agent的IP地址（用于注册）
@@ -1469,9 +1706,14 @@ async def run_data_agent(
     db = ClickHouseDatabase()
     kline_manager = DataAgentKlineManager(db, max_symbols=max_symbols)
     
-    # 启动指令服务器
+    # 启动指令服务器（处理添加symbol等指令）
     command_task = asyncio.create_task(
         run_data_agent_command_server(kline_manager, command_host, command_port)
+    )
+    
+    # 启动状态检查服务器（独立端口，仅处理ping请求，避免指令服务阻塞）
+    status_task = asyncio.create_task(
+        run_data_agent_status_server(kline_manager, status_host, status_port)
     )
     
     # 等待服务器启动
@@ -1597,8 +1839,9 @@ async def run_data_agent(
     self_update_task_obj = asyncio.create_task(self_update_status_task())
     
     try:
-        logger.info("[DataAgent] Data agent started")
-        tasks = [command_task, cleanup_task_obj, self_update_task_obj]
+        logger.info("[DataAgent] ✅ Data agent started (指令端口: %s:%s, 状态端口: %s:%s)", 
+                   command_host, command_port, status_host, status_port)
+        tasks = [command_task, status_task, cleanup_task_obj, self_update_task_obj]
         if register_task_obj:
             tasks.append(register_task_obj)
         await asyncio.gather(*tasks)
@@ -1606,12 +1849,13 @@ async def run_data_agent(
         raise
     finally:
         command_task.cancel()
+        status_task.cancel()
         cleanup_task_obj.cancel()
         self_update_task_obj.cancel()
         if register_task_obj:
             register_task_obj.cancel()
         await kline_manager.cleanup_all()
-        logger.info("[DataAgent] Data agent stopped")
+        logger.info("[DataAgent] 🛑 Data agent stopped")
 
 
 def _setup_logging() -> None:
@@ -1628,15 +1872,26 @@ def main() -> int:
     max_symbols = getattr(app_config, 'DATA_AGENT_MAX_SYMBOL', 100)
     command_host = '0.0.0.0'
     command_port = getattr(app_config, 'DATA_AGENT_PORT', 9999)
+    status_host = '0.0.0.0'
+    status_port = getattr(app_config, 'DATA_AGENT_STATUS_PORT', 9988)
     register_ip = getattr(app_config, 'DATA_AGENT_REGISTER_IP', None)
     register_port = getattr(app_config, 'DATA_AGENT_REGISTER_PORT', None)
     agent_ip = getattr(app_config, 'DATA_AGENT_IP', None)
+    
+    logger.info("[DataAgent] 📋 配置信息:")
+    logger.info("[DataAgent]   - 最大symbol数: %s", max_symbols)
+    logger.info("[DataAgent]   - 指令服务: %s:%s", command_host, command_port)
+    logger.info("[DataAgent]   - 状态服务: %s:%s", status_host, status_port)
+    logger.info("[DataAgent]   - 注册地址: %s:%s", register_ip, register_port)
+    logger.info("[DataAgent]   - Agent IP: %s", agent_ip)
     
     try:
         asyncio.run(run_data_agent(
             max_symbols=max_symbols,
             command_host=command_host,
             command_port=command_port,
+            status_host=status_host,
+            status_port=status_port,
             register_ip=register_ip,
             register_port=register_port,
             agent_ip=agent_ip
