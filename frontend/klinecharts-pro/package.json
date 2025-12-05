@@ -30,7 +30,7 @@
   "scripts": {
     "build-core": "tsc && vite build",
     "build-dts": "dts-bundle-generator --no-banner true --umd-module-name klinechartspro -o dist/index.d.ts src/index.ts",
-    "build": "npm run build-core && npm run build-dts",
+    "build": "npm run build-core",
     "docs:dev": "vitepress dev docs",
     "docs:build": "vitepress build docs",
     "docs:preview": "vitepress preview docs",
