@@ -1,10 +1,28 @@
 /**
  * 自定义数据接入类
  * 实现 KLineChart Pro 版本的数据接入接口
+ * 参考 klinecharts-pro/index.html 中的 AkshareDatafeed 实现方式
+ * 使用 fetch API 直接调用后端接口，避免 ES6 模块依赖
  */
 
-import { marketApi } from '../services/api.js'
 import { createSocketConnection } from './websocket.js'
+
+// 获取 API 基础 URL（与 api.js 保持一致）
+function getApiBaseUrl() {
+  const isDev = import.meta.env.DEV
+  if (import.meta.env.VITE_BACKEND_URL) {
+    return import.meta.env.VITE_BACKEND_URL
+  } else if (isDev) {
+    // 开发环境：使用相对路径，通过 Vite 代理
+    return ''
+  } else {
+    // 生产环境：使用当前域名+配置的端口
+    const backendPort = import.meta.env.VITE_BACKEND_PORT || '5002'
+    const protocol = window.location.protocol
+    const hostname = window.location.hostname
+    return `${protocol}//${hostname}:${backendPort}`
+  }
+}
 
 /**
  * 自定义数据接入类
@@ -21,6 +39,7 @@ export class CustomDatafeed {
    * 模糊搜索标的
    * 在搜索框输入的时候触发
    * 返回标的信息数组
+   * 参考 klinecharts-pro/index.html 中的 searchSymbols 实现
    * @param {string} search - 搜索关键词
    * @returns {Promise<SymbolInfo[]>}
    */
@@ -28,9 +47,16 @@ export class CustomDatafeed {
     try {
       console.log('[CustomDatafeed] Searching symbols:', search)
       
-      // 获取市场行情数据
+      // 获取市场行情数据（使用 fetch API，参考参考实现）
       if (this.marketPrices.length === 0) {
-        const prices = await marketApi.getPrices()
+        const apiBaseUrl = getApiBaseUrl()
+        const response = await fetch(`${apiBaseUrl}/api/market/prices`)
+        
+        if (!response.ok) {
+          throw new Error(`HTTP error! status: ${response.status}`)
+        }
+        
+        const prices = await response.json()
         this.marketPrices = Object.keys(prices).map(symbol => ({
           symbol,
           name: prices[symbol].name || `${symbol}永续合约`,
@@ -38,7 +64,7 @@ export class CustomDatafeed {
         }))
       }
 
-      // 过滤匹配的标的
+      // 过滤匹配的标的（参考参考实现的过滤逻辑）
       const searchUpper = search.toUpperCase()
       const matched = this.marketPrices
         .filter(item => {
@@ -120,16 +146,37 @@ export class CustomDatafeed {
         toTimestamp: to
       })
 
-      // 调用后端 API 获取 K 线数据，传入时间范围参数
-      const response = await marketApi.getKlines(ticker, interval, limit, startTimeISO, endTimeISO)
+      // 调用后端 API 获取 K 线数据（使用 fetch API，参考参考实现）
+      const apiBaseUrl = getApiBaseUrl()
+      const params = new URLSearchParams({
+        symbol: ticker,
+        interval: interval,
+        limit: limit.toString()
+      })
+      if (startTimeISO) {
+        params.append('start_time', startTimeISO)
+      }
+      if (endTimeISO) {
+        params.append('end_time', endTimeISO)
+      }
+      
+      const response = await fetch(`${apiBaseUrl}/api/market/klines?${params.toString()}`)
+      
+      if (!response.ok) {
+        const errorText = await response.text()
+        console.error('[CustomDatafeed] HTTP错误详情:', errorText)
+        throw new Error(`HTTP error! status: ${response.status}, details: ${errorText}`)
+      }
+      
+      const result = await response.json()
 
-      if (!response || !response.data || !Array.isArray(response.data)) {
-        console.warn('[CustomDatafeed] Invalid response format:', response)
+      if (!result || !result.data || !Array.isArray(result.data)) {
+        console.warn('[CustomDatafeed] Invalid response format:', result)
         return []
       }
 
-      // 转换数据格式并过滤时间范围
-      const klines = response.data
+      // 转换数据格式并过滤时间范围（参考参考实现的数据转换方式）
+      const klines = result.data
         .map(kline => {
           // 处理时间戳：确保是数字类型（毫秒）
           let timestamp = kline.timestamp

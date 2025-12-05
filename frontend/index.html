@@ -7,9 +7,21 @@
     <link rel="icon" type="image/svg+xml" href="/favicon.svg">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.0/font/bootstrap-icons.css">
     <link rel="stylesheet" href="/style.css">
+    <!-- 引入 klinecharts-pro CSS（自定义构建版本） -->
+    <!-- 文件由 Dockerfile 构建时复制到 public/klinecharts-pro/，Vite 构建时会复制到 dist/klinecharts-pro/ -->
+    <link rel="stylesheet" href="/klinecharts-pro/klinecharts-pro.css">
 </head>
 <body>
     <div id="app"></div>
+    
+    <!-- 引入 klinecharts 基础库（UMD 版本） -->
+    <!-- 文件由 Dockerfile 构建时从 node_modules 复制到 public/klinecharts-pro/ -->
+    <script src="/klinecharts-pro/klinecharts.js"></script>
+    
+    <!-- 引入自定义构建的 klinecharts-pro（UMD 版本） -->
+    <!-- 文件由 Dockerfile 构建时从 klinecharts-pro/dist/ 复制到 public/klinecharts-pro/ -->
+    <script src="/klinecharts-pro/klinecharts-pro.umd.js"></script>
+    
     <script type="module" src="/src/main.js"></script>
 </body>
 </html>

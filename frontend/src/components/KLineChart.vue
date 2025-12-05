@@ -31,9 +31,25 @@
 <script setup>
 import { ref, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import { CustomDatafeed } from '../utils/customDatafeed.js'
-// 直接导入自构建的 klinecharts-pro 包
-import { KLineChartPro } from '@klinecharts/pro'
-import '@klinecharts/pro/dist/klinecharts-pro.css'
+
+// 使用 UMD 方式引入自定义构建的 klinecharts-pro
+// 参考 klinecharts-pro/index.html 的实现方式：
+// 1. CSS: 通过 <link> 标签引入（在 index.html 中）
+// 2. JS: 通过 <script> 标签引入 klinecharts.js 和 klinecharts-pro.umd.js（在 index.html 中）
+// 3. UMD 构建会将库挂载到 window.klinechartspro（参考 vite.config.ts 中的 name: 'klinechartspro'）
+// 在 Docker 构建环境中，文件由 Dockerfile 确保存在并复制到 public/klinecharts-pro/
+const getKLineChartPro = () => {
+  if (typeof window !== 'undefined' && window.klinechartspro && window.klinechartspro.KLineChartPro) {
+    return window.klinechartspro.KLineChartPro
+  }
+  
+  // 如果 UMD 版本不可用，说明构建或加载有问题
+  throw new Error(
+    'klinecharts-pro (UMD) is not available. ' +
+    'Please ensure /klinecharts-pro/klinecharts-pro.umd.js is loaded via script tag in index.html. ' +
+    'This should be handled automatically by Dockerfile build process.'
+  )
+}
 
 // Props
 const props = defineProps({
@@ -105,6 +121,9 @@ const initChart = async () => {
   }
   
   try {
+    // 获取 KLineChartPro 类（UMD 方式，自定义构建版本）
+    const KLineChartProClass = getKLineChartPro()
+    
     // Clear container
     chartContainerRef.value.innerHTML = ''
     
@@ -116,16 +135,18 @@ const initChart = async () => {
     const period = intervalToPeriod(currentInterval.value)
     
     // Create KLineChartPro instance
+    // 参考 klinecharts-pro/index.html 中的创建方式
     // 使用 klinecharts-pro 中的默认配置（periods, mainIndicators, subIndicators）
-    // 默认配置在 frontend/klinecharts-pro/src/KLineChartPro.tsx 中定义
-    chartInstance.value = new KLineChartPro({
+    // 默认配置在 frontend/klinecharts-pro/src/KLineChartPro.tsx (44-72行) 中定义
+    // 如果使用 UMD 方式引入自定义构建的包，这些默认配置会生效
+    chartInstance.value = new KLineChartProClass({
       container: chartContainerRef.value,
       symbol: symbolInfo,
       period: period,
       // periods 不指定，使用 klinecharts-pro 默认值：['1m', '5m', '15m', '1h', '4h', '1d', '1w']
       // mainIndicators 不指定，使用 klinecharts-pro 默认值：['MA']
       // subIndicators 不指定，使用 klinecharts-pro 默认值：['MA', 'RSI', 'MACD', 'VOL']
-      datafeed: datafeedInstance.value,
+      datafeed: datafeedInstance.value, // 使用 CustomDatafeed（参考参考实现中的 AkshareDatafeed）
       theme: 'light'
     })
     

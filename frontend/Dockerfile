@@ -99,10 +99,16 @@ RUN cp ./klinecharts-pro-build/klinecharts-pro.umd.js public/klinecharts-pro/ &&
 
 # 验证所有必需文件是否存在
 RUN if [ ! -f public/klinecharts-pro/klinecharts-pro.umd.js ] || \
-        [ ! -f public/klinecharts-pro/klinecharts-pro.css ]; then \
+        [ ! -f public/klinecharts-pro/klinecharts-pro.css ] || \
+        [ ! -f public/klinecharts-pro/klinecharts.js ]; then \
         echo "ERROR: Required klinecharts-pro files missing" && \
+        echo "Checking public/klinecharts-pro/ directory:" && \
         ls -la public/klinecharts-pro/ && \
         exit 1; \
+    else \
+        echo "✓ All klinecharts-pro files are present:" && \
+        ls -lh public/klinecharts-pro/ && \
+        echo ""; \
     fi
 
 # 构建前端应用
