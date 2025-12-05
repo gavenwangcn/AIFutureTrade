@@ -10,7 +10,7 @@
 # 阶段1：构建 klinecharts-pro 基础库
 # ==============================================================================
 
-FROM node:18-slim AS klinecharts-pro-builder
+FROM node:20-slim AS klinecharts-pro-builder
 WORKDIR /app
 
 # 安装系统依赖
@@ -49,7 +49,7 @@ RUN npm link
 # 阶段2：构建前端应用
 # ==============================================================================
 
-FROM node:18-slim AS frontend-builder
+FROM node:20-slim AS frontend-builder
 WORKDIR /app/frontend
 
 # 安装系统依赖
@@ -118,7 +118,7 @@ RUN if [ ! -d dist ]; then \
 # 阶段3：准备运行环境
 # ==============================================================================
 
-FROM node:18-slim AS runtime
+FROM node:20-slim AS runtime
 WORKDIR /app
 
 # 安装系统依赖
