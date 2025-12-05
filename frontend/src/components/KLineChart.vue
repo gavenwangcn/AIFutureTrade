@@ -29,58 +29,11 @@
 </template>
 
 <script setup>
-import { ref, onMounted, onUnmounted, watch, nextTick, onBeforeMount } from 'vue'
+import { ref, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import { CustomDatafeed } from '../utils/customDatafeed.js'
-
-// 动态加载自构建的 klinecharts-pro
-let KLineChartPro = null
-let klinechartsLoaded = false
-
-const loadKlinechartsPro = () => {
-  return new Promise((resolve, reject) => {
-    if (klinechartsLoaded && window.klinechartspro && window.klinechartspro.KLineChartPro) {
-      KLineChartPro = window.klinechartspro.KLineChartPro
-      resolve()
-      return
-    }
-
-    // 加载 CSS
-    const cssLink = document.createElement('link')
-    cssLink.rel = 'stylesheet'
-    cssLink.href = '/klinecharts-pro/klinecharts-pro.css'
-    document.head.appendChild(cssLink)
-
-    // 加载 klinecharts 基础库
-    const klinechartsScript = document.createElement('script')
-    klinechartsScript.src = '/klinecharts-pro/klinecharts.js'
-    klinechartsScript.onload = () => {
-      // 加载 klinecharts-pro
-      const proScript = document.createElement('script')
-      proScript.src = '/klinecharts-pro/klinecharts-pro.umd.js'
-      proScript.onload = () => {
-        if (window.klinechartspro && window.klinechartspro.KLineChartPro) {
-          KLineChartPro = window.klinechartspro.KLineChartPro
-          klinechartsLoaded = true
-          resolve()
-        } else {
-          reject(new Error('Failed to load KLineChartPro'))
-        }
-      }
-      proScript.onerror = () => reject(new Error('Failed to load klinecharts-pro.umd.js'))
-      document.body.appendChild(proScript)
-    }
-    klinechartsScript.onerror = () => reject(new Error('Failed to load klinecharts.js'))
-    document.body.appendChild(klinechartsScript)
-  })
-}
-
-onBeforeMount(async () => {
-  try {
-    await loadKlinechartsPro()
-  } catch (error) {
-    console.error('[KLineChart] Failed to load klinecharts-pro:', error)
-  }
-})
+// 直接导入自构建的 klinecharts-pro 包
+import { KLineChartPro } from '@klinecharts/pro'
+import '@klinecharts/pro/dist/klinecharts-pro.css'
 
 // Props
 const props = defineProps({
@@ -142,16 +95,6 @@ const symbolToSymbolInfo = (symbol) => {
 const initChart = async () => {
   // Wait for DOM to be ready
   await nextTick()
-  
-  // Ensure klinecharts-pro is loaded
-  if (!klinechartsLoaded || !KLineChartPro) {
-    try {
-      await loadKlinechartsPro()
-    } catch (error) {
-      console.error('[KLineChart] Failed to load klinecharts-pro:', error)
-      return
-    }
-  }
   
   // Destroy existing chart if it exists
   destroyChart()
