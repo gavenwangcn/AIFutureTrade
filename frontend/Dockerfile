@@ -19,6 +19,8 @@ FROM base AS klinecharts-pro-builder
 WORKDIR /app/klinecharts-pro
 
 # 复制依赖文件和 node_modules
+# 注意：node_modules 中的 klinecharts 仅用于构建时的类型检查（TypeScript 编译）
+# klinecharts 不会被打包进 klinecharts-pro（在 vite.config.ts 中配置为 external）
 COPY frontend/klinecharts-pro/package.json frontend/klinecharts-pro/package-lock.json* ./
 COPY frontend/klinecharts-pro/node_modules ./node_modules
 
@@ -73,6 +75,8 @@ FROM base AS frontend-builder
 WORKDIR /app
 
 # 复制依赖文件
+# 注意：前端构建只需要 vite 等构建工具（这些工具在 klinecharts-pro/node_modules 中）
+# 前端不依赖 node_modules 中的 klinecharts，因为前端通过 script 标签动态加载 klinecharts.js
 COPY frontend/package.json frontend/package-lock.json* ./
 COPY frontend/klinecharts-pro/node_modules ./node_modules
 
@@ -100,15 +104,22 @@ COPY --from=klinecharts-pro-builder /app/klinecharts-pro/dist/klinecharts-pro.um
 COPY --from=klinecharts-pro-builder /app/klinecharts-pro/dist/klinecharts-pro.css ./public/klinecharts-pro/
 
 # 复制 klinecharts 基础库
-# 前端需要：/klinecharts-pro/klinecharts.js
-RUN if [ -f node_modules/klinecharts/dist/klinecharts.umd.js ]; then \
-        cp node_modules/klinecharts/dist/klinecharts.umd.js public/klinecharts-pro/klinecharts.js; \
+# 前端通过 script 标签动态加载 /klinecharts-pro/klinecharts.js
+# 优先使用已有的 klinecharts.min.js，否则从 klinecharts-pro-builder 阶段的 node_modules 复制
+RUN if [ -f public/klinecharts.min.js ]; then \
+        cp public/klinecharts.min.js public/klinecharts-pro/klinecharts.js && \
+        echo "Using existing klinecharts.min.js"; \
+    elif [ -f node_modules/klinecharts/dist/klinecharts.umd.js ]; then \
+        cp node_modules/klinecharts/dist/klinecharts.umd.js public/klinecharts-pro/klinecharts.js && \
+        echo "Using klinecharts from node_modules"; \
     elif [ -f node_modules/klinecharts/dist/umd/klinecharts.js ]; then \
-        cp node_modules/klinecharts/dist/umd/klinecharts.js public/klinecharts-pro/klinecharts.js; \
+        cp node_modules/klinecharts/dist/umd/klinecharts.js public/klinecharts-pro/klinecharts.js && \
+        echo "Using klinecharts from node_modules"; \
     elif [ -f node_modules/klinecharts/dist/klinecharts.js ]; then \
-        cp node_modules/klinecharts/dist/klinecharts.js public/klinecharts-pro/klinecharts.js; \
+        cp node_modules/klinecharts/dist/klinecharts.js public/klinecharts-pro/klinecharts.js && \
+        echo "Using klinecharts from node_modules"; \
     else \
-        echo "ERROR: klinecharts.js not found" && \
+        echo "ERROR: klinecharts.js not found. Please ensure klinecharts.min.js exists in public/ or klinecharts is installed in klinecharts-pro/node_modules" && \
         exit 1; \
     fi
 
