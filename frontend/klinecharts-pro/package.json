@@ -59,10 +59,7 @@
     "vitest": "^0.28.4"
   },
   "dependencies": {
-    "@klinecharts/pro": "^0.1.1",
-    "install": "^0.13.0",
     "lodash": "^4.17.21",
-    "npm": "^11.5.2",
     "solid-js": "^1.6.11"
   },
   "peerDependencies": {
