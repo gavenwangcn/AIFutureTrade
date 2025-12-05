@@ -68,16 +68,16 @@ COPY frontend/public/ ./public/
 # 创建klinecharts-pro资源目录
 RUN mkdir -p public/klinecharts-pro
 
-# 从klinecharts-pro-builder阶段复制构建好的产物
-COPY --from=klinecharts-pro-builder /app/klinecharts-pro/dist/ ./klinecharts-pro-build/
+# 从klinecharts-pro-builder阶段复制构建好的产物和package.json
+    COPY --from=klinecharts-pro-builder /app/klinecharts-pro/dist/ ./klinecharts-pro-build/
+    COPY --from=klinecharts-pro-builder /app/klinecharts-pro/package.json ./klinecharts-pro-build/
 
-# 安装frontend依赖（根据package.json安装，适应跨平台构建）
+    # 安装frontend依赖（使用package.json安装，适应跨平台构建）
     RUN npm install --no-fund --no-audit
 
-# 创建node_modules/@klinecharts/pro目录并复制自构建的包
-RUN mkdir -p node_modules/@klinecharts/pro
-RUN cp -r ./klinecharts-pro-build/* node_modules/@klinecharts/pro/
-RUN cp frontend/klinecharts-pro/package.json node_modules/@klinecharts/pro/
+    # 创建node_modules/@klinecharts/pro目录并复制自构建的包
+    RUN mkdir -p node_modules/@klinecharts/pro
+    RUN cp -r ./klinecharts-pro-build/* node_modules/@klinecharts/pro/
 
 # 复制klinecharts基础库（如果需要的话）
 RUN if [ -f node_modules/klinecharts/dist/klinecharts.umd.js ]; then \
