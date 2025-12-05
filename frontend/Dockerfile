@@ -30,8 +30,8 @@ COPY frontend/klinecharts-pro/indicators/ ./klinecharts-pro/indicators/
 
 WORKDIR /app/klinecharts-pro
 
-# 安装klinecharts-pro依赖（使用package-lock.json，确保依赖一致性）
-RUN npm ci --no-fund --no-audit
+# 安装klinecharts-pro依赖（根据package.json安装，适应跨平台构建）
+    RUN npm install --no-fund --no-audit
 
 # 构建klinecharts-pro
 RUN npm run build
@@ -71,8 +71,8 @@ RUN mkdir -p public/klinecharts-pro
 # 从klinecharts-pro-builder阶段复制构建好的产物
 COPY --from=klinecharts-pro-builder /app/klinecharts-pro/dist/ ./klinecharts-pro-build/
 
-# 安装frontend依赖（使用package-lock.json，确保依赖一致性）
-RUN npm ci --no-fund --no-audit
+# 安装frontend依赖（根据package.json安装，适应跨平台构建）
+    RUN npm install --no-fund --no-audit
 
 # 创建node_modules/@klinecharts/pro目录并复制自构建的包
 RUN mkdir -p node_modules/@klinecharts/pro
