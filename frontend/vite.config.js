@@ -10,9 +10,7 @@ export default defineConfig({
   plugins: [vue()],
   resolve: {
     alias: {
-      '@': path.resolve(__dirname, 'src'),
-      // 确保使用本地自构建的@klinecharts/pro，而不是npm registry版本
-      '@klinecharts/pro': path.resolve(__dirname, '../klinecharts-pro')
+      '@': path.resolve(__dirname, 'src')
     }
   },
   build: {
