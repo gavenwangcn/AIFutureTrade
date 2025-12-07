@@ -60,10 +60,11 @@ class KlineMessageTestHandler:
     def __init__(self):
         # 统计信息
         self.stats = {
-            "total_messages": 0,  # 总消息数
-            "success_messages": 0,  # 成功处理的消息数
-            "failed_messages": 0,  # 处理失败的消息数
-            "normalize_errors": 0,  # normalize_kline 错误数
+            "total_messages": 0,  # 总消息数（包括所有类型的消息）
+            "success_messages": 0,  # 成功处理的消息数（完结的K线）
+            "failed_messages": 0,  # 处理失败的消息数（真正的错误）
+            "skipped_messages": 0,  # 跳过的消息数（空消息、未完结K线等，不算错误）
+            "normalize_errors": 0,  # normalize_kline 错误数（无效消息格式）
             "insert_errors": 0,  # insert_market_klines 错误数
             "other_errors": 0,  # 其他错误数
         }
@@ -145,6 +146,17 @@ class KlineMessageTestHandler:
                 }
         
         try:
+            # 步骤0: 检查空消息
+            if message is None:
+                async with self._lock:
+                    self.stats["skipped_messages"] += 1
+                logger.debug(
+                    "[测试] ⏭️  [消息处理] 跳过空消息 %s %s",
+                    symbol, interval
+                )
+                # 空消息不算错误，只是跳过
+                return
+            
             # 步骤1: 测试 normalize_kline
             from market.market_streams import _normalize_kline
             
@@ -152,22 +164,68 @@ class KlineMessageTestHandler:
                 normalized = _normalize_kline(message)
                 
                 if normalized is None:
-                    async with self._lock:
-                        self.stats["normalize_errors"] += 1
-                        self.stats["failed_messages"] += 1
-                        self.errors.append({
-                            "symbol": symbol,
-                            "interval": interval,
-                            "step": "normalize_kline",
-                            "error": "normalize_kline returned None",
-                            "message_preview": str(message)[:200] if message else None,
-                            "timestamp": message_start_time.isoformat()
-                        })
+                    # normalize_kline 返回 None 可能是以下情况：
+                    # 1. 空消息（已在上方检查）
+                    # 2. 未完结的K线（x=False）- 这是正常的，应该跳过
+                    # 3. 无效的消息格式 - 这是错误
                     
-                    logger.warning(
-                        "[测试] ⚠️  [消息处理] normalize_kline 返回 None %s %s",
-                        symbol, interval
-                    )
+                    # 检查是否是未完结的K线（正常情况）
+                    is_incomplete_kline = False
+                    try:
+                        # 尝试提取 kline 对象检查 x 字段
+                        if hasattr(message, "model_dump"):
+                            data = message.model_dump()
+                        elif hasattr(message, "__dict__"):
+                            data = message.__dict__
+                        elif isinstance(message, dict):
+                            data = message
+                        else:
+                            data = {}
+                        
+                        kline_obj = data.get("k")
+                        if kline_obj:
+                            if hasattr(kline_obj, "model_dump"):
+                                k = kline_obj.model_dump()
+                            elif hasattr(kline_obj, "__dict__"):
+                                k = kline_obj.__dict__
+                            elif isinstance(kline_obj, dict):
+                                k = kline_obj
+                            else:
+                                k = {}
+                            
+                            is_closed = k.get("x") or k.get("is_closed", False)
+                            if not is_closed:
+                                # 这是未完结的K线，正常跳过，不算错误
+                                is_incomplete_kline = True
+                                async with self._lock:
+                                    self.stats["skipped_messages"] += 1
+                                logger.debug(
+                                    "[测试] ⏭️  [消息处理] 跳过未完结K线 %s %s (x=False)",
+                                    symbol, interval
+                                )
+                    except Exception:
+                        # 如果无法检查，假设是无效消息格式
+                        pass
+                    
+                    if not is_incomplete_kline:
+                        # 这是真正的错误（无效消息格式）
+                        async with self._lock:
+                            self.stats["normalize_errors"] += 1
+                            self.stats["failed_messages"] += 1
+                            self.errors.append({
+                                "symbol": symbol,
+                                "interval": interval,
+                                "step": "normalize_kline",
+                                "error": "normalize_kline returned None (invalid message format)",
+                                "message_preview": str(message)[:200] if message else None,
+                                "timestamp": message_start_time.isoformat()
+                            })
+                        
+                        logger.warning(
+                            "[测试] ⚠️  [消息处理] normalize_kline 返回 None（无效消息格式） %s %s",
+                            symbol, interval
+                        )
+                    # 无论是否未完结的K线，都不继续处理
                     return
             except Exception as e:
                 error_info = {
@@ -278,16 +336,23 @@ class KlineMessageTestHandler:
         logger.info("[测试报告] 📊 K线消息处理测试统计")
         logger.info("=" * 80)
         logger.info("[测试报告] 总消息数: %s", self.stats["total_messages"])
-        logger.info("[测试报告] 成功处理: %s", self.stats["success_messages"])
-        logger.info("[测试报告] 处理失败: %s", self.stats["failed_messages"])
-        logger.info("[测试报告]   - normalize_kline 错误: %s", self.stats["normalize_errors"])
+        logger.info("[测试报告] 成功处理: %s (完结的K线)", self.stats["success_messages"])
+        logger.info("[测试报告] 跳过消息: %s (空消息、未完结K线等，正常行为)", self.stats["skipped_messages"])
+        logger.info("[测试报告] 处理失败: %s (真正的错误)", self.stats["failed_messages"])
+        logger.info("[测试报告]   - normalize_kline 错误: %s (无效消息格式)", self.stats["normalize_errors"])
         logger.info("[测试报告]   - insert_market_klines 错误: %s", self.stats["insert_errors"])
         logger.info("[测试报告]   - 其他错误: %s", self.stats["other_errors"])
         logger.info("=" * 80)
         
         if self.stats["total_messages"] > 0:
-            success_rate = (self.stats["success_messages"] / self.stats["total_messages"]) * 100
-            logger.info("[测试报告] 成功率: %.2f%%", success_rate)
+            # 成功率 = 成功处理的消息数 / (总消息数 - 跳过的消息数)
+            processable_messages = self.stats["total_messages"] - self.stats["skipped_messages"]
+            if processable_messages > 0:
+                success_rate = (self.stats["success_messages"] / processable_messages) * 100
+                logger.info("[测试报告] 成功率: %.2f%% (基于可处理消息数: %s)", 
+                           success_rate, processable_messages)
+            else:
+                logger.info("[测试报告] 成功率: N/A (所有消息都被跳过)")
         
         # 按symbol统计
         logger.info("[测试报告] 📊 按Symbol统计:")

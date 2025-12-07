@@ -47,8 +47,10 @@ logger = logging.getLogger(__name__)
 # 支持的K线时间间隔
 KLINE_INTERVALS = ['1m', '5m', '15m', '1h', '4h', '1d', '1w']
 
-# WebSocket连接最大有效期（24小时）
-WS_CONNECTION_MAX_AGE = timedelta(hours=24)
+# WebSocket连接最大有效期（设置为非常长的时间，确保连接长期运行）
+# 注意：K线监听是长期运行的异步任务，不应该主动关闭连接
+# 只有在服务关闭或连接出错时才关闭
+WS_CONNECTION_MAX_AGE = timedelta(days=365)  # 1年，实际上不会过期
 
 
 class KlineStreamConnection:
@@ -90,13 +92,19 @@ class DataAgentKlineManager:
     """管理所有K线WebSocket连接。
     
     该类负责管理多个交易对的K线数据WebSocket连接，每个交易对支持7个时间间隔（1m, 5m, 15m, 1h, 4h, 1d, 1w）。
+    
+    **重要说明：K线监听是长期运行的异步任务**
+    - 连接构建完成后会一直保持活跃，持续接收K线消息
+    - 不会主动关闭连接（除非服务关闭或连接出错）
+    - 所有连接会持续运行，同步K线数据到ClickHouse数据库
+    
     主要功能包括：
     - 客户端初始化和连接管理
     - 流的添加、移除和批量操作
-    - 连接状态查询和监控
-    - 过期连接清理和重连
+    - 连接状态查询和监控（不主动关闭）
     - K线消息处理和数据库存储
     - 订阅频率控制
+    - 连接健康检查（不关闭连接）
     """
     
     # ============================================================================
@@ -1288,7 +1296,13 @@ class DataAgentKlineManager:
         return result
     
     async def remove_stream(self, symbol: str, interval: str) -> bool:
-        """移除K线流。
+        """移除K线流（手动调用，用于停止监听某个symbol的某个interval）。
+        
+        注意：正常情况下，K线监听应该长期运行，不应该主动调用此方法。
+        此方法主要用于：
+        - 手动停止监听某个symbol的某个interval
+        - 服务关闭时清理所有连接
+        - 错误处理时清理无法使用的连接
         
         Args:
             symbol: 交易对符号
@@ -1325,33 +1339,38 @@ class DataAgentKlineManager:
             return len(self._active_connections)
     
     async def _cleanup_broken_connections(self) -> None:
-        """清理断开的连接（检查连接是否仍然活跃）。"""
-        # 注意：不要在持有锁的情况下调用可能阻塞的操作（如 conn.close()）
-        # 先收集需要清理的连接，然后在锁外关闭它们
-        broken_keys = []
+        """检查断开的连接（但不主动关闭，因为K线监听应该长期运行）。
+        
+        注意：K线监听是长期运行的异步任务，不应该主动关闭连接。
+        此方法只检查连接状态，不关闭连接。
+        只有在连接确实无法使用时（通过错误处理器检测到）才会关闭。
+        """
+        # 只检查连接状态，不关闭连接
         async with self._lock:
+            total_connections = len(self._active_connections)
+            broken_count = 0
             for key, conn in self._active_connections.items():
                 if not conn.is_active:
-                    broken_keys.append(key)
+                    broken_count += 1
+                    logger.debug(
+                        "[DataAgentKline] 🔍 [检查] 发现非活跃连接（但不会主动关闭）: %s %s",
+                        key[0], key[1]
+                    )
+            
+            if broken_count > 0:
+                logger.info(
+                    "[DataAgentKline] 📊 [检查] 连接状态: 总数=%s, 非活跃数=%s (非活跃连接不会自动关闭，等待错误处理器处理)",
+                    total_connections, broken_count
+                )
+            else:
+                logger.debug(
+                    "[DataAgentKline] ✅ [检查] 所有连接状态正常: 总数=%s",
+                    total_connections
+                )
         
-        # 在锁外关闭连接，避免阻塞
-        for key in broken_keys:
-            async with self._lock:
-                if key not in self._active_connections:
-                    continue
-                conn = self._active_connections[key]
-            
-            # 在锁外关闭连接
-            try:
-                await conn.close()
-            except Exception as e:
-                logger.debug("[DataAgentKline] Error closing broken connection: %s", e)
-            
-            # 再次获取锁删除连接
-            async with self._lock:
-                if key in self._active_connections:
-                    del self._active_connections[key]
-                    logger.info("[DataAgentKline] Cleaned up broken connection: %s %s", key[0], key[1])
+        # 不再主动关闭连接，让连接长期运行
+        # 只有在错误处理器检测到连接确实无法使用时才会关闭
+        return
     
     async def get_connection_status(self) -> Dict[str, Any]:
         """获取当前连接状态（JSON格式）。
@@ -1363,9 +1382,9 @@ class DataAgentKlineManager:
                 "symbols": [str, ...]  # symbol列表，不包含interval信息
             }
         """
-        # 先清理过期连接和断开的连接（在锁外执行，避免阻塞）
-        await self.cleanup_expired_connections()
-        await self._cleanup_broken_connections()
+        # 只检查连接状态，不清理连接（K线监听应该长期运行）
+        await self.cleanup_expired_connections()  # 只检查，不关闭
+        await self._cleanup_broken_connections()  # 只检查，不关闭
         
         async with self._lock:
             # 获取所有唯一的symbol（不包含interval信息）
@@ -1480,7 +1499,13 @@ class DataAgentKlineManager:
         当WebSocket接收到K线数据时，会调用此方法处理消息。
         该方法会：
         1. 规范化K线数据格式
-        2. 将数据插入ClickHouse数据库
+        2. 只处理完结的K线（x=True），跳过未完结的K线
+        3. 将数据插入ClickHouse数据库
+        
+        注意：
+        - 空消息会被跳过（不记录为错误）
+        - 未完结的K线（x=False）会被跳过（不记录为错误，这是正常行为）
+        - 只有完结的K线（x=True）才会被处理并插入数据库
         
         Args:
             symbol: 交易对符号
@@ -1488,55 +1513,59 @@ class DataAgentKlineManager:
             message: 原始K线消息数据
         """
         try:
+            # Check for empty message
+            if message is None:
+                logger.debug("[DataAgentKline] ⏭️  跳过空消息 %s %s", symbol, interval)
+                return
+            
             normalized = _normalize_kline(message)
             if normalized:
+                # Only insert closed klines (x=True)
                 await asyncio.to_thread(self._db.insert_market_klines, [normalized])
-                logger.debug("[DataAgentKline] Inserted kline: %s %s", symbol, interval)
+                logger.debug("[DataAgentKline] ✅ 已插入完结K线: %s %s", symbol, interval)
+            else:
+                # normalized is None means:
+                # 1. Empty message (already checked above)
+                # 2. Incomplete kline (x=False) - this is normal, skip it
+                # 3. Invalid message format - already logged in _normalize_kline
+                logger.debug("[DataAgentKline] ⏭️  跳过未完结或无效K线: %s %s", symbol, interval)
         except Exception as e:
-            logger.error("[DataAgentKline] Error handling kline message: %s", e, exc_info=True)
+            logger.error("[DataAgentKline] ❌ 处理K线消息时出错 %s %s: %s", symbol, interval, e, exc_info=True)
     
     # ============================================================================
     # 清理方法
     # ============================================================================
     
     async def cleanup_expired_connections(self) -> None:
-        """清理过期的连接（超过24小时）。
+        """检查并处理过期的连接（实际上不会执行清理，因为连接应该长期运行）。
         
-        该方法会检查所有活跃连接，找出已过期的连接（创建时间超过24小时），
-        然后关闭这些连接并从活跃连接字典中删除。
+        注意：K线监听是长期运行的异步任务，不应该主动关闭连接。
+        此方法保留用于检查连接状态，但不会主动关闭连接。
+        只有在连接出错或服务关闭时才会关闭连接。
         
-        注意：为了避免在持有锁的情况下调用可能阻塞的操作，先收集需要清理的连接，
-        然后在锁外关闭它们。
+        该方法会检查所有活跃连接的状态，但不关闭它们。
         """
-        # 先收集需要清理的连接
-        expired_connections = []
+        # 只检查连接状态，不关闭连接
         async with self._lock:
-            expired_keys = []
+            total_connections = len(self._active_connections)
+            expired_count = 0
             for key, conn in self._active_connections.items():
                 if conn.is_expired():
-                    expired_keys.append(key)
-                    expired_connections.append((key, conn))
+                    expired_count += 1
+                    logger.debug(
+                        "[DataAgentKline] 🔍 [检查] 发现过期连接（但不会关闭）: %s %s (创建时间: %s)",
+                        key[0], key[1], conn.created_at.isoformat()
+                    )
             
-            # 先从字典中删除
-            for key in expired_keys:
-                del self._active_connections[key]
-        
-        # 在锁外关闭连接，避免阻塞
-        for key, conn in expired_connections:
-            try:
-                logger.info("[DataAgentKline] 🧹 [清理过期] 关闭过期连接: %s %s", key[0], key[1])
-                # 添加超时保护，避免关闭连接时卡住
-                await asyncio.wait_for(conn.close(), timeout=5.0)
-                logger.info("[DataAgentKline] ✅ [清理过期] 过期连接已关闭: %s %s", key[0], key[1])
-            except asyncio.TimeoutError:
-                logger.warning(
-                    "[DataAgentKline] ⚠️  [清理过期] 关闭过期连接超时: %s %s",
-                    key[0], key[1]
+            if expired_count > 0:
+                logger.info(
+                    "[DataAgentKline] 📊 [检查] 连接状态: 总数=%s, 过期数=%s (过期连接不会自动关闭，保持长期运行)",
+                    total_connections, expired_count
                 )
-            except Exception as e:
-                logger.warning(
-                    "[DataAgentKline] ⚠️  [清理过期] 关闭过期连接失败: %s %s: %s",
-                    key[0], key[1], e
+            else:
+                logger.debug(
+                    "[DataAgentKline] ✅ [检查] 所有连接状态正常: 总数=%s",
+                    total_connections
                 )
     
     async def _periodic_ping(self) -> None:
@@ -2549,18 +2578,23 @@ async def run_data_agent(
         # 启动注册任务（只注册一次）
         register_task_obj = asyncio.create_task(register_once_task())
     
-    # 定期清理过期连接
-    async def cleanup_task():
+    # 定期检查连接状态（不关闭连接，因为K线监听应该长期运行）
+    async def connection_check_task():
+        """定期检查连接状态，但不关闭连接。
+        
+        注意：K线监听是长期运行的异步任务，连接应该一直保持活跃状态。
+        此任务只用于监控连接状态，不会主动关闭连接。
+        """
         while True:
             try:
-                await asyncio.sleep(3600)  # 每小时清理一次
-                await kline_manager.cleanup_expired_connections()
+                await asyncio.sleep(3600)  # 每小时检查一次
+                await kline_manager.cleanup_expired_connections()  # 只检查，不关闭
             except asyncio.CancelledError:
                 raise
             except Exception as e:
-                logger.error("[DataAgent] Error in cleanup task: %s", e, exc_info=True)
+                logger.error("[DataAgent] Error in connection check task: %s", e, exc_info=True)
     
-    cleanup_task_obj = asyncio.create_task(cleanup_task())
+    connection_check_task_obj = asyncio.create_task(connection_check_task())
     
     # 定期更新agent状态到数据库（只更新不新建）
     # 使用闭包变量确保agent_ip和command_port可用
@@ -2612,7 +2646,7 @@ async def run_data_agent(
     try:
         logger.info("[DataAgent] ✅ Data agent started (指令端口: %s:%s, 状态端口: %s:%s)", 
                    command_host, command_port, status_host, status_port)
-        tasks = [command_task, status_task, cleanup_task_obj, self_update_task_obj]
+        tasks = [command_task, status_task, connection_check_task_obj, self_update_task_obj]
         if register_task_obj:
             tasks.append(register_task_obj)
         await asyncio.gather(*tasks)
@@ -2621,7 +2655,7 @@ async def run_data_agent(
     finally:
         command_task.cancel()
         status_task.cancel()
-        cleanup_task_obj.cancel()
+        connection_check_task_obj.cancel()
         self_update_task_obj.cancel()
         if register_task_obj:
             register_task_obj.cancel()

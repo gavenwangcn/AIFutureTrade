@@ -176,8 +176,20 @@ def _normalize_kline(message_data: Any) -> Optional[Dict[str, Any]]:
     
     Expected format:
     e='kline' E=1764148546845 s='BTCUSDT' k=KlineCandlestickStreamsResponseK(...)
+    
+    Returns:
+        Normalized kline data dict if the kline is closed, None otherwise.
+        None is returned in the following cases:
+        - Empty or invalid message
+        - Kline is not closed (x=False, is_closed=False)
+        - Missing required fields
     """
     try:
+        # Check for empty or None message
+        if message_data is None:
+            logger.debug("[MarketStreams] Received empty message (None)")
+            return None
+        
         # Extract data from message
         if hasattr(message_data, "model_dump"):
             data = message_data.model_dump()
@@ -189,10 +201,20 @@ def _normalize_kline(message_data: Any) -> Optional[Dict[str, Any]]:
             logger.warning("[MarketStreams] Unknown kline message format: %s", type(message_data))
             return None
         
+        # Check if data is empty
+        if not data:
+            logger.debug("[MarketStreams] Received empty message (empty dict)")
+            return None
+        
         # Extract event time, symbol, and kline data
         event_time = data.get("E") or data.get("event_time", 0)
         symbol = data.get("s") or data.get("symbol", "")
         kline_obj = data.get("k")
+        
+        # Check if kline object exists
+        if kline_obj is None:
+            logger.debug("[MarketStreams] Kline object is None in message")
+            return None
         
         # Extract kline data
         if hasattr(kline_obj, "model_dump"):
@@ -208,6 +230,9 @@ def _normalize_kline(message_data: Any) -> Optional[Dict[str, Any]]:
         # Check if kline is closed (only process closed klines)
         is_closed = k.get("x") or k.get("is_closed", False)
         if not is_closed:
+            # This is normal - incomplete klines should be skipped
+            logger.debug("[MarketStreams] Skipping incomplete kline (x=False) for %s %s", 
+                        symbol, k.get("i") or k.get("interval", ""))
             return None  # Skip incomplete klines
         
         # Extract contract type (may be in parent data)
