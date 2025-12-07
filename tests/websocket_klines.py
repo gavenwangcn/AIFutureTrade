@@ -34,7 +34,8 @@ TEST_SYMBOL = "BTCUSDT"
 # 支持的interval: '1m', '5m', '15m', '1h', '4h', '1d', '1w'
 TEST_INTERVALS = [
     "1m",
-    "5m"
+    "5m",
+    "15m"
 ]
 
 # 注意：每个interval会持续等待直到收到消息，不设置超时时间
