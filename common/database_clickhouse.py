@@ -97,13 +97,17 @@ class ClickHouseConnectionPool:
                 # 注意：不设置 timezone，因为某些 ClickHouse 服务器不支持或不允许设置该参数
                 # 时区处理在应用层完成，所有时间都使用 UTC 时间戳（create_datetime_long）
                 # 清理逻辑使用时间戳比较，不依赖时区设置
+                # 设置超时参数，避免连接长时间阻塞
                 client = clickhouse_connect.get_client(
                     host=self._host,
                     port=self._port,
                     username=self._username,
                     password=self._password,
                     database=self._database,
-                    secure=self._secure
+                    secure=self._secure,
+                    connect_timeout=10,  # 连接超时10秒
+                    send_receive_timeout=30,  # 发送/接收超时30秒
+                    settings={'max_execution_time': 30}  # 查询执行超时30秒
                 )
                 self._pool.put(client)
                 self._current_connections += 1
@@ -112,6 +116,26 @@ class ClickHouseConnectionPool:
             except Exception as e:
                 logger.error(f"[ClickHouse] Failed to create connection: {e}")
                 return None
+    
+    def _is_connection_healthy(self, client: Any) -> bool:
+        """检查连接是否健康。
+        
+        Args:
+            client: ClickHouse客户端实例
+            
+        Returns:
+            如果连接健康返回True，否则返回False
+        """
+        if not client:
+            return False
+        
+        try:
+            # 使用短超时快速检查连接健康状态
+            client.query("SELECT 1", settings={'max_execution_time': 2})
+            return True
+        except Exception as e:
+            logger.debug(f"[ClickHouse] Connection health check failed: {e}")
+            return False
     
     def acquire(self, timeout: Optional[int] = None) -> Optional[Any]:
         """Acquire a connection from the pool.
@@ -127,6 +151,24 @@ class ClickHouseConnectionPool:
         try:
             # Try to get a connection from the pool
             client = self._pool.get(timeout=timeout)
+            
+            # 检查连接是否健康，如果不健康则关闭并创建新连接
+            if not self._is_connection_healthy(client):
+                logger.warning(f"[ClickHouse] Connection from pool is unhealthy, closing and creating new one")
+                try:
+                    if hasattr(client, 'close'):
+                        client.close()
+                except Exception as close_error:
+                    logger.debug(f"[ClickHouse] Error closing unhealthy connection: {close_error}")
+                with self._lock:
+                    if self._current_connections > 0:
+                        self._current_connections -= 1
+                # 创建新连接
+                client = self._create_connection()
+                if not client:
+                    logger.error(f"[ClickHouse] Failed to create replacement connection")
+                    return None
+            
             logger.debug(f"[ClickHouse] Acquired connection from pool")
             return client
         except Empty:
@@ -139,6 +181,18 @@ class ClickHouseConnectionPool:
             # If we can't create a new connection, try again to get from the pool
             try:
                 client = self._pool.get(timeout=timeout)
+                # 再次检查连接健康
+                if client and not self._is_connection_healthy(client):
+                    logger.warning(f"[ClickHouse] Connection from pool is unhealthy after waiting")
+                    try:
+                        if hasattr(client, 'close'):
+                            client.close()
+                    except Exception as close_error:
+                        logger.debug(f"[ClickHouse] Error closing unhealthy connection: {close_error}")
+                    with self._lock:
+                        if self._current_connections > 0:
+                            self._current_connections -= 1
+                    return None
                 logger.debug(f"[ClickHouse] Acquired connection from pool after waiting")
                 return client
             except Empty:
@@ -155,32 +209,22 @@ class ClickHouseConnectionPool:
             return
         
         try:
-            # Check if the client is still valid by sending a simple query
-            # 使用超时和异常处理，避免长时间阻塞
-            try:
-                client.query("SELECT 1", settings={'max_execution_time': 2})
-                self._pool.put(client)
-                logger.debug(f"[ClickHouse] Released connection back to pool")
-            except Exception as query_error:
-                # 连接可能已损坏，尝试关闭它
-                logger.warning(f"[ClickHouse] Connection health check failed: {query_error}, closing connection")
-                try:
-                    if hasattr(client, 'close'):
-                        client.close()
-                except Exception as close_error:
-                    logger.debug(f"[ClickHouse] Error closing invalid connection: {close_error}")
-                with self._lock:
-                    self._current_connections -= 1
+            # 直接将连接放回池中，健康检查在 acquire() 时进行
+            # 这样可以避免在 release() 时因为连接问题导致长时间阻塞
+            # 如果连接有问题，会在下次 acquire() 时被发现并替换
+            self._pool.put(client)
+            logger.debug(f"[ClickHouse] Released connection back to pool")
         except Exception as e:
-            # 如果检查连接时发生其他错误，也关闭连接
-            logger.error(f"[ClickHouse] Connection is invalid, closing it: {e}")
+            # 如果放回池中失败（例如池已满），尝试关闭连接
+            logger.warning(f"[ClickHouse] Failed to release connection to pool: {e}, closing connection")
             try:
                 if hasattr(client, 'close'):
                     client.close()
             except Exception as close_error:
-                logger.debug(f"[ClickHouse] Error closing invalid connection: {close_error}")
+                logger.debug(f"[ClickHouse] Error closing connection: {close_error}")
             with self._lock:
-                self._current_connections -= 1
+                if self._current_connections > 0:
+                    self._current_connections -= 1
     
     def close_all(self) -> None:
         """Close all connections in the pool."""
