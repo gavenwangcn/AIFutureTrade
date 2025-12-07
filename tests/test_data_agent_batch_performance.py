@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import json
 import logging
+import socket
 import subprocess
 import sys
 import time
@@ -84,6 +85,39 @@ class DataAgentBatchPerformanceTest:
         logger.info("[性能测试] Agent 地址: %s:%s", agent_host, agent_port)
         logger.info("[性能测试] 使用方式: %s", "curl" if self.use_curl else "requests")
         logger.info("=" * 80)
+        
+        # 检查服务是否可用
+        if not self.check_service_available():
+            logger.warning(
+                "[性能测试] ⚠️  警告: Data Agent 服务在 %s:%s 不可用。"
+                "请确保 data_agent 服务已启动。",
+                agent_host, agent_port
+            )
+            logger.warning(
+                "[性能测试] 💡 提示: 启动 data_agent 服务: python data/data_agent.py"
+            )
+            logger.warning(
+                "[性能测试] 💡 提示: 或使用 Docker: docker-compose up data-agent"
+            )
+    
+    def check_service_available(self, timeout: float = 2.0) -> bool:
+        """检查服务是否可用。
+        
+        Args:
+            timeout: 连接超时时间（秒）
+            
+        Returns:
+            如果服务可用返回 True，否则返回 False
+        """
+        try:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(timeout)
+            result = sock.connect_ex((self.agent_host, self.agent_port))
+            sock.close()
+            return result == 0
+        except Exception as e:
+            logger.debug("[性能测试] 检查服务可用性时出错: %s", e)
+            return False
     
     def _send_request_curl(self, method: str, path: str, data: Optional[Dict] = None) -> Dict[str, Any]:
         """使用 curl 命令发送 HTTP 请求。"""
@@ -110,12 +144,29 @@ class DataAgentBatchPerformanceTest:
             duration = time.time() - start_time
             
             if result.returncode != 0:
-                logger.error("[性能测试] curl 命令执行失败: %s", result.stderr)
-                return {
-                    "success": False,
-                    "error": f"curl failed: {result.stderr}",
-                    "duration": duration
-                }
+                error_output = result.stderr or result.stdout
+                # 检查是否是连接错误
+                if "Connection refused" in error_output or "Failed to connect" in error_output:
+                    friendly_msg = (
+                        f"无法连接到 Data Agent 服务 ({url})。"
+                        f"请确保 data_agent 服务已启动。"
+                        f"启动命令: python data/data_agent.py"
+                    )
+                    logger.error("[性能测试] ❌ 连接错误: %s", friendly_msg)
+                    logger.error("[性能测试] 原始错误: %s", error_output)
+                    return {
+                        "success": False,
+                        "error": friendly_msg,
+                        "original_error": error_output,
+                        "duration": duration
+                    }
+                else:
+                    logger.error("[性能测试] curl 命令执行失败: %s", error_output)
+                    return {
+                        "success": False,
+                        "error": f"curl failed: {error_output}",
+                        "duration": duration
+                    }
             
             # 解析 curl 输出
             # curl -w 的输出格式：响应体\nHTTP状态码\n总时间
@@ -194,6 +245,27 @@ class DataAgentBatchPerformanceTest:
             return {
                 "success": False,
                 "error": "Request timeout",
+                "duration": duration
+            }
+        except requests.exceptions.ConnectionError as e:
+            duration = time.time() - start_time
+            error_msg = str(e)
+            # 提供更友好的错误消息
+            if "Connection refused" in error_msg or "Failed to establish" in error_msg:
+                friendly_msg = (
+                    f"无法连接到 Data Agent 服务 ({self.base_url})。"
+                    f"请确保 data_agent 服务已启动。"
+                    f"启动命令: python data/data_agent.py"
+                )
+                logger.error("[性能测试] ❌ 连接错误: %s", friendly_msg)
+                logger.error("[性能测试] 原始错误: %s", error_msg)
+            else:
+                friendly_msg = f"连接错误: {error_msg}"
+                logger.error("[性能测试] ❌ %s", friendly_msg)
+            return {
+                "success": False,
+                "error": friendly_msg,
+                "original_error": error_msg,
                 "duration": duration
             }
         except Exception as e:
@@ -449,6 +521,17 @@ class DataAgentBatchPerformanceTest:
         Returns:
             完整的测试结果
         """
+        # 在运行测试前再次检查服务可用性
+        if not self.check_service_available():
+            error_msg = (
+                f"Data Agent 服务在 {self.agent_host}:{self.agent_port} 不可用。"
+                "请先启动 data_agent 服务后再运行测试。"
+            )
+            logger.error("[性能测试] ❌ %s", error_msg)
+            logger.error("[性能测试] 💡 启动命令: python data/data_agent.py")
+            logger.error("[性能测试] 💡 或使用 Docker: docker-compose up data-agent")
+            raise ConnectionError(error_msg)
+        
         if test_symbols is None:
             # 默认测试15个symbol
             test_symbols = [

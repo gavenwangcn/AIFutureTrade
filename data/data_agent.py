@@ -212,7 +212,607 @@ class DataAgentKlineManager:
                 )
     
     # ============================================================================
-    # 流管理方法
+    # 流管理方法 - 分步方法（每个步骤都可以单独测试）
+    # ============================================================================
+    
+    async def step1_init_client(self) -> Dict[str, Any]:
+        """步骤1: 初始化客户端。
+        
+        Returns:
+            包含执行结果的字典:
+            {
+                "success": bool,
+                "duration": float,
+                "client_type": str,
+                "error": Optional[str]
+            }
+        """
+        step_start_time = datetime.now(timezone.utc)
+        try:
+            logger.info("[DataAgentKline] 🔧 [步骤1] 初始化客户端...")
+            
+            if self._client is None:
+                stream_url = os.getenv(
+                    "STREAM_URL",
+                    DERIVATIVES_TRADING_USDS_FUTURES_WS_STREAMS_PROD_URL,
+                )
+                logger.info("[DataAgentKline] 🔧 [步骤1] 使用流URL: %s", stream_url)
+                
+                configuration_ws_streams = ConfigurationWebSocketStreams(
+                    stream_url=stream_url
+                )
+                logger.info(
+                    "[DataAgentKline] 🔧 [步骤1] 创建配置对象完成: %s",
+                    type(configuration_ws_streams).__name__
+                )
+                
+                self._client = DerivativesTradingUsdsFutures(
+                    config_ws_streams=configuration_ws_streams
+                )
+                logger.info(
+                    "[DataAgentKline] ✅ [步骤1] 客户端初始化完成: %s",
+                    type(self._client).__name__
+                )
+            else:
+                logger.debug(
+                    "[DataAgentKline] ⏭️  [步骤1] 客户端已存在，跳过初始化: %s",
+                    type(self._client).__name__
+                )
+            
+            duration = (datetime.now(timezone.utc) - step_start_time).total_seconds()
+            return {
+                "success": True,
+                "duration": duration,
+                "client_type": type(self._client).__name__ if self._client else None,
+                "error": None
+            }
+        except Exception as e:
+            duration = (datetime.now(timezone.utc) - step_start_time).total_seconds()
+            logger.error(
+                "[DataAgentKline] ❌ [步骤1] 客户端初始化失败 (耗时: %.3fs): %s",
+                duration, e, exc_info=True
+            )
+            return {
+                "success": False,
+                "duration": duration,
+                "client_type": None,
+                "error": str(e)
+            }
+    
+    async def step2_rate_limit_check(self) -> Dict[str, Any]:
+        """步骤2: 检查订阅频率限制。
+        
+        Returns:
+            包含执行结果的字典:
+            {
+                "success": bool,
+                "duration": float,
+                "waited": bool,
+                "wait_time": Optional[float],
+                "error": Optional[str]
+            }
+        """
+        step_start_time = datetime.now(timezone.utc)
+        try:
+            logger.info("[DataAgentKline] ⏱️  [步骤2] 检查订阅频率限制...")
+            
+            rate_limit_start_time = datetime.now(timezone.utc)
+            current_time = datetime.now(timezone.utc)
+            time_since_last_subscription = current_time - self._last_subscription_time
+            
+            logger.debug(
+                "[DataAgentKline] ⏱️  [步骤2] 检查订阅频率: 上次订阅时间=%s, 距今=%.3fs, 当前计数=%s/%s",
+                self._last_subscription_time.isoformat(),
+                time_since_last_subscription.total_seconds(),
+                self._subscriptions_in_last_second,
+                self._max_subscriptions_per_second
+            )
+            
+            waited = False
+            wait_time = None
+            
+            # 如果已经过了1秒，重置计数器
+            if time_since_last_subscription > timedelta(seconds=1):
+                self._last_subscription_time = current_time
+                self._subscriptions_in_last_second = 1
+                logger.debug("[DataAgentKline] ✅ [步骤2] 频率检查通过，重置计数器")
+            else:
+                # 如果在1秒内订阅次数已达上限，等待剩余时间
+                self._subscriptions_in_last_second += 1
+                if self._subscriptions_in_last_second > self._max_subscriptions_per_second:
+                    wait_time = timedelta(seconds=1) - time_since_last_subscription
+                    wait_seconds = wait_time.total_seconds()
+                    logger.info(
+                        "[DataAgentKline] ⏳ [步骤2] 达到频率限制 (%s/%s)，等待 %.3fs...",
+                        self._subscriptions_in_last_second,
+                        self._max_subscriptions_per_second,
+                        wait_seconds
+                    )
+                    await asyncio.sleep(wait_seconds)
+                    waited = True
+                    # 重置计数器
+                    self._last_subscription_time = datetime.now(timezone.utc)
+                    self._subscriptions_in_last_second = 1
+                    logger.info("[DataAgentKline] ✅ [步骤2] 等待完成，重置计数器")
+                else:
+                    logger.debug(
+                        "[DataAgentKline] ✅ [步骤2] 频率检查通过，当前计数: %s/%s",
+                        self._subscriptions_in_last_second,
+                        self._max_subscriptions_per_second
+                    )
+            
+            duration = (datetime.now(timezone.utc) - step_start_time).total_seconds()
+            return {
+                "success": True,
+                "duration": duration,
+                "waited": waited,
+                "wait_time": wait_time.total_seconds() if wait_time else None,
+                "error": None
+            }
+        except Exception as e:
+            duration = (datetime.now(timezone.utc) - step_start_time).total_seconds()
+            logger.error(
+                "[DataAgentKline] ❌ [步骤2] 频率检查失败 (耗时: %.3fs): %s",
+                duration, e, exc_info=True
+            )
+            return {
+                "success": False,
+                "duration": duration,
+                "waited": False,
+                "wait_time": None,
+                "error": str(e)
+            }
+    
+    async def step3_create_connection(self) -> Dict[str, Any]:
+        """步骤3: 创建WebSocket连接。
+        
+        Returns:
+            包含执行结果的字典:
+            {
+                "success": bool,
+                "duration": float,
+                "connection": Optional[Any],
+                "connection_type": Optional[str],
+                "connection_id": Optional[int],
+                "error": Optional[str]
+            }
+        """
+        step_start_time = datetime.now(timezone.utc)
+        connection = None
+        try:
+            logger.info("[DataAgentKline] 🔌 [步骤3] 创建WebSocket连接...")
+            
+            if self._client is None:
+                raise RuntimeError("客户端未初始化，请先调用 step1_init_client")
+            
+            logger.debug(
+                "[DataAgentKline] 🔌 [步骤3] SDK调用前状态: client=%s, websocket_streams=%s",
+                type(self._client).__name__,
+                type(self._client.websocket_streams).__name__ if hasattr(self._client, 'websocket_streams') else None
+            )
+            
+            sdk_call_start = datetime.now(timezone.utc)
+            logger.debug(
+                "[DataAgentKline] 🔌 [步骤3] 开始调用SDK: self._client.websocket_streams.create_connection()"
+            )
+            
+            # 为 create_connection 添加超时保护（最多等待15秒）
+            connection = await asyncio.wait_for(
+                self._client.websocket_streams.create_connection(),
+                timeout=15.0
+            )
+            
+            sdk_call_duration = (datetime.now(timezone.utc) - sdk_call_start).total_seconds()
+            duration = (datetime.now(timezone.utc) - step_start_time).total_seconds()
+            
+            logger.info(
+                "[DataAgentKline] ✅ [步骤3] WebSocket连接创建成功 (总耗时: %.3fs, SDK调用耗时: %.3fs, 连接对象: %s, 连接ID: %s)",
+                duration, sdk_call_duration,
+                type(connection).__name__,
+                id(connection) if connection else None
+            )
+            
+            return {
+                "success": True,
+                "duration": duration,
+                "connection": connection,
+                "connection_type": type(connection).__name__ if connection else None,
+                "connection_id": id(connection) if connection else None,
+                "error": None
+            }
+        except asyncio.TimeoutError as e:
+            duration = (datetime.now(timezone.utc) - step_start_time).total_seconds()
+            logger.error(
+                "[DataAgentKline] ❌ [步骤3] SDK调用超时 (耗时: %.3fs, 超时设置: 15s): %s",
+                duration, e
+            )
+            return {
+                "success": False,
+                "duration": duration,
+                "connection": None,
+                "connection_type": None,
+                "connection_id": None,
+                "error": f"Timeout: {str(e)}"
+            }
+        except Exception as e:
+            duration = (datetime.now(timezone.utc) - step_start_time).total_seconds()
+            logger.error(
+                "[DataAgentKline] ❌ [步骤3] SDK调用异常 (耗时: %.3fs): %s",
+                duration, e, exc_info=True
+            )
+            return {
+                "success": False,
+                "duration": duration,
+                "connection": None,
+                "connection_type": None,
+                "connection_id": None,
+                "error": str(e)
+            }
+    
+    async def step4_register_connection_error_handler(
+        self, connection: Any, symbol: str, interval: str
+    ) -> Dict[str, Any]:
+        """步骤4: 注册连接错误处理器。
+        
+        Args:
+            connection: WebSocket连接对象
+            symbol: 交易对符号
+            interval: 时间间隔
+        
+        Returns:
+            包含执行结果的字典:
+            {
+                "success": bool,
+                "duration": float,
+                "handler_registered": bool,
+                "error": Optional[str]
+            }
+        """
+        step_start_time = datetime.now(timezone.utc)
+        symbol_upper = symbol.upper()
+        try:
+            logger.info(
+                "[DataAgentKline] 🛡️  [步骤4] 注册连接错误处理器 %s %s...",
+                symbol_upper, interval
+            )
+            
+            def connection_error_handler(error: Any) -> None:
+                logger.error(
+                    "[DataAgentKline] ❌ [连接错误] %s %s 连接错误: %s",
+                    symbol_upper, interval, error
+                )
+                asyncio.create_task(self._remove_broken_connection(symbol_upper, interval))
+            
+            handler_registered = False
+            if hasattr(connection, 'on'):
+                try:
+                    connection.on("error", connection_error_handler)
+                    handler_registered = True
+                    logger.info(
+                        "[DataAgentKline] ✅ [步骤4] 连接错误处理器注册成功 %s %s",
+                        symbol_upper, interval
+                    )
+                except (AttributeError, TypeError, ValueError) as e:
+                    logger.debug(
+                        "[DataAgentKline] ⚠️  [步骤4] 连接不支持'error'事件或已注册 %s %s: %s",
+                        symbol_upper, interval, e
+                    )
+                except Exception as e:
+                    logger.warning(
+                        "[DataAgentKline] ⚠️  [步骤4] 注册连接错误处理器失败（非关键）%s %s: %s",
+                        symbol_upper, interval, e
+                    )
+            else:
+                logger.debug(
+                    "[DataAgentKline] ⚠️  [步骤4] 连接对象不支持'on'方法 %s %s",
+                    symbol_upper, interval
+                )
+            
+            duration = (datetime.now(timezone.utc) - step_start_time).total_seconds()
+            return {
+                "success": True,
+                "duration": duration,
+                "handler_registered": handler_registered,
+                "error": None
+            }
+        except Exception as e:
+            duration = (datetime.now(timezone.utc) - step_start_time).total_seconds()
+            logger.error(
+                "[DataAgentKline] ❌ [步骤4] 注册连接错误处理器失败 %s %s (耗时: %.3fs): %s",
+                symbol_upper, interval, duration, e, exc_info=True
+            )
+            return {
+                "success": False,
+                "duration": duration,
+                "handler_registered": False,
+                "error": str(e)
+            }
+    
+    async def step5_subscribe_kline_stream(
+        self, connection: Any, symbol: str, interval: str
+    ) -> Dict[str, Any]:
+        """步骤5: 订阅K线流。
+        
+        Args:
+            connection: WebSocket连接对象
+            symbol: 交易对符号
+            interval: 时间间隔
+        
+        Returns:
+            包含执行结果的字典:
+            {
+                "success": bool,
+                "duration": float,
+                "stream": Optional[Any],
+                "stream_type": Optional[str],
+                "stream_id": Optional[int],
+                "error": Optional[str]
+            }
+        """
+        step_start_time = datetime.now(timezone.utc)
+        symbol_upper = symbol.upper()
+        stream = None
+        try:
+            logger.info(
+                "[DataAgentKline] 📡 [步骤5] 订阅K线流 %s %s (symbol=%s, interval=%s)...",
+                symbol_upper, interval, symbol.lower(), interval
+            )
+            
+            logger.debug(
+                "[DataAgentKline] 📡 [步骤5] SDK调用前状态: connection=%s, connection_id=%s",
+                type(connection).__name__ if connection else None,
+                id(connection) if connection else None
+            )
+            
+            subscribe_sdk_start = datetime.now(timezone.utc)
+            logger.debug(
+                "[DataAgentKline] 📡 [步骤5] 开始调用SDK: connection.kline_candlestick_streams(symbol='%s', interval='%s')",
+                symbol.lower(), interval
+            )
+            
+            # 为 kline_candlestick_streams 添加超时保护（最多等待15秒）
+            stream = await asyncio.wait_for(
+                connection.kline_candlestick_streams(
+                    symbol=symbol.lower(),
+                    interval=interval
+                ),
+                timeout=15.0
+            )
+            
+            subscribe_sdk_duration = (datetime.now(timezone.utc) - subscribe_sdk_start).total_seconds()
+            duration = (datetime.now(timezone.utc) - step_start_time).total_seconds()
+            
+            logger.info(
+                "[DataAgentKline] ✅ [步骤5] K线流订阅成功 %s %s (总耗时: %.3fs, SDK调用耗时: %.3fs, 流对象: %s, 流ID: %s)",
+                symbol_upper, interval, duration, subscribe_sdk_duration,
+                type(stream).__name__,
+                id(stream) if stream else None
+            )
+            
+            return {
+                "success": True,
+                "duration": duration,
+                "stream": stream,
+                "stream_type": type(stream).__name__ if stream else None,
+                "stream_id": id(stream) if stream else None,
+                "error": None
+            }
+        except asyncio.TimeoutError as e:
+            duration = (datetime.now(timezone.utc) - step_start_time).total_seconds()
+            logger.error(
+                "[DataAgentKline] ❌ [步骤5] SDK调用超时 %s %s (耗时: %.3fs, 超时设置: 15s): %s",
+                symbol_upper, interval, duration, e
+            )
+            return {
+                "success": False,
+                "duration": duration,
+                "stream": None,
+                "stream_type": None,
+                "stream_id": None,
+                "error": f"Timeout: {str(e)}"
+            }
+        except Exception as e:
+            duration = (datetime.now(timezone.utc) - step_start_time).total_seconds()
+            logger.error(
+                "[DataAgentKline] ❌ [步骤5] SDK调用异常 %s %s (耗时: %.3fs): %s",
+                symbol_upper, interval, duration, e, exc_info=True
+            )
+            return {
+                "success": False,
+                "duration": duration,
+                "stream": None,
+                "stream_type": None,
+                "stream_id": None,
+                "error": str(e)
+            }
+    
+    async def step6_register_message_handler(
+        self, stream: Any, symbol: str, interval: str
+    ) -> Dict[str, Any]:
+        """步骤6: 注册消息和错误处理器。
+        
+        Args:
+            stream: K线流对象
+            symbol: 交易对符号
+            interval: 时间间隔
+        
+        Returns:
+            包含执行结果的字典:
+            {
+                "success": bool,
+                "duration": float,
+                "message_handler_registered": bool,
+                "error_handler_registered": bool,
+                "error": Optional[str]
+            }
+        """
+        step_start_time = datetime.now(timezone.utc)
+        symbol_upper = symbol.upper()
+        try:
+            logger.info(
+                "[DataAgentKline] 📨 [步骤6] 注册消息和错误处理器 %s %s...",
+                symbol_upper, interval
+            )
+            
+            def handler(data: Any) -> None:
+                """K线消息处理器，记录消息接收时间，便于排查性能问题。"""
+                message_received_time = datetime.now(timezone.utc)
+                logger.debug(
+                    "[DataAgentKline] 📨 [消息处理] 收到K线消息 %s %s (消息时间: %s)",
+                    symbol_upper, interval, message_received_time.isoformat()
+                )
+                try:
+                    task = asyncio.create_task(self._handle_kline_message(symbol_upper, interval, data))
+                    logger.debug(
+                        "[DataAgentKline] 📨 [消息处理] 已创建异步任务处理消息 %s %s (任务ID: %s)",
+                        symbol_upper, interval, id(task)
+                    )
+                except Exception as e:
+                    logger.error(
+                        "[DataAgentKline] ❌ [消息处理] 创建异步任务失败 %s %s: %s",
+                        symbol_upper, interval, e, exc_info=True
+                    )
+            
+            def stream_error_handler(error: Any) -> None:
+                """流错误处理器。"""
+                logger.error(
+                    "[DataAgentKline] ❌ [流错误] %s %s 流错误: %s",
+                    symbol_upper, interval, error
+                )
+                asyncio.create_task(self._remove_broken_connection(symbol_upper, interval))
+            
+            message_handler_registered = False
+            stream_error_handler_registered = False
+            
+            try:
+                if hasattr(stream, 'on'):
+                    stream.on("message", handler)
+                    message_handler_registered = True
+                    logger.info(
+                        "[DataAgentKline] ✅ [步骤6] 消息处理器注册成功 %s %s",
+                        symbol_upper, interval
+                    )
+                else:
+                    logger.warning(
+                        "[DataAgentKline] ⚠️  [步骤6] 流对象不支持'on'方法 %s %s",
+                        symbol_upper, interval
+                    )
+            except Exception as e:
+                logger.error(
+                    "[DataAgentKline] ❌ [步骤6] 注册消息处理器失败 %s %s: %s",
+                    symbol_upper, interval, e, exc_info=True
+                )
+            
+            # 尝试注册流级别的错误处理器（如果SDK支持）
+            try:
+                if hasattr(stream, 'on'):
+                    stream.on("error", stream_error_handler)
+                    stream_error_handler_registered = True
+                    logger.info(
+                        "[DataAgentKline] ✅ [步骤6] 流错误处理器注册成功 %s %s",
+                        symbol_upper, interval
+                    )
+            except (AttributeError, TypeError, ValueError) as e:
+                logger.debug(
+                    "[DataAgentKline] ⚠️  [步骤6] 流不支持'error'事件或已注册 %s %s: %s",
+                    symbol_upper, interval, e
+                )
+            except Exception as e:
+                logger.warning(
+                    "[DataAgentKline] ⚠️  [步骤6] 注册流错误处理器失败（非关键）%s %s: %s",
+                    symbol_upper, interval, e
+                )
+            
+            duration = (datetime.now(timezone.utc) - step_start_time).total_seconds()
+            return {
+                "success": True,
+                "duration": duration,
+                "message_handler_registered": message_handler_registered,
+                "error_handler_registered": stream_error_handler_registered,
+                "error": None
+            }
+        except Exception as e:
+            duration = (datetime.now(timezone.utc) - step_start_time).total_seconds()
+            logger.error(
+                "[DataAgentKline] ❌ [步骤6] 注册处理器失败 %s %s (耗时: %.3fs): %s",
+                symbol_upper, interval, duration, e, exc_info=True
+            )
+            return {
+                "success": False,
+                "duration": duration,
+                "message_handler_registered": False,
+                "error_handler_registered": False,
+                "error": str(e)
+            }
+    
+    async def step7_save_connection(
+        self, symbol: str, interval: str, connection: Any, stream: Any
+    ) -> Dict[str, Any]:
+        """步骤7: 保存连接对象到map。
+        
+        Args:
+            symbol: 交易对符号
+            interval: 时间间隔
+            connection: WebSocket连接对象
+            stream: K线流对象
+        
+        Returns:
+            包含执行结果的字典:
+            {
+                "success": bool,
+                "duration": float,
+                "connection_count": int,
+                "error": Optional[str]
+            }
+        """
+        step_start_time = datetime.now(timezone.utc)
+        symbol_upper = symbol.upper()
+        key = (symbol_upper, interval)
+        try:
+            logger.info(
+                "[DataAgentKline] 💾 [步骤7] 保存连接对象到map %s %s...",
+                symbol_upper, interval
+            )
+            
+            async with self._lock:
+                conn = KlineStreamConnection(
+                    symbol=symbol_upper,
+                    interval=interval,
+                    connection=connection,
+                    stream=stream,
+                    created_at=datetime.now(timezone.utc)
+                )
+                
+                self._active_connections[key] = conn
+                connection_count = len(self._active_connections)
+            
+            duration = (datetime.now(timezone.utc) - step_start_time).total_seconds()
+            logger.info(
+                "[DataAgentKline] ✅ [步骤7] 连接对象已保存 %s %s (耗时: %.3fs, 当前连接数: %s)",
+                symbol_upper, interval, duration, connection_count
+            )
+            
+            return {
+                "success": True,
+                "duration": duration,
+                "connection_count": connection_count,
+                "error": None
+            }
+        except Exception as e:
+            duration = (datetime.now(timezone.utc) - step_start_time).total_seconds()
+            logger.error(
+                "[DataAgentKline] ❌ [步骤7] 保存连接对象失败 %s %s (耗时: %.3fs): %s",
+                symbol_upper, interval, duration, e, exc_info=True
+            )
+            return {
+                "success": False,
+                "duration": duration,
+                "connection_count": len(self._active_connections),
+                "error": str(e)
+            }
+    
+    # ============================================================================
+    # 流管理方法 - 完整流程
     # ============================================================================
     
     async def add_stream(self, symbol: str, interval: str) -> bool:
@@ -343,322 +943,120 @@ class DataAgentKlineManager:
         )
         
         try:
-            # 确保客户端已初始化（在事件循环中）
-            init_client_start = datetime.now(timezone.utc)
-            logger.info(
-                "[DataAgentKline] 🔧 [添加流] 步骤1/6: 初始化客户端 %s %s...",
-                symbol_upper, interval
-            )
-            await self._init_client()
-            init_client_duration = (datetime.now(timezone.utc) - init_client_start).total_seconds()
-            logger.info(
-                "[DataAgentKline] ✅ [添加流] 步骤1/6: 客户端初始化完成 %s %s (耗时: %.3fs)",
-                symbol_upper, interval, init_client_duration
-            )
-            
-            # 控制订阅频率，确保每秒不超过10个订阅消息
-            rate_limit_start = datetime.now(timezone.utc)
-            logger.info(
-                "[DataAgentKline] ⏱️  [添加流] 步骤2/6: 检查订阅频率限制 %s %s...",
-                symbol_upper, interval
-            )
-            await self._rate_limit_subscription()
-            rate_limit_duration = (datetime.now(timezone.utc) - rate_limit_start).total_seconds()
-            logger.info(
-                "[DataAgentKline] ✅ [添加流] 步骤2/6: 订阅频率检查通过 %s %s (耗时: %.3fs)",
-                symbol_upper, interval, rate_limit_duration
-            )
-            
-            # 根据SDK最佳实践，为每个symbol-interval对创建独立的WebSocket连接
-            # 这是SDK推荐的方式，每个连接可以处理多个流，但为了隔离和管理方便，每个symbol-interval使用独立连接
-            create_conn_start = datetime.now(timezone.utc)
-            logger.info(
-                "[DataAgentKline] 🔌 [添加流] 步骤3/6: 创建WebSocket连接 %s %s...",
-                symbol_upper, interval
-            )
-            logger.debug(
-                "[DataAgentKline] 🔌 [WebSocket创建] SDK调用前状态: client=%s, websocket_streams=%s",
-                type(self._client).__name__ if self._client else None,
-                type(self._client.websocket_streams).__name__ if self._client and hasattr(self._client, 'websocket_streams') else None
-            )
-            
-            # 记录SDK调用前的详细信息
-            sdk_call_start = datetime.now(timezone.utc)
-            logger.debug(
-                "[DataAgentKline] 🔌 [WebSocket创建] 开始调用SDK: self._client.websocket_streams.create_connection()"
-            )
-            
-            try:
-                connection = await self._client.websocket_streams.create_connection()
-                sdk_call_duration = (datetime.now(timezone.utc) - sdk_call_start).total_seconds()
-                logger.info(
-                    "[DataAgentKline] 🔌 [WebSocket创建] SDK调用完成 %s %s (SDK调用耗时: %.3fs, 连接对象: %s, 连接ID: %s)",
-                    symbol_upper, interval, sdk_call_duration, 
-                    type(connection).__name__,
-                    id(connection) if connection else None
-                )
-                logger.debug(
-                    "[DataAgentKline] 🔌 [WebSocket创建] 连接对象详细信息: %s, 属性: %s",
-                    connection,
-                    [attr for attr in dir(connection) if not attr.startswith('_')][:10] if connection else None
-                )
-            except asyncio.TimeoutError as e:
-                sdk_call_duration = (datetime.now(timezone.utc) - sdk_call_start).total_seconds()
+            # 步骤1: 初始化客户端
+            step1_result = await self.step1_init_client()
+            if not step1_result["success"]:
                 logger.error(
-                    "[DataAgentKline] ❌ [WebSocket创建] SDK调用超时 %s %s (耗时: %.3fs): %s",
-                    symbol_upper, interval, sdk_call_duration, e
+                    "[DataAgentKline] ❌ [添加流] 步骤1失败 %s %s: %s",
+                    symbol_upper, interval, step1_result.get("error")
                 )
-                raise
-            except Exception as e:
-                sdk_call_duration = (datetime.now(timezone.utc) - sdk_call_start).total_seconds()
+                return False
+            
+            # 步骤2: 检查订阅频率限制
+            step2_result = await self.step2_rate_limit_check()
+            if not step2_result["success"]:
                 logger.error(
-                    "[DataAgentKline] ❌ [WebSocket创建] SDK调用异常 %s %s (耗时: %.3fs): %s",
-                    symbol_upper, interval, sdk_call_duration, e, exc_info=True
+                    "[DataAgentKline] ❌ [添加流] 步骤2失败 %s %s: %s",
+                    symbol_upper, interval, step2_result.get("error")
                 )
-                raise
+                return False
             
-            create_conn_duration = (datetime.now(timezone.utc) - create_conn_start).total_seconds()
-            logger.info(
-                "[DataAgentKline] ✅ [添加流] 步骤3/6: WebSocket连接创建成功 %s %s (总耗时: %.3fs, SDK调用耗时: %.3fs)",
-                symbol_upper, interval, create_conn_duration, sdk_call_duration
-            )
-            
-            # 设置连接级别的错误处理器（处理连接错误）
-            register_error_handler_start = datetime.now(timezone.utc)
-            logger.info(
-                "[DataAgentKline] 🛡️  [添加流] 步骤4/6: 注册连接错误处理器 %s %s...",
-                symbol_upper, interval
-            )
-            
-            def connection_error_handler(error: Any) -> None:
+            # 步骤3: 创建WebSocket连接
+            step3_result = await self.step3_create_connection()
+            if not step3_result["success"]:
                 logger.error(
-                    "[DataAgentKline] ❌ [连接错误] %s %s 连接错误: %s",
-                    symbol_upper, interval, error
+                    "[DataAgentKline] ❌ [添加流] 步骤3失败 %s %s: %s",
+                    symbol_upper, interval, step3_result.get("error")
                 )
-                asyncio.create_task(self._remove_broken_connection(symbol_upper, interval))
+                return False
             
-            # 如果连接对象支持错误事件，注册错误处理器
-            # 注意：某些SDK版本可能不支持"error"事件，使用try-except避免崩溃
-            error_handler_registered = False
-            if hasattr(connection, 'on'):
-                try:
-                    connection.on("error", connection_error_handler)
-                    error_handler_registered = True
-                    logger.info(
-                        "[DataAgentKline] ✅ [添加流] 连接错误处理器注册成功 %s %s",
-                        symbol_upper, interval
-                    )
-                except (AttributeError, TypeError, ValueError) as e:
-                    logger.debug(
-                        "[DataAgentKline] ⚠️  [添加流] 连接不支持'error'事件或已注册 %s %s: %s",
-                        symbol_upper, interval, e
-                    )
-                except Exception as e:
-                    # 捕获所有其他异常，避免因为事件注册失败导致整个流创建失败
-                    logger.warning(
-                        "[DataAgentKline] ⚠️  [添加流] 注册连接错误处理器失败（非关键）%s %s: %s",
-                        symbol_upper, interval, e
-                    )
-            else:
-                logger.debug(
-                    "[DataAgentKline] ⚠️  [添加流] 连接对象不支持'on'方法 %s %s",
+            connection = step3_result["connection"]
+            if connection is None:
+                logger.error(
+                    "[DataAgentKline] ❌ [添加流] 步骤3返回的连接对象为None %s %s",
                     symbol_upper, interval
                 )
+                return False
             
-            register_error_handler_duration = (datetime.now(timezone.utc) - register_error_handler_start).total_seconds()
-            logger.info(
-                "[DataAgentKline] ✅ [添加流] 步骤4/6: 错误处理器注册完成 %s %s (耗时: %.3fs, 已注册: %s)",
-                symbol_upper, interval, register_error_handler_duration, error_handler_registered
+            # 步骤4: 注册连接错误处理器
+            step4_result = await self.step4_register_connection_error_handler(
+                connection, symbol_upper, interval
             )
-            
-            # 订阅K线流
-            subscribe_start = datetime.now(timezone.utc)
-            logger.info(
-                "[DataAgentKline] 📡 [添加流] 步骤5/6: 订阅K线流 %s %s (symbol=%s, interval=%s)...",
-                symbol_upper, interval, symbol.lower(), interval
-            )
-            logger.debug(
-                "[DataAgentKline] 📡 [订阅流] SDK调用前状态: connection=%s, connection_id=%s",
-                type(connection).__name__ if connection else None,
-                id(connection) if connection else None
-            )
-            
-            # 记录SDK订阅调用前的详细信息
-            subscribe_sdk_start = datetime.now(timezone.utc)
-            logger.debug(
-                "[DataAgentKline] 📡 [订阅流] 开始调用SDK: connection.kline_candlestick_streams(symbol='%s', interval='%s')",
-                symbol.lower(), interval
-            )
-            
-            try:
-                stream = await connection.kline_candlestick_streams(
-                    symbol=symbol.lower(),
-                    interval=interval
-                )
-                subscribe_sdk_duration = (datetime.now(timezone.utc) - subscribe_sdk_start).total_seconds()
-                logger.info(
-                    "[DataAgentKline] 📡 [订阅流] SDK调用完成 %s %s (SDK调用耗时: %.3fs, 流对象: %s, 流ID: %s)",
-                    symbol_upper, interval, subscribe_sdk_duration,
-                    type(stream).__name__,
-                    id(stream) if stream else None
-                )
-                logger.debug(
-                    "[DataAgentKline] 📡 [订阅流] 流对象详细信息: %s, 属性: %s",
-                    stream,
-                    [attr for attr in dir(stream) if not attr.startswith('_')][:10] if stream else None
-                )
-            except asyncio.TimeoutError as e:
-                subscribe_sdk_duration = (datetime.now(timezone.utc) - subscribe_sdk_start).total_seconds()
-                logger.error(
-                    "[DataAgentKline] ❌ [订阅流] SDK调用超时 %s %s (耗时: %.3fs): %s",
-                    symbol_upper, interval, subscribe_sdk_duration, e
-                )
-                raise
-            except Exception as e:
-                subscribe_sdk_duration = (datetime.now(timezone.utc) - subscribe_sdk_start).total_seconds()
-                logger.error(
-                    "[DataAgentKline] ❌ [订阅流] SDK调用异常 %s %s (耗时: %.3fs): %s",
-                    symbol_upper, interval, subscribe_sdk_duration, e, exc_info=True
-                )
-                raise
-            
-            subscribe_duration = (datetime.now(timezone.utc) - subscribe_start).total_seconds()
-            logger.info(
-                "[DataAgentKline] ✅ [添加流] 步骤5/6: K线流订阅成功 %s %s (总耗时: %.3fs, SDK调用耗时: %.3fs)",
-                symbol_upper, interval, subscribe_duration, subscribe_sdk_duration
-            )
-            
-            # 设置消息处理器
-            register_handler_start = datetime.now(timezone.utc)
-            logger.info(
-                "[DataAgentKline] 📨 [添加流] 步骤6/6: 注册消息和错误处理器 %s %s...",
-                symbol_upper, interval
-            )
-            
-            def handler(data: Any) -> None:
-                """K线消息处理器，记录消息接收时间，便于排查性能问题。"""
-                message_received_time = datetime.now(timezone.utc)
-                logger.debug(
-                    "[DataAgentKline] 📨 [消息处理] 收到K线消息 %s %s (消息时间: %s)",
-                    symbol_upper, interval, message_received_time.isoformat()
-                )
-                try:
-                    task = asyncio.create_task(self._handle_kline_message(symbol_upper, interval, data))
-                    logger.debug(
-                        "[DataAgentKline] 📨 [消息处理] 已创建异步任务处理消息 %s %s (任务ID: %s)",
-                        symbol_upper, interval, id(task)
-                    )
-                except Exception as e:
-                    logger.error(
-                        "[DataAgentKline] ❌ [消息处理] 创建异步任务失败 %s %s: %s",
-                        symbol_upper, interval, e, exc_info=True
-                    )
-            
-            # 设置流级别的错误处理器，当流异常时从map中删除
-            def stream_error_handler(error: Any) -> None:
-                logger.error(
-                    "[DataAgentKline] ❌ [流错误] %s %s 流错误: %s",
-                    symbol_upper, interval, error
-                )
-                asyncio.create_task(self._remove_broken_connection(symbol_upper, interval))
-            
-            # 注册消息处理器
-            message_handler_registered = False
-            stream_error_handler_registered = False
-            
-            try:
-                if hasattr(stream, 'on'):
-                    stream.on("message", handler)
-                    message_handler_registered = True
-                    logger.info(
-                        "[DataAgentKline] ✅ [添加流] 消息处理器注册成功 %s %s",
-                        symbol_upper, interval
-                    )
-                else:
-                    logger.warning(
-                        "[DataAgentKline] ⚠️  [添加流] 流对象不支持'on'方法 %s %s",
-                        symbol_upper, interval
-                    )
-            except Exception as e:
-                logger.error(
-                    "[DataAgentKline] ❌ [添加流] 注册消息处理器失败 %s %s: %s",
-                    symbol_upper, interval, e, exc_info=True
-                )
-            
-            # 尝试注册流级别的错误处理器（如果SDK支持）
-            # 注意：某些SDK版本可能不支持"error"事件，使用try-except避免崩溃
-            try:
-                if hasattr(stream, 'on'):
-                    stream.on("error", stream_error_handler)
-                    stream_error_handler_registered = True
-                    logger.info(
-                        "[DataAgentKline] ✅ [添加流] 流错误处理器注册成功 %s %s",
-                        symbol_upper, interval
-                    )
-            except (AttributeError, TypeError, ValueError) as e:
-                logger.debug(
-                    "[DataAgentKline] ⚠️  [添加流] 流不支持'error'事件或已注册 %s %s: %s",
-                    symbol_upper, interval, e
-                )
-            except Exception as e:
-                # 捕获所有其他异常，避免因为事件注册失败导致整个流创建失败
+            if not step4_result["success"]:
                 logger.warning(
-                    "[DataAgentKline] ⚠️  [添加流] 注册流错误处理器失败（非关键）%s %s: %s",
-                    symbol_upper, interval, e
+                    "[DataAgentKline] ⚠️  [添加流] 步骤4失败（非关键）%s %s: %s",
+                    symbol_upper, interval, step4_result.get("error")
                 )
+                # 步骤4失败不影响后续流程，继续执行
             
-            register_handler_duration = (datetime.now(timezone.utc) - register_handler_start).total_seconds()
-            logger.info(
-                "[DataAgentKline] ✅ [添加流] 步骤6/6: 处理器注册完成 %s %s (耗时: %.3fs, 消息处理器: %s, 错误处理器: %s)",
-                symbol_upper, interval, register_handler_duration, message_handler_registered, stream_error_handler_registered
+            # 步骤5: 订阅K线流
+            step5_result = await self.step5_subscribe_kline_stream(
+                connection, symbol_upper, interval
             )
-            
-            # 创建连接对象并保存到map
-            save_conn_start = datetime.now(timezone.utc)
-            logger.info(
-                "[DataAgentKline] 💾 [添加流] 保存连接对象到map %s %s...",
-                symbol_upper, interval
-            )
-            
-            # 需要再次获取锁来保存连接对象
-            save_lock_start = datetime.now(timezone.utc)
-            logger.debug(
-                "[DataAgentKline] 🔒 [添加流] 获取锁以保存连接对象 %s %s...",
-                symbol_upper, interval
-            )
-            async with self._lock:
-                save_lock_duration = (datetime.now(timezone.utc) - save_lock_start).total_seconds()
-                logger.debug(
-                    "[DataAgentKline] ✅ [添加流] 锁获取成功（保存）%s %s (耗时: %.3fs)",
-                    symbol_upper, interval, save_lock_duration
+            if not step5_result["success"]:
+                logger.error(
+                    "[DataAgentKline] ❌ [添加流] 步骤5失败 %s %s: %s",
+                    symbol_upper, interval, step5_result.get("error")
                 )
-                
-                conn = KlineStreamConnection(
-                    symbol=symbol_upper,
-                    interval=interval,
-                    connection=connection,
-                    stream=stream,
-                    created_at=datetime.now(timezone.utc)
-                )
-                
-                self._active_connections[key] = conn
-                save_conn_duration = (datetime.now(timezone.utc) - save_conn_start).total_seconds()
-                logger.info(
-                    "[DataAgentKline] ✅ [添加流] 连接对象已保存 %s %s (耗时: %.3fs, 当前连接数: %s)",
-                    symbol_upper, interval, save_conn_duration, len(self._active_connections)
-                )
+                # 清理连接
+                try:
+                    await connection.close_connection()
+                except Exception:
+                    pass
+                return False
             
-            logger.debug(
-                "[DataAgentKline] 🔓 [添加流] 锁已释放（保存后）%s %s",
-                symbol_upper, interval
+            stream = step5_result["stream"]
+            if stream is None:
+                logger.error(
+                    "[DataAgentKline] ❌ [添加流] 步骤5返回的流对象为None %s %s",
+                    symbol_upper, interval
+                )
+                # 清理连接
+                try:
+                    await connection.close_connection()
+                except Exception:
+                    pass
+                return False
+            
+            # 步骤6: 注册消息和错误处理器
+            step6_result = await self.step6_register_message_handler(
+                stream, symbol_upper, interval
             )
+            if not step6_result["success"]:
+                logger.error(
+                    "[DataAgentKline] ❌ [添加流] 步骤6失败 %s %s: %s",
+                    symbol_upper, interval, step6_result.get("error")
+                )
+                # 清理连接和流
+                try:
+                    await connection.close_connection()
+                except Exception:
+                    pass
+                return False
+            
+            # 步骤7: 保存连接对象
+            step7_result = await self.step7_save_connection(
+                symbol_upper, interval, connection, stream
+            )
+            if not step7_result["success"]:
+                logger.error(
+                    "[DataAgentKline] ❌ [添加流] 步骤7失败 %s %s: %s",
+                    symbol_upper, interval, step7_result.get("error")
+                )
+                # 清理连接和流
+                try:
+                    await connection.close_connection()
+                except Exception:
+                    pass
+                return False
             
             stream_duration = (datetime.now(timezone.utc) - stream_start_time).total_seconds()
             logger.info(
-                "[DataAgentKline] ✅ [添加流] %s %s 全部完成！(总耗时: %.3fs, 步骤耗时: 初始化=%.3fs, 频率限制=%.3fs, 创建连接=%.3fs, 订阅=%.3fs, 注册处理器=%.3fs, 保存=%.3fs)",
+                "[DataAgentKline] ✅ [添加流] %s %s 全部完成！(总耗时: %.3fs, 步骤耗时: 步骤1=%.3fs, 步骤2=%.3fs, 步骤3=%.3fs, 步骤4=%.3fs, 步骤5=%.3fs, 步骤6=%.3fs, 步骤7=%.3fs)",
                 symbol_upper, interval, stream_duration,
-                init_client_duration, rate_limit_duration, create_conn_duration,
-                subscribe_duration, register_error_handler_duration + register_handler_duration, save_conn_duration
+                step1_result["duration"], step2_result["duration"], step3_result["duration"],
+                step4_result["duration"], step5_result["duration"], step6_result["duration"],
+                step7_result["duration"]
             )
             return True
         except asyncio.CancelledError:
@@ -769,8 +1167,8 @@ class DataAgentKlineManager:
         symbol_upper = symbol.upper()
         
         logger.info(
-            "[DataAgentKline] 🔨 [构建K线监听] 开始为 symbol %s 构建所有interval的K线流",
-            symbol_upper
+            "[DataAgentKline] 🔨 [构建K线监听] 开始为 symbol %s 构建所有interval的K线流 (时间: %s)",
+            symbol_upper, method_start_time.isoformat()
         )
         
         success_count = 0
@@ -833,13 +1231,17 @@ class DataAgentKlineManager:
                 continue
             
             logger.info(
-                "[DataAgentKline] 🔨 [构建K线监听] 开始构建 %s %s (%s/%s)",
-                symbol_upper, interval, idx + 1, len(KLINE_INTERVALS)
+                "[DataAgentKline] 🔨 [构建K线监听] 开始构建 %s %s (%s/%s) (时间: %s)",
+                symbol_upper, interval, idx + 1, len(KLINE_INTERVALS), interval_start_time.isoformat()
             )
             
             try:
                 # add_stream内部会再次检查map，确保不会重复创建
-                success = await self.add_stream(symbol_upper, interval)
+                # 为每个 interval 的 add_stream 添加超时保护（最多等待25秒，留出一些余量）
+                success = await asyncio.wait_for(
+                    self.add_stream(symbol_upper, interval),
+                    timeout=25.0
+                )
                 interval_duration = (datetime.now(timezone.utc) - interval_start_time).total_seconds()
                 
                 if success:
@@ -858,7 +1260,7 @@ class DataAgentKlineManager:
                 interval_duration = (datetime.now(timezone.utc) - interval_start_time).total_seconds()
                 failed_count += 1
                 logger.error(
-                    "[DataAgentKline] ❌ [构建K线监听] %s %s 构建超时 (耗时: %.3fs): %s",
+                    "[DataAgentKline] ❌ [构建K线监听] %s %s 构建超时 (耗时: %.3fs, 超时设置: 25s): %s",
                     symbol_upper, interval, interval_duration, e
                 )
             except Exception as e:
