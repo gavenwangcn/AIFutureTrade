@@ -29,6 +29,40 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+def make_json_serializable(obj: Any) -> Any:
+    """将对象转换为可JSON序列化的格式。
+    
+    递归处理字典、列表等，将不可序列化的对象转换为字符串表示。
+    
+    Args:
+        obj: 要转换的对象
+    
+    Returns:
+        可JSON序列化的对象
+    """
+    if obj is None:
+        return None
+    elif isinstance(obj, (str, int, float, bool)):
+        return obj
+    elif isinstance(obj, dict):
+        return {k: make_json_serializable(v) for k, v in obj.items()}
+    elif isinstance(obj, (list, tuple)):
+        return [make_json_serializable(item) for item in obj]
+    elif isinstance(obj, set):
+        return list(make_json_serializable(item) for item in obj)
+    elif isinstance(obj, datetime):
+        return obj.isoformat()
+    else:
+        # 对于其他对象，尝试获取类型名和ID
+        try:
+            # 尝试获取对象的类型名
+            type_name = type(obj).__name__
+            obj_id = id(obj)
+            return f"<{type_name} object at {hex(obj_id)}>"
+        except Exception:
+            return str(obj)
+
+
 class DataAgentStepByStepTester:
     """Data Agent 分步测试类，每个步骤都可以单独测试。"""
     
@@ -586,12 +620,14 @@ async def main_step1():
     try:
         # 测试单个初始化
         result = await tester.test_step1_init_client()
-        print(json.dumps(result, indent=2, ensure_ascii=False))
+        serializable_result = make_json_serializable(result)
+        print(json.dumps(serializable_result, indent=2, ensure_ascii=False))
         
         # 测试多个symbol的初始化（应该只初始化一次）
         symbols = ["BTCUSDT", "ETHUSDT", "BNBUSDT"]
         result = await tester.test_step1_init_client(symbols=symbols)
-        print(json.dumps(result, indent=2, ensure_ascii=False))
+        serializable_result = make_json_serializable(result)
+        print(json.dumps(serializable_result, indent=2, ensure_ascii=False))
     finally:
         await tester.cleanup()
 
@@ -602,13 +638,15 @@ async def main_step2():
     try:
         # 测试单个频率检查
         result = await tester.test_step2_rate_limit_check()
-        print(json.dumps(result, indent=2, ensure_ascii=False))
+        serializable_result = make_json_serializable(result)
+        print(json.dumps(serializable_result, indent=2, ensure_ascii=False))
         
         # 测试多个symbol和interval的组合（测试频率限制）
         symbols = ["BTCUSDT", "ETHUSDT"]
         intervals = ["1m", "5m"]
         result = await tester.test_step2_rate_limit_check(symbols=symbols, intervals=intervals)
-        print(json.dumps(result, indent=2, ensure_ascii=False))
+        serializable_result = make_json_serializable(result)
+        print(json.dumps(serializable_result, indent=2, ensure_ascii=False))
     finally:
         await tester.cleanup()
 
@@ -619,13 +657,15 @@ async def main_step3():
     try:
         # 测试单个连接创建
         result = await tester.test_step3_create_connection()
-        print(json.dumps(result, indent=2, ensure_ascii=False))
+        serializable_result = make_json_serializable(result)
+        print(json.dumps(serializable_result, indent=2, ensure_ascii=False))
         
         # 测试多个连接创建
         symbols = ["BTCUSDT", "ETHUSDT"]
         intervals = ["1m", "5m"]
         result = await tester.test_step3_create_connection(symbols=symbols, intervals=intervals)
-        print(json.dumps(result, indent=2, ensure_ascii=False))
+        serializable_result = make_json_serializable(result)
+        print(json.dumps(serializable_result, indent=2, ensure_ascii=False))
     finally:
         await tester.cleanup()
 
@@ -636,13 +676,15 @@ async def main_step5():
     try:
         # 测试单个订阅
         result = await tester.test_step5_subscribe_kline_stream()
-        print(json.dumps(result, indent=2, ensure_ascii=False))
+        serializable_result = make_json_serializable(result)
+        print(json.dumps(serializable_result, indent=2, ensure_ascii=False))
         
         # 测试多个订阅
         symbols = ["BTCUSDT", "ETHUSDT"]
         intervals = ["1m", "5m"]
         result = await tester.test_step5_subscribe_kline_stream(symbols=symbols, intervals=intervals)
-        print(json.dumps(result, indent=2, ensure_ascii=False))
+        serializable_result = make_json_serializable(result)
+        print(json.dumps(serializable_result, indent=2, ensure_ascii=False))
     finally:
         await tester.cleanup()
 
@@ -653,7 +695,8 @@ async def main_full_flow():
     try:
         # 测试单个symbol的完整流程
         result = await tester.test_full_flow_for_one_symbol("BTCUSDT")
-        print(json.dumps(result, indent=2, ensure_ascii=False))
+        serializable_result = make_json_serializable(result)
+        print(json.dumps(serializable_result, indent=2, ensure_ascii=False))
     finally:
         await tester.cleanup()
 
