@@ -42,7 +42,7 @@ TEST_SYMBOLS = [
 # 支持的interval: '1m', '5m', '15m', '1h', '4h', '1d', '1w'
 # 可以通过修改此列表来调整测试的interval
 # 注意：如果设置为None，则使用data_agent中的配置（从config.py读取）
-TEST_KLINE_INTERVALS = ['1m', '5m', '15m', '1h', '4h']  # 默认7个interval
+TEST_KLINE_INTERVALS = ['1m', '5m', '15m', '1h']  # 默认7个interval
 
 # 等待接收消息的时间（秒）
 # 注意：实际测试中会持续等待直到收到完结的K线消息（x=True），不设置超时
