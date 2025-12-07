@@ -44,8 +44,9 @@ from market.market_streams import _normalize_kline
 
 logger = logging.getLogger(__name__)
 
-# 支持的K线时间间隔
-KLINE_INTERVALS = ['1m', '5m', '15m', '1h', '4h', '1d', '1w']
+# 支持的K线时间间隔（从配置文件读取，默认7个interval）
+# 可以通过环境变量 DATA_AGENT_KLINE_INTERVALS 配置，格式：'1m,5m,15m,1h,4h,1d,1w'
+KLINE_INTERVALS = getattr(app_config, 'DATA_AGENT_KLINE_INTERVALS', ['1m', '5m', '15m', '1h', '4h', '1d', '1w'])
 
 # WebSocket连接最大有效期（设置为非常长的时间，确保连接长期运行）
 # 注意：K线监听是长期运行的异步任务，不应该主动关闭连接
@@ -91,7 +92,8 @@ class KlineStreamConnection:
 class DataAgentKlineManager:
     """管理所有K线WebSocket连接。
     
-    该类负责管理多个交易对的K线数据WebSocket连接，每个交易对支持7个时间间隔（1m, 5m, 15m, 1h, 4h, 1d, 1w）。
+    该类负责管理多个交易对的K线数据WebSocket连接，每个交易对支持多个时间间隔（默认7个：1m, 5m, 15m, 1h, 4h, 1d, 1w）。
+    interval列表可通过配置文件 config.py 中的 DATA_AGENT_KLINE_INTERVALS 进行配置。
     
     **重要说明：K线监听是长期运行的异步任务**
     - 连接构建完成后会一直保持活跃，持续接收K线消息
@@ -113,7 +115,7 @@ class DataAgentKlineManager:
     
     def __init__(self, db: ClickHouseDatabase, max_symbols: int = 100):
         self._db = db
-        # 每个symbol有7个interval，所以最大连接数 = max_symbols * 7
+        # 每个symbol有多个interval（默认7个），所以最大连接数 = max_symbols * interval数量
         self._max_connections = max_symbols * len(KLINE_INTERVALS)
         self._max_symbols = max_symbols
         # 客户端将在第一次使用时初始化，避免事件循环冲突

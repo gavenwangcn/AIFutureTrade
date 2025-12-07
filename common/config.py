@@ -48,6 +48,16 @@ DATA_AGENT_MAX_SYMBOL = int(os.getenv('DATA_AGENT_MAX_SYMBOL', '150'))  # 每个
 DATA_AGENT_PORT = int(os.getenv('DATA_AGENT_PORT', '9999'))  # data_agent指令接口端口
 DATA_AGENT_STATUS_PORT = int(os.getenv('DATA_AGENT_STATUS_PORT', '9988'))  # data_agent状态检查端口（独立端口，避免指令服务阻塞）
 
+# Data Agent K线时间间隔配置
+# 支持的interval: '1m', '5m', '15m', '1h', '4h', '1d', '1w'
+# 默认配置：7个interval（1m, 5m, 15m, 1h, 4h, 1d, 1w）
+DATA_AGENT_KLINE_INTERVALS = os.getenv(
+    'DATA_AGENT_KLINE_INTERVALS',
+    '1m,5m,15m,1h,4h,1d,1w'  # 默认7个interval，用逗号分隔
+).split(',') if os.getenv('DATA_AGENT_KLINE_INTERVALS') else ['1m', '5m', '15m', '1h', '4h', '1d', '1w']
+# 清理空白字符
+DATA_AGENT_KLINE_INTERVALS = [interval.strip() for interval in DATA_AGENT_KLINE_INTERVALS if interval.strip()]
+
 # data_agent注册配置：在Docker Compose中使用服务名 'async-agent'，本地开发使用 '127.0.0.1'
 DATA_AGENT_REGISTER_IP = os.getenv('DATA_AGENT_REGISTER_IP', '127.0.0.1')  # data_agent注册IP
 DATA_AGENT_REGISTER_PORT = int(os.getenv('DATA_AGENT_REGISTER_PORT', '8888'))  # data_agent注册端口

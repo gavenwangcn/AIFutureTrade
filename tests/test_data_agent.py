@@ -38,6 +38,12 @@ TEST_SYMBOLS = [
     "BTCUSDT"
 ]
 
+# 测试用的K线时间间隔列表（默认7个interval，与data_agent默认配置一致）
+# 支持的interval: '1m', '5m', '15m', '1h', '4h', '1d', '1w'
+# 可以通过修改此列表来调整测试的interval
+# 注意：如果设置为None，则使用data_agent中的配置（从config.py读取）
+TEST_KLINE_INTERVALS = ['1m', '5m', '15m', '1h', '4h']  # 默认7个interval
+
 # 等待接收消息的时间（秒）
 # 注意：实际测试中会持续等待直到收到完结的K线消息（x=True），不设置超时
 # 此配置仅用于其他场景
@@ -45,6 +51,16 @@ MESSAGE_WAIT_TIME = 120
 
 # 统计信息打印间隔（秒）
 STATS_CHECK_INTERVAL = 10
+
+# 是否打印所有完结消息的开关（默认False，只打印第一条完结消息）
+# 如果设置为True，则每次收到完结消息（x=True）都会打印
+PRINT_ALL_COMPLETED_MESSAGES = True
+
+# 需要打印所有完结消息的symbol列表（只有当PRINT_ALL_COMPLETED_MESSAGES=True时生效）
+# 只有在这个列表中的symbol才会打印所有后续的完结消息
+# 如果列表为空，则所有symbol都打印（当开关开启时）
+# 示例: ['BTCUSDT', 'ETHUSDT']
+PRINT_ALL_COMPLETED_MESSAGES_SYMBOLS = ['BTCUSDT']
 
 # ============================================================================
 # 日志配置
@@ -434,9 +450,25 @@ class KlineMessageTestHandler:
                             "timestamp": message_start_time.isoformat()
                         }
                 
-                # 如果是第一条完结的K线消息，打印K线数据（参考 websocket_klines.py 格式）
+                # 判断是否需要打印这条完结消息
+                should_print = False
                 if is_first_completed_message:
+                    # 第一条完结消息总是打印
+                    should_print = True
                     logger.info("[测试] ✅ [收到完结K线] %s %s 收到第一条完结的K线消息 (x=True)", symbol, interval)
+                elif PRINT_ALL_COMPLETED_MESSAGES:
+                    # 如果开启了打印所有完结消息的开关
+                    if not PRINT_ALL_COMPLETED_MESSAGES_SYMBOLS:
+                        # 如果symbol列表为空，则所有symbol都打印
+                        should_print = True
+                    elif symbol.upper() in [s.upper() for s in PRINT_ALL_COMPLETED_MESSAGES_SYMBOLS]:
+                        # 如果symbol在配置的列表中，则打印
+                        should_print = True
+                
+                # 如果需要打印，则打印K线数据（参考 websocket_klines.py 格式）
+                if should_print:
+                    if not is_first_completed_message:
+                        logger.info("[测试] ✅ [收到完结K线] %s %s 收到后续完结的K线消息 (x=True)", symbol, interval)
                     # 使用与 websocket_klines.py 相同的格式打印K线数据
                     print_kline_data(message, symbol, interval)
                     logger.info("[测试] ✅ [消息处理] 这是完结的K线")
@@ -444,15 +476,25 @@ class KlineMessageTestHandler:
                 # 只有成功处理的完结K线（x=True，已验证）才标记为已收到
                 # 注意：不立即关闭监听，等待该symbol的所有interval都收到完结消息后再统一关闭
                 event = self.message_received_events.get(key_tuple)
-                if event and not event.is_set():
-                    event.set()
-                    # 记录该interval已完成
-                    async with self._lock:
-                        self.symbol_completed_intervals[symbol.upper()].add(interval)
-                    logger.debug(
-                        "[测试] ✅ [消息处理] %s %s 已收到完结的K线（x=True已验证），标记为完成（等待所有interval完成后再关闭）",
-                        symbol, interval
-                    )
+                if event:
+                    if not event.is_set():
+                        # 第一条完结消息：设置事件，标记为完成
+                        event.set()
+                        async with self._lock:
+                            self.symbol_completed_intervals[symbol.upper()].add(interval)
+                        logger.debug(
+                            "[测试] ✅ [消息处理] %s %s 已收到第一条完结的K线（x=True已验证），标记为完成（等待所有interval完成后再关闭）",
+                            symbol, interval
+                        )
+                    else:
+                        # 后续完结消息：不设置事件（已设置过），但仍记录完成状态（如果还未记录）
+                        async with self._lock:
+                            if interval not in self.symbol_completed_intervals[symbol.upper()]:
+                                self.symbol_completed_intervals[symbol.upper()].add(interval)
+                        logger.debug(
+                            "[测试] ✅ [消息处理] %s %s 收到后续完结的K线（x=True已验证），interval已完成（等待所有interval完成后再关闭）",
+                            symbol, interval
+                        )
                 
             except Exception as e:
                 error_info = {
@@ -573,7 +615,8 @@ class KlineMessageTestHandler:
 async def simulate_add_symbols_request(
     kline_manager,
     symbols: List[str],
-    per_symbol_timeout: int = 30
+    per_symbol_timeout: int = 30,
+    expected_interval_count: Optional[int] = None
 ) -> Dict[str, Any]:
     """模拟 HTTP POST /symbols/add 请求的处理逻辑。
     
@@ -639,12 +682,14 @@ async def simulate_add_symbols_request(
                 symbol_clean, symbol_duration, per_symbol_timeout
             )
             failed_symbols.append(symbol_clean)
+            # 使用配置的interval数量
+            interval_count = expected_interval_count if expected_interval_count is not None else 7
             results.append({
                 "symbol": symbol_clean,
                 "success_count": 0,
                 "failed_count": 0,
                 "skipped_count": 0,
-                "total_count": 7,
+                "total_count": interval_count,
                 "error": f"Timeout after {per_symbol_timeout}s"
             })
         except Exception as e:
@@ -654,12 +699,14 @@ async def simulate_add_symbols_request(
                 symbol_clean, symbol_duration, e, exc_info=True
             )
             failed_symbols.append(symbol_clean)
+            # 使用配置的interval数量
+            interval_count = expected_interval_count if expected_interval_count is not None else 7
             results.append({
                 "symbol": symbol_clean,
                 "success_count": 0,
                 "failed_count": 0,
                 "skipped_count": 0,
-                "total_count": 7,
+                "total_count": interval_count,
                 "error": str(e)
             })
     
@@ -718,12 +765,15 @@ async def test_data_agent_kline_processing(
         test_symbols: 测试用的symbol列表，如果为None则使用默认配置 TEST_SYMBOLS
         message_wait_time: 等待接收消息的时间（秒），如果为None则使用默认配置 MESSAGE_WAIT_TIME
     """
-    from data.data_agent import DataAgentKlineManager, KLINE_INTERVALS
+    from data.data_agent import DataAgentKlineManager, KLINE_INTERVALS as DATA_AGENT_KLINE_INTERVALS
     from common.database_clickhouse import ClickHouseDatabase
     
     # 使用配置参数或默认值
     symbols = test_symbols if test_symbols is not None else TEST_SYMBOLS
     wait_time = message_wait_time if message_wait_time is not None else MESSAGE_WAIT_TIME
+    
+    # 使用测试配置的interval列表，如果为None则使用data_agent的配置
+    test_intervals = TEST_KLINE_INTERVALS if TEST_KLINE_INTERVALS is not None else DATA_AGENT_KLINE_INTERVALS
     
     logger.info("=" * 80)
     logger.info("[测试] 🚀 开始测试 data_agent K线消息处理逻辑")
@@ -751,11 +801,17 @@ async def test_data_agent_kline_processing(
     logger.info("[测试] 📋 测试配置:")
     logger.info("[测试]   - Symbol数量: %s", len(symbols))
     logger.info("[测试]   - Symbol列表: %s", symbols)
-    logger.info("[测试]   - Interval数量: %s", len(KLINE_INTERVALS))
-    logger.info("[测试]   - Interval列表: %s", KLINE_INTERVALS)
-    logger.info("[测试]   - 总连接数: %s", len(symbols) * len(KLINE_INTERVALS))
+    logger.info("[测试]   - Interval数量: %s", len(test_intervals))
+    logger.info("[测试]   - Interval列表: %s", test_intervals)
+    logger.info("[测试]   - 总连接数: %s", len(symbols) * len(test_intervals))
     logger.info("[测试]   - 等待模式: 持续等待直到收到完结的K线（x=True），无超时限制")
     logger.info("[测试]   - 处理逻辑: 只处理完结的K线，未完结的K线会被跳过")
+    logger.info("[测试]   - 打印所有完结消息: %s", PRINT_ALL_COMPLETED_MESSAGES)
+    if PRINT_ALL_COMPLETED_MESSAGES:
+        if PRINT_ALL_COMPLETED_MESSAGES_SYMBOLS:
+            logger.info("[测试]   - 打印所有完结消息的Symbol列表: %s", PRINT_ALL_COMPLETED_MESSAGES_SYMBOLS)
+        else:
+            logger.info("[测试]   - 打印所有完结消息的Symbol列表: 所有symbol（列表为空）")
     logger.info("=" * 80)
     
     try:
@@ -766,7 +822,8 @@ async def test_data_agent_kline_processing(
         add_response = await simulate_add_symbols_request(
             kline_manager,
             symbols,
-            per_symbol_timeout=30
+            per_symbol_timeout=30,
+            expected_interval_count=len(test_intervals)
         )
         
         logger.info("[测试] ✅ [步骤1] 批量添加完成")
@@ -792,10 +849,10 @@ async def test_data_agent_kline_processing(
         
         # 注册所有symbol-interval组合
         for symbol in symbols:
-            for interval in KLINE_INTERVALS:
+            for interval in test_intervals:
                 test_handler.register_symbol_interval(symbol, interval)
         
-        total_combinations = len(symbols) * len(KLINE_INTERVALS)
+        total_combinations = len(symbols) * len(test_intervals)
         logger.info("[测试] 📨 [步骤2] 总共需要等待 %s 个symbol-interval组合收到完结的K线消息", total_combinations)
         logger.info("[测试] 📨 [步骤2] 等待模式: 持续等待直到收到完结的K线（x=True），无超时限制")
         logger.info("[测试] 📨 [步骤2] 关闭策略: 等待每个symbol的所有interval都收到完结消息后，统一关闭该symbol的所有订阅")
@@ -915,7 +972,7 @@ async def test_data_agent_kline_processing(
         logger.info("[测试] 🚀 [步骤2] 同时创建 %s 个等待任务...", total_combinations)
         tasks = []
         for symbol in symbols:
-            for interval in KLINE_INTERVALS:
+            for interval in test_intervals:
                 task = asyncio.create_task(wait_for_interval(symbol, interval))
                 tasks.append(task)
                 # 控制任务创建频率，避免过快
@@ -960,7 +1017,7 @@ async def test_data_agent_kline_processing(
         for symbol in symbols:
             symbol_upper = symbol.upper()
             completed_intervals = test_handler.symbol_completed_intervals.get(symbol_upper, set())
-            expected_intervals = set(KLINE_INTERVALS)
+            expected_intervals = set(test_intervals)
             
             logger.info(
                 "[测试] 📊 [步骤2.1] [%s] 已完成interval: %s/%s",
@@ -979,7 +1036,7 @@ async def test_data_agent_kline_processing(
                 close_success_count = 0
                 close_failed_count = 0
                 
-                for interval in KLINE_INTERVALS:
+                for interval in test_intervals:
                     try:
                         success = await kline_manager.remove_stream(symbol_upper, interval)
                         if success:
@@ -1035,7 +1092,7 @@ async def test_data_agent_kline_processing(
         logger.info("[测试] 🔍 [步骤4] 验证数据库中的数据...")
         try:
             for symbol in symbols[:5]:  # 只验证前5个symbol
-                for interval in KLINE_INTERVALS[:3]:  # 只验证前3个interval
+                for interval in test_intervals[:3]:  # 只验证前3个interval
                     try:
                         klines = db.get_market_klines(symbol, interval, limit=1)
                         if klines:
