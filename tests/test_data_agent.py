@@ -791,6 +791,14 @@ async def test_data_agent_kline_processing(
                         "[测试] ✅ [步骤2] [%s %s] 已收到完结的K线消息",
                         symbol, interval
                     )
+                    
+                    # 获取并打印K线数据（参考 websocket_klines.py 格式）
+                    key_tuple = (symbol.upper(), interval)
+                    first_message = test_handler.first_messages.get(key_tuple)
+                    if first_message and first_message.get("message"):
+                        # 使用与 websocket_klines.py 相同的格式打印K线数据
+                        print_kline_data(first_message["message"], symbol, interval)
+                    
                     return {
                         "symbol": symbol,
                         "interval": interval,
