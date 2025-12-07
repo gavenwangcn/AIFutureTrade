@@ -234,19 +234,10 @@ class KlineMessageTestHandler:
         key = f"{symbol}_{interval}"
         key_tuple = (symbol.upper(), interval)
         
-        # 检查是否是第一条消息
-        is_first_message = False
+        # 统计消息（但不立即保存到 first_messages）
         async with self._lock:
             self.stats["total_messages"] += 1
             self.by_symbol_interval[symbol][interval] += 1
-            if key_tuple not in self.first_messages:
-                is_first_message = True
-                self.first_messages[key_tuple] = {
-                    "symbol": symbol,
-                    "interval": interval,
-                    "message": message,
-                    "timestamp": message_start_time.isoformat()
-                }
         
         try:
             # 步骤0: 检查消息类型（不打印，只用于内部判断）
@@ -384,7 +375,39 @@ class KlineMessageTestHandler:
                 )
                 return
             
-            # 步骤2: 测试 insert_market_klines
+            # 步骤2: 验证消息中的 x 字段是否为 True（双重验证）
+            is_closed_verified = False
+            try:
+                # 从原始消息中提取 x 字段进行验证
+                if hasattr(message, "k") and hasattr(message.k, "x"):
+                    is_closed_verified = message.k.x
+                elif hasattr(message, "k") and isinstance(message.k, dict):
+                    is_closed_verified = message.k.get("x", False)
+                elif isinstance(message_dict, dict) and "k" in message_dict:
+                    k_data = message_dict["k"]
+                    if isinstance(k_data, dict):
+                        is_closed_verified = k_data.get("x", False)
+                    elif hasattr(k_data, "x"):
+                        is_closed_verified = k_data.x
+                
+                if not is_closed_verified:
+                    # 虽然 normalized 不是 None，但原始消息中的 x 字段是 False，跳过
+                    async with self._lock:
+                        self.stats["skipped_messages"] += 1
+                    logger.debug(
+                        "[测试] ⏭️  [消息处理] 跳过未完结K线 %s %s (x=False，双重验证失败)",
+                        symbol, interval
+                    )
+                    return
+            except Exception as e:
+                logger.warning(
+                    "[测试] ⚠️  [消息处理] 验证 x 字段时出错 %s %s: %s",
+                    symbol, interval, e
+                )
+                # 如果验证失败，为了安全起见，不标记为完成
+                return
+            
+            # 步骤3: 测试 insert_market_klines
             try:
                 # 调用原始处理器的数据库插入逻辑
                 await original_handler(symbol, interval, message)
@@ -398,15 +421,27 @@ class KlineMessageTestHandler:
                         "normalized_data": normalized,
                         "timestamp": message_start_time.isoformat()
                     }
+                    
+                    # 只在收到完结的K线（x=True）时才保存到 first_messages
+                    # 这样确保 first_messages 中保存的就是确认的完结消息
+                    is_first_completed_message = False
+                    if key_tuple not in self.first_messages:
+                        is_first_completed_message = True
+                        self.first_messages[key_tuple] = {
+                            "symbol": symbol,
+                            "interval": interval,
+                            "message": message,  # 保存的就是这个完结的消息
+                            "timestamp": message_start_time.isoformat()
+                        }
                 
-                # 如果是第一条消息（完结的K线），打印K线数据（参考 websocket_klines.py 格式）
-                if is_first_message:
+                # 如果是第一条完结的K线消息，打印K线数据（参考 websocket_klines.py 格式）
+                if is_first_completed_message:
                     logger.info("[测试] ✅ [收到完结K线] %s %s 收到第一条完结的K线消息 (x=True)", symbol, interval)
                     # 使用与 websocket_klines.py 相同的格式打印K线数据
                     print_kline_data(message, symbol, interval)
                     logger.info("[测试] ✅ [消息处理] 这是完结的K线")
                 
-                # 只有成功处理的完结K线才标记为已收到
+                # 只有成功处理的完结K线（x=True，已验证）才标记为已收到
                 # 注意：不立即关闭监听，等待该symbol的所有interval都收到完结消息后再统一关闭
                 event = self.message_received_events.get(key_tuple)
                 if event and not event.is_set():
@@ -415,7 +450,7 @@ class KlineMessageTestHandler:
                     async with self._lock:
                         self.symbol_completed_intervals[symbol.upper()].add(interval)
                     logger.debug(
-                        "[测试] ✅ [消息处理] %s %s 已收到完结的K线，标记为完成（等待所有interval完成后再关闭）",
+                        "[测试] ✅ [消息处理] %s %s 已收到完结的K线（x=True已验证），标记为完成（等待所有interval完成后再关闭）",
                         symbol, interval
                     )
                 
@@ -787,24 +822,70 @@ async def test_data_agent_kline_processing(
                 received = await test_handler.wait_for_message(symbol, interval, timeout=None)
                 
                 if received:
-                    logger.info(
-                        "[测试] ✅ [步骤2] [%s %s] 已收到完结的K线消息",
-                        symbol, interval
-                    )
-                    
                     # 获取并打印K线数据（参考 websocket_klines.py 格式）
+                    # first_messages 中保存的就是确认的完结消息（x=True），因为只在收到完结消息时才保存
                     key_tuple = (symbol.upper(), interval)
                     first_message = test_handler.first_messages.get(key_tuple)
-                    if first_message and first_message.get("message"):
-                        # 使用与 websocket_klines.py 相同的格式打印K线数据
-                        print_kline_data(first_message["message"], symbol, interval)
                     
-                    return {
-                        "symbol": symbol,
-                        "interval": interval,
-                        "success": True,
-                        "message_received": True
-                    }
+                    if first_message and first_message.get("message"):
+                        # 验证消息中的 x 字段是否为 True（双重确认）
+                        message_to_print = first_message["message"]
+                        is_closed = False
+                        try:
+                            if hasattr(message_to_print, "k") and hasattr(message_to_print.k, "x"):
+                                is_closed = message_to_print.k.x
+                            elif hasattr(message_to_print, "k") and isinstance(message_to_print.k, dict):
+                                is_closed = message_to_print.k.get("x", False)
+                            elif isinstance(message_to_print, dict) and "k" in message_to_print:
+                                k_data = message_to_print["k"]
+                                if isinstance(k_data, dict):
+                                    is_closed = k_data.get("x", False)
+                                elif hasattr(k_data, "x"):
+                                    is_closed = k_data.x
+                        except Exception as e:
+                            logger.warning(
+                                "[测试] ⚠️  [步骤2] [%s %s] 验证 x 字段时出错: %s",
+                                symbol, interval, e
+                            )
+                        
+                        if is_closed:
+                            logger.info(
+                                "[测试] ✅ [步骤2] [%s %s] 已收到完结的K线消息 (x=True)",
+                                symbol, interval
+                            )
+                            # 使用与 websocket_klines.py 相同的格式打印K线数据
+                            # 这个 message_to_print 就是确认的完结消息，与标记完成的是同一个消息
+                            print_kline_data(message_to_print, symbol, interval)
+                            return {
+                                "symbol": symbol,
+                                "interval": interval,
+                                "success": True,
+                                "message_received": True
+                            }
+                        else:
+                            logger.error(
+                                "[测试] ❌ [步骤2] [%s %s] 数据不一致：first_messages 中保存的消息 x=False，这不应该发生！",
+                                symbol, interval
+                            )
+                            return {
+                                "symbol": symbol,
+                                "interval": interval,
+                                "success": False,
+                                "message_received": False,
+                                "error": "数据不一致：first_messages 中保存的消息 x=False"
+                            }
+                    else:
+                        logger.warning(
+                            "[测试] ⚠️  [步骤2] [%s %s] 收到事件但 first_messages 中没有消息，这不应该发生",
+                            symbol, interval
+                        )
+                        return {
+                            "symbol": symbol,
+                            "interval": interval,
+                            "success": False,
+                            "message_received": False,
+                            "error": "first_messages 中没有消息"
+                        }
                 else:
                     logger.warning(
                         "[测试] ⚠️  [步骤2] [%s %s] 未收到消息（不应该发生，因为timeout=None）",
