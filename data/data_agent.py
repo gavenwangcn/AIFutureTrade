@@ -1530,17 +1530,27 @@ class DataAgentKlineManager:
                 logger.debug("[DataAgentKline] ⏭️  跳过空消息 %s %s", symbol, interval)
                 return
             
+            # 规范化K线数据（_normalize_kline 只负责数据格式转换，不进行业务逻辑判断）
             normalized = _normalize_kline(message)
             if normalized:
-                # Only insert closed klines (x=True)
+                # 检查是否完结：只有完结的K线（is_closed=1）才会被插入数据库
+                is_closed = normalized.get("is_closed", 0)
+                if is_closed != 1:
+                    # 未完结的K线，正常跳过，不插入数据库
+                    logger.debug(
+                        "[DataAgentKline] ⏭️  跳过未完结的K线（is_closed=%s） %s %s",
+                        is_closed, symbol, interval
+                    )
+                    return
+                
+                # 只有完结的K线（x=True, is_closed=1）才会被插入数据库
                 await asyncio.to_thread(self._db.insert_market_klines, [normalized])
                 logger.debug("[DataAgentKline] ✅ 已插入完结K线: %s %s", symbol, interval)
             else:
                 # normalized is None means:
                 # 1. Empty message (already checked above)
-                # 2. Incomplete kline (x=False) - this is normal, skip it
-                # 3. Invalid message format - already logged in _normalize_kline
-                logger.debug("[DataAgentKline] ⏭️  跳过未完结或无效K线: %s %s", symbol, interval)
+                # 2. Invalid message format - already logged in _normalize_kline
+                logger.debug("[DataAgentKline] ⏭️  跳过无效K线: %s %s", symbol, interval)
         except Exception as e:
             logger.error("[DataAgentKline] ❌ 处理K线消息时出错 %s %s: %s", symbol, interval, e, exc_info=True)
     

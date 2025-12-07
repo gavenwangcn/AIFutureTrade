@@ -177,11 +177,13 @@ def _normalize_kline(message_data: Any) -> Optional[Dict[str, Any]]:
     Expected format:
     e='kline' E=1764148546845 s='BTCUSDT' k=KlineCandlestickStreamsResponseK(...)
     
+    注意：此函数只负责规范化数据格式，不进行业务逻辑判断（如是否完结）。
+    是否完结的判断应该在调用此函数后进行。
+    
     Returns:
-        Normalized kline data dict if the kline is closed, None otherwise.
+        Normalized kline data dict if the message is valid, None otherwise.
         None is returned in the following cases:
         - Empty or invalid message
-        - Kline is not closed (x=False, is_closed=False)
         - Missing required fields
     """
     try:
@@ -227,13 +229,8 @@ def _normalize_kline(message_data: Any) -> Optional[Dict[str, Any]]:
             logger.warning("[MarketStreams] Unknown kline object format: %s", type(kline_obj))
             return None
         
-        # Check if kline is closed (only process closed klines)
+        # 提取是否完结的标记（不在这里过滤，只用于设置 is_closed 字段）
         is_closed = k.get("x") or k.get("is_closed", False)
-        if not is_closed:
-            # This is normal - incomplete klines should be skipped
-            logger.debug("[MarketStreams] Skipping incomplete kline (x=False) for %s %s", 
-                        symbol, k.get("i") or k.get("interval", ""))
-            return None  # Skip incomplete klines
         
         # Extract contract type (may be in parent data)
         contract_type = data.get("ps") or data.get("contract_type", "PERPETUAL")
@@ -295,17 +292,43 @@ class KlineStreamManager:
         self._lock = asyncio.Lock()
     
     async def _handle_kline_message(self, symbol: str, interval: str, message: Any) -> None:
-        """Handle kline message and insert into database."""
+        """Handle kline message and insert into database.
+        
+        注意：
+        - 只处理完结的K线（x=True），跳过未完结的K线
+        - _normalize_kline 函数只负责数据格式转换，不进行业务逻辑判断
+        - 是否完结的判断在规范化后进行，只有完结的K线才会被插入数据库
+        """
         try:
-            # Normalize kline data
+            # Check for empty message
+            if message is None:
+                logger.debug("[KlineStream] ⏭️  跳过空消息 %s %s", symbol, interval)
+                return
+            
+            # 规范化K线数据（_normalize_kline 只负责数据格式转换，不进行业务逻辑判断）
             normalized = _normalize_kline(message)
             
             if normalized:
-                # Insert into database
+                # 检查是否完结：只有完结的K线（is_closed=1）才会被插入数据库
+                is_closed = normalized.get("is_closed", 0)
+                if is_closed != 1:
+                    # 未完结的K线，正常跳过，不插入数据库
+                    logger.debug(
+                        "[KlineStream] ⏭️  跳过未完结的K线（is_closed=%s） %s %s",
+                        is_closed, symbol, interval
+                    )
+                    return
+                
+                # 只有完结的K线（x=True, is_closed=1）才会被插入数据库
                 await asyncio.to_thread(self._db.insert_market_klines, [normalized])
-                logger.debug("[KlineStream] Inserted kline: %s %s", symbol, interval)
+                logger.debug("[KlineStream] ✅ 已插入完结K线: %s %s", symbol, interval)
+            else:
+                # normalized is None means:
+                # 1. Empty message (already checked above)
+                # 2. Invalid message format - already logged in _normalize_kline
+                logger.debug("[KlineStream] ⏭️  跳过无效K线: %s %s", symbol, interval)
         except Exception as e:
-            logger.error("[KlineStream] Error handling kline message: %s", e, exc_info=True)
+            logger.error("[KlineStream] ❌ 处理K线消息时出错 %s %s: %s", symbol, interval, e, exc_info=True)
     
     async def add_stream(self, symbol: str, interval: str) -> bool:
         """Add a kline stream for symbol and interval."""

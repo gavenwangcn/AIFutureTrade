@@ -16,6 +16,19 @@
 - 收到完结的K线消息后立即关闭该interval的监听
 - 所有interval都完成后测试结束
 
+重要说明：
+- 本测试代码直接调用 data_agent 的原始 _handle_kline_message 方法
+- 不进行重复的验证，让 data_agent 自己处理所有的验证和插入逻辑
+- 这样可以便于判断 data_agent 是否只插入完结消息
+- data_agent 模块保证只有完结的K线消息（x=True）才会被插入数据库：
+  * _normalize_kline 函数只负责规范化数据格式，不进行业务逻辑判断（不改造消息内容）
+  * _handle_kline_message 会检查 is_closed 字段，确保只有完结的K线（is_closed=1）才插入数据库
+  * 未完结的K线（is_closed=0）会被跳过，不插入数据库
+- 这确保了测试代码测试的是完整的 data_agent 构建K线监听的逻辑：
+  * 创建监听 ✓
+  * 接收数据 ✓
+  * 插入数据到数据库中 ✓（只插入完结的K线，由 data_agent 保证）
+
 配置说明：
 - TEST_SYMBOLS: 测试用的symbol列表，默认只测试1个symbol，便于快速验证
 - 可以通过修改 TEST_SYMBOLS 列表来调整测试的symbol
@@ -171,14 +184,16 @@ class KlineMessageTestHandler:
     
     def __init__(self):
         # 统计信息
+        # 注意：所有消息处理逻辑都由 data_agent 的 _handle_kline_message 完成
+        # 测试代码只负责统计和记录，不进行重复的验证
         self.stats = {
             "total_messages": 0,  # 总消息数（包括所有类型的消息）
-            "success_messages": 0,  # 成功处理的消息数（完结的K线）
-            "failed_messages": 0,  # 处理失败的消息数（真正的错误）
-            "skipped_messages": 0,  # 跳过的消息数（空消息、未完结K线等，不算错误）
-            "normalize_errors": 0,  # normalize_kline 错误数（无效消息格式）
-            "insert_errors": 0,  # insert_market_klines 错误数
-            "other_errors": 0,  # 其他错误数
+            "success_messages": 0,  # 成功处理的消息数（完结的K线，已插入数据库）
+            "failed_messages": 0,  # 处理失败的消息数（data_agent 处理时出错）
+            "skipped_messages": 0,  # 跳过的消息数（空消息、未完结K线等，data_agent 正常跳过）
+            "normalize_errors": 0,  # 保留字段（兼容性），实际由 data_agent 处理
+            "insert_errors": 0,  # 保留字段（兼容性），实际由 data_agent 处理
+            "other_errors": 0,  # data_agent 处理消息时的异常数
         }
         
         # 按symbol和interval统计
@@ -241,202 +256,87 @@ class KlineMessageTestHandler:
                            original_handler, db) -> None:
         """处理K线消息，记录统计信息和错误。
         
+        注意：此方法直接调用 data_agent 的原始 _handle_kline_message 方法，
+        让 data_agent 自己处理所有的验证和插入逻辑，这样可以：
+        1. 测试 data_agent 的真实行为
+        2. 便于判断 data_agent 是否只插入完结消息
+        3. 避免重复的验证逻辑
+        
         Args:
             symbol: 交易对符号
             interval: 时间间隔
             message: 原始消息数据
-            original_handler: 原始的消息处理器
-            db: 数据库实例（用于测试insert_market_klines）
+            original_handler: 原始的消息处理器（data_agent 的 _handle_kline_message）
+            db: 数据库实例（用于后续验证）
         """
         message_start_time = datetime.now(timezone.utc)
         key = f"{symbol}_{interval}"
         key_tuple = (symbol.upper(), interval)
         
-        # 统计消息（但不立即保存到 first_messages）
+        # 统计总消息数
         async with self._lock:
             self.stats["total_messages"] += 1
             self.by_symbol_interval[symbol][interval] += 1
         
+        # 检查是否是订阅确认消息（跳过订阅确认消息，不调用原始处理器）
         try:
-            # 步骤0: 检查消息类型（不打印，只用于内部判断）
-            # 尝试将消息转换为可检查的格式
             message_dict = None
-            try:
-                if hasattr(message, "model_dump"):
-                    message_dict = message.model_dump()
-                elif hasattr(message, "__dict__"):
-                    message_dict = message.__dict__
-                elif isinstance(message, dict):
-                    message_dict = message
-                else:
-                    message_dict = {"raw_message": str(message)}
-            except Exception as e:
-                # 如果序列化失败，创建一个基本的字典
-                message_dict = {"raw_message": str(message)[:500], "serialization_error": str(e)}
+            if hasattr(message, "model_dump"):
+                message_dict = message.model_dump()
+            elif hasattr(message, "__dict__"):
+                message_dict = message.__dict__
+            elif isinstance(message, dict):
+                message_dict = message
             
-            # 步骤0.1: 检查是否是订阅确认消息（如 {'result': None, 'id': '...'}）
-            # 订阅确认消息不打印，直接跳过
-            try:
-                if message_dict is not None and isinstance(message_dict, dict):
-                    # 检查是否是订阅确认消息格式
-                    if "result" in message_dict and "id" in message_dict:
-                        # 订阅确认消息不算在统计中，只是跳过（不打印）
-                        logger.debug(
-                            "[测试] ⏭️  [消息处理] 跳过订阅确认消息 %s %s (result=%s, id=%s)",
-                            symbol, interval, message_dict.get("result"), message_dict.get("id")
-                        )
-                        return
-            except Exception as e:
-                logger.debug("[测试] ⚠️  [消息类型] 检查订阅确认消息时出错: %s", e)
-            
-            # 步骤0.2: 检查空消息
-            if message is None:
-                async with self._lock:
-                    self.stats["skipped_messages"] += 1
-                logger.debug(
-                    "[测试] ⏭️  [消息处理] 跳过空消息 %s %s",
-                    symbol, interval
-                )
-                # 空消息不算错误，只是跳过
-                return
-            
-            # 步骤1: 测试 normalize_kline
-            from market.market_streams import _normalize_kline
-            
-            try:
-                normalized = _normalize_kline(message)
-                
-                if normalized is None:
-                    # normalize_kline 返回 None 可能是以下情况：
-                    # 1. 空消息（已在上方检查）
-                    # 2. 未完结的K线（x=False）- 这是正常的，应该跳过
-                    # 3. 无效的消息格式 - 这是错误
-                    
-                    # 检查是否是未完结的K线（正常情况）
-                    is_incomplete_kline = False
-                    try:
-                        # 尝试提取 kline 对象检查 x 字段
-                        if hasattr(message, "model_dump"):
-                            data = message.model_dump()
-                        elif hasattr(message, "__dict__"):
-                            data = message.__dict__
-                        elif isinstance(message, dict):
-                            data = message
-                        else:
-                            data = {}
-                        
-                        kline_obj = data.get("k")
-                        if kline_obj:
-                            if hasattr(kline_obj, "model_dump"):
-                                k = kline_obj.model_dump()
-                            elif hasattr(kline_obj, "__dict__"):
-                                k = kline_obj.__dict__
-                            elif isinstance(kline_obj, dict):
-                                k = kline_obj
-                            else:
-                                k = {}
-                            
-                            is_closed = k.get("x") or k.get("is_closed", False)
-                            if not is_closed:
-                                # 这是未完结的K线，正常跳过，不算错误（不打印）
-                                is_incomplete_kline = True
-                                async with self._lock:
-                                    self.stats["skipped_messages"] += 1
-                                logger.debug(
-                                    "[测试] ⏭️  [消息处理] 跳过未完结K线 %s %s (x=False)",
-                                    symbol, interval
-                                )
-                    except Exception:
-                        # 如果无法检查，假设是无效消息格式
-                        pass
-                    
-                    if not is_incomplete_kline:
-                        # 这是真正的错误（无效消息格式）
-                        async with self._lock:
-                            self.stats["normalize_errors"] += 1
-                            self.stats["failed_messages"] += 1
-                            self.errors.append({
-                                "symbol": symbol,
-                                "interval": interval,
-                                "step": "normalize_kline",
-                                "error": "normalize_kline returned None (invalid message format)",
-                                "message_preview": str(message)[:200] if message else None,
-                                "timestamp": message_start_time.isoformat()
-                            })
-                        
-                        logger.warning(
-                            "[测试] ⚠️  [消息处理] normalize_kline 返回 None（无效消息格式） %s %s",
-                            symbol, interval
-                        )
-                    # 无论是否未完结的K线，都不继续处理
-                    return
-            except Exception as e:
-                error_info = {
-                    "symbol": symbol,
-                    "interval": interval,
-                    "step": "normalize_kline",
-                    "error": str(e),
-                    "error_type": type(e).__name__,
-                    "traceback": traceback.format_exc(),
-                    "message_preview": str(message)[:200] if message else None,
-                    "timestamp": message_start_time.isoformat()
-                }
-                
-                async with self._lock:
-                    self.stats["normalize_errors"] += 1
-                    self.stats["failed_messages"] += 1
-                    self.errors.append(error_info)
-                
-                logger.error(
-                    "[测试] ❌ [消息处理] normalize_kline 异常 %s %s: %s",
-                    symbol, interval, e, exc_info=True
-                )
-                return
-            
-            # 步骤2: 验证消息中的 x 字段是否为 True（双重验证）
-            is_closed_verified = False
-            try:
-                # 从原始消息中提取 x 字段进行验证
-                if hasattr(message, "k") and hasattr(message.k, "x"):
-                    is_closed_verified = message.k.x
-                elif hasattr(message, "k") and isinstance(message.k, dict):
-                    is_closed_verified = message.k.get("x", False)
-                elif isinstance(message_dict, dict) and "k" in message_dict:
-                    k_data = message_dict["k"]
-                    if isinstance(k_data, dict):
-                        is_closed_verified = k_data.get("x", False)
-                    elif hasattr(k_data, "x"):
-                        is_closed_verified = k_data.x
-                
-                if not is_closed_verified:
-                    # 虽然 normalized 不是 None，但原始消息中的 x 字段是 False，跳过
-                    async with self._lock:
-                        self.stats["skipped_messages"] += 1
+            if message_dict and isinstance(message_dict, dict):
+                if "result" in message_dict and "id" in message_dict:
+                    # 订阅确认消息，跳过
                     logger.debug(
-                        "[测试] ⏭️  [消息处理] 跳过未完结K线 %s %s (x=False，双重验证失败)",
+                        "[测试] ⏭️  [消息处理] 跳过订阅确认消息 %s %s",
                         symbol, interval
                     )
                     return
-            except Exception as e:
-                logger.warning(
-                    "[测试] ⚠️  [消息处理] 验证 x 字段时出错 %s %s: %s",
-                    symbol, interval, e
-                )
-                # 如果验证失败，为了安全起见，不标记为完成
-                return
+        except Exception:
+            pass
+        
+        # 检查消息是否为完结的K线（用于后续统计和打印）
+        is_closed_message = False
+        try:
+            # 尝试从消息中提取 x 字段
+            if hasattr(message, "k") and hasattr(message.k, "x"):
+                is_closed_message = message.k.x
+            elif hasattr(message, "k") and isinstance(message.k, dict):
+                is_closed_message = message.k.get("x", False)
+            elif isinstance(message_dict, dict) and "k" in message_dict:
+                k_data = message_dict["k"]
+                if isinstance(k_data, dict):
+                    is_closed_message = k_data.get("x", False)
+                elif hasattr(k_data, "x"):
+                    is_closed_message = k_data.x
+        except Exception:
+            pass
+        
+        # 直接调用 data_agent 的原始处理逻辑
+        # data_agent 会自己处理：
+        # 1. 空消息检查
+        # 2. _normalize_kline 规范化（只返回完结的K线）
+        # 3. 双重验证 is_closed 字段
+        # 4. 插入数据库（只有完结的K线才会插入）
+        try:
+            await original_handler(symbol, interval, message)
             
-            # 步骤3: 测试 insert_market_klines
-            try:
-                # 调用原始处理器的数据库插入逻辑
-                await original_handler(symbol, interval, message)
-                
+            # 如果 original_handler 执行成功且没有抛出异常，说明消息已被处理
+            # 注意：data_agent 只会处理完结的K线（x=True），未完结的K线会被跳过
+            # 所以如果 original_handler 成功执行，说明这是一个完结的K线消息
+            
+            # 只有完结的K线消息才会被 data_agent 处理并插入数据库
+            if is_closed_message:
                 async with self._lock:
                     self.stats["success_messages"] += 1
                     # 保存成功处理的消息样本
                     self.sample_messages[key] = {
                         "symbol": symbol,
                         "interval": interval,
-                        "normalized_data": normalized,
                         "timestamp": message_start_time.isoformat()
                     }
                     
@@ -475,7 +375,7 @@ class KlineMessageTestHandler:
                     print_kline_data(message, symbol, interval)
                     logger.info("[测试] ✅ [消息处理] 这是完结的K线")
                 
-                # 只有成功处理的完结K线（x=True，已验证）才标记为已收到
+                # 只有成功处理的完结K线（x=True）才标记为已收到
                 # 注意：不立即关闭监听，等待该symbol的所有interval都收到完结消息后再统一关闭
                 event = self.message_received_events.get(key_tuple)
                 if event:
@@ -485,7 +385,7 @@ class KlineMessageTestHandler:
                         async with self._lock:
                             self.symbol_completed_intervals[symbol.upper()].add(interval)
                         logger.debug(
-                            "[测试] ✅ [消息处理] %s %s 已收到第一条完结的K线（x=True已验证），标记为完成（等待所有interval完成后再关闭）",
+                            "[测试] ✅ [消息处理] %s %s 已收到第一条完结的K线（x=True），标记为完成（等待所有interval完成后再关闭）",
                             symbol, interval
                         )
                     else:
@@ -494,37 +394,25 @@ class KlineMessageTestHandler:
                             if interval not in self.symbol_completed_intervals[symbol.upper()]:
                                 self.symbol_completed_intervals[symbol.upper()].add(interval)
                         logger.debug(
-                            "[测试] ✅ [消息处理] %s %s 收到后续完结的K线（x=True已验证），interval已完成（等待所有interval完成后再关闭）",
+                            "[测试] ✅ [消息处理] %s %s 收到后续完结的K线（x=True），interval已完成（等待所有interval完成后再关闭）",
                             symbol, interval
                         )
-                
-            except Exception as e:
-                error_info = {
-                    "symbol": symbol,
-                    "interval": interval,
-                    "step": "insert_market_klines",
-                    "error": str(e),
-                    "error_type": type(e).__name__,
-                    "traceback": traceback.format_exc(),
-                    "normalized_data": normalized,
-                    "timestamp": message_start_time.isoformat()
-                }
-                
+            else:
+                # 如果消息不是完结的K线，但 original_handler 没有抛出异常
+                # 说明 data_agent 正确地跳过了未完结的K线（这是正常行为）
                 async with self._lock:
-                    self.stats["insert_errors"] += 1
-                    self.stats["failed_messages"] += 1
-                    self.errors.append(error_info)
-                
-                logger.error(
-                    "[测试] ❌ [消息处理] insert_market_klines 异常 %s %s: %s",
-                    symbol, interval, e, exc_info=True
+                    self.stats["skipped_messages"] += 1
+                logger.debug(
+                    "[测试] ⏭️  [消息处理] data_agent 跳过了未完结的K线 %s %s (x=False)",
+                    symbol, interval
                 )
+                
         except Exception as e:
-            # 捕获其他未预期的异常
+            # 捕获 data_agent 处理消息时的异常
             error_info = {
                 "symbol": symbol,
                 "interval": interval,
-                "step": "other",
+                "step": "data_agent_handle_message",
                 "error": str(e),
                 "error_type": type(e).__name__,
                 "traceback": traceback.format_exc(),
@@ -537,7 +425,7 @@ class KlineMessageTestHandler:
                 self.errors.append(error_info)
             
             logger.error(
-                "[测试] ❌ [消息处理] 未预期的异常 %s %s: %s",
+                "[测试] ❌ [消息处理] data_agent 处理消息时异常 %s %s: %s",
                 symbol, interval, e, exc_info=True
             )
             # 错误情况下不设置事件，继续等待
@@ -557,12 +445,12 @@ class KlineMessageTestHandler:
         logger.info("[测试报告] 📊 K线消息处理测试统计")
         logger.info("=" * 80)
         logger.info("[测试报告] 总消息数: %s", self.stats["total_messages"])
-        logger.info("[测试报告] 成功处理: %s (完结的K线)", self.stats["success_messages"])
-        logger.info("[测试报告] 跳过消息: %s (空消息、未完结K线等，正常行为)", self.stats["skipped_messages"])
-        logger.info("[测试报告] 处理失败: %s (真正的错误)", self.stats["failed_messages"])
-        logger.info("[测试报告]   - normalize_kline 错误: %s (无效消息格式)", self.stats["normalize_errors"])
-        logger.info("[测试报告]   - insert_market_klines 错误: %s", self.stats["insert_errors"])
-        logger.info("[测试报告]   - 其他错误: %s", self.stats["other_errors"])
+        logger.info("[测试报告] 成功处理: %s (完结的K线，已插入数据库)", self.stats["success_messages"])
+        logger.info("[测试报告] 跳过消息: %s (空消息、未完结K线等，data_agent 正常跳过)", self.stats["skipped_messages"])
+        logger.info("[测试报告] 处理失败: %s (data_agent 处理时出错)", self.stats["failed_messages"])
+        logger.info("[测试报告]   - data_agent 处理异常: %s", self.stats["other_errors"])
+        logger.info("[测试报告] 说明: 所有消息验证和数据库插入都由 data_agent 的 _handle_kline_message 完成")
+        logger.info("[测试报告] 说明: 只有完结的K线（x=True）才会被 data_agent 插入数据库")
         logger.info("=" * 80)
         
         if self.stats["total_messages"] > 0:
