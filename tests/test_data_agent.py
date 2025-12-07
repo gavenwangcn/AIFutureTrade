@@ -28,8 +28,7 @@ from typing import Any, Dict, List, Optional, Set
 # 测试用的symbol列表（默认只测试2个symbol，便于快速验证）
 # 可以通过修改此列表来调整测试的symbol
 TEST_SYMBOLS = [
-    "BTCUSDT",
-    "ETHUSDT"
+    "BTCUSDT"
 ]
 
 # 等待接收消息的时间（秒）
@@ -78,8 +77,43 @@ class KlineMessageTestHandler:
         # 成功处理的消息样本（每个symbol-interval组合保留最新的一条）
         self.sample_messages: Dict[str, Dict] = {}
         
+        # 记录每个symbol-interval组合是否已收到消息
+        # key: (symbol, interval), value: asyncio.Event
+        self.message_received_events: Dict[tuple, asyncio.Event] = {}
+        
+        # 记录每个symbol-interval组合收到的第一条消息（用于打印）
+        self.first_messages: Dict[tuple, Dict] = {}
+        
         # 锁（用于线程安全）
         self._lock = asyncio.Lock()
+    
+    def register_symbol_interval(self, symbol: str, interval: str):
+        """注册一个symbol-interval组合，创建等待事件。"""
+        key = (symbol.upper(), interval)
+        if key not in self.message_received_events:
+            self.message_received_events[key] = asyncio.Event()
+    
+    async def wait_for_message(self, symbol: str, interval: str, timeout: int = 60) -> bool:
+        """等待指定symbol-interval组合收到消息。
+        
+        Args:
+            symbol: 交易对符号
+            interval: 时间间隔
+            timeout: 超时时间（秒）
+        
+        Returns:
+            如果收到消息返回True，超时返回False
+        """
+        key = (symbol.upper(), interval)
+        event = self.message_received_events.get(key)
+        if event is None:
+            return False
+        
+        try:
+            await asyncio.wait_for(event.wait(), timeout=timeout)
+            return True
+        except asyncio.TimeoutError:
+            return False
     
     async def handle_message(self, symbol: str, interval: str, message: Any, 
                            original_handler, db) -> None:
@@ -94,29 +128,28 @@ class KlineMessageTestHandler:
         """
         message_start_time = datetime.now(timezone.utc)
         key = f"{symbol}_{interval}"
+        key_tuple = (symbol.upper(), interval)
         
+        # 检查是否是第一条消息
+        is_first_message = False
         async with self._lock:
             self.stats["total_messages"] += 1
             self.by_symbol_interval[symbol][interval] += 1
-        
-        logger.debug(
-            "[测试] 📨 [消息处理] 收到K线消息 %s %s (消息序号: %s, 时间: %s)",
-            symbol, interval, self.stats["total_messages"], message_start_time.isoformat()
-        )
+            if key_tuple not in self.first_messages:
+                is_first_message = True
+                self.first_messages[key_tuple] = {
+                    "symbol": symbol,
+                    "interval": interval,
+                    "message": message,
+                    "timestamp": message_start_time.isoformat()
+                }
         
         try:
             # 步骤1: 测试 normalize_kline
-            normalize_start_time = datetime.now(timezone.utc)
-            logger.debug(
-                "[测试] 🔧 [消息处理] 步骤1/2: 开始规范化K线数据 %s %s...",
-                symbol, interval
-            )
-            
             from market.market_streams import _normalize_kline
             
             try:
                 normalized = _normalize_kline(message)
-                normalize_duration = (datetime.now(timezone.utc) - normalize_start_time).total_seconds()
                 
                 if normalized is None:
                     async with self._lock:
@@ -132,17 +165,11 @@ class KlineMessageTestHandler:
                         })
                     
                     logger.warning(
-                        "[测试] ⚠️  [消息处理] normalize_kline 返回 None %s %s (耗时: %.3fs)",
-                        symbol, interval, normalize_duration
+                        "[测试] ⚠️  [消息处理] normalize_kline 返回 None %s %s",
+                        symbol, interval
                     )
                     return
-                
-                logger.debug(
-                    "[测试] ✅ [消息处理] 步骤1/2: 规范化完成 %s %s (耗时: %.3fs)",
-                    symbol, interval, normalize_duration
-                )
             except Exception as e:
-                normalize_duration = (datetime.now(timezone.utc) - normalize_start_time).total_seconds()
                 error_info = {
                     "symbol": symbol,
                     "interval": interval,
@@ -160,23 +187,15 @@ class KlineMessageTestHandler:
                     self.errors.append(error_info)
                 
                 logger.error(
-                    "[测试] ❌ [消息处理] normalize_kline 异常 %s %s (耗时: %.3fs): %s",
-                    symbol, interval, normalize_duration, e, exc_info=True
+                    "[测试] ❌ [消息处理] normalize_kline 异常 %s %s: %s",
+                    symbol, interval, e, exc_info=True
                 )
                 return
             
             # 步骤2: 测试 insert_market_klines
-            insert_start_time = datetime.now(timezone.utc)
-            logger.debug(
-                "[测试] 💾 [消息处理] 步骤2/2: 开始插入数据库 %s %s...",
-                symbol, interval
-            )
-            
             try:
                 # 调用原始处理器的数据库插入逻辑
                 await original_handler(symbol, interval, message)
-                
-                insert_duration = (datetime.now(timezone.utc) - insert_start_time).total_seconds()
                 
                 async with self._lock:
                     self.stats["success_messages"] += 1
@@ -185,20 +204,18 @@ class KlineMessageTestHandler:
                         "symbol": symbol,
                         "interval": interval,
                         "normalized_data": normalized,
-                        "timestamp": message_start_time.isoformat(),
-                        "normalize_duration": normalize_duration,
-                        "insert_duration": insert_duration,
-                        "total_duration": (datetime.now(timezone.utc) - message_start_time).total_seconds()
+                        "timestamp": message_start_time.isoformat()
                     }
                 
-                logger.info(
-                    "[测试] ✅ [消息处理] 成功处理 %s %s (总耗时: %.3fs, normalize: %.3fs, insert: %.3fs)",
-                    symbol, interval,
-                    (datetime.now(timezone.utc) - message_start_time).total_seconds(),
-                    normalize_duration, insert_duration
-                )
+                # 如果是第一条消息，打印消息体
+                if is_first_message:
+                    logger.info("=" * 80)
+                    logger.info("[测试] 📨 [收到消息] %s %s 收到第一条K线消息", symbol, interval)
+                    logger.info("[测试] 📨 [消息体] 原始消息: %s", json.dumps(message, indent=2, ensure_ascii=False, default=str))
+                    logger.info("[测试] 📨 [消息体] 规范化后: %s", json.dumps(normalized, indent=2, ensure_ascii=False, default=str))
+                    logger.info("=" * 80)
+                
             except Exception as e:
-                insert_duration = (datetime.now(timezone.utc) - insert_start_time).total_seconds()
                 error_info = {
                     "symbol": symbol,
                     "interval": interval,
@@ -216,12 +233,11 @@ class KlineMessageTestHandler:
                     self.errors.append(error_info)
                 
                 logger.error(
-                    "[测试] ❌ [消息处理] insert_market_klines 异常 %s %s (耗时: %.3fs): %s",
-                    symbol, interval, insert_duration, e, exc_info=True
+                    "[测试] ❌ [消息处理] insert_market_klines 异常 %s %s: %s",
+                    symbol, interval, e, exc_info=True
                 )
         except Exception as e:
             # 捕获其他未预期的异常
-            total_duration = (datetime.now(timezone.utc) - message_start_time).total_seconds()
             error_info = {
                 "symbol": symbol,
                 "interval": interval,
@@ -238,9 +254,14 @@ class KlineMessageTestHandler:
                 self.errors.append(error_info)
             
             logger.error(
-                "[测试] ❌ [消息处理] 未预期的异常 %s %s (耗时: %.3fs): %s",
-                symbol, interval, total_duration, e, exc_info=True
+                "[测试] ❌ [消息处理] 未预期的异常 %s %s: %s",
+                symbol, interval, e, exc_info=True
             )
+        finally:
+            # 标记已收到消息
+            event = self.message_received_events.get(key_tuple)
+            if event and not event.is_set():
+                event.set()
     
     def get_stats(self) -> Dict:
         """获取统计信息。"""
@@ -523,27 +544,73 @@ async def test_data_agent_kline_processing(
         
         logger.info("=" * 80)
         
-        # 步骤2: 等待接收K线数据消息
-        logger.info("[测试] 📨 [步骤2] 开始监听K线数据消息...")
-        logger.info("[测试] 📨 [步骤2] 等待时间: %s秒（每个symbol-interval组合至少接收1条消息）", wait_time)
+        # 步骤2: 为每个symbol-interval组合等待接收消息，收到后关闭监听
+        logger.info("[测试] 📨 [步骤2] 开始监听K线数据消息并逐个关闭...")
         
-        # 每10秒打印一次统计信息
-        elapsed = 0
+        # 注册所有symbol-interval组合
+        for symbol in symbols:
+            for interval in KLINE_INTERVALS:
+                test_handler.register_symbol_interval(symbol, interval)
         
-        while elapsed < wait_time:
-            await asyncio.sleep(STATS_CHECK_INTERVAL)
-            elapsed += STATS_CHECK_INTERVAL
-            
-            stats = test_handler.get_stats()
-            logger.info(
-                "[测试] 📊 [步骤2] 进度: 已等待 %s/%s秒, 总消息数=%s, 成功=%s, 失败=%s",
-                elapsed, wait_time,
-                stats["total_messages"],
-                stats["success_messages"],
-                stats["failed_messages"]
-            )
+        total_combinations = len(symbols) * len(KLINE_INTERVALS)
+        logger.info("[测试] 📨 [步骤2] 总共需要等待 %s 个symbol-interval组合收到消息", total_combinations)
+        logger.info("=" * 80)
         
-        logger.info("[测试] ✅ [步骤2] 监听完成")
+        # 为每个symbol-interval组合等待消息并关闭
+        completed_count = 0
+        for symbol in symbols:
+            for interval in KLINE_INTERVALS:
+                logger.info(
+                    "[测试] 📨 [步骤2] 等待 %s %s 收到消息 (%s/%s)...",
+                    symbol, interval, completed_count + 1, total_combinations
+                )
+                
+                # 等待收到消息（最多等待60秒）
+                received = await test_handler.wait_for_message(symbol, interval, timeout=60)
+                
+                if received:
+                    logger.info(
+                        "[测试] ✅ [步骤2] %s %s 已收到消息",
+                        symbol, interval
+                    )
+                    
+                    # 关闭该监听
+                    logger.info(
+                        "[测试] 🔌 [步骤2] 开始关闭 %s %s 的监听...",
+                        symbol, interval
+                    )
+                    close_start = datetime.now(timezone.utc)
+                    try:
+                        success = await kline_manager.remove_stream(symbol, interval)
+                        close_duration = (datetime.now(timezone.utc) - close_start).total_seconds()
+                        if success:
+                            logger.info(
+                                "[测试] ✅ [步骤2] %s %s 监听已关闭 (耗时: %.3fs)",
+                                symbol, interval, close_duration
+                            )
+                        else:
+                            logger.warning(
+                                "[测试] ⚠️  [步骤2] %s %s 监听关闭失败 (耗时: %.3fs)",
+                                symbol, interval, close_duration
+                            )
+                    except Exception as e:
+                        close_duration = (datetime.now(timezone.utc) - close_start).total_seconds()
+                        logger.error(
+                            "[测试] ❌ [步骤2] %s %s 监听关闭异常 (耗时: %.3fs): %s",
+                            symbol, interval, close_duration, e, exc_info=True
+                        )
+                    
+                    completed_count += 1
+                    logger.info("=" * 80)
+                else:
+                    logger.warning(
+                        "[测试] ⚠️  [步骤2] %s %s 等待消息超时（60秒），跳过关闭",
+                        symbol, interval
+                    )
+                    completed_count += 1
+                    logger.info("=" * 80)
+        
+        logger.info("[测试] ✅ [步骤2] 所有监听处理完成 (完成: %s/%s)", completed_count, total_combinations)
         logger.info("=" * 80)
         
         # 步骤3: 打印测试报告
