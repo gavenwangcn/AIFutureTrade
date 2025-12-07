@@ -25,7 +25,7 @@ import json
 import logging
 import traceback
 from collections import defaultdict
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional, Set
 
 # ============================================================================
@@ -56,6 +56,92 @@ logging.basicConfig(
     datefmt='%Y-%m-%d %H:%M:%S'
 )
 logger = logging.getLogger(__name__)
+
+
+# ============================================================================
+# 辅助函数
+# ============================================================================
+
+def print_kline_data(kline_data: Any, symbol: str, interval: str):
+    """打印K线数据用于测试验证（参考 websocket_klines.py 的格式）
+    
+    Args:
+        kline_data: K线数据对象或字典
+        symbol: 交易对符号
+        interval: 时间间隔
+    """
+    # 计算日期标签
+    today = datetime.now()
+    yesterday = today - timedelta(days=1)
+    
+    # 提取K线数据
+    k_data = None
+    kline_date = None
+    
+    try:
+        # 处理SDK返回的对象，而不是字典
+        if hasattr(kline_data, 'k'):
+            # 这是SDK返回的对象
+            k_data = kline_data.k
+            kline_date = datetime.fromtimestamp(k_data.t / 1000).date()
+        elif isinstance(kline_data, dict) and 'k' in kline_data:
+            # 字典格式
+            k_data = kline_data['k']
+            if isinstance(k_data, dict):
+                kline_date = datetime.fromtimestamp(k_data['t'] / 1000).date()
+            elif hasattr(k_data, 't'):
+                kline_date = datetime.fromtimestamp(k_data.t / 1000).date()
+        else:
+            # 尝试从规范化后的数据中提取
+            if isinstance(kline_data, dict) and 'kline_start_time' in kline_data:
+                kline_date = datetime.fromisoformat(kline_data['kline_start_time'].replace('Z', '+00:00')).date()
+        
+        # 判断日期标签
+        if kline_date:
+            if kline_date == today.date():
+                day_label = "今天"
+            elif kline_date == yesterday.date():
+                day_label = "昨天"
+            else:
+                day_label = str(kline_date)
+        else:
+            day_label = "未知日期"
+        
+        logger.info("=" * 80)
+        logger.info("=== %s %s - %s K线数据 ===", symbol, interval, day_label)
+        logger.info("=" * 80)
+        
+        # 打印K线数据
+        if hasattr(k_data, 't'):
+            # SDK对象格式
+            logger.info("开盘时间: %s", datetime.fromtimestamp(k_data.t / 1000).strftime('%Y-%m-%d %H:%M:%S'))
+            logger.info("收盘时间: %s", datetime.fromtimestamp(k_data.T / 1000).strftime('%Y-%m-%d %H:%M:%S'))
+            logger.info("开盘价: %s", k_data.o)
+            logger.info("最高价: %s", k_data.h)
+            logger.info("最低价: %s", k_data.l)
+            logger.info("收盘价: %s", k_data.c)
+            logger.info("成交量: %s", k_data.v)
+            logger.info("成交笔数: %s", k_data.n)
+            logger.info("是否完结: %s", k_data.x)
+        elif isinstance(k_data, dict):
+            # 字典格式
+            logger.info("开盘时间: %s", datetime.fromtimestamp(k_data['t'] / 1000).strftime('%Y-%m-%d %H:%M:%S'))
+            logger.info("收盘时间: %s", datetime.fromtimestamp(k_data['T'] / 1000).strftime('%Y-%m-%d %H:%M:%S'))
+            logger.info("开盘价: %s", k_data.get('o', 'N/A'))
+            logger.info("最高价: %s", k_data.get('h', 'N/A'))
+            logger.info("最低价: %s", k_data.get('l', 'N/A'))
+            logger.info("收盘价: %s", k_data.get('c', 'N/A'))
+            logger.info("成交量: %s", k_data.get('v', 'N/A'))
+            logger.info("成交笔数: %s", k_data.get('n', 'N/A'))
+            logger.info("是否完结: %s", k_data.get('x', 'N/A'))
+        else:
+            # 如果无法提取K线数据，打印原始数据
+            logger.info("原始数据: %s", json.dumps(kline_data, indent=2, ensure_ascii=False, default=str))
+        
+        logger.info("=" * 80)
+    except Exception as e:
+        logger.warning("[测试] ⚠️  [打印K线数据] 无法解析K线数据: %s", e)
+        logger.info("原始数据: %s", json.dumps(kline_data, indent=2, ensure_ascii=False, default=str))
 
 
 # ============================================================================
@@ -309,28 +395,12 @@ class KlineMessageTestHandler:
                         "timestamp": message_start_time.isoformat()
                     }
                 
-                # 如果是第一条消息（完结的K线），打印详细消息体
+                # 如果是第一条消息（完结的K线），打印K线数据（参考 websocket_klines.py 格式）
                 if is_first_message:
-                    # 确保 message_dict 已定义（用于打印）
-                    if message_dict is None:
-                        try:
-                            if hasattr(message, "model_dump"):
-                                message_dict = message.model_dump()
-                            elif hasattr(message, "__dict__"):
-                                message_dict = message.__dict__
-                            elif isinstance(message, dict):
-                                message_dict = message
-                            else:
-                                message_dict = {"raw_message": str(message)}
-                        except Exception:
-                            message_dict = {"raw_message": str(message)[:500]}
-                    
-                    logger.info("=" * 80)
                     logger.info("[测试] ✅ [收到完结K线] %s %s 收到第一条完结的K线消息 (x=True)", symbol, interval)
-                    logger.info("[测试] 📨 [消息体] 原始消息: %s", json.dumps(message_dict, indent=2, ensure_ascii=False, default=str))
-                    logger.info("[测试] 📨 [消息体] 规范化后: %s", json.dumps(normalized, indent=2, ensure_ascii=False, default=str))
+                    # 使用与 websocket_klines.py 相同的格式打印K线数据
+                    print_kline_data(message, symbol, interval)
                     logger.info("[测试] ✅ [消息处理] 这是完结的K线，将关闭监听")
-                    logger.info("=" * 80)
                 
                 # 只有成功处理的完结K线才标记为已收到（触发关闭监听）
                 event = self.message_received_events.get(key_tuple)
