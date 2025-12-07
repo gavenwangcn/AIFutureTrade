@@ -113,10 +113,19 @@ class DataAgentKlineManager:
     # 初始化方法
     # ============================================================================
     
-    def __init__(self, db: ClickHouseDatabase, max_symbols: int = 100):
+    def __init__(self, db: ClickHouseDatabase, max_symbols: int = 100, intervals: Optional[List[str]] = None):
+        """初始化 DataAgentKlineManager。
+        
+        Args:
+            db: ClickHouse数据库实例
+            max_symbols: 最大symbol数量
+            intervals: K线时间间隔列表，如果为None则使用全局配置 KLINE_INTERVALS
+        """
         self._db = db
-        # 每个symbol有多个interval（默认7个），所以最大连接数 = max_symbols * interval数量
-        self._max_connections = max_symbols * len(KLINE_INTERVALS)
+        # 使用传入的intervals或全局配置
+        self._intervals = intervals if intervals is not None else KLINE_INTERVALS
+        # 每个symbol有多个interval，所以最大连接数 = max_symbols * interval数量
+        self._max_connections = max_symbols * len(self._intervals)
         self._max_symbols = max_symbols
         # 客户端将在第一次使用时初始化，避免事件循环冲突
         self._client = None
@@ -837,7 +846,7 @@ class DataAgentKlineManager:
         """
         stream_start_time = datetime.now(timezone.utc)
         
-        if interval not in KLINE_INTERVALS:
+        if interval not in self._intervals:
             logger.warning("[DataAgentKline] ⚠️  [添加流] 不支持的interval: %s", interval)
             return False
         
@@ -1157,9 +1166,10 @@ class DataAgentKlineManager:
                 logger.info("[DataAgentKline] Removed broken connection: %s %s", symbol, interval)
     
     async def add_symbol_streams(self, symbol: str) -> Dict[str, Any]:
-        """为指定symbol添加所有interval的K线流（7个interval）。
+        """为指定symbol添加所有interval的K线流。
         
         在构建每个interval的监听连接前，会检查map中是否已经存在对应的连接。
+        使用的interval列表由初始化时的intervals参数决定（如果未提供则使用全局配置）。
         
         Args:
             symbol: 交易对符号
@@ -1197,7 +1207,7 @@ class DataAgentKlineManager:
             )
             
             existing_intervals = set()
-            for interval in KLINE_INTERVALS:
+            for interval in self._intervals:
                 key = (symbol_upper, interval)
                 if key in self._active_connections:
                     conn = self._active_connections[key]
@@ -1225,11 +1235,11 @@ class DataAgentKlineManager:
         
         logger.info(
             "[DataAgentKline] 📊 [构建K线监听] %s 已有连接数: %s/%s",
-            symbol_upper, len(existing_intervals), len(KLINE_INTERVALS)
+            symbol_upper, len(existing_intervals), len(self._intervals)
         )
         
         # 只为不存在的interval创建连接
-        for idx, interval in enumerate(KLINE_INTERVALS):
+        for idx, interval in enumerate(self._intervals):
             interval_start_time = datetime.now(timezone.utc)
             
             if interval in existing_intervals:
@@ -1242,7 +1252,7 @@ class DataAgentKlineManager:
             
             logger.info(
                 "[DataAgentKline] 🔨 [构建K线监听] 开始构建 %s %s (%s/%s) (时间: %s)",
-                symbol_upper, interval, idx + 1, len(KLINE_INTERVALS), interval_start_time.isoformat()
+                symbol_upper, interval, idx + 1, len(self._intervals), interval_start_time.isoformat()
             )
             
             try:
@@ -1287,7 +1297,7 @@ class DataAgentKlineManager:
             "success_count": success_count,
             "failed_count": failed_count,
             "skipped_count": skipped_count,
-            "total_count": len(KLINE_INTERVALS)
+            "total_count": len(self._intervals)
         }
         
         logger.info(
@@ -1395,7 +1405,7 @@ class DataAgentKlineManager:
                 symbols_set.add(conn.symbol)
             
             # 计算总连接数（每个symbol有7个interval）
-            connection_count = len(symbols_set) * len(KLINE_INTERVALS)
+            connection_count = len(symbols_set) * len(self._intervals)
             
             return {
                 "connection_count": connection_count,

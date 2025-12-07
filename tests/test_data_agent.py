@@ -781,7 +781,10 @@ async def test_data_agent_kline_processing(
     
     # 初始化数据库和kline_manager
     db = ClickHouseDatabase()
-    kline_manager = DataAgentKlineManager(db, max_symbols=100)
+    # 使用测试配置的interval列表，如果为None则使用data_agent的配置
+    test_intervals = TEST_KLINE_INTERVALS if TEST_KLINE_INTERVALS is not None else DATA_AGENT_KLINE_INTERVALS
+    # 将interval列表传递给DataAgentKlineManager，而不是使用全局配置
+    kline_manager = DataAgentKlineManager(db, max_symbols=100, intervals=test_intervals)
     
     # 创建测试处理器
     test_handler = KlineMessageTestHandler()
