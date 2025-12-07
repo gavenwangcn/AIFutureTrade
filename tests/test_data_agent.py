@@ -35,7 +35,7 @@ from typing import Any, Dict, List, Optional, Set
 # 测试用的symbol列表（默认只测试2个symbol，便于快速验证）
 # 可以通过修改此列表来调整测试的symbol
 TEST_SYMBOLS = [
-    "BTCUSDT"
+    "BTCUSDT", "ETHUSDT", "BNBUSDT", "SOLUSDT"
 ]
 
 # 测试用的K线时间间隔列表（默认7个interval，与data_agent默认配置一致）
@@ -60,7 +60,9 @@ PRINT_ALL_COMPLETED_MESSAGES = True
 # 只有在这个列表中的symbol才会打印所有后续的完结消息
 # 如果列表为空，则所有symbol都打印（当开关开启时）
 # 示例: ['BTCUSDT', 'ETHUSDT']
-PRINT_ALL_COMPLETED_MESSAGES_SYMBOLS = ['BTCUSDT']
+PRINT_ALL_COMPLETED_MESSAGES_SYMBOLS =  [
+    "BTCUSDT", "ETHUSDT", "BNBUSDT", "SOLUSDT"]
+
 
 # ============================================================================
 # 日志配置

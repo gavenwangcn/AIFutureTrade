@@ -2,10 +2,15 @@
 Data Agent 批量添加 Symbol 性能测试
 
 测试 data_agent 接收批量添加 symbol 指令时的性能表现：
-- 批量下发15个symbol一组
+- 批量下发symbol（可配置数量，默认15个）
 - 记录总共时长和详细日志
 - 记录返回信息
 - 使用 HTTP 请求（模拟 curl）方式测试
+
+配置说明：
+- TEST_SYMBOLS: 测试用的symbol列表，默认15个symbol
+- 可以通过修改 TEST_SYMBOLS 列表来调整测试的symbol
+- 支持通过命令行参数 --symbols 指定symbol列表
 
 手动测试命令（curl）：
 # 测试单个 symbol
@@ -52,6 +57,18 @@ except ImportError:
     print("[警告] requests 库未安装，将使用 subprocess 调用 curl")
 
 logger = logging.getLogger(__name__)
+
+# ============================================================================
+# 测试配置
+# ============================================================================
+
+# 测试用的symbol列表（默认15个symbol，便于性能测试）
+# 可以通过修改此列表来调整测试的symbol
+TEST_SYMBOLS = [
+    "BTCUSDT", "ETHUSDT", "BNBUSDT", "SOLUSDT", "ADAUSDT",
+    "XRPUSDT", "DOGEUSDT", "DOTUSDT", "MATICUSDT", "AVAXUSDT",
+    "LINKUSDT", "UNIUSDT", "LTCUSDT", "ATOMUSDT", "ETCUSDT"
+]
 
 
 class DataAgentBatchPerformanceTest:
@@ -406,7 +423,8 @@ class DataAgentBatchPerformanceTest:
                         "symbol": symbol,
                         "error": error
                     })
-                elif skipped_count == 7:  # 所有 interval 都跳过
+                elif skipped_count > 0 and success_count == 0 and failed_count == 0:
+                    # 所有 interval 都跳过（没有成功也没有失败，只有跳过）
                     skipped_symbols.append(symbol)
                 elif success_count > 0:
                     success_symbols.append({
@@ -533,12 +551,8 @@ class DataAgentBatchPerformanceTest:
             raise ConnectionError(error_msg)
         
         if test_symbols is None:
-            # 默认测试15个symbol
-            test_symbols = [
-                "BTCUSDT", "ETHUSDT", "BNBUSDT", "SOLUSDT", "ADAUSDT",
-                "XRPUSDT", "DOGEUSDT", "DOTUSDT", "MATICUSDT", "AVAXUSDT",
-                "LINKUSDT", "UNIUSDT", "LTCUSDT", "ATOMUSDT", "ETCUSDT"
-            ]
+            # 使用配置的默认symbol列表
+            test_symbols = TEST_SYMBOLS
         
         full_test_start_time = datetime.now(timezone.utc)
         test_results = []
@@ -654,12 +668,13 @@ def main():
     if args.symbols:
         test_symbols = args.symbols
     else:
-        # 默认测试15个symbol
-        test_symbols = [
-            "BTCUSDT", "ETHUSDT", "BNBUSDT", "SOLUSDT", "ADAUSDT",
-            "XRPUSDT", "DOGEUSDT", "DOTUSDT", "MATICUSDT", "AVAXUSDT",
-            "LINKUSDT", "UNIUSDT", "LTCUSDT", "ATOMUSDT", "ETCUSDT"
-        ]
+        # 使用配置的默认symbol列表
+        test_symbols = TEST_SYMBOLS
+    
+    logger.info("[性能测试] 📋 测试配置:")
+    logger.info("[性能测试]   - Symbol数量: %s", len(test_symbols))
+    logger.info("[性能测试]   - Symbol列表: %s", test_symbols)
+    logger.info("=" * 80)
     
     # 如果指定了 batch_size，分批测试
     if args.batch_size and len(test_symbols) > args.batch_size:
