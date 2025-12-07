@@ -1320,26 +1320,38 @@ class DataAgentKlineManager:
     # ============================================================================
     
     async def get_connection_count(self) -> int:
-        """清理过期的连接（超过24小时）。"""
-        async with self._lock:
-            expired_keys = []
-            for key, conn in self._active_connections.items():
-                if conn.is_expired():
-                    expired_keys.append(key)
-            
-            for key in expired_keys:
-                conn = self._active_connections[key]
-                await conn.close()
-                del self._active_connections[key]
-                logger.info("[DataAgentKline] Cleaned up expired connection: %s %s", key[0], key[1])
-    
-    async def _cleanup_broken_connections(self) -> None:
         """获取当前连接数。"""
         async with self._lock:
-            # 先清理过期连接和断开的连接
-            await self.cleanup_expired_connections()
-            await self._cleanup_broken_connections()
             return len(self._active_connections)
+    
+    async def _cleanup_broken_connections(self) -> None:
+        """清理断开的连接（检查连接是否仍然活跃）。"""
+        # 注意：不要在持有锁的情况下调用可能阻塞的操作（如 conn.close()）
+        # 先收集需要清理的连接，然后在锁外关闭它们
+        broken_keys = []
+        async with self._lock:
+            for key, conn in self._active_connections.items():
+                if not conn.is_active:
+                    broken_keys.append(key)
+        
+        # 在锁外关闭连接，避免阻塞
+        for key in broken_keys:
+            async with self._lock:
+                if key not in self._active_connections:
+                    continue
+                conn = self._active_connections[key]
+            
+            # 在锁外关闭连接
+            try:
+                await conn.close()
+            except Exception as e:
+                logger.debug("[DataAgentKline] Error closing broken connection: %s", e)
+            
+            # 再次获取锁删除连接
+            async with self._lock:
+                if key in self._active_connections:
+                    del self._active_connections[key]
+                    logger.info("[DataAgentKline] Cleaned up broken connection: %s %s", key[0], key[1])
     
     async def get_connection_status(self) -> Dict[str, Any]:
         """获取当前连接状态（JSON格式）。
@@ -1351,11 +1363,11 @@ class DataAgentKlineManager:
                 "symbols": [str, ...]  # symbol列表，不包含interval信息
             }
         """
+        # 先清理过期连接和断开的连接（在锁外执行，避免阻塞）
+        await self.cleanup_expired_connections()
+        await self._cleanup_broken_connections()
+        
         async with self._lock:
-            # 先清理过期连接和断开的连接
-            await self.cleanup_expired_connections()
-            await self._cleanup_broken_connections()
-            
             # 获取所有唯一的symbol（不包含interval信息）
             symbols_set = set()
             for key, conn in self._active_connections.items():
@@ -1370,26 +1382,8 @@ class DataAgentKlineManager:
             }
     
     async def get_connection_list(self) -> List[Dict[str, Any]]:
-        """清理断开的连接（检查连接是否仍然活跃）。"""
-        broken_keys = []
-        for key, conn in self._active_connections.items():
-            if not conn.is_active:
-                broken_keys.append(key)
-        
-        for key in broken_keys:
-            conn = self._active_connections[key]
-            try:
-                await conn.close()
-            except Exception as e:
-                logger.debug("[DataAgentKline] Error closing broken connection: %s", e)
-            del self._active_connections[key]
-            logger.info("[DataAgentKline] Cleaned up broken connection: %s %s", key[0], key[1])
-    
-    async def cleanup_all(self) -> None:
         """获取当前所有连接的详细信息。"""
         async with self._lock:
-            await self.cleanup_expired_connections()
-            await self._cleanup_broken_connections()
             connections = []
             for key, conn in self._active_connections.items():
                 connections.append({
@@ -1400,10 +1394,77 @@ class DataAgentKlineManager:
                 })
             return connections
     
+    async def cleanup_all(self) -> None:
+        """清理所有连接。
+        
+        该方法会：
+        1. 标记为正在关闭
+        2. 取消后台任务
+        3. 关闭所有连接
+        4. 清空连接字典
+        """
+        logger.info("[DataAgentKline] 🧹 [清理] 开始清理所有连接...")
+        self._is_closing = True
+        
+        # 取消后台任务
+        if hasattr(self, '_check_task'):
+            self._check_task.cancel()
+            try:
+                await self._check_task
+            except asyncio.CancelledError:
+                pass
+            except Exception as e:
+                logger.warning("[DataAgentKline] Error cancelling check task: %s", e)
+        
+        if hasattr(self, '_ping_task'):
+            self._ping_task.cancel()
+            try:
+                await self._ping_task
+            except asyncio.CancelledError:
+                pass
+            except Exception as e:
+                logger.warning("[DataAgentKline] Error cancelling ping task: %s", e)
+        
+        # 收集所有连接，在锁外关闭它们
+        connections_to_close = []
+        async with self._lock:
+            connections_to_close = list(self._active_connections.values())
+            self._active_connections.clear()
+        
+        logger.info("[DataAgentKline] 🧹 [清理] 需要关闭 %s 个连接", len(connections_to_close))
+        
+        # 在锁外关闭所有连接，避免阻塞
+        for idx, conn in enumerate(connections_to_close, 1):
+            try:
+                logger.debug(
+                    "[DataAgentKline] 🧹 [清理] 关闭连接 %s/%s: %s %s",
+                    idx, len(connections_to_close), conn.symbol, conn.interval
+                )
+                # 添加超时保护，避免关闭连接时卡住
+                await asyncio.wait_for(conn.close(), timeout=5.0)
+                logger.debug(
+                    "[DataAgentKline] ✅ [清理] 连接已关闭 %s/%s: %s %s",
+                    idx, len(connections_to_close), conn.symbol, conn.interval
+                )
+            except asyncio.TimeoutError:
+                logger.warning(
+                    "[DataAgentKline] ⚠️  [清理] 关闭连接超时 %s/%s: %s %s",
+                    idx, len(connections_to_close), conn.symbol, conn.interval
+                )
+            except Exception as e:
+                logger.warning(
+                    "[DataAgentKline] ⚠️  [清理] 关闭连接失败 %s/%s: %s %s: %s",
+                    idx, len(connections_to_close), conn.symbol, conn.interval, e
+                )
+        
+        logger.info("[DataAgentKline] ✅ [清理] 所有连接清理完成")
+    
     async def get_symbols(self) -> Set[str]:
         """获取当前所有正在同步的symbol。"""
+        # 先清理过期连接（在锁外执行，避免阻塞）
+        await self.cleanup_expired_connections()
+        
         async with self._lock:
-            await self.cleanup_expired_connections()
             symbols = set()
             for key, conn in self._active_connections.items():
                 symbols.add(conn.symbol)
@@ -1443,18 +1504,40 @@ class DataAgentKlineManager:
         
         该方法会检查所有活跃连接，找出已过期的连接（创建时间超过24小时），
         然后关闭这些连接并从活跃连接字典中删除。
+        
+        注意：为了避免在持有锁的情况下调用可能阻塞的操作，先收集需要清理的连接，
+        然后在锁外关闭它们。
         """
+        # 先收集需要清理的连接
+        expired_connections = []
         async with self._lock:
             expired_keys = []
             for key, conn in self._active_connections.items():
                 if conn.is_expired():
                     expired_keys.append(key)
+                    expired_connections.append((key, conn))
             
+            # 先从字典中删除
             for key in expired_keys:
-                conn = self._active_connections[key]
-                await conn.close()
                 del self._active_connections[key]
-                logger.info("[DataAgentKline] Cleaned up expired connection: %s %s", key[0], key[1])
+        
+        # 在锁外关闭连接，避免阻塞
+        for key, conn in expired_connections:
+            try:
+                logger.info("[DataAgentKline] 🧹 [清理过期] 关闭过期连接: %s %s", key[0], key[1])
+                # 添加超时保护，避免关闭连接时卡住
+                await asyncio.wait_for(conn.close(), timeout=5.0)
+                logger.info("[DataAgentKline] ✅ [清理过期] 过期连接已关闭: %s %s", key[0], key[1])
+            except asyncio.TimeoutError:
+                logger.warning(
+                    "[DataAgentKline] ⚠️  [清理过期] 关闭过期连接超时: %s %s",
+                    key[0], key[1]
+                )
+            except Exception as e:
+                logger.warning(
+                    "[DataAgentKline] ⚠️  [清理过期] 关闭过期连接失败: %s %s: %s",
+                    key[0], key[1], e
+                )
     
     async def _periodic_ping(self) -> None:
         """定期发送ping请求，保持WebSocket连接活跃。"""
