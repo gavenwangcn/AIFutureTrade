@@ -159,12 +159,8 @@ class KlineMessageTestHandler:
                 }
         
         try:
-            # 步骤0: 打印所有收到的消息内容（便于调试和确认消息类型）
-            logger.info("=" * 80)
-            logger.info("[测试] 📨 [收到消息] %s %s 收到消息", symbol, interval)
-            logger.info("[测试] 📨 [消息类型] 开始检查消息类型...")
-            
-            # 尝试将消息转换为可打印的格式
+            # 步骤0: 检查消息类型（不打印，只用于内部判断）
+            # 尝试将消息转换为可检查的格式
             message_dict = None
             try:
                 if hasattr(message, "model_dump"):
@@ -175,51 +171,26 @@ class KlineMessageTestHandler:
                     message_dict = message
                 else:
                     message_dict = {"raw_message": str(message)}
-                
-                # 打印消息内容
-                logger.info("[测试] 📨 [消息内容] %s", json.dumps(message_dict, indent=2, ensure_ascii=False, default=str))
             except Exception as e:
-                logger.warning("[测试] ⚠️  [消息内容] 无法序列化消息: %s, 原始消息: %s", e, str(message)[:500])
                 # 如果序列化失败，创建一个基本的字典
                 message_dict = {"raw_message": str(message)[:500], "serialization_error": str(e)}
             
             # 步骤0.1: 检查是否是订阅确认消息（如 {'result': None, 'id': '...'}）
-            is_subscription_confirmation = False
+            # 订阅确认消息不打印，直接跳过
             try:
                 if message_dict is not None and isinstance(message_dict, dict):
                     # 检查是否是订阅确认消息格式
                     if "result" in message_dict and "id" in message_dict:
-                        is_subscription_confirmation = True
-                        logger.info(
-                            "[测试] ✅ [消息类型] 这是订阅确认消息 (result=%s, id=%s)",
-                            message_dict.get("result"), message_dict.get("id")
+                        # 订阅确认消息不算在统计中，只是跳过（不打印）
+                        logger.debug(
+                            "[测试] ⏭️  [消息处理] 跳过订阅确认消息 %s %s (result=%s, id=%s)",
+                            symbol, interval, message_dict.get("result"), message_dict.get("id")
                         )
-                        logger.info("[测试] ⏭️  [消息处理] 跳过订阅确认消息，继续等待K线消息...")
-                        logger.info("=" * 80)
-                        # 订阅确认消息不算在统计中，只是跳过
                         return
             except Exception as e:
                 logger.debug("[测试] ⚠️  [消息类型] 检查订阅确认消息时出错: %s", e)
             
-            # 步骤0.2: 检查是否是K线消息（包含 'k' 字段）
-            is_kline_message = False
-            try:
-                if message_dict is not None and isinstance(message_dict, dict):
-                    if "k" in message_dict or (hasattr(message, "k") and message.k is not None):
-                        is_kline_message = True
-                        logger.info("[测试] ✅ [消息类型] 这是K线消息")
-                elif hasattr(message, "k") and message.k is not None:
-                    is_kline_message = True
-                    logger.info("[测试] ✅ [消息类型] 这是K线消息（通过对象属性检测）")
-            except Exception as e:
-                logger.debug("[测试] ⚠️  [消息类型] 检查K线消息时出错: %s", e)
-            
-            if not is_kline_message and not is_subscription_confirmation:
-                logger.warning("[测试] ⚠️  [消息类型] 未知消息类型，继续处理...")
-            
-            logger.info("=" * 80)
-            
-            # 步骤0.3: 检查空消息
+            # 步骤0.2: 检查空消息
             if message is None:
                 async with self._lock:
                     self.stats["skipped_messages"] += 1
@@ -268,7 +239,7 @@ class KlineMessageTestHandler:
                             
                             is_closed = k.get("x") or k.get("is_closed", False)
                             if not is_closed:
-                                # 这是未完结的K线，正常跳过，不算错误
+                                # 这是未完结的K线，正常跳过，不算错误（不打印）
                                 is_incomplete_kline = True
                                 async with self._lock:
                                     self.stats["skipped_messages"] += 1
@@ -340,6 +311,20 @@ class KlineMessageTestHandler:
                 
                 # 如果是第一条消息（完结的K线），打印详细消息体
                 if is_first_message:
+                    # 确保 message_dict 已定义（用于打印）
+                    if message_dict is None:
+                        try:
+                            if hasattr(message, "model_dump"):
+                                message_dict = message.model_dump()
+                            elif hasattr(message, "__dict__"):
+                                message_dict = message.__dict__
+                            elif isinstance(message, dict):
+                                message_dict = message
+                            else:
+                                message_dict = {"raw_message": str(message)}
+                        except Exception:
+                            message_dict = {"raw_message": str(message)[:500]}
+                    
                     logger.info("=" * 80)
                     logger.info("[测试] ✅ [收到完结K线] %s %s 收到第一条完结的K线消息 (x=True)", symbol, interval)
                     logger.info("[测试] 📨 [消息体] 原始消息: %s", json.dumps(message_dict, indent=2, ensure_ascii=False, default=str))
