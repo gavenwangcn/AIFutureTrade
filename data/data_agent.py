@@ -371,6 +371,7 @@ class DataAgentKlineManager:
             {
                 "success": bool,
                 "duration": float,
+                "connection": Optional[Any],  # 连接对象（供后续步骤使用）
                 "connection_type": Optional[str],  # 连接对象的类型名
                 "connection_id": Optional[int],  # 连接对象的ID
                 "error": Optional[str]
@@ -414,6 +415,7 @@ class DataAgentKlineManager:
             return {
                 "success": True,
                 "duration": duration,
+                "connection": connection,  # 返回连接对象供后续步骤使用
                 "connection_type": type(connection).__name__ if connection else None,
                 "connection_id": id(connection) if connection else None,
                 "error": None
@@ -427,6 +429,7 @@ class DataAgentKlineManager:
             return {
                 "success": False,
                 "duration": duration,
+                "connection": None,
                 "connection_type": None,
                 "connection_id": None,
                 "error": f"Timeout: {str(e)}"
@@ -440,6 +443,7 @@ class DataAgentKlineManager:
             return {
                 "success": False,
                 "duration": duration,
+                "connection": None,
                 "connection_type": None,
                 "connection_id": None,
                 "error": str(e)
@@ -539,9 +543,9 @@ class DataAgentKlineManager:
             {
                 "success": bool,
                 "duration": float,
-                "stream": Optional[Any],
-                "stream_type": Optional[str],
-                "stream_id": Optional[int],
+                "stream": Optional[Any],  # 流对象（供后续步骤使用）
+                "stream_type": Optional[str],  # 流对象的类型名
+                "stream_id": Optional[int],  # 流对象的ID
                 "error": Optional[str]
             }
         """
@@ -588,6 +592,7 @@ class DataAgentKlineManager:
             return {
                 "success": True,
                 "duration": duration,
+                "stream": stream,  # 返回流对象供后续步骤使用
                 "stream_type": type(stream).__name__ if stream else None,
                 "stream_id": id(stream) if stream else None,
                 "error": None
@@ -601,6 +606,7 @@ class DataAgentKlineManager:
             return {
                 "success": False,
                 "duration": duration,
+                "stream": None,
                 "stream_type": None,
                 "stream_id": None,
                 "error": f"Timeout: {str(e)}"
@@ -614,6 +620,7 @@ class DataAgentKlineManager:
             return {
                 "success": False,
                 "duration": duration,
+                "stream": None,
                 "stream_type": None,
                 "stream_id": None,
                 "error": str(e)

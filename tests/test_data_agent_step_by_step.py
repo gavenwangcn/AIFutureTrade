@@ -33,6 +33,7 @@ def make_json_serializable(obj: Any) -> Any:
     """将对象转换为可JSON序列化的格式。
     
     递归处理字典、列表等，将不可序列化的对象转换为字符串表示。
+    特别处理 connection 和 stream 对象，移除它们但保留类型和ID信息。
     
     Args:
         obj: 要转换的对象
@@ -45,7 +46,21 @@ def make_json_serializable(obj: Any) -> Any:
     elif isinstance(obj, (str, int, float, bool)):
         return obj
     elif isinstance(obj, dict):
-        return {k: make_json_serializable(v) for k, v in obj.items()}
+        result = {}
+        for k, v in obj.items():
+            # 跳过 connection 和 stream 对象，但保留类型和ID信息
+            if k in ('connection', 'stream'):
+                # 这些对象已经在结果中有 connection_type/stream_type 和 connection_id/stream_id
+                # 所以可以跳过，或者转换为字符串表示
+                try:
+                    type_name = type(v).__name__ if v else None
+                    obj_id = id(v) if v else None
+                    result[k] = f"<{type_name} object at {hex(obj_id) if obj_id else 'None'}>" if v else None
+                except Exception:
+                    result[k] = None
+            else:
+                result[k] = make_json_serializable(v)
+        return result
     elif isinstance(obj, (list, tuple)):
         return [make_json_serializable(item) for item in obj]
     elif isinstance(obj, set):
