@@ -37,11 +37,7 @@ TEST_INTERVALS = [
     "5m"
 ]
 
-# 每个interval等待消息的超时时间（秒）
-MESSAGE_WAIT_TIMEOUT = 60
-
-# 每个interval需要接收的消息数量（收到指定数量后关闭）
-MESSAGES_PER_INTERVAL = 2
+# 注意：每个interval会持续等待直到收到消息，不设置超时时间
 
 # ============================================================================
 # 日志配置
@@ -109,7 +105,8 @@ async def test_interval(
     symbol: str,
     interval: str,
     today: datetime,
-    yesterday: datetime
+    yesterday: datetime,
+    message_received_event: asyncio.Event
 ) -> Dict[str, Any]:
     """测试单个interval的K线数据订阅。
     
@@ -119,136 +116,149 @@ async def test_interval(
         interval: 时间间隔
         today: 今天的日期
         yesterday: 昨天的日期
+        message_received_event: 消息接收事件，收到消息后设置此事件
     
     Returns:
         包含测试结果的字典
     """
     logger.info("=" * 80)
-    logger.info("[WebSocketTest] 📡 开始测试 %s %s", symbol, interval)
+    logger.info("[WebSocketTest] [%s %s] 📡 开始构建监听", symbol, interval)
     logger.info("=" * 80)
     
-    # 控制订阅频率，确保符合要求（每秒不超过10个订阅消息）
-    logger.info("[WebSocketTest] ⏱️  订阅前等待1秒，确保不超过订阅频率限制...")
-    await asyncio.sleep(1)
-    
-    # 订阅K线流
-    logger.info("[WebSocketTest] 📡 正在订阅 %s %s 的K线流...", symbol, interval)
-    stream = await connection.kline_candlestick_streams(
-        symbol=symbol,
-        interval=interval,
-    )
-    logger.info("[WebSocketTest] ✅ %s %s 订阅成功", symbol, interval)
-    
-    # 存储接收到的K线数据
-    received_klines = []
-    
-    # 创建事件，用于等待数据接收完成
-    data_received_event = asyncio.Event()
-    
-    def on_message(data: Any):
-        """K线消息处理器"""
-        # 只处理完结的K线数据
-        is_final = False
-        kline_date = None
-        
-        try:
-            # 处理SDK返回的对象
-            if hasattr(data, 'k'):
-                # 这是SDK返回的对象
-                is_final = data.k.x
-                kline_date = datetime.fromtimestamp(data.k.t / 1000).date()
-            else:
-                # 兼容旧版或字典格式
-                is_final = data['k']['x']
-                kline_date = datetime.fromtimestamp(data['k']['t'] / 1000).date()
-            
-            if is_final:
-                received_klines.append(data)
-                
-                # 判断这是今天的还是昨天的K线
-                if kline_date == today.date():
-                    day_label = "今天"
-                elif kline_date == yesterday.date():
-                    day_label = "昨天"
-                else:
-                    day_label = str(kline_date)
-                
-                # 打印K线数据
-                print_kline_data(data, symbol, interval, day_label)
-                
-                logger.info(
-                    "[WebSocketTest] ✅ [%s %s] 收到第 %s 条完结K线数据 (日期: %s)",
-                    symbol, interval, len(received_klines), day_label
-                )
-                
-                # 当收集到足够的数据后取消订阅并设置事件
-                if len(received_klines) >= MESSAGES_PER_INTERVAL:
-                    logger.info(
-                        "[WebSocketTest] 📊 [%s %s] 已收到 %s 条消息，准备关闭订阅",
-                        symbol, interval, len(received_klines)
-                    )
-                    asyncio.create_task(stream.unsubscribe())
-                    data_received_event.set()
-        except Exception as e:
-            logger.error(
-                "[WebSocketTest] ❌ [%s %s] 处理消息时出错: %s",
-                symbol, interval, e, exc_info=True
-            )
-            # 打印数据的属性，便于调试
-            if hasattr(data, '__dict__'):
-                logger.error("[WebSocketTest] Data attributes: %s", data.__dict__)
-            elif isinstance(data, dict):
-                logger.error("[WebSocketTest] Data keys: %s", list(data.keys()))
-    
-    # 注册消息处理器
-    stream.on("message", on_message)
-    
-    # 等待数据接收完成
-    logger.info(
-        "[WebSocketTest] ⏳ [%s %s] 等待接收K线数据（最多等待 %s 秒，需要 %s 条消息）...",
-        symbol, interval, MESSAGE_WAIT_TIMEOUT, MESSAGES_PER_INTERVAL
-    )
+    stream = None
+    received_kline = None
     
     try:
-        # 等待数据接收完成，最多等待指定时间
-        await asyncio.wait_for(data_received_event.wait(), timeout=MESSAGE_WAIT_TIMEOUT)
+        # 订阅K线流
+        logger.info("[WebSocketTest] [%s %s] 📡 正在订阅K线流...", symbol, interval)
+        stream = await connection.kline_candlestick_streams(
+            symbol=symbol,
+            interval=interval,
+        )
+        logger.info("[WebSocketTest] [%s %s] ✅ 订阅成功", symbol, interval)
+        
+        def on_message(data: Any):
+            """K线消息处理器"""
+            nonlocal received_kline
+            
+            # 只处理完结的K线数据
+            is_final = False
+            kline_date = None
+            
+            try:
+                # 处理SDK返回的对象
+                if hasattr(data, 'k'):
+                    # 这是SDK返回的对象
+                    is_final = data.k.x
+                    kline_date = datetime.fromtimestamp(data.k.t / 1000).date()
+                else:
+                    # 兼容旧版或字典格式
+                    is_final = data['k']['x']
+                    kline_date = datetime.fromtimestamp(data['k']['t'] / 1000).date()
+                
+                if is_final:
+                    received_kline = data
+                    
+                    # 判断这是今天的还是昨天的K线
+                    if kline_date == today.date():
+                        day_label = "今天"
+                    elif kline_date == yesterday.date():
+                        day_label = "昨天"
+                    else:
+                        day_label = str(kline_date)
+                    
+                    # 打印K线数据
+                    logger.info("=" * 80)
+                    logger.info("[WebSocketTest] [%s %s] 📨 收到K线消息", symbol, interval)
+                    print_kline_data(data, symbol, interval, day_label)
+                    
+                    # 立即关闭订阅
+                    logger.info("[WebSocketTest] [%s %s] 🔌 收到消息后立即关闭订阅...", symbol, interval)
+                    asyncio.create_task(close_stream_async(stream, symbol, interval))
+                    
+                    # 设置事件，通知已收到消息
+                    if not message_received_event.is_set():
+                        message_received_event.set()
+            except Exception as e:
+                logger.error(
+                    "[WebSocketTest] [%s %s] ❌ 处理消息时出错: %s",
+                    symbol, interval, e, exc_info=True
+                )
+                # 打印数据的属性，便于调试
+                if hasattr(data, '__dict__'):
+                    logger.error("[WebSocketTest] [%s %s] Data attributes: %s", symbol, interval, data.__dict__)
+                elif isinstance(data, dict):
+                    logger.error("[WebSocketTest] [%s %s] Data keys: %s", symbol, interval, list(data.keys()))
+        
+        # 注册消息处理器
+        stream.on("message", on_message)
+        
+        # 等待数据接收完成（不设置超时，一直等待）
         logger.info(
-            "[WebSocketTest] ✅ [%s %s] 数据接收完成，共收到 %s 条消息",
-            symbol, interval, len(received_klines)
+            "[WebSocketTest] [%s %s] ⏳ 等待接收K线数据（持续等待，直到收到消息）...",
+            symbol, interval
         )
-    except asyncio.TimeoutError:
-        logger.warning(
-            "[WebSocketTest] ⚠️  [%s %s] 数据接收超时（已等待 %s 秒），当前收到 %s 条消息",
-            symbol, interval, MESSAGE_WAIT_TIMEOUT, len(received_klines)
+        
+        # 等待消息接收事件（不设置超时）
+        await message_received_event.wait()
+        
+        logger.info(
+            "[WebSocketTest] [%s %s] ✅ 已收到消息，测试完成",
+            symbol, interval
         )
+        logger.info("=" * 80)
+        
+        return {
+            "symbol": symbol,
+            "interval": interval,
+            "success": True,
+            "kline": received_kline
+        }
+        
+    except Exception as e:
+        logger.error(
+            "[WebSocketTest] [%s %s] ❌ 测试失败: %s",
+            symbol, interval, e, exc_info=True
+        )
+        # 如果出错，尝试关闭订阅
+        if stream:
+            try:
+                await close_stream_async(stream, symbol, interval)
+            except Exception:
+                pass
+        
+        return {
+            "symbol": symbol,
+            "interval": interval,
+            "success": False,
+            "error": str(e),
+            "kline": None
+        }
+
+
+async def close_stream_async(stream: Any, symbol: str, interval: str):
+    """异步关闭stream订阅。
     
-    # 关闭该interval的订阅
-    logger.info("[WebSocketTest] 🔌 [%s %s] 开始关闭订阅...", symbol, interval)
+    Args:
+        stream: 流对象
+        symbol: 交易对符号
+        interval: 时间间隔
+    """
+    logger.info("[WebSocketTest] [%s %s] 🔌 开始关闭订阅...", symbol, interval)
     close_start = datetime.now()
     try:
         await stream.unsubscribe()
         close_duration = (datetime.now() - close_start).total_seconds()
         logger.info(
-            "[WebSocketTest] ✅ [%s %s] 订阅已关闭 (耗时: %.3fs)",
+            "[WebSocketTest] [%s %s] ✅ 订阅已关闭 (耗时: %.3fs)",
             symbol, interval, close_duration
         )
     except Exception as e:
         close_duration = (datetime.now() - close_start).total_seconds()
         logger.error(
-            "[WebSocketTest] ❌ [%s %s] 关闭订阅失败 (耗时: %.3fs): %s",
+            "[WebSocketTest] [%s %s] ❌ 关闭订阅失败 (耗时: %.3fs): %s",
             symbol, interval, close_duration, e, exc_info=True
         )
-    
-    logger.info("=" * 80)
-    
-    return {
-        "symbol": symbol,
-        "interval": interval,
-        "received_count": len(received_klines),
-        "expected_count": MESSAGES_PER_INTERVAL,
-        "success": len(received_klines) >= MESSAGES_PER_INTERVAL,
-        "klines": received_klines
-    }
 
 
 async def kline_candlestick_streams(
@@ -302,42 +312,66 @@ async def kline_candlestick_streams(
         logger.info("[WebSocketTest]   - Interval列表: %s", test_intervals)
         logger.info("[WebSocketTest]   - 今天日期: %s", today.strftime('%Y-%m-%d'))
         logger.info("[WebSocketTest]   - 昨天日期: %s", yesterday.strftime('%Y-%m-%d'))
-        logger.info("[WebSocketTest]   - 每个interval等待超时: %s秒", MESSAGE_WAIT_TIMEOUT)
-        logger.info("[WebSocketTest]   - 每个interval需要消息数: %s", MESSAGES_PER_INTERVAL)
+        logger.info("[WebSocketTest]   - 等待模式: 持续等待直到收到消息（无超时）")
         logger.info("=" * 80)
         
-        # 存储所有interval的测试结果
-        all_results = []
+        # 同时构建所有interval的监听
+        logger.info("=" * 80)
+        logger.info("[WebSocketTest] 🚀 开始同时构建 %s 个interval的监听", len(test_intervals))
+        logger.info("[WebSocketTest] 📋 Interval列表: %s", test_intervals)
+        logger.info("=" * 80)
         
-        # 对每个interval进行测试
+        # 为每个interval创建独立的事件
+        interval_events = {}
+        for interval in test_intervals:
+            interval_events[interval] = asyncio.Event()
+        
+        # 同时创建所有interval的订阅任务
+        tasks = []
         for idx, interval in enumerate(test_intervals, 1):
             logger.info(
-                "[WebSocketTest] 🔄 处理 interval %s (%s/%s)",
-                interval, idx, len(test_intervals)
+                "[WebSocketTest] 🔨 [%s/%s] 创建 %s %s 的订阅任务...",
+                idx, len(test_intervals), test_symbol, interval
             )
             
-            try:
-                result = await test_interval(
+            # 控制订阅频率，确保符合要求（每秒不超过10个订阅消息）
+            if idx > 1:
+                await asyncio.sleep(0.1)  # 每个订阅间隔0.1秒
+            
+            task = asyncio.create_task(
+                test_interval(
                     connection,
                     test_symbol,
                     interval,
                     today,
-                    yesterday
+                    yesterday,
+                    interval_events[interval]
                 )
+            )
+            tasks.append((interval, task))
+        
+        logger.info("=" * 80)
+        logger.info("[WebSocketTest] ✅ 所有 %s 个interval的监听已同时构建完成", len(test_intervals))
+        logger.info("[WebSocketTest] ⏳ 等待所有interval收到消息...")
+        logger.info("=" * 80)
+        
+        # 等待所有interval都收到消息
+        all_results = []
+        for interval, task in tasks:
+            try:
+                result = await task
                 all_results.append(result)
             except Exception as e:
                 logger.error(
-                    "[WebSocketTest] ❌ [%s %s] 测试失败: %s",
+                    "[WebSocketTest] ❌ [%s %s] 任务执行失败: %s",
                     test_symbol, interval, e, exc_info=True
                 )
                 all_results.append({
                     "symbol": test_symbol,
                     "interval": interval,
-                    "received_count": 0,
-                    "expected_count": MESSAGES_PER_INTERVAL,
                     "success": False,
                     "error": str(e),
-                    "klines": []
+                    "kline": None
                 })
         
         # 打印测试结果汇总
@@ -354,14 +388,21 @@ async def kline_candlestick_streams(
         
         for result in all_results:
             status = "✅" if result.get("success", False) else "❌"
-            logger.info(
-                "[WebSocketTest] %s [%s %s] 收到 %s/%s 条消息",
-                status,
-                result["symbol"],
-                result["interval"],
-                result["received_count"],
-                result["expected_count"]
-            )
+            if result.get("success", False):
+                logger.info(
+                    "[WebSocketTest] %s [%s %s] 已收到消息并关闭",
+                    status,
+                    result["symbol"],
+                    result["interval"]
+                )
+            else:
+                logger.error(
+                    "[WebSocketTest] %s [%s %s] 失败: %s",
+                    status,
+                    result["symbol"],
+                    result["interval"],
+                    result.get("error", "未知错误")
+                )
         
         logger.info("=" * 80)
         
