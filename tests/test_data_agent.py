@@ -179,6 +179,10 @@ class KlineMessageTestHandler:
         # 记录每个symbol-interval组合收到的第一条消息（用于打印）
         self.first_messages: Dict[tuple, Dict] = {}
         
+        # 记录每个symbol的interval完成状态
+        # key: symbol, value: set of completed intervals
+        self.symbol_completed_intervals: Dict[str, Set[str]] = defaultdict(set)
+        
         # 锁（用于线程安全）
         self._lock = asyncio.Lock()
     
@@ -400,14 +404,18 @@ class KlineMessageTestHandler:
                     logger.info("[测试] ✅ [收到完结K线] %s %s 收到第一条完结的K线消息 (x=True)", symbol, interval)
                     # 使用与 websocket_klines.py 相同的格式打印K线数据
                     print_kline_data(message, symbol, interval)
-                    logger.info("[测试] ✅ [消息处理] 这是完结的K线，将关闭监听")
+                    logger.info("[测试] ✅ [消息处理] 这是完结的K线")
                 
-                # 只有成功处理的完结K线才标记为已收到（触发关闭监听）
+                # 只有成功处理的完结K线才标记为已收到
+                # 注意：不立即关闭监听，等待该symbol的所有interval都收到完结消息后再统一关闭
                 event = self.message_received_events.get(key_tuple)
                 if event and not event.is_set():
                     event.set()
+                    # 记录该interval已完成
+                    async with self._lock:
+                        self.symbol_completed_intervals[symbol.upper()].add(interval)
                     logger.debug(
-                        "[测试] ✅ [消息处理] %s %s 已收到完结的K线，标记为完成（将关闭监听）",
+                        "[测试] ✅ [消息处理] %s %s 已收到完结的K线，标记为完成（等待所有interval完成后再关闭）",
                         symbol, interval
                     )
                 
@@ -744,7 +752,7 @@ async def test_data_agent_kline_processing(
         
         logger.info("=" * 80)
         
-        # 步骤2: 同时等待所有symbol-interval组合收到完结的K线消息，收到后立即关闭监听
+        # 步骤2: 同时等待所有symbol-interval组合收到完结的K线消息，所有interval都收到后再统一关闭
         logger.info("[测试] 📨 [步骤2] 开始同时监听所有K线数据消息...")
         
         # 注册所有symbol-interval组合
@@ -755,11 +763,12 @@ async def test_data_agent_kline_processing(
         total_combinations = len(symbols) * len(KLINE_INTERVALS)
         logger.info("[测试] 📨 [步骤2] 总共需要等待 %s 个symbol-interval组合收到完结的K线消息", total_combinations)
         logger.info("[测试] 📨 [步骤2] 等待模式: 持续等待直到收到完结的K线（x=True），无超时限制")
+        logger.info("[测试] 📨 [步骤2] 关闭策略: 等待每个symbol的所有interval都收到完结消息后，统一关闭该symbol的所有订阅")
         logger.info("=" * 80)
         
-        # 定义单个symbol-interval的等待和关闭任务
-        async def wait_and_close_interval(symbol: str, interval: str) -> Dict[str, Any]:
-            """等待指定symbol-interval收到完结的K线消息，然后关闭监听。
+        # 定义单个symbol-interval的等待任务（不关闭，只等待）
+        async def wait_for_interval(symbol: str, interval: str) -> Dict[str, Any]:
+            """等待指定symbol-interval收到完结的K线消息（不关闭监听）。
             
             Args:
                 symbol: 交易对符号
@@ -782,34 +791,6 @@ async def test_data_agent_kline_processing(
                         "[测试] ✅ [步骤2] [%s %s] 已收到完结的K线消息",
                         symbol, interval
                     )
-                    
-                    # 立即关闭该监听
-                    logger.info(
-                        "[测试] 🔌 [步骤2] [%s %s] 开始关闭监听...",
-                        symbol, interval
-                    )
-                    close_start = datetime.now(timezone.utc)
-                    try:
-                        success = await kline_manager.remove_stream(symbol, interval)
-                        close_duration = (datetime.now(timezone.utc) - close_start).total_seconds()
-                        if success:
-                            logger.info(
-                                "[测试] ✅ [步骤2] [%s %s] 监听已关闭 (耗时: %.3fs)",
-                                symbol, interval, close_duration
-                            )
-                        else:
-                            logger.warning(
-                                "[测试] ⚠️  [步骤2] [%s %s] 监听关闭失败 (耗时: %.3fs)",
-                                symbol, interval, close_duration
-                            )
-                    except Exception as e:
-                        close_duration = (datetime.now(timezone.utc) - close_start).total_seconds()
-                        logger.error(
-                            "[测试] ❌ [步骤2] [%s %s] 监听关闭异常 (耗时: %.3fs): %s",
-                            symbol, interval, close_duration, e, exc_info=True
-                        )
-                    
-                    logger.info("=" * 80)
                     return {
                         "symbol": symbol,
                         "interval": interval,
@@ -846,7 +827,7 @@ async def test_data_agent_kline_processing(
         tasks = []
         for symbol in symbols:
             for interval in KLINE_INTERVALS:
-                task = asyncio.create_task(wait_and_close_interval(symbol, interval))
+                task = asyncio.create_task(wait_for_interval(symbol, interval))
                 tasks.append(task)
                 # 控制任务创建频率，避免过快
                 await asyncio.sleep(0.01)
@@ -857,7 +838,7 @@ async def test_data_agent_kline_processing(
         # 等待所有任务完成
         results = await asyncio.gather(*tasks, return_exceptions=True)
         
-        # 统计结果
+        # 统计结果并检查每个symbol的所有interval是否都已完成
         completed_count = 0
         success_count = 0
         failed_count = 0
@@ -877,12 +858,74 @@ async def test_data_agent_kline_processing(
                     failed_count += 1
         
         logger.info("=" * 80)
-        logger.info("[测试] ✅ [步骤2] 所有监听处理完成")
+        logger.info("[测试] ✅ [步骤2] 所有interval都已收到完结消息")
         logger.info("[测试] 📊 [步骤2] 结果统计:")
         logger.info("[测试]   - 总任务数: %s", total_combinations)
         logger.info("[测试]   - 完成数: %s", completed_count)
         logger.info("[测试]   - 成功数: %s", success_count)
         logger.info("[测试]   - 失败数: %s", failed_count)
+        logger.info("=" * 80)
+        
+        # 步骤2.1: 检查每个symbol的所有interval是否都已完成，完成后统一关闭该symbol的所有订阅
+        logger.info("[测试] 🔌 [步骤2.1] 开始检查并关闭已完成的symbol订阅...")
+        for symbol in symbols:
+            symbol_upper = symbol.upper()
+            completed_intervals = test_handler.symbol_completed_intervals.get(symbol_upper, set())
+            expected_intervals = set(KLINE_INTERVALS)
+            
+            logger.info(
+                "[测试] 📊 [步骤2.1] [%s] 已完成interval: %s/%s",
+                symbol_upper, len(completed_intervals), len(expected_intervals)
+            )
+            
+            # 检查是否所有interval都已完成
+            if completed_intervals == expected_intervals:
+                logger.info(
+                    "[测试] ✅ [步骤2.1] [%s] 所有interval都已完成，开始关闭该symbol的所有订阅...",
+                    symbol_upper
+                )
+                
+                # 关闭该symbol的所有interval订阅
+                close_start = datetime.now(timezone.utc)
+                close_success_count = 0
+                close_failed_count = 0
+                
+                for interval in KLINE_INTERVALS:
+                    try:
+                        success = await kline_manager.remove_stream(symbol_upper, interval)
+                        if success:
+                            close_success_count += 1
+                            logger.debug(
+                                "[测试] ✅ [步骤2.1] [%s %s] 订阅已关闭",
+                                symbol_upper, interval
+                            )
+                        else:
+                            close_failed_count += 1
+                            logger.warning(
+                                "[测试] ⚠️  [步骤2.1] [%s %s] 订阅关闭失败",
+                                symbol_upper, interval
+                            )
+                    except Exception as e:
+                        close_failed_count += 1
+                        logger.error(
+                            "[测试] ❌ [步骤2.1] [%s %s] 订阅关闭异常: %s",
+                            symbol_upper, interval, e, exc_info=True
+                        )
+                
+                close_duration = (datetime.now(timezone.utc) - close_start).total_seconds()
+                logger.info(
+                    "[测试] ✅ [步骤2.1] [%s] 所有订阅关闭完成 (耗时: %.3fs, 成功: %s, 失败: %s)",
+                    symbol_upper, close_duration, close_success_count, close_failed_count
+                )
+            else:
+                missing_intervals = expected_intervals - completed_intervals
+                logger.warning(
+                    "[测试] ⚠️  [步骤2.1] [%s] 还有 %s 个interval未完成: %s",
+                    symbol_upper, len(missing_intervals), missing_intervals
+                )
+        
+        logger.info("=" * 80)
+        logger.info("[测试] ✅ [步骤2] 所有监听处理完成")
         logger.info("=" * 80)
         
         # 步骤3: 打印测试报告
