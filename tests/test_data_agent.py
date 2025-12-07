@@ -4,13 +4,20 @@
 测试内容：
 1. 模拟 HTTP POST /symbols/add 请求，批量添加symbol的所有interval K线流
 2. 验证连接是否正常建立
-3. 监听所有接收到的K线消息
-4. 检查消息处理过程中是否有异常（包括 normalize_kline 和 insert_market_klines）
-5. 记录详细的统计信息（成功、失败、异常等）
-6. 测试所有interval（1m, 5m, 15m, 1h, 4h, 1d, 1w）
+3. 同时等待所有interval收到完结的K线消息（x=True）
+4. 每个interval收到完结的K线消息后立即关闭该监听
+5. 检查消息处理过程中是否有异常（包括 normalize_kline 和 insert_market_klines）
+6. 记录详细的统计信息（成功、失败、异常等）
+7. 测试所有interval（1m, 5m, 15m, 1h, 4h, 1d, 1w）
+
+测试逻辑（与 websocket_klines.py 一致）：
+- 同时构建所有interval的监听（使用 data_agent 封装的SDK）
+- 每个interval持续等待直到收到完结的K线消息（x=True），无超时限制
+- 收到完结的K线消息后立即关闭该interval的监听
+- 所有interval都完成后测试结束
 
 配置说明：
-- TEST_SYMBOLS: 测试用的symbol列表，默认只测试2个symbol，便于快速验证
+- TEST_SYMBOLS: 测试用的symbol列表，默认只测试1个symbol，便于快速验证
 - 可以通过修改 TEST_SYMBOLS 列表来调整测试的symbol
 """
 import asyncio
@@ -32,7 +39,8 @@ TEST_SYMBOLS = [
 ]
 
 # 等待接收消息的时间（秒）
-# 根据interval不同，消息频率也不同（1m最快，1w最慢）
+# 注意：实际测试中会持续等待直到收到完结的K线消息（x=True），不设置超时
+# 此配置仅用于其他场景
 MESSAGE_WAIT_TIME = 120
 
 # 统计信息打印间隔（秒）
@@ -94,13 +102,13 @@ class KlineMessageTestHandler:
         if key not in self.message_received_events:
             self.message_received_events[key] = asyncio.Event()
     
-    async def wait_for_message(self, symbol: str, interval: str, timeout: int = 60) -> bool:
+    async def wait_for_message(self, symbol: str, interval: str, timeout: Optional[int] = 60) -> bool:
         """等待指定symbol-interval组合收到消息。
         
         Args:
             symbol: 交易对符号
             interval: 时间间隔
-            timeout: 超时时间（秒）
+            timeout: 超时时间（秒），如果为None则一直等待
         
         Returns:
             如果收到消息返回True，超时返回False
@@ -111,8 +119,13 @@ class KlineMessageTestHandler:
             return False
         
         try:
-            await asyncio.wait_for(event.wait(), timeout=timeout)
-            return True
+            if timeout is None:
+                # 不设置超时，一直等待
+                await event.wait()
+                return True
+            else:
+                await asyncio.wait_for(event.wait(), timeout=timeout)
+                return True
         except asyncio.TimeoutError:
             return False
     
@@ -146,7 +159,67 @@ class KlineMessageTestHandler:
                 }
         
         try:
-            # 步骤0: 检查空消息
+            # 步骤0: 打印所有收到的消息内容（便于调试和确认消息类型）
+            logger.info("=" * 80)
+            logger.info("[测试] 📨 [收到消息] %s %s 收到消息", symbol, interval)
+            logger.info("[测试] 📨 [消息类型] 开始检查消息类型...")
+            
+            # 尝试将消息转换为可打印的格式
+            message_dict = None
+            try:
+                if hasattr(message, "model_dump"):
+                    message_dict = message.model_dump()
+                elif hasattr(message, "__dict__"):
+                    message_dict = message.__dict__
+                elif isinstance(message, dict):
+                    message_dict = message
+                else:
+                    message_dict = {"raw_message": str(message)}
+                
+                # 打印消息内容
+                logger.info("[测试] 📨 [消息内容] %s", json.dumps(message_dict, indent=2, ensure_ascii=False, default=str))
+            except Exception as e:
+                logger.warning("[测试] ⚠️  [消息内容] 无法序列化消息: %s, 原始消息: %s", e, str(message)[:500])
+                # 如果序列化失败，创建一个基本的字典
+                message_dict = {"raw_message": str(message)[:500], "serialization_error": str(e)}
+            
+            # 步骤0.1: 检查是否是订阅确认消息（如 {'result': None, 'id': '...'}）
+            is_subscription_confirmation = False
+            try:
+                if message_dict is not None and isinstance(message_dict, dict):
+                    # 检查是否是订阅确认消息格式
+                    if "result" in message_dict and "id" in message_dict:
+                        is_subscription_confirmation = True
+                        logger.info(
+                            "[测试] ✅ [消息类型] 这是订阅确认消息 (result=%s, id=%s)",
+                            message_dict.get("result"), message_dict.get("id")
+                        )
+                        logger.info("[测试] ⏭️  [消息处理] 跳过订阅确认消息，继续等待K线消息...")
+                        logger.info("=" * 80)
+                        # 订阅确认消息不算在统计中，只是跳过
+                        return
+            except Exception as e:
+                logger.debug("[测试] ⚠️  [消息类型] 检查订阅确认消息时出错: %s", e)
+            
+            # 步骤0.2: 检查是否是K线消息（包含 'k' 字段）
+            is_kline_message = False
+            try:
+                if message_dict is not None and isinstance(message_dict, dict):
+                    if "k" in message_dict or (hasattr(message, "k") and message.k is not None):
+                        is_kline_message = True
+                        logger.info("[测试] ✅ [消息类型] 这是K线消息")
+                elif hasattr(message, "k") and message.k is not None:
+                    is_kline_message = True
+                    logger.info("[测试] ✅ [消息类型] 这是K线消息（通过对象属性检测）")
+            except Exception as e:
+                logger.debug("[测试] ⚠️  [消息类型] 检查K线消息时出错: %s", e)
+            
+            if not is_kline_message and not is_subscription_confirmation:
+                logger.warning("[测试] ⚠️  [消息类型] 未知消息类型，继续处理...")
+            
+            logger.info("=" * 80)
+            
+            # 步骤0.3: 检查空消息
             if message is None:
                 async with self._lock:
                     self.stats["skipped_messages"] += 1
@@ -265,13 +338,23 @@ class KlineMessageTestHandler:
                         "timestamp": message_start_time.isoformat()
                     }
                 
-                # 如果是第一条消息，打印消息体
+                # 如果是第一条消息（完结的K线），打印详细消息体
                 if is_first_message:
                     logger.info("=" * 80)
-                    logger.info("[测试] 📨 [收到消息] %s %s 收到第一条K线消息", symbol, interval)
-                    logger.info("[测试] 📨 [消息体] 原始消息: %s", json.dumps(message, indent=2, ensure_ascii=False, default=str))
+                    logger.info("[测试] ✅ [收到完结K线] %s %s 收到第一条完结的K线消息 (x=True)", symbol, interval)
+                    logger.info("[测试] 📨 [消息体] 原始消息: %s", json.dumps(message_dict, indent=2, ensure_ascii=False, default=str))
                     logger.info("[测试] 📨 [消息体] 规范化后: %s", json.dumps(normalized, indent=2, ensure_ascii=False, default=str))
+                    logger.info("[测试] ✅ [消息处理] 这是完结的K线，将关闭监听")
                     logger.info("=" * 80)
+                
+                # 只有成功处理的完结K线才标记为已收到（触发关闭监听）
+                event = self.message_received_events.get(key_tuple)
+                if event and not event.is_set():
+                    event.set()
+                    logger.debug(
+                        "[测试] ✅ [消息处理] %s %s 已收到完结的K线，标记为完成（将关闭监听）",
+                        symbol, interval
+                    )
                 
             except Exception as e:
                 error_info = {
@@ -315,11 +398,7 @@ class KlineMessageTestHandler:
                 "[测试] ❌ [消息处理] 未预期的异常 %s %s: %s",
                 symbol, interval, e, exc_info=True
             )
-        finally:
-            # 标记已收到消息
-            event = self.message_received_events.get(key_tuple)
-            if event and not event.is_set():
-                event.set()
+            # 错误情况下不设置事件，继续等待
     
     def get_stats(self) -> Dict:
         """获取统计信息。"""
@@ -577,7 +656,8 @@ async def test_data_agent_kline_processing(
     logger.info("[测试]   - Interval数量: %s", len(KLINE_INTERVALS))
     logger.info("[测试]   - Interval列表: %s", KLINE_INTERVALS)
     logger.info("[测试]   - 总连接数: %s", len(symbols) * len(KLINE_INTERVALS))
-    logger.info("[测试]   - 等待消息时间: %s秒", wait_time)
+    logger.info("[测试]   - 等待模式: 持续等待直到收到完结的K线（x=True），无超时限制")
+    logger.info("[测试]   - 处理逻辑: 只处理完结的K线，未完结的K线会被跳过")
     logger.info("=" * 80)
     
     try:
@@ -609,8 +689,8 @@ async def test_data_agent_kline_processing(
         
         logger.info("=" * 80)
         
-        # 步骤2: 为每个symbol-interval组合等待接收消息，收到后关闭监听
-        logger.info("[测试] 📨 [步骤2] 开始监听K线数据消息并逐个关闭...")
+        # 步骤2: 同时等待所有symbol-interval组合收到完结的K线消息，收到后立即关闭监听
+        logger.info("[测试] 📨 [步骤2] 开始同时监听所有K线数据消息...")
         
         # 注册所有symbol-interval组合
         for symbol in symbols:
@@ -618,30 +698,39 @@ async def test_data_agent_kline_processing(
                 test_handler.register_symbol_interval(symbol, interval)
         
         total_combinations = len(symbols) * len(KLINE_INTERVALS)
-        logger.info("[测试] 📨 [步骤2] 总共需要等待 %s 个symbol-interval组合收到消息", total_combinations)
+        logger.info("[测试] 📨 [步骤2] 总共需要等待 %s 个symbol-interval组合收到完结的K线消息", total_combinations)
+        logger.info("[测试] 📨 [步骤2] 等待模式: 持续等待直到收到完结的K线（x=True），无超时限制")
         logger.info("=" * 80)
         
-        # 为每个symbol-interval组合等待消息并关闭
-        completed_count = 0
-        for symbol in symbols:
-            for interval in KLINE_INTERVALS:
-                logger.info(
-                    "[测试] 📨 [步骤2] 等待 %s %s 收到消息 (%s/%s)...",
-                    symbol, interval, completed_count + 1, total_combinations
-                )
-                
-                # 等待收到消息（最多等待60秒）
-                received = await test_handler.wait_for_message(symbol, interval, timeout=60)
+        # 定义单个symbol-interval的等待和关闭任务
+        async def wait_and_close_interval(symbol: str, interval: str) -> Dict[str, Any]:
+            """等待指定symbol-interval收到完结的K线消息，然后关闭监听。
+            
+            Args:
+                symbol: 交易对符号
+                interval: 时间间隔
+            
+            Returns:
+                包含处理结果的字典
+            """
+            logger.info(
+                "[测试] 📨 [步骤2] [%s %s] 开始等待完结的K线消息（持续等待，无超时）...",
+                symbol, interval
+            )
+            
+            try:
+                # 持续等待直到收到消息（不设置超时，一直等待）
+                received = await test_handler.wait_for_message(symbol, interval, timeout=None)
                 
                 if received:
                     logger.info(
-                        "[测试] ✅ [步骤2] %s %s 已收到消息",
+                        "[测试] ✅ [步骤2] [%s %s] 已收到完结的K线消息",
                         symbol, interval
                     )
                     
-                    # 关闭该监听
+                    # 立即关闭该监听
                     logger.info(
-                        "[测试] 🔌 [步骤2] 开始关闭 %s %s 的监听...",
+                        "[测试] 🔌 [步骤2] [%s %s] 开始关闭监听...",
                         symbol, interval
                     )
                     close_start = datetime.now(timezone.utc)
@@ -650,32 +739,95 @@ async def test_data_agent_kline_processing(
                         close_duration = (datetime.now(timezone.utc) - close_start).total_seconds()
                         if success:
                             logger.info(
-                                "[测试] ✅ [步骤2] %s %s 监听已关闭 (耗时: %.3fs)",
+                                "[测试] ✅ [步骤2] [%s %s] 监听已关闭 (耗时: %.3fs)",
                                 symbol, interval, close_duration
                             )
                         else:
                             logger.warning(
-                                "[测试] ⚠️  [步骤2] %s %s 监听关闭失败 (耗时: %.3fs)",
+                                "[测试] ⚠️  [步骤2] [%s %s] 监听关闭失败 (耗时: %.3fs)",
                                 symbol, interval, close_duration
                             )
                     except Exception as e:
                         close_duration = (datetime.now(timezone.utc) - close_start).total_seconds()
                         logger.error(
-                            "[测试] ❌ [步骤2] %s %s 监听关闭异常 (耗时: %.3fs): %s",
+                            "[测试] ❌ [步骤2] [%s %s] 监听关闭异常 (耗时: %.3fs): %s",
                             symbol, interval, close_duration, e, exc_info=True
                         )
                     
-                    completed_count += 1
                     logger.info("=" * 80)
+                    return {
+                        "symbol": symbol,
+                        "interval": interval,
+                        "success": True,
+                        "message_received": True
+                    }
                 else:
                     logger.warning(
-                        "[测试] ⚠️  [步骤2] %s %s 等待消息超时（60秒），跳过关闭",
+                        "[测试] ⚠️  [步骤2] [%s %s] 未收到消息（不应该发生，因为timeout=None）",
                         symbol, interval
                     )
-                    completed_count += 1
-                    logger.info("=" * 80)
+                    return {
+                        "symbol": symbol,
+                        "interval": interval,
+                        "success": False,
+                        "message_received": False,
+                        "error": "未收到消息"
+                    }
+            except Exception as e:
+                logger.error(
+                    "[测试] ❌ [步骤2] [%s %s] 等待消息时出错: %s",
+                    symbol, interval, e, exc_info=True
+                )
+                return {
+                    "symbol": symbol,
+                    "interval": interval,
+                    "success": False,
+                    "message_received": False,
+                    "error": str(e)
+                }
         
-        logger.info("[测试] ✅ [步骤2] 所有监听处理完成 (完成: %s/%s)", completed_count, total_combinations)
+        # 同时创建所有symbol-interval的等待任务
+        logger.info("[测试] 🚀 [步骤2] 同时创建 %s 个等待任务...", total_combinations)
+        tasks = []
+        for symbol in symbols:
+            for interval in KLINE_INTERVALS:
+                task = asyncio.create_task(wait_and_close_interval(symbol, interval))
+                tasks.append(task)
+                # 控制任务创建频率，避免过快
+                await asyncio.sleep(0.01)
+        
+        logger.info("[测试] ✅ [步骤2] 所有 %s 个等待任务已创建，开始并发等待...", len(tasks))
+        logger.info("=" * 80)
+        
+        # 等待所有任务完成
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        
+        # 统计结果
+        completed_count = 0
+        success_count = 0
+        failed_count = 0
+        
+        for result in results:
+            if isinstance(result, Exception):
+                failed_count += 1
+                logger.error(
+                    "[测试] ❌ [步骤2] 任务执行异常: %s",
+                    result, exc_info=True
+                )
+            elif isinstance(result, dict):
+                completed_count += 1
+                if result.get("success", False):
+                    success_count += 1
+                else:
+                    failed_count += 1
+        
+        logger.info("=" * 80)
+        logger.info("[测试] ✅ [步骤2] 所有监听处理完成")
+        logger.info("[测试] 📊 [步骤2] 结果统计:")
+        logger.info("[测试]   - 总任务数: %s", total_combinations)
+        logger.info("[测试]   - 完成数: %s", completed_count)
+        logger.info("[测试]   - 成功数: %s", success_count)
+        logger.info("[测试]   - 失败数: %s", failed_count)
         logger.info("=" * 80)
         
         # 步骤3: 打印测试报告
