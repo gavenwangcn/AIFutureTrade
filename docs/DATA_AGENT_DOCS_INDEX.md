@@ -17,7 +17,7 @@
 
 ---
 
-### 2. [调用链可视化图表](./DATA_AGENT_CALL_CHAIN_DIAGRAMS.md)
+### 2. [调用链可视化图表 (Mermaid)](./DATA_AGENT_CALL_CHAIN_DIAGRAMS.md)
 **Mermaid格式的可视化图表，包含：**
 - 系统启动流程
 - HTTP请求处理流程
@@ -36,7 +36,25 @@
 
 ---
 
-### 3. [API快速参考](./DATA_AGENT_API_REFERENCE.md)
+### 3. [调用链时序图 (PlantUML)](./DATA_AGENT_CALL_CHAIN_PLANTUML.md)
+**PlantUML格式的时序图，包含：**
+- 系统启动流程时序图
+- HTTP GET请求处理时序图
+- HTTP POST批量添加Symbol时序图
+- 添加单个流详细流程时序图
+- K线消息处理流程时序图
+- 连接清理流程时序图
+- 错误处理流程时序图
+- 定期任务流程时序图
+- 服务端口架构时序图
+- 并发处理模型时序图
+- 锁机制使用时序图
+
+**适合：** 详细查看方法调用顺序和交互流程
+
+---
+
+### 4. [API快速参考](./DATA_AGENT_API_REFERENCE.md)
 **API接口文档，包含：**
 - 服务端口说明
 - 所有HTTP接口（GET/POST）
@@ -51,7 +69,7 @@
 
 ---
 
-### 4. [清理资源代码逻辑](./CLEANUP_RESOURCE_LOGIC.md)
+### 5. [清理资源代码逻辑](./CLEANUP_RESOURCE_LOGIC.md)
 **清理资源代码的详细分析，包含：**
 - 问题分析
 - 修复后的处理逻辑
@@ -69,7 +87,10 @@
 → 阅读 [业务场景调用链分析](./DATA_AGENT_CALL_CHAIN_ANALYSIS.md)
 
 ### 想查看可视化流程图？
-→ 阅读 [调用链可视化图表](./DATA_AGENT_CALL_CHAIN_DIAGRAMS.md)
+→ 阅读 [调用链可视化图表 (Mermaid)](./DATA_AGENT_CALL_CHAIN_DIAGRAMS.md)
+
+### 想查看时序图？
+→ 阅读 [调用链时序图 (PlantUML)](./DATA_AGENT_CALL_CHAIN_PLANTUML.md)
 
 ### 想查找API接口？
 → 阅读 [API快速参考](./DATA_AGENT_API_REFERENCE.md)
@@ -83,11 +104,12 @@
 
 ```
 docs/
-├── DATA_AGENT_DOCS_INDEX.md          # 本文档（索引）
-├── DATA_AGENT_CALL_CHAIN_ANALYSIS.md # 详细分析
-├── DATA_AGENT_CALL_CHAIN_DIAGRAMS.md # 可视化图表
-├── DATA_AGENT_API_REFERENCE.md       # API参考
-└── CLEANUP_RESOURCE_LOGIC.md         # 清理逻辑
+├── DATA_AGENT_DOCS_INDEX.md              # 本文档（索引）
+├── DATA_AGENT_CALL_CHAIN_ANALYSIS.md     # 详细分析
+├── DATA_AGENT_CALL_CHAIN_DIAGRAMS.md     # 可视化图表 (Mermaid)
+├── DATA_AGENT_CALL_CHAIN_PLANTUML.md     # 时序图 (PlantUML)
+├── DATA_AGENT_API_REFERENCE.md           # API参考
+└── CLEANUP_RESOURCE_LOGIC.md             # 清理逻辑
 ```
 
 ---

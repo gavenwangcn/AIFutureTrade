@@ -1,12 +1,17 @@
 """
-测试 data_agent 接收K线数据消息后的处理逻辑
+测试 data_agent 接收构建symbol监听命令请求后的代码执行逻辑
 
 测试内容：
-1. 批量添加多个symbol（15个一组）的所有interval K线流
-2. 监听所有接收到的K线消息
-3. 检查消息处理过程中是否有异常（包括 normalize_kline 和 insert_market_klines）
-4. 记录详细的统计信息（成功、失败、异常等）
-5. 测试所有interval（1m, 5m, 15m, 1h, 4h, 1d, 1w）
+1. 模拟 HTTP POST /symbols/add 请求，批量添加symbol的所有interval K线流
+2. 验证连接是否正常建立
+3. 监听所有接收到的K线消息
+4. 检查消息处理过程中是否有异常（包括 normalize_kline 和 insert_market_klines）
+5. 记录详细的统计信息（成功、失败、异常等）
+6. 测试所有interval（1m, 5m, 15m, 1h, 4h, 1d, 1w）
+
+配置说明：
+- TEST_SYMBOLS: 测试用的symbol列表，默认只测试2个symbol，便于快速验证
+- 可以通过修改 TEST_SYMBOLS 列表来调整测试的symbol
 """
 import asyncio
 import json
@@ -16,7 +21,28 @@ from collections import defaultdict
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Set
 
-# 配置日志
+# ============================================================================
+# 测试配置
+# ============================================================================
+
+# 测试用的symbol列表（默认只测试2个symbol，便于快速验证）
+# 可以通过修改此列表来调整测试的symbol
+TEST_SYMBOLS = [
+    "BTCUSDT",
+    "ETHUSDT"
+]
+
+# 等待接收消息的时间（秒）
+# 根据interval不同，消息频率也不同（1m最快，1w最慢）
+MESSAGE_WAIT_TIME = 120
+
+# 统计信息打印间隔（秒）
+STATS_CHECK_INTERVAL = 10
+
+# ============================================================================
+# 日志配置
+# ============================================================================
+
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
@@ -24,6 +50,10 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+
+# ============================================================================
+# K线消息测试处理器
+# ============================================================================
 
 class KlineMessageTestHandler:
     """K线消息测试处理器，用于捕获和统计消息处理结果。"""
@@ -108,9 +138,8 @@ class KlineMessageTestHandler:
                     return
                 
                 logger.debug(
-                    "[测试] ✅ [消息处理] 步骤1/2: 规范化完成 %s %s (耗时: %.3fs, 规范化数据: %s)",
-                    symbol, interval, normalize_duration,
-                    {k: v for k, v in normalized.items() if k not in ['event_time', 'kline_start_time', 'kline_end_time']}
+                    "[测试] ✅ [消息处理] 步骤1/2: 规范化完成 %s %s (耗时: %.3fs)",
+                    symbol, interval, normalize_duration
                 )
             except Exception as e:
                 normalize_duration = (datetime.now(timezone.utc) - normalize_start_time).total_seconds()
@@ -274,10 +303,164 @@ class KlineMessageTestHandler:
         logger.info("=" * 80)
 
 
-async def test_data_agent_kline_processing():
-    """测试 data_agent 接收K线数据消息后的处理逻辑。"""
+# ============================================================================
+# 模拟HTTP请求处理
+# ============================================================================
+
+async def simulate_add_symbols_request(
+    kline_manager,
+    symbols: List[str],
+    per_symbol_timeout: int = 30
+) -> Dict[str, Any]:
+    """模拟 HTTP POST /symbols/add 请求的处理逻辑。
+    
+    该方法模拟 DataAgentCommandHandler._handle_add_symbols() 的核心逻辑，
+    但不通过HTTP服务器，直接调用 kline_manager 的方法。
+    
+    Args:
+        kline_manager: DataAgentKlineManager 实例
+        symbols: 要添加的symbol列表
+        per_symbol_timeout: 每个symbol的超时时间（秒）
+    
+    Returns:
+        包含处理结果的字典，格式与HTTP响应相同
+    """
+    request_start_time = datetime.now(timezone.utc)
+    
+    logger.info(
+        "[测试] 📥 [模拟请求] 模拟批量添加symbol请求 (时间: %s)",
+        request_start_time.isoformat()
+    )
+    logger.info(
+        "[测试] 📋 [模拟请求] 开始处理 %s 个symbol: %s",
+        len(symbols), symbols
+    )
+    
+    results = []
+    failed_symbols = []
+    
+    for idx, symbol in enumerate(symbols):
+        symbol_start_time = datetime.now(timezone.utc)
+        symbol_clean = symbol.upper().strip()
+        
+        if not symbol_clean:
+            logger.warning("[测试] ⚠️  [模拟请求] 跳过空symbol: %s", symbol)
+            continue
+        
+        logger.info(
+            "[测试] 🔨 [模拟请求] 开始处理 symbol %s (%s/%s) (时间: %s)",
+            symbol_clean, idx + 1, len(symbols), symbol_start_time.isoformat()
+        )
+        
+        try:
+            # 直接调用 kline_manager.add_symbol_streams()，模拟HTTP请求中的逻辑
+            result = await asyncio.wait_for(
+                kline_manager.add_symbol_streams(symbol_clean),
+                timeout=per_symbol_timeout
+            )
+            symbol_duration = (datetime.now(timezone.utc) - symbol_start_time).total_seconds()
+            
+            logger.info(
+                "[测试] ✅ [模拟请求] symbol %s 处理完成 (耗时: %.3fs, 结果: %s)",
+                symbol_clean, symbol_duration, result
+            )
+            
+            results.append({
+                "symbol": symbol_clean,
+                **result
+            })
+        except asyncio.TimeoutError:
+            symbol_duration = (datetime.now(timezone.utc) - symbol_start_time).total_seconds()
+            logger.error(
+                "[测试] ❌ [模拟请求] symbol %s 处理超时 (耗时: %.3fs, 超时设置: %ss)",
+                symbol_clean, symbol_duration, per_symbol_timeout
+            )
+            failed_symbols.append(symbol_clean)
+            results.append({
+                "symbol": symbol_clean,
+                "success_count": 0,
+                "failed_count": 0,
+                "skipped_count": 0,
+                "total_count": 7,
+                "error": f"Timeout after {per_symbol_timeout}s"
+            })
+        except Exception as e:
+            symbol_duration = (datetime.now(timezone.utc) - symbol_start_time).total_seconds()
+            logger.error(
+                "[测试] ❌ [模拟请求] symbol %s 处理失败 (耗时: %.3fs): %s",
+                symbol_clean, symbol_duration, e, exc_info=True
+            )
+            failed_symbols.append(symbol_clean)
+            results.append({
+                "symbol": symbol_clean,
+                "success_count": 0,
+                "failed_count": 0,
+                "skipped_count": 0,
+                "total_count": 7,
+                "error": str(e)
+            })
+    
+    # 获取当前连接状态
+    logger.info("[测试] 📊 [模拟请求] 获取当前连接状态...")
+    try:
+        status = await kline_manager.get_connection_status()
+        logger.info(
+            "[测试] ✅ [模拟请求] 连接状态获取成功: %s",
+            status
+        )
+    except Exception as e:
+        logger.error(
+            "[测试] ⚠️  [模拟请求] 获取连接状态失败: %s",
+            e, exc_info=True
+        )
+        status = {
+            "connection_count": 0,
+            "symbols": []
+        }
+    
+    request_duration = (datetime.now(timezone.utc) - request_start_time).total_seconds()
+    
+    response_data = {
+        "status": "ok" if not failed_symbols else "partial",
+        "results": results,
+        "current_status": status,
+        "summary": {
+            "total_symbols": len(symbols),
+            "success_count": len(results) - len(failed_symbols),
+            "failed_count": len(failed_symbols),
+            "failed_symbols": failed_symbols,
+            "duration_seconds": round(request_duration, 3)
+        }
+    }
+    
+    logger.info(
+        "[测试] 📤 [模拟请求] 请求处理完成 (总耗时: %.3fs, 状态: %s)",
+        request_duration, response_data["status"]
+    )
+    
+    return response_data
+
+
+# ============================================================================
+# 主测试函数
+# ============================================================================
+
+async def test_data_agent_kline_processing(
+    test_symbols: Optional[List[str]] = None,
+    message_wait_time: Optional[int] = None
+):
+    """测试 data_agent 接收构建symbol监听命令请求后的代码执行逻辑。
+    
+    Args:
+        test_symbols: 测试用的symbol列表，如果为None则使用默认配置 TEST_SYMBOLS
+        message_wait_time: 等待接收消息的时间（秒），如果为None则使用默认配置 MESSAGE_WAIT_TIME
+    """
     from data.data_agent import DataAgentKlineManager, KLINE_INTERVALS
     from common.database_clickhouse import ClickHouseDatabase
+    
+    # 使用配置参数或默认值
+    symbols = test_symbols if test_symbols is not None else TEST_SYMBOLS
+    wait_time = message_wait_time if message_wait_time is not None else MESSAGE_WAIT_TIME
     
     logger.info("=" * 80)
     logger.info("[测试] 🚀 开始测试 data_agent K线消息处理逻辑")
@@ -302,65 +485,54 @@ async def test_data_agent_kline_processing():
     kline_manager._handle_kline_message = test_handle_message
     logger.info("[测试] ✅ 消息处理器已替换为测试处理器")
     
-    # 测试用的symbol列表（15个）
-    test_symbols = [
-        "BTCUSDT", "ETHUSDT", "BNBUSDT", "SOLUSDT", "ADAUSDT",
-        "XRPUSDT", "DOGEUSDT", "DOTUSDT", "MATICUSDT", "AVAXUSDT",
-        "LINKUSDT", "UNIUSDT", "LTCUSDT", "ATOMUSDT", "ETCUSDT"
-    ]
-    
     logger.info("[测试] 📋 测试配置:")
-    logger.info("[测试]   - Symbol数量: %s", len(test_symbols))
+    logger.info("[测试]   - Symbol数量: %s", len(symbols))
+    logger.info("[测试]   - Symbol列表: %s", symbols)
     logger.info("[测试]   - Interval数量: %s", len(KLINE_INTERVALS))
-    logger.info("[测试]   - 总连接数: %s", len(test_symbols) * len(KLINE_INTERVALS))
-    logger.info("[测试]   - Symbol列表: %s", test_symbols)
+    logger.info("[测试]   - Interval列表: %s", KLINE_INTERVALS)
+    logger.info("[测试]   - 总连接数: %s", len(symbols) * len(KLINE_INTERVALS))
+    logger.info("[测试]   - 等待消息时间: %s秒", wait_time)
     logger.info("=" * 80)
     
     try:
-        # 步骤1: 批量添加所有symbol的所有interval
-        logger.info("[测试] 🔨 [步骤1] 开始批量添加symbol K线流...")
-        add_start_time = datetime.now(timezone.utc)
+        # 步骤1: 模拟 HTTP POST /symbols/add 请求，批量添加所有symbol的所有interval
+        logger.info("[测试] 🔨 [步骤1] 模拟批量添加symbol K线流请求...")
+        logger.info("[测试] 🔨 [步骤1] 模拟 HTTP POST /symbols/add 请求")
         
-        for idx, symbol in enumerate(test_symbols, 1):
-            logger.info(
-                "[测试] 🔨 [步骤1] 添加 symbol %s (%s/%s): %s",
-                symbol, idx, len(test_symbols), symbol
-            )
-            
-            try:
-                result = await kline_manager.add_symbol_streams(symbol)
-                logger.info(
-                    "[测试] ✅ [步骤1] symbol %s 添加完成: 成功=%s, 失败=%s, 跳过=%s",
-                    symbol, result["success_count"], result["failed_count"], result["skipped_count"]
-                )
-            except Exception as e:
-                logger.error(
-                    "[测试] ❌ [步骤1] symbol %s 添加失败: %s",
-                    symbol, e, exc_info=True
-                )
-        
-        add_duration = (datetime.now(timezone.utc) - add_start_time).total_seconds()
-        logger.info(
-            "[测试] ✅ [步骤1] 批量添加完成 (总耗时: %.3fs)",
-            add_duration
+        add_response = await simulate_add_symbols_request(
+            kline_manager,
+            symbols,
+            per_symbol_timeout=30
         )
+        
+        logger.info("[测试] ✅ [步骤1] 批量添加完成")
+        logger.info("[测试] 📊 [步骤1] 添加结果汇总:")
+        logger.info("[测试]   - 状态: %s", add_response["status"])
+        logger.info("[测试]   - 成功: %s 个", add_response["summary"]["success_count"])
+        logger.info("[测试]   - 失败: %s 个", add_response["summary"]["failed_count"])
+        logger.info("[测试]   - 总耗时: %.3fs", add_response["summary"]["duration_seconds"])
+        logger.info("[测试]   - 当前连接数: %s", add_response["current_status"].get("connection_count", 0))
+        logger.info("[测试]   - 当前symbol数: %s", len(add_response["current_status"].get("symbols", [])))
+        
+        if add_response["summary"]["failed_count"] > 0:
+            logger.warning(
+                "[测试] ⚠️  [步骤1] 有 %s 个symbol添加失败: %s",
+                add_response["summary"]["failed_count"],
+                add_response["summary"]["failed_symbols"]
+            )
+        
         logger.info("=" * 80)
         
         # 步骤2: 等待接收K线数据消息
         logger.info("[测试] 📨 [步骤2] 开始监听K线数据消息...")
-        logger.info("[测试] 📨 [步骤2] 等待时间: 120秒（每个symbol-interval组合至少接收1条消息）")
-        
-        # 等待足够的时间让所有连接都接收到至少一条消息
-        # 根据interval不同，消息频率也不同（1m最快，1w最慢）
-        wait_time = 120  # 等待120秒
+        logger.info("[测试] 📨 [步骤2] 等待时间: %s秒（每个symbol-interval组合至少接收1条消息）", wait_time)
         
         # 每10秒打印一次统计信息
-        check_interval = 10
         elapsed = 0
         
         while elapsed < wait_time:
-            await asyncio.sleep(check_interval)
-            elapsed += check_interval
+            await asyncio.sleep(STATS_CHECK_INTERVAL)
+            elapsed += STATS_CHECK_INTERVAL
             
             stats = test_handler.get_stats()
             logger.info(
@@ -391,7 +563,7 @@ async def test_data_agent_kline_processing():
         # 步骤5: 验证数据库中的数据
         logger.info("[测试] 🔍 [步骤4] 验证数据库中的数据...")
         try:
-            for symbol in test_symbols[:5]:  # 只验证前5个symbol
+            for symbol in symbols[:5]:  # 只验证前5个symbol
                 for interval in KLINE_INTERVALS[:3]:  # 只验证前3个interval
                     try:
                         klines = db.get_market_klines(symbol, interval, limit=1)
@@ -430,9 +602,39 @@ async def test_data_agent_kline_processing():
         logger.info("[测试] 🛑 测试已停止")
 
 
+# ============================================================================
+# 主入口
+# ============================================================================
+
 if __name__ == "__main__":
+    import argparse
+    
+    parser = argparse.ArgumentParser(description='测试 data_agent K线消息处理逻辑')
+    parser.add_argument(
+        '--symbols',
+        type=str,
+        nargs='+',
+        default=None,
+        help='测试用的symbol列表，例如: --symbols BTCUSDT ETHUSDT BNBUSDT'
+    )
+    parser.add_argument(
+        '--wait-time',
+        type=int,
+        default=None,
+        help='等待接收消息的时间（秒），默认使用配置中的 MESSAGE_WAIT_TIME'
+    )
+    
+    args = parser.parse_args()
+    
+    # 如果通过命令行参数指定了symbols，则使用命令行参数
+    test_symbols = args.symbols if args.symbols else TEST_SYMBOLS
+    wait_time = args.wait_time if args.wait_time else MESSAGE_WAIT_TIME
+    
     try:
-        asyncio.run(test_data_agent_kline_processing())
+        asyncio.run(test_data_agent_kline_processing(
+            test_symbols=test_symbols,
+            message_wait_time=wait_time
+        ))
     except KeyboardInterrupt:
         logger.info("[测试] ⚠️  测试被用户中断")
     except Exception as e:
