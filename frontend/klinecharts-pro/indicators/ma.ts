@@ -23,7 +23,7 @@ const ma: IndicatorTemplate = {
   shortName: 'MA',
   series: IndicatorSeries.Price,
   calcParams: [5, 20, 60, 99],
-  precision: 2,
+  precision: 6,
   shouldOhlc: true,
   shouldFormatBigNumber: false,
   visible: true,

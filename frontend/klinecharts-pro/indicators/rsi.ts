@@ -23,7 +23,7 @@ const rsi: IndicatorTemplate = {
   shortName: 'RSI',
   series: IndicatorSeries.Normal,
   calcParams: [6, 9], // RSI6、RSI9
-  precision: 2,
+  precision: 6,
   shouldOhlc: false,
   shouldFormatBigNumber: false,
   visible: true,

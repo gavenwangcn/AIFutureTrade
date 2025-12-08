@@ -23,7 +23,7 @@ const macd: IndicatorTemplate = {
   shortName: 'MACD',
   series: IndicatorSeries.Normal,
   calcParams: [12, 26, 9], // 快线周期、慢线周期、信号线周期
-  precision: 4,
+  precision: 6,
   shouldOhlc: false,
   shouldFormatBigNumber: false,
   visible: true,
