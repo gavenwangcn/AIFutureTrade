@@ -36,9 +36,9 @@ client = DerivativesTradingUsdsFutures(config_rest_api=configuration_rest_api)
 
 
 def test_kline_without_time_params():
-    """测试不带时间参数的K线数据获取"""
+    """测试不带时间参数的K线数据获取，验证limit=300是否返回300条数据"""
     logger.info("=" * 60)
-    logger.info("测试1: 不带startTime和endTime参数")
+    logger.info("测试1: 不带startTime和endTime参数（limit=300）")
     logger.info("=" * 60)
     try:
         response = client.rest_api.kline_candlestick_data(
@@ -47,10 +47,48 @@ def test_kline_without_time_params():
             limit=300
         )
         data = response.data()
-        logger.info(f"✅ 成功获取 {len(data)} 条K线数据")
+        count = len(data)
+        logger.info(f"✅ 成功获取 {count} 条K线数据")
+        
         if data:
-            logger.info(f"第一条K线时间: {data[0]}")
-            logger.info(f"最后一条K线时间: {data[-1]}")
+            # 解析第一条和最后一条K线的时间戳
+            first_kline = data[0]
+            last_kline = data[-1]
+            
+            # 如果是列表格式，第一个元素是时间戳（毫秒）
+            if isinstance(first_kline, (list, tuple)) and len(first_kline) > 0:
+                first_timestamp = first_kline[0]
+                last_timestamp = last_kline[0]
+            else:
+                # 如果是字典格式
+                first_timestamp = first_kline.get('open_time', first_kline.get('t', 0))
+                last_timestamp = last_kline.get('open_time', last_kline.get('t', 0))
+            
+            # 转换为datetime格式
+            first_datetime = datetime.fromtimestamp(first_timestamp / 1000, tz=timezone.utc) if first_timestamp else None
+            last_datetime = datetime.fromtimestamp(last_timestamp / 1000, tz=timezone.utc) if last_timestamp else None
+            
+            logger.info(f"第一条K线时间戳: {first_timestamp} -> {first_datetime.strftime('%Y-%m-%d %H:%M:%S UTC') if first_datetime else 'N/A'}")
+            logger.info(f"最后一条K线时间戳: {last_timestamp} -> {last_datetime.strftime('%Y-%m-%d %H:%M:%S UTC') if last_datetime else 'N/A'}")
+            
+            # 验证数据条数
+            if count == 300:
+                logger.info(f"✅ 成功获取到300条数据（符合预期）")
+            else:
+                logger.warning(f"⚠️  获取到{count}条数据，不是300条（limit=300）")
+            
+            # 验证时间差（5分钟周期，300条应该是300*5=1500分钟=25小时）
+            if first_timestamp and last_timestamp:
+                time_diff_ms = last_timestamp - first_timestamp
+                time_diff_minutes = time_diff_ms / 1000 / 60
+                expected_minutes = 300 * 5  # 300条 * 5分钟/条 = 1500分钟
+                logger.info(f"时间差: {time_diff_minutes:.1f} 分钟 ({time_diff_minutes/60:.2f} 小时)")
+                logger.info(f"预期时间差: {expected_minutes} 分钟 ({expected_minutes/60:.2f} 小时)")
+                if abs(time_diff_minutes - expected_minutes) <= 5:  # 允许5分钟误差
+                    logger.info(f"✅ 时间差验证通过（符合预期：300条 * 5分钟 = 1500分钟）")
+                else:
+                    logger.warning(f"⚠️  时间差不符合预期：实际{time_diff_minutes:.1f}分钟，预期{expected_minutes}分钟")
+        
         return True
     except Exception as e:
         logger.error(f"❌ 失败: {e}")
@@ -58,26 +96,27 @@ def test_kline_without_time_params():
 
 
 def test_kline_with_endtime_only_short_intervals():
-    """测试只带end_time参数（不传start_time）查询1m、5m、15m的K线数据，默认120条"""
+    """测试只带end_time参数（不传start_time）查询1m、5m、15m的K线数据，验证limit=300是否返回300条数据"""
     logger.info("=" * 60)
-    logger.info("测试4: 只带end_time参数查询1m、5m、15m K线数据（limit=120）")
+    logger.info("测试2: 只带end_time参数查询1m、5m、15m K线数据（limit=300）")
     logger.info("=" * 60)
     
     intervals = [
-        ("INTERVAL_1m", "1分钟"),
-        ("INTERVAL_5m", "5分钟"),
-        ("INTERVAL_15m", "15分钟")
+        ("INTERVAL_1m", "1分钟", 1),   # interval名称, 显示名称, 分钟数
+        ("INTERVAL_5m", "5分钟", 5),
+        ("INTERVAL_15m", "15分钟", 15)
     ]
     
     # end_time使用当前时间
     end_time = int(datetime.now(timezone.utc).timestamp() * 1000)
-    logger.info(f"end_time: {end_time} ({datetime.fromtimestamp(end_time/1000, tz=timezone.utc)})")
-    logger.info(f"limit: 120")
+    end_time_dt = datetime.fromtimestamp(end_time / 1000, tz=timezone.utc)
+    logger.info(f"end_time: {end_time} -> {end_time_dt.strftime('%Y-%m-%d %H:%M:%S UTC')}")
+    logger.info(f"limit: 300")
     logger.info("")
     
     results = {}
     
-    for interval_enum_key, interval_name in intervals:
+    for interval_enum_key, interval_name, minutes_per_kline in intervals:
         try:
             logger.info(f"--- 测试 {interval_name} ({interval_enum_key}) ---")
             
@@ -95,21 +134,47 @@ def test_kline_with_endtime_only_short_intervals():
             logger.info(f"✅ {interval_name}: 成功获取 {count} 条K线数据")
             if data:
                 # 解析第一条和最后一条K线的时间戳
-                first_kline = data[0] if isinstance(data[0], (list, tuple)) else data[0]
-                last_kline = data[-1] if isinstance(data[-1], (list, tuple)) else data[-1]
+                first_kline = data[0]
+                last_kline = data[-1]
                 
-                # 如果是列表格式，第一个元素是时间戳
-                first_timestamp = first_kline[0] if isinstance(first_kline, (list, tuple)) else first_kline.get('open_time', first_kline.get('t', 'N/A'))
-                last_timestamp = last_kline[0] if isinstance(last_kline, (list, tuple)) else last_kline.get('open_time', last_kline.get('t', 'N/A'))
-                
-                logger.info(f"   第一条K线时间戳: {first_timestamp}")
-                logger.info(f"   最后一条K线时间戳: {last_timestamp}")
-                
-                # 检查是否获取到120条
-                if count == 120:
-                    logger.info(f"   ✅ 成功获取到120条数据（符合预期）")
+                # 如果是列表格式，第一个元素是时间戳（毫秒）
+                if isinstance(first_kline, (list, tuple)) and len(first_kline) > 0:
+                    first_timestamp = first_kline[0]
+                    last_timestamp = last_kline[0]
                 else:
-                    logger.warning(f"   ⚠️  获取到{count}条数据，不是120条")
+                    # 如果是字典格式
+                    first_timestamp = first_kline.get('open_time', first_kline.get('t', 0))
+                    last_timestamp = last_kline.get('open_time', last_kline.get('t', 0))
+                
+                # 转换为datetime格式
+                first_datetime = datetime.fromtimestamp(first_timestamp / 1000, tz=timezone.utc) if first_timestamp else None
+                last_datetime = datetime.fromtimestamp(last_timestamp / 1000, tz=timezone.utc) if last_timestamp else None
+                
+                logger.info(f"   第一条K线时间戳: {first_timestamp} -> {first_datetime.strftime('%Y-%m-%d %H:%M:%S UTC') if first_datetime else 'N/A'}")
+                logger.info(f"   最后一条K线时间戳: {last_timestamp} -> {last_datetime.strftime('%Y-%m-%d %H:%M:%S UTC') if last_datetime else 'N/A'}")
+                
+                # 验证数据条数
+                if count == 300:
+                    logger.info(f"   ✅ 成功获取到300条数据（符合预期）")
+                else:
+                    logger.warning(f"   ⚠️  获取到{count}条数据，不是300条（limit=300）")
+                
+                # 验证时间差
+                if first_timestamp and last_timestamp:
+                    time_diff_ms = last_timestamp - first_timestamp
+                    time_diff_minutes = time_diff_ms / 1000 / 60
+                    expected_minutes = 300 * minutes_per_kline  # 300条 * 每条的分钟数
+                    expected_hours = expected_minutes / 60
+                    
+                    logger.info(f"   时间差: {time_diff_minutes:.1f} 分钟 ({time_diff_minutes/60:.2f} 小时)")
+                    logger.info(f"   预期时间差: {expected_minutes} 分钟 ({expected_hours:.2f} 小时)")
+                    
+                    # 允许一定误差（考虑到K线可能不完全连续）
+                    tolerance_minutes = minutes_per_kline  # 允许1个K线周期的误差
+                    if abs(time_diff_minutes - expected_minutes) <= tolerance_minutes:
+                        logger.info(f"   ✅ 时间差验证通过（符合预期：300条 * {minutes_per_kline}分钟 = {expected_minutes}分钟）")
+                    else:
+                        logger.warning(f"   ⚠️  时间差不符合预期：实际{time_diff_minutes:.1f}分钟，预期{expected_minutes}分钟（误差{abs(time_diff_minutes - expected_minutes):.1f}分钟）")
             logger.info("")
             
         except TypeError as e:
@@ -133,34 +198,68 @@ def test_kline_with_endtime_only_short_intervals():
 
 
 def test_kline_with_endtime_only_1d():
-    """测试只带end_time参数（不传start_time）查询1天K线数据，默认120条"""
+    """测试只带end_time参数（不传start_time）查询1天K线数据，验证limit=300是否返回300条数据"""
     logger.info("=" * 60)
-    logger.info("测试5: 只带end_time参数查询1天K线数据（limit=120）")
+    logger.info("测试3: 只带end_time参数查询1天K线数据（limit=300）")
     logger.info("=" * 60)
     try:
         # end_time使用当前时间（或可以设置为过去某个时间点）
         end_time = int(datetime.now(timezone.utc).timestamp() * 1000)
-        logger.info(f"end_time: {end_time} ({datetime.fromtimestamp(end_time/1000, tz=timezone.utc)})")
+        end_time_dt = datetime.fromtimestamp(end_time / 1000, tz=timezone.utc)
+        logger.info(f"end_time: {end_time} -> {end_time_dt.strftime('%Y-%m-%d %H:%M:%S UTC')}")
         logger.info(f"interval: 1d (1天)")
-        logger.info(f"limit: 120")
+        logger.info(f"limit: 300")
         
         response = client.rest_api.kline_candlestick_data(
             symbol="BTCUSDT",
             interval=KlineCandlestickDataIntervalEnum["INTERVAL_1d"].value,
-            limit=120,
+            limit=300,
             start_time=None,  # 不传入start_time
             end_time=end_time  # 只传入end_time
         )
         data = response.data()
-        logger.info(f"✅ 成功获取 {len(data)} 条K线数据（1天周期，只带end_time）")
+        count = len(data)
+        logger.info(f"✅ 成功获取 {count} 条K线数据（1天周期，只带end_time）")
+        
         if data:
-            logger.info(f"第一条K线时间: {data[0]}")
-            logger.info(f"最后一条K线时间: {data[-1]}")
-            # 检查是否获取到120条
-            if len(data) == 120:
-                logger.info(f"✅ 成功获取到120条数据（符合预期）")
+            # 解析第一条和最后一条K线的时间戳
+            first_kline = data[0]
+            last_kline = data[-1]
+            
+            # 如果是列表格式，第一个元素是时间戳（毫秒）
+            if isinstance(first_kline, (list, tuple)) and len(first_kline) > 0:
+                first_timestamp = first_kline[0]
+                last_timestamp = last_kline[0]
             else:
-                logger.warning(f"⚠️  获取到{len(data)}条数据，不是120条（可能数据不足）")
+                # 如果是字典格式
+                first_timestamp = first_kline.get('open_time', first_kline.get('t', 0))
+                last_timestamp = last_kline.get('open_time', last_kline.get('t', 0))
+            
+            # 转换为datetime格式
+            first_datetime = datetime.fromtimestamp(first_timestamp / 1000, tz=timezone.utc) if first_timestamp else None
+            last_datetime = datetime.fromtimestamp(last_timestamp / 1000, tz=timezone.utc) if last_timestamp else None
+            
+            logger.info(f"第一条K线时间戳: {first_timestamp} -> {first_datetime.strftime('%Y-%m-%d %H:%M:%S UTC') if first_datetime else 'N/A'}")
+            logger.info(f"最后一条K线时间戳: {last_timestamp} -> {last_datetime.strftime('%Y-%m-%d %H:%M:%S UTC') if last_datetime else 'N/A'}")
+            
+            # 验证数据条数
+            if count == 300:
+                logger.info(f"✅ 成功获取到300条数据（符合预期）")
+            else:
+                logger.warning(f"⚠️  获取到{count}条数据，不是300条（可能数据不足，300天=约10个月历史数据）")
+            
+            # 验证时间差（1天周期，300条应该是300天）
+            if first_timestamp and last_timestamp:
+                time_diff_ms = last_timestamp - first_timestamp
+                time_diff_days = time_diff_ms / 1000 / 60 / 60 / 24
+                expected_days = 300  # 300条 * 1天/条 = 300天
+                logger.info(f"时间差: {time_diff_days:.1f} 天 ({time_diff_days/30:.2f} 个月)")
+                logger.info(f"预期时间差: {expected_days} 天 ({expected_days/30:.2f} 个月)")
+                if abs(time_diff_days - expected_days) <= 1:  # 允许1天误差
+                    logger.info(f"✅ 时间差验证通过（符合预期：300条 * 1天 = 300天）")
+                else:
+                    logger.warning(f"⚠️  时间差不符合预期：实际{time_diff_days:.1f}天，预期{expected_days}天")
+        
         return True
     except TypeError as e:
         logger.warning(f"⚠️  TypeError: SDK方法不支持end_time参数 - {e}")
@@ -171,16 +270,17 @@ def test_kline_with_endtime_only_1d():
 
 
 def test_kline_with_endtime_only_1w():
-    """测试只带end_time参数（不传start_time）查询1周K线数据，默认120条"""
+    """测试只带end_time参数（不传start_time）查询1周K线数据，验证limit=300是否返回300条数据"""
     logger.info("=" * 60)
-    logger.info("测试5: 只带end_time参数查询1周K线数据（limit=120）")
+    logger.info("测试4: 只带end_time参数查询1周K线数据（limit=300）")
     logger.info("=" * 60)
     try:
         # end_time使用当前时间（或可以设置为过去某个时间点）
         end_time = int(datetime.now(timezone.utc).timestamp() * 1000)
-        logger.info(f"end_time: {end_time} ({datetime.fromtimestamp(end_time/1000, tz=timezone.utc)})")
+        end_time_dt = datetime.fromtimestamp(end_time / 1000, tz=timezone.utc)
+        logger.info(f"end_time: {end_time} -> {end_time_dt.strftime('%Y-%m-%d %H:%M:%S UTC')}")
         logger.info(f"interval: 1w (1周)")
-        logger.info(f"limit: 120")
+        logger.info(f"limit: 300")
         
         response = client.rest_api.kline_candlestick_data(
             symbol="BTCUSDT",
@@ -190,15 +290,48 @@ def test_kline_with_endtime_only_1w():
             end_time=end_time  # 只传入end_time
         )
         data = response.data()
-        logger.info(f"✅ 成功获取 {len(data)} 条K线数据（1周周期，只带end_time）")
+        count = len(data)
+        logger.info(f"✅ 成功获取 {count} 条K线数据（1周周期，只带end_time）")
+        
         if data:
-            logger.info(f"第一条K线时间: {data[0]}")
-            logger.info(f"最后一条K线时间: {data[-1]}")
-            # 检查是否获取到120条
-            if len(data) == 120:
-                logger.info(f"✅ 成功获取到120条数据（符合预期）")
+            # 解析第一条和最后一条K线的时间戳
+            first_kline = data[0]
+            last_kline = data[-1]
+            
+            # 如果是列表格式，第一个元素是时间戳（毫秒）
+            if isinstance(first_kline, (list, tuple)) and len(first_kline) > 0:
+                first_timestamp = first_kline[0]
+                last_timestamp = last_kline[0]
             else:
-                logger.warning(f"⚠️  获取到{len(data)}条数据，不是120条（可能数据不足，120周=约2.3年历史数据）")
+                # 如果是字典格式
+                first_timestamp = first_kline.get('open_time', first_kline.get('t', 0))
+                last_timestamp = last_kline.get('open_time', last_kline.get('t', 0))
+            
+            # 转换为datetime格式
+            first_datetime = datetime.fromtimestamp(first_timestamp / 1000, tz=timezone.utc) if first_timestamp else None
+            last_datetime = datetime.fromtimestamp(last_timestamp / 1000, tz=timezone.utc) if last_timestamp else None
+            
+            logger.info(f"第一条K线时间戳: {first_timestamp} -> {first_datetime.strftime('%Y-%m-%d %H:%M:%S UTC') if first_datetime else 'N/A'}")
+            logger.info(f"最后一条K线时间戳: {last_timestamp} -> {last_datetime.strftime('%Y-%m-%d %H:%M:%S UTC') if last_datetime else 'N/A'}")
+            
+            # 验证数据条数
+            if count == 300:
+                logger.info(f"✅ 成功获取到300条数据（符合预期）")
+            else:
+                logger.warning(f"⚠️  获取到{count}条数据，不是300条（可能数据不足，300周=约5.8年历史数据）")
+            
+            # 验证时间差（1周周期，300条应该是300周）
+            if first_timestamp and last_timestamp:
+                time_diff_ms = last_timestamp - first_timestamp
+                time_diff_weeks = time_diff_ms / 1000 / 60 / 60 / 24 / 7
+                expected_weeks = 300  # 300条 * 1周/条 = 300周
+                logger.info(f"时间差: {time_diff_weeks:.1f} 周 ({time_diff_weeks/52:.2f} 年)")
+                logger.info(f"预期时间差: {expected_weeks} 周 ({expected_weeks/52:.2f} 年)")
+                if abs(time_diff_weeks - expected_weeks) <= 1:  # 允许1周误差
+                    logger.info(f"✅ 时间差验证通过（符合预期：300条 * 1周 = 300周）")
+                else:
+                    logger.warning(f"⚠️  时间差不符合预期：实际{time_diff_weeks:.1f}周，预期{expected_weeks}周")
+        
         return True
     except TypeError as e:
         logger.warning(f"⚠️  TypeError: SDK方法不支持end_time参数 - {e}")
