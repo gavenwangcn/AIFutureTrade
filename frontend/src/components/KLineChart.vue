@@ -273,11 +273,26 @@ onUnmounted(() => {
   background: #fff;
   border-radius: 8px;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-  width: 75%;
-  height: 75vh;
+  width: 80%;
+  height: 85vh;
   display: flex;
   flex-direction: column;
   overflow: hidden;
+}
+
+/* 响应式调整，确保在不同屏幕尺寸下都能占满3/4屏幕 */
+@media (max-width: 1200px) {
+  .kline-modal-content {
+    width: 85%;
+    height: 90vh;
+  }
+}
+
+@media (max-width: 768px) {
+  .kline-modal-content {
+    width: 95%;
+    height: 95vh;
+  }
 }
 
 .kline-modal-header {
