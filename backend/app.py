@@ -1215,10 +1215,13 @@ def get_market_klines():
         
         symbol = request.args.get('symbol', '').upper()
         interval = request.args.get('interval', '5m')
-        limit = request.args.get('limit', type=int) or 500
+        # 根据数据源设置不同的默认limit
+        source = KLINE_DATA_SOURCE  # 从配置文件获取数据源，不再从请求参数获取
+        # SDK模式默认120条，DB模式默认500条
+        default_limit = 120 if source == 'sdk' else 500
+        limit = request.args.get('limit', type=int) or default_limit
         start_time_str = request.args.get('start_time')
         end_time_str = request.args.get('end_time')
-        source = KLINE_DATA_SOURCE  # 从配置文件获取数据源，不再从请求参数获取
         
         if not symbol:
             return jsonify({'error': 'symbol parameter is required'}), 400
@@ -1248,14 +1251,18 @@ def get_market_klines():
             except ValueError:
                 return jsonify({'error': 'invalid end_time format. Use ISO format'}), 400
         
-        # 查询K线数据
-        logger.info(f"[API] 获取K线数据请求: symbol={symbol}, interval={interval}, limit={limit}, source={source}, start_time={start_time_str}, end_time={end_time_str}")
+        # 获取客户端IP地址
+        client_ip = request.remote_addr
+        
+        # 查询K线数据，添加客户端IP信息
+        logger.info(f"[API] 获取K线历史数据请求: symbol={symbol}, interval={interval}, limit={limit}, source={source}, start_time={start_time_str}, end_time={end_time_str}, client_ip={client_ip}")
         
         klines = []
         
         if source == 'db':
             # 从数据库获取数据
             from common.database_clickhouse import ClickHouseDatabase
+            logger.info(f"[API] 从数据库获取K线数据: symbol={symbol}, interval={interval}")
             clickhouse_db = ClickHouseDatabase(auto_init_tables=False)
             klines = clickhouse_db.get_market_klines(
                 symbol=symbol,
@@ -1272,8 +1279,9 @@ def get_market_klines():
             sdk_limit = limit
             if sdk_limit > 120:
                 sdk_limit = 120
-                logger.info(f"[API] SDK模式下限制limit为120，原请求limit={limit}")
+                logger.debug(f"[API] SDK模式下限制limit为120，原请求limit={limit}")
             
+            logger.info(f"[API] 从SDK获取K线数据: symbol={symbol}, interval={interval}, limit={sdk_limit}")
             # 调用SDK获取K线数据
             klines = market_fetcher._futures_client.get_klines(
                 symbol=symbol,
@@ -1297,9 +1305,9 @@ def get_market_klines():
                 })
             klines = formatted_klines
         
-        # 记录返回数据信息
+        # 记录返回数据信息，添加客户端IP
         klines_count = len(klines) if klines else 0
-        logger.info(f"[API] K线数据查询完成: symbol={symbol}, interval={interval}, source={source}, 返回数据条数={klines_count}")
+        logger.info(f"[API] 获取K线历史数据查询完成: symbol={symbol}, interval={interval}, source={source}, 返回数据条数={klines_count}, client_ip={client_ip}")
         
         if klines_count > 0:
             # 记录第一条和最后一条数据的时间戳（用于调试）
@@ -1307,16 +1315,20 @@ def get_market_klines():
             last_kline = klines[-1]
             first_timestamp = first_kline.get('timestamp', 'N/A')
             last_timestamp = last_kline.get('timestamp', 'N/A')
-            logger.info(f"[API] K线数据时间范围: 第一条timestamp={first_timestamp}, 最后一条timestamp={last_timestamp}")
+            logger.info(f"[API] 获取K线历史数据时间范围: 第一条timestamp={first_timestamp}, 最后一条timestamp={last_timestamp}, 共返回{klines_count}条数据, client_ip={client_ip}")
             
             # 记录第一条数据的详细信息（用于调试数据格式）
-            logger.debug(f"[API] K线数据示例（第一条）: {first_kline}")
+            logger.debug(f"[API] 获取K线历史数据示例（第一条）: {first_kline}")
+            logger.debug(f"[API] 获取K线历史数据示例（最后一条）: {last_kline}")
+        else:
+            logger.warning(f"[API]  未找到K线历史数据: symbol={symbol}, interval={interval}, client_ip={client_ip}")
         
         response_data = {
             'symbol': symbol,
             'interval': interval,
             'source': source,
-            'data': klines
+            'data': klines,
+            'count': klines_count  # 添加数据条数字段，便于前端调试
         }
         
         return jsonify(response_data)
