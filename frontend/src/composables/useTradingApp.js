@@ -156,14 +156,14 @@ export function useTradingApp() {
       //   leaderboardStatus.value = '更新失败'
       //   
       //   // 更新错误状态指示器
-        const statusEl = document.querySelector('.status-indicator')
-        if (statusEl) {
-          statusEl.classList.add('error')
-          setTimeout(() => {
-            statusEl.classList.remove('error')
-          }, 3000)
-        }
-      })
+      //   const statusEl = document.querySelector('.status-indicator')
+      //   if (statusEl) {
+      //     statusEl.classList.add('error')
+      //     setTimeout(() => {
+      //       statusEl.classList.remove('error')
+      //     }, 3000)
+      //   }
+      // })
 
       // 连接断开事件
       socket.value.on('disconnect', (reason) => {
