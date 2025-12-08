@@ -98,6 +98,11 @@ class ClickHouseConnectionPool:
                 # 时区处理在应用层完成，所有时间都使用 UTC 时间戳（create_datetime_long）
                 # 清理逻辑使用时间戳比较，不依赖时区设置
                 # 设置超时参数，避免连接长时间阻塞
+                # 使用配置中的超时设置，支持通过环境变量调整
+                connect_timeout = getattr(app_config, 'CLICKHOUSE_CONNECT_TIMEOUT', 30)
+                send_receive_timeout = getattr(app_config, 'CLICKHOUSE_SEND_RECEIVE_TIMEOUT', 120)
+                max_execution_time = getattr(app_config, 'CLICKHOUSE_MAX_EXECUTION_TIME', 120)
+                
                 client = clickhouse_connect.get_client(
                     host=self._host,
                     port=self._port,
@@ -105,9 +110,9 @@ class ClickHouseConnectionPool:
                     password=self._password,
                     database=self._database,
                     secure=self._secure,
-                    connect_timeout=10,  # 连接超时10秒
-                    send_receive_timeout=30,  # 发送/接收超时30秒
-                    settings={'max_execution_time': 30}  # 查询执行超时30秒
+                    connect_timeout=connect_timeout,  # 连接超时，默认30秒
+                    send_receive_timeout=send_receive_timeout,  # 发送/接收超时，默认120秒（2分钟）
+                    settings={'max_execution_time': max_execution_time}  # 查询执行超时，默认120秒（2分钟）
                 )
                 self._pool.put(client)
                 self._current_connections += 1
@@ -131,7 +136,10 @@ class ClickHouseConnectionPool:
         
         try:
             # 使用短超时快速检查连接健康状态
-            client.query("SELECT 1", settings={'max_execution_time': 2})
+            # 健康检查使用较短的超时时间，避免影响正常查询
+            max_execution_time = getattr(app_config, 'CLICKHOUSE_MAX_EXECUTION_TIME', 120)
+            health_check_timeout = min(5, max_execution_time)  # 健康检查超时最多5秒
+            client.query("SELECT 1", settings={'max_execution_time': health_check_timeout})
             return True
         except Exception as e:
             error_type = type(e).__name__

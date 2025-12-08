@@ -1353,7 +1353,29 @@ def get_market_klines():
             last_kline = klines[-1]
             first_timestamp = first_kline.get('timestamp', 'N/A')
             last_timestamp = last_kline.get('timestamp', 'N/A')
-            logger.info(f"[API] 获取K线历史数据时间范围: 第一条timestamp={first_timestamp}, 最后一条timestamp={last_timestamp}, 共返回{klines_count}条数据, client_ip={client_ip}")
+            
+            # 将timestamp转换为datetime格式便于排查
+            def format_timestamp(ts):
+                """将timestamp（毫秒）转换为datetime字符串"""
+                if ts == 'N/A' or ts is None:
+                    return 'N/A'
+                try:
+                    # timestamp是毫秒时间戳，需要除以1000
+                    from datetime import timezone as tz
+                    dt = datetime.fromtimestamp(ts / 1000, tz=tz.utc)
+                    return dt.strftime('%Y-%m-%d %H:%M:%S UTC')
+                except (ValueError, TypeError, OSError) as e:
+                    return f'{ts} (转换失败: {e})'
+            
+            first_timestamp_dt = format_timestamp(first_timestamp)
+            last_timestamp_dt = format_timestamp(last_timestamp)
+            
+            logger.info(
+                f"[API] 获取K线历史数据时间范围: "
+                f"第一条timestamp={first_timestamp} ({first_timestamp_dt}), "
+                f"最后一条timestamp={last_timestamp} ({last_timestamp_dt}), "
+                f"共返回{klines_count}条数据, client_ip={client_ip}"
+            )
             
             # 记录第一条数据的详细信息（用于调试数据格式）
             logger.debug(f"[API] 获取K线历史数据示例（第一条）: {first_kline}")
