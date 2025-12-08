@@ -1273,7 +1273,7 @@ def get_market_klines():
             )
         else:
             # 从SDK获取数据（默认）
-            from market.market_data import market_fetcher
+            # 使用全局market_fetcher变量，而非重新导入
             
             # SDK模式下限制最大返回数为120
             sdk_limit = limit
