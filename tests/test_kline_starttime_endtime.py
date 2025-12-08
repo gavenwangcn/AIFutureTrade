@@ -44,7 +44,7 @@ def test_kline_without_time_params():
         response = client.rest_api.kline_candlestick_data(
             symbol="BTCUSDT",
             interval=KlineCandlestickDataIntervalEnum["INTERVAL_5m"].value,
-            limit=120
+            limit=300
         )
         data = response.data()
         logger.info(f"✅ 成功获取 {len(data)} 条K线数据")
@@ -84,7 +84,7 @@ def test_kline_with_endtime_only_short_intervals():
             response = client.rest_api.kline_candlestick_data(
                 symbol="BTCUSDT",
                 interval=KlineCandlestickDataIntervalEnum[interval_enum_key].value,
-                limit=120,
+                limit=300,
                 start_time=None,  # 不传入start_time
                 end_time=end_time  # 只传入end_time
             )
@@ -185,7 +185,7 @@ def test_kline_with_endtime_only_1w():
         response = client.rest_api.kline_candlestick_data(
             symbol="BTCUSDT",
             interval=KlineCandlestickDataIntervalEnum["INTERVAL_1w"].value,
-            limit=120,
+            limit=300,
             start_time=None,  # 不传入start_time
             end_time=end_time  # 只传入end_time
         )
