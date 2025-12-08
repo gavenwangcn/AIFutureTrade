@@ -135,18 +135,15 @@ const initChart = async () => {
     const period = intervalToPeriod(currentInterval.value)
     
     // Create KLineChartPro instance
-    // 参考 klinecharts-pro/index.html 中的创建方式
-    // 使用 klinecharts-pro 中的默认配置（periods, mainIndicators, subIndicators）
-    // 默认配置在 frontend/klinecharts-pro/src/KLineChartPro.tsx (44-72行) 中定义
-    // 如果使用 UMD 方式引入自定义构建的包，这些默认配置会生效
+    // 明确指定副指标配置，确保使用预期的默认值
     chartInstance.value = new KLineChartProClass({
       container: chartContainerRef.value,
       symbol: symbolInfo,
       period: period,
-      // periods 不指定，使用 klinecharts-pro 默认值：['1m', '5m', '15m', '1h', '4h', '1d', '1w']
-      // mainIndicators 不指定，使用 klinecharts-pro 默认值：['MA']
-      // subIndicators 不指定，使用 klinecharts-pro 默认值：['MA', 'RSI', 'MACD', 'VOL']
-      datafeed: datafeedInstance.value, // 使用 CustomDatafeed（参考参考实现中的 AkshareDatafeed）
+      // 指定默认的主指标和副指标
+      mainIndicators: ['MA'],
+      subIndicators: ['RSI', 'MACD', 'VOL'],
+      datafeed: datafeedInstance.value,
       theme: 'light'
     })
     
