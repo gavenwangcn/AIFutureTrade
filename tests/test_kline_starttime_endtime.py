@@ -58,29 +58,29 @@ def test_kline_without_time_params():
 
 
 def test_kline_with_starttime():
-    """测试带startTime参数的K线数据获取"""
+    """测试带start_time参数的K线数据获取"""
     logger.info("=" * 60)
-    logger.info("测试2: 带startTime参数")
+    logger.info("测试2: 带start_time参数")
     logger.info("=" * 60)
     try:
         # 计算24小时前的时间戳（毫秒）
         start_time = int((datetime.now(timezone.utc).timestamp() - 24 * 3600) * 1000)
-        logger.info(f"startTime: {start_time} ({datetime.fromtimestamp(start_time/1000, tz=timezone.utc)})")
+        logger.info(f"start_time: {start_time} ({datetime.fromtimestamp(start_time/1000, tz=timezone.utc)})")
         
         response = client.rest_api.kline_candlestick_data(
             symbol="BTCUSDT",
             interval=KlineCandlestickDataIntervalEnum["INTERVAL_5m"].value,
             limit=10,
-            startTime=start_time
+            start_time=start_time  # 使用小写下划线格式
         )
         data = response.data()
-        logger.info(f"✅ 成功获取 {len(data)} 条K线数据（带startTime）")
+        logger.info(f"✅ 成功获取 {len(data)} 条K线数据（带start_time）")
         if data:
             logger.info(f"第一条K线时间: {data[0]}")
             logger.info(f"最后一条K线时间: {data[-1]}")
         return True
     except TypeError as e:
-        logger.warning(f"⚠️  TypeError: SDK方法不支持startTime参数 - {e}")
+        logger.warning(f"⚠️  TypeError: SDK方法不支持start_time参数 - {e}")
         return False
     except Exception as e:
         logger.error(f"❌ 失败: {e}")
@@ -88,32 +88,32 @@ def test_kline_with_starttime():
 
 
 def test_kline_with_starttime_endtime():
-    """测试带startTime和endTime参数的K线数据获取"""
+    """测试带start_time和end_time参数的K线数据获取"""
     logger.info("=" * 60)
-    logger.info("测试3: 带startTime和endTime参数")
+    logger.info("测试3: 带start_time和end_time参数")
     logger.info("=" * 60)
     try:
         # 计算24小时前和12小时前的时间戳（毫秒）
         end_time = int((datetime.now(timezone.utc).timestamp() - 12 * 3600) * 1000)
         start_time = int((datetime.now(timezone.utc).timestamp() - 24 * 3600) * 1000)
-        logger.info(f"startTime: {start_time} ({datetime.fromtimestamp(start_time/1000, tz=timezone.utc)})")
-        logger.info(f"endTime: {end_time} ({datetime.fromtimestamp(end_time/1000, tz=timezone.utc)})")
+        logger.info(f"start_time: {start_time} ({datetime.fromtimestamp(start_time/1000, tz=timezone.utc)})")
+        logger.info(f"end_time: {end_time} ({datetime.fromtimestamp(end_time/1000, tz=timezone.utc)})")
         
         response = client.rest_api.kline_candlestick_data(
             symbol="BTCUSDT",
             interval=KlineCandlestickDataIntervalEnum["INTERVAL_5m"].value,
             limit=10,
-            startTime=start_time,
-            endTime=end_time
+            start_time=start_time,  # 使用小写下划线格式
+            end_time=end_time      # 使用小写下划线格式
         )
         data = response.data()
-        logger.info(f"✅ 成功获取 {len(data)} 条K线数据（带startTime和endTime）")
+        logger.info(f"✅ 成功获取 {len(data)} 条K线数据（带start_time和end_time）")
         if data:
             logger.info(f"第一条K线时间: {data[0]}")
             logger.info(f"最后一条K线时间: {data[-1]}")
         return True
     except TypeError as e:
-        logger.warning(f"⚠️  TypeError: SDK方法不支持startTime/endTime参数 - {e}")
+        logger.warning(f"⚠️  TypeError: SDK方法不支持start_time/end_time参数 - {e}")
         return False
     except Exception as e:
         logger.error(f"❌ 失败: {e}")
@@ -138,7 +138,7 @@ def inspect_method_signature():
 
 
 if __name__ == "__main__":
-    logger.info("开始测试SDK的kline_candlestick_data方法是否支持startTime和endTime参数")
+    logger.info("开始测试SDK的kline_candlestick_data方法是否支持start_time和end_time参数")
     logger.info("")
     
     # 检查方法签名
