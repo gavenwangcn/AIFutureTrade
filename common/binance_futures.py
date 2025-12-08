@@ -609,17 +609,13 @@ class BinanceFuturesClient:
             interval_enum = KlineCandlestickDataIntervalEnum(interval)
 
             # 构建API调用参数
+            # 注意：根据错误信息，当前SDK版本的kline_candlestick_data方法不支持startTime和endTime参数
+            # 仅使用symbol、interval和limit参数
             api_params = {
                 "symbol": symbol,
                 "interval": interval_enum,
                 "limit": limit,
             }
-            
-            # 添加可选的时间参数
-            if startTime is not None:
-                api_params["startTime"] = startTime
-            if endTime is not None:
-                api_params["endTime"] = endTime
 
             # 调用API获取K线数据
             api_start_time = time.time()
