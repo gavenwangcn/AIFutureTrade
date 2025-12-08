@@ -13,9 +13,6 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-      # 构建缓存配置
-      cache_from:
-        - aifuturetrade-backend:latest
     container_name: aifuturetrade-backend
     ports:
       - "5002:5002"  # 后端API端口

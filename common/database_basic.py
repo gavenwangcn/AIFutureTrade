@@ -52,15 +52,68 @@ class Database:
         self.futures_leaderboard_table = "futures_leaderboard"
     
     def _with_connection(self, func: Callable, *args, **kwargs) -> Any:
-        """Execute a function with a ClickHouse connection from the pool."""
+        """Execute a function with a ClickHouse connection from the pool.
+        
+        注意：此方法使用 try-finally 确保连接总是被释放。
+        如果发生网络错误（如 IncompleteRead、ProtocolError），连接会被正确关闭。
+        """
         client = self._pool.acquire()
         if not client:
             raise Exception("Failed to acquire ClickHouse connection")
         
+        connection_handled = False  # 标记连接是否已被处理
         try:
             return func(client, *args, **kwargs)
+        except Exception as e:
+            # 检查是否为网络/协议错误
+            error_type = type(e).__name__
+            error_msg = str(e)
+            is_network_error = any(keyword in error_msg.lower() for keyword in [
+                'connection', 'broken', 'aborted', 'protocol', 'chunk', 
+                'incompleteread', 'incomplete read', 'timeout', 'reset'
+            ]) or any(keyword in error_type.lower() for keyword in [
+                'connection', 'protocol', 'timeout', 'incompleteread', 'protocolerror'
+            ])
+            
+            if is_network_error:
+                # 对于网络错误，连接可能已损坏，应该关闭而不是放回池中
+                logger.warning(
+                    f"[Database] Network/Protocol error detected, closing damaged connection: "
+                    f"{error_type}: {error_msg}"
+                )
+                try:
+                    if hasattr(client, 'close'):
+                        client.close()
+                except Exception as close_error:
+                    logger.debug(f"[Database] Error closing failed connection: {close_error}")
+                # 减少连接计数
+                with self._pool._lock:
+                    if self._pool._current_connections > 0:
+                        self._pool._current_connections -= 1
+                connection_handled = True  # 标记连接已处理
+                # 重新抛出异常
+                raise
+            else:
+                # 对于非网络错误，正常释放连接（在 finally 中处理）
+                raise
         finally:
-            self._pool.release(client)
+            # 只有在连接未被处理的情况下才释放连接
+            if client and not connection_handled:
+                try:
+                    self._pool.release(client)
+                except Exception as release_error:
+                    # 如果释放失败，尝试关闭连接
+                    logger.warning(
+                        f"[Database] Failed to release connection, closing it: {release_error}"
+                    )
+                    try:
+                        if hasattr(client, 'close'):
+                            client.close()
+                    except Exception:
+                        pass
+                    with self._pool._lock:
+                        if self._pool._current_connections > 0:
+                            self._pool._current_connections -= 1
     
     def command(self, sql: str) -> None:
         """Execute a raw SQL command."""

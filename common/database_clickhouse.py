@@ -134,7 +134,23 @@ class ClickHouseConnectionPool:
             client.query("SELECT 1", settings={'max_execution_time': 2})
             return True
         except Exception as e:
-            logger.debug(f"[ClickHouse] Connection health check failed: {e}")
+            error_type = type(e).__name__
+            error_msg = str(e)
+            # 检查是否为网络/协议错误
+            is_network_error = any(keyword in error_msg.lower() for keyword in [
+                'connection', 'broken', 'aborted', 'protocol', 'chunk', 
+                'incompleteread', 'incomplete read', 'timeout', 'reset'
+            ]) or any(keyword in error_type.lower() for keyword in [
+                'connection', 'protocol', 'timeout', 'incompleteread', 'protocolerror'
+            ])
+            
+            if is_network_error:
+                logger.warning(
+                    f"[ClickHouse] Connection health check detected network error: "
+                    f"{error_type}: {error_msg}"
+                )
+            else:
+                logger.debug(f"[ClickHouse] Connection health check failed: {error_type}: {error_msg}")
             return False
     
     def acquire(self, timeout: Optional[int] = None) -> Optional[Any]:
@@ -229,15 +245,35 @@ class ClickHouseConnectionPool:
     def close_all(self) -> None:
         """Close all connections in the pool."""
         with self._lock:
+            closed_count = 0
             while not self._pool.empty():
                 try:
                     client = self._pool.get_nowait()
-                    client.close()
+                    if hasattr(client, 'close'):
+                        client.close()
+                    closed_count += 1
                     self._current_connections -= 1
                 except Exception as e:
                     logger.error(f"[ClickHouse] Failed to close connection: {e}")
             
-            logger.info(f"[ClickHouse] Closed all connections. Current connections: {self._current_connections}")
+            logger.info(
+                f"[ClickHouse] Closed all connections. Closed: {closed_count}, "
+                f"Remaining count: {self._current_connections}"
+            )
+    
+    def get_pool_stats(self) -> Dict[str, int]:
+        """获取连接池统计信息。
+        
+        Returns:
+            包含连接池统计信息的字典
+        """
+        with self._lock:
+            return {
+                'current_connections': self._current_connections,
+                'pool_size': self._pool.qsize(),
+                'max_connections': self._max_connections,
+                'min_connections': self._min_connections
+            }
 
 
 class ClickHouseDatabase:
@@ -334,6 +370,7 @@ class ClickHouseDatabase:
                 
                 # 成功执行，释放连接并返回结果
                 self._pool.release(client)
+                client = None  # 标记已释放，避免 finally 中重复处理
                 return result
                 
             except Exception as e:
@@ -342,26 +379,55 @@ class ClickHouseDatabase:
                 error_msg = str(e)
                 
                 # 判断是否为网络/协议错误，需要重试
+                # 包括 IncompleteRead, ProtocolError 等
                 is_network_error = any(keyword in error_msg.lower() for keyword in [
                     'connection', 'broken', 'aborted', 'protocol', 'chunk', 
                     'badstatusline', 'invalidchunklength', 'timeout', 'reset',
-                    'httperror', 'urlerror'
+                    'httperror', 'urlerror', 'incompleteread', 'incomplete read'
                 ]) or any(keyword in error_type.lower() for keyword in [
-                    'connection', 'protocol', 'timeout', 'httperror', 'urlerror'
+                    'connection', 'protocol', 'timeout', 'httperror', 'urlerror',
+                    'incompleteread', 'protocolerror'
                 ])
                 
                 # 如果已获取连接，需要处理连接（关闭或释放）
                 if connection_acquired and client:
                     try:
-                        # 尝试关闭可能已损坏的连接
-                        if hasattr(client, 'close'):
-                            client.close()
+                        # 对于网络错误，连接很可能已损坏，应该关闭而不是放回池中
+                        if is_network_error:
+                            logger.warning(
+                                f"[ClickHouse] Network/Protocol error detected, closing damaged connection: "
+                                f"{error_type}: {error_msg}"
+                            )
+                            if hasattr(client, 'close'):
+                                client.close()
+                            # 减少连接计数（因为连接已损坏，不能放回池中）
+                            with self._pool._lock:
+                                if self._pool._current_connections > 0:
+                                    self._pool._current_connections -= 1
+                            client = None  # 标记已处理，避免 finally 中重复处理
+                        else:
+                            # 对于非网络错误，尝试释放连接回池中
+                            try:
+                                self._pool.release(client)
+                                client = None  # 标记已释放
+                            except Exception as release_error:
+                                # 如果释放失败，关闭连接
+                                logger.warning(
+                                    f"[ClickHouse] Failed to release connection, closing it: {release_error}"
+                                )
+                                if hasattr(client, 'close'):
+                                    client.close()
+                                with self._pool._lock:
+                                    if self._pool._current_connections > 0:
+                                        self._pool._current_connections -= 1
+                                client = None  # 标记已处理
                     except Exception as close_error:
                         logger.debug(f"[ClickHouse] Error closing failed connection: {close_error}")
-                    # 减少连接计数（因为连接已损坏，不能放回池中）
-                    with self._pool._lock:
-                        if self._pool._current_connections > 0:
-                            self._pool._current_connections -= 1
+                        # 确保连接计数被减少
+                        with self._pool._lock:
+                            if self._pool._current_connections > 0:
+                                self._pool._current_connections -= 1
+                        client = None  # 标记已处理
                 
                 # 判断是否需要重试
                 if attempt < max_retries - 1:
@@ -387,6 +453,21 @@ class ClickHouseDatabase:
                         f"[ClickHouse] Failed after {max_retries} attempts. Last error: {error_type}: {error_msg}"
                     )
                     raise
+            finally:
+                # 确保连接被正确处理（双重保险）
+                if connection_acquired and client:
+                    try:
+                        # 如果连接还没有被释放，尝试关闭它
+                        logger.warning(
+                            f"[ClickHouse] Connection not released in finally block, closing it"
+                        )
+                        if hasattr(client, 'close'):
+                            client.close()
+                        with self._pool._lock:
+                            if self._pool._current_connections > 0:
+                                self._pool._current_connections -= 1
+                    except Exception as final_error:
+                        logger.debug(f"[ClickHouse] Error in finally block: {final_error}")
 
     # ==================================================================
     # 通用数据库操作方法
