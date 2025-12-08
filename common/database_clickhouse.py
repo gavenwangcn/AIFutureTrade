@@ -2148,15 +2148,15 @@ class ClickHouseDatabase:
             
             result = self.query(query)
             
-            # 转换为字典列表
+            # 转换为字典列表，价格保留6位小数
             klines = []
             for row in result:
                 klines.append({
                     'timestamp': int(row[0]),
-                    'open': float(row[1]),
-                    'high': float(row[2]),
-                    'low': float(row[3]),
-                    'close': float(row[4]),
+                    'open': round(float(row[1]), 6),
+                    'high': round(float(row[2]), 6),
+                    'low': round(float(row[3]), 6),
+                    'close': round(float(row[4]), 6),
                     'volume': float(row[5]),
                     'turnover': float(row[6]),
                     'buyVolume': float(row[7]),

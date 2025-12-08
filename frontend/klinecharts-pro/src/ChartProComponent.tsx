@@ -344,7 +344,7 @@ const ChartProComponent: Component<ChartProComponentProps> = props => {
     } else {
       priceUnitDom.style.display = 'none'
     }
-    widget?.setPriceVolumePrecision(s?.pricePrecision ?? 2, s?.volumePrecision ?? 0)
+    widget?.setPriceVolumePrecision(s?.pricePrecision ?? 6, s?.volumePrecision ?? 0)
   })
 
   createEffect((prev?: PrevSymbolPeriod) => {

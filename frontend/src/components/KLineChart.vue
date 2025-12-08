@@ -103,7 +103,9 @@ const symbolToSymbolInfo = (symbol) => {
     exchange: 'BINANCE',
     market: 'futures',
     priceCurrency: 'usd',
-    type: 'PERPETUAL'
+    type: 'PERPETUAL',
+    pricePrecision: 6,  // 价格精度设置为6位小数
+    volumePrecision: 0  // 成交量精度保持0位小数
   }
 }
 

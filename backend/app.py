@@ -1297,15 +1297,47 @@ def get_market_klines():
                 endTime=end_timestamp
             )
             
-            # 转换SDK返回数据为统一格式
+            # 转换SDK返回数据为统一格式，价格保留6位小数
             formatted_klines = []
-            for kline in klines:
+            for idx, kline in enumerate(klines):
+                # 获取原始价格数据（可能是字符串或数字）
+                raw_open = kline.get('open', 0)
+                raw_high = kline.get('high', 0)
+                raw_low = kline.get('low', 0)
+                raw_close = kline.get('close', 0)
+                
+                # 记录第一条数据的原始格式（用于调试）
+                if idx == 0:
+                    logger.debug(
+                        f"[API] SDK返回的原始价格数据格式: "
+                        f"open={raw_open} (type={type(raw_open).__name__}), "
+                        f"high={raw_high} (type={type(raw_high).__name__}), "
+                        f"low={raw_low} (type={type(raw_low).__name__}), "
+                        f"close={raw_close} (type={type(raw_close).__name__})"
+                    )
+                
+                # 转换为浮点数并保留6位小数
+                # 注意：如果SDK返回的是字符串格式，需要先转换为浮点数
+                # 币安API通常返回字符串格式的价格，精度足够（通常8位小数）
+                formatted_open = round(float(raw_open) if raw_open else 0.0, 6)
+                formatted_high = round(float(raw_high) if raw_high else 0.0, 6)
+                formatted_low = round(float(raw_low) if raw_low else 0.0, 6)
+                formatted_close = round(float(raw_close) if raw_close else 0.0, 6)
+                
+                # 记录第一条数据格式化后的结果（用于调试）
+                if idx == 0:
+                    logger.debug(
+                        f"[API] 格式化后的价格数据（保留6位小数）: "
+                        f"open={formatted_open}, high={formatted_high}, "
+                        f"low={formatted_low}, close={formatted_close}"
+                    )
+                
                 formatted_klines.append({
                     'timestamp': kline.get('open_time', 0),
-                    'open': float(kline.get('open', 0)),
-                    'high': float(kline.get('high', 0)),
-                    'low': float(kline.get('low', 0)),
-                    'close': float(kline.get('close', 0)),
+                    'open': formatted_open,
+                    'high': formatted_high,
+                    'low': formatted_low,
+                    'close': formatted_close,
                     'volume': float(kline.get('volume', 0)),
                     'turnover': float(kline.get('quote_asset_volume', 0))
                 })

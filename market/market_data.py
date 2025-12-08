@@ -222,10 +222,10 @@ class MarketDataFetcher:
             if not payload:
                 continue
             try:
-                last_price = float(
+                last_price = round(float(
                     payload.get('lastPrice')
                     or spot_prices.get(futures_symbol, {}).get('price', 0)
-                )
+                ), 6)  # 价格保留6位小数
                 change_percent = float(payload.get('priceChangePercent', 0))
                 quote_volume = float(payload.get('quoteVolume', payload.get('volume', 0)))
             except (ValueError, TypeError):
