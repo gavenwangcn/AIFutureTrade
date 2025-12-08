@@ -71,7 +71,7 @@ export function useTradingApp() {
   // WebSocket连接
   const socket = ref(null)
   let websocketMonitorInterval = null // WebSocket 监控定时器
-  let leaderboardRefreshInterval = null // 涨跌榜自动刷新定时器（30秒轮询备用方案）
+  let leaderboardRefreshInterval = null // 涨跌榜自动刷新定时器（轮询方式，默认5秒）
   
   // ECharts 实例
   const accountChart = ref(null)
@@ -123,12 +123,11 @@ export function useTradingApp() {
         leaderboardStatus.value = '已连接，等待数据...'
         leaderboardStatusType.value = 'default'
         
-        // 验证事件监听器是否已注册
+        // 涨跌幅榜已改为轮询方式，不再使用WebSocket推送
+        // 以下代码已移除（仅保留其他WebSocket功能的检查）：
+        // - leaderboard:update 监听器检查
         // 注意：Socket.IO 客户端可能不支持 eventNames() 方法，使用 hasListeners() 检查
         try {
-          if (typeof socket.value.hasListeners === 'function') {
-            console.log('[WebSocket] leaderboard:update 监听器已注册:', socket.value.hasListeners('leaderboard:update'))
-          }
           // 尝试获取已注册的事件（如果支持）
           if (typeof socket.value.eventNames === 'function') {
             const registeredEvents = socket.value.eventNames()
@@ -140,96 +139,23 @@ export function useTradingApp() {
           console.warn('[WebSocket] 检查事件监听器时出错:', e)
         }
         
-        // 连接成功后请求初始涨跌幅榜数据
-        console.log('[WebSocket] 📤 发送 leaderboard:request 事件，请求初始涨跌幅榜数据')
-        try {
-          socket.value.emit('leaderboard:request', { limit: 10 })
-          console.log('[WebSocket] ✅ leaderboard:request 事件已发送')
-        } catch (e) {
-          console.error('[WebSocket] ❌ 发送 leaderboard:request 失败:', e)
-        }
+        // 涨跌幅榜已改为轮询方式，不再通过WebSocket获取
+        // 连接成功后不再请求初始涨跌幅榜数据（由轮询机制处理）
+        console.log('[WebSocket] ✅ WebSocket连接成功（涨跌幅榜已改为轮询方式，不再通过WebSocket获取）')
       })
 
-      // 涨跌幅榜更新事件（后端自动推送）
-      socket.value.on('leaderboard:update', async (data) => {
-        console.log('[WebSocket] 📊 ========== 收到涨跌幅榜自动更新 ==========')
-        console.log('[WebSocket] 原始数据:', data)
-        console.log('[WebSocket] 数据类型:', typeof data)
-        console.log('[WebSocket] 数据是否为对象:', data && typeof data === 'object')
-        console.log('[WebSocket] 数据详情:', {
-          hasGainers: !!data?.gainers,
-          gainersType: Array.isArray(data?.gainers) ? 'array' : typeof data?.gainers,
-          gainersCount: Array.isArray(data?.gainers) ? data.gainers.length : (data?.gainers ? 'not-array' : 0),
-          hasLosers: !!data?.losers,
-          losersType: Array.isArray(data?.losers) ? 'array' : typeof data?.losers,
-          losersCount: Array.isArray(data?.losers) ? data.losers.length : (data?.losers ? 'not-array' : 0),
-          dataKeys: data ? Object.keys(data) : []
-        })
-        
-        if (data && (data.gainers || data.losers)) {
-          // 更新涨幅榜和跌幅榜数据
-          const newGainers = Array.isArray(data.gainers) ? data.gainers : []
-          const newLosers = Array.isArray(data.losers) ? data.losers : []
-          
-          console.log('[WebSocket] 处理后的数据:', {
-            newGainersCount: newGainers.length,
-            newLosersCount: newLosers.length,
-            currentGainersCount: leaderboardGainers.value.length,
-            currentLosersCount: leaderboardLosers.value.length
-          })
-          
-          // 先设置更新中状态（黄色）
-          leaderboardStatus.value = '正在更新...'
-          leaderboardStatusType.value = 'updating'
-          
-          // 更新数据（无论是否变化，因为后端推送的数据应该是最新的）
-          leaderboardGainers.value = newGainers
-          leaderboardLosers.value = newLosers
-          
-          // 检查是否有数据
-          if (newGainers.length > 0 || newLosers.length > 0) {
-            // 更新成功：显示日期时间格式（绿色）
-            const updateTime = new Date()
-            const dateStr = updateTime.toLocaleDateString('zh-CN', {
-              year: 'numeric',
-              month: '2-digit',
-              day: '2-digit'
-            })
-            const timeStr = updateTime.toLocaleTimeString('zh-CN', {
-              hour12: false,
-              hour: '2-digit',
-              minute: '2-digit',
-              second: '2-digit'
-            })
-            leaderboardStatus.value = `最后更新: ${dateStr} ${timeStr}`
-            leaderboardStatusType.value = 'success'
-          } else {
-            // 没有数据：显示更新失败（白色）
-            leaderboardStatus.value = '更新失败'
-            leaderboardStatusType.value = 'error'
-          }
-          
-          console.log(`[WebSocket] ✅ 涨跌幅榜数据已更新: 涨幅榜 ${newGainers.length} 条, 跌幅榜 ${newLosers.length} 条`)
-          
-          console.log('[WebSocket] ========== 涨跌幅榜更新完成 ==========')
-        } else {
-          console.warn('[WebSocket] ⚠️ 收到无效的涨跌幅榜数据:', data)
-          console.warn('[WebSocket] 数据验证:', {
-            hasData: !!data,
-            hasGainers: !!data?.gainers,
-            hasLosers: !!data?.losers,
-            gainersIsArray: Array.isArray(data?.gainers),
-            losersIsArray: Array.isArray(data?.losers)
-          })
-        }
-      })
-
-      // 涨跌幅榜错误事件
-      socket.value.on('leaderboard:error', (error) => {
-        console.error('[WebSocket] ❌ 涨跌幅榜更新错误', error)
-        leaderboardStatus.value = '更新失败'
-        
-        // 更新错误状态指示器
+      // 涨跌幅榜已改为轮询方式，不再监听WebSocket推送事件
+      // 以下代码已移除：
+      // - leaderboard:update 事件监听
+      // - leaderboard:error 事件监听
+      // - leaderboard:request 事件发送
+      
+      // 涨跌幅榜错误事件（已移除，改为轮询方式）
+      // socket.value.on('leaderboard:error', (error) => {
+      //   console.error('[WebSocket] ❌ 涨跌幅榜更新错误', error)
+      //   leaderboardStatus.value = '更新失败'
+      //   
+      //   // 更新错误状态指示器
         const statusEl = document.querySelector('.status-indicator')
         if (statusEl) {
           statusEl.classList.add('error')
@@ -249,10 +175,8 @@ export function useTradingApp() {
       // 重新连接事件
       socket.value.on('reconnect', (attemptNumber) => {
         console.log(`[WebSocket] 🔄 重新连接成功 (尝试 ${attemptNumber} 次)`)
-        leaderboardStatus.value = '已重连，等待数据...'
-        leaderboardStatusType.value = 'default'
-        // 重新连接后请求数据
-        socket.value.emit('leaderboard:request', { limit: 10 })
+        // 涨跌幅榜已改为轮询方式，不再通过WebSocket请求数据
+        // 轮询机制会自动刷新数据，无需在重连后手动请求
       })
 
       // 连接错误事件
@@ -313,8 +237,9 @@ export function useTradingApp() {
   }
 
   /**
-   * 启动涨跌榜自动刷新（30秒轮询备用方案）
-   * 参考原始 app.js 的 startLeaderboardAutoRefresh 逻辑
+   * 启动涨跌榜自动刷新（轮询方式）
+   * 使用配置的刷新时间（FUTURES_LEADERBOARD_REFRESH，默认5秒）
+   * 整体刷新渲染，不是一条一条刷新
    */
   const startLeaderboardAutoRefresh = () => {
     // 清除已有定时器
@@ -326,13 +251,16 @@ export function useTradingApp() {
     // 立即获取一次数据
     loadLeaderboard(false)
 
-    // 每30秒自动刷新一次（作为WebSocket的备用方案）
+    // 使用配置的刷新时间（默认5秒，与后端FUTURES_LEADERBOARD_REFRESH配置一致）
+    // 前端轮询时间应该与后端同步间隔一致，确保数据实时性
+    const refreshInterval = 5000 // 5秒，与后端FUTURES_LEADERBOARD_REFRESH=5一致
+    
     leaderboardRefreshInterval = setInterval(() => {
-      console.log('[TradingApp] 30秒轮询：自动刷新涨跌榜数据（备用方案）')
-      loadLeaderboard(false)
-    }, 30000) // 30秒
+      console.log(`[TradingApp] 轮询刷新涨跌榜数据（${refreshInterval/1000}秒间隔）`)
+      loadLeaderboard(false) // 整体刷新，不是一条一条刷新
+    }, refreshInterval)
 
-    console.log('[TradingApp] ✅ 涨跌榜自动刷新已启动（30秒轮询备用方案）')
+    console.log(`[TradingApp] ✅ 涨跌榜自动刷新已启动（轮询方式，${refreshInterval/1000}秒间隔）`)
   }
 
   /**
@@ -414,10 +342,11 @@ export function useTradingApp() {
         const gainers = data.gainers || []
         const losers = data.losers || []
         
-        // 检查是否有数据
-        if (gainers.length > 0 || losers.length > 0) {
-          leaderboardGainers.value = gainers
-          leaderboardLosers.value = losers
+      // 检查是否有数据
+      if (gainers.length > 0 || losers.length > 0) {
+        // 整体刷新渲染：直接替换整个数组（不是一条一条刷新）
+        leaderboardGainers.value = gainers
+        leaderboardLosers.value = losers
           
           // 更新成功：显示日期时间格式（绿色）
           const updateTime = new Date()
@@ -892,19 +821,14 @@ export function useTradingApp() {
       // 等待一小段时间确保 WebSocket 连接建立
       await new Promise(resolve => setTimeout(resolve, 500))
       
-      // 检查 WebSocket 连接状态
+      // 涨跌幅榜已改为轮询方式，不再通过WebSocket请求初始数据
+      // WebSocket连接状态检查（用于其他功能，如K线数据推送）
       if (socket.value) {
         console.log('[TradingApp] WebSocket 连接状态:', {
           connected: socket.value.connected,
           disconnected: socket.value.disconnected,
           id: socket.value.id
         })
-        
-        // 如果已经连接，立即请求数据
-        if (socket.value.connected) {
-          console.log('[TradingApp] WebSocket 已连接，请求初始涨跌幅榜数据')
-          socket.value.emit('leaderboard:request', { limit: 10 })
-        }
       }
       
       // 并行加载初始数据

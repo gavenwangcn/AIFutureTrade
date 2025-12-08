@@ -223,17 +223,19 @@ def init_trading_engines():
 
 def _leaderboard_loop():
     """
-    后台循环任务：定期同步涨跌幅榜数据并推送到前端
+    后台循环任务：定期同步涨跌幅榜数据到ClickHouse（不再通过WebSocket推送到前端）
     
     流程：
     1. 启动循环，记录启动信息
-    2. 定期调用 sync_leaderboard 同步数据
-    3. 如果同步成功，通过 WebSocket 推送到前端
+    2. 定期调用 sync_leaderboard 同步数据到ClickHouse
+    3. 不再通过 WebSocket 推送到前端（前端改为轮询方式获取数据）
     4. 等待指定间隔后继续下一次循环
     5. 收到停止信号时退出循环
+    
+    注意：前端已改为轮询方式获取数据，不再使用WebSocket推送
     """
     thread_id = threading.current_thread().ident
-    logger.info(f"[Leaderboard Worker-{thread_id}] 涨跌幅榜同步循环启动，刷新间隔: {LEADERBOARD_REFRESH_INTERVAL} 秒")
+    logger.info(f"[Leaderboard Worker-{thread_id}] 涨跌幅榜同步循环启动，刷新间隔: {LEADERBOARD_REFRESH_INTERVAL} 秒（仅同步到ClickHouse，不推送前端）")
     
     wait_seconds = max(5, LEADERBOARD_REFRESH_INTERVAL)
     cycle_count = 0
@@ -244,18 +246,20 @@ def _leaderboard_loop():
         
         try:
             # 调用同步方法（不强制刷新，使用缓存机制）
+            # 仅同步数据到ClickHouse，不再通过WebSocket推送
             data = market_fetcher.sync_leaderboard(force=False)
             
-            # 检查同步结果并推送
+            # 检查同步结果（仅记录日志，不推送）
             if data:
                 gainers_count = len(data.get('gainers', [])) if data.get('gainers') else 0
                 losers_count = len(data.get('losers', [])) if data.get('losers') else 0
-                
-                # 通过 WebSocket 推送到前端
-                socketio.emit('leaderboard:update', data)
-                
+                logger.debug(
+                    f"[Leaderboard Worker-{thread_id}] [循环 #{cycle_count}] 同步完成: "
+                    f"涨幅榜 {gainers_count} 条, 跌幅榜 {losers_count} 条 "
+                    f"（已同步到ClickHouse，前端通过轮询获取）"
+                )
             else:
-                logger.warning(f"[Leaderboard Worker-{thread_id}] [循环 #{cycle_count}] 同步返回空数据，跳过推送")
+                logger.warning(f"[Leaderboard Worker-{thread_id}] [循环 #{cycle_count}] 同步返回空数据")
                 
         except Exception as exc:
             cycle_duration = (datetime.now() - cycle_start_time).total_seconds()
@@ -1158,15 +1162,36 @@ def get_market_indicators(symbol):
 
 @app.route('/api/market/leaderboard', methods=['GET'])
 def get_market_leaderboard():
-    """Get market leaderboard data"""
-    limit = request.args.get('limit', type=int)
+    """Get market leaderboard data
+    
+    返回完整的涨跌幅榜数据：
+    - gainers: 涨幅榜TOP 10（按涨幅从高到低排序）
+    - losers: 跌幅榜TOP 10（按跌幅从低到高排序，跌幅为负值）
+    
+    前端通过轮询此接口获取数据，整体刷新渲染
+    """
+    limit = request.args.get('limit', type=int) or 10  # 默认10条，涨10个，跌10个
     force = request.args.get('force', default=0, type=int)
+    
     try:
+        # 获取涨跌幅榜数据（涨10个，跌10个）
         data = market_fetcher.sync_leaderboard(force=bool(force), limit=limit)
-        return jsonify(data)
+        
+        # 确保返回完整数据格式
+        result = {
+            'gainers': data.get('gainers', [])[:limit],  # 确保最多返回limit条
+            'losers': data.get('losers', [])[:limit],   # 确保最多返回limit条
+            'timestamp': int(datetime.now().timestamp() * 1000)  # 添加时间戳，便于前端判断数据新鲜度
+        }
+        
+        gainers_count = len(result['gainers'])
+        losers_count = len(result['losers'])
+        logger.debug(f"[API] 涨跌幅榜数据返回: 涨幅榜 {gainers_count} 条, 跌幅榜 {losers_count} 条")
+        
+        return jsonify(result)
     except Exception as exc:
-        logger.error(f"Failed to load leaderboard: {exc}")
-        return jsonify({'error': str(exc)}), 500
+        logger.error(f"Failed to load leaderboard: {exc}", exc_info=True)
+        return jsonify({'error': str(exc), 'gainers': [], 'losers': []}), 500
 
 @app.route('/api/clickhouse/leaderboard/status', methods=['GET'])
 def get_clickhouse_leaderboard_status():
@@ -1211,7 +1236,10 @@ def get_market_klines():
     参数:
         symbol: 交易对符号（如 'BTCUSDT'）
         interval: 时间间隔（'1m', '5m', '15m', '1h', '4h', '1d', '1w'）
-        limit: 返回的最大记录数，默认500，SDK模式下最大500
+        limit: 返回的最大记录数，默认值根据interval不同：
+               - 1d（1天）：默认120条，最大120条
+               - 1w（1周）：默认20条，最大20条
+               - 其他interval：默认500条，最大500条
         start_time: 开始时间（可选，ISO格式字符串）
         end_time: 结束时间（可选，ISO格式字符串）
     """
@@ -1223,8 +1251,17 @@ def get_market_klines():
         interval = request.args.get('interval', '5m')
         # 根据数据源设置不同的默认limit
         source = KLINE_DATA_SOURCE  # 从配置文件获取数据源，不再从请求参数获取
-        # SDK模式和DB模式都默认500条
-        default_limit = 500
+        
+        # 根据不同的interval设置不同的默认limit
+        # 1d（1天）：120条（约4个月历史数据）
+        # 1w（1周）：20条（约5个月历史数据）
+        # 其他interval：500条
+        interval_default_limits = {
+            '1d': 120,  # 1天周期，默认120条
+            '1w': 20,   # 1周周期，默认20条
+        }
+        default_limit = interval_default_limits.get(interval, 500)  # 其他周期默认500条
+        
         limit = request.args.get('limit', type=int) or default_limit
         start_time_str = request.args.get('start_time')
         end_time_str = request.args.get('end_time')
@@ -1281,12 +1318,20 @@ def get_market_klines():
             # 从SDK获取数据（默认）
             # 使用全局market_fetcher变量，而非重新导入
             
-            # SDK模式下单次查询可以获取最多500条数据
-            # 限制最大limit为500
+            # SDK模式下根据不同的interval设置不同的最大limit
+            # 1d（1天）：最大120条
+            # 1w（1周）：最大20条
+            # 其他interval：最大500条
+            interval_max_limits = {
+                '1d': 120,  # 1天周期，最大120条
+                '1w': 20,   # 1周周期，最大20条
+            }
+            max_limit = interval_max_limits.get(interval, 500)  # 其他周期最大500条
+            
             sdk_limit = limit
-            if sdk_limit > 500:
-                sdk_limit = 500
-                logger.debug(f"[API] SDK模式下限制limit为500，原请求limit={limit}")
+            if sdk_limit > max_limit:
+                sdk_limit = max_limit
+                logger.debug(f"[API] SDK模式下限制limit为{max_limit}（interval={interval}），原请求limit={limit}")
             
             logger.info(f"[API] 从SDK获取K线数据: symbol={symbol}, interval={interval}, limit={sdk_limit}")
             
@@ -1303,11 +1348,9 @@ def get_market_klines():
                 logger.warning(f"[API] SDK未返回K线数据: symbol={symbol}, interval={interval}")
                 klines = []
             else:
-                # SDK返回的数据是倒序的（从新到旧），第一条（数组[0]）是最新的K线
-                # 由于最近一根K线通过WebSocket监听接口实时获取，需要去掉第一条（最新的）
-                if len(klines_raw) > 0:
-                    logger.debug(f"[API] SDK返回{len(klines_raw)}条K线数据，去掉第一条（最新K线通过监听接口获取）")
-                    klines_raw = klines_raw[1:]  # 去掉第一条（最新的），保留从第二条开始的所有数据
+                # SDK返回的数据是倒序的（从新到旧），数组[0]是最新的K线，数组[-1]是最旧的K线
+                # 注意：K线页面已改为仅使用历史数据，不再订阅实时K线更新，因此保留所有数据（包括最新K线）
+                logger.debug(f"[API] SDK返回{len(klines_raw)}条K线数据（倒序：最新→最旧），保留所有数据（包括最新K线）")
                 
                 # 转换SDK返回数据为统一格式，价格保留6位小数
                 formatted_klines = []
@@ -1336,29 +1379,55 @@ def get_market_klines():
                 
                 # 由于SDK返回的数据是倒序的（从新到旧），需要按timestamp升序排序（从旧到新）
                 # 确保与数据库模式和前端期望的数据顺序一致
+                # 前端K线图表从左到右显示，左边是最旧的数据，右边是最新的数据，所以需要从旧到新的顺序
                 formatted_klines.sort(key=lambda x: x.get('timestamp', 0))
                 klines = formatted_klines
                 
-                logger.info(f"[API] SDK查询完成，共获取 {len(klines)} 条K线数据（已去掉最后一条最新K线）")
+                logger.info(f"[API] SDK查询完成，共获取 {len(klines)} 条K线数据（已排序为从旧到新，包含最新K线）")
                 
                 # 验证数据顺序：确保第一条时间戳小于最后一条时间戳（从旧到新，timestamp升序）
+                # 前端K线图表从左到右显示，左边是最旧的数据（第一条），右边是最新的数据（最后一条）
+                # 所以数据顺序应该是：第一条（最旧）< 最后一条（最新）
                 if len(klines) > 1:
                     first_timestamp = klines[0].get('timestamp', 0)
                     last_timestamp = klines[-1].get('timestamp', 0)
+                    
+                    # 将时间戳转换为datetime格式便于排查
+                    def format_timestamp_for_validation(ts):
+                        """将timestamp（毫秒）转换为datetime字符串用于验证"""
+                        if ts == 0 or ts is None:
+                            return 'N/A'
+                        try:
+                            from datetime import timezone as tz
+                            dt = datetime.fromtimestamp(ts / 1000, tz=tz.utc)
+                            return dt.strftime('%Y-%m-%d %H:%M:%S UTC')
+                        except (ValueError, TypeError, OSError) as e:
+                            return f'{ts} (转换失败: {e})'
+                    
+                    first_timestamp_dt = format_timestamp_for_validation(first_timestamp)
+                    last_timestamp_dt = format_timestamp_for_validation(last_timestamp)
+                    
                     if first_timestamp >= last_timestamp:
                         logger.warning(
-                            f"[API] ⚠️ 数据顺序异常：第一条时间戳({first_timestamp}) >= 最后一条({last_timestamp})，"
-                            f"重新排序以确保从旧到新的顺序（与数据库模式和前端要求一致）"
+                            f"[API] ⚠️ 数据顺序异常：第一条时间戳({first_timestamp}, {first_timestamp_dt}) >= "
+                            f"最后一条({last_timestamp}, {last_timestamp_dt})，"
+                            f"重新排序以确保从旧到新的顺序（与前端K线图表从左到右的要求一致）"
                         )
                         klines.sort(key=lambda x: x.get('timestamp', 0))
                         # 重新验证
                         first_timestamp = klines[0].get('timestamp', 0)
                         last_timestamp = klines[-1].get('timestamp', 0)
-                        logger.debug(f"[API] ✓ 重新排序后：第一条时间戳={first_timestamp}, 最后一条时间戳={last_timestamp}")
+                        first_timestamp_dt = format_timestamp_for_validation(first_timestamp)
+                        last_timestamp_dt = format_timestamp_for_validation(last_timestamp)
+                        logger.debug(
+                            f"[API] ✓ 重新排序后：第一条时间戳={first_timestamp} ({first_timestamp_dt}), "
+                            f"最后一条时间戳={last_timestamp} ({last_timestamp_dt})"
+                        )
                     else:
                         logger.debug(
-                            f"[API] ✓ 数据顺序验证通过：第一条时间戳={first_timestamp} < 最后一条时间戳={last_timestamp} "
-                            f"（从旧到新，符合数据库模式和前端要求）"
+                            f"[API] ✓ 数据顺序验证通过：第一条时间戳={first_timestamp} ({first_timestamp_dt}) < "
+                            f"最后一条时间戳={last_timestamp} ({last_timestamp_dt}) "
+                            f"（从旧到新，符合前端K线图表从左到右的显示要求）"
                         )
         
         # 记录返回数据信息，添加客户端IP
@@ -1417,30 +1486,25 @@ def get_market_klines():
 
 @socketio.on('leaderboard:request')
 def handle_leaderboard_request(payload=None):
-    """WebSocket handler for leaderboard requests"""
-    payload = payload or {}
-    limit = payload.get('limit')
+    """WebSocket handler for leaderboard requests (已废弃，前端已改为轮询方式)
     
-    # 记录函数调用信息
-    logger.info(f"[Leaderboard Request] Received leaderboard request: payload={payload}, limit={limit}")
+    注意：涨跌幅榜已改为前端轮询方式获取数据，不再通过WebSocket推送。
+    此handler保留以兼容旧版本前端，但建议前端使用 /api/market/leaderboard API接口。
+    """
+    payload = payload or {}
+    limit = payload.get('limit', 10)
+    
+    logger.warning(f"[Leaderboard Request] WebSocket leaderboard:request 已废弃，建议使用 /api/market/leaderboard API接口（轮询方式）")
     
     try:
-        # 记录获取数据前的信息
-        logger.debug(f"[Leaderboard Request] Fetching leaderboard data with limit={limit}")
-        
         # 获取涨跌榜数据
-        data = market_fetcher.get_leaderboard(limit=limit)
+        data = market_fetcher.sync_leaderboard(force=False, limit=limit)
         
-        # 记录数据获取成功信息
-        data_count = len(data.get('gainers', [])) + len(data.get('losers', [])) if data else 0
-        logger.info(f"[Leaderboard Request] Leaderboard data fetched successfully: total_items={data_count}, limit={limit}")
-        
-        # 发送数据更新事件
+        # 发送数据更新事件（兼容旧版本前端）
         emit('leaderboard:update', data)
-        logger.debug(f"[Leaderboard Request] Leaderboard update emitted to client")
+        logger.debug(f"[Leaderboard Request] Leaderboard update emitted to client (兼容模式)")
         
     except Exception as exc:
-        # 记录异常信息
         logger.error(f"[Leaderboard Request] Failed to fetch leaderboard data: limit={limit}, error={str(exc)}", exc_info=True)
         emit('leaderboard:error', {'message': str(exc)})
 

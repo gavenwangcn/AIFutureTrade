@@ -115,7 +115,7 @@ FUTURES_TOP_GAINERS_LIMIT = 10
 FUTURES_TOP_GAINERS_REFRESH = 30  # seconds, can be adjusted per deployment needs
 FUTURES_INDICATOR_REFRESH = 2  # seconds
 FUTURES_KLINE_LIMIT = 120
-FUTURES_LEADERBOARD_REFRESH = 5  # seconds - WebSocket实时推送间隔
+FUTURES_LEADERBOARD_REFRESH = 5  # seconds - 前端轮询刷新间隔（涨跌幅榜）
 
 # K线数据获取配置
 KLINE_DATA_SOURCE = os.getenv('KLINE_DATA_SOURCE', 'sdk').lower()  # 数据源: 'sdk' 或 'db'

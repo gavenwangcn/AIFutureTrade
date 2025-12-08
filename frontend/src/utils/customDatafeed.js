@@ -262,204 +262,34 @@ export class CustomDatafeed {
   }
 
   /**
-   * 订阅标的在某个周期的实时数据
-   * 当标的和周期发生变化的时候触发
-   * 参考 klinecharts-pro/index.html 中的实现方式
+   * 订阅标的在某个周期的实时数据（已禁用，仅使用历史数据）
+   * 
+   * 注意：K线页面已改为仅使用历史数据，不再订阅实时K线更新，避免BUG
+   * 此方法保留空实现以兼容 klinecharts-pro 库的接口要求
+   * 
    * @param {SymbolInfo} symbol - 标的信息
    * @param {Period} period - 周期信息
-   * @param {Function} callback - 数据回调函数
+   * @param {Function} callback - 数据回调函数（不会被调用）
    */
   subscribe(symbol, period, callback) {
-    try {
-      // 支持 symbol 对象或字符串
-      const ticker = symbol?.ticker || symbol
-      const periodText = period?.text || period
-      
-      console.log('[CustomDatafeed] Subscribing to real-time data:', {
-        ticker,
-        period: periodText,
-        symbol,
-        period
-      })
-
-      // 确保 WebSocket 连接已建立
-      if (!this.socket || !this.socket.connected) {
-        console.log('[CustomDatafeed] Initializing WebSocket connection...')
-        this.socket = createSocketConnection()
-        
-        // 监听实时 K 线更新
-        this.socket.on('klines:update', (data) => {
-          try {
-            const symbol = data.symbol || data.ticker
-            const interval = data.interval || data.period
-            const key = `${symbol}:${interval}`
-            const subscription = this.subscriptions.get(key)
-            
-            if (subscription && subscription.callback) {
-              // 获取 K 线数据（可能在不同的字段中）
-              const kline = data.kline || data.data || data
-              
-              // 处理时间戳
-              let timestamp = kline.timestamp
-              if (typeof timestamp === 'string') {
-                timestamp = new Date(timestamp).getTime()
-              } else if (typeof timestamp !== 'number') {
-                if (kline.kline_start_time) {
-                  timestamp = typeof kline.kline_start_time === 'number'
-                    ? kline.kline_start_time
-                    : new Date(kline.kline_start_time).getTime()
-                } else if (kline.kline_end_time) {
-                  timestamp = typeof kline.kline_end_time === 'number'
-                    ? kline.kline_end_time
-                    : new Date(kline.kline_end_time).getTime()
-                } else {
-                  timestamp = Date.now() // 使用当前时间作为后备
-                }
-              }
-              
-              // 确保时间戳是毫秒
-              if (timestamp < 1e12) {
-                timestamp = timestamp * 1000
-              }
-
-              // 转换数据格式为 Pro 版本要求的格式
-              const klineData = {
-                timestamp: Math.floor(timestamp),
-                open: parseFloat(kline.open) || 0,
-                high: parseFloat(kline.high) || 0,
-                low: parseFloat(kline.low) || 0,
-                close: parseFloat(kline.close) || 0,
-                volume: parseFloat(kline.volume) || 0
-              }
-              
-              // 验证数据有效性
-              if (klineData.timestamp > 0 && klineData.close > 0) {
-                console.log('[CustomDatafeed] Received real-time K-line update:', {
-                  key,
-                  klineData,
-                  timestamp: new Date(klineData.timestamp).toISOString()
-                })
-                
-                // Pro 版本的 callback 期望单个 K 线数据对象
-                subscription.callback(klineData)
-              } else {
-                console.warn('[CustomDatafeed] Invalid real-time K-line data:', klineData)
-              }
-            } else {
-              console.debug('[CustomDatafeed] No subscription found for:', key)
-            }
-          } catch (error) {
-            console.error('[CustomDatafeed] Error processing real-time K-line update:', error, data)
-          }
-        })
-      }
-
-      // 将 period 转换为后端支持的 interval
-      const interval = this.periodToInterval(period)
-      if (!interval) {
-        console.warn('[CustomDatafeed] Unsupported period for subscription:', period)
-        return
-      }
-
-      // 存储订阅信息
-      const key = `${ticker}:${interval}`
-      this.subscriptions.set(key, {
-        callback,
-        symbol,
-        period,
-        interval
-      })
-
-      // 向后端发送订阅请求
-      if (this.socket && this.socket.connected) {
-        this.socket.emit('klines:subscribe', {
-          symbol: ticker,
-          interval: interval
-        })
-        console.log('[CustomDatafeed] Subscription sent to backend:', { symbol: ticker, interval })
-      } else {
-        console.warn('[CustomDatafeed] WebSocket not connected, subscription will be sent when connected')
-        // 等待连接后发送订阅
-        this.socket.once('connect', () => {
-          this.socket.emit('klines:subscribe', {
-            symbol: ticker,
-            interval: interval
-          })
-          console.log('[CustomDatafeed] Subscription sent after connection:', { symbol: ticker, interval })
-        })
-      }
-    } catch (error) {
-      console.error('[CustomDatafeed] Error subscribing:', error)
-    }
+    // K线页面已改为仅使用历史数据，不再订阅实时K线更新
+    // 此方法保留空实现以兼容 klinecharts-pro 库的接口要求
+    console.log('[CustomDatafeed] subscribe called but real-time subscription is disabled (using history data only)')
   }
 
   /**
-   * 取消订阅标的在某个周期的实时数据
-   * 当标的和周期发生变化的时候触发
+   * 取消订阅标的在某个周期的实时数据（已禁用，仅使用历史数据）
+   * 
+   * 注意：K线页面已改为仅使用历史数据，不再订阅实时K线更新，避免BUG
+   * 此方法保留空实现以兼容 klinecharts-pro 库的接口要求
+   * 
    * @param {SymbolInfo} symbol - 标的信息
    * @param {Period} period - 周期信息
    */
   unsubscribe(symbol, period) {
-    try {
-      // 支持 symbol 对象或字符串
-      const ticker = symbol?.ticker || symbol
-      const periodText = period?.text || period
-      
-      console.log('[CustomDatafeed] Unsubscribing from real-time data:', {
-        ticker,
-        period: periodText
-      })
-
-      // 将 period 转换为后端支持的 interval
-      const interval = this.periodToInterval(period)
-      if (!interval) {
-        console.warn('[CustomDatafeed] Cannot unsubscribe: invalid interval for period:', period)
-        return
-      }
-
-      // 移除订阅信息
-      const key = `${ticker}:${interval}`
-      const hadSubscription = this.subscriptions.has(key)
-      this.subscriptions.delete(key)
-
-      // 向后端发送取消订阅请求
-      if (hadSubscription) {
-        if (this.socket && this.socket.connected) {
-          this.socket.emit('klines:unsubscribe', {
-            symbol: ticker,
-            interval: interval
-          })
-          console.log('[CustomDatafeed] Unsubscription sent to backend:', { symbol: ticker, interval })
-        } else if (this.socket) {
-          // 如果WebSocket连接断开，等待连接重新建立后发送取消订阅请求
-          console.warn('[CustomDatafeed] WebSocket not connected, unsubscription will be sent when connected')
-          this.socket.once('connect', () => {
-            this.socket.emit('klines:unsubscribe', {
-              symbol: ticker,
-              interval: interval
-            })
-            console.log('[CustomDatafeed] Unsubscription sent after connection:', { symbol: ticker, interval })
-          })
-        } else {
-          // 如果WebSocket不存在，创建临时连接发送取消订阅请求
-          console.warn('[CustomDatafeed] WebSocket not initialized, creating temporary connection for unsubscription')
-          const tempSocket = createSocketConnection()
-          tempSocket.once('connect', () => {
-            tempSocket.emit('klines:unsubscribe', {
-              symbol: ticker,
-              interval: interval
-            })
-            console.log('[CustomDatafeed] Unsubscription sent via temporary connection:', { symbol: ticker, interval })
-            // 发送后立即断开临时连接
-            setTimeout(() => {
-              tempSocket.disconnect()
-            }, 1000)
-          })
-        }
-      }
-    } catch (error) {
-      console.error('[CustomDatafeed] Error unsubscribing:', error)
-    }
+    // K线页面已改为仅使用历史数据，不再订阅实时K线更新
+    // 此方法保留空实现以兼容 klinecharts-pro 库的接口要求
+    console.log('[CustomDatafeed] unsubscribe called but real-time subscription is disabled (using history data only)')
   }
 
   /**
