@@ -1205,19 +1205,20 @@ def get_market_klines():
     参数:
         symbol: 交易对符号（如 'BTCUSDT'）
         interval: 时间间隔（'1m', '5m', '15m', '1h', '4h', '1d', '1w'）
-        limit: 返回的最大记录数，默认500
+        limit: 返回的最大记录数，默认500，SDK模式下最大120
         start_time: 开始时间（可选，ISO格式字符串）
         end_time: 结束时间（可选，ISO格式字符串）
     """
     try:
-        from common.database_clickhouse import ClickHouseDatabase
         from datetime import datetime
+        from common.config import KLINE_DATA_SOURCE
         
         symbol = request.args.get('symbol', '').upper()
         interval = request.args.get('interval', '5m')
         limit = request.args.get('limit', type=int) or 500
         start_time_str = request.args.get('start_time')
         end_time_str = request.args.get('end_time')
+        source = KLINE_DATA_SOURCE  # 从配置文件获取数据源，不再从请求参数获取
         
         if not symbol:
             return jsonify({'error': 'symbol parameter is required'}), 400
@@ -1230,31 +1231,75 @@ def get_market_klines():
         # 解析时间参数
         start_time = None
         end_time = None
+        start_timestamp = None
+        end_timestamp = None
+        
         if start_time_str:
             try:
                 start_time = datetime.fromisoformat(start_time_str.replace('Z', '+00:00'))
+                start_timestamp = int(start_time.timestamp() * 1000)  # 转换为毫秒
             except ValueError:
                 return jsonify({'error': 'invalid start_time format. Use ISO format'}), 400
+        
         if end_time_str:
             try:
                 end_time = datetime.fromisoformat(end_time_str.replace('Z', '+00:00'))
+                end_timestamp = int(end_time.timestamp() * 1000)  # 转换为毫秒
             except ValueError:
                 return jsonify({'error': 'invalid end_time format. Use ISO format'}), 400
         
         # 查询K线数据
-        logger.info(f"[API] 获取K线数据请求: symbol={symbol}, interval={interval}, limit={limit}, start_time={start_time_str}, end_time={end_time_str}")
-        clickhouse_db = ClickHouseDatabase(auto_init_tables=False)
-        klines = clickhouse_db.get_market_klines(
-            symbol=symbol,
-            interval=interval,
-            limit=limit,
-            start_time=start_time,
-            end_time=end_time
-        )
+        logger.info(f"[API] 获取K线数据请求: symbol={symbol}, interval={interval}, limit={limit}, source={source}, start_time={start_time_str}, end_time={end_time_str}")
+        
+        klines = []
+        
+        if source == 'db':
+            # 从数据库获取数据
+            from common.database_clickhouse import ClickHouseDatabase
+            clickhouse_db = ClickHouseDatabase(auto_init_tables=False)
+            klines = clickhouse_db.get_market_klines(
+                symbol=symbol,
+                interval=interval,
+                limit=limit,
+                start_time=start_time,
+                end_time=end_time
+            )
+        else:
+            # 从SDK获取数据（默认）
+            from market.market_data import market_fetcher
+            
+            # SDK模式下限制最大返回数为120
+            sdk_limit = limit
+            if sdk_limit > 120:
+                sdk_limit = 120
+                logger.info(f"[API] SDK模式下限制limit为120，原请求limit={limit}")
+            
+            # 调用SDK获取K线数据
+            klines = market_fetcher._futures_client.get_klines(
+                symbol=symbol,
+                interval=interval,
+                limit=sdk_limit,
+                startTime=start_timestamp,
+                endTime=end_timestamp
+            )
+            
+            # 转换SDK返回数据为统一格式
+            formatted_klines = []
+            for kline in klines:
+                formatted_klines.append({
+                    'timestamp': kline.get('open_time', 0),
+                    'open': float(kline.get('open', 0)),
+                    'high': float(kline.get('high', 0)),
+                    'low': float(kline.get('low', 0)),
+                    'close': float(kline.get('close', 0)),
+                    'volume': float(kline.get('volume', 0)),
+                    'turnover': float(kline.get('quote_asset_volume', 0))
+                })
+            klines = formatted_klines
         
         # 记录返回数据信息
         klines_count = len(klines) if klines else 0
-        logger.info(f"[API] K线数据查询完成: symbol={symbol}, interval={interval}, 返回数据条数={klines_count}")
+        logger.info(f"[API] K线数据查询完成: symbol={symbol}, interval={interval}, source={source}, 返回数据条数={klines_count}")
         
         if klines_count > 0:
             # 记录第一条和最后一条数据的时间戳（用于调试）
@@ -1270,13 +1315,14 @@ def get_market_klines():
         response_data = {
             'symbol': symbol,
             'interval': interval,
+            'source': source,
             'data': klines
         }
         
         return jsonify(response_data)
         
     except Exception as e:
-        logger.error(f"[API] 获取K线数据失败: symbol={symbol}, interval={interval}, error={e}", exc_info=True)
+        logger.error(f"[API] 获取K线数据失败: symbol={symbol}, interval={interval}, source={source}, error={e}", exc_info=True)
         return jsonify({'error': str(e)}), 500
 
 @socketio.on('leaderboard:request')
@@ -1284,10 +1330,28 @@ def handle_leaderboard_request(payload=None):
     """WebSocket handler for leaderboard requests"""
     payload = payload or {}
     limit = payload.get('limit')
+    
+    # 记录函数调用信息
+    logger.info(f"[Leaderboard Request] Received leaderboard request: payload={payload}, limit={limit}")
+    
     try:
+        # 记录获取数据前的信息
+        logger.debug(f"[Leaderboard Request] Fetching leaderboard data with limit={limit}")
+        
+        # 获取涨跌榜数据
         data = market_fetcher.get_leaderboard(limit=limit)
+        
+        # 记录数据获取成功信息
+        data_count = len(data.get('gainers', [])) + len(data.get('losers', [])) if data else 0
+        logger.info(f"[Leaderboard Request] Leaderboard data fetched successfully: total_items={data_count}, limit={limit}")
+        
+        # 发送数据更新事件
         emit('leaderboard:update', data)
+        logger.debug(f"[Leaderboard Request] Leaderboard update emitted to client")
+        
     except Exception as exc:
+        # 记录异常信息
+        logger.error(f"[Leaderboard Request] Failed to fetch leaderboard data: limit={limit}, error={str(exc)}", exc_info=True)
         emit('leaderboard:error', {'message': str(exc)})
 
 @socketio.on('klines:subscribe')
@@ -1302,12 +1366,17 @@ def handle_klines_subscribe(payload=None):
     symbol = payload.get('symbol', '').upper()
     interval = payload.get('interval', '5m')
     
+    # 记录函数调用信息
+    logger.info(f"[KLine Subscribe] Received subscription request: payload={payload}, symbol={symbol}, interval={interval}")
+    
     if not symbol:
+        logger.warning(f"[KLine Subscribe] Subscription failed: symbol is required, payload={payload}")
         emit('klines:error', {'message': 'symbol is required'})
         return
     
     valid_intervals = ['1m', '5m', '15m', '1h', '4h', '1d', '1w']
     if interval not in valid_intervals:
+        logger.warning(f"[KLine Subscribe] Subscription failed: invalid interval '{interval}', must be one of {valid_intervals}")
         emit('klines:error', {'message': f'invalid interval. Must be one of: {valid_intervals}'})
         return
     
@@ -1315,20 +1384,29 @@ def handle_klines_subscribe(payload=None):
     room = f'klines:{symbol}:{interval}'
     from flask_socketio import join_room
     join_room(room)
+    logger.debug(f"[KLine Subscribe] Client joined room: {room}")
     
-    # 记录订阅信息
+    # 记录订阅前后的订阅数量
     with kline_push_lock:
+        previous_count = len(kline_subscriptions)
         kline_subscriptions[room] = {
             'symbol': symbol,
             'interval': interval,
             'last_update_time': datetime.now()
         }
+        current_count = len(kline_subscriptions)
+    
+    logger.info(f"[KLine Subscribe] Subscription added: room={room}, symbol={symbol}, interval={interval}, " \
+                f"subscriptions_count: {previous_count} → {current_count}")
     
     # 启动推送工作线程（如果还没有启动）
     start_kline_push_worker()
+    logger.debug(f"[KLine Subscribe] Push worker started/checked")
     
-    logger.info(f"Client subscribed to klines: {symbol} {interval}, room: {room}")
+    # 发送订阅成功事件
     emit('klines:subscribed', {'symbol': symbol, 'interval': interval})
+    logger.info(f"[KLine Subscribe] Subscription completed: symbol={symbol}, interval={interval}, room={room}, " \
+                f"total_subscriptions={current_count}")
 
 @socketio.on('klines:unsubscribe')
 def handle_klines_unsubscribe(payload=None):
@@ -1337,16 +1415,36 @@ def handle_klines_unsubscribe(payload=None):
     symbol = payload.get('symbol', '').upper()
     interval = payload.get('interval', '5m')
     
+    # 记录函数调用信息
+    logger.info(f"[KLine Unsubscribe] Received unsubscribe request: payload={payload}, symbol={symbol}, interval={interval}")
+    
     room = f'klines:{symbol}:{interval}'
     from flask_socketio import leave_room
+    
+    # 记录客户端离开房间信息
+    logger.debug(f"[KLine Unsubscribe] Client leaving room: {room}")
     leave_room(room)
     
     # 移除订阅信息
     with kline_push_lock:
-        if room in kline_subscriptions:
+        previous_count = len(kline_subscriptions)
+        was_subscribed = room in kline_subscriptions
+        
+        if was_subscribed:
             del kline_subscriptions[room]
+            current_count = len(kline_subscriptions)
+            logger.info(f"[KLine Unsubscribe] Subscription removed: room={room}, symbol={symbol}, interval={interval}, subscriptions_count: {previous_count} → {current_count}")
+        else:
+            current_count = previous_count
+            logger.warning(f"[KLine Unsubscribe] Room not found in subscriptions: room={room}, symbol={symbol}, interval={interval}")
+        
+        # 检查是否还有活跃订阅，如果没有则关闭推送线程
+        if not kline_subscriptions:
+            kline_push_stop_event.set()
+            logger.info("[KLine Unsubscribe] No active KLine subscriptions, stopping push thread")
     
-    logger.info(f"Client unsubscribed from klines: {symbol} {interval}, room: {room}")
+    # 记录取消订阅完成信息
+    logger.info(f"[KLine Unsubscribe] Client unsubscribed from klines: symbol={symbol}, interval={interval}, room={room}, was_subscribed={was_subscribed}")
     emit('klines:unsubscribed', {'symbol': symbol, 'interval': interval})
 
 # K线实时推送相关变量
@@ -1395,6 +1493,7 @@ def push_realtime_kline(symbol: str, interval: str):
 
 def _kline_push_loop():
     """后台循环任务：定期推送实时K线数据到订阅的客户端"""
+    global kline_push_thread
     thread_id = threading.current_thread().ident
     logger.info(f"[KLine Push Worker-{thread_id}] K线实时推送循环启动")
     
@@ -1431,6 +1530,11 @@ def _kline_push_loop():
             kline_push_stop_event.wait(push_interval)
     
     logger.info(f"[KLine Push Worker-{thread_id}] K线实时推送循环停止")
+    
+    # 线程退出时重置状态，确保下次能正确启动
+    with kline_push_lock:
+        kline_push_stop_event.clear()
+        kline_push_thread = None
 
 def start_kline_push_worker():
     """启动K线实时推送工作线程"""
@@ -1507,7 +1611,7 @@ def check_update():
 
 if __name__ == '__main__':
     logger.info("\n" + "=" * 60)
-    logger.info("AICoinTrade Backend Service - Starting...")
+    logger.info("AIFutureTrade Backend Service - Starting...")
     logger.info("=" * 60)
     logger.info("Initializing database...")
 
@@ -1540,10 +1644,9 @@ if __name__ == '__main__':
     logger.info("✅ 所有涨跌幅榜相关工作线程已启动完成")
 
     logger.info("\n" + "=" * 60)
-    logger.info("AICoinTrade Backend Service is running!")
+    logger.info("AIFutureTrade Backend Service is running!")
     logger.info("API Server: http://0.0.0.0:5002")
     logger.info("WebSocket Server: ws://0.0.0.0:5002")
-    logger.info("Press Ctrl+C to stop")
     logger.info("=" * 60 + "\n")
 
     # 开发环境：使用Werkzeug服务器
