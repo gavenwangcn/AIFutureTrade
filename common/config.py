@@ -119,3 +119,4 @@ FUTURES_LEADERBOARD_REFRESH = 5  # seconds - WebSocket实时推送间隔
 
 # K线数据获取配置
 KLINE_DATA_SOURCE = os.getenv('KLINE_DATA_SOURCE', 'sdk').lower()  # 数据源: 'sdk' 或 'db'
+KLINE_SDK_QUERY_BATCH_COUNT = int(os.getenv('KLINE_SDK_QUERY_BATCH_COUNT', '3'))  # SDK模式下查询批次次数，默认3次（120*3=360条）
