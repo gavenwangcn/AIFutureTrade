@@ -103,7 +103,11 @@ class BinanceFuturesClient:
         Returns:
             完整交易对符号，如 'BTCUSDT'
         """
-        return f"{base_symbol.upper()}{self.quote_asset}"
+        base_symbol = base_symbol.upper()
+        # 检查base_symbol是否已经以quote_asset结尾，避免重复添加
+        if not base_symbol.endswith(self.quote_asset):
+            return f"{base_symbol}{self.quote_asset}"
+        return base_symbol
 
     @staticmethod
     def _normalize_list(payload: Any) -> List[Any]:
