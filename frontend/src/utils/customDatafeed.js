@@ -423,12 +423,39 @@ export class CustomDatafeed {
       this.subscriptions.delete(key)
 
       // 向后端发送取消订阅请求
-      if (this.socket && this.socket.connected && hadSubscription) {
-        this.socket.emit('klines:unsubscribe', {
-          symbol: ticker,
-          interval: interval
-        })
-        console.log('[CustomDatafeed] Unsubscription sent to backend:', { symbol: ticker, interval })
+      if (hadSubscription) {
+        if (this.socket && this.socket.connected) {
+          this.socket.emit('klines:unsubscribe', {
+            symbol: ticker,
+            interval: interval
+          })
+          console.log('[CustomDatafeed] Unsubscription sent to backend:', { symbol: ticker, interval })
+        } else if (this.socket) {
+          // 如果WebSocket连接断开，等待连接重新建立后发送取消订阅请求
+          console.warn('[CustomDatafeed] WebSocket not connected, unsubscription will be sent when connected')
+          this.socket.once('connect', () => {
+            this.socket.emit('klines:unsubscribe', {
+              symbol: ticker,
+              interval: interval
+            })
+            console.log('[CustomDatafeed] Unsubscription sent after connection:', { symbol: ticker, interval })
+          })
+        } else {
+          // 如果WebSocket不存在，创建临时连接发送取消订阅请求
+          console.warn('[CustomDatafeed] WebSocket not initialized, creating temporary connection for unsubscription')
+          const tempSocket = createSocketConnection()
+          tempSocket.once('connect', () => {
+            tempSocket.emit('klines:unsubscribe', {
+              symbol: ticker,
+              interval: interval
+            })
+            console.log('[CustomDatafeed] Unsubscription sent via temporary connection:', { symbol: ticker, interval })
+            // 发送后立即断开临时连接
+            setTimeout(() => {
+              tempSocket.disconnect()
+            }, 1000)
+          })
+        }
       }
     } catch (error) {
       console.error('[CustomDatafeed] Error unsubscribing:', error)
