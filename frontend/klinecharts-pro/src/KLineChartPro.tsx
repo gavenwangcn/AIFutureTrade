@@ -65,7 +65,7 @@ export default class KLineChartPro implements ChartPro {
           }
           timezone={options.timezone ?? 'Asia/Shanghai'}
           mainIndicators={options.mainIndicators ?? ['MA']}
-          subIndicators={options.subIndicators ?? ['MA', 'RSI', 'MACD', 'VOL']}
+          subIndicators={options.subIndicators ?? ['RSI', 'MACD', 'VOL']}
           datafeed={options.datafeed}/>
       ),
       this._container

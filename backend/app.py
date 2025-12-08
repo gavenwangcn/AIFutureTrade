@@ -638,8 +638,14 @@ def after_request(response):
 
 @app.route('/')
 def index():
-    """Main page route"""
-    return render_template('index.html')
+    """Main page route - 返回简单的状态信息，不渲染模板"""
+    return jsonify({
+        'status': 'running',
+        'message': 'AI Future Trade Backend API',
+        'version': __version__,
+        'frontend_url': 'http://localhost:3000',
+        'api_endpoint': '/api/'
+    })
 
 @app.route('/lib/<path:filename>')
 def serve_lib_file(filename):

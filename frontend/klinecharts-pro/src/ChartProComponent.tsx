@@ -43,6 +43,17 @@ interface PrevSymbolPeriod {
 }
 
 function createIndicator (widget: Nullable<Chart>, indicatorName: string, isStack?: boolean, paneOptions?: PaneOptions): Nullable<string> {
+  // 为所有副指标设置较小的高度，缩小到原来的一半
+  // 主指标（isStack为true且paneId为candle_pane）使用默认高度
+  if (!isStack || paneOptions?.id !== 'candle_pane') {
+    // 为副指标设置固定高度，约为默认高度的一半
+    paneOptions = { 
+      height: 80, // 设置固定高度为80px，默认通常为150-200px
+      gap: { bottom: 2 }, 
+      ...paneOptions 
+    }
+  }
+  // VOL指标可以有特殊设置
   if (indicatorName === 'VOL') {
     paneOptions = { gap: { bottom: 2 }, ...paneOptions }
   }
