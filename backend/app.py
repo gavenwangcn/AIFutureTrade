@@ -1211,7 +1211,7 @@ def get_market_klines():
     参数:
         symbol: 交易对符号（如 'BTCUSDT'）
         interval: 时间间隔（'1m', '5m', '15m', '1h', '4h', '1d', '1w'）
-        limit: 返回的最大记录数，默认500，SDK模式下最大120
+        limit: 返回的最大记录数，默认500，SDK模式下最大500
         start_time: 开始时间（可选，ISO格式字符串）
         end_time: 结束时间（可选，ISO格式字符串）
     """
@@ -1223,8 +1223,8 @@ def get_market_klines():
         interval = request.args.get('interval', '5m')
         # 根据数据源设置不同的默认limit
         source = KLINE_DATA_SOURCE  # 从配置文件获取数据源，不再从请求参数获取
-        # SDK模式默认120条，DB模式默认500条
-        default_limit = 120 if source == 'sdk' else 500
+        # SDK模式和DB模式都默认500条
+        default_limit = 500
         limit = request.args.get('limit', type=int) or default_limit
         start_time_str = request.args.get('start_time')
         end_time_str = request.args.get('end_time')
@@ -1281,128 +1281,85 @@ def get_market_klines():
             # 从SDK获取数据（默认）
             # 使用全局market_fetcher变量，而非重新导入
             
-            # SDK模式下需要多次查询以获取足够的历史数据
-            # 单次查询最多120条，需要查询多次才能满足页面需求（300+条）
-            from common.config import KLINE_SDK_QUERY_BATCH_COUNT
-            batch_count = KLINE_SDK_QUERY_BATCH_COUNT  # 默认3次，可配置
-            sdk_limit_per_batch = 120  # SDK单次查询最大限制
+            # SDK模式下单次查询可以获取最多500条数据
+            # 限制最大limit为500
+            sdk_limit = limit
+            if sdk_limit > 500:
+                sdk_limit = 500
+                logger.debug(f"[API] SDK模式下限制limit为500，原请求limit={limit}")
             
-            logger.info(f"[API] 从SDK获取K线数据: symbol={symbol}, interval={interval}, 查询批次={batch_count}, 每批={sdk_limit_per_batch}条")
+            logger.info(f"[API] 从SDK获取K线数据: symbol={symbol}, interval={interval}, limit={sdk_limit}")
             
-            # 存储所有批次查询的结果
-            all_klines = []
-            current_end_time = end_timestamp  # 第一次查询的endTime（当前时间或传入的endTime）
+            # 调用SDK获取K线数据（只传入endTime，不传入startTime）
+            klines_raw = market_fetcher._futures_client.get_klines(
+                symbol=symbol,
+                interval=interval,
+                limit=sdk_limit,
+                startTime=start_timestamp,  # 如果提供了startTime，也传入
+                endTime=end_timestamp  # 只传入endTime（或传入的endTime）
+            )
             
-            # 循环查询多次
-            for batch_idx in range(batch_count):
-                try:
-                    logger.debug(f"[API] SDK查询批次 {batch_idx + 1}/{batch_count}: endTime={current_end_time}")
+            if not klines_raw or len(klines_raw) == 0:
+                logger.warning(f"[API] SDK未返回K线数据: symbol={symbol}, interval={interval}")
+                klines = []
+            else:
+                # SDK返回的数据是倒序的（从新到旧），第一条（数组[0]）是最新的K线
+                # 由于最近一根K线通过WebSocket监听接口实时获取，需要去掉第一条（最新的）
+                if len(klines_raw) > 0:
+                    logger.debug(f"[API] SDK返回{len(klines_raw)}条K线数据，去掉第一条（最新K线通过监听接口获取）")
+                    klines_raw = klines_raw[1:]  # 去掉第一条（最新的），保留从第二条开始的所有数据
+                
+                # 转换SDK返回数据为统一格式，价格保留6位小数
+                formatted_klines = []
+                for kline in klines_raw:
+                    # 获取原始价格数据（可能是字符串或数字）
+                    raw_open = kline.get('open', 0)
+                    raw_high = kline.get('high', 0)
+                    raw_low = kline.get('low', 0)
+                    raw_close = kline.get('close', 0)
                     
-                    # 调用SDK获取K线数据（只传入endTime，不传入startTime）
-                    batch_klines = market_fetcher._futures_client.get_klines(
-                        symbol=symbol,
-                        interval=interval,
-                        limit=sdk_limit_per_batch,
-                        startTime=None,  # 不传入startTime
-                        endTime=current_end_time  # 只传入endTime
-                    )
+                    # 转换为浮点数并保留6位小数
+                    formatted_open = round(float(raw_open) if raw_open else 0.0, 6)
+                    formatted_high = round(float(raw_high) if raw_high else 0.0, 6)
+                    formatted_low = round(float(raw_low) if raw_low else 0.0, 6)
+                    formatted_close = round(float(raw_close) if raw_close else 0.0, 6)
                     
-                    if not batch_klines or len(batch_klines) == 0:
-                        logger.warning(f"[API] SDK批次 {batch_idx + 1} 未返回数据，停止查询")
-                        break
-                    
-                    # 第一次查询需要去掉第一根K线（因为最近一根K线通过监听接口获取）
-                    if batch_idx == 0 and len(batch_klines) > 0:
-                        logger.debug(f"[API] 第一次查询，去掉第一根K线（最近一根通过监听接口获取）")
-                        batch_klines = batch_klines[1:]  # 去掉第一根
-                    
-                    if len(batch_klines) == 0:
-                        logger.debug(f"[API] 批次 {batch_idx + 1} 去掉第一根后无数据，停止查询")
-                        break
-                    
-                    # 转换SDK返回数据为统一格式，价格保留6位小数
-                    formatted_batch_klines = []
-                    for kline in batch_klines:
-                        # 获取原始价格数据（可能是字符串或数字）
-                        raw_open = kline.get('open', 0)
-                        raw_high = kline.get('high', 0)
-                        raw_low = kline.get('low', 0)
-                        raw_close = kline.get('close', 0)
-                        
-                        # 转换为浮点数并保留6位小数
-                        formatted_open = round(float(raw_open) if raw_open else 0.0, 6)
-                        formatted_high = round(float(raw_high) if raw_high else 0.0, 6)
-                        formatted_low = round(float(raw_low) if raw_low else 0.0, 6)
-                        formatted_close = round(float(raw_close) if raw_close else 0.0, 6)
-                        
-                        formatted_batch_klines.append({
-                            'timestamp': kline.get('open_time', 0),
-                            'open': formatted_open,
-                            'high': formatted_high,
-                            'low': formatted_low,
-                            'close': formatted_close,
-                            'volume': float(kline.get('volume', 0)),
-                            'turnover': float(kline.get('quote_asset_volume', 0))
-                        })
-                    
-                    # 将当前批次的数据添加到总结果中
-                    all_klines.extend(formatted_batch_klines)
-                    
-                    logger.debug(f"[API] SDK批次 {batch_idx + 1} 完成，获取 {len(formatted_batch_klines)} 条K线数据")
-                    
-                    # 如果当前批次返回的数据少于120条，说明已经获取到最早的数据，停止查询
-                    # 注意：这里判断的是原始batch_klines的长度，因为第一次查询可能去掉了第一根
-                    original_batch_length = len(batch_klines) + (1 if batch_idx == 0 else 0)  # 如果是第一次查询，加上被去掉的那根
-                    if original_batch_length < sdk_limit_per_batch:
-                        logger.debug(f"[API] 批次 {batch_idx + 1} 返回数据少于{sdk_limit_per_batch}条，已获取最早数据，停止查询")
-                        break
-                    
-                    # 准备下一次查询的endTime：使用当前批次最早的一根K线的open_time
-                    # 注意：SDK返回的数据是倒序的（最新的在前），所以formatted_batch_klines[-1]是最早的数据
-                    if len(formatted_batch_klines) > 0:
-                        earliest_kline_timestamp = formatted_batch_klines[-1].get('timestamp', 0)
-                        if earliest_kline_timestamp > 0:
-                            current_end_time = earliest_kline_timestamp - 1  # 减1毫秒，避免重复
-                            logger.debug(f"[API] 批次 {batch_idx + 1} 最早K线时间戳: {earliest_kline_timestamp}, 下次查询endTime: {current_end_time}")
-                        else:
-                            logger.warning(f"[API] 批次 {batch_idx + 1} 最早K线时间戳无效，停止查询")
-                            break
-                    else:
-                        logger.warning(f"[API] 批次 {batch_idx + 1} 格式化后无数据，停止查询")
-                        break
-                    
-                except Exception as batch_error:
-                    logger.error(f"[API] SDK批次 {batch_idx + 1} 查询失败: {batch_error}", exc_info=True)
-                    # 如果某批次失败，继续尝试下一批次，但记录错误
-                    break
-            
-            # 由于SDK返回的数据是倒序的（从新到旧），需要按timestamp升序排序（从旧到新）
-            # 确保与数据库模式和单次查询的数据顺序一致
-            all_klines.sort(key=lambda x: x.get('timestamp', 0))
-            klines = all_klines
-            
-            logger.info(f"[API] SDK查询完成，共获取 {len(klines)} 条K线数据（{batch_count}个批次）")
-            
-            # 验证数据顺序：确保第一条时间戳小于最后一条时间戳（从旧到新，timestamp升序）
-            # 这与数据库模式（ORDER BY kline_end_time ASC）和前端期望的顺序一致
-            if len(klines) > 1:
-                first_timestamp = klines[0].get('timestamp', 0)
-                last_timestamp = klines[-1].get('timestamp', 0)
-                if first_timestamp >= last_timestamp:
-                    logger.warning(
-                        f"[API] ⚠️ 数据顺序异常：第一条时间戳({first_timestamp}) >= 最后一条({last_timestamp})，"
-                        f"重新排序以确保从旧到新的顺序（与数据库模式和前端要求一致）"
-                    )
-                    klines.sort(key=lambda x: x.get('timestamp', 0))
-                    # 重新验证
+                    formatted_klines.append({
+                        'timestamp': kline.get('open_time', 0),
+                        'open': formatted_open,
+                        'high': formatted_high,
+                        'low': formatted_low,
+                        'close': formatted_close,
+                        'volume': float(kline.get('volume', 0)),
+                        'turnover': float(kline.get('quote_asset_volume', 0))
+                    })
+                
+                # 由于SDK返回的数据是倒序的（从新到旧），需要按timestamp升序排序（从旧到新）
+                # 确保与数据库模式和前端期望的数据顺序一致
+                formatted_klines.sort(key=lambda x: x.get('timestamp', 0))
+                klines = formatted_klines
+                
+                logger.info(f"[API] SDK查询完成，共获取 {len(klines)} 条K线数据（已去掉最后一条最新K线）")
+                
+                # 验证数据顺序：确保第一条时间戳小于最后一条时间戳（从旧到新，timestamp升序）
+                if len(klines) > 1:
                     first_timestamp = klines[0].get('timestamp', 0)
                     last_timestamp = klines[-1].get('timestamp', 0)
-                    logger.debug(f"[API] ✓ 重新排序后：第一条时间戳={first_timestamp}, 最后一条时间戳={last_timestamp}")
-                else:
-                    logger.debug(
-                        f"[API] ✓ 数据顺序验证通过：第一条时间戳={first_timestamp} < 最后一条时间戳={last_timestamp} "
-                        f"（从旧到新，符合数据库模式和前端要求）"
-                    )
+                    if first_timestamp >= last_timestamp:
+                        logger.warning(
+                            f"[API] ⚠️ 数据顺序异常：第一条时间戳({first_timestamp}) >= 最后一条({last_timestamp})，"
+                            f"重新排序以确保从旧到新的顺序（与数据库模式和前端要求一致）"
+                        )
+                        klines.sort(key=lambda x: x.get('timestamp', 0))
+                        # 重新验证
+                        first_timestamp = klines[0].get('timestamp', 0)
+                        last_timestamp = klines[-1].get('timestamp', 0)
+                        logger.debug(f"[API] ✓ 重新排序后：第一条时间戳={first_timestamp}, 最后一条时间戳={last_timestamp}")
+                    else:
+                        logger.debug(
+                            f"[API] ✓ 数据顺序验证通过：第一条时间戳={first_timestamp} < 最后一条时间戳={last_timestamp} "
+                            f"（从旧到新，符合数据库模式和前端要求）"
+                        )
         
         # 记录返回数据信息，添加客户端IP
         klines_count = len(klines) if klines else 0
