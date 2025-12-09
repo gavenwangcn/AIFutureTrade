@@ -1062,32 +1062,36 @@ def get_aggregated_portfolio():
             total_portfolio['unrealized_pnl'] += portfolio.get('unrealized_pnl', 0)
             total_portfolio['initial_capital'] += portfolio.get('initial_capital', 0)
 
-            # Aggregate positions by future and side
+            # Aggregate positions by symbol and position_side
             for pos in portfolio.get('positions', []):
-                key = f"{pos['future']}_{pos['side']}"
+                symbol = pos.get('symbol', '')
+                position_side = pos.get('position_side', 'LONG')
+                position_amt = abs(pos.get('position_amt', 0.0))
+                
+                key = f"{symbol}_{position_side}"
                 if key not in all_positions:
                     all_positions[key] = {
-                        'future': pos['future'],
-                        'side': pos['side'],
-                        'quantity': 0,
+                        'symbol': symbol,
+                        'position_side': position_side,
+                        'position_amt': 0,
                         'avg_price': 0,
                         'total_cost': 0,
-                        'leverage': pos['leverage'],
-                        'current_price': pos['current_price'],
-                        'pnl': 0
+                        'leverage': pos.get('leverage', 1),
+                        'current_price': pos.get('current_price'),
+                        'pnl': pos.get('pnl', 0)
                     }
 
                 # Weighted average calculation
                 current_pos = all_positions[key]
-                current_cost = current_pos['quantity'] * current_pos['avg_price']
-                new_cost = pos['quantity'] * pos['avg_price']
-                total_quantity = current_pos['quantity'] + pos['quantity']
+                current_cost = current_pos['position_amt'] * current_pos['avg_price']
+                new_cost = position_amt * pos.get('avg_price', 0)
+                total_position_amt = current_pos['position_amt'] + position_amt
 
-                if total_quantity > 0:
-                    current_pos['avg_price'] = (current_cost + new_cost) / total_quantity
-                    current_pos['quantity'] = total_quantity
+                if total_position_amt > 0:
+                    current_pos['avg_price'] = (current_cost + new_cost) / total_position_amt
+                    current_pos['position_amt'] = total_position_amt
                     current_pos['total_cost'] = current_cost + new_cost
-                    current_pos['pnl'] = (pos['current_price'] - current_pos['avg_price']) * total_quantity
+                    current_pos['pnl'] = (pos.get('current_price', 0) - current_pos['avg_price']) * total_position_amt
 
     total_portfolio['positions'] = list(all_positions.values())
     chart_data = db.get_multi_model_chart_data(limit=100)
@@ -1118,8 +1122,9 @@ def get_market_prices():
         try:
             portfolio = db.get_portfolio(model['id'], {})
             for pos in portfolio.get('positions', []):
-                if pos.get('future'):
-                    position_symbols.add(pos['future'])
+                symbol = pos.get('symbol')
+                if symbol:
+                    position_symbols.add(symbol)
         except Exception:
             continue
     

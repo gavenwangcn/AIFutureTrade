@@ -11,6 +11,7 @@ import logging
 import time
 from datetime import datetime
 from typing import Any, Callable, Dict, List, Optional
+import common.config as app_config
 
 # ============ SDK导入和可用性检查 ============
 
@@ -29,6 +30,7 @@ try:  # pragma: no cover - external dependency optional in many envs
     from binance_sdk_derivatives_trading_usds_futures.rest_api.models import (
         KlineCandlestickDataIntervalEnum,
         NewOrderSideEnum,
+        TestOrderSideEnum,
     )
 except ImportError as exc:  # pragma: no cover - handled at runtime
     BINANCE_SDK_AVAILABLE = False
@@ -36,6 +38,8 @@ except ImportError as exc:  # pragma: no cover - handled at runtime
     ConfigurationRestAPI = None  # type: ignore[assignment]
     DerivativesTradingUsdsFutures = None  # type: ignore[assignment]
     KlineCandlestickDataIntervalEnum = None  # type: ignore[assignment]
+    NewOrderSideEnum = None  # type: ignore[assignment]
+    TestOrderSideEnum = None  # type: ignore[assignment]
     DERIVATIVES_TRADING_USDS_FUTURES_REST_API_PROD_URL = None  # type: ignore[assignment]
     DERIVATIVES_TRADING_USDS_FUTURES_REST_API_TESTNET_URL = None  # type: ignore[assignment]
 
@@ -394,41 +398,135 @@ class BinanceFuturesOrderClient:
         return flattened
 
     # ============ 交易方法 ============
-
-    def stop_loss_trade(self, symbol: str, side: str, order_type: str, quantity: Optional[float] = None, price: Optional[float] = None, stop_price: float = None, **kwargs) -> Dict[str, Any]:
+    
+    def _execute_order(self, order_params: Dict[str, Any], context: str = "交易") -> Dict[str, Any]:
         """
-        止损交易 - 使用STOP或STOP_MARKET订单类型
+        执行订单的统一方法，根据配置选择使用测试接口或真实交易接口
         
         Args:
-            symbol: 交易对符号，如 'BTCUSDT'
-            side: 交易方向，'BUY'或'SELL'
-            order_type: 订单类型，'STOP'或'STOP_MARKET'
-            quantity: 订单数量（STOP订单必填）
-            price: 订单价格（STOP订单必填）
-            stop_price: 止损触发价格（必填）
-            **kwargs: 其他可选参数
+            order_params: 订单参数字典（包含完整的订单参数）
+            context: 上下文信息，用于日志记录
             
         Returns:
             订单响应数据
         """
-        logger.info(f"[Binance Futures] 开始止损交易，交易对: {symbol}, 方向: {side}, 类型: {order_type}")
+        # 【交易模式切换】根据配置选择使用测试接口或真实交易接口
+        trade_mode = getattr(app_config, 'BINANCE_TRADE_MODE', 'test').lower()
+        
+        if trade_mode == 'test':
+            # 使用测试接口（不会真实下单）
+            logger.info(f"[Binance Futures] [{context}] 使用测试接口下单（不会真实成交）")
+            # test_order接口只需要symbol、side、type三个基本参数
+            # 从order_params中提取side值（可能是枚举值或字符串）
+            side_value = order_params.get("side")
+            if side_value is None:
+                side_str = "BUY"
+            elif hasattr(side_value, 'value'):
+                # 如果是枚举值，提取其字符串值
+                side_str = str(side_value.value).upper()
+            else:
+                side_str = str(side_value).upper()
+            
+            # 使用TestOrderSideEnum转换side参数
+            if TestOrderSideEnum and side_str in TestOrderSideEnum.__members__:
+                test_side = TestOrderSideEnum[side_str].value
+            else:
+                test_side = side_str
+            
+            test_params = {
+                "symbol": order_params.get("symbol"),
+                "side": test_side,
+                "type": order_params.get("type"),
+            }
+            response = self._rest.test_order(**test_params)
+            logger.info(f"[Binance Futures] [{context}] 测试接口调用成功（未真实下单）")
+            response_context = "test_order"
+        else:
+            # 使用真实交易接口
+            logger.info(f"[Binance Futures] [{context}] 使用真实交易接口下单")
+            response = self._rest.new_order(**order_params)
+            response_context = "new_order"
+        
+        # 处理响应
+        data = response.data()
+        logger.info(f"[Binance Futures] [{context}] 订单执行成功: {data}")
+        
+        return self._flatten_to_dicts(data, response_context)[0] if data else {}
+
+    def stop_loss_trade(self, symbol: str, side: str, order_type: str = "STOP", quantity: Optional[float] = None, price: Optional[float] = None, stop_price: Optional[float] = None, position_side: Optional[str] = None, **kwargs) -> Dict[str, Any]:
+        """
+        止损交易 - 使用STOP或STOP_MARKET订单类型
+        
+        【默认订单类型】
+        默认使用'STOP'订单类型，此时quantity、price、stop_price均为必填参数。
+        如需使用'STOP_MARKET'订单类型，需显式指定order_type='STOP_MARKET'，此时只需stop_price。
+        
+        【position_side参数说明】
+        在双向持仓模式下，此参数为必填项，用于指定持仓方向：
+        - "LONG": 多头持仓（做多）
+        - "SHORT": 空头持仓（做空）
+        
+        在单向持仓模式下，此参数可选，默认为"BOTH"。
+        
+        Args:
+            symbol: 交易对符号，如 'BTCUSDT'
+            side: 交易方向，'BUY'或'SELL'
+            order_type: 订单类型，'STOP_MARKET'或'STOP'（默认）
+            quantity: 订单数量（STOP订单必填，STOP_MARKET订单不需要）
+            price: 订单价格（STOP订单必填，STOP_MARKET订单不需要）
+            stop_price: 止损触发价格（STOP和STOP_MARKET订单均必填）
+            position_side: 持仓方向，'LONG'（多）或'SHORT'（空），双向持仓模式下必填
+            止损单：买入:最新合约价格/标记价格高于等于触发价stop_price;卖出:最新合约价格/标记价格低于等于触发价stop_price;
+            **kwargs: 其他可选参数
+            
+        Returns:
+            订单响应数据
+            
+        Raises:
+            ValueError: 当STOP订单缺少必填参数（quantity、price、stop_price）时
+        """
+        # 【参数验证】当order_type为默认值"STOP"时，验证必填参数
+        order_type_upper = order_type.upper()
+        if order_type_upper == "STOP":
+            if quantity is None:
+                raise ValueError("STOP订单必须提供quantity参数")
+            if price is None:
+                raise ValueError("STOP订单必须提供price参数")
+            if stop_price is None:
+                raise ValueError("STOP订单必须提供stop_price参数")
+        elif order_type_upper == "STOP_MARKET":
+            if stop_price is None:
+                raise ValueError("STOP_MARKET订单必须提供stop_price参数")
+        else:
+            raise ValueError(f"不支持的订单类型: {order_type}，仅支持'STOP'或'STOP_MARKET'")
+        
+        logger.info(f"[Binance Futures] 开始止损交易，交易对: {symbol}, 方向: {side}, 类型: {order_type_upper}, 持仓方向: {position_side}")
         
         try:
             # 格式化交易对
             formatted_symbol = self.format_symbol(symbol)
             
+            # 【参数验证】验证position_side参数值
+            if position_side is not None:
+                position_side_upper = position_side.upper()
+                if position_side_upper not in ["LONG", "SHORT"]:
+                    raise ValueError(f"position_side参数值必须是'LONG'或'SHORT'，当前值: {position_side}")
+                position_side = position_side_upper
+            
             # 准备订单参数
             order_params = {
                 "symbol": formatted_symbol,
-                "side": NewOrderSideEnum[side.upper()].value,
-                "type": order_type.upper(),
+                "side": NewOrderSideEnum[side.upper()].value if NewOrderSideEnum else side.upper(),
+                "type": order_type_upper,
                 "stop_price": stop_price,
             }
             
-            # 添加STOP订单所需的参数
-            if order_type.upper() == "STOP":
-                if quantity is None or price is None:
-                    raise ValueError("STOP订单必须提供quantity和price参数")
+            # 【添加position_side参数】在双向持仓模式下，此参数为必填项
+            if position_side:
+                order_params["position_side"] = position_side
+            
+            # 【添加STOP订单所需的参数】当order_type为STOP时，quantity和price已通过前置验证确保存在
+            if order_type_upper == "STOP":
                 order_params["quantity"] = quantity
                 order_params["price"] = price
                 order_params["time_in_force"] = kwargs.get("time_in_force", "GTC")
@@ -436,53 +534,86 @@ class BinanceFuturesOrderClient:
             # 添加可选参数
             order_params.update(kwargs)
             
-            # 调用SDK下单
-            response = self._rest.new_order(**order_params)
-            
-            # 处理响应
-            data = response.data()
-            logger.info(f"[Binance Futures] 止损交易成功: {data}")
-            
-            return self._flatten_to_dicts(data, "new_order")[0] if data else {}
+            # 【统一订单执行】使用辅助方法处理测试/真实交易切换
+            return self._execute_order(order_params, context="止损交易")
             
         except Exception as exc:
             logger.error(f"[Binance Futures] 止损交易失败: {exc}", exc_info=True)
             raise
 
-    def take_profit_trade(self, symbol: str, side: str, order_type: str, quantity: Optional[float] = None, price: Optional[float] = None, stop_price: float = None, **kwargs) -> Dict[str, Any]:
+    def take_profit_trade(self, symbol: str, side: str, order_type: str = "TAKE_PROFIT", quantity: Optional[float] = None, price: Optional[float] = None, stop_price: Optional[float] = None, position_side: Optional[str] = None, **kwargs) -> Dict[str, Any]:
         """
         止盈交易 - 使用TAKE_PROFIT或TAKE_PROFIT_MARKET订单类型
+        
+        【默认订单类型】
+        默认使用'TAKE_PROFIT'订单类型，此时quantity、price、stop_price均为必填参数。
+        如需使用'TAKE_PROFIT_MARKET'订单类型，需显式指定order_type='TAKE_PROFIT_MARKET'，此时只需stop_price。
+        
+        【position_side参数说明】
+        在双向持仓模式下，此参数为必填项，用于指定持仓方向：
+        - "LONG": 多头持仓（做多）
+        - "SHORT": 空头持仓（做空）
+        
+        在单向持仓模式下，此参数可选，默认为"BOTH"。
         
         Args:
             symbol: 交易对符号，如 'BTCUSDT'
             side: 交易方向，'BUY'或'SELL'
-            order_type: 订单类型，'TAKE_PROFIT'或'TAKE_PROFIT_MARKET'
-            quantity: 订单数量（TAKE_PROFIT订单必填）
-            price: 订单价格（TAKE_PROFIT订单必填）
-            stop_price: 止盈触发价格（必填）
+            order_type: 订单类型，'TAKE_PROFIT_MARKET'或'TAKE_PROFIT'（默认）
+            quantity: 订单数量（TAKE_PROFIT订单必填，TAKE_PROFIT_MARKET订单不需要）
+            price: 订单价格（TAKE_PROFIT订单必填，TAKE_PROFIT_MARKET订单不需要）
+            stop_price: 止盈触发价格（TAKE_PROFIT和TAKE_PROFIT_MARKET订单均必填）
+            position_side: 持仓方向，'LONG'（多）或'SHORT'（空），双向持仓模式下必填
             **kwargs: 其他可选参数
-            
+            止盈单：买入:最新合约价格/标记价格低于等于触发价stop_price;卖出:最新合约价格/标记价格高于等于触发价stop_price;
         Returns:
             订单响应数据
+            
+        Raises:
+            ValueError: 当TAKE_PROFIT订单缺少必填参数（quantity、price、stop_price）时
         """
-        logger.info(f"[Binance Futures] 开始止盈交易，交易对: {symbol}, 方向: {side}, 类型: {order_type}")
+        # 【参数验证】当order_type为默认值"TAKE_PROFIT"时，验证必填参数
+        order_type_upper = order_type.upper()
+        if order_type_upper == "TAKE_PROFIT":
+            if quantity is None:
+                raise ValueError("TAKE_PROFIT订单必须提供quantity参数")
+            if price is None:
+                raise ValueError("TAKE_PROFIT订单必须提供price参数")
+            if stop_price is None:
+                raise ValueError("TAKE_PROFIT订单必须提供stop_price参数")
+        elif order_type_upper == "TAKE_PROFIT_MARKET":
+            if stop_price is None:
+                raise ValueError("TAKE_PROFIT_MARKET订单必须提供stop_price参数")
+        else:
+            raise ValueError(f"不支持的订单类型: {order_type}，仅支持'TAKE_PROFIT'或'TAKE_PROFIT_MARKET'")
+        
+        logger.info(f"[Binance Futures] 开始止盈交易，交易对: {symbol}, 方向: {side}, 类型: {order_type_upper}, 持仓方向: {position_side}")
         
         try:
             # 格式化交易对
             formatted_symbol = self.format_symbol(symbol)
             
+            # 【参数验证】验证position_side参数值
+            if position_side is not None:
+                position_side_upper = position_side.upper()
+                if position_side_upper not in ["LONG", "SHORT"]:
+                    raise ValueError(f"position_side参数值必须是'LONG'或'SHORT'，当前值: {position_side}")
+                position_side = position_side_upper
+            
             # 准备订单参数
             order_params = {
                 "symbol": formatted_symbol,
-                "side": NewOrderSideEnum[side.upper()].value,
-                "type": order_type.upper(),
+                "side": NewOrderSideEnum[side.upper()].value if NewOrderSideEnum else side.upper(),
+                "type": order_type_upper,
                 "stop_price": stop_price,
             }
             
-            # 添加TAKE_PROFIT订单所需的参数
-            if order_type.upper() == "TAKE_PROFIT":
-                if quantity is None or price is None:
-                    raise ValueError("TAKE_PROFIT订单必须提供quantity和price参数")
+            # 【添加position_side参数】在双向持仓模式下，此参数为必填项
+            if position_side:
+                order_params["position_side"] = position_side
+            
+            # 【添加TAKE_PROFIT订单所需的参数】当order_type为TAKE_PROFIT时，quantity和price已通过前置验证确保存在
+            if order_type_upper == "TAKE_PROFIT":
                 order_params["quantity"] = quantity
                 order_params["price"] = price
                 order_params["time_in_force"] = kwargs.get("time_in_force", "GTC")
@@ -490,90 +621,130 @@ class BinanceFuturesOrderClient:
             # 添加可选参数
             order_params.update(kwargs)
             
-            # 调用SDK下单
-            response = self._rest.new_order(**order_params)
-            
-            # 处理响应
-            data = response.data()
-            logger.info(f"[Binance Futures] 止盈交易成功: {data}")
-            
-            return self._flatten_to_dicts(data, "new_order")[0] if data else {}
+            # 【统一订单执行】使用辅助方法处理测试/真实交易切换
+            return self._execute_order(order_params, context="止盈交易")
             
         except Exception as exc:
             logger.error(f"[Binance Futures] 止盈交易失败: {exc}", exc_info=True)
             raise
 
-    def trailing_stop_market_trade(self, symbol: str, side: str, callback_rate: float, **kwargs) -> Dict[str, Any]:
+    def trailing_stop_market_trade(self, symbol: str, side: str, callback_rate: float = 1.0, position_side: Optional[str] = None, **kwargs) -> Dict[str, Any]:
         """
-        跟踪止损单(市场价格交易) - 使用TRAILING_STOP_MARKET订单类型
+        市场价格交易- 使用TRAILING_STOP_MARKET订单类型
+        
+        【position_side参数说明】
+        在双向持仓模式下，此参数为必填项，用于指定持仓方向：
+        - "LONG": 多头持仓（做多）
+        - "SHORT": 空头持仓（做空）
+        
+        在单向持仓模式下，此参数可选，默认为"BOTH"。
         
         Args:
             symbol: 交易对符号，如 'BTCUSDT'
             side: 交易方向，'BUY'或'SELL'
-            callback_rate: 回调幅度百分比（必填）
+            callback_rate: 回调幅度百分比，默认1.0（即1%），范围[0.1-10]
+            position_side: 【新增参数】持仓方向，'LONG'（多）或'SHORT'（空），双向持仓模式下必填
             **kwargs: 其他可选参数
             
         Returns:
             订单响应数据
         """
-        logger.info(f"[Binance Futures] 开始跟踪止损交易，交易对: {symbol}, 方向: {side}, 回调幅度: {callback_rate}%")
+        logger.info(f"[Binance Futures] 开始跟踪止损交易，交易对: {symbol}, 方向: {side}, 回调幅度: {callback_rate}%, 持仓方向: {position_side}")
         
         try:
             # 格式化交易对
             formatted_symbol = self.format_symbol(symbol)
             
+            # 【参数验证】验证position_side参数值
+            if position_side is not None:
+                position_side_upper = position_side.upper()
+                if position_side_upper not in ["LONG", "SHORT"]:
+                    raise ValueError(f"position_side参数值必须是'LONG'或'SHORT'，当前值: {position_side}")
+                position_side = position_side_upper
+            
             # 准备订单参数
             order_params = {
                 "symbol": formatted_symbol,
-                "side": NewOrderSideEnum[side.upper()].value,
+                "side": NewOrderSideEnum[side.upper()].value if NewOrderSideEnum else side.upper(),
                 "type": "TRAILING_STOP_MARKET",
                 "callback_rate": callback_rate,
                 # 不设置activationPrice参数
             }
             
+            # 【添加position_side参数】在双向持仓模式下，此参数为必填项
+            if position_side:
+                order_params["position_side"] = position_side
+            
             # 添加可选参数
             order_params.update(kwargs)
             
-            # 调用SDK下单
-            response = self._rest.new_order(**order_params)
-            
-            # 处理响应
-            data = response.data()
-            logger.info(f"[Binance Futures] 跟踪止损交易成功: {data}")
-            
-            return self._flatten_to_dicts(data, "new_order")[0] if data else {}
+            # 【统一订单执行】使用辅助方法处理测试/真实交易切换
+            return self._execute_order(order_params, context="跟踪止损交易")
             
         except Exception as exc:
             logger.error(f"[Binance Futures] 跟踪止损交易失败: {exc}", exc_info=True)
             raise
 
-    def close_position_trade(self, symbol: str, side: str, order_type: str, stop_price: Optional[float] = None, **kwargs) -> Dict[str, Any]:
+    def close_position_trade(self, symbol: str, side: str, order_type: str="STOP_MARKET", stop_price: Optional[float] = None, position_side: Optional[str] = None, **kwargs) -> Dict[str, Any]:
         """
         平仓交易 - 使用STOP_MARKET或TAKE_PROFIT_MARKET订单类型配合closePosition=true
+        
+        【position_side参数说明】
+        在双向持仓模式下，此参数为必填项，用于指定要平仓的持仓方向：
+        - "LONG": 平掉多头持仓（做多）
+        - "SHORT": 平掉空头持仓（做空）
+        
+        在单向持仓模式下，此参数可选，默认为"BOTH"。
         
         Args:
             symbol: 交易对符号，如 'BTCUSDT'
             side: 交易方向，'BUY'或'SELL'
-            order_type: 订单类型，'STOP_MARKET'或'TAKE_PROFIT_MARKET'
+            order_type: 订单类型，'STOP_MARKET'(默认)或'TAKE_PROFIT_MARKET'
             stop_price: 触发价格（可选，取决于order_type）
+            position_side: 持仓方向，'LONG'（多）或'SHORT'（空），双向持仓模式下必填
             **kwargs: 其他可选参数
             
+        【双开模式校验规则】
+        在双向持仓模式下，side和position_side的组合必须符合以下规则：
+        - LONG方向上不支持BUY操作（平多仓应使用SELL）
+        - SHORT方向上不支持SELL操作（平空仓应使用BUY）
+        
         Returns:
             订单响应数据
         """
-        logger.info(f"[Binance Futures] 开始平仓交易，交易对: {symbol}, 方向: {side}, 类型: {order_type}")
+        logger.info(f"[Binance Futures] 开始平仓交易，交易对: {symbol}, 方向: {side}, 类型: {order_type}, 持仓方向: {position_side}")
         
         try:
             # 格式化交易对
             formatted_symbol = self.format_symbol(symbol)
             
+            # 【参数验证】验证position_side参数值
+            if position_side is not None:
+                position_side_upper = position_side.upper()
+                if position_side_upper not in ["LONG", "SHORT"]:
+                    raise ValueError(f"position_side参数值必须是'LONG'或'SHORT'，当前值: {position_side}")
+                position_side = position_side_upper
+                
+                # 【双开模式校验】验证side和position_side的组合是否合法
+                # LONG方向上不支持BUY（平多仓应该用SELL）
+                # SHORT方向上不支持SELL（平空仓应该用BUY）
+                side_upper = side.upper()
+                if position_side == "LONG" and side_upper == "BUY":
+                    raise ValueError(f"双开模式下，LONG方向上不支持BUY操作。平多仓应使用SELL，当前side={side}, position_side={position_side}")
+                if position_side == "SHORT" and side_upper == "SELL":
+                    raise ValueError(f"双开模式下，SHORT方向上不支持SELL操作。平空仓应使用BUY，当前side={side}, position_side={position_side}")
+            
             # 准备订单参数
             order_params = {
                 "symbol": formatted_symbol,
-                "side": NewOrderSideEnum[side.upper()].value,
+                "side": NewOrderSideEnum[side.upper()].value if NewOrderSideEnum else side.upper(),
                 "type": order_type.upper(),
                 "close_position": True,
             }
+            
+            # 【添加position_side参数】在双向持仓模式下，此参数为必填项
+            if position_side:
+                order_params["position_side"] = position_side
             
             # 添加触发价格参数（如果需要）
             if order_type.upper() in ["STOP_MARKET", "TAKE_PROFIT_MARKET"] and stop_price is not None:
@@ -582,14 +753,8 @@ class BinanceFuturesOrderClient:
             # 添加可选参数
             order_params.update(kwargs)
             
-            # 调用SDK下单
-            response = self._rest.new_order(**order_params)
-            
-            # 处理响应
-            data = response.data()
-            logger.info(f"[Binance Futures] 平仓交易成功: {data}")
-            
-            return self._flatten_to_dicts(data, "new_order")[0] if data else {}
+            # 【统一订单执行】使用辅助方法处理测试/真实交易切换
+            return self._execute_order(order_params, context="平仓交易")
             
         except Exception as exc:
             logger.error(f"[Binance Futures] 平仓交易失败: {exc}", exc_info=True)

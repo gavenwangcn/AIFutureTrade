@@ -50,6 +50,9 @@ class Database:
         self.model_futures_table = "model_futures"
         self.futures_table = "futures"
         self.futures_leaderboard_table = "futures_leaderboard"
+        self.accounts_table = "accounts"
+        self.account_asset_table = "account_asset"
+        self.asset_table = "asset"
     
     def _with_connection(self, func: Callable, *args, **kwargs) -> Any:
         """Execute a function with a ClickHouse connection from the pool.
@@ -183,6 +186,15 @@ class Database:
         # Futures leaderboard table
         self._ensure_futures_leaderboard_table()
         
+        # Accounts table
+        self._ensure_accounts_table()
+        
+        # Account asset table
+        self._ensure_account_asset_table()
+        
+        # Asset table
+        self._ensure_asset_table()
+        
         # Insert default settings if no settings exist
         self._init_default_settings()
         
@@ -234,15 +246,17 @@ class Database:
         CREATE TABLE IF NOT EXISTS {self.portfolios_table} (
             id String,
             model_id String,
-            future String,
-            quantity Float64,
+            symbol String,
+            position_amt Float64,
             avg_price Float64,
             leverage UInt8 DEFAULT 1,
-            side String DEFAULT 'long',
+            position_side String DEFAULT 'LONG',
+            initial_margin Float64 DEFAULT 0.0,
+            unrealized_profit Float64 DEFAULT 0.0,
             updated_at DateTime DEFAULT now()
         )
         ENGINE = ReplacingMergeTree(updated_at)
-        ORDER BY (model_id, future, side)
+        ORDER BY (model_id, symbol, position_side)
         """
         self.command(ddl)
         logger.debug(f"[Database] Ensured table {self.portfolios_table} exists")
@@ -292,13 +306,15 @@ class Database:
         CREATE TABLE IF NOT EXISTS {self.account_values_table} (
             id String,
             model_id String,
-            total_value Float64,
-            cash Float64,
-            positions_value Float64,
+            account_alias String DEFAULT '',
+            balance Float64,
+            available_balance Float64,
+            cross_wallet_balance Float64,
+            cross_un_pnl Float64 DEFAULT 0.0,
             timestamp DateTime DEFAULT now()
         )
         ENGINE = MergeTree
-        ORDER BY (model_id, timestamp)
+        ORDER BY (model_id, account_alias, timestamp)
         """
         self.command(ddl)
         logger.debug(f"[Database] Ensured table {self.account_values_table} exists")
@@ -396,6 +412,78 @@ class Database:
         """
         self.command(ddl)
         logger.debug(f"[Database] Ensured table {self.futures_leaderboard_table} exists")
+    
+    def _ensure_accounts_table(self):
+        """Create accounts table if not exists"""
+        ddl = f"""
+        CREATE TABLE IF NOT EXISTS {self.accounts_table} (
+            account_alias String,
+            asset String,
+            balance Float64,
+            cross_wallet_balance Float64,
+            cross_un_pnl Float64,
+            available_balance Float64,
+            max_withdraw_amount Float64,
+            margin_available UInt8,
+            update_time UInt64,
+            created_at DateTime DEFAULT now()
+        )
+        ENGINE = ReplacingMergeTree(update_time)
+        ORDER BY (account_alias, asset)
+        """
+        self.command(ddl)
+        logger.debug(f"[Database] Ensured table {self.accounts_table} exists")
+    
+    def _ensure_account_asset_table(self):
+        """Create account_asset table if not exists"""
+        ddl = f"""
+        CREATE TABLE IF NOT EXISTS {self.account_asset_table} (
+            account_alias String,
+            total_initial_margin Float64 DEFAULT 0.0,
+            total_maint_margin Float64 DEFAULT 0.0,
+            total_wallet_balance Float64 DEFAULT 0.0,
+            total_unrealized_profit Float64 DEFAULT 0.0,
+            total_margin_balance Float64 DEFAULT 0.0,
+            total_position_initial_margin Float64 DEFAULT 0.0,
+            total_open_order_initial_margin Float64 DEFAULT 0.0,
+            total_cross_wallet_balance Float64 DEFAULT 0.0,
+            total_cross_un_pnl Float64 DEFAULT 0.0,
+            available_balance Float64 DEFAULT 0.0,
+            max_withdraw_amount Float64 DEFAULT 0.0,
+            update_time UInt64,
+            created_at DateTime DEFAULT now()
+        )
+        ENGINE = ReplacingMergeTree(update_time)
+        ORDER BY (account_alias, update_time)
+        """
+        self.command(ddl)
+        logger.debug(f"[Database] Ensured table {self.account_asset_table} exists")
+    
+    def _ensure_asset_table(self):
+        """Create asset table if not exists"""
+        ddl = f"""
+        CREATE TABLE IF NOT EXISTS {self.asset_table} (
+            account_alias String,
+            asset String,
+            wallet_balance Float64 DEFAULT 0.0,
+            unrealized_profit Float64 DEFAULT 0.0,
+            margin_balance Float64 DEFAULT 0.0,
+            maint_margin Float64 DEFAULT 0.0,
+            initial_margin Float64 DEFAULT 0.0,
+            position_initial_margin Float64 DEFAULT 0.0,
+            open_order_initial_margin Float64 DEFAULT 0.0,
+            cross_wallet_balance Float64 DEFAULT 0.0,
+            cross_un_pnl Float64 DEFAULT 0.0,
+            available_balance Float64 DEFAULT 0.0,
+            max_withdraw_amount Float64 DEFAULT 0.0,
+            update_time UInt64,
+            created_at DateTime DEFAULT now()
+        )
+        ENGINE = ReplacingMergeTree(update_time)
+        ORDER BY (account_alias, asset)
+        """
+        self.command(ddl)
+        logger.debug(f"[Database] Ensured table {self.asset_table} exists")
     
     def _init_default_settings(self):
         """Initialize default settings if none exist"""
@@ -788,9 +876,22 @@ class Database:
     # Portfolio Management
     # ==================================================================
     
-    def update_position(self, model_id: int, future: str, quantity: float,
-                       avg_price: float, leverage: int = 1, side: str = 'long'):
-        """Update position"""
+    def update_position(self, model_id: int, symbol: str, position_amt: float,
+                       avg_price: float, leverage: int = 1, position_side: str = 'LONG',
+                       initial_margin: float = 0.0, unrealized_profit: float = 0.0):
+        """
+        Update position
+        
+        Args:
+            model_id: 模型ID
+            symbol: 交易对符号（如BTCUSDT）
+            position_amt: 持仓数量
+            avg_price: 平均价格
+            leverage: 杠杆倍数
+            position_side: 持仓方向，'LONG'（多）或'SHORT'（空）
+            initial_margin: 持仓所需起始保证金（基于最新标记价格）
+            unrealized_profit: 持仓未实现盈亏
+        """
         try:
             model_mapping = self._get_model_id_mapping()
             model_uuid = model_mapping.get(model_id)
@@ -798,12 +899,19 @@ class Database:
                 logger.warning(f"[Database] Model {model_id} not found for position update")
                 return
             
+            # 规范化position_side
+            position_side_upper = position_side.upper()
+            if position_side_upper not in ['LONG', 'SHORT']:
+                raise ValueError(f"position_side must be 'LONG' or 'SHORT', got: {position_side}")
+            
             # 使用 ReplacingMergeTree，直接插入即可（会自动去重）
             position_id = self._generate_id()
             self.insert_rows(
                 self.portfolios_table,
-                [[position_id, model_uuid, future.upper(), quantity, avg_price, leverage, side, datetime.now(timezone.utc)]],
-                ["id", "model_id", "future", "quantity", "avg_price", "leverage", "side", "updated_at"]
+                [[position_id, model_uuid, symbol.upper(), position_amt, avg_price, leverage, 
+                  position_side_upper, initial_margin, unrealized_profit, datetime.now(timezone.utc)]],
+                ["id", "model_id", "symbol", "position_amt", "avg_price", "leverage", 
+                 "position_side", "initial_margin", "unrealized_profit", "updated_at"]
             )
         except Exception as e:
             logger.error(f"[Database] Failed to update position: {e}")
@@ -820,9 +928,10 @@ class Database:
             # 获取持仓（使用 FINAL 确保 ReplacingMergeTree 去重）
             rows = self.query(f"""
                 SELECT * FROM {self.portfolios_table} FINAL
-                WHERE model_id = '{model_uuid}' AND quantity > 0
+                WHERE model_id = '{model_uuid}' AND position_amt != 0
             """)
-            columns = ["id", "model_id", "future", "quantity", "avg_price", "leverage", "side", "updated_at"]
+            columns = ["id", "model_id", "symbol", "position_amt", "avg_price", "leverage", 
+                      "position_side", "initial_margin", "unrealized_profit", "updated_at"]
             positions = self._rows_to_dicts(rows, columns)
             
             # 获取初始资金
@@ -839,35 +948,46 @@ class Database:
             """)
             realized_pnl = float(pnl_rows[0][0]) if pnl_rows and pnl_rows[0][0] is not None else 0.0
             
-            # 计算已用保证金
-            margin_used = sum([p['quantity'] * p['avg_price'] / p['leverage'] for p in positions])
+            # 计算已用保证金（优先使用initial_margin字段，如果没有则使用传统计算方式）
+            margin_used = sum([p.get('initial_margin', 0) or (abs(p['position_amt']) * p['avg_price'] / p['leverage']) for p in positions])
             
-            # 计算未实现盈亏
+            # 计算未实现盈亏（优先使用unrealized_profit字段，如果没有则计算）
             unrealized_pnl = 0
             if current_prices:
                 for pos in positions:
-                    symbol = pos['future']
+                    symbol = pos['symbol']
                     if symbol in current_prices:
                         current_price = current_prices[symbol]
                         entry_price = pos['avg_price']
-                        qty = pos['quantity']
+                        position_amt = abs(pos['position_amt'])  # 使用绝对值
                         pos['current_price'] = current_price
-                        if pos['side'] == 'long':
-                            pos_pnl = (current_price - entry_price) * qty
+                        
+                        # 优先使用数据库中的unrealized_profit字段
+                        if pos.get('unrealized_profit') is not None and pos['unrealized_profit'] != 0:
+                            pos_pnl = pos['unrealized_profit']
                         else:
-                            pos_pnl = (entry_price - current_price) * qty
+                            # 如果没有，则计算
+                            if pos['position_side'] == 'LONG':
+                                pos_pnl = (current_price - entry_price) * position_amt
+                            else:  # SHORT
+                                pos_pnl = (entry_price - current_price) * position_amt
+                        
                         pos['pnl'] = pos_pnl
                         unrealized_pnl += pos_pnl
                     else:
                         pos['current_price'] = None
-                        pos['pnl'] = 0
+                        # 使用数据库中的unrealized_profit字段
+                        pos['pnl'] = pos.get('unrealized_profit', 0)
+                        unrealized_pnl += pos.get('unrealized_profit', 0)
             else:
                 for pos in positions:
                     pos['current_price'] = None
-                    pos['pnl'] = 0
+                    # 使用数据库中的unrealized_profit字段
+                    pos['pnl'] = pos.get('unrealized_profit', 0)
+                    unrealized_pnl += pos.get('unrealized_profit', 0)
             
             cash = initial_capital + realized_pnl - margin_used
-            positions_value = sum([p['quantity'] * p['avg_price'] for p in positions])
+            positions_value = sum([abs(p['position_amt']) * p['avg_price'] for p in positions])
             total_value = initial_capital + realized_pnl + unrealized_pnl
             
             return {
@@ -885,21 +1005,32 @@ class Database:
             logger.error(f"[Database] Failed to get portfolio for model {model_id}: {e}")
             raise
     
-    def close_position(self, model_id: int, future: str, side: str = 'long'):
-        """Close position and clean up futures universe if unused"""
+    def close_position(self, model_id: int, symbol: str, position_side: str = 'LONG'):
+        """
+        Close position and clean up futures universe if unused
+        
+        Args:
+            model_id: 模型ID
+            symbol: 交易对符号（如BTCUSDT）
+            position_side: 持仓方向，'LONG'（多）或'SHORT'（空）
+        """
         try:
             model_mapping = self._get_model_id_mapping()
             model_uuid = model_mapping.get(model_id)
             if not model_uuid:
                 return
             
-            normalized_symbol = future.upper()
-            self.command(f"ALTER TABLE {self.portfolios_table} DELETE WHERE model_id = '{model_uuid}' AND future = '{normalized_symbol}' AND side = '{side}'")
+            normalized_symbol = symbol.upper()
+            position_side_upper = position_side.upper()
+            if position_side_upper not in ['LONG', 'SHORT']:
+                raise ValueError(f"position_side must be 'LONG' or 'SHORT', got: {position_side}")
+            
+            self.command(f"ALTER TABLE {self.portfolios_table} DELETE WHERE model_id = '{model_uuid}' AND symbol = '{normalized_symbol}' AND position_side = '{position_side_upper}'")
             
             # 检查是否还有其他持仓
             remaining_rows = self.query(f"""
                 SELECT count() as cnt FROM {self.portfolios_table} FINAL
-                WHERE future = '{normalized_symbol}' AND quantity > 0
+                WHERE symbol = '{normalized_symbol}' AND position_amt != 0
             """)
             if remaining_rows and remaining_rows[0][0] == 0:
                 # 删除 futures 表中的记录
@@ -1000,9 +1131,20 @@ class Database:
     # Account Value History
     # ==================================================================
     
-    def record_account_value(self, model_id: int, total_value: float,
-                            cash: float, positions_value: float):
-        """Record account value snapshot"""
+    def record_account_value(self, model_id: int, balance: float,
+                            available_balance: float, cross_wallet_balance: float,
+                            account_alias: str = '', cross_un_pnl: float = 0.0):
+        """
+        Record account value snapshot
+        
+        Args:
+            model_id: 模型ID
+            balance: 总余额
+            available_balance: 下单可用余额
+            cross_wallet_balance: 全仓余额
+            account_alias: 账户唯一识别码（可选，默认空字符串）
+            cross_un_pnl: 全仓持仓未实现盈亏（可选，默认0.0）
+        """
         try:
             model_mapping = self._get_model_id_mapping()
             model_uuid = model_mapping.get(model_id)
@@ -1013,15 +1155,25 @@ class Database:
             av_id = self._generate_id()
             self.insert_rows(
                 self.account_values_table,
-                [[av_id, model_uuid, total_value, cash, positions_value, datetime.now(timezone.utc)]],
-                ["id", "model_id", "total_value", "cash", "positions_value", "timestamp"]
+                [[av_id, model_uuid, account_alias, balance, available_balance, cross_wallet_balance, cross_un_pnl, datetime.now(timezone.utc)]],
+                ["id", "model_id", "account_alias", "balance", "available_balance", "cross_wallet_balance", "cross_un_pnl", "timestamp"]
             )
         except Exception as e:
             logger.error(f"[Database] Failed to record account value: {e}")
             raise
     
     def get_account_value_history(self, model_id: int, limit: int = 100) -> List[Dict]:
-        """Get account value history"""
+        """
+        Get account value history
+        
+        Returns:
+            账户价值历史记录列表，包含新字段名：
+            - accountAlias: 账户唯一识别码
+            - balance: 总余额
+            - availableBalance: 下单可用余额
+            - crossWalletBalance: 全仓余额
+            - crossUnPnl: 全仓持仓未实现盈亏
+        """
         try:
             model_mapping = self._get_model_id_mapping()
             model_uuid = model_mapping.get(model_id)
@@ -1029,34 +1181,63 @@ class Database:
                 return []
             
             rows = self.query(f"""
-                SELECT * FROM {self.account_values_table}
+                SELECT id, model_id, account_alias, balance, available_balance, 
+                       cross_wallet_balance, cross_un_pnl, timestamp
+                FROM {self.account_values_table}
                 WHERE model_id = '{model_uuid}'
                 ORDER BY timestamp DESC
                 LIMIT {limit}
             """)
-            columns = ["id", "model_id", "total_value", "cash", "positions_value", "timestamp"]
-            return self._rows_to_dicts(rows, columns)
+            columns = ["id", "model_id", "account_alias", "balance", "available_balance", 
+                      "cross_wallet_balance", "cross_un_pnl", "timestamp"]
+            results = self._rows_to_dicts(rows, columns)
+            
+            # 转换为驼峰命名格式
+            formatted_results = []
+            for result in results:
+                formatted_results.append({
+                    "id": result.get("id"),
+                    "model_id": result.get("model_id"),
+                    "accountAlias": result.get("account_alias", ""),
+                    "balance": result.get("balance", 0.0),
+                    "availableBalance": result.get("available_balance", 0.0),
+                    "crossWalletBalance": result.get("cross_wallet_balance", 0.0),
+                    "crossUnPnl": result.get("cross_un_pnl", 0.0),
+                    "timestamp": result.get("timestamp")
+                })
+            return formatted_results
         except Exception as e:
             logger.error(f"[Database] Failed to get account value history for model {model_id}: {e}")
             return []
     
     def get_aggregated_account_value_history(self, limit: int = 100) -> List[Dict]:
-        """Get aggregated account value history across all models"""
+        """
+        Get aggregated account value history across all models
+        
+        Returns:
+            聚合账户价值历史记录列表，包含新字段名：
+            - balance: 总余额（聚合）
+            - availableBalance: 下单可用余额（聚合）
+            - crossWalletBalance: 全仓余额（聚合）
+            - crossUnPnl: 全仓持仓未实现盈亏（聚合）
+        """
         try:
             # ClickHouse 的日期函数略有不同
             rows = self.query(f"""
                 SELECT 
                     timestamp,
-                    SUM(total_value) as total_value,
-                    SUM(cash) as cash,
-                    SUM(positions_value) as positions_value,
+                    SUM(balance) as balance,
+                    SUM(available_balance) as available_balance,
+                    SUM(cross_wallet_balance) as cross_wallet_balance,
+                    SUM(cross_un_pnl) as cross_un_pnl,
                     COUNT(DISTINCT model_id) as model_count
                 FROM (
                     SELECT 
                         timestamp,
-                        total_value,
-                        cash,
-                        positions_value,
+                        balance,
+                        available_balance,
+                        cross_wallet_balance,
+                        cross_un_pnl,
                         model_id,
                         ROW_NUMBER() OVER (PARTITION BY model_id, toDate(timestamp) ORDER BY timestamp DESC) as rn
                     FROM {self.account_values_table}
@@ -1066,14 +1247,32 @@ class Database:
                 ORDER BY timestamp DESC
                 LIMIT {limit}
             """)
-            columns = ["timestamp", "total_value", "cash", "positions_value", "model_count"]
-            return self._rows_to_dicts(rows, columns)
+            columns = ["timestamp", "balance", "available_balance", "cross_wallet_balance", "cross_un_pnl", "model_count"]
+            results = self._rows_to_dicts(rows, columns)
+            
+            # 转换为驼峰命名格式
+            formatted_results = []
+            for result in results:
+                formatted_results.append({
+                    "timestamp": result.get("timestamp"),
+                    "balance": result.get("balance", 0.0),
+                    "availableBalance": result.get("available_balance", 0.0),
+                    "crossWalletBalance": result.get("cross_wallet_balance", 0.0),
+                    "crossUnPnl": result.get("cross_un_pnl", 0.0),
+                    "model_count": result.get("model_count")
+                })
+            return formatted_results
         except Exception as e:
             logger.error(f"[Database] Failed to get aggregated account value history: {e}")
             return []
     
     def get_multi_model_chart_data(self, limit: int = 100) -> List[Dict]:
-        """Get chart data for all models to display in multi-line chart"""
+        """
+        Get chart data for all models to display in multi-line chart
+        
+        Returns:
+            图表数据列表，使用新字段名balance作为value
+        """
         try:
             # 获取所有 models
             models = self.get_all_models()
@@ -1091,7 +1290,7 @@ class Database:
                         'data': [
                             {
                                 'timestamp': row['timestamp'],
-                                'value': row['total_value']
+                                'value': row['balance']  # 使用新字段名balance
                             } for row in history
                         ]
                     }
@@ -1333,9 +1532,9 @@ class Database:
                 logger.error(f"[Database] Model {model_id} not found in mapping")
                 return False
             
-            # 1. 从portfolios表获取当前模型所有交易过的去重future合约
+            # 1. 从portfolios表获取当前模型所有交易过的去重symbol合约
             rows = self.query(f"""
-                SELECT DISTINCT future as symbol
+                SELECT DISTINCT symbol
                 FROM {self.portfolios_table} FINAL
                 WHERE model_id = '{model_uuid}'
                 ORDER BY symbol ASC
@@ -1556,4 +1755,765 @@ class Database:
         except Exception as e:
             logger.error(f"[Database] Failed to get futures leaderboard: {e}")
             return {'gainers': [], 'losers': []}
+    
+    # ==================================================================
+    # Accounts Management (账户信息管理)
+    # ==================================================================
+    
+    def add_account(self, account_alias: str, asset: str, balance: float,
+                    cross_wallet_balance: float, cross_un_pnl: float,
+                    available_balance: float, max_withdraw_amount: float,
+                    margin_available: bool, update_time: int) -> bool:
+        """
+        添加或更新账户信息
+        
+        Args:
+            account_alias: 账户唯一识别码
+            asset: 资产类型（如USDT）
+            balance: 总余额
+            cross_wallet_balance: 全仓余额
+            cross_un_pnl: 全仓持仓未实现盈亏
+            available_balance: 下单可用余额
+            max_withdraw_amount: 最大可转出余额
+            margin_available: 是否可用作联合保证金
+            update_time: 更新时间（毫秒时间戳）
+            
+        Returns:
+            操作是否成功
+        """
+        try:
+            self.insert_rows(
+                self.accounts_table,
+                [[account_alias, asset, balance, cross_wallet_balance, cross_un_pnl,
+                  available_balance, max_withdraw_amount, 1 if margin_available else 0,
+                  update_time, datetime.now(timezone.utc)]],
+                ["account_alias", "asset", "balance", "cross_wallet_balance", "cross_un_pnl",
+                 "available_balance", "max_withdraw_amount", "margin_available", "update_time", "created_at"]
+            )
+            logger.debug(f"[Database] Added/Updated account: {account_alias}, asset: {asset}")
+            return True
+        except Exception as e:
+            logger.error(f"[Database] Failed to add account {account_alias}: {e}")
+            raise
+    
+    def get_account(self, account_alias: str, asset: str = None) -> Optional[Dict]:
+        """
+        获取账户信息
+        
+        Args:
+            account_alias: 账户唯一识别码
+            asset: 资产类型（可选，如果指定则只返回该资产的信息）
+            
+        Returns:
+            账户信息字典，如果不存在则返回None
+        """
+        try:
+            if asset:
+                rows = self.query(f"""
+                    SELECT account_alias, asset, balance, cross_wallet_balance, cross_un_pnl,
+                           available_balance, max_withdraw_amount, margin_available, update_time, created_at
+                    FROM {self.accounts_table} FINAL
+                    WHERE account_alias = '{account_alias}' AND asset = '{asset}'
+                    ORDER BY update_time DESC
+                    LIMIT 1
+                """)
+            else:
+                rows = self.query(f"""
+                    SELECT account_alias, asset, balance, cross_wallet_balance, cross_un_pnl,
+                           available_balance, max_withdraw_amount, margin_available, update_time, created_at
+                    FROM {self.accounts_table} FINAL
+                    WHERE account_alias = '{account_alias}'
+                    ORDER BY update_time DESC
+                    LIMIT 1
+                """)
+            
+            if not rows:
+                return None
+            
+            columns = ["account_alias", "asset", "balance", "cross_wallet_balance", "cross_un_pnl",
+                      "available_balance", "max_withdraw_amount", "margin_available", "update_time", "created_at"]
+            result = self._row_to_dict(rows[0], columns)
+            # 转换字段名以匹配原始JSON格式
+            return {
+                "accountAlias": result["account_alias"],
+                "asset": result["asset"],
+                "balance": str(result["balance"]),
+                "crossWalletBalance": str(result["cross_wallet_balance"]),
+                "crossUnPnl": str(result["cross_un_pnl"]),
+                "availableBalance": str(result["available_balance"]),
+                "maxWithdrawAmount": str(result["max_withdraw_amount"]),
+                "marginAvailable": bool(result["margin_available"]),
+                "updateTime": result["update_time"]
+            }
+        except Exception as e:
+            logger.error(f"[Database] Failed to get account {account_alias}: {e}")
+            return None
+    
+    def get_all_accounts(self, account_alias: str = None) -> List[Dict]:
+        """
+        获取所有账户信息或指定账户的所有资产信息
+        
+        Args:
+            account_alias: 账户唯一识别码（可选，如果指定则只返回该账户的所有资产）
+            
+        Returns:
+            账户信息列表
+        """
+        try:
+            if account_alias:
+                rows = self.query(f"""
+                    SELECT account_alias, asset, balance, cross_wallet_balance, cross_un_pnl,
+                           available_balance, max_withdraw_amount, margin_available, update_time, created_at
+                    FROM {self.accounts_table} FINAL
+                    WHERE account_alias = '{account_alias}'
+                    ORDER BY asset ASC, update_time DESC
+                """)
+            else:
+                rows = self.query(f"""
+                    SELECT account_alias, asset, balance, cross_wallet_balance, cross_un_pnl,
+                           available_balance, max_withdraw_amount, margin_available, update_time, created_at
+                    FROM {self.accounts_table} FINAL
+                    ORDER BY account_alias ASC, asset ASC, update_time DESC
+                """)
+            
+            columns = ["account_alias", "asset", "balance", "cross_wallet_balance", "cross_un_pnl",
+                      "available_balance", "max_withdraw_amount", "margin_available", "update_time", "created_at"]
+            results = self._rows_to_dicts(rows, columns)
+            
+            # 转换字段名以匹配原始JSON格式
+            formatted_results = []
+            for result in results:
+                formatted_results.append({
+                    "accountAlias": result["account_alias"],
+                    "asset": result["asset"],
+                    "balance": str(result["balance"]),
+                    "crossWalletBalance": str(result["cross_wallet_balance"]),
+                    "crossUnPnl": str(result["cross_un_pnl"]),
+                    "availableBalance": str(result["available_balance"]),
+                    "maxWithdrawAmount": str(result["max_withdraw_amount"]),
+                    "marginAvailable": bool(result["margin_available"]),
+                    "updateTime": result["update_time"]
+                })
+            
+            return formatted_results
+        except Exception as e:
+            logger.error(f"[Database] Failed to get all accounts: {e}")
+            return []
+    
+    def update_account(self, account_alias: str, asset: str, balance: float = None,
+                      cross_wallet_balance: float = None, cross_un_pnl: float = None,
+                      available_balance: float = None, max_withdraw_amount: float = None,
+                      margin_available: bool = None, update_time: int = None) -> bool:
+        """
+        更新账户信息（部分字段）
+        
+        Args:
+            account_alias: 账户唯一识别码
+            asset: 资产类型
+            balance: 总余额（可选）
+            cross_wallet_balance: 全仓余额（可选）
+            cross_un_pnl: 全仓持仓未实现盈亏（可选）
+            available_balance: 下单可用余额（可选）
+            max_withdraw_amount: 最大可转出余额（可选）
+            margin_available: 是否可用作联合保证金（可选）
+            update_time: 更新时间（可选，如果不提供则使用当前时间戳）
+            
+        Returns:
+            操作是否成功
+        """
+        try:
+            # 先获取现有账户信息
+            existing = self.get_account(account_alias, asset)
+            if not existing:
+                logger.warning(f"[Database] Account {account_alias} with asset {asset} not found for update")
+                return False
+            
+            # 使用提供的值或保留现有值
+            final_balance = balance if balance is not None else float(existing["balance"])
+            final_cross_wallet_balance = cross_wallet_balance if cross_wallet_balance is not None else float(existing["crossWalletBalance"])
+            final_cross_un_pnl = cross_un_pnl if cross_un_pnl is not None else float(existing["crossUnPnl"])
+            final_available_balance = available_balance if available_balance is not None else float(existing["availableBalance"])
+            final_max_withdraw_amount = max_withdraw_amount if max_withdraw_amount is not None else float(existing["maxWithdrawAmount"])
+            final_margin_available = margin_available if margin_available is not None else existing["marginAvailable"]
+            final_update_time = update_time if update_time is not None else existing["updateTime"]
+            
+            # 使用 add_account 方法（ReplacingMergeTree会自动去重）
+            return self.add_account(
+                account_alias=account_alias,
+                asset=asset,
+                balance=final_balance,
+                cross_wallet_balance=final_cross_wallet_balance,
+                cross_un_pnl=final_cross_un_pnl,
+                available_balance=final_available_balance,
+                max_withdraw_amount=final_max_withdraw_amount,
+                margin_available=final_margin_available,
+                update_time=final_update_time
+            )
+        except Exception as e:
+            logger.error(f"[Database] Failed to update account {account_alias}: {e}")
+            return False
+    
+    def delete_account(self, account_alias: str, asset: str = None) -> bool:
+        """
+        删除账户信息
+        
+        Args:
+            account_alias: 账户唯一识别码
+            asset: 资产类型（可选，如果指定则只删除该资产的信息，否则删除该账户的所有资产信息）
+            
+        Returns:
+            操作是否成功
+        """
+        try:
+            if asset:
+                self.command(f"ALTER TABLE {self.accounts_table} DELETE WHERE account_alias = '{account_alias}' AND asset = '{asset}'")
+                logger.debug(f"[Database] Deleted account: {account_alias}, asset: {asset}")
+            else:
+                self.command(f"ALTER TABLE {self.accounts_table} DELETE WHERE account_alias = '{account_alias}'")
+                logger.debug(f"[Database] Deleted all accounts for: {account_alias}")
+            return True
+        except Exception as e:
+            logger.error(f"[Database] Failed to delete account {account_alias}: {e}")
+            return False
+    
+    # ==================================================================
+    # Account Asset Management (账户资产管理)
+    # ==================================================================
+    
+    def add_account_asset(self, account_alias: str,
+                         total_initial_margin: float = 0.0,
+                         total_maint_margin: float = 0.0,
+                         total_wallet_balance: float = 0.0,
+                         total_unrealized_profit: float = 0.0,
+                         total_margin_balance: float = 0.0,
+                         total_position_initial_margin: float = 0.0,
+                         total_open_order_initial_margin: float = 0.0,
+                         total_cross_wallet_balance: float = 0.0,
+                         total_cross_un_pnl: float = 0.0,
+                         available_balance: float = 0.0,
+                         max_withdraw_amount: float = 0.0,
+                         update_time: int = None) -> bool:
+        """
+        添加或更新账户资产信息
+        
+        Args:
+            account_alias: 账户唯一识别码
+            total_initial_margin: 当前所需起始保证金总额（仅计算USDT资产）
+            total_maint_margin: 维持保证金总额（仅计算USDT资产）
+            total_wallet_balance: 账户总余额（仅计算USDT资产）
+            total_unrealized_profit: 持仓未实现盈亏总额（仅计算USDT资产）
+            total_margin_balance: 保证金总余额（仅计算USDT资产）
+            total_position_initial_margin: 持仓所需起始保证金（基于最新标记价格，仅计算USDT资产）
+            total_open_order_initial_margin: 当前挂单所需起始保证金（基于最新标记价格，仅计算USDT资产）
+            total_cross_wallet_balance: 全仓账户余额（仅计算USDT资产）
+            total_cross_un_pnl: 全仓持仓未实现盈亏总额（仅计算USDT资产）
+            available_balance: 可用余额（仅计算USDT资产）
+            max_withdraw_amount: 最大可转出余额（仅计算USDT资产）
+            update_time: 更新时间（毫秒时间戳，如果为None则使用当前时间戳）
+            
+        Returns:
+            操作是否成功
+        """
+        try:
+            if update_time is None:
+                import time
+                update_time = int(time.time() * 1000)
+            
+            self.insert_rows(
+                self.account_asset_table,
+                [[account_alias, total_initial_margin, total_maint_margin, total_wallet_balance,
+                  total_unrealized_profit, total_margin_balance, total_position_initial_margin,
+                  total_open_order_initial_margin, total_cross_wallet_balance, total_cross_un_pnl,
+                  available_balance, max_withdraw_amount, update_time, datetime.now(timezone.utc)]],
+                ["account_alias", "total_initial_margin", "total_maint_margin", "total_wallet_balance",
+                 "total_unrealized_profit", "total_margin_balance", "total_position_initial_margin",
+                 "total_open_order_initial_margin", "total_cross_wallet_balance", "total_cross_un_pnl",
+                 "available_balance", "max_withdraw_amount", "update_time", "created_at"]
+            )
+            logger.debug(f"[Database] Added/Updated account asset: {account_alias}")
+            return True
+        except Exception as e:
+            logger.error(f"[Database] Failed to add account asset {account_alias}: {e}")
+            raise
+    
+    def get_account_asset(self, account_alias: str) -> Optional[Dict]:
+        """
+        获取账户资产信息（最新记录）
+        
+        Args:
+            account_alias: 账户唯一识别码
+            
+        Returns:
+            账户资产信息字典，如果不存在则返回None
+        """
+        try:
+            rows = self.query(f"""
+                SELECT account_alias, total_initial_margin, total_maint_margin, total_wallet_balance,
+                       total_unrealized_profit, total_margin_balance, total_position_initial_margin,
+                       total_open_order_initial_margin, total_cross_wallet_balance, total_cross_un_pnl,
+                       available_balance, max_withdraw_amount, update_time, created_at
+                FROM {self.account_asset_table} FINAL
+                WHERE account_alias = '{account_alias}'
+                ORDER BY update_time DESC
+                LIMIT 1
+            """)
+            
+            if not rows:
+                return None
+            
+            columns = ["account_alias", "total_initial_margin", "total_maint_margin", "total_wallet_balance",
+                      "total_unrealized_profit", "total_margin_balance", "total_position_initial_margin",
+                      "total_open_order_initial_margin", "total_cross_wallet_balance", "total_cross_un_pnl",
+                      "available_balance", "max_withdraw_amount", "update_time", "created_at"]
+            result = self._row_to_dict(rows[0], columns)
+            
+            # 转换为驼峰命名格式
+            return {
+                "accountAlias": result["account_alias"],
+                "totalInitialMargin": str(result["total_initial_margin"]),
+                "totalMaintMargin": str(result["total_maint_margin"]),
+                "totalWalletBalance": str(result["total_wallet_balance"]),
+                "totalUnrealizedProfit": str(result["total_unrealized_profit"]),
+                "totalMarginBalance": str(result["total_margin_balance"]),
+                "totalPositionInitialMargin": str(result["total_position_initial_margin"]),
+                "totalOpenOrderInitialMargin": str(result["total_open_order_initial_margin"]),
+                "totalCrossWalletBalance": str(result["total_cross_wallet_balance"]),
+                "totalCrossUnPnl": str(result["total_cross_un_pnl"]),
+                "availableBalance": str(result["available_balance"]),
+                "maxWithdrawAmount": str(result["max_withdraw_amount"]),
+                "updateTime": result["update_time"]
+            }
+        except Exception as e:
+            logger.error(f"[Database] Failed to get account asset {account_alias}: {e}")
+            return None
+    
+    def get_all_account_assets(self, account_alias: str = None) -> List[Dict]:
+        """
+        获取所有账户资产信息或指定账户的资产历史
+        
+        Args:
+            account_alias: 账户唯一识别码（可选，如果指定则只返回该账户的资产历史）
+            
+        Returns:
+            账户资产信息列表
+        """
+        try:
+            if account_alias:
+                rows = self.query(f"""
+                    SELECT account_alias, total_initial_margin, total_maint_margin, total_wallet_balance,
+                           total_unrealized_profit, total_margin_balance, total_position_initial_margin,
+                           total_open_order_initial_margin, total_cross_wallet_balance, total_cross_un_pnl,
+                           available_balance, max_withdraw_amount, update_time, created_at
+                    FROM {self.account_asset_table} FINAL
+                    WHERE account_alias = '{account_alias}'
+                    ORDER BY update_time DESC
+                """)
+            else:
+                rows = self.query(f"""
+                    SELECT account_alias, total_initial_margin, total_maint_margin, total_wallet_balance,
+                           total_unrealized_profit, total_margin_balance, total_position_initial_margin,
+                           total_open_order_initial_margin, total_cross_wallet_balance, total_cross_un_pnl,
+                           available_balance, max_withdraw_amount, update_time, created_at
+                    FROM {self.account_asset_table} FINAL
+                    ORDER BY account_alias ASC, update_time DESC
+                """)
+            
+            columns = ["account_alias", "total_initial_margin", "total_maint_margin", "total_wallet_balance",
+                      "total_unrealized_profit", "total_margin_balance", "total_position_initial_margin",
+                      "total_open_order_initial_margin", "total_cross_wallet_balance", "total_cross_un_pnl",
+                      "available_balance", "max_withdraw_amount", "update_time", "created_at"]
+            results = self._rows_to_dicts(rows, columns)
+            
+            # 转换为驼峰命名格式
+            formatted_results = []
+            for result in results:
+                formatted_results.append({
+                    "accountAlias": result["account_alias"],
+                    "totalInitialMargin": str(result["total_initial_margin"]),
+                    "totalMaintMargin": str(result["total_maint_margin"]),
+                    "totalWalletBalance": str(result["total_wallet_balance"]),
+                    "totalUnrealizedProfit": str(result["total_unrealized_profit"]),
+                    "totalMarginBalance": str(result["total_margin_balance"]),
+                    "totalPositionInitialMargin": str(result["total_position_initial_margin"]),
+                    "totalOpenOrderInitialMargin": str(result["total_open_order_initial_margin"]),
+                    "totalCrossWalletBalance": str(result["total_cross_wallet_balance"]),
+                    "totalCrossUnPnl": str(result["total_cross_un_pnl"]),
+                    "availableBalance": str(result["available_balance"]),
+                    "maxWithdrawAmount": str(result["max_withdraw_amount"]),
+                    "updateTime": result["update_time"]
+                })
+            
+            return formatted_results
+        except Exception as e:
+            logger.error(f"[Database] Failed to get all account assets: {e}")
+            return []
+    
+    def update_account_asset(self, account_alias: str,
+                            total_initial_margin: float = None,
+                            total_maint_margin: float = None,
+                            total_wallet_balance: float = None,
+                            total_unrealized_profit: float = None,
+                            total_margin_balance: float = None,
+                            total_position_initial_margin: float = None,
+                            total_open_order_initial_margin: float = None,
+                            total_cross_wallet_balance: float = None,
+                            total_cross_un_pnl: float = None,
+                            available_balance: float = None,
+                            max_withdraw_amount: float = None,
+                            update_time: int = None) -> bool:
+        """
+        更新账户资产信息（部分字段）
+        
+        Args:
+            account_alias: 账户唯一识别码
+            total_initial_margin: 当前所需起始保证金总额（可选）
+            total_maint_margin: 维持保证金总额（可选）
+            total_wallet_balance: 账户总余额（可选）
+            total_unrealized_profit: 持仓未实现盈亏总额（可选）
+            total_margin_balance: 保证金总余额（可选）
+            total_position_initial_margin: 持仓所需起始保证金（可选）
+            total_open_order_initial_margin: 当前挂单所需起始保证金（可选）
+            total_cross_wallet_balance: 全仓账户余额（可选）
+            total_cross_un_pnl: 全仓持仓未实现盈亏总额（可选）
+            available_balance: 可用余额（可选）
+            max_withdraw_amount: 最大可转出余额（可选）
+            update_time: 更新时间（可选，如果不提供则使用当前时间戳）
+            
+        Returns:
+            操作是否成功
+        """
+        try:
+            # 先获取现有账户资产信息
+            existing = self.get_account_asset(account_alias)
+            if not existing:
+                logger.warning(f"[Database] Account asset {account_alias} not found for update")
+                return False
+            
+            # 使用提供的值或保留现有值
+            final_total_initial_margin = total_initial_margin if total_initial_margin is not None else float(existing["totalInitialMargin"])
+            final_total_maint_margin = total_maint_margin if total_maint_margin is not None else float(existing["totalMaintMargin"])
+            final_total_wallet_balance = total_wallet_balance if total_wallet_balance is not None else float(existing["totalWalletBalance"])
+            final_total_unrealized_profit = total_unrealized_profit if total_unrealized_profit is not None else float(existing["totalUnrealizedProfit"])
+            final_total_margin_balance = total_margin_balance if total_margin_balance is not None else float(existing["totalMarginBalance"])
+            final_total_position_initial_margin = total_position_initial_margin if total_position_initial_margin is not None else float(existing["totalPositionInitialMargin"])
+            final_total_open_order_initial_margin = total_open_order_initial_margin if total_open_order_initial_margin is not None else float(existing["totalOpenOrderInitialMargin"])
+            final_total_cross_wallet_balance = total_cross_wallet_balance if total_cross_wallet_balance is not None else float(existing["totalCrossWalletBalance"])
+            final_total_cross_un_pnl = total_cross_un_pnl if total_cross_un_pnl is not None else float(existing["totalCrossUnPnl"])
+            final_available_balance = available_balance if available_balance is not None else float(existing["availableBalance"])
+            final_max_withdraw_amount = max_withdraw_amount if max_withdraw_amount is not None else float(existing["maxWithdrawAmount"])
+            final_update_time = update_time if update_time is not None else existing["updateTime"]
+            
+            # 使用 add_account_asset 方法（ReplacingMergeTree会自动去重）
+            return self.add_account_asset(
+                account_alias=account_alias,
+                total_initial_margin=final_total_initial_margin,
+                total_maint_margin=final_total_maint_margin,
+                total_wallet_balance=final_total_wallet_balance,
+                total_unrealized_profit=final_total_unrealized_profit,
+                total_margin_balance=final_total_margin_balance,
+                total_position_initial_margin=final_total_position_initial_margin,
+                total_open_order_initial_margin=final_total_open_order_initial_margin,
+                total_cross_wallet_balance=final_total_cross_wallet_balance,
+                total_cross_un_pnl=final_total_cross_un_pnl,
+                available_balance=final_available_balance,
+                max_withdraw_amount=final_max_withdraw_amount,
+                update_time=final_update_time
+            )
+        except Exception as e:
+            logger.error(f"[Database] Failed to update account asset {account_alias}: {e}")
+            return False
+    
+    def delete_account_asset(self, account_alias: str) -> bool:
+        """
+        删除账户资产信息
+        
+        Args:
+            account_alias: 账户唯一识别码
+            
+        Returns:
+            操作是否成功
+        """
+        try:
+            self.command(f"ALTER TABLE {self.account_asset_table} DELETE WHERE account_alias = '{account_alias}'")
+            logger.debug(f"[Database] Deleted account asset: {account_alias}")
+            return True
+        except Exception as e:
+            logger.error(f"[Database] Failed to delete account asset {account_alias}: {e}")
+            return False
+    
+    # ==================================================================
+    # Asset Management (资产表管理，与account_asset为1对多关系)
+    # ==================================================================
+    
+    def add_asset(self, account_alias: str, asset: str,
+                 wallet_balance: float = 0.0,
+                 unrealized_profit: float = 0.0,
+                 margin_balance: float = 0.0,
+                 maint_margin: float = 0.0,
+                 initial_margin: float = 0.0,
+                 position_initial_margin: float = 0.0,
+                 open_order_initial_margin: float = 0.0,
+                 cross_wallet_balance: float = 0.0,
+                 cross_un_pnl: float = 0.0,
+                 available_balance: float = 0.0,
+                 max_withdraw_amount: float = 0.0,
+                 update_time: int = None) -> bool:
+        """
+        添加或更新资产信息
+        
+        Args:
+            account_alias: 账户唯一识别码
+            asset: 资产类型（如USDT）
+            wallet_balance: 余额
+            unrealized_profit: 未实现盈亏
+            margin_balance: 保证金余额
+            maint_margin: 维持保证金
+            initial_margin: 当前所需起始保证金
+            position_initial_margin: 持仓所需起始保证金（基于最新标记价格）
+            open_order_initial_margin: 当前挂单所需起始保证金（基于最新标记价格）
+            cross_wallet_balance: 全仓账户余额
+            cross_un_pnl: 全仓持仓未实现盈亏
+            available_balance: 可用余额
+            max_withdraw_amount: 最大可转出余额
+            update_time: 更新时间（毫秒时间戳，如果为None则使用当前时间戳）
+            
+        Returns:
+            操作是否成功
+        """
+        try:
+            if update_time is None:
+                import time
+                update_time = int(time.time() * 1000)
+            
+            self.insert_rows(
+                self.asset_table,
+                [[account_alias, asset, wallet_balance, unrealized_profit, margin_balance,
+                  maint_margin, initial_margin, position_initial_margin, open_order_initial_margin,
+                  cross_wallet_balance, cross_un_pnl, available_balance, max_withdraw_amount,
+                  update_time, datetime.now(timezone.utc)]],
+                ["account_alias", "asset", "wallet_balance", "unrealized_profit", "margin_balance",
+                 "maint_margin", "initial_margin", "position_initial_margin", "open_order_initial_margin",
+                 "cross_wallet_balance", "cross_un_pnl", "available_balance", "max_withdraw_amount",
+                 "update_time", "created_at"]
+            )
+            logger.debug(f"[Database] Added/Updated asset: {account_alias}, {asset}")
+            return True
+        except Exception as e:
+            logger.error(f"[Database] Failed to add asset {account_alias}/{asset}: {e}")
+            raise
+    
+    def get_asset(self, account_alias: str, asset: str) -> Optional[Dict]:
+        """
+        获取资产信息（最新记录）
+        
+        Args:
+            account_alias: 账户唯一识别码
+            asset: 资产类型
+            
+        Returns:
+            资产信息字典，如果不存在则返回None
+        """
+        try:
+            rows = self.query(f"""
+                SELECT account_alias, asset, wallet_balance, unrealized_profit, margin_balance,
+                       maint_margin, initial_margin, position_initial_margin, open_order_initial_margin,
+                       cross_wallet_balance, cross_un_pnl, available_balance, max_withdraw_amount,
+                       update_time, created_at
+                FROM {self.asset_table} FINAL
+                WHERE account_alias = '{account_alias}' AND asset = '{asset}'
+                ORDER BY update_time DESC
+                LIMIT 1
+            """)
+            
+            if not rows:
+                return None
+            
+            columns = ["account_alias", "asset", "wallet_balance", "unrealized_profit", "margin_balance",
+                      "maint_margin", "initial_margin", "position_initial_margin", "open_order_initial_margin",
+                      "cross_wallet_balance", "cross_un_pnl", "available_balance", "max_withdraw_amount",
+                      "update_time", "created_at"]
+            result = self._row_to_dict(rows[0], columns)
+            
+            # 转换为驼峰命名格式
+            return {
+                "accountAlias": result["account_alias"],
+                "asset": result["asset"],
+                "walletBalance": str(result["wallet_balance"]),
+                "unrealizedProfit": str(result["unrealized_profit"]),
+                "marginBalance": str(result["margin_balance"]),
+                "maintMargin": str(result["maint_margin"]),
+                "initialMargin": str(result["initial_margin"]),
+                "positionInitialMargin": str(result["position_initial_margin"]),
+                "openOrderInitialMargin": str(result["open_order_initial_margin"]),
+                "crossWalletBalance": str(result["cross_wallet_balance"]),
+                "crossUnPnl": str(result["cross_un_pnl"]),
+                "availableBalance": str(result["available_balance"]),
+                "maxWithdrawAmount": str(result["max_withdraw_amount"]),
+                "updateTime": result["update_time"]
+            }
+        except Exception as e:
+            logger.error(f"[Database] Failed to get asset {account_alias}/{asset}: {e}")
+            return None
+    
+    def get_all_assets(self, account_alias: str = None) -> List[Dict]:
+        """
+        获取所有资产信息或指定账户的所有资产
+        
+        Args:
+            account_alias: 账户唯一识别码（可选，如果指定则只返回该账户的所有资产）
+            
+        Returns:
+            资产信息列表
+        """
+        try:
+            if account_alias:
+                rows = self.query(f"""
+                    SELECT account_alias, asset, wallet_balance, unrealized_profit, margin_balance,
+                           maint_margin, initial_margin, position_initial_margin, open_order_initial_margin,
+                           cross_wallet_balance, cross_un_pnl, available_balance, max_withdraw_amount,
+                           update_time, created_at
+                    FROM {self.asset_table} FINAL
+                    WHERE account_alias = '{account_alias}'
+                    ORDER BY asset ASC, update_time DESC
+                """)
+            else:
+                rows = self.query(f"""
+                    SELECT account_alias, asset, wallet_balance, unrealized_profit, margin_balance,
+                           maint_margin, initial_margin, position_initial_margin, open_order_initial_margin,
+                           cross_wallet_balance, cross_un_pnl, available_balance, max_withdraw_amount,
+                           update_time, created_at
+                    FROM {self.asset_table} FINAL
+                    ORDER BY account_alias ASC, asset ASC, update_time DESC
+                """)
+            
+            columns = ["account_alias", "asset", "wallet_balance", "unrealized_profit", "margin_balance",
+                      "maint_margin", "initial_margin", "position_initial_margin", "open_order_initial_margin",
+                      "cross_wallet_balance", "cross_un_pnl", "available_balance", "max_withdraw_amount",
+                      "update_time", "created_at"]
+            results = self._rows_to_dicts(rows, columns)
+            
+            # 转换为驼峰命名格式
+            formatted_results = []
+            for result in results:
+                formatted_results.append({
+                    "accountAlias": result["account_alias"],
+                    "asset": result["asset"],
+                    "walletBalance": str(result["wallet_balance"]),
+                    "unrealizedProfit": str(result["unrealized_profit"]),
+                    "marginBalance": str(result["margin_balance"]),
+                    "maintMargin": str(result["maint_margin"]),
+                    "initialMargin": str(result["initial_margin"]),
+                    "positionInitialMargin": str(result["position_initial_margin"]),
+                    "openOrderInitialMargin": str(result["open_order_initial_margin"]),
+                    "crossWalletBalance": str(result["cross_wallet_balance"]),
+                    "crossUnPnl": str(result["cross_un_pnl"]),
+                    "availableBalance": str(result["available_balance"]),
+                    "maxWithdrawAmount": str(result["max_withdraw_amount"]),
+                    "updateTime": result["update_time"]
+                })
+            
+            return formatted_results
+        except Exception as e:
+            logger.error(f"[Database] Failed to get all assets: {e}")
+            return []
+    
+    def update_asset(self, account_alias: str, asset: str,
+                    wallet_balance: float = None,
+                    unrealized_profit: float = None,
+                    margin_balance: float = None,
+                    maint_margin: float = None,
+                    initial_margin: float = None,
+                    position_initial_margin: float = None,
+                    open_order_initial_margin: float = None,
+                    cross_wallet_balance: float = None,
+                    cross_un_pnl: float = None,
+                    available_balance: float = None,
+                    max_withdraw_amount: float = None,
+                    update_time: int = None) -> bool:
+        """
+        更新资产信息（部分字段）
+        
+        Args:
+            account_alias: 账户唯一识别码
+            asset: 资产类型
+            wallet_balance: 余额（可选）
+            unrealized_profit: 未实现盈亏（可选）
+            margin_balance: 保证金余额（可选）
+            maint_margin: 维持保证金（可选）
+            initial_margin: 当前所需起始保证金（可选）
+            position_initial_margin: 持仓所需起始保证金（可选）
+            open_order_initial_margin: 当前挂单所需起始保证金（可选）
+            cross_wallet_balance: 全仓账户余额（可选）
+            cross_un_pnl: 全仓持仓未实现盈亏（可选）
+            available_balance: 可用余额（可选）
+            max_withdraw_amount: 最大可转出余额（可选）
+            update_time: 更新时间（可选，如果不提供则使用当前时间戳）
+            
+        Returns:
+            操作是否成功
+        """
+        try:
+            # 先获取现有资产信息
+            existing = self.get_asset(account_alias, asset)
+            if not existing:
+                logger.warning(f"[Database] Asset {account_alias}/{asset} not found for update")
+                return False
+            
+            # 使用提供的值或保留现有值
+            final_wallet_balance = wallet_balance if wallet_balance is not None else float(existing["walletBalance"])
+            final_unrealized_profit = unrealized_profit if unrealized_profit is not None else float(existing["unrealizedProfit"])
+            final_margin_balance = margin_balance if margin_balance is not None else float(existing["marginBalance"])
+            final_maint_margin = maint_margin if maint_margin is not None else float(existing["maintMargin"])
+            final_initial_margin = initial_margin if initial_margin is not None else float(existing["initialMargin"])
+            final_position_initial_margin = position_initial_margin if position_initial_margin is not None else float(existing["positionInitialMargin"])
+            final_open_order_initial_margin = open_order_initial_margin if open_order_initial_margin is not None else float(existing["openOrderInitialMargin"])
+            final_cross_wallet_balance = cross_wallet_balance if cross_wallet_balance is not None else float(existing["crossWalletBalance"])
+            final_cross_un_pnl = cross_un_pnl if cross_un_pnl is not None else float(existing["crossUnPnl"])
+            final_available_balance = available_balance if available_balance is not None else float(existing["availableBalance"])
+            final_max_withdraw_amount = max_withdraw_amount if max_withdraw_amount is not None else float(existing["maxWithdrawAmount"])
+            final_update_time = update_time if update_time is not None else existing["updateTime"]
+            
+            # 使用 add_asset 方法（ReplacingMergeTree会自动去重）
+            return self.add_asset(
+                account_alias=account_alias,
+                asset=asset,
+                wallet_balance=final_wallet_balance,
+                unrealized_profit=final_unrealized_profit,
+                margin_balance=final_margin_balance,
+                maint_margin=final_maint_margin,
+                initial_margin=final_initial_margin,
+                position_initial_margin=final_position_initial_margin,
+                open_order_initial_margin=final_open_order_initial_margin,
+                cross_wallet_balance=final_cross_wallet_balance,
+                cross_un_pnl=final_cross_un_pnl,
+                available_balance=final_available_balance,
+                max_withdraw_amount=final_max_withdraw_amount,
+                update_time=final_update_time
+            )
+        except Exception as e:
+            logger.error(f"[Database] Failed to update asset {account_alias}/{asset}: {e}")
+            return False
+    
+    def delete_asset(self, account_alias: str, asset: str = None) -> bool:
+        """
+        删除资产信息
+        
+        Args:
+            account_alias: 账户唯一识别码
+            asset: 资产类型（可选，如果指定则只删除该资产的信息，否则删除该账户的所有资产信息）
+            
+        Returns:
+            操作是否成功
+        """
+        try:
+            if asset:
+                self.command(f"ALTER TABLE {self.asset_table} DELETE WHERE account_alias = '{account_alias}' AND asset = '{asset}'")
+                logger.debug(f"[Database] Deleted asset: {account_alias}, {asset}")
+            else:
+                self.command(f"ALTER TABLE {self.asset_table} DELETE WHERE account_alias = '{account_alias}'")
+                logger.debug(f"[Database] Deleted all assets for: {account_alias}")
+            return True
+        except Exception as e:
+            logger.error(f"[Database] Failed to delete asset {account_alias}/{asset}: {e}")
+            return False
 

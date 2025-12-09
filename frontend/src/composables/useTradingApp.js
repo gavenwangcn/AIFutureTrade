@@ -625,7 +625,7 @@ export function useTradingApp() {
           hour: '2-digit',
           minute: '2-digit'
         }),
-        value: h.total_value
+        value: h.balance || h.total_value || 0  // 使用新字段名balance，兼容旧字段名total_value
       }))
       
       if (currentValue !== undefined && currentValue !== null) {
@@ -720,10 +720,10 @@ export function useTradingApp() {
       if (data.portfolio && data.portfolio.positions) {
         // 映射数据格式以匹配前端显示
         positions.value = (data.portfolio.positions || []).map(pos => ({
-          id: pos.id || `${pos.future}_${pos.side}`,
-          symbol: pos.future || '',
-          side: pos.side || '',
-          quantity: pos.quantity || 0,
+          id: pos.id || `${pos.symbol}_${pos.position_side}`,
+          symbol: pos.symbol || '',
+          side: pos.position_side || '',
+          quantity: Math.abs(pos.position_amt || 0),
           openPrice: pos.avg_price || 0,
           currentPrice: pos.current_price || 0,
           leverage: pos.leverage || 1,
@@ -753,12 +753,13 @@ export function useTradingApp() {
       // 后端直接返回数组格式
       const tradesList = Array.isArray(data) ? data : (data.trades || [])
       // 映射数据格式以匹配前端显示
+      // 注意：trades表仍使用future和quantity字段，这里需要兼容
       trades.value = tradesList.map(trade => ({
-        id: trade.id || `${trade.timestamp}_${trade.future}`,
+        id: trade.id || `${trade.timestamp}_${trade.future || trade.symbol || ''}`,
         time: trade.timestamp || '',
-        symbol: trade.future || '',
+        symbol: trade.future || trade.symbol || '',  // trades表使用future字段
         side: trade.signal || '',
-        quantity: trade.quantity || 0,
+        quantity: trade.quantity || 0,  // trades表使用quantity字段
         price: trade.price || 0,
         pnl: trade.pnl || 0,
         fee: trade.fee || 0,

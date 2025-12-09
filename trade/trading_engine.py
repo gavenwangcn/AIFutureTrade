@@ -9,13 +9,25 @@ import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import common.config as app_config
 from trade.prompt_defaults import DEFAULT_BUY_CONSTRAINTS, DEFAULT_SELL_CONSTRAINTS
+from common.binance_futures import BinanceFuturesOrderClient
 
 logger = logging.getLogger(__name__)
 
 class TradingEngine:
     def __init__(self, model_id: int, db, market_fetcher, ai_trader, trade_fee_rate: float = 0.001,
                  buy_cycle_interval: int = 5, sell_cycle_interval: int = 5):
-        """Initialize trading engine for a model"""
+        """
+        Initialize trading engine for a model
+        
+        Args:
+            model_id: 模型ID
+            db: 数据库实例
+            market_fetcher: 市场数据获取器
+            ai_trader: AI交易决策器
+            trade_fee_rate: 交易费率
+            buy_cycle_interval: 买入周期间隔（秒）
+            sell_cycle_interval: 卖出周期间隔（秒）
+        """
         self.model_id = model_id
         self.db = db
         self.market_fetcher = market_fetcher
@@ -31,6 +43,11 @@ class TradingEngine:
         self.sell_thread = None
         # 全局交易锁，用于协调买入和卖出服务线程之间的并发操作
         self.trading_lock = threading.Lock()
+        
+        # 【Binance订单客户端】每个model使用独立的实例，使用model表中的api_key和api_secret初始化
+        # 这样每个model可以使用不同的API账户进行交易
+        self.binance_order_client = None
+        self._init_binance_order_client()
 
     # ============ Main Trading Cycle ============
 
@@ -102,7 +119,7 @@ class TradingEngine:
                 # 在构建sell prompt时，实时更新持仓合约的价格
                 positions = portfolio.get('positions', []) or []
                 if positions:
-                    position_symbols = [pos.get('future') for pos in positions if pos.get('future')]
+                    position_symbols = [pos.get('symbol') for pos in positions if pos.get('symbol')]
                     if position_symbols:
                         # 实时获取持仓合约的最新价格（不使用缓存）
                         realtime_prices = self.market_fetcher.get_current_prices(position_symbols)
@@ -200,16 +217,21 @@ class TradingEngine:
             logger.debug(f"[Model {self.model_id}] [卖出服务] [阶段3] 开始记录账户价值快照")
             
             updated_portfolio = self.db.get_portfolio(self.model_id, current_prices)
-            logger.debug(f"[Model {self.model_id}] [卖出服务] [阶段3.1] 账户价值: "
-                        f"总价值=${updated_portfolio.get('total_value', 0):.2f}, "
-                        f"现金=${updated_portfolio.get('cash', 0):.2f}, "
-                        f"持仓价值=${updated_portfolio.get('positions_value', 0):.2f}")
+            balance = updated_portfolio.get('total_value', 0)
+            available_balance = updated_portfolio.get('cash', 0)
+            cross_wallet_balance = updated_portfolio.get('positions_value', 0)
             
+            logger.debug(f"[Model {self.model_id}] [卖出服务] [阶段3.1] 账户价值: "
+                        f"总余额(balance)=${balance:.2f}, "
+                        f"可用余额(available_balance)=${available_balance:.2f}, "
+                        f"全仓余额(cross_wallet_balance)=${cross_wallet_balance:.2f}")
+            
+            # 【记录账户价值快照】使用新字段名，提高代码可读性
             self.db.record_account_value(
                 self.model_id,
-                updated_portfolio['total_value'],
-                updated_portfolio['cash'],
-                updated_portfolio['positions_value']
+                balance=balance,
+                available_balance=available_balance,
+                cross_wallet_balance=cross_wallet_balance
             )
             logger.debug(f"[Model {self.model_id}] [卖出服务] [阶段3.2] 账户价值快照已记录到数据库")
             
@@ -363,16 +385,21 @@ class TradingEngine:
             logger.debug(f"[Model {self.model_id}] [买入服务] [阶段3] 开始记录账户价值快照")
             
             updated_portfolio = self.db.get_portfolio(self.model_id, current_prices)
-            logger.debug(f"[Model {self.model_id}] [买入服务] [阶段3.1] 账户价值: "
-                        f"总价值=${updated_portfolio.get('total_value', 0):.2f}, "
-                        f"现金=${updated_portfolio.get('cash', 0):.2f}, "
-                        f"持仓价值=${updated_portfolio.get('positions_value', 0):.2f}")
+            balance = updated_portfolio.get('total_value', 0)
+            available_balance = updated_portfolio.get('cash', 0)
+            cross_wallet_balance = updated_portfolio.get('positions_value', 0)
             
+            logger.debug(f"[Model {self.model_id}] [买入服务] [阶段3.1] 账户价值: "
+                        f"总余额(balance)=${balance:.2f}, "
+                        f"可用余额(available_balance)=${available_balance:.2f}, "
+                        f"全仓余额(cross_wallet_balance)=${cross_wallet_balance:.2f}")
+            
+            # 【记录账户价值快照】使用新字段名，提高代码可读性
             self.db.record_account_value(
                 self.model_id,
-                updated_portfolio['total_value'],
-                updated_portfolio['cash'],
-                updated_portfolio['positions_value']
+                balance=balance,
+                available_balance=available_balance,
+                cross_wallet_balance=cross_wallet_balance
             )
             logger.debug(f"[Model {self.model_id}] [买入服务] [阶段3.2] 账户价值快照已记录到数据库")
             
@@ -537,6 +564,80 @@ class TradingEngine:
             'success': True,
             'message': '交易服务已停止'
         }
+
+    # ============ Binance Order Client Initialization ============
+    
+    def _init_binance_order_client(self):
+        """
+        初始化Binance期货订单客户端
+        
+        【重要说明】
+        每个model使用独立的BinanceFuturesOrderClient实例，使用model表中的api_key和api_secret进行初始化。
+        这样每个model可以使用不同的API账户进行交易，实现账户隔离。
+        
+        【初始化流程】
+        1. 从model表获取api_key和api_secret
+        2. 验证API密钥是否存在
+        3. 使用API密钥初始化BinanceFuturesOrderClient实例
+        4. 如果初始化失败，binance_order_client设置为None，交易操作将跳过SDK调用
+        
+        【使用场景】
+        - _execute_buy: 调用trailing_stop_market_trade
+        - _execute_close: 调用close_position_trade
+        - _execute_stop_loss: 调用stop_loss_trade
+        - _execute_take_profit: 调用take_profit_trade
+        """
+        try:
+            # 【步骤1】从model表获取API密钥
+            model = self.db.get_model(self.model_id)
+            if not model:
+                logger.warning(f"[Model {self.model_id}] Model not found, cannot initialize Binance order client")
+                self.binance_order_client = None
+                return
+            
+            api_key = model.get('api_key', '')
+            api_secret = model.get('api_secret', '')
+            
+            # 【步骤2】验证API密钥是否存在
+            if not api_key or not api_secret:
+                logger.warning(f"[Model {self.model_id}] API key/secret not configured in model table, Binance order client disabled")
+                logger.warning(f"[Model {self.model_id}] SDK calls will be skipped, only database records will be created")
+                self.binance_order_client = None
+                return
+            
+            # 【步骤3】使用model的API密钥初始化Binance订单客户端
+            # 每个model使用独立的实例，实现账户隔离
+            testnet = getattr(app_config, 'BINANCE_TESTNET', False)
+            self.binance_order_client = BinanceFuturesOrderClient(
+                api_key=api_key,
+                api_secret=api_secret,
+                quote_asset='USDT',
+                testnet=testnet
+            )
+            logger.info(f"[Model {self.model_id}] Binance order client initialized successfully with model's API credentials")
+            logger.debug(f"[Model {self.model_id}] API key: {api_key[:8]}... (truncated for security)")
+        except Exception as e:
+            logger.error(f"[Model {self.model_id}] Failed to initialize Binance order client: {e}")
+            logger.error(f"[Model {self.model_id}] SDK calls will be skipped, only database records will be created")
+            self.binance_order_client = None
+    
+    def _ensure_binance_order_client(self) -> bool:
+        """
+        确保Binance订单客户端已初始化
+        
+        如果客户端未初始化，尝试重新初始化。
+        用于在运行时检查客户端状态。
+        
+        Returns:
+            bool: 客户端是否可用
+        """
+        if self.binance_order_client is not None:
+            return True
+        
+        # 尝试重新初始化
+        logger.debug(f"[Model {self.model_id}] Binance order client not initialized, attempting to reinitialize...")
+        self._init_binance_order_client()
+        return self.binance_order_client is not None
 
     # ============ Market Data Methods ============
 
@@ -784,8 +885,9 @@ class TradingEngine:
         """Build account information for AI decision making"""
         model = self.db.get_model(self.model_id)
         initial_capital = model['initial_capital']
-        total_value = portfolio['total_value']
-        total_return = ((total_value - initial_capital) / initial_capital) * 100
+        # 【安全访问】使用.get()方法避免KeyError
+        total_value = portfolio.get('total_value', 0)
+        total_return = ((total_value - initial_capital) / initial_capital) * 100 if initial_capital > 0 else 0
 
         return {
             'current_time': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
@@ -953,7 +1055,7 @@ class TradingEngine:
         """
         thread_id = threading.current_thread().ident
         batch_start_time = datetime.now()
-        batch_symbols = [pos.get('future', 'N/A') for pos in batch_positions]
+        batch_symbols = [pos.get('symbol', 'N/A') for pos in batch_positions]  # 【字段更新】使用新字段名symbol替代future
         
         logger.debug(f"[Model {self.model_id}] [线程-{thread_id}] [卖出批次 {batch_num}/{total_batches}] "
                     f"开始处理批次，持仓合约: {batch_symbols}")
@@ -1050,9 +1152,9 @@ class TradingEngine:
                 for idx, result in enumerate(batch_results):
                     logger.debug(f"[Model {self.model_id}] [线程-{thread_id}] [卖出批次 {batch_num}/{total_batches}] "
                                 f"[步骤5.3.{idx+1}] 执行结果: "
-                                f"合约={result.get('future')}, "
+                                f"合约={result.get('symbol', 'N/A')}, "
                                 f"信号={result.get('signal')}, "
-                                f"数量={result.get('quantity', 0)}, "
+                                f"数量={result.get('position_amt', 0)}, "
                                 f"价格=${result.get('price', 0):.4f}, "
                                 f"错误={result.get('error', '无')}")
                 
@@ -1217,9 +1319,9 @@ class TradingEngine:
                 for idx, result in enumerate(batch_results):
                     logger.debug(f"[Model {self.model_id}] [线程-{thread_id}] [批次 {batch_num}/{total_batches}] "
                                 f"[步骤4.3.{idx+1}] 执行结果: "
-                                f"合约={result.get('future')}, "
+                                f"合约={result.get('symbol', 'N/A')}, "
                                 f"信号={result.get('signal')}, "
-                                f"数量={result.get('quantity', 0)}, "
+                                f"数量={result.get('position_amt', 0)}, "
                                 f"价格=${result.get('price', 0):.4f}, "
                                 f"错误={result.get('error', '无')}")
                 
@@ -1318,7 +1420,7 @@ class TradingEngine:
         symbol_source = model.get('symbol_source', 'leaderboard') if model else 'leaderboard'
         
         # 计算可用持仓槽位
-        held = {pos['future'] for pos in (portfolio.get('positions') or [])}
+        held = {pos['symbol'] for pos in (portfolio.get('positions') or [])}
         available_slots = max(0, self.max_positions - len(held))
         if available_slots <= 0:
             return []
@@ -1363,7 +1465,7 @@ class TradingEngine:
         results = []
 
         tracked = set(self._get_tracked_symbols())
-        positions_map = {pos['future']: pos for pos in portfolio.get('positions', [])}
+        positions_map = {pos['symbol']: pos for pos in portfolio.get('positions', [])}
 
         # 获取全局交易锁，确保买入和卖出服务线程不会同时执行交易操作
         with self.trading_lock:
@@ -1376,24 +1478,36 @@ class TradingEngine:
                 signal = decision.get('signal', '').lower()
 
                 try:
-                    if signal == 'buy_to_enter':
+                    if signal == 'buy_to_enter' or signal == 'sell_to_enter':
+                        # 【统一执行方法】buy_to_enter（开多）和sell_to_enter（开空）都调用_execute_buy方法
+                        # _execute_buy方法会根据signal自动确定position_side：
+                        # - buy_to_enter → position_side = 'LONG'
+                        # - sell_to_enter → position_side = 'SHORT'
                         result = self._execute_buy(symbol, decision, market_state, portfolio)
-                    elif signal == 'sell_to_enter':
-                        result = {'future': symbol, 'error': '当前账户暂不支持做空'}
                     elif signal == 'close_position':
                         if symbol not in positions_map:
-                            result = {'future': symbol, 'error': 'No position to close'}
+                            result = {'symbol': symbol, 'error': 'No position to close'}
                         else:
                             result = self._execute_close(symbol, decision, market_state, portfolio)
+                    elif signal == 'stop_loss':
+                        if symbol not in positions_map:
+                            result = {'symbol': symbol, 'error': 'No position for stop loss'}
+                        else:
+                            result = self._execute_stop_loss(symbol, decision, market_state, portfolio)
+                    elif signal == 'take_profit':
+                        if symbol not in positions_map:
+                            result = {'symbol': symbol, 'error': 'No position for take profit'}
+                        else:
+                            result = self._execute_take_profit(symbol, decision, market_state, portfolio)
                     elif signal == 'hold':
-                        result = {'future': symbol, 'signal': 'hold', 'message': '保持观望'}
+                        result = {'symbol': symbol, 'signal': 'hold', 'message': '保持观望'}
                     else:
-                        result = {'future': symbol, 'error': f'Unknown signal: {signal}'}
+                        result = {'symbol': symbol, 'error': f'Unknown signal: {signal}'}
 
                     results.append(result)
 
                 except Exception as e:
-                    results.append({'future': symbol, 'error': str(e)})
+                    results.append({'symbol': symbol, 'error': str(e)})
             
             logger.debug(f"[Model {self.model_id}] [交易执行] 交易决策执行完成，释放交易锁")
 
@@ -1402,107 +1516,224 @@ class TradingEngine:
     # ============ Trade Execution Methods ============
 
     def _execute_buy(self, symbol: str, decision: Dict, market_state: Dict, portfolio: Dict) -> Dict:
-        """Execute buy order"""
+        """
+        执行开仓操作（统一方法，支持开多和开空）
+        
+        【signal与position_side的映射关系】
+        根据AI模型返回的signal字段自动确定position_side：
+        - signal='buy_to_enter'（开多）→ position_side='LONG'
+        - signal='sell_to_enter'（开空）→ position_side='SHORT'
+        
+        【重要说明】
+        - AI模型不再返回position_side字段，只需要返回signal字段
+        - 系统会根据signal自动确定position_side
+        - trades表中记录的signal字段：buy_to_enter 或 sell_to_enter
+        
+        【position_side的作用】
+        根据position_side的值决定：
+        - SDK调用的side参数：LONG持仓用SELL保护，SHORT持仓用BUY保护
+        - 数据库记录的position_side：根据signal自动确定
+        - trades表的side字段：LONG开仓用'buy'，SHORT开仓用'sell'
+        """
         quantity = decision.get('quantity', 0)
         leverage = self._resolve_leverage(decision)
         price = market_state[symbol]['price']
+        
+        # 【根据signal自动确定position_side】不再从decision中获取position_side字段
+        signal = decision.get('signal', '').lower()
+        if signal == 'buy_to_enter':
+            position_side = 'LONG'  # 开多仓
+            trade_signal = 'buy_to_enter'  # trades表记录的signal
+        elif signal == 'sell_to_enter':
+            position_side = 'SHORT'  # 开空仓
+            trade_signal = 'sell_to_enter'  # trades表记录的signal
+        else:
+            # 如果signal不是buy_to_enter或sell_to_enter，默认使用LONG（向后兼容）
+            logger.warning(f"[Model {self.model_id}] Invalid signal '{signal}' for _execute_buy, defaulting to LONG")
+            position_side = 'LONG'
+            trade_signal = 'buy_to_enter'
+        
+        logger.debug(f"[Model {self.model_id}] [开仓] {symbol} signal={signal} → position_side={position_side}")
 
         positions = portfolio.get('positions', [])
-        existing_symbols = {pos['future'] for pos in positions}
+        existing_symbols = {pos['symbol'] for pos in positions}
         if symbol not in existing_symbols and len(existing_symbols) >= self.max_positions:
-            return {'future': symbol, 'error': '达到最大持仓数量，无法继续开仓'}
+            return {'symbol': symbol, 'error': '达到最大持仓数量，无法继续开仓'}
 
-        max_affordable_qty = portfolio['cash'] / (price * (1 + self.trade_fee_rate))
+        # 【获取可用现金】从portfolio中获取cash字段（计算值：初始资金 + 已实现盈亏 - 已用保证金）
+        available_cash = portfolio.get('cash', 0)
+        if available_cash <= 0:
+            return {'symbol': symbol, 'error': '可用现金不足，无法买入'}
+        
+        max_affordable_qty = available_cash / (price * (1 + self.trade_fee_rate))
         risk_pct = float(decision.get('risk_budget_pct', 3)) / 100
         risk_pct = min(max(risk_pct, 0.01), 0.05)
-        risk_based_qty = (portfolio['cash'] * risk_pct) / (price * (1 + self.trade_fee_rate))
+        risk_based_qty = (available_cash * risk_pct) / (price * (1 + self.trade_fee_rate))
 
         quantity = float(quantity)
         if quantity <= 0 or quantity > max_affordable_qty:
             quantity = min(max_affordable_qty, risk_based_qty if risk_based_qty > 0 else max_affordable_qty)
 
         if quantity <= 0:
-            return {'future': symbol, 'error': '现金不足，无法买入'}
+            return {'symbol': symbol, 'error': '现金不足，无法买入'}
 
         trade_amount = quantity * price
         trade_fee = trade_amount * self.trade_fee_rate
         required_margin = (quantity * price) / leverage
         total_required = required_margin + trade_fee
 
-        if total_required > portfolio['cash']:
-            return {'future': symbol, 'error': '可用资金不足（含手续费）'}
+        if total_required > available_cash:
+            return {'symbol': symbol, 'error': '可用资金不足（含手续费）'}
 
-        # Update position
+        # 【确定SDK调用的side参数】根据position_side决定trailing stop的保护方向
+        # LONG持仓：用SELL方向来设置trailing stop（保护多仓，价格下跌时触发）
+        # SHORT持仓：用BUY方向来设置trailing stop（保护空仓，价格上涨时触发）
+        if position_side == 'LONG':
+            trailing_stop_side = 'SELL'  # 保护LONG持仓使用SELL方向
+        else:  # SHORT
+            trailing_stop_side = 'BUY'  # 保护SHORT持仓使用BUY方向
+        
+        # 【调用SDK执行交易】使用trailing_stop_market_trade
+        # 注意：trailing_stop_market_trade是用于保护已有持仓的，不是用于开仓的
+        # 但按照用户要求，buy操作对应trailing_stop_market_trade
+        # 这里先更新数据库记录持仓，然后设置trailing stop保护
+        sdk_response = None
+        # 【使用model独立的binance_order_client】确保客户端已初始化
+        if self._ensure_binance_order_client():
+            try:
+                # 获取回调幅度（从决策中获取，默认1.0）
+                callback_rate = float(decision.get('callback_rate', 1.0))
+                callback_rate = max(0.1, min(10.0, callback_rate))  # 限制在0.1-10范围内
+                
+                logger.info(f"TRADE: Calling SDK - trailing_stop_market_trade for {symbol}, side={trailing_stop_side} (protect {position_side}), callback_rate={callback_rate}%")
+                sdk_response = self.binance_order_client.trailing_stop_market_trade(
+                    symbol=symbol,
+                    side=trailing_stop_side,  # 根据position_side动态决定保护方向
+                    callback_rate=callback_rate,
+                    position_side=position_side  # 使用根据signal自动确定的position_side
+                )
+                logger.info(f"TRADE: SDK response received for {symbol}: {sdk_response}")
+            except Exception as sdk_err:
+                logger.error(f"TRADE: SDK call failed ({trade_signal.upper()}/trailing_stop) model={self.model_id} symbol={symbol}: {sdk_err}")
+                # SDK调用失败不影响数据库记录，继续执行
+        else:
+            logger.warning(f"TRADE: Binance order client not available for model {self.model_id}, skipping SDK call for {symbol}")
+
+        # 【更新持仓】使用根据signal自动确定的position_side
         try:
             self.db.update_position(
-                self.model_id, symbol, quantity, price, leverage, 'long'
+                self.model_id, symbol=symbol, position_amt=quantity, avg_price=price, 
+                leverage=leverage, position_side=position_side  # 使用根据signal自动确定的position_side
             )
         except Exception as db_err:
-            logger.error(f"TRADE: Update position failed (BUY) model={self.model_id} future={symbol}: {db_err}")
+            logger.error(f"TRADE: Update position failed ({trade_signal.upper()}) model={self.model_id} future={symbol}: {db_err}")
             raise
 
-        # Record trade
-        logger.info(f"TRADE: PENDING - Model {self.model_id} BUY {symbol} qty={quantity} price={price} fee={trade_fee}")
+        # 【确定trades表的side字段】开仓时的side字段
+        # LONG开仓：side='buy'（开多仓）
+        # SHORT开仓：side='sell'（开空仓）
+        if position_side == 'LONG':
+            trade_side = 'buy'  # 开多仓
+        else:  # SHORT
+            trade_side = 'sell'  # 开空仓
+        
+        # 【记录交易】根据signal记录到trades表（buy_to_enter 或 sell_to_enter）
+        logger.info(f"TRADE: PENDING - Model {self.model_id} {trade_signal.upper()} {symbol} position_side={position_side} qty={quantity} price={price} fee={trade_fee}")
         try:
             self.db.add_trade(
-                self.model_id, symbol, 'buy_to_enter', quantity,
-                price, leverage, 'long', pnl=0, fee=trade_fee
+                self.model_id, symbol, trade_signal, quantity,  # 使用根据signal确定的trade_signal（buy_to_enter或sell_to_enter）
+                price, leverage, trade_side, pnl=0, fee=trade_fee  # 使用根据position_side确定的trade_side
             )
         except Exception as db_err:
-            logger.error(f"TRADE: Add trade failed (BUY) model={self.model_id} future={symbol}: {db_err}")
+            logger.error(f"TRADE: Add trade failed ({trade_signal.upper()}) model={self.model_id} future={symbol}: {db_err}")
             raise
-        logger.info(f"TRADE: RECORDED - Model {self.model_id} BUY {symbol}")
+        logger.info(f"TRADE: RECORDED - Model {self.model_id} {trade_signal.upper()} {symbol} position_side={position_side}")
 
         return {
-            'future': symbol,
-            'signal': 'buy_to_enter',
-            'quantity': quantity,
+            'symbol': symbol,
+            'signal': trade_signal,  # 返回实际的signal（buy_to_enter或sell_to_enter）
+            'position_amt': quantity,
+            'position_side': position_side,  # 返回position_side信息
             'price': price,
             'leverage': leverage,
             'fee': trade_fee,
-            'message': f'买入 {symbol} {quantity:.4f} @ ${price:.2f} (手续费: ${trade_fee:.2f})'
+            'message': f'开仓 {symbol} {position_side} {quantity:.4f} @ ${price:.2f} (手续费: ${trade_fee:.2f})'
         }
 
     def _execute_close(self, symbol: str, decision: Dict, market_state: Dict, portfolio: Dict) -> Dict:
         """Execute close position order"""
+        # 【安全访问】使用.get()方法避免KeyError
+        positions = portfolio.get('positions', []) or []
         position = None
-        for pos in portfolio['positions']:
-            if pos['future'] == symbol:
+        for pos in positions:
+            if pos.get('symbol') == symbol:
                 position = pos
                 break
 
         if not position:
-            return {'future': symbol, 'error': 'Position not found'}
+            return {'symbol': symbol, 'error': 'Position not found'}
 
         current_price = market_state[symbol]['price']
-        entry_price = position['avg_price']
-        quantity = position['quantity']
-        side = position['side']
+        # 【安全访问】使用.get()方法避免KeyError
+        entry_price = position.get('avg_price', 0)
+        position_amt = abs(position.get('position_amt', 0))  # 使用绝对值
+        position_side = position.get('position_side', 'LONG')  # LONG 或 SHORT，默认LONG
 
         # Calculate gross P&L (before fees)
-        if side == 'long':
-            gross_pnl = (current_price - entry_price) * quantity
-        else:  # short
-            gross_pnl = (entry_price - current_price) * quantity
+        if position_side == 'LONG':
+            gross_pnl = (current_price - entry_price) * position_amt
+        else:  # SHORT
+            gross_pnl = (entry_price - current_price) * position_amt
 
         # Calculate closing trade fee
-        trade_amount = quantity * current_price
+        trade_amount = position_amt * current_price
         trade_fee = trade_amount * self.trade_fee_rate
         net_pnl = gross_pnl - trade_fee
 
-        # Close position
+        # 【确定side字段】trades表的side字段是position_side的反向
+        # LONG持仓需要SELL来平仓，SHORT持仓需要BUY来平仓
+        if position_side == 'LONG':
+            side_for_trade = 'SELL'  # 平多仓需要卖出
+        else:  # SHORT
+            side_for_trade = 'BUY'  # 平空仓需要买入
+
+        # 【调用SDK执行交易】使用close_position_trade
+        # 注意：close_position_trade只支持STOP_MARKET或TAKE_PROFIT_MARKET，不支持MARKET
+        # 对于立即平仓，使用当前价格作为stop_price的STOP_MARKET订单
+        sdk_response = None
+        # 【使用model独立的binance_order_client】确保客户端已初始化
+        if self._ensure_binance_order_client():
+            try:
+                # 使用STOP_MARKET订单类型，以当前价格作为触发价格（立即触发）
+                logger.info(f"TRADE: Calling SDK - close_position_trade for {symbol}, side={side_for_trade}, order_type=STOP_MARKET, stop_price={current_price}")
+                sdk_response = self.binance_order_client.close_position_trade(
+                    symbol=symbol,
+                    side=side_for_trade,
+                    order_type='STOP_MARKET',
+                    stop_price=current_price,  # 使用当前价格作为触发价格，实现立即平仓
+                    position_side=position_side
+                )
+                logger.info(f"TRADE: SDK response received for {symbol}: {sdk_response}")
+            except Exception as sdk_err:
+                logger.error(f"TRADE: SDK call failed (CLOSE) model={self.model_id} symbol={symbol}: {sdk_err}")
+                # SDK调用失败不影响数据库记录，继续执行
+        else:
+            logger.warning(f"TRADE: Binance order client not available, skipping SDK call for {symbol}")
+
+        # Close position in database
         try:
-            self.db.close_position(self.model_id, symbol, side)
+            self.db.close_position(self.model_id, symbol=symbol, position_side=position_side)
         except Exception as db_err:
             logger.error(f"TRADE: Close position failed model={self.model_id} future={symbol}: {db_err}")
             raise
-
+        
         # Record trade
-        logger.info(f"TRADE: PENDING - Model {self.model_id} CLOSE {symbol} side={side} qty={quantity} price={current_price} fee={trade_fee} net_pnl={net_pnl}")
+        logger.info(f"TRADE: PENDING - Model {self.model_id} CLOSE {symbol} position_side={position_side} position_amt={position_amt} price={current_price} fee={trade_fee} net_pnl={net_pnl}")
         try:
+            # 【记录到trades表】side字段使用position_side的反向
             self.db.add_trade(
-                self.model_id, symbol, 'close_position', quantity,
-                current_price, position['leverage'], side, pnl=net_pnl, fee=trade_fee
+                self.model_id, symbol, 'close_position', position_amt,
+                current_price, position.get('leverage', 1), side_for_trade.lower(), pnl=net_pnl, fee=trade_fee
             )
         except Exception as db_err:
             logger.error(f"TRADE: Add trade failed (CLOSE) model={self.model_id} future={symbol}: {db_err}")
@@ -1510,13 +1741,175 @@ class TradingEngine:
         logger.info(f"TRADE: RECORDED - Model {self.model_id} CLOSE {symbol}")
 
         return {
-            'future': symbol,
+            'symbol': symbol,
             'signal': 'close_position',
-            'quantity': quantity,
+            'position_amt': position_amt,
             'price': current_price,
             'pnl': net_pnl,
             'fee': trade_fee,
             'message': f'平仓 {symbol}, 毛收益 ${gross_pnl:.2f}, 手续费 ${trade_fee:.2f}, 净收益 ${net_pnl:.2f}'
+        }
+
+    def _execute_stop_loss(self, symbol: str, decision: Dict, market_state: Dict, portfolio: Dict) -> Dict:
+        """Execute stop loss order"""
+        # 【安全访问】使用.get()方法避免KeyError
+        positions = portfolio.get('positions', []) or []
+        position = None
+        for pos in positions:
+            if pos.get('symbol') == symbol:
+                position = pos
+                break
+
+        if not position:
+            return {'symbol': symbol, 'error': 'Position not found'}
+
+        current_price = market_state[symbol]['price']
+        # 【安全访问】使用.get()方法避免KeyError
+        position_amt = abs(position.get('position_amt', 0))
+        position_side = position.get('position_side', 'LONG')  # LONG 或 SHORT，默认LONG
+        
+        # 获取止损价格（从AI决策中获取）
+        stop_price = decision.get('stop_price')
+        if not stop_price:
+            return {'symbol': symbol, 'error': 'Stop price not provided'}
+        
+        stop_price = float(stop_price)
+        
+        # 【确定side字段】trades表的side字段是position_side的反向
+        # LONG持仓需要SELL来止损，SHORT持仓需要BUY来止损
+        if position_side == 'LONG':
+            side_for_trade = 'SELL'  # 平多仓需要卖出
+        else:  # SHORT
+            side_for_trade = 'BUY'  # 平空仓需要买入
+        
+        # 【调用SDK执行交易】使用stop_loss_trade
+        sdk_response = None
+        # 【使用model独立的binance_order_client】确保客户端已初始化
+        if self._ensure_binance_order_client():
+            try:
+                # 使用STOP_MARKET订单类型（只需要stop_price，不需要quantity和price）
+                logger.info(f"TRADE: Calling SDK - stop_loss_trade for {symbol}, side={side_for_trade}, stop_price={stop_price}")
+                sdk_response = self.binance_order_client.stop_loss_trade(
+                    symbol=symbol,
+                    side=side_for_trade,
+                    order_type='STOP_MARKET',  # 使用STOP_MARKET类型，只需要stop_price
+                    stop_price=stop_price,
+                    position_side=position_side
+                )
+                logger.info(f"TRADE: SDK response received for {symbol}: {sdk_response}")
+            except Exception as sdk_err:
+                logger.error(f"TRADE: SDK call failed (STOP_LOSS) model={self.model_id} symbol={symbol}: {sdk_err}")
+                # SDK调用失败不影响数据库记录，继续执行
+        else:
+            logger.warning(f"TRADE: Binance order client not available, skipping SDK call for {symbol}")
+        
+        # 计算预估手续费（止损单可能不会立即成交，这里只是预估）
+        trade_amount = position_amt * stop_price
+        trade_fee = trade_amount * self.trade_fee_rate
+        
+        # 记录止损单到trades表
+        logger.info(f"TRADE: PENDING - Model {self.model_id} STOP_LOSS {symbol} position_side={position_side} position_amt={position_amt} stop_price={stop_price}")
+        try:
+            # 【记录到trades表】side字段使用position_side的反向
+            self.db.add_trade(
+                self.model_id, symbol, 'stop_loss', position_amt,
+                stop_price, position.get('leverage', 1), side_for_trade.lower(), pnl=0, fee=trade_fee
+            )
+        except Exception as db_err:
+            logger.error(f"TRADE: Add trade failed (STOP_LOSS) model={self.model_id} symbol={symbol}: {db_err}")
+            raise
+        logger.info(f"TRADE: RECORDED - Model {self.model_id} STOP_LOSS {symbol}")
+
+        return {
+            'symbol': symbol,
+            'signal': 'stop_loss',
+            'position_amt': position_amt,
+            'stop_price': stop_price,
+            'position_side': position_side,
+            'side': side_for_trade.lower(),
+            'fee': trade_fee,
+            'message': f'止损单 {symbol}, 持仓方向: {position_side}, 止损价格: ${stop_price:.4f}, 数量: {position_amt:.4f}'
+        }
+
+    def _execute_take_profit(self, symbol: str, decision: Dict, market_state: Dict, portfolio: Dict) -> Dict:
+        """Execute take profit order"""
+        # 【安全访问】使用.get()方法避免KeyError
+        positions = portfolio.get('positions', []) or []
+        position = None
+        for pos in positions:
+            if pos.get('symbol') == symbol:
+                position = pos
+                break
+
+        if not position:
+            return {'symbol': symbol, 'error': 'Position not found'}
+
+        current_price = market_state[symbol]['price']
+        # 【安全访问】使用.get()方法避免KeyError
+        position_amt = abs(position.get('position_amt', 0))
+        position_side = position.get('position_side', 'LONG')  # LONG 或 SHORT，默认LONG
+        
+        # 获取止盈价格（从AI决策中获取）
+        stop_price = decision.get('stop_price')  # AI返回的stop_price在止盈场景下就是止盈价格
+        if not stop_price:
+            return {'symbol': symbol, 'error': 'Take profit price not provided'}
+        
+        stop_price = float(stop_price)
+        
+        # 【确定side字段】trades表的side字段是position_side的反向
+        # LONG持仓需要SELL来止盈，SHORT持仓需要BUY来止盈
+        if position_side == 'LONG':
+            side_for_trade = 'SELL'  # 平多仓需要卖出
+        else:  # SHORT
+            side_for_trade = 'BUY'  # 平空仓需要买入
+        
+        # 【调用SDK执行交易】使用take_profit_trade
+        sdk_response = None
+        # 【使用model独立的binance_order_client】确保客户端已初始化
+        if self._ensure_binance_order_client():
+            try:
+                # 使用TAKE_PROFIT_MARKET订单类型（只需要stop_price，不需要quantity和price）
+                logger.info(f"TRADE: Calling SDK - take_profit_trade for {symbol}, side={side_for_trade}, stop_price={stop_price}")
+                sdk_response = self.binance_order_client.take_profit_trade(
+                    symbol=symbol,
+                    side=side_for_trade,
+                    order_type='TAKE_PROFIT_MARKET',  # 使用TAKE_PROFIT_MARKET类型，只需要stop_price
+                    stop_price=stop_price,
+                    position_side=position_side
+                )
+                logger.info(f"TRADE: SDK response received for {symbol}: {sdk_response}")
+            except Exception as sdk_err:
+                logger.error(f"TRADE: SDK call failed (TAKE_PROFIT) model={self.model_id} symbol={symbol}: {sdk_err}")
+                # SDK调用失败不影响数据库记录，继续执行
+        else:
+            logger.warning(f"TRADE: Binance order client not available, skipping SDK call for {symbol}")
+        
+        # 计算预估手续费（止盈单可能不会立即成交，这里只是预估）
+        trade_amount = position_amt * stop_price
+        trade_fee = trade_amount * self.trade_fee_rate
+        
+        # 记录止盈单到trades表
+        logger.info(f"TRADE: PENDING - Model {self.model_id} TAKE_PROFIT {symbol} position_side={position_side} position_amt={position_amt} stop_price={stop_price}")
+        try:
+            # 【记录到trades表】side字段使用position_side的反向
+            self.db.add_trade(
+                self.model_id, symbol, 'take_profit', position_amt,
+                stop_price, position.get('leverage', 1), side_for_trade.lower(), pnl=0, fee=trade_fee
+            )
+        except Exception as db_err:
+            logger.error(f"TRADE: Add trade failed (TAKE_PROFIT) model={self.model_id} symbol={symbol}: {db_err}")
+            raise
+        logger.info(f"TRADE: RECORDED - Model {self.model_id} TAKE_PROFIT {symbol}")
+
+        return {
+            'symbol': symbol,
+            'signal': 'take_profit',
+            'position_amt': position_amt,
+            'stop_price': stop_price,  # 在止盈场景下，stop_price就是止盈价格
+            'position_side': position_side,
+            'side': side_for_trade.lower(),
+            'fee': trade_fee,
+            'message': f'止盈单 {symbol}, 持仓方向: {position_side}, 止盈价格: ${stop_price:.4f}, 数量: {position_amt:.4f}'
         }
 
     # ============ Leverage Management Methods ============

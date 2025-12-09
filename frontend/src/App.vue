@@ -332,11 +332,11 @@
                 </thead>
                 <tbody>
                   <tr v-for="position in positions" :key="position.id">
-                    <td><strong>{{ position.symbol || position.future }}</strong></td>
-                    <td><span :class="['badge', position.side === 'long' ? 'badge-long' : 'badge-short']">
-                      {{ position.side === 'long' ? '做多' : '做空' }}
+                    <td><strong>{{ position.symbol }}</strong></td>
+                    <td><span :class="['badge', (position.position_side || '').toLowerCase() === 'long' ? 'badge-long' : 'badge-short']">
+                      {{ (position.position_side || '').toLowerCase() === 'long' ? '做多' : '做空' }}
                     </span></td>
-                    <td>{{ (position.quantity || 0).toFixed(4) }}</td>
+                    <td>{{ Math.abs(position.position_amt || 0).toFixed(4) }}</td>
                     <td>${{ formatPrice(position.openPrice || position.avg_price) }}</td>
                     <td>${{ formatPrice(position.currentPrice || position.current_price) }}</td>
                     <td>{{ position.leverage }}x</td>
@@ -369,16 +369,22 @@
                 <tbody>
                   <tr v-for="trade in trades" :key="trade.id">
                     <td>{{ formatTime(trade.time || trade.timestamp) }}</td>
-                    <td><strong>{{ trade.symbol || trade.future }}</strong></td>
+                    <td><strong>{{ trade.future || trade.symbol }}</strong></td>
                     <td>
                       <span :class="['badge', 
                         trade.side === 'buy_to_enter' ? 'badge-buy' : 
                         trade.side === 'sell_to_enter' ? 'badge-sell' : 
+                        trade.side === 'close_position' ? 'badge-close' :
+                        trade.side === 'stop_loss' ? 'badge-stop' :
+                        trade.side === 'take_profit' ? 'badge-profit' :
                         'badge-close'
                       ]">
                         {{ trade.side === 'buy_to_enter' ? '开多' : 
                            trade.side === 'sell_to_enter' ? '开空' : 
-                           trade.side === 'close_position' ? '平仓' : trade.side }}
+                           trade.side === 'close_position' ? '平仓' :
+                           trade.side === 'stop_loss' ? '止损' :
+                           trade.side === 'take_profit' ? '止盈' : 
+                           trade.side || '未知' }}
                       </span>
                     </td>
                     <td>{{ (trade.quantity || 0).toFixed(4) }}</td>

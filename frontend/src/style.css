@@ -1637,6 +1637,16 @@ body {
     color: #86909c;
 }
 
+.badge-stop {
+    background: #fff1f0;
+    color: #f53f3f;
+}
+
+.badge-profit {
+    background: #e8ffea;
+    color: #00b42a;
+}
+
 /* Conversations */
 .conversations-list {
     max-height: 500px;

@@ -111,6 +111,9 @@ LOG_DATE_FORMAT = '%Y-%m-%d %H:%M:%S'
 BINANCE_API_KEY = os.getenv('BINANCE_API_KEY', 'Eric')
 BINANCE_API_SECRET = os.getenv('BINANCE_API_SECRET', 'rg5CRfwMCbkFCZBQKatrnlM7ALOQQDDyfRyaLUs4TduxSRP8WQwk4PrcksHgWP4j')
 FUTURES_QUOTE_ASSET = 'USDT'
+# Binance交易模式配置：'test'（测试接口，默认）或 'real'（真实交易接口）
+BINANCE_TRADE_MODE = os.getenv('BINANCE_TRADE_MODE', 'test').lower()  # 默认使用测试接口
+BINANCE_TESTNET = os.getenv('BINANCE_TESTNET', '0').lower() in {'1', 'true', 'yes'}  # 是否使用测试网络
 
 # Binance期货市场数据配置
 FUTURES_TOP_GAINERS_LIMIT = 10

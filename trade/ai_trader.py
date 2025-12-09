@@ -174,9 +174,14 @@ class AITrader:
 
         prompt += """
 执行要求：
-1. 仅按上述候选与约束做出 buy_to_enter 或 hold 决策。
-2. 若需加仓或跳过，请写明理由与风险控制说明。
+1. 仅按上述候选与约束做出buy_to_enter(开多)或sell_to_enter(开空)或hold决策。
+2. 写明每个决策的依据与风控考量，必要时可保持观望。
 3. 严格按照下方 JSON 模板返回，仅包含需要动作的合约。
+
+【重要说明】
+- buy_to_enter：开多仓（做多），系统会自动设置position_side为LONG
+- sell_to_enter：开空仓（做空），系统会自动设置position_side为SHORT
+- 不需要返回position_side字段，系统会根据signal自动确定
 
 请返回：
 ```
@@ -184,7 +189,7 @@ class AITrader:
   "cot_trace": ["推理步骤..."],
   "decisions": {
     "SYMBOL": {
-      "signal": "buy_to_enter|hold",
+      "signal": "buy_to_enter|sell_to_enter|hold",
       "quantity": 0.1,
       "leverage": 1,
       "confidence": 0.8,
@@ -215,33 +220,42 @@ class AITrader:
         prompt += "\n\n当前持仓详情：\n"
         positions = portfolio.get('positions', []) or []
         for pos in positions:
-            symbol = pos['future']
+            symbol = pos.get('symbol', '')  # 【字段更新】使用新字段名symbol替代future
             market_info = market_state.get(symbol, {}) if market_state else {}
             current_price = market_info.get('price') or 0.0
             avg_price = pos.get('avg_price', 0.0)
-            quantity = pos.get('quantity', 0.0)
-            side = pos.get('side', 'long')
+            position_amt = abs(pos.get('position_amt', 0.0))  # 【字段更新】使用新字段名position_amt替代quantity，使用绝对值
+            position_side = pos.get('position_side', 'LONG')  # 【字段更新】使用新字段名position_side替代side
             
             # 计算盈亏
             if avg_price > 0 and current_price > 0:
-                if side.lower() == 'long':
+                if position_side.upper() == 'LONG':
                     # 做多：盈亏 = (现价 - 均价) / 均价 * 100
                     pnl_pct = ((current_price - avg_price) / avg_price) * 100
-                else:
+                else:  # SHORT
                     # 做空：盈亏 = (均价 - 现价) / 均价 * 100
                     pnl_pct = ((avg_price - current_price) / avg_price) * 100
                 
-                # 计算盈亏金额（近似值）
-                position_value = quantity * avg_price
-                pnl_amount = position_value * (pnl_pct / 100)
+                # 计算盈亏金额（优先使用数据库中的unrealized_profit字段）
+                unrealized_profit = pos.get('unrealized_profit', 0.0)
+                if unrealized_profit != 0:
+                    pnl_amount = unrealized_profit
+                    pnl_pct = (unrealized_profit / (position_amt * avg_price)) * 100 if position_amt * avg_price > 0 else 0.0
+                else:
+                    # 如果没有，则使用计算值
+                    position_value = position_amt * avg_price
+                    pnl_amount = position_value * (pnl_pct / 100)
+                
                 pnl_status = "盈利" if pnl_pct > 0 else "亏损" if pnl_pct < 0 else "持平"
             else:
-                pnl_pct = 0.0
-                pnl_amount = 0.0
+                # 使用数据库中的unrealized_profit字段
+                unrealized_profit = pos.get('unrealized_profit', 0.0)
+                pnl_amount = unrealized_profit
+                pnl_pct = (unrealized_profit / (position_amt * avg_price)) * 100 if position_amt * avg_price > 0 else 0.0
                 pnl_status = "未知"
             
             prompt += (
-                f"- {symbol} ({side.upper()}) 数量: {quantity:.4f} | "
+                f"- {symbol} ({position_side}) 数量: {position_amt:.4f} | "
                 f"开仓均价: ${avg_price:.4f} | 当前价格: ${current_price:.4f} | "
                 f"盈亏: {pnl_status} {pnl_pct:+.2f}% (约 ${pnl_amount:+.2f})"
             )
@@ -267,9 +281,30 @@ class AITrader:
 
         prompt += """
 执行要求：
-1. 仅针对现有持仓给出 close_position 或 hold。
+1. 仅针对现有持仓给出 close_position 或 stop_loss 或 take_profit 或 hold。
 2. 写明每个决策的依据与风控考量，必要时可保持观望。
-3. 严格按照买入模块相同 JSON 结构输出，并包含 cot_trace。
+3. 若决定止损/止盈请给出 quantity数量，price价格（期望价格），stop_price止损/止盈触发价格（必填）,
+4. 严格按照下方 JSON 模板返回，仅包含需要动作的合约。
+
+请返回：
+```
+{
+  "cot_trace": ["推理步骤..."],
+  "decisions": {
+    "SYMBOL": {
+      "signal": "close_position|stop_loss|take_profit|hold",
+      "quantity": 1,
+      "price": 0.0345,
+      "stop_price": 0.0325,
+      "confidence": 0.8,
+      "risk_budget_pct": 3,
+      "profit_target": 12345.0,
+      "stop_loss": 12000.0,
+      "justification": "理由"
+    }
+  }
+}
+```
 """
 
         return prompt
