@@ -99,13 +99,13 @@ class MarketDataFetcher:
         获取最新价格数据（实时获取，无缓存）
         
         实时从交易所获取最新价格数据，不使用任何缓存机制。
-        如果无法获取实时数据，则返回最近一次的价格作为降级方案（仅在API完全不可用时使用）。
+        如果无法从SDK获取价格，则返回空字典。
         
         Args:
             symbols: 可选的交易对符号列表，如果为None则返回所有已配置的交易对
             
         Returns:
-            价格数据字典，key为交易对符号，value为价格信息
+            价格数据字典，key为交易对符号，value为价格信息。如果SDK获取失败，返回空字典。
         """
         now = datetime.now()
         
@@ -118,25 +118,8 @@ class MarketDataFetcher:
                 payload['price_date'] = now.strftime('%Y-%m-%d')
             return live_prices
 
-        # 如果无法获取实时数据，返回最近一次的价格作为降级方案
-        # 这仅在交易所API完全不可用时使用，不用于缓存目的
-        if self._last_live_prices:
-            fallback: Dict[str, Dict] = {}
-            for symbol, payload in self._last_live_prices.items():
-                if symbols and symbol not in symbols:
-                    continue
-                fallback[symbol] = {
-                    **payload,
-                    'source': 'fallback',  # 明确标记为降级数据
-                    'price_date': payload.get('price_date') or (
-                        self._last_live_date.strftime('%Y-%m-%d') if self._last_live_date else None
-                    )
-                }
-            logger.warning(f'[Prices] Using fallback prices for {len(fallback)} symbols (API unavailable)')
-            return fallback
-
-        # 如果没有任何数据，返回空字典
-        logger.warning('[Prices] No price data available')
+        # 如果无法获取实时数据，返回空字典
+        logger.warning('[Prices] No price data available from SDK')
         return {}
 
     def get_current_prices(self, symbols: List[str] = None) -> Dict[str, Dict]:
@@ -165,31 +148,7 @@ class MarketDataFetcher:
         # 实时获取价格数据（不使用缓存）
         prices = self._fetch_from_binance_futures(futures)
 
-        # 如果某些交易对获取失败，使用最近一次的价格作为降级方案
-        # 但仅在交易所API完全不可用时使用，不用于缓存
-        missing_symbols = [f['symbol'] for f in futures if f['symbol'] not in prices]
-        if missing_symbols and self._last_live_prices:
-            for symbol in missing_symbols:
-                last_price_info = self._last_live_prices.get(symbol, {})
-                last_price = last_price_info.get('price', 0)
-                # 只有在有有效历史价格时才使用降级方案
-                if last_price > 0:
-                    prices[symbol] = {
-                        'price': last_price,
-                        'name': symbol,
-                        'exchange': 'BINANCE_FUTURES',
-                        'change_24h': last_price_info.get('change_24h', 0),
-                        'daily_volume': last_price_info.get('daily_volume', 0),
-                        'timeframes': {}  # 不再实时生成，只在 AI 交易时计算
-                    }
-                    logger.debug(f'[Prices] Using fallback price for {symbol}: ${last_price}')
-
-        # 更新最近一次的价格记录（仅用于降级方案，不用于缓存）
-        if prices:
-            for symbol, price_data in prices.items():
-                self._last_live_prices[symbol] = price_data.copy()
-            self._last_live_date = datetime.now().date()
-
+        # 直接从SDK获取价格，如果获取不到则返回空（不包含在prices字典中）
         return prices
 
     def _fetch_from_binance_futures(self, futures: List[Dict]) -> Dict[str, Dict]:
@@ -1244,19 +1203,3 @@ class MarketDataFetcher:
     def get_leaderboard(self, limit: Optional[int] = None) -> Dict[str, List[Dict]]:
         """Get leaderboard data (wrapper for sync_leaderboard)"""
         return self.sync_leaderboard(force=False, limit=limit)
-
-    def _build_leaderboard_entries(self, limit: int) -> List[Dict]:
-        """
-        构建涨跌幅榜条目（已废弃，不再使用）
-        
-        此方法已被废弃，涨幅榜数据现在直接从 ClickHouse 查询。
-        保留此方法仅为了向后兼容，实际不会被调用。
-        
-        Args:
-            limit: 每个榜单返回的条数
-            
-        Returns:
-            空列表（已废弃）
-        """
-        logger.warning('[Leaderboard] _build_leaderboard_entries is deprecated, data now comes from ClickHouse')
-        return []

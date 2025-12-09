@@ -82,8 +82,8 @@ class AITrader:
         available_cash = constraints.get('available_cash', portfolio.get('cash', 0))
         available_slots = max(0, max_positions - occupied) if isinstance(max_positions, int) else 'N/A'
 
-        prompt = """你是USDS-M合约的AI买入策略模块，只能在给定的候选列表中挑选要买入的合约。"""
-        prompt += f"\n\n候选合约（来自实时涨跌幅榜，共 {len(candidates)} 个）：\n"
+        prompt = """你是USDS-M合约的专业人士，请使用相关专业知识进行操作，只能在给定的候选列表中挑选要买入的合约。"""
+        prompt += f"\n\n候选合约（来自实时涨跌幅榜，共 {len(candidates)} 个），相关市场数据：\n"
         
         # 创建一个symbol到timeframes的映射，用于快速查找
         symbol_timeframes_map = {}
@@ -158,7 +158,7 @@ class AITrader:
         此方法只关注当前持仓信息，不包含涨幅榜数据。
         决策基于持仓币种本身的表现和账户状态。
         """
-        prompt = """你是USDS-M合约的AI卖出/风控模块，负责判断当前持仓是平仓还是继续持有。
+        prompt = """你是USDS-M合约的专业人士，请使用相关专业知识进行操作，负责判断当前持仓是平仓还是继续持有。
         
 注意：重点需要关注当前账户持有的币种。
 决策应基于持仓币种本身的价格表现、盈亏情况、风险控制等因素。"""
@@ -196,7 +196,7 @@ class AITrader:
                 f"开仓均价: ${avg_price:.4f} | 当前价格: ${current_price:.4f} | "
                 f"盈亏: {pnl_status} {pnl_pct:+.2f}% (约 ${pnl_amount:+.2f})"
             )
-            prompt += "\n"
+            prompt += "\n\n当前持仓的市场历史指标数据：\n"
             
             # 添加市场历史指标数据
             timeframes = market_info.get('indicators', {}).get('timeframes', {})
@@ -224,72 +224,6 @@ class AITrader:
 """
 
         return prompt
-
-    def _format_market_snapshot(self, market_snapshot: Optional[List[Dict]]) -> str:
-        """Format market snapshot data for prompt"""
-        if not market_snapshot:
-            return "暂无可用行情数据（涨跌幅榜为空）\n"
-
-        timeframe_labels = [
-            ('1w', '周线'),
-            ('1d', '日线'),
-            ('4h', '4小时'),
-            ('1h', '1小时'),
-            ('15m', '15分钟'),
-            ('5m', '5分钟'),
-            ('1m', '1分钟'),
-        ]
-
-        def fmt_number(value, precision=4, prefix='', suffix=''):
-            try:
-                if value is None:
-                    return '--'
-                return f"{prefix}{float(value):.{precision}f}{suffix}"
-            except (TypeError, ValueError):
-                return '--'
-
-        lines = []
-        for idx, entry in enumerate(market_snapshot, start=1):
-            symbol = entry.get('symbol', 'N/A')
-            contract_symbol = entry.get('contract_symbol') or f"{symbol}USDT"
-            price = fmt_number(entry.get('price'))
-            volume = fmt_number(entry.get('quote_volume'), precision=2)
-            lines.append(f"{idx}. {symbol} / {contract_symbol}")
-            lines.append(f"   实时价格: ${price} | 24H成交额: {volume} USDT")
-            timeframes = entry.get('timeframes') or {}
-            for key, label in timeframe_labels:
-                tf = timeframes.get(key)
-                if not tf:
-                    continue
-                
-                # 新格式：{kline: {}, ma: {}, macd: {}, rsi: {}, vol: {}}
-                kline = tf.get('kline', {})
-                close = fmt_number(kline.get('close') or tf.get('close'))
-                ma = tf.get('ma') or {}
-                ma_text = ', '.join(
-                    [f"MA{length}:{fmt_number(ma.get(f'ma{length}'))}" for length in (5, 20, 60, 99)]
-                )
-                
-                # MACD 新格式：{dif: float, dea: float, bar: float}
-                macd_data = tf.get('macd', {})
-                if isinstance(macd_data, dict):
-                    macd_text = f"DIF:{fmt_number(macd_data.get('dif'))}, DEA:{fmt_number(macd_data.get('dea'))}, BAR:{fmt_number(macd_data.get('bar'))}"
-                else:
-                    macd_text = fmt_number(macd_data)
-                
-                # RSI 新格式：{rsi6: float, rsi9: float}
-                rsi_data = tf.get('rsi', {})
-                if isinstance(rsi_data, dict):
-                    rsi_text = f"RSI6:{fmt_number(rsi_data.get('rsi6'))}, RSI9:{fmt_number(rsi_data.get('rsi9'))}"
-                else:
-                    rsi_text = fmt_number(rsi_data)
-                
-                vol = fmt_number(tf.get('vol'), precision=2)
-                lines.append(
-                    f"   - {label}: close={close}, {ma_text}, MACD({macd_text}), RSI({rsi_text}), VOL={vol}"
-                )
-
-        return '\n'.join(lines) + '\n'
 
     # ============ LLM API Call Methods ============
 
