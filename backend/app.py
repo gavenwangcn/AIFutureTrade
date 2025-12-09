@@ -831,7 +831,9 @@ def add_model():
             provider_id=data['provider_id'],
             model_name=data['model_name'],
             initial_capital=float(data.get('initial_capital', 100000)),
-            leverage=int(data.get('leverage', 10))
+            leverage=int(data.get('leverage', 10)),
+            api_key=data.get('api_key', ''),
+            api_secret=data.get('api_secret', '')
         )
 
         model = db.get_model(model_id)

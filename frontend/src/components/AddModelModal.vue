@@ -32,6 +32,14 @@
       <label>初始资金</label>
       <input v-model.number="formData.initialCapital" type="number" class="form-input" />
     </div>
+    <div class="form-group">
+      <label>SDK Key</label>
+      <input v-model="formData.apiKey" type="text" class="form-input" placeholder="请输入API密钥" />
+    </div>
+    <div class="form-group">
+      <label>SDK Secret</label>
+      <input v-model="formData.apiSecret" type="password" class="form-input" placeholder="请输入API密钥" />
+    </div>
     <template #footer>
       <button class="btn-secondary" @click="handleClose">取消</button>
       <button class="btn-primary" @click="handleSubmit" :disabled="loading">确认添加</button>
@@ -57,7 +65,9 @@ const formData = ref({
   providerId: '',
   modelName: '',
   displayName: '',
-  initialCapital: 100000
+  initialCapital: 100000,
+  apiKey: '',
+  apiSecret: ''
 })
 
 const providers = ref([])
@@ -87,7 +97,7 @@ const handleProviderChange = () => {
 
 // 提交模型
 const handleSubmit = async () => {
-  if (!formData.value.providerId || !formData.value.modelName || !formData.value.displayName) {
+  if (!formData.value.providerId || !formData.value.modelName || !formData.value.displayName || !formData.value.apiKey || !formData.value.apiSecret) {
     alert('请填写所有必填字段')
     return
   }
@@ -103,7 +113,9 @@ const handleSubmit = async () => {
       provider_id: formData.value.providerId,
       model_name: formData.value.modelName,
       name: formData.value.displayName,
-      initial_capital: formData.value.initialCapital
+      initial_capital: formData.value.initialCapital,
+      api_key: formData.value.apiKey,
+      api_secret: formData.value.apiSecret
     })
     alert('模型添加成功')
     clearForm()
@@ -123,7 +135,9 @@ const clearForm = () => {
     providerId: '',
     modelName: '',
     displayName: '',
-    initialCapital: 100000
+    initialCapital: 100000,
+    apiKey: '',
+    apiSecret: ''
   }
   availableModels.value = []
 }

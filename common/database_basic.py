@@ -217,6 +217,8 @@ class Database:
             initial_capital Float64 DEFAULT 10000,
             leverage UInt8 DEFAULT 10,
             auto_trading_enabled UInt8 DEFAULT 1,
+            api_key String,
+            api_secret String,
             created_at DateTime DEFAULT now()
         )
         ENGINE = MergeTree
@@ -569,7 +571,7 @@ class Database:
             return {}
     
     def add_model(self, name: str, provider_id: int, model_name: str,
-                 initial_capital: float = 10000, leverage: int = 10) -> int:
+                 initial_capital: float = 10000, leverage: int = 10, api_key: str = '', api_secret: str = '') -> int:
         """Add new trading model"""
         model_id = self._generate_id()
         provider_mapping = self._get_provider_id_mapping()
@@ -578,8 +580,8 @@ class Database:
         try:
             self.insert_rows(
                 self.models_table,
-                [[model_id, name, provider_uuid, model_name, initial_capital, leverage, 1, datetime.now(timezone.utc)]],
-                ["id", "name", "provider_id", "model_name", "initial_capital", "leverage", "auto_trading_enabled", "created_at"]
+                [[model_id, name, provider_uuid, model_name, initial_capital, leverage, 1, api_key, api_secret, datetime.now(timezone.utc)]],
+                ["id", "name", "provider_id", "model_name", "initial_capital", "leverage", "auto_trading_enabled", "api_key", "api_secret", "created_at"]
             )
             return self._uuid_to_int(model_id)
         except Exception as e:
