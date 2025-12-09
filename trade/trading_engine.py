@@ -528,12 +528,49 @@ class TradingEngine:
             price_info = prices.get(symbol)
             if price_info:
                 market_state[symbol] = price_info.copy()
-                # 实时计算技术指标（无缓存）
-                indicators = self.market_fetcher.calculate_technical_indicators(symbol)
-                market_state[symbol]['indicators'] = indicators
+                # 使用新方法获取所有时间周期的技术指标（无缓存）
+                merged_data = self._merge_timeframe_data(symbol)
+                # 将合并后的数据格式调整为与原有格式兼容
+                if symbol in merged_data:
+                    market_state[symbol]['indicators'] = {'timeframes': merged_data[symbol]}
 
         return market_state
 
+    def _merge_timeframe_data(self, symbol: str) -> Dict:
+        """
+        合并7个时间周期的市场数据和技术指标
+        
+        Args:
+            symbol: 交易对符号（如 'BTC'）
+            
+        Returns:
+            Dict: 合并后的数据格式 {symbol: {1m: {get_market_data_1m返回格式}, 5m: {get_market_data_5m返回格式}, ...}}
+        """
+        # 获取7个时间周期的数据
+        timeframe_methods = {
+            '1m': self.market_fetcher.get_market_data_1m,
+            '5m': self.market_fetcher.get_market_data_5m,
+            '15m': self.market_fetcher.get_market_data_15m,
+            '1h': self.market_fetcher.get_market_data_1h,
+            '4h': self.market_fetcher.get_market_data_4h,
+            '1d': self.market_fetcher.get_market_data_1d,
+            '1w': self.market_fetcher.get_market_data_1w
+        }
+        
+        merged_data = {symbol: {}}
+        
+        for timeframe, method in timeframe_methods.items():
+            try:
+                data = method(symbol)
+                if data:
+                    # 直接使用get_market_data_*方法返回的完整数据格式
+                    merged_data[symbol][timeframe] = data
+            except Exception as e:
+                logger.warning(f"[Model {self.model_id}] 获取 {symbol} {timeframe} 数据失败: {e}")
+                continue
+        
+        return merged_data
+        
     def _extract_price_map(self, market_state: Dict) -> Dict[str, float]:
         """Extract price map from market state"""
         prices = {}
@@ -652,8 +689,8 @@ class TradingEngine:
                 logger.warning(f"[Model {self.model_id}] 市场快照中 {symbol} 无法获取实时价格，使用涨幅榜价格")
             
             # 实时计算技术指标（无缓存）
-            indicators = self.market_fetcher.calculate_technical_indicators(symbol)
-            timeframes = indicators.get('timeframes', {}) if indicators else {}
+            merged_data = self._merge_timeframe_data(symbol)
+            timeframes = merged_data.get(symbol, {}) if merged_data else {}
             
             snapshot.append({
                 'symbol': symbol,

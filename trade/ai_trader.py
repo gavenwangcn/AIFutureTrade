@@ -35,7 +35,7 @@ class AITrader:
         if not candidates:
             return {'decisions': {}, 'prompt': None, 'raw_response': None, 'cot_trace': None, 'skipped': True}
 
-        prompt = self._build_buy_prompt(candidates, portfolio, account_info, constraints or {}, constraints_text)
+        prompt = self._build_buy_prompt(candidates, portfolio, account_info, constraints or {}, constraints_text, market_snapshot)
         return self._request_decisions(prompt)
 
     def make_sell_decision(
@@ -73,7 +73,8 @@ class AITrader:
         portfolio: Dict,
         account_info: Dict,
         constraints: Dict,
-        constraints_text: Optional[str]
+        constraints_text: Optional[str],
+        market_snapshot: Optional[List[Dict]] = None
     ) -> str:
         """Build prompt for buy decision"""
         max_positions = constraints.get('max_positions')
@@ -83,7 +84,34 @@ class AITrader:
 
         prompt = """你是USDS-M合约的AI买入策略模块，只能在给定的候选列表中挑选要买入的合约。"""
         prompt += f"\n\n候选合约（来自实时涨跌幅榜，共 {len(candidates)} 个）：\n"
-        prompt += self._format_market_snapshot(candidates)
+        
+        # 创建一个symbol到timeframes的映射，用于快速查找
+        symbol_timeframes_map = {}
+        if market_snapshot:
+            for snapshot_entry in market_snapshot:
+                symbol = snapshot_entry.get('symbol')
+                timeframes = snapshot_entry.get('timeframes')
+                if symbol and timeframes:
+                    symbol_timeframes_map[symbol] = timeframes
+        
+        # 直接将新的数据格式以JSON格式插入到prompt中，不再使用_format_market_snapshot
+        for idx, entry in enumerate(candidates, start=1):
+            symbol = entry.get('symbol', 'N/A')
+            contract_symbol = entry.get('contract_symbol') or f"{symbol}USDT"
+            price = entry.get('price')
+            volume = entry.get('quote_volume')
+            
+            prompt += f"{idx}. {symbol} / {contract_symbol}\n"
+            prompt += f"   实时价格: ${price:.4f} | 24H成交额: {volume:.2f} USDT\n"
+            
+            # 获取时间框架数据（从market_snapshot中）
+            timeframes = symbol_timeframes_map.get(symbol) or {}
+            if timeframes:
+                prompt += f"   {symbol}市场历史指标数据: {json.dumps(timeframes, indent=2, ensure_ascii=False)}\n"
+            else:
+                prompt += f"   {symbol}市场历史指标数据: 无\n"
+            
+            prompt += "\n"
 
         prompt += "\n账户约束：\n"
         prompt += f"- 可用现金: ${available_cash:.2f}\n"
@@ -132,7 +160,7 @@ class AITrader:
         """
         prompt = """你是USDS-M合约的AI卖出/风控模块，负责判断当前持仓是平仓还是继续持有。
         
-注意：你只需要关注当前账户持有的币种，不需要考虑涨幅榜或其他市场行情。
+注意：重点需要关注当前账户持有的币种。
 决策应基于持仓币种本身的价格表现、盈亏情况、风险控制等因素。"""
 
         prompt += "\n\n当前持仓详情：\n"
@@ -168,6 +196,15 @@ class AITrader:
                 f"开仓均价: ${avg_price:.4f} | 当前价格: ${current_price:.4f} | "
                 f"盈亏: {pnl_status} {pnl_pct:+.2f}% (约 ${pnl_amount:+.2f})"
             )
+            prompt += "\n"
+            
+            # 添加市场历史指标数据
+            timeframes = market_info.get('indicators', {}).get('timeframes', {})
+            if timeframes:
+                prompt += f"   {symbol}市场历史指标数据: {json.dumps(timeframes, indent=2, ensure_ascii=False)}\n"
+            else:
+                prompt += f"   {symbol}市场历史指标数据: 无\n"
+            
             prompt += "\n"
 
         prompt += "\n账户概况：\n"

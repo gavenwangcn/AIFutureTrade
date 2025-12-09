@@ -150,7 +150,8 @@ def init_trading_engine_for_model(model_id: int):
             provider_type=provider.get('provider_type', 'openai'),
             api_key=provider['api_key'],
             api_url=provider['api_url'],
-            model_name=model['model_name']
+            model_name=model['model_name'],
+            market_fetcher=market_fetcher
         ),
         trade_fee_rate=TRADE_FEE_RATE
     )
@@ -205,7 +206,8 @@ def init_trading_engines():
                         provider_type=provider.get('provider_type', 'openai'),
                         api_key=provider['api_key'],
                         api_url=provider['api_url'],
-                        model_name=model['model_name']
+                        model_name=model['model_name'],
+                        market_fetcher=market_fetcher
                     ),
                     trade_fee_rate=TRADE_FEE_RATE
                 )

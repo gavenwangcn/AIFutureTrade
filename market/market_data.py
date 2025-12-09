@@ -876,9 +876,282 @@ class MarketDataFetcher:
         
         return result
 
+    def _get_market_data_by_interval(self, symbol: str, interval: str, limit: int, return_count: int) -> Dict:
+        """
+        通用方法：获取指定交易对和时间周期的市场数据
+        
+        Args:
+            symbol: 交易对符号（如 'BTC'）
+            interval: 时间周期（如 '1m', '5m', '1h', '4h', '1d', '1w'）
+            limit: 获取的K线数量
+            return_count: 返回的K线数量（最新的return_count根K线）
+            
+        Returns:
+            市场数据字典，包含symbol、timeframe、klines、indicators和metadata字段
+        """
+        if not self._futures_client:
+            logger.warning(f'[MarketData] Futures client unavailable for {symbol}')
+            return {}
+
+        # 格式化交易对符号（添加计价资产后缀）
+        symbol_key = self._futures_client.format_symbol(symbol)
+        
+        try:
+            # 获取K线数据
+            klines = self._futures_client.get_klines(
+                symbol_key, 
+                interval, 
+                limit=limit
+            )
+            
+            if not klines or len(klines) == 0:
+                logger.debug(f'[MarketData] No klines data for {symbol} {interval}')
+                return {}
+            
+            # 只返回最新的return_count根K线
+            klines = klines[-return_count:]
+            
+            # 提取完整的OHLCV数据
+            opens = []
+            highs = []
+            lows = []
+            closes = []
+            volumes = []
+            kline_data_list = []
+            
+            for item in klines:
+                # 兼容字典和列表格式
+                try:
+                    if isinstance(item, dict):
+                        open_time_ms = int(item.get('open_time', 0))
+                        open_price = float(item.get('open', 0))
+                        high_price = float(item.get('high', 0))
+                        low_price = float(item.get('low', 0))
+                        close_price = float(item.get('close', 0))
+                        volume_value = float(item.get('volume', 0))
+                    elif isinstance(item, (list, tuple)) and len(item) > 5:
+                        open_time_ms = int(item[0])
+                        open_price = float(item[1])
+                        high_price = float(item[2])
+                        low_price = float(item[3])
+                        close_price = float(item[4])
+                        volume_value = float(item[5])
+                    else:
+                        continue
+                    
+                    opens.append(open_price)
+                    highs.append(high_price)
+                    lows.append(low_price)
+                    closes.append(close_price)
+                    volumes.append(volume_value)
+                    
+                    # 构建K线数据
+                    kline_data_list.append({
+                        'time': open_time_ms,
+                        'open': open_price,
+                        'high': high_price,
+                        'low': low_price,
+                        'close': close_price,
+                        'volume': volume_value
+                    })
+                except (ValueError, TypeError, KeyError, IndexError):
+                    continue
+            
+            if not closes or len(closes) < 2:
+                logger.debug(f'[MarketData] Insufficient data for {symbol} {interval}: {len(closes)} closes')
+                return {}
+            
+            # 创建DataFrame用于指标计算
+            df = pd.DataFrame({
+                'open': opens,
+                'high': highs,
+                'low': lows,
+                'close': closes,
+                'volume': volumes
+            })
+            
+            # 计算MA值
+            ma_values = {}
+            for length in [5, 20, 50, 99]:
+                if len(closes) >= length:
+                    try:
+                        ma_series = ta.SMA(df, period=length)
+                        if ma_series is not None and not ma_series.empty:
+                            ma_values[f'MA{length}'] = float(ma_series.iloc[-1])
+                        else:
+                            ma_values[f'MA{length}'] = 0.0
+                    except Exception as e:
+                        ma_values[f'MA{length}'] = 0.0
+                        logger.warning(f'[MA] 无法计算MA{length}: {e}')
+                else:
+                    ma_values[f'MA{length}'] = 0.0
+            
+            # 计算MACD指标
+            macd = {'DIF': 0.0, 'DEA': 0.0, 'BAR': 0.0}
+            if len(closes) >= 26:
+                try:
+                    macd_df = ta.MACD(df, period_fast=12, period_slow=26, signal=9)
+                    if macd_df is not None and not macd_df.empty:
+                        if 'MACD' in macd_df.columns:
+                            macd['DIF'] = float(macd_df['MACD'].iloc[-1])
+                        if 'SIGNAL' in macd_df.columns:
+                            macd['DEA'] = float(macd_df['SIGNAL'].iloc[-1])
+                        if 'HISTOGRAM' in macd_df.columns:
+                            macd['BAR'] = float(macd_df['HISTOGRAM'].iloc[-1])
+                        else:
+                            macd['BAR'] = macd['DIF'] - macd['DEA']
+                except Exception as e:
+                    logger.warning(f'[MACD] 无法计算MACD: {e}')
+            
+            # 计算RSI指标
+            rsi = {'RSI6': 50.0, 'RSI9': 50.0}
+            # RSI6
+            if len(closes) >= 7:
+                try:
+                    rsi6_series = ta.RSI(df, period=6)
+                    if rsi6_series is not None and not rsi6_series.empty:
+                        rsi['RSI6'] = float(rsi6_series.iloc[-1])
+                except Exception as e:
+                    logger.warning(f'[RSI] 无法计算RSI6: {e}')
+            # RSI9
+            if len(closes) >= 10:
+                try:
+                    rsi9_series = ta.RSI(df, period=9)
+                    if rsi9_series is not None and not rsi9_series.empty:
+                        rsi['RSI9'] = float(rsi9_series.iloc[-1])
+                except Exception as e:
+                    logger.warning(f'[RSI] 无法计算RSI9: {e}')
+            
+            # 计算VOL指标
+            vol_data = {
+                'volume': volumes[-1] if volumes else 0.0
+            }
+            # 计算均量线
+            for length in [5, 10]:
+                if len(volumes) >= length:
+                    try:
+                        mavol_value = df['volume'].rolling(window=length, min_periods=length).mean().iloc[-1]
+                        vol_data[f'MAVOL{length}'] = float(mavol_value) if pd.notna(mavol_value) else 0.0
+                    except Exception as e:
+                        vol_data[f'MAVOL{length}'] = 0.0
+                        logger.warning(f'[VOL] 无法计算MAVOL{length}: {e}')
+                else:
+                    vol_data[f'MAVOL{length}'] = 0.0
+            
+            # 组装指标数据
+            indicators = {
+                'MA': ma_values,
+                'MACD': macd,
+                'RSI': rsi,
+                'VOL': vol_data
+            }
+            
+            # 组装返回数据
+            result = {
+                'symbol': symbol,
+                'timeframe': interval,
+                'klines': kline_data_list,
+                'indicators': indicators,
+                'metadata': {
+                    'source': 'Binance Futures',
+                    'timestamp': int(datetime.now().timestamp() * 1000),
+                    'total_klines': len(klines),
+                    'return_count': return_count
+                }
+            }
+            
+            return result
+            
+        except Exception as e:
+            logger.warning(f'[MarketData] 获取 {symbol} {interval} 数据失败: {e}', exc_info=True)
+            return {}
+
+    def get_market_data_1m(self, symbol: str) -> Dict:
+        """
+        获取1分钟时间周期的市场数据
+        
+        Args:
+            symbol: 交易对符号（如 'BTC'）
+            
+        Returns:
+            市场数据字典，包含symbol、timeframe、klines、indicators和metadata字段
+        """
+        return self._get_market_data_by_interval(symbol, '1m', limit=500, return_count=200)
+
+    def get_market_data_5m(self, symbol: str) -> Dict:
+        """
+        获取5分钟时间周期的市场数据
+        
+        Args:
+            symbol: 交易对符号（如 'BTC'）
+            
+        Returns:
+            市场数据字典，包含symbol、timeframe、klines、indicators和metadata字段
+        """
+        return self._get_market_data_by_interval(symbol, '5m', limit=500, return_count=200)
+
+    def get_market_data_15m(self, symbol: str) -> Dict:
+        """
+        获取15分钟时间周期的市场数据
+        
+        Args:
+            symbol: 交易对符号（如 'BTC'）
+            
+        Returns:
+            市场数据字典，包含symbol、timeframe、klines、indicators和metadata字段
+        """
+        return self._get_market_data_by_interval(symbol, '15m', limit=500, return_count=200)
+
+    def get_market_data_1h(self, symbol: str) -> Dict:
+        """
+        获取1小时时间周期的市场数据
+        
+        Args:
+            symbol: 交易对符号（如 'BTC'）
+            
+        Returns:
+            市场数据字典，包含symbol、timeframe、klines、indicators和metadata字段
+        """
+        return self._get_market_data_by_interval(symbol, '1h', limit=500, return_count=200)
+
+    def get_market_data_4h(self, symbol: str) -> Dict:
+        """
+        获取4小时时间周期的市场数据
+        
+        Args:
+            symbol: 交易对符号（如 'BTC'）
+            
+        Returns:
+            市场数据字典，包含symbol、timeframe、klines、indicators和metadata字段
+        """
+        return self._get_market_data_by_interval(symbol, '4h', limit=500, return_count=200)
+
+    def get_market_data_1d(self, symbol: str) -> Dict:
+        """
+        获取1天时间周期的市场数据
+        
+        Args:
+            symbol: 交易对符号（如 'BTC'）
+            
+        Returns:
+            市场数据字典，包含symbol、timeframe、klines、indicators和metadata字段
+        """
+        return self._get_market_data_by_interval(symbol, '1d', limit=120, return_count=60)
+
+    def get_market_data_1w(self, symbol: str) -> Dict:
+        """
+        获取1周时间周期的市场数据
+        
+        Args:
+            symbol: 交易对符号（如 'BTC'）
+            
+        Returns:
+            市场数据字典，包含symbol、timeframe、klines、indicators和metadata字段
+        """
+        return self._get_market_data_by_interval(symbol, '1w', limit=120, return_count=40)
 
 
-    # ============ Leaderboard Methods ============
+    # ============ Leaderboard Methods ===========
 
     def sync_leaderboard(self, force: bool = False, limit: Optional[int] = None) -> Dict[str, List[Dict]]:
         """
