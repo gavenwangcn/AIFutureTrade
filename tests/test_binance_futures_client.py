@@ -244,7 +244,7 @@ def exercise_binance_futures_client(api_key: str, api_secret: str) -> None:
         logging.info("calculate_technical_indicators() 返回值 (JSON格式):")
         logging.info("=" * 80)
         if indicators:
-            logging.info(json.dumps(indicators, indent=2, default=str, ensure_ascii=False))
+            logging.info(json.dumps(indicators, default=str, ensure_ascii=False))
         else:
             logging.warning("返回值为空或None")
         logging.info("=" * 80)
@@ -259,3 +259,4 @@ if __name__ == "__main__":
     api_key_value, api_secret_value = _load_credentials()
     #sdk_exchange_information_health_check(api_key_value, api_secret_value)
     exercise_binance_futures_client(api_key_value, api_secret_value)
+
