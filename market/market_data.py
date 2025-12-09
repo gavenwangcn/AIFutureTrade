@@ -856,21 +856,67 @@ class MarketDataFetcher:
         symbol_key = self._futures_client.format_symbol(symbol)
         
         try:
-            # 获取K线数据
-            klines = self._futures_client.get_klines(
+            # 获取K线数据（抓取limit根，用于计算指标）
+            all_klines = self._futures_client.get_klines(
                 symbol_key, 
                 interval, 
                 limit=limit
             )
             
-            if not klines or len(klines) == 0:
+            if not all_klines or len(all_klines) == 0:
                 logger.debug(f'[MarketData] No klines data for {symbol} {interval}')
                 return {}
             
-            # 只返回最新的return_count根K线
-            klines = klines[-return_count:]
+            # 只返回最新的return_count根K线（用于输出）
+            klines = all_klines[-return_count:] if len(all_klines) > return_count else all_klines
             
-            # 提取完整的OHLCV数据
+            # 提取所有K线的OHLCV数据（用于计算指标）
+            all_opens = []
+            all_highs = []
+            all_lows = []
+            all_closes = []
+            all_volumes = []
+            
+            for item in all_klines:
+                # 兼容字典和列表格式
+                try:
+                    if isinstance(item, dict):
+                        open_price = float(item.get('open', 0))
+                        high_price = float(item.get('high', 0))
+                        low_price = float(item.get('low', 0))
+                        close_price = float(item.get('close', 0))
+                        volume_value = float(item.get('volume', 0))
+                    elif isinstance(item, (list, tuple)) and len(item) > 5:
+                        open_price = float(item[1])
+                        high_price = float(item[2])
+                        low_price = float(item[3])
+                        close_price = float(item[4])
+                        volume_value = float(item[5])
+                    else:
+                        continue
+                    
+                    all_opens.append(open_price)
+                    all_highs.append(high_price)
+                    all_lows.append(low_price)
+                    all_closes.append(close_price)
+                    all_volumes.append(volume_value)
+                except (ValueError, TypeError, KeyError, IndexError):
+                    continue
+            
+            if len(all_closes) < 2:
+                logger.debug(f'[MarketData] Insufficient data for {symbol} {interval}: {len(all_closes)} closes')
+                return {}
+            
+            # 创建DataFrame用于指标计算（使用所有抓取的K线数据）
+            df_all = pd.DataFrame({
+                'open': all_opens,
+                'high': all_highs,
+                'low': all_lows,
+                'close': all_closes,
+                'volume': all_volumes
+            })
+            
+            # 提取输出K线的OHLCV数据（用于构建返回的K线数据）
             opens = []
             highs = []
             lows = []
@@ -904,9 +950,16 @@ class MarketDataFetcher:
                     closes.append(close_price)
                     volumes.append(volume_value)
                     
+                    # 将毫秒时间戳转换为 datetime 字符串（精确到秒后两位小数）
+                    # 格式：YYYY-MM-DD HH:MM:SS.XX
+                    dt = datetime.fromtimestamp(open_time_ms / 1000.0, tz=timezone.utc)
+                    # 获取毫秒部分（前两位作为小数秒）
+                    milliseconds = open_time_ms % 1000
+                    time_str = dt.strftime('%Y-%m-%d %H:%M:%S') + f'.{milliseconds // 10:02d}'
+                    
                     # 构建K线数据
                     kline_data_list.append({
-                        'time': open_time_ms,
+                        'time': time_str,
                         'open': open_price,
                         'high': high_price,
                         'low': low_price,
@@ -920,82 +973,95 @@ class MarketDataFetcher:
                 logger.debug(f'[MarketData] Insufficient data for {symbol} {interval}: {len(closes)} closes')
                 return {}
             
-            # 创建DataFrame用于指标计算
-            df = pd.DataFrame({
-                'open': opens,
-                'high': highs,
-                'low': lows,
-                'close': closes,
-                'volume': volumes
-            })
+            # 计算需要截取的指标数组的起始索引（只返回最后return_count个值）
+            # 确保output_start_idx >= 0，如果all_closes少于return_count，则从0开始
+            output_start_idx = max(0, len(all_closes) - len(closes))  # 从所有K线中截取最后return_count根对应的指标值
             
-            # 计算MA值
+            # 计算MA值（基于所有K线计算，但只返回最后return_count个值）
             ma_values = {}
             for length in [5, 20, 50, 99]:
-                if len(closes) >= length:
-                    try:
-                        ma_series = ta.SMA(df, period=length)
-                        if ma_series is not None and not ma_series.empty:
-                            ma_values[f'MA{length}'] = float(ma_series.iloc[-1])
-                        else:
-                            ma_values[f'MA{length}'] = 0.0
-                    except Exception as e:
-                        ma_values[f'MA{length}'] = 0.0
-                        logger.warning(f'[MA] 无法计算MA{length}: {e}')
-                else:
-                    ma_values[f'MA{length}'] = 0.0
-            
-            # 计算MACD指标
-            macd = {'DIF': 0.0, 'DEA': 0.0, 'BAR': 0.0}
-            if len(closes) >= 26:
                 try:
-                    macd_df = ta.MACD(df, period_fast=12, period_slow=26, signal=9)
+                    ma_series = ta.SMA(df_all, period=length)
+                    if ma_series is not None and not ma_series.empty:
+                        # 转换为列表，NaN值填充为None，然后只取最后return_count个值
+                        ma_array_all = [float(val) if pd.notna(val) else None for val in ma_series]
+                        ma_array_output = ma_array_all[output_start_idx:]
+                        # 确保输出数组长度与K线数量一致（如果不足则用None填充，如果超出则截断）
+                        if len(ma_array_output) < len(closes):
+                            ma_array_output.extend([None] * (len(closes) - len(ma_array_output)))
+                        elif len(ma_array_output) > len(closes):
+                            ma_array_output = ma_array_output[:len(closes)]
+                        ma_values[f'MA{length}'] = ma_array_output
+                    else:
+                        ma_values[f'MA{length}'] = [None] * len(closes)
+                except Exception as e:
+                    ma_values[f'MA{length}'] = [None] * len(closes)
+                    logger.warning(f'[MA] 无法计算MA{length}: {e}')
+            
+            # 计算MACD指标（基于所有K线计算，但只返回最后return_count个值）
+            macd = {'DIF': [None] * len(closes), 'DEA': [None] * len(closes), 'BAR': [None] * len(closes)}
+            if len(all_closes) >= 26:
+                try:
+                    macd_df = ta.MACD(df_all, period_fast=12, period_slow=26, signal=9)
                     if macd_df is not None and not macd_df.empty:
                         if 'MACD' in macd_df.columns:
-                            macd['DIF'] = float(macd_df['MACD'].iloc[-1])
+                            dif_array_all = [float(val) if pd.notna(val) else None for val in macd_df['MACD']]
+                            macd['DIF'] = dif_array_all[output_start_idx:]
                         if 'SIGNAL' in macd_df.columns:
-                            macd['DEA'] = float(macd_df['SIGNAL'].iloc[-1])
+                            dea_array_all = [float(val) if pd.notna(val) else None for val in macd_df['SIGNAL']]
+                            macd['DEA'] = dea_array_all[output_start_idx:]
+                        # 计算BAR数组
                         if 'HISTOGRAM' in macd_df.columns:
-                            macd['BAR'] = float(macd_df['HISTOGRAM'].iloc[-1])
+                            bar_array_all = [float(val) if pd.notna(val) else None for val in macd_df['HISTOGRAM']]
+                            macd['BAR'] = bar_array_all[output_start_idx:]
                         else:
-                            macd['BAR'] = macd['DIF'] - macd['DEA']
+                            # 如果没有HISTOGRAM，手动计算：BAR = DIF - DEA
+                            # 使用已更新的DIF和DEA数组
+                            dif_array = macd.get('DIF', [None] * len(closes))
+                            dea_array = macd.get('DEA', [None] * len(closes))
+                            macd['BAR'] = [
+                                (dif_array[i] - dea_array[i]) 
+                                if (dif_array[i] is not None and dea_array[i] is not None) 
+                                else None
+                                for i in range(len(closes))
+                            ]
                 except Exception as e:
                     logger.warning(f'[MACD] 无法计算MACD: {e}')
             
-            # 计算RSI指标
-            rsi = {'RSI6': 50.0, 'RSI9': 50.0}
+            # 计算RSI指标（基于所有K线计算，但只返回最后return_count个值）
+            rsi = {'RSI6': [None] * len(closes), 'RSI9': [None] * len(closes)}
             # RSI6
-            if len(closes) >= 7:
+            if len(all_closes) >= 7:
                 try:
-                    rsi6_series = ta.RSI(df, period=6)
+                    rsi6_series = ta.RSI(df_all, period=6)
                     if rsi6_series is not None and not rsi6_series.empty:
-                        rsi['RSI6'] = float(rsi6_series.iloc[-1])
+                        rsi6_array_all = [float(val) if pd.notna(val) else None for val in rsi6_series]
+                        rsi['RSI6'] = rsi6_array_all[output_start_idx:]
                 except Exception as e:
                     logger.warning(f'[RSI] 无法计算RSI6: {e}')
             # RSI9
-            if len(closes) >= 10:
+            if len(all_closes) >= 10:
                 try:
-                    rsi9_series = ta.RSI(df, period=9)
+                    rsi9_series = ta.RSI(df_all, period=9)
                     if rsi9_series is not None and not rsi9_series.empty:
-                        rsi['RSI9'] = float(rsi9_series.iloc[-1])
+                        rsi9_array_all = [float(val) if pd.notna(val) else None for val in rsi9_series]
+                        rsi['RSI9'] = rsi9_array_all[output_start_idx:]
                 except Exception as e:
                     logger.warning(f'[RSI] 无法计算RSI9: {e}')
             
-            # 计算VOL指标
+            # 计算VOL指标（基于所有K线计算，但只返回最后return_count个值）
             vol_data = {
-                'volume': volumes[-1] if volumes else 0.0
+                'volume': [float(v) for v in volumes]  # 每根K线的成交量（已经是最后return_count根）
             }
-            # 计算均量线
+            # 计算均量线数组
             for length in [5, 10]:
-                if len(volumes) >= length:
-                    try:
-                        mavol_value = df['volume'].rolling(window=length, min_periods=length).mean().iloc[-1]
-                        vol_data[f'MAVOL{length}'] = float(mavol_value) if pd.notna(mavol_value) else 0.0
-                    except Exception as e:
-                        vol_data[f'MAVOL{length}'] = 0.0
-                        logger.warning(f'[VOL] 无法计算MAVOL{length}: {e}')
-                else:
-                    vol_data[f'MAVOL{length}'] = 0.0
+                try:
+                    mavol_series = df_all['volume'].rolling(window=length, min_periods=length).mean()
+                    mavol_array_all = [float(val) if pd.notna(val) else None for val in mavol_series]
+                    vol_data[f'MAVOL{length}'] = mavol_array_all[output_start_idx:]
+                except Exception as e:
+                    vol_data[f'MAVOL{length}'] = [None] * len(closes)
+                    logger.warning(f'[VOL] 无法计算MAVOL{length}: {e}')
             
             # 组装指标数据
             indicators = {
@@ -1006,6 +1072,7 @@ class MarketDataFetcher:
             }
             
             # 组装返回数据
+            now = datetime.now(timezone.utc)
             result = {
                 'symbol': symbol,
                 'timeframe': interval,
@@ -1013,9 +1080,9 @@ class MarketDataFetcher:
                 'indicators': indicators,
                 'metadata': {
                     'source': 'Binance Futures',
-                    'timestamp': int(datetime.now().timestamp() * 1000),
-                    'total_klines': len(klines),
-                    'return_count': return_count
+                    'last_update': now.strftime('%Y-%m-%d %H:%M:%S.%f')[:-4],  # 精确到秒后两位小数
+                    'total_bars': len(kline_data_list),
+                    'indicators_calculated': True
                 }
             }
             
