@@ -1257,12 +1257,12 @@ def get_market_klines():
         # 根据不同的interval设置不同的默认limit
         # 1d（1天）：120条（约4个月历史数据）
         # 1w（1周）：20条（约5个月历史数据）
-        # 其他interval：500条
+        # 其他interval：499条
         interval_default_limits = {
-            '1d': 120,  # 1天周期，默认120条
-            '1w': 20,   # 1周周期，默认20条
+            '1d': 499,  # 1天周期，默认499条
+            '1w': 99,   # 1周周期，默认99条
         }
-        default_limit = interval_default_limits.get(interval, 500)  # 其他周期默认500条
+        default_limit = interval_default_limits.get(interval, 499)  # 其他周期默认500条
         
         limit = request.args.get('limit', type=int) or default_limit
         start_time_str = request.args.get('start_time')
@@ -1328,7 +1328,7 @@ def get_market_klines():
                 '1d': 120,  # 1天周期，最大120条
                 '1w': 20,   # 1周周期，最大20条
             }
-            max_limit = interval_max_limits.get(interval, 500)  # 其他周期最大500条
+            max_limit = interval_max_limits.get(interval, 499)  # 其他周期最大500条
             
             sdk_limit = limit
             if sdk_limit > max_limit:
