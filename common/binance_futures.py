@@ -99,6 +99,7 @@ class BinanceFuturesOrderClient:
     
     提供止损交易、止盈交易、跟踪止损单和平仓交易等高级交易功能，
     支持传入不同的api_key和api_secret进行操作。
+    positionSide 持仓方向，单向持仓模式下非必填，默认且仅可填BOTH;在双向持仓模式下必填,且仅可选择 LONG(多) 或 SHORT（空）
     """
 
     def __init__(
@@ -144,6 +145,82 @@ class BinanceFuturesOrderClient:
         self._rest = self._client.rest_api
 
     # ============ 工具方法：数据格式转换 ============
+
+    def change_initial_leverage(self, symbol: str, leverage: int) -> Dict[str, Any]:
+        """
+        修改合约的初始杠杆倍数
+        
+        Args:
+            symbol: 交易对符号，如"BTCUSDT"
+            leverage: 杠杆倍数，1-125之间的整数
+            
+        Returns:
+            包含杠杆修改结果的字典
+            
+        Raises:
+            RuntimeError: 如果SDK不可用
+            Exception: 如果API调用失败
+        """
+        try:
+            response = self._rest.change_initial_leverage(
+                symbol=symbol,
+                leverage=leverage
+            )
+            return response.data()
+        except Exception as e:
+            logger.error(f"[BinanceFuturesOrderClient] Failed to change initial leverage for {symbol}: {e}")
+            raise
+            
+    def all_orders(self, symbol: str, **kwargs) -> List[Dict[str, Any]]:
+        """
+        获取交易对的全部订单信息
+        
+        Args:
+            symbol: 交易对符号，如"BTCUSDT"
+            **kwargs: 其他可选参数（参考币安API文档）
+            
+        Returns:
+            订单列表，每个订单包含以下字段：
+            - avgPrice: 平均成交价
+            - clientOrderId: 用户自定义的订单号
+            - cumQuote: 成交金额
+            - executedQty: 成交量
+            - orderId: 系统订单号
+            - origQty: 原始委托数量
+            - origType: 触发前订单类型
+            - price: 委托价格
+            - reduceOnly: 是否仅减仓
+            - side: 买卖方向
+            - positionSide: 持仓方向
+            - status: 订单状态
+            - stopPrice: 触发价
+            - closePosition: 是否条件全平仓
+            - symbol: 交易对
+            - time: 订单时间
+            - timeInForce: 有效方法
+            - type: 订单类型
+            - activatePrice: 跟踪止损激活价格
+            - priceRate: 跟踪止损回调比例
+            - updateTime: 更新时间
+            - workingType: 条件价格触发类型
+            - priceProtect: 是否开启条件单触发保护
+            - priceMatch: 盘口价格下单模式
+            - selfTradePreventionMode: 订单自成交保护模式
+            - goodTillDate: 订单TIF为GTD时的自动取消时间
+            
+        Raises:
+            RuntimeError: 如果SDK不可用
+            Exception: 如果API调用失败
+        """
+        try:
+            response = self._rest.all_orders(
+                symbol=symbol,
+                **kwargs
+            )
+            return response.data()
+        except Exception as e:
+            logger.error(f"[BinanceFuturesOrderClient] Failed to get all orders for {symbol}: {e}")
+            raise
 
     def format_symbol(self, base_symbol: str) -> str:
         """
