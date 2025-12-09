@@ -11,7 +11,8 @@ from common.database_basic import Database
 def test_market_data_methods():
     """测试7个时间周期的市场数据获取方法"""
     # 初始化数据库和市场数据获取器
-    db = Database(auto_init=True)
+    db = Database()
+    db.init_db()  # 初始化数据库表
     market_data = MarketDataFetcher(db)
     
     # 测试的交易对
@@ -37,25 +38,12 @@ def test_market_data_methods():
             
             if data:
                 print(f"✓ 成功获取 {interval} 数据")
-                print(f"  Symbol: {data.get('symbol')}")
-                print(f"  Timeframe: {data.get('timeframe')}")
-                print(f"  Kline count: {len(data.get('klines', []))}")
-                print(f"  Indicators: {list(data.get('indicators', {}).keys())}")
-                print(f"  Metadata: {data.get('metadata')}")
-                
-                # 验证数据结构
-                if 'klines' in data and len(data['klines']) > 0:
-                    print(f"  First kline: {data['klines'][0]}")
-                    print(f"  Last kline: {data['klines'][-1]}")
-                
-                if 'indicators' in data:
-                    indicators = data['indicators']
-                    print(f"  MA: {indicators.get('MA')}")
-                    print(f"  MACD: {indicators.get('MACD')}")
-                    print(f"  RSI: {indicators.get('RSI')}")
-                    print(f"  VOL: {indicators.get('VOL')}")
+                print("=" * 80)
+                # 打印整体数据（JSON格式，便于查看完整数据结构）
+                print(json.dumps(data, indent=2, ensure_ascii=False, default=str))
+                print("=" * 80)
             else:
-                print(f"✗ 获取 {interval} 数据失败")
+                print(f"✗ 获取 {interval} 数据失败（返回值为空）")
                 
         except Exception as e:
             print(f"✗ 调用 {interval} 方法出错: {e}")
