@@ -129,7 +129,7 @@ def test_market_data_methods():
                 print(f"  Token数 ({model_name}): {tokens:,}")
                 print("=" * 80)
                 # 打印整体数据（JSON格式，便于查看完整数据结构）
-                print(json.dumps(data, indent=2, ensure_ascii=False, default=str))
+                print(json.dumps(data, ensure_ascii=False, default=str))
                 print("=" * 80)
             else:
                 print(f"✗ 获取 {interval} 数据失败（返回值为空）")
