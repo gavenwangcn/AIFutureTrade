@@ -1102,7 +1102,7 @@ class MarketDataFetcher:
         Returns:
             市场数据字典，包含symbol、timeframe、klines、indicators和metadata字段
         """
-        return self._get_market_data_by_interval(symbol, '1m', limit=500, return_count=150)
+        return self._get_market_data_by_interval(symbol, '1m', limit=360, return_count=180)
 
     def get_market_data_5m(self, symbol: str) -> Dict:
         """
@@ -1114,7 +1114,7 @@ class MarketDataFetcher:
         Returns:
             市场数据字典，包含symbol、timeframe、klines、indicators和metadata字段
         """
-        return self._get_market_data_by_interval(symbol, '5m', limit=500, return_count=150)
+        return self._get_market_data_by_interval(symbol, '5m', limit=300, return_count=144)
 
     def get_market_data_15m(self, symbol: str) -> Dict:
         """
@@ -1126,7 +1126,7 @@ class MarketDataFetcher:
         Returns:
             市场数据字典，包含symbol、timeframe、klines、indicators和metadata字段
         """
-        return self._get_market_data_by_interval(symbol, '15m', limit=500, return_count=150)
+        return self._get_market_data_by_interval(symbol, '15m', limit=300, return_count=144)
 
     def get_market_data_1h(self, symbol: str) -> Dict:
         """
@@ -1138,7 +1138,7 @@ class MarketDataFetcher:
         Returns:
             市场数据字典，包含symbol、timeframe、klines、indicators和metadata字段
         """
-        return self._get_market_data_by_interval(symbol, '1h', limit=500, return_count=100)
+        return self._get_market_data_by_interval(symbol, '1h', limit=240, return_count=120)
 
     def get_market_data_4h(self, symbol: str) -> Dict:
         """
@@ -1150,7 +1150,7 @@ class MarketDataFetcher:
         Returns:
             市场数据字典，包含symbol、timeframe、klines、indicators和metadata字段
         """
-        return self._get_market_data_by_interval(symbol, '4h', limit=500, return_count=100)
+        return self._get_market_data_by_interval(symbol, '4h', limit=120, return_count=60)
 
     def get_market_data_1d(self, symbol: str) -> Dict:
         """
@@ -1162,7 +1162,7 @@ class MarketDataFetcher:
         Returns:
             市场数据字典，包含symbol、timeframe、klines、indicators和metadata字段
         """
-        return self._get_market_data_by_interval(symbol, '1d', limit=120, return_count=45)
+        return self._get_market_data_by_interval(symbol, '1d', limit=100, return_count=45)
 
     def get_market_data_1w(self, symbol: str) -> Dict:
         """
@@ -1174,7 +1174,7 @@ class MarketDataFetcher:
         Returns:
             市场数据字典，包含symbol、timeframe、klines、indicators和metadata字段
         """
-        return self._get_market_data_by_interval(symbol, '1w', limit=120, return_count=20)
+        return self._get_market_data_by_interval(symbol, '1w', limit=60, return_count=20)
 
 
     # ============ Leaderboard Methods ===========
