@@ -91,6 +91,59 @@ class MarketDataFetcher:
         if not futures:
             logger.warning('[配置] 未检测到任何已持仓的USDS-M合约，等待交易产生持仓后自动记录')
         return futures
+    
+    def get_configured_futures_symbols(self) -> List[Dict]:
+        """
+        【新增方法】获取futures表中配置的所有交易对列表（用于AI交易决策）
+        
+        此方法用于支持symbol_source='future'的场景，从futures表获取所有已配置的交易对，
+        而不是从涨跌榜获取。返回格式与leaderboard格式兼容，确保后续处理逻辑一致。
+        
+        调用链：
+        trading_engine._select_buy_candidates() -> market_data.get_configured_futures_symbols()
+        当模型的symbol_source='future'时，会调用此方法获取交易对列表。
+        
+        注意：
+        - 返回的交易对价格、成交量、技术指标等字段初始值为0或空，需要后续实时获取
+        - 后续会通过get_current_prices()和_merge_timeframe_data()补充实时数据
+        
+        Returns:
+            交易对列表，格式与leaderboard返回格式兼容，包含：
+            - symbol: 交易对符号
+            - contract_symbol: 合约符号（如BTCUSDT）
+            - name: 交易对名称
+            - exchange: 交易所名称
+            - price: 价格（初始0.0，需实时获取）
+            - quote_volume: 成交量（初始0.0，需实时获取）
+            - change_percent: 涨跌幅（初始0.0，需实时获取）
+            - timeframes: 技术指标（初始{}，需实时计算）
+        """
+        futures = self.db.get_future_configs()
+        if not futures:
+            logger.debug('[Futures] 未检测到任何已配置的USDS-M合约')
+            return []
+        
+        # 【数据格式转换】转换为与leaderboard兼容的格式，确保后续处理逻辑一致
+        # 这样无论是从leaderboard还是futures表获取，后续的价格获取、技术指标计算等逻辑都可以复用
+        result = []
+        for future in futures:
+            symbol = future.get('symbol', '')
+            if not symbol:
+                continue
+            
+            result.append({
+                'symbol': symbol,
+                'contract_symbol': future.get('contract_symbol') or f"{symbol}USDT",
+                'name': future.get('name', symbol),
+                'exchange': future.get('exchange', 'BINANCE_FUTURES'),
+                'price': 0.0,  # 【占位符】价格需要后续通过get_current_prices()实时获取
+                'quote_volume': 0.0,  # 【占位符】成交量需要后续实时获取
+                'change_percent': 0.0,  # 【占位符】涨跌幅需要后续实时获取
+                'timeframes': {}  # 【占位符】技术指标需要后续通过_merge_timeframe_data()实时计算
+            })
+        
+        logger.debug(f'[Futures] 获取到 {len(result)} 个已配置的交易对')
+        return result
 
     # ============ Price Fetching Methods ============
 

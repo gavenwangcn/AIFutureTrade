@@ -219,6 +219,7 @@ class Database:
             auto_trading_enabled UInt8 DEFAULT 1,
             api_key String,
             api_secret String,
+            symbol_source String DEFAULT 'leaderboard',  -- 【新增字段】交易对数据源：'leaderboard'（涨跌榜，默认）或'future'（合约配置信息表）
             created_at DateTime DEFAULT now()
         )
         ENGINE = MergeTree
@@ -571,17 +572,42 @@ class Database:
             return {}
     
     def add_model(self, name: str, provider_id: int, model_name: str,
-                 initial_capital: float = 10000, leverage: int = 10, api_key: str = '', api_secret: str = '') -> int:
-        """Add new trading model"""
+                 initial_capital: float = 10000, leverage: int = 10, api_key: str = '', api_secret: str = '', symbol_source: str = 'leaderboard') -> int:
+        """
+        Add new trading model
+        
+        【symbol_source字段说明】
+        此字段用于AI交易买入决策时确定交易对数据来源：
+        - 'leaderboard': 从涨跌榜（futures_leaderboard表）获取交易对，这是默认值，保持向后兼容
+        - 'future': 从合约配置信息表（futures表）获取所有已配置的交易对
+        
+        该字段仅在buy类型的AI交互中使用，sell逻辑不受影响。
+        相关调用链：trading_engine._select_buy_candidates() -> market_data.get_leaderboard() 或 get_configured_futures_symbols()
+        
+        Args:
+            name: 模型名称
+            provider_id: 提供方ID
+            model_name: 模型名称
+            initial_capital: 初始资金
+            leverage: 杠杆倍数
+            api_key: API密钥
+            api_secret: API密钥
+            symbol_source: 交易对来源，'future'（合约配置信息）或'leaderboard'（涨跌榜），默认'leaderboard'
+        """
         model_id = self._generate_id()
         provider_mapping = self._get_provider_id_mapping()
         provider_uuid = provider_mapping.get(provider_id, '')
         
+        # 【数据验证】确保symbol_source值合法，非法值自动回退到默认值'leaderboard'
+        if symbol_source not in ['future', 'leaderboard']:
+            logger.warning(f"[Database] Invalid symbol_source value '{symbol_source}', using default 'leaderboard'")
+            symbol_source = 'leaderboard'
+        
         try:
             self.insert_rows(
                 self.models_table,
-                [[model_id, name, provider_uuid, model_name, initial_capital, leverage, 1, api_key, api_secret, datetime.now(timezone.utc)]],
-                ["id", "name", "provider_id", "model_name", "initial_capital", "leverage", "auto_trading_enabled", "api_key", "api_secret", "created_at"]
+                [[model_id, name, provider_uuid, model_name, initial_capital, leverage, 1, api_key, api_secret, symbol_source, datetime.now(timezone.utc)]],
+                ["id", "name", "provider_id", "model_name", "initial_capital", "leverage", "auto_trading_enabled", "api_key", "api_secret", "symbol_source", "created_at"]
             )
             return self._uuid_to_int(model_id)
         except Exception as e:
@@ -599,7 +625,7 @@ class Database:
             # 查询 model 和关联的 provider
             rows = self.query(f"""
                 SELECT m.id, m.name, m.provider_id, m.model_name, m.initial_capital, 
-                       m.leverage, m.auto_trading_enabled, m.created_at,
+                       m.leverage, m.auto_trading_enabled, m.symbol_source, m.created_at,
                        p.api_key, p.api_url, p.provider_type
                 FROM {self.models_table} m
                 LEFT JOIN {self.providers_table} p ON m.provider_id = p.id
@@ -610,7 +636,7 @@ class Database:
                 return None
             
             columns = ["id", "name", "provider_id", "model_name", "initial_capital", 
-                      "leverage", "auto_trading_enabled", "created_at",
+                      "leverage", "auto_trading_enabled", "symbol_source", "created_at",
                       "api_key", "api_url", "provider_type"]
             result = self._row_to_dict(rows[0], columns)
             # 转换 ID 为 int 以保持兼容性
@@ -621,6 +647,10 @@ class Database:
                     if puuid == result['provider_id']:
                         result['provider_id'] = pid
                         break
+            # 【兼容性处理】确保symbol_source有默认值（处理旧数据或字段缺失的情况）
+            # 如果数据库中没有该字段或值为空，默认使用'leaderboard'以保持向后兼容
+            if not result.get('symbol_source'):
+                result['symbol_source'] = 'leaderboard'
             return result
         except Exception as e:
             logger.error(f"[Database] Failed to get model {model_id}: {e}")
@@ -631,14 +661,14 @@ class Database:
         try:
             rows = self.query(f"""
                 SELECT m.id, m.name, m.provider_id, m.model_name, m.initial_capital,
-                       m.leverage, m.auto_trading_enabled, m.created_at,
+                       m.leverage, m.auto_trading_enabled, m.symbol_source, m.created_at,
                        p.name as provider_name
                 FROM {self.models_table} m
                 LEFT JOIN {self.providers_table} p ON m.provider_id = p.id
                 ORDER BY m.created_at DESC
             """)
             columns = ["id", "name", "provider_id", "model_name", "initial_capital",
-                      "leverage", "auto_trading_enabled", "created_at", "provider_name"]
+                      "leverage", "auto_trading_enabled", "symbol_source", "created_at", "provider_name"]
             results = self._rows_to_dicts(rows, columns)
             
             # 转换 ID 为 int 以保持兼容性
@@ -650,6 +680,9 @@ class Database:
                         if puuid == result['provider_id']:
                             result['provider_id'] = pid
                             break
+                # 【兼容性处理】确保symbol_source有默认值（处理旧数据或字段缺失的情况）
+                if not result.get('symbol_source'):
+                    result['symbol_source'] = 'leaderboard'
             return results
         except Exception as e:
             logger.error(f"[Database] Failed to get all models: {e}")

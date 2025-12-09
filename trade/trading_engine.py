@@ -682,28 +682,59 @@ class TradingEngine:
 
     def _get_prompt_market_snapshot(self) -> List[Dict]:
         """
-        获取用于prompt的市场快照（使用实时价格）
+        【改造方法】获取用于prompt的市场快照（使用实时价格）
+        
+        根据模型的symbol_source选择数据源：
+        - leaderboard: 从涨跌榜获取（默认，保持向后兼容）
+        - future: 从futures表获取所有已配置的交易对
         
         此方法用于构建AI交易的prompt，确保所有价格数据都是实时的，
         不使用任何缓存，以保证AI决策基于最新市场数据。
+        
+        调用链：
+        execute_buy_cycle() -> _get_prompt_market_snapshot() -> get_leaderboard() 或 get_configured_futures_symbols()
+        
+        注意：
+        - 无论从哪个数据源获取，后续都会统一获取实时价格和技术指标
+        - 此方法仅用于buy类型的prompt构建，sell逻辑不受影响
         """
+        # 【获取模型配置】读取模型的symbol_source字段，决定使用哪个数据源
+        model = self.db.get_model(self.model_id)
+        symbol_source = model.get('symbol_source', 'leaderboard') if model else 'leaderboard'
+        
         limit = getattr(app_config, 'PROMPT_MARKET_SYMBOL_LIMIT', 5)
         limit = max(1, int(limit))
 
-        try:
-            leaderboard = self.market_fetcher.get_leaderboard(limit=limit)
-        except Exception as exc:
-            logger.warning(f"[Model {self.model_id}] 获取提示词市场快照失败: {exc}")
-            return []
+        if symbol_source == 'future':
+            # 【数据源分支1】从futures表获取所有已配置的交易对
+            # 适用于全市场扫描策略，提供更全面的市场数据
+            try:
+                entries = self.market_fetcher.get_configured_futures_symbols()
+                if not entries:
+                    logger.warning(f"[Model {self.model_id}] 未获取到futures表配置的交易对")
+                    return []
+                # 【数量限制】与leaderboard保持一致，取前limit*2个（模拟涨跌榜的gainers+losers数量）
+                entries = entries[:limit * 2]
+            except Exception as exc:
+                logger.warning(f"[Model {self.model_id}] 获取futures表市场快照失败: {exc}")
+                return []
+        else:
+            # 【数据源分支2】默认从涨跌榜获取（leaderboard）
+            # 适用于关注市场热点的策略，优先选择涨跌幅较大的交易对
+            try:
+                leaderboard = self.market_fetcher.get_leaderboard(limit=limit)
+            except Exception as exc:
+                logger.warning(f"[Model {self.model_id}] 获取提示词市场快照失败: {exc}")
+                return []
 
-        # 同时获取涨幅榜和跌幅榜数据
-        gainers = leaderboard.get('gainers') or []
-        losers = leaderboard.get('losers') or []
-        
-        # 合并涨幅榜和跌幅榜的前limit个条目
-        entries = gainers[:limit] + losers[:limit]
-        if not entries:
-            return []
+            # 同时获取涨幅榜和跌幅榜数据，提供更全面的市场信息
+            gainers = leaderboard.get('gainers') or []
+            losers = leaderboard.get('losers') or []
+            
+            # 合并涨幅榜和跌幅榜的前limit个条目
+            entries = gainers[:limit] + losers[:limit]
+            if not entries:
+                return []
         
         # 提取所有符号
         symbols = [entry.get('symbol') for entry in entries if entry.get('symbol')]
@@ -723,14 +754,15 @@ class TradingEngine:
             # 获取实时价格信息
             realtime_info = realtime_prices.get(symbol, {})
             
-            # 优先使用实时价格，如果没有则使用榜单中的价格作为降级方案
+            # 优先使用实时价格，如果没有则使用entry中的价格作为降级方案
             if realtime_info and realtime_info.get('price', 0) > 0:
                 price = realtime_info.get('price', 0)
                 quote_volume = realtime_info.get('daily_volume', entry.get('quote_volume', 0))
             else:
                 price = entry.get('price', 0)
                 quote_volume = entry.get('quote_volume', 0)
-                logger.warning(f"[Model {self.model_id}] 市场快照中 {symbol} 无法获取实时价格，使用榜单价格")
+                source_type = "futures表" if symbol_source == 'future' else "榜单"
+                logger.warning(f"[Model {self.model_id}] 市场快照中 {symbol} 无法获取实时价格，使用{source_type}价格")
             
             # 实时计算技术指标（无缓存）
             merged_data = self._merge_timeframe_data(symbol)
@@ -738,7 +770,7 @@ class TradingEngine:
             
             snapshot.append({
                 'symbol': symbol,
-                'contract_symbol': entry.get('contract_symbol'),
+                'contract_symbol': entry.get('contract_symbol') or f"{symbol}USDT",
                 'price': price,  # 使用实时价格
                 'quote_volume': quote_volume,
                 'timeframes': timeframes  # 使用实时计算的技术指标
@@ -1091,6 +1123,11 @@ class TradingEngine:
                         f"当前持仓数={constraints.get('occupied', 0)}, "
                         f"可用现金=${constraints.get('available_cash', 0):.2f}")
             
+            # 【传递symbol_source参数】获取模型的symbol_source配置，传递给AI决策方法
+            # 这样AI可以根据数据源类型调整prompt文本，让模型知道交易对来自哪个数据源
+            model = self.db.get_model(self.model_id)
+            symbol_source = model.get('symbol_source', 'leaderboard') if model else 'leaderboard'
+            
             ai_call_start = datetime.now()
             buy_payload = self.ai_trader.make_buy_decision(
                 batch_candidates,
@@ -1098,7 +1135,8 @@ class TradingEngine:
                 account_info,
                 constraints,
                 constraints_text=constraints_text,
-                market_snapshot=market_snapshot
+                market_snapshot=market_snapshot,
+                symbol_source=symbol_source  # 【新增参数】传递数据源类型，用于调整prompt文本
             )
             ai_call_duration = (datetime.now() - ai_call_start).total_seconds()
             
@@ -1254,24 +1292,69 @@ class TradingEngine:
             }
 
     def _select_buy_candidates(self, portfolio: Dict) -> list:
-        """Select buy candidates from leaderboard"""
-        try:
-            leaderboard = self.market_fetcher.get_leaderboard()
-        except Exception as exc:
-            logger.warning(f"[Model {self.model_id}] 获取涨幅榜候选失败: {exc}")
-            return []
-
-        gainers = leaderboard.get('gainers') or []
-        if not gainers:
-            return []
-
+        """
+        【核心改造方法】根据模型的symbol_source选择买入候选交易对
+        
+        此方法是symbol_source功能的核心实现，根据模型配置选择不同的数据源：
+        - symbol_source='leaderboard'（默认）：从涨跌榜（futures_leaderboard表）获取候选
+        - symbol_source='future'：从futures表获取所有已配置的交易对
+        
+        调用链：
+        execute_buy_cycle() -> _select_buy_candidates() -> get_leaderboard() 或 get_configured_futures_symbols()
+        
+        注意：
+        - 此方法仅用于buy类型的AI交互，sell逻辑不受影响
+        - 无论从哪个数据源获取，后续的价格获取、技术指标计算等逻辑都保持一致
+        - 已持仓的交易对会被自动过滤，避免重复开仓
+        
+        Args:
+            portfolio: 当前持仓组合信息
+            
+        Returns:
+            候选交易对列表，已过滤掉已持仓的交易对
+        """
+        # 【获取模型配置】读取模型的symbol_source字段，决定使用哪个数据源
+        model = self.db.get_model(self.model_id)
+        symbol_source = model.get('symbol_source', 'leaderboard') if model else 'leaderboard'
+        
+        # 计算可用持仓槽位
         held = {pos['future'] for pos in (portfolio.get('positions') or [])}
         available_slots = max(0, self.max_positions - len(held))
         if available_slots <= 0:
             return []
+        
+        if symbol_source == 'future':
+            # 【数据源分支1】从futures表获取所有已配置的交易对
+            # 适用于全市场扫描策略，不依赖涨跌榜的热度排序
+            try:
+                futures_list = self.market_fetcher.get_configured_futures_symbols()
+                if not futures_list:
+                    logger.warning(f"[Model {self.model_id}] 未获取到futures表配置的交易对")
+                    return []
+                
+                # 过滤掉已持仓的交易对，避免重复开仓
+                filtered = [item for item in futures_list if item.get('symbol') not in held]
+                logger.debug(f"[Model {self.model_id}] 从futures表获取到 {len(filtered)} 个候选交易对")
+                return filtered[:available_slots]
+            except Exception as exc:
+                logger.warning(f"[Model {self.model_id}] 获取futures表候选失败: {exc}")
+                return []
+        else:
+            # 【数据源分支2】默认从涨跌榜获取（leaderboard）
+            # 适用于关注市场热点的策略，优先选择涨幅较大的交易对
+            try:
+                leaderboard = self.market_fetcher.get_leaderboard()
+            except Exception as exc:
+                logger.warning(f"[Model {self.model_id}] 获取涨幅榜候选失败: {exc}")
+                return []
 
-        filtered = [item for item in gainers if item.get('symbol') not in held]
-        return filtered[:available_slots]
+            gainers = leaderboard.get('gainers') or []
+            if not gainers:
+                return []
+
+            # 过滤掉已持仓的交易对
+            filtered = [item for item in gainers if item.get('symbol') not in held]
+            return filtered[:available_slots]
 
     # ============ Decision Execution Methods ============
 

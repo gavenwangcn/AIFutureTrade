@@ -819,7 +819,17 @@ def get_models():
 
 @app.route('/api/models', methods=['POST'])
 def add_model():
-    """Add new trading model"""
+    """
+    Add new trading model
+    
+    【symbol_source参数说明】
+    前端传递的symbol_source字段用于指定AI交易买入决策时的交易对数据源：
+    - 'leaderboard'（默认）：从涨跌榜获取交易对，适用于关注市场热点的策略
+    - 'future'：从futures表获取所有已配置的交易对，适用于全市场扫描策略
+    
+    该参数仅影响buy类型的AI交互，sell逻辑不受影响。
+    相关调用：trading_engine._select_buy_candidates() 会根据此值选择不同的数据源
+    """
     data = request.json or {}
     try:
         provider = db.get_provider(data['provider_id'])
@@ -833,7 +843,8 @@ def add_model():
             initial_capital=float(data.get('initial_capital', 100000)),
             leverage=int(data.get('leverage', 10)),
             api_key=data.get('api_key', ''),
-            api_secret=data.get('api_secret', '')
+            api_secret=data.get('api_secret', ''),
+            symbol_source=data.get('symbol_source', 'leaderboard')  # 【新增参数】交易对数据源，默认'leaderboard'保持向后兼容
         )
 
         model = db.get_model(model_id)

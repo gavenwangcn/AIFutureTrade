@@ -29,13 +29,33 @@ class AITrader:
         account_info: Dict,
         constraints: Optional[Dict] = None,
         constraints_text: Optional[str] = None,
-        market_snapshot: Optional[List[Dict]] = None
+        market_snapshot: Optional[List[Dict]] = None,
+        symbol_source: str = 'leaderboard'
     ) -> Dict:
-        """Make buy decision based on candidates from leaderboard"""
+        """
+        【改造方法】Make buy decision based on candidates
+        
+        【symbol_source参数说明】
+        此参数用于标识候选交易对的数据来源，影响prompt的构建：
+        - 'leaderboard'（默认）：候选来自涨跌榜，prompt会说明"来自实时涨跌幅榜"
+        - 'future'：候选来自合约配置信息表，prompt会说明"来自合约配置信息表"
+        
+        这样AI模型可以理解交易对的来源，有助于做出更准确的决策。
+        
+        Args:
+            candidates: 候选交易对列表（可能来自涨跌榜或futures表）
+            portfolio: 持仓组合信息
+            account_info: 账户信息
+            constraints: 约束条件
+            constraints_text: 约束文本
+            market_snapshot: 市场快照数据
+            symbol_source: 【新增参数】数据源类型，'future'（合约配置信息）或'leaderboard'（涨跌榜，默认）
+        """
         if not candidates:
             return {'decisions': {}, 'prompt': None, 'raw_response': None, 'cot_trace': None, 'skipped': True}
 
-        prompt = self._build_buy_prompt(candidates, portfolio, account_info, constraints or {}, constraints_text, market_snapshot)
+        # 【传递symbol_source】将数据源类型传递给prompt构建方法，用于调整prompt文本
+        prompt = self._build_buy_prompt(candidates, portfolio, account_info, constraints or {}, constraints_text, market_snapshot, symbol_source)
         return self._request_decisions(prompt)
 
     def make_sell_decision(
@@ -74,16 +94,42 @@ class AITrader:
         account_info: Dict,
         constraints: Dict,
         constraints_text: Optional[str],
-        market_snapshot: Optional[List[Dict]] = None
+        market_snapshot: Optional[List[Dict]] = None,
+        symbol_source: str = 'leaderboard'
     ) -> str:
-        """Build prompt for buy decision"""
+        """
+        【改造方法】Build prompt for buy decision
+        
+        【symbol_source参数说明】
+        此参数用于调整prompt中关于候选交易对来源的描述：
+        - 'future'：说明"来自合约配置信息表"，适用于全市场扫描策略
+        - 'leaderboard'（默认）：说明"来自实时涨跌幅榜"，适用于关注市场热点的策略
+        
+        这样AI模型可以理解交易对的来源，有助于做出更准确的决策。
+        
+        Args:
+            candidates: 候选交易对列表
+            portfolio: 持仓组合信息
+            account_info: 账户信息
+            constraints: 约束条件
+            constraints_text: 约束文本
+            market_snapshot: 市场快照数据
+            symbol_source: 【新增参数】数据源类型，'future'（合约配置信息）或'leaderboard'（涨跌榜，默认）
+        """
         max_positions = constraints.get('max_positions')
         occupied = constraints.get('occupied', len(portfolio.get('positions') or []))
         available_cash = constraints.get('available_cash', portfolio.get('cash', 0))
         available_slots = max(0, max_positions - occupied) if isinstance(max_positions, int) else 'N/A'
 
         prompt = """你是USDS-M合约的专业人士，请使用相关专业知识进行操作，只能在给定的候选列表中挑选要买入的合约。"""
-        prompt += f"\n\n候选合约（来自实时涨跌幅榜，共 {len(candidates)} 个），相关市场数据：\n"
+        
+        # 【根据数据源调整prompt文本】让AI模型知道交易对的来源，有助于理解数据特征
+        # 涨跌榜的交易对通常具有较高的市场关注度和波动性
+        # futures表的交易对则覆盖全市场，可能包含更多样化的选择
+        if symbol_source == 'future':
+            prompt += f"\n\n候选合约（来自合约配置信息表，共 {len(candidates)} 个），相关市场数据：\n"
+        else:
+            prompt += f"\n\n候选合约（来自实时涨跌幅榜，共 {len(candidates)} 个），相关市场数据：\n"
         
         # 创建一个symbol到timeframes的映射，用于快速查找
         symbol_timeframes_map = {}
@@ -102,7 +148,10 @@ class AITrader:
             volume = entry.get('quote_volume')
             
             prompt += f"{idx}. {symbol} / {contract_symbol}\n"
-            prompt += f"   实时价格: ${price:.4f} | 24H成交额: {volume:.2f} USDT\n"
+            # 处理price和volume可能为0或None的情况
+            price_str = f"${price:.4f}" if price and price > 0 else "价格获取中"
+            volume_str = f"{volume:.2f} USDT" if volume and volume > 0 else "成交量获取中"
+            prompt += f"   实时价格: {price_str} | 24H成交额: {volume_str}\n"
             
             # 获取时间框架数据（从market_snapshot中）
             timeframes = symbol_timeframes_map.get(symbol) or {}

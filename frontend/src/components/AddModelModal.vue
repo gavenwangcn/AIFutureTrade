@@ -40,6 +40,30 @@
       <label>SDK Secret</label>
       <input v-model="formData.apiSecret" type="password" class="form-input" placeholder="请输入API密钥" />
     </div>
+    <div class="form-group">
+      <label>交易对数据源</label>
+      <div class="radio-group">
+        <label class="radio-label">
+          <input 
+            type="radio" 
+            v-model="formData.symbolSource" 
+            value="leaderboard" 
+            class="radio-input"
+          />
+          <span>涨跌榜</span>
+        </label>
+        <label class="radio-label">
+          <input 
+            type="radio" 
+            v-model="formData.symbolSource" 
+            value="future" 
+            class="radio-input"
+          />
+          <span>合约配置信息</span>
+        </label>
+      </div>
+      <small class="form-help">选择AI交易时获取交易对的数据源：涨跌榜（实时涨跌幅榜）或合约配置信息（futures表）</small>
+    </div>
     <template #footer>
       <button class="btn-secondary" @click="handleClose">取消</button>
       <button class="btn-primary" @click="handleSubmit" :disabled="loading">确认添加</button>
@@ -67,7 +91,8 @@ const formData = ref({
   displayName: '',
   initialCapital: 100000,
   apiKey: '',
-  apiSecret: ''
+  apiSecret: '',
+  symbolSource: 'leaderboard'  // 默认使用涨跌榜
 })
 
 const providers = ref([])
@@ -115,7 +140,8 @@ const handleSubmit = async () => {
       name: formData.value.displayName,
       initial_capital: formData.value.initialCapital,
       api_key: formData.value.apiKey,
-      api_secret: formData.value.apiSecret
+      api_secret: formData.value.apiSecret,
+      symbol_source: formData.value.symbolSource
     })
     alert('模型添加成功')
     clearForm()
@@ -137,7 +163,8 @@ const clearForm = () => {
     displayName: '',
     initialCapital: 100000,
     apiKey: '',
-    apiSecret: ''
+    apiSecret: '',
+    symbolSource: 'leaderboard'  // 重置为默认值
   }
   availableModels.value = []
 }
