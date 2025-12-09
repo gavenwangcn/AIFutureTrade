@@ -636,13 +636,13 @@ async def main_step1():
         # 测试单个初始化
         result = await tester.test_step1_init_client()
         serializable_result = make_json_serializable(result)
-        print(json.dumps(serializable_result, ensure_ascii=False))
+        print(json.dumps(serializable_result, indent=2, ensure_ascii=False))
         
         # 测试多个symbol的初始化（应该只初始化一次）
         symbols = ["BTCUSDT", "ETHUSDT", "BNBUSDT"]
         result = await tester.test_step1_init_client(symbols=symbols)
         serializable_result = make_json_serializable(result)
-        print(json.dumps(serializable_result, ensure_ascii=False))
+        print(json.dumps(serializable_result, indent=2, ensure_ascii=False))
     finally:
         await tester.cleanup()
 

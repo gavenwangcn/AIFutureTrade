@@ -107,7 +107,7 @@ class AITrader:
             # 获取时间框架数据（从market_snapshot中）
             timeframes = symbol_timeframes_map.get(symbol) or {}
             if timeframes:
-                prompt += f"   {symbol}市场历史指标数据: {json.dumps(timeframes, ensure_ascii=False, default=str)}\n"
+                prompt += f"   {symbol}市场历史指标数据: {json.dumps(timeframes, indent=2, ensure_ascii=False, default=str)}\n"
             else:
                 prompt += f"   {symbol}市场历史指标数据: 无\n"
             
@@ -201,7 +201,7 @@ class AITrader:
             # 添加市场历史指标数据
             timeframes = market_info.get('indicators', {}).get('timeframes', {})
             if timeframes:
-                prompt += f"   {symbol}市场历史指标数据: {json.dumps(timeframes, ensure_ascii=False, default=str)}\n"
+                prompt += f"   {symbol}市场历史指标数据: {json.dumps(timeframes, indent=2, ensure_ascii=False, default=str)}\n"
             else:
                 prompt += f"   {symbol}市场历史指标数据: 无\n"
             
