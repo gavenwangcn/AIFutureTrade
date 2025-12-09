@@ -112,46 +112,85 @@ class TradingEngine:
                                 market_state[symbol]['price'] = price_info.get('price', market_state[symbol].get('price', 0))
                                 logger.debug(f"[Model {self.model_id}] [卖出服务] 更新持仓 {symbol} 实时价格: ${price_info.get('price', 0):.4f}")
                 
-                # 调用AI模型获取卖出决策（使用实时价格）
-                # 注意：卖出决策不需要涨幅榜信息，只基于当前持仓
-                logger.debug(f"[Model {self.model_id}] [卖出服务] [阶段2.2] 调用AI模型进行卖出决策（使用实时价格）...")
-                sell_payload = self.ai_trader.make_sell_decision(
-                    portfolio,
-                    market_state,
-                    account_info,
-                    constraints_text=prompt_templates['sell']
-                )
+                # 分批处理卖出决策，每批处理指定数量的symbol
+                logger.debug(f"[Model {self.model_id}] [卖出服务] [阶段2.2] 开始分批处理卖出决策...")
                 
-                # 检查AI决策结果
-                is_skipped = sell_payload.get('skipped', False)
-                has_prompt = bool(sell_payload.get('prompt'))
-                decisions = sell_payload.get('decisions') or {}
-                logger.debug(f"[Model {self.model_id}] [卖出服务] [阶段2.3] AI卖出决策完成: "
-                            f"跳过={is_skipped}, 有提示词={has_prompt}, 决策数量={len(decisions)}")
+                # 从配置获取批次大小
+                batch_size = getattr(app_config, 'AI_DECISION_SYMBOL_BATCH_SIZE', 1)
+                batch_size = max(1, int(batch_size))
                 
-                if not is_skipped and has_prompt:
-                    # 记录AI对话到数据库
-                    logger.debug(f"[Model {self.model_id}] [卖出服务] [阶段2.4] 记录AI对话到数据库...")
-                    self._record_ai_conversation(sell_payload)
-                    
-                    # 执行卖出决策
-                    logger.debug(f"[Model {self.model_id}] [卖出服务] [阶段2.5] 开始执行卖出决策, 决策详情: {list(decisions.keys())}")
-                    sell_results = self._execute_decisions(
-                        decisions,
-                        market_state,
-                        portfolio
-                    )
-                    logger.debug(f"[Model {self.model_id}] [卖出服务] [阶段2.6] 卖出决策执行完成, 执行结果数: {len(sell_results)}")
-                    for idx, result in enumerate(sell_results):
-                        logger.debug(f"[Model {self.model_id}] [卖出服务] [阶段2.6.{idx+1}] 执行结果: "
-                                    f"合约={result.get('future')}, "
-                                    f"信号={result.get('signal')}, "
-                                    f"错误={result.get('error', '无')}")
-                    
-                    executions.extend(sell_results)
+                # 将持仓分批
+                batches = []
+                for i in range(0, len(positions), batch_size):
+                    batches.append(positions[i:i + batch_size])
+                
+                logger.debug(f"[Model {self.model_id}] [卖出服务] [阶段2.2] 持仓分批完成: "
+                            f"总持仓数={len(positions)}, "
+                            f"批次数={len(batches)}, "
+                            f"每批大小={batch_size}")
+                
+                # 从配置获取线程数
+                thread_count = getattr(app_config, 'SELL_DECISION_THREAD_COUNT', 2)
+                thread_count = max(1, int(thread_count))
+                
+                logger.info(f"[Model {self.model_id}] 开始分批处理卖出决策: 共 {len(positions)} 个持仓, 分为 {len(batches)} 批, 每批最多 {batch_size} 个, 使用 {thread_count} 个线程")
+
+                # 创建线程安全锁（用于保护portfolio和executions的更新）
+                portfolio_lock = threading.Lock()
+                has_sell_decision = False
+                batch_start_time = datetime.now()
+
+                # 使用线程池并发处理各批次
+                logger.debug(f"[Model {self.model_id}] [卖出服务] 创建线程池，最大工作线程数: {thread_count}")
+                with ThreadPoolExecutor(max_workers=thread_count) as executor:
+                    # 提交所有批次任务到线程池
+                    futures = []
+                    for batch_idx, batch_positions in enumerate(batches):
+                        batch_symbols = [pos.get('future', 'N/A') for pos in batch_positions]
+                        logger.debug(f"[Model {self.model_id}] [卖出服务] 提交批次 {batch_idx + 1}/{len(batches)} 到线程池: {batch_symbols}")
+                        future = executor.submit(
+                            self._process_and_execute_sell_batch,
+                            batch_positions,
+                            portfolio,
+                            account_info,
+                            market_state,
+                            prompt_templates['sell'],
+                            portfolio_lock,
+                            executions,
+                            batch_idx + 1,
+                            len(batches)
+                        )
+                        futures.append(future)
+                    logger.debug(f"[Model {self.model_id}] [卖出服务] 所有批次任务已提交，等待执行完成...")
+
+                    # 等待所有批次完成并检查是否有决策
+                    completed_batches = 0
+                    for future_idx, future in enumerate(futures):
+                        try:
+                            payload = future.result()
+                            completed_batches += 1
+                            if not payload.get('skipped') and payload.get('decisions'):
+                                has_sell_decision = True
+                            logger.debug(f"[Model {self.model_id}] [卖出服务] 批次 {future_idx + 1}/{len(futures)} 完成: "
+                                        f"跳过={payload.get('skipped')}, "
+                                        f"决策数={len(payload.get('decisions') or {})}")
+                        except Exception as exc:
+                            logger.error(f"[Model {self.model_id}] [卖出服务] 批次 {future_idx + 1} 处理异常: {exc}")
+                            import traceback
+                            logger.debug(f"[Model {self.model_id}] [卖出服务] 异常堆栈:{traceback.format_exc()}")
+
+                batch_end_time = datetime.now()
+                batch_duration = (batch_end_time - batch_start_time).total_seconds()
+                logger.debug(f"[Model {self.model_id}] [卖出服务] 所有批次处理完成: "
+                            f"完成批次数={completed_batches}/{len(batches)}, "
+                            f"总耗时={batch_duration:.2f}秒, "
+                            f"平均每批耗时={batch_duration/len(batches):.2f}秒")
+                
+                # 如果有任何批次产生了卖出决策，添加到对话提示中
+                if has_sell_decision and 'sell' not in conversation_prompts:
                     conversation_prompts.append('sell')
                 else:
-                    logger.debug(f"[Model {self.model_id}] [卖出服务] [阶段2] 卖出决策被跳过或无有效决策")
+                    logger.debug(f"[Model {self.model_id}] [卖出服务] [阶段2] 所有批次卖出决策被跳过或无有效决策")
             else:
                 logger.debug(f"[Model {self.model_id}] [卖出服务] [阶段2] 无持仓，跳过卖出决策处理")
             
@@ -657,12 +696,17 @@ class TradingEngine:
             logger.warning(f"[Model {self.model_id}] 获取提示词市场快照失败: {exc}")
             return []
 
-        entries = leaderboard.get('gainers') or []
+        # 同时获取涨幅榜和跌幅榜数据
+        gainers = leaderboard.get('gainers') or []
+        losers = leaderboard.get('losers') or []
+        
+        # 合并涨幅榜和跌幅榜的前limit个条目
+        entries = gainers[:limit] + losers[:limit]
         if not entries:
             return []
         
         # 提取所有符号
-        symbols = [entry.get('symbol') for entry in entries[:limit] if entry.get('symbol')]
+        symbols = [entry.get('symbol') for entry in entries if entry.get('symbol')]
         
         # 实时获取这些符号的最新价格（不使用缓存）
         realtime_prices = {}
@@ -671,7 +715,7 @@ class TradingEngine:
         
         # 构建快照，优先使用实时价格
         snapshot = []
-        for entry in entries[:limit]:
+        for entry in entries:
             symbol = entry.get('symbol')
             if not symbol:
                 continue
@@ -679,14 +723,14 @@ class TradingEngine:
             # 获取实时价格信息
             realtime_info = realtime_prices.get(symbol, {})
             
-            # 优先使用实时价格，如果没有则使用涨幅榜中的价格作为降级方案
+            # 优先使用实时价格，如果没有则使用榜单中的价格作为降级方案
             if realtime_info and realtime_info.get('price', 0) > 0:
                 price = realtime_info.get('price', 0)
                 quote_volume = realtime_info.get('daily_volume', entry.get('quote_volume', 0))
             else:
                 price = entry.get('price', 0)
                 quote_volume = entry.get('quote_volume', 0)
-                logger.warning(f"[Model {self.model_id}] 市场快照中 {symbol} 无法获取实时价格，使用涨幅榜价格")
+                logger.warning(f"[Model {self.model_id}] 市场快照中 {symbol} 无法获取实时价格，使用榜单价格")
             
             # 实时计算技术指标（无缓存）
             merged_data = self._merge_timeframe_data(symbol)
@@ -770,7 +814,7 @@ class TradingEngine:
             return
 
         # 从配置获取批次大小和线程数
-        batch_size = getattr(app_config, 'PROMPT_MARKET_SYMBOL_LIMIT', 5)
+        batch_size = getattr(app_config, 'AI_DECISION_SYMBOL_BATCH_SIZE', 1)
         batch_size = max(1, int(batch_size))
         thread_count = getattr(app_config, 'BUY_DECISION_THREAD_COUNT', 2)
         thread_count = max(1, int(thread_count))
@@ -849,6 +893,160 @@ class TradingEngine:
         if has_buy_decision and 'buy' not in conversation_prompts:
             conversation_prompts.append('buy')
             logger.debug(f"[Model {self.model_id}] [分批买入] 已添加'buy'到对话提示列表")
+
+    def _process_and_execute_sell_batch(
+        self,
+        batch_positions: List[Dict],
+        portfolio: Dict,
+        account_info: Dict,
+        market_state: Dict,
+        constraints_text: str,
+        portfolio_lock: threading.Lock,
+        executions: List,
+        batch_num: int,
+        total_batches: int
+    ) -> Dict:
+        """
+        处理单个批次的卖出决策
+        
+        线程内部流程：
+        1. 为当前批次创建临时portfolio
+        2. 调用AI模型获取卖出决策
+        3. 记录AI对话到数据库
+        4. 获取决策结果
+        5. 获取锁，执行决策（线程安全）
+        6. 更新执行结果列表
+        
+        注意：此方法在独立线程中执行，需要线程安全处理
+        """
+        thread_id = threading.current_thread().ident
+        batch_start_time = datetime.now()
+        batch_symbols = [pos.get('future', 'N/A') for pos in batch_positions]
+        
+        logger.debug(f"[Model {self.model_id}] [线程-{thread_id}] [卖出批次 {batch_num}/{total_batches}] "
+                    f"开始处理批次，持仓合约: {batch_symbols}")
+        
+        try:
+            # ========== 步骤1: 为当前批次创建临时portfolio ==========
+            logger.debug(f"[Model {self.model_id}] [线程-{thread_id}] [卖出批次 {batch_num}/{total_batches}] "
+                        f"[步骤1] 创建临时portfolio，仅包含当前批次持仓...")
+            batch_portfolio = portfolio.copy()
+            batch_portfolio['positions'] = batch_positions
+            
+            # ========== 步骤2: 调用AI模型获取卖出决策 ==========
+            logger.debug(f"[Model {self.model_id}] [线程-{thread_id}] [卖出批次 {batch_num}/{total_batches}] "
+                        f"[步骤2] 调用AI模型进行卖出决策...")
+            
+            ai_call_start = datetime.now()
+            sell_payload = self.ai_trader.make_sell_decision(
+                batch_portfolio,
+                market_state,
+                account_info,
+                constraints_text=constraints_text
+            )
+            ai_call_duration = (datetime.now() - ai_call_start).total_seconds()
+            
+            is_skipped = sell_payload.get('skipped', False)
+            has_prompt = bool(sell_payload.get('prompt'))
+            decisions = sell_payload.get('decisions') or {}
+            logger.debug(f"[Model {self.model_id}] [线程-{thread_id}] [卖出批次 {batch_num}/{total_batches}] "
+                        f"[步骤2] AI调用完成: 耗时={ai_call_duration:.2f}秒, "
+                        f"跳过={is_skipped}, 有提示词={has_prompt}, 决策数={len(decisions)}")
+
+            # 检查是否需要跳过执行
+            if is_skipped or not has_prompt:
+                logger.info(f"[Model {self.model_id}] 卖出批次 {batch_num}/{total_batches} 跳过执行")
+                return sell_payload
+
+            # ========== 步骤3: 记录AI对话到数据库 ==========
+            logger.debug(f"[Model {self.model_id}] [线程-{thread_id}] [卖出批次 {batch_num}/{total_batches}] "
+                        f"[步骤3] 记录AI对话到数据库...")
+            self._record_ai_conversation(sell_payload)
+            logger.debug(f"[Model {self.model_id}] [线程-{thread_id}] [卖出批次 {batch_num}/{total_batches}] "
+                        f"[步骤3] AI对话已记录")
+
+            # ========== 步骤4: 获取决策结果 ==========
+            logger.debug(f"[Model {self.model_id}] [线程-{thread_id}] [卖出批次 {batch_num}/{total_batches}] "
+                        f"[步骤4] 解析决策结果...")
+            if not decisions:
+                logger.info(f"[Model {self.model_id}] 卖出批次 {batch_num}/{total_batches} 无卖出决策")
+                return sell_payload
+            
+            decision_symbols = list(decisions.keys())
+            logger.debug(f"[Model {self.model_id}] [线程-{thread_id}] [卖出批次 {batch_num}/{total_batches}] "
+                        f"[步骤4] 决策结果解析完成: 决策合约={decision_symbols}")
+            for symbol, decision in decisions.items():
+                logger.debug(f"[Model {self.model_id}] [线程-{thread_id}] [卖出批次 {batch_num}/{total_batches}] "
+                            f"[步骤4] 决策详情 [{symbol}]: "
+                            f"信号={decision.get('signal')}, "
+                            f"数量={decision.get('quantity', 0)}")
+
+            # ========== 步骤5: 获取锁并执行决策（线程安全） ==========
+            logger.debug(f"[Model {self.model_id}] [线程-{thread_id}] [卖出批次 {batch_num}/{total_batches}] "
+                        f"[步骤5] 等待获取锁以执行决策...")
+            lock_acquire_start = datetime.now()
+            
+            with portfolio_lock:
+                lock_acquire_duration = (datetime.now() - lock_acquire_start).total_seconds()
+                logger.debug(f"[Model {self.model_id}] [线程-{thread_id}] [卖出批次 {batch_num}/{total_batches}] "
+                            f"[步骤5.1] 锁已获取，等待时间={lock_acquire_duration:.3f}秒")
+                
+                # 获取最新持仓状态（可能已被其他批次修改）
+                logger.debug(f"[Model {self.model_id}] [线程-{thread_id}] [卖出批次 {batch_num}/{total_batches}] "
+                            f"[步骤5.2] 获取最新持仓状态...")
+                latest_portfolio = self.db.get_portfolio(self.model_id)
+                logger.debug(f"[Model {self.model_id}] [线程-{thread_id}] [卖出批次 {batch_num}/{total_batches}] "
+                            f"[步骤5.2] 最新持仓状态: "
+                            f"总价值=${latest_portfolio.get('total_value', 0):.2f}, "
+                            f"现金=${latest_portfolio.get('cash', 0):.2f}, "
+                            f"持仓数={len(latest_portfolio.get('positions', []) or [])}")
+                
+                # 执行决策
+                logger.debug(f"[Model {self.model_id}] [线程-{thread_id}] [卖出批次 {batch_num}/{total_batches}] "
+                            f"[步骤5.3] 开始执行决策...")
+                execution_start = datetime.now()
+                batch_results = self._execute_decisions(
+                    decisions,
+                    market_state,
+                    latest_portfolio
+                )
+                execution_duration = (datetime.now() - execution_start).total_seconds()
+                logger.debug(f"[Model {self.model_id}] [线程-{thread_id}] [卖出批次 {batch_num}/{total_batches}] "
+                            f"[步骤5.3] 决策执行完成: 耗时={execution_duration:.2f}秒, 结果数={len(batch_results)}")
+                
+                # 记录每个执行结果
+                for idx, result in enumerate(batch_results):
+                    logger.debug(f"[Model {self.model_id}] [线程-{thread_id}] [卖出批次 {batch_num}/{total_batches}] "
+                                f"[步骤5.3.{idx+1}] 执行结果: "
+                                f"合约={result.get('future')}, "
+                                f"信号={result.get('signal')}, "
+                                f"数量={result.get('quantity', 0)}, "
+                                f"价格=${result.get('price', 0):.4f}, "
+                                f"错误={result.get('error', '无')}")
+                
+                # 添加到执行结果列表（线程安全）
+                logger.debug(f"[Model {self.model_id}] [线程-{thread_id}] [卖出批次 {batch_num}/{total_batches}] "
+                            f"[步骤5.4] 添加执行结果到列表（当前总数: {len(executions)}）...")
+                executions.extend(batch_results)
+                logger.debug(f"[Model {self.model_id}] [线程-{thread_id}] [卖出批次 {batch_num}/{total_batches}] "
+                            f"[步骤5.4] 执行结果已添加（新总数: {len(executions)}）")
+                
+                logger.info(f"[Model {self.model_id}] 卖出批次 {batch_num}/{total_batches} 执行完成, 决策数: {len(decisions)}, 执行结果: {len(batch_results)}")
+            
+            # ========== 步骤6: 记录批次处理时间 ==========
+            batch_duration = (datetime.now() - batch_start_time).total_seconds()
+            logger.debug(f"[Model {self.model_id}] [线程-{thread_id}] [卖出批次 {batch_num}/{total_batches}] "
+                        f"批次处理完成，耗时: {batch_duration:.2f}秒")
+            
+            return sell_payload
+            
+        except Exception as e:
+            logger.error(f"[Model {self.model_id}] [线程-{thread_id}] [卖出批次 {batch_num}/{total_batches}] "
+                        f"处理批次时发生异常: {str(e)}")
+            import traceback
+            logger.error(f"[Model {self.model_id}] [线程-{thread_id}] [卖出批次 {batch_num}/{total_batches}] "
+                        f"异常堆栈: {traceback.format_exc()}")
+            return {'skipped': True, 'decisions': {}}
 
     def _process_and_execute_batch(
         self,

@@ -97,6 +97,8 @@ TRADE_FEE_RATE = 0.001  # 交易费率：0.1%（双向收费）
 # ============ AI交易决策配置 ============
 PROMPT_MARKET_SYMBOL_LIMIT = 5  # 每次调用AI模型时处理的合约数量
 BUY_DECISION_THREAD_COUNT = 2  # 买入决策API调用的并发线程数
+SELL_DECISION_THREAD_COUNT = 2  # 卖出决策API调用的并发线程数
+AI_DECISION_SYMBOL_BATCH_SIZE = int(os.getenv('AI_DECISION_SYMBOL_BATCH_SIZE', '1'))  # 每次提交给AI模型的symbol数量，默认为1
 
 # ============ 日志配置 ============
 # 日志级别: DEBUG, INFO, WARNING, ERROR, CRITICAL
@@ -114,7 +116,7 @@ FUTURES_QUOTE_ASSET = 'USDT'
 FUTURES_TOP_GAINERS_LIMIT = 10
 FUTURES_TOP_GAINERS_REFRESH = 30  # seconds, can be adjusted per deployment needs
 FUTURES_INDICATOR_REFRESH = 2  # seconds
-FUTURES_KLINE_LIMIT = 120
+FUTURES_KLINE_LIMIT = 300
 FUTURES_LEADERBOARD_REFRESH = 5  # seconds - 前端轮询刷新间隔（涨跌幅榜）
 
 # K线数据获取配置
