@@ -1211,7 +1211,7 @@ class MySQLDatabase:
             `name` VARCHAR(200) DEFAULT '',
             `exchange` VARCHAR(50) DEFAULT 'BINANCE_FUTURES',
             `side` VARCHAR(10) NOT NULL,
-            `rank` TINYINT UNSIGNED DEFAULT 0,
+            `position` TINYINT UNSIGNED DEFAULT 0 COMMENT '排名位置（1表示第1名，2表示第2名，以此类推）',
             `price` DOUBLE DEFAULT 0.0,
             `change_percent` DOUBLE DEFAULT 0.0,
             `quote_volume` DOUBLE DEFAULT 0.0,
@@ -1219,7 +1219,7 @@ class MySQLDatabase:
             `updated_at` DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
             INDEX `idx_symbol_side` (`symbol`, `side`),
             INDEX `idx_event_time` (`event_time`),
-            INDEX `idx_rank` (`rank`)
+            INDEX `idx_position` (`position`)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
         """
         self.command(ddl)
@@ -1250,12 +1250,12 @@ class MySQLDatabase:
             
             query = f"""
             SELECT 
-                symbol, contract_symbol, name, exchange, side, rank, 
-                price, change_percent, quote_volume, timeframes, updated_at
+                `symbol`, `contract_symbol`, `name`, `exchange`, `side`, `position`, 
+                `price`, `change_percent`, `quote_volume`, `timeframes`, `updated_at`
             FROM `{self.leaderboard_table}`
-            WHERE side = %s 
-            AND event_time >= %s
-            ORDER BY rank ASC
+            WHERE `side` = %s 
+            AND `event_time` >= %s
+            ORDER BY `position` ASC
             LIMIT %s
             """
             
@@ -1276,7 +1276,7 @@ class MySQLDatabase:
                             'name': row[2] if len(row) > 2 else '',
                             'exchange': row[3] if len(row) > 3 else 'BINANCE_FUTURES',
                             'side': row[4] if len(row) > 4 else side,
-                            'rank': row[5] if len(row) > 5 else 0,
+                            'position': row[5] if len(row) > 5 else 0,
                             'price': row[6] if len(row) > 6 else 0.0,
                             'change_percent': row[7] if len(row) > 7 else 0.0,
                             'quote_volume': row[8] if len(row) > 8 else 0.0,
@@ -1395,7 +1395,7 @@ class MySQLDatabase:
             
             # 涨幅榜（change_percent >= 0，按降序排序）
             gainers = [
-                {**item, 'rank': idx + 1}
+                {**item, 'position': idx + 1}
                 for idx, item in enumerate(
                     sorted(
                         [t for t in ticker_list if t['change_percent'] >= 0],
@@ -1407,7 +1407,7 @@ class MySQLDatabase:
             
             # 跌幅榜（change_percent < 0，按升序排序，绝对值大的在前）
             losers = [
-                {**item, 'rank': idx + 1}
+                {**item, 'position': idx + 1}
                 for idx, item in enumerate(
                     sorted(
                         [t for t in ticker_list if t['change_percent'] < 0],
@@ -1465,11 +1465,11 @@ class MySQLDatabase:
                             sql = f"""
                             INSERT INTO `{self.leaderboard_table}`
                             (`event_time`, `symbol`, `contract_symbol`, `name`, `exchange`, 
-                             `side`, `rank`, `price`, `change_percent`, `quote_volume`, `timeframes`)
+                             `side`, `position`, `price`, `change_percent`, `quote_volume`, `timeframes`)
                             VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                             ON DUPLICATE KEY UPDATE
                             `event_time` = VALUES(`event_time`),
-                            `rank` = VALUES(`rank`),
+                            `position` = VALUES(`position`),
                             `price` = VALUES(`price`),
                             `change_percent` = VALUES(`change_percent`),
                             `quote_volume` = VALUES(`quote_volume`),
@@ -1484,7 +1484,7 @@ class MySQLDatabase:
                                 row.get('name', ''),
                                 row.get('exchange', 'BINANCE_FUTURES'),
                                 row.get('side'),
-                                row.get('rank', 0),
+                                row.get('position', 0),
                                 row.get('price', 0.0),
                                 row.get('change_percent', 0.0),
                                 row.get('quote_volume', 0.0),
@@ -1504,11 +1504,11 @@ class MySQLDatabase:
                             sql = f"""
                             INSERT INTO `{self.leaderboard_table}`
                             (`event_time`, `symbol`, `contract_symbol`, `name`, `exchange`, 
-                             `side`, `rank`, `price`, `change_percent`, `quote_volume`, `timeframes`)
+                             `side`, `position`, `price`, `change_percent`, `quote_volume`, `timeframes`)
                             VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                             ON DUPLICATE KEY UPDATE
                             `event_time` = VALUES(`event_time`),
-                            `rank` = VALUES(`rank`),
+                            `position` = VALUES(`position`),
                             `price` = VALUES(`price`),
                             `change_percent` = VALUES(`change_percent`),
                             `quote_volume` = VALUES(`quote_volume`),
@@ -1523,7 +1523,7 @@ class MySQLDatabase:
                                 row.get('name', ''),
                                 row.get('exchange', 'BINANCE_FUTURES'),
                                 row.get('side'),
-                                row.get('rank', 0),
+                                row.get('position', 0),
                                 row.get('price', 0.0),
                                 row.get('change_percent', 0.0),
                                 row.get('quote_volume', 0.0),

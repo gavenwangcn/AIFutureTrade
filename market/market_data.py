@@ -1288,7 +1288,7 @@ class MarketDataFetcher:
                     'name': base_symbol,
                     'exchange': 'BINANCE_FUTURES',
                     'side': 'gainer',
-                    'rank': item.get('rank', 0),
+                    'position': item.get('position', 0),
                     'price': item.get('price', 0.0),  # 使用 MySQL 的 price
                     'change_percent': item.get('change_percent', 0.0),
                     'quote_volume': item.get('quote_volume', 0.0),
@@ -1307,7 +1307,7 @@ class MarketDataFetcher:
                     'name': base_symbol,
                     'exchange': 'BINANCE_FUTURES',
                     'side': 'loser',
-                    'rank': item.get('rank', 0),
+                    'position': item.get('position', 0),
                     'price': item.get('price', 0.0),  # 使用 MySQL 的 price
                     'change_percent': item.get('change_percent', 0.0),
                     'quote_volume': item.get('quote_volume', 0.0),

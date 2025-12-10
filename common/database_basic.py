@@ -429,14 +429,14 @@ class Database:
             `name` VARCHAR(200) DEFAULT '',
             `exchange` VARCHAR(50) DEFAULT 'BINANCE_FUTURES',
             `side` VARCHAR(10) NOT NULL,
-            `rank` TINYINT UNSIGNED DEFAULT 0,
+            `position` TINYINT UNSIGNED DEFAULT 0 COMMENT '排名位置（1表示第1名，2表示第2名，以此类推）',
             `price` DOUBLE DEFAULT 0.0,
             `change_percent` DOUBLE DEFAULT 0.0,
             `quote_volume` DOUBLE DEFAULT 0.0,
             `timeframes` VARCHAR(200) DEFAULT '',
             `updated_at` DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
             UNIQUE KEY `uk_symbol_side` (`symbol`, `side`),
-            INDEX `idx_rank` (`rank`)
+            INDEX `idx_position` (`position`)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
         """
         self.command(ddl)
@@ -1728,7 +1728,7 @@ class Database:
                         entry.get('name', ''),
                         entry.get('exchange', 'BINANCE_FUTURES'),
                         entry['side'],
-                        entry['rank'],
+                        entry.get('position', entry.get('rank', 0)),  # 兼容 position 和 rank
                         entry.get('price', 0.0),
                         entry.get('change_percent', 0.0),
                         entry.get('quote_volume', 0.0),
@@ -1742,7 +1742,7 @@ class Database:
                 self.insert_rows(
                     self.futures_leaderboard_table,
                     rows_to_insert,
-                    ["id", "symbol", "contract_symbol", "name", "exchange", "side", "rank", "price", "change_percent", "quote_volume", "timeframes", "updated_at"]
+                    ["id", "symbol", "contract_symbol", "name", "exchange", "side", "position", "price", "change_percent", "quote_volume", "timeframes", "updated_at"]
                 )
         except Exception as e:
             logger.error(f"[Database] Failed to upsert leaderboard entries: {e}")
@@ -1754,13 +1754,13 @@ class Database:
             def fetch(side_key: str) -> List[Dict]:
                 rows = self.query(f"""
                     SELECT symbol, contract_symbol, name, exchange, side,
-                           rank, price, change_percent, quote_volume, timeframes, updated_at
+                           position, price, change_percent, quote_volume, timeframes, updated_at
                     FROM {self.futures_leaderboard_table} FINAL
                     WHERE side = '{side_key}'
-                    ORDER BY rank ASC
+                    ORDER BY position ASC
                     LIMIT {limit}
                 """)
-                columns = ["symbol", "contract_symbol", "name", "exchange", "side", "rank", "price", "change_percent", "quote_volume", "timeframes", "updated_at"]
+                columns = ["symbol", "contract_symbol", "name", "exchange", "side", "position", "price", "change_percent", "quote_volume", "timeframes", "updated_at"]
                 results = self._rows_to_dicts(rows, columns)
                 for result in results:
                     try:
