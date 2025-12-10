@@ -4,6 +4,12 @@
 # 注意：version字段在新版本Docker Compose中已废弃，但保留以兼容旧版本
 # 如果看到警告，可以安全地忽略或移除version字段
 # ==============================================================================
+# 环境变量配置：
+# 1. 所有配置已抽离到 .env 文件中，便于统一管理
+# 2. 首次使用前，请创建 .env 文件（参考 ENV_SETUP.md）
+# 3. Docker Compose 会自动读取 .env 文件中的环境变量
+# 4. 所有变量都有默认值，可以不设置 .env 文件（不推荐）
+# ==============================================================================
 # 使用说明：
 # 1. 启动MySQL服务：docker-compose -f docker-compose-mysql.yml up -d（必须先启动）
 # 2. 默认启动：docker-compose up -d（启动backend、frontend和async-agent服务）
@@ -13,6 +19,7 @@
 # 注意：
 # - MySQL服务已拆分到 docker-compose-mysql.yml，需要先启动
 # - 其他服务通过 depends_on 依赖 MySQL 服务，但需要确保 MySQL 服务已启动
+# - 生产环境请修改 .env 文件中的默认密码和 API 密钥
 # ==============================================================================
 
 services:
@@ -23,35 +30,35 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: aifuturetrade-backend
+    container_name: ${BACKEND_CONTAINER_NAME:-aifuturetrade-backend}
     ports:
-      - "5002:5002"  # 后端API端口
+      - "${BACKEND_PORT:-5002}:5002"  # 后端API端口
     volumes:
       - ./data:/app/data
     environment:
       # 基础配置
-      - DATABASE_PATH=/app/data/trading_bot.db
-      - USE_GUNICORN=true
-      - FLASK_ENV=production
+      - DATABASE_PATH=${DATABASE_PATH:-/app/data/trading_bot.db}
+      - USE_GUNICORN=${USE_GUNICORN:-true}
+      - FLASK_ENV=${FLASK_ENV:-production}
       # Gunicorn配置
-      - GUNICORN_WORKERS=${GUNICORN_WORKERS}
-      - GUNICORN_WORKER_CLASS=${GUNICORN_WORKER_CLASS}
-      - GUNICORN_WORKER_CONNECTIONS=${GUNICORN_WORKER_CONNECTIONS}
-      - GUNICORN_TIMEOUT=${GUNICORN_TIMEOUT}
-      - GUNICORN_KEEPALIVE=${GUNICORN_KEEPALIVE}
-      - GUNICORN_MAX_REQUESTS=${GUNICORN_MAX_REQUESTS}
+      - GUNICORN_WORKERS=${GUNICORN_WORKERS:-5}
+      - GUNICORN_WORKER_CLASS=${GUNICORN_WORKER_CLASS:-eventlet}
+      - GUNICORN_WORKER_CONNECTIONS=${GUNICORN_WORKER_CONNECTIONS:-1000}
+      - GUNICORN_TIMEOUT=${GUNICORN_TIMEOUT:-120}
+      - GUNICORN_KEEPALIVE=${GUNICORN_KEEPALIVE:-5}
+      - GUNICORN_MAX_REQUESTS=${GUNICORN_MAX_REQUESTS:-1000}
       # MySQL配置
-      - MYSQL_HOST=193.134.209.95
-      - MYSQL_PORT=32123
-      - MYSQL_USER=aifuturetrade
-      - MYSQL_PASSWORD=aifuturetrade123
-      - MYSQL_DATABASE=aifuturetrade
+      - MYSQL_HOST=${MYSQL_HOST:-193.134.209.95}
+      - MYSQL_PORT=${MYSQL_PORT:-32123}
+      - MYSQL_USER=${MYSQL_USER:-aifuturetrade}
+      - MYSQL_PASSWORD=${MYSQL_PASSWORD:-aifuturetrade123}
+      - MYSQL_DATABASE=${MYSQL_DATABASE:-aifuturetrade}
       # Binance配置
       - BINANCE_API_KEY=${BINANCE_API_KEY}
       - BINANCE_API_SECRET=${BINANCE_API_SECRET}
       # 价格刷新服务配置
-      - PRICE_REFRESH_CRON=${PRICE_REFRESH_CRON}
-      - PRICE_REFRESH_MAX_PER_MINUTE=${PRICE_REFRESH_MAX_PER_MINUTE}
+      - PRICE_REFRESH_CRON=${PRICE_REFRESH_CRON:-*/5 * * * *}
+      - PRICE_REFRESH_MAX_PER_MINUTE=${PRICE_REFRESH_MAX_PER_MINUTE:-1000}
     restart: unless-stopped
     networks:
       - aifuturetrade-network
@@ -66,13 +73,13 @@ services:
     build:
       context: .
       dockerfile: ./frontend/Dockerfile
-    container_name: aifuturetrade-frontend
+    container_name: ${FRONTEND_CONTAINER_NAME:-aifuturetrade-frontend}
     ports:
-      - "3000:3000"  # 前端服务端口
+      - "${FRONTEND_PORT:-3000}:3000"  # 前端服务端口
     environment:
-      - BACKEND_URL=http://backend:5002
-      - FRONTEND_PORT=3000
-      - NODE_ENV=production
+      - BACKEND_URL=${BACKEND_URL:-http://backend:5002}
+      - FRONTEND_PORT=${FRONTEND_PORT:-3000}
+      - NODE_ENV=${NODE_ENV:-production}
     depends_on:
       backend:
         condition: service_started
@@ -89,32 +96,32 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: aifuturetrade-async-agent
+    container_name: ${ASYNC_AGENT_CONTAINER_NAME:-aifuturetrade-async-agent}
     command: ["python", "async/async_agent.py", "--task", "all"]
     # 注意：async-agent 是后台数据同步服务，不需要暴露端口
     volumes:
       - ./data:/app/data
     environment:
       # 设置PYTHONPATH，确保可以找到所有模块
-      - PYTHONPATH=/app
+      - PYTHONPATH=${PYTHONPATH:-/app}
       # MySQL配置
-      - MYSQL_HOST=193.134.209.95
-      - MYSQL_PORT=32123
-      - MYSQL_USER=aifuturetrade
-      - MYSQL_PASSWORD=aifuturetrade123
-      - MYSQL_DATABASE=aifuturetrade
+      - MYSQL_HOST=${MYSQL_HOST:-193.134.209.95}
+      - MYSQL_PORT=${MYSQL_PORT:-32123}
+      - MYSQL_USER=${MYSQL_USER:-aifuturetrade}
+      - MYSQL_PASSWORD=${MYSQL_PASSWORD:-aifuturetrade123}
+      - MYSQL_DATABASE=${MYSQL_DATABASE:-aifuturetrade}
       # K线同步配置
-      - KLINE_SYNC_CHECK_INTERVAL=${KLINE_SYNC_CHECK_INTERVAL}
-      - KLINE_CLEANUP_CRON=${KLINE_CLEANUP_CRON}
-      - KLINE_CLEANUP_RETENTION_DAYS=${KLINE_CLEANUP_RETENTION_DAYS}
+      - KLINE_SYNC_CHECK_INTERVAL=${KLINE_SYNC_CHECK_INTERVAL:-10}
+      - KLINE_CLEANUP_CRON=${KLINE_CLEANUP_CRON:-0 */1 * * *}
+      - KLINE_CLEANUP_RETENTION_DAYS=${KLINE_CLEANUP_RETENTION_DAYS:-14}
       # Data Agent配置
-      - DATA_AGENT_MAX_SYMBOL=${DATA_AGENT_MAX_SYMBOL}
-      - DATA_AGENT_PORT=${DATA_AGENT_PORT}
-      - DATA_AGENT_REGISTER_IP=${DATA_AGENT_REGISTER_IP}
-      - DATA_AGENT_REGISTER_PORT=${DATA_AGENT_REGISTER_PORT}
-      - DATA_AGENT_BATCH_SYMBOL_SIZE=${DATA_AGENT_BATCH_SYMBOL_SIZE}
-      - DATA_AGENT_HEARTBEAT_TIMEOUT=${DATA_AGENT_HEARTBEAT_TIMEOUT}
-      - DATA_AGENT_STATUS_CHECK_INTERVAL=${DATA_AGENT_STATUS_CHECK_INTERVAL}
+      - DATA_AGENT_MAX_SYMBOL=${DATA_AGENT_MAX_SYMBOL:-150}
+      - DATA_AGENT_PORT=${DATA_AGENT_PORT:-9999}
+      - DATA_AGENT_REGISTER_IP=${DATA_AGENT_REGISTER_IP:-data-manager}
+      - DATA_AGENT_REGISTER_PORT=${DATA_AGENT_REGISTER_PORT:-8888}
+      - DATA_AGENT_BATCH_SYMBOL_SIZE=${DATA_AGENT_BATCH_SYMBOL_SIZE:-20}
+      - DATA_AGENT_HEARTBEAT_TIMEOUT=${DATA_AGENT_HEARTBEAT_TIMEOUT:-60}
+      - DATA_AGENT_STATUS_CHECK_INTERVAL=${DATA_AGENT_STATUS_CHECK_INTERVAL:-60}
       # Binance配置
       - BINANCE_API_KEY=${BINANCE_API_KEY}
       - BINANCE_API_SECRET=${BINANCE_API_SECRET}
@@ -130,8 +137,8 @@ services:
 # 注意：网络名称与docker-compose-mysql.yml中的网络名称相同
 # Docker Compose会自动合并相同名称的网络，使服务可以互相通信
 networks:
-  aifuturetrade-network:
-    driver: bridge
+  ${DOCKER_NETWORK_NAME:-aifuturetrade-network}:
+    driver: ${DOCKER_NETWORK_DRIVER:-bridge}
 
 # ==============================================================================
 # 数据卷配置

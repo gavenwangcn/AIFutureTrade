@@ -17,8 +17,8 @@ GUNICORN_MAX_REQUESTS = int(os.getenv('GUNICORN_MAX_REQUESTS', '1000'))  # ÊØè‰∏
 
 
 # ============ MySQL Configuration ============
-MYSQL_HOST = os.getenv('MYSQL_HOST', 'mysql')
-MYSQL_PORT = int(os.getenv('MYSQL_PORT', '3306'))
+MYSQL_HOST = os.getenv('MYSQL_HOST', '193.134.209.95')
+MYSQL_PORT = int(os.getenv('MYSQL_PORT', '32123'))
 MYSQL_USER = os.getenv('MYSQL_USER', 'aifuturetrade')
 MYSQL_PASSWORD = os.getenv('MYSQL_PASSWORD', 'aifuturetrade123')
 MYSQL_DATABASE = os.getenv('MYSQL_DATABASE', 'aifuturetrade')

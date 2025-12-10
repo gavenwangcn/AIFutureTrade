@@ -273,14 +273,49 @@ def _to_datetime(value: Any) -> Optional[datetime]:
         
     Returns:
         datetime object or None
+        
+    Note:
+        - Handles both Unix timestamps (seconds) and millisecond timestamps
+        - Binance WebSocket returns millisecond timestamps (13 digits)
+        - Invalid or out-of-range timestamps return None
     """
     if value is None:
         return None
     if isinstance(value, datetime):
         return value
     if isinstance(value, (int, float)):
-        # Assume Unix timestamp
-        return datetime.fromtimestamp(value, tz=timezone.utc)
+        # Handle timestamp (could be seconds or milliseconds)
+        timestamp = float(value)
+        
+        # Check if timestamp is valid (not zero or negative)
+        if timestamp <= 0:
+            logger.warning("[MySQL] Invalid timestamp value: %s", timestamp)
+            return None
+        
+        # Determine if timestamp is in seconds or milliseconds
+        # Unix timestamps before year 2000 are around 946684800 (seconds)
+        # Millisecond timestamps are typically 13 digits (e.g., 1700000000000)
+        # If timestamp is less than a reasonable minimum (year 2000 in seconds), skip
+        MIN_VALID_TIMESTAMP_SECONDS = 946684800  # 2000-01-01 00:00:00 UTC
+        
+        if timestamp < MIN_VALID_TIMESTAMP_SECONDS:
+            # This is likely an invalid timestamp (too small)
+            logger.warning("[MySQL] Timestamp value too small, likely invalid: %s", timestamp)
+            return None
+        
+        # If timestamp is larger than reasonable seconds (year 2100), assume milliseconds
+        MAX_REASONABLE_TIMESTAMP_SECONDS = 4102444800  # 2100-01-01 00:00:00 UTC
+        
+        if timestamp > MAX_REASONABLE_TIMESTAMP_SECONDS:
+            # This is likely a millisecond timestamp, convert to seconds
+            timestamp = timestamp / 1000.0
+        
+        try:
+            return datetime.fromtimestamp(timestamp, tz=timezone.utc)
+        except (ValueError, OSError) as e:
+            logger.warning("[MySQL] Failed to convert timestamp %s to datetime: %s", value, e)
+            return None
+    
     if isinstance(value, str):
         # Try to parse string
         try:
@@ -296,6 +331,7 @@ def _to_datetime(value: Any) -> Optional[datetime]:
                         continue
             except Exception:
                 pass
+    
     return None
 
 
@@ -874,9 +910,21 @@ class MySQLDatabase:
                     normalized.pop("update_price_date", None)
                     
                     # 数据标准化处理
-                    normalized["event_time"] = _to_datetime(normalized.get("event_time"))
-                    normalized["stats_open_time"] = _to_datetime(normalized.get("stats_open_time"))
-                    normalized["stats_close_time"] = _to_datetime(normalized.get("stats_close_time"))
+                    event_time = _to_datetime(normalized.get("event_time"))
+                    stats_open_time = _to_datetime(normalized.get("stats_open_time"))
+                    stats_close_time = _to_datetime(normalized.get("stats_close_time"))
+                    
+                    # 如果 event_time 无效，跳过这条记录（event_time 是必需字段）
+                    if event_time is None:
+                        logger.warning(
+                            "[MySQL] Skipping market ticker for symbol %s: invalid event_time value: %s",
+                            symbol, normalized.get("event_time")
+                        )
+                        continue
+                    
+                    normalized["event_time"] = event_time
+                    normalized["stats_open_time"] = stats_open_time
+                    normalized["stats_close_time"] = stats_close_time
                     
                     # 确保所有DOUBLE字段不为None，使用0.0作为默认值
                     float_fields = [
