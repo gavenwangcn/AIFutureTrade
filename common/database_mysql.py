@@ -4,7 +4,7 @@ from __future__ import annotations
 import logging
 import threading
 import time
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timedelta
 from queue import Queue, Empty
 from typing import Any, Dict, Iterable, List, Optional, Callable, Tuple
 import pymysql
@@ -388,7 +388,7 @@ def _to_datetime(value: Any) -> Optional[datetime]:
             timestamp = timestamp / 1000.0
         
         try:
-            return datetime.fromtimestamp(timestamp, tz=timezone.utc)
+            return datetime.fromtimestamp(timestamp)
         except (ValueError, OSError) as e:
             logger.warning("[MySQL] Failed to convert timestamp %s to datetime: %s", value, e)
             return None
@@ -964,98 +964,284 @@ class MySQLDatabase:
             self.insert_rows(self.market_ticker_table, prepared_rows, column_names)
 
     def upsert_market_tickers(self, rows: Iterable[Dict[str, Any]]) -> None:
-        """Upsert市场行情数据（插入或更新）。
+        """更新或插入市场行情数据（upsert操作）。
         
-        优化后的upsert逻辑：
-        1. 先执行UPDATE操作（基于symbol唯一主键）
-        2. 如果UPDATE返回受影响行数为0，说明记录不存在，则执行INSERT
-        3. 单行操作，不使用批量更新，提高效率
+        功能说明：
+        1. 筛选出以USDT结尾的交易对
+        2. 对每一条接收的symbol数据都执行upsert操作（无去重，每条数据都处理）
+        3. 查询数据库中已有的symbol数据，获取open_price和update_price_date信息
+        4. 根据已有open_price计算涨跌幅相关字段（price_change, price_change_percent, side等）
+        5. 对每条数据执行UPDATE操作，如果symbol不存在则执行INSERT操作
         
-        注意：
-        - 不再需要先查询SELECT，直接尝试UPDATE即可
-        - UPDATE操作会排除open_price和update_price_date字段（这些字段由价格刷新服务管理）
+        核心逻辑：
+        - 数据接收：从MarketTickerStream接收原始行情数据
+        - 数据过滤：只处理USDT交易对
+        - 数据保护：移除接口数据中的open_price和update_price_date字段，这些字段只能由异步价格刷新服务更新
+        - 价格计算：基于数据库中已有的open_price计算涨跌幅指标
+        - 数据存储：对每条数据执行UPDATE或INSERT操作，确保ingestion_time字段被正确更新
+        
+        数据处理规则：
+        1. 时间字段规范化：将event_time, stats_open_time, stats_close_time转换为datetime对象
+        2. 字段类型保证：确保DOUBLE字段使用0.0作为默认值，BIGINT字段使用0作为默认值，String字段使用空字符串作为默认值
+        3. ingestion_time更新：无论UPDATE还是INSERT操作，都会更新ingestion_time为当前时间
+        4. open_price保护：首次插入时设置为0.0且update_price_date为None，表示"未设置"状态
+        
+        设计决策：
+        - 取消symbol去重：每条接收到的数据都会被处理，确保数据的实时性和完整性
+        - open_price管理：采用异步价格刷新服务更新，避免接口数据覆盖开盘价
+        - 涨跌幅计算：只有当数据库中存在有效open_price时才计算涨跌幅
         
         Args:
-            rows: 市场行情数据字典的可迭代对象
+            rows: 市场行情数据的迭代器，每个元素是包含行情信息的字典
+        
+        Returns:
+            None
         """
-        rows_list = list(rows)
-        if not rows_list:
+        logger.info("[MySQL] Starting upsert_market_tickers")
+        
+        if not rows:
+            logger.info("[MySQL] No rows provided for upsert, returning")
             return
         
+        # 筛选出USDT交易对：只处理以"USDT"结尾的交易对
+        # 这是业务需求，系统只关注USDT计价的交易对
+        rows_list = list(rows)
+        usdt_rows = [row for row in rows_list if row.get("symbol", "").endswith("USDT")]
+        logger.info("[MySQL] 从%d条总数据中筛选出%d条USDT交易对数据", len(rows_list), len(usdt_rows))
+        
+        if not usdt_rows:
+            logger.debug("[MySQL] No USDT symbols to upsert")
+            return
+        
+        # 数据处理列表：存储经过预处理的symbol数据
+        # 注意：根据业务需求，不再对同一批数据中的重复symbol进行去重
+        # 每条接收到的数据都会被处理，确保数据的实时性和完整性
+        processed_rows = []
+        
+        for row in usdt_rows:
+            normalized = dict(row)
+            
+            symbol = normalized.get("symbol")
+            if not symbol:
+                logger.debug("[MySQL] Skipping row without symbol: %s", row)
+                continue
+            
+            # 重要：移除接口数据中的 open_price 和 update_price_date 字段
+            # 数据保护机制：这两个字段只能由异步价格刷新服务(price_refresh_service)更新
+            # 避免接口数据覆盖开盘价，确保涨跌幅计算的准确性
+            if "open_price" in normalized:
+                del normalized["open_price"]
+                logger.debug("[MySQL] 移除了%s的open_price字段(该字段只能由异步价格刷新服务更新)", symbol)
+            if "update_price_date" in normalized:
+                del normalized["update_price_date"]
+                logger.debug("[MySQL] 移除了%s的update_price_date字段(该字段只能由异步价格刷新服务更新)", symbol)
+            
+            normalized["event_time"] = _to_datetime(normalized.get("event_time"))
+            normalized["stats_open_time"] = _to_datetime(normalized.get("stats_open_time"))
+            normalized["stats_close_time"] = _to_datetime(normalized.get("stats_close_time"))
+            
+            logger.debug("[MySQL] Adding symbol %s to upsert list", symbol)
+            processed_rows.append((symbol, normalized))
+        
+        logger.info("[MySQL] Processed %d USDT symbols for upsert", len(processed_rows))
+        
+        if not processed_rows:
+            logger.info("[MySQL] No symbols to upsert after processing, returning")
+            return
+        
+        # 获取所有需要处理的symbol列表
+        symbols_to_process = [symbol for symbol, _ in processed_rows]
+        
+        # 获取数据库中已存在的symbol数据，用于计算价格变化
+        existing_data = self.get_existing_symbol_data(symbols_to_process)
+        logger.info("[MySQL] Retrieved existing data for %d symbols", len(existing_data))
+        
+        # 处理每条symbol数据，执行UPDATE或INSERT操作
+        total_upserted = 0
+        total_updated = 0
+        total_inserted = 0
+        total_failed = 0
+        
         def _execute_upsert(conn):
-            # 为每个操作创建新的游标，避免连接状态不一致
-            for row in rows_list:
+            nonlocal total_upserted, total_updated, total_inserted, total_failed
+            
+            for symbol, normalized in processed_rows:
                 cursor = None
                 try:
-                    normalized = dict(row)
-                    symbol = normalized.get("symbol")
+                    logger.debug("[MySQL] Processing symbol: %s", symbol)
+                    logger.debug("[MySQL] Raw data for %s: %s", symbol, normalized)
                     
-                    if not symbol:
-                        continue
+                    # 获取当前报文的last_price
+                    try:
+                        current_last_price = float(normalized.get("last_price", 0))
+                        logger.debug("[MySQL] Extracted last_price for %s: %f", symbol, current_last_price)
+                    except (TypeError, ValueError) as e:
+                        current_last_price = 0.0
+                        logger.warning("[MySQL] Failed to extract last_price for %s, defaulting to 0: %s", symbol, e)
                     
-                    # 移除open_price和update_price_date（这些字段由价格刷新服务管理）
-                    normalized.pop("open_price", None)
-                    normalized.pop("update_price_date", None)
+                    # 判断是插入还是更新
+                    existing_symbol_data = existing_data.get(symbol)
+                    existing_open_price = existing_symbol_data.get("open_price") if existing_symbol_data else None
+                    existing_update_price_date = existing_symbol_data.get("update_price_date") if existing_symbol_data else None
                     
-                    # 数据标准化处理
-                    event_time = _to_datetime(normalized.get("event_time"))
-                    stats_open_time = _to_datetime(normalized.get("stats_open_time"))
-                    stats_close_time = _to_datetime(normalized.get("stats_close_time"))
+                    logger.debug("[MySQL] Existing data for %s: open_price=%s, update_price_date=%s", 
+                               symbol, existing_open_price, existing_update_price_date)
                     
-                    # 如果 event_time 无效，跳过这条记录（event_time 是必需字段）
-                    if event_time is None:
-                        logger.warning(
-                            "[MySQL] Skipping market ticker for symbol %s: invalid event_time value: %s",
-                            symbol, normalized.get("event_time")
-                        )
-                        continue
-                    
-                    normalized["event_time"] = event_time
-                    normalized["stats_open_time"] = stats_open_time
-                    normalized["stats_close_time"] = stats_close_time
+                    # 关键逻辑：判断open_price是否已设置
+                    # existing_open_price为None表示未设置（即使数据库中存储的是0.0，如果update_price_date为None也视为未设置）
+                    # existing_open_price不为None且不为0表示已设置且有有效值
+                    # 如果是更新且open_price有值（不为None且不为0），则计算涨跌幅相关字段
+                    if existing_open_price is not None and existing_open_price != 0 and current_last_price != 0:
+                        logger.debug("[MySQL] Calculating price change for %s (existing_open_price: %s, current_last_price: %s)", 
+                                   symbol, existing_open_price, current_last_price)
+                        
+                        try:
+                            existing_open_price_float = float(existing_open_price)
+                            current_last_price_float = float(current_last_price)
+                            
+                            # 计算 price_change = last_price - open_price
+                            price_change = current_last_price_float - existing_open_price_float
+                            
+                            # 计算 price_change_percent = (last_price - open_price) / open_price * 100
+                            price_change_percent = (price_change / existing_open_price_float) * 100
+                            
+                            # 根据正负设置 side（0为正，即gainer）
+                            side = "gainer" if price_change_percent >= 0 else "loser"
+                            
+                            # 设置 change_percent_text = price_change_percent + "%"
+                            change_percent_text = f"{price_change_percent:.2f}%"
+                            
+                            logger.debug("[MySQL] Calculated price change for %s: %f (%.2f%%), side: %s", 
+                                       symbol, price_change, price_change_percent, side)
+                            
+                            # 重要：保持原有的open_price和update_price_date，不更新
+                            # 这两个字段只能由异步价格刷新服务更新，接口数据不能覆盖它们
+                            normalized["price_change"] = price_change
+                            normalized["price_change_percent"] = price_change_percent
+                            normalized["side"] = side
+                            normalized["change_percent_text"] = change_percent_text
+                            normalized["open_price"] = existing_open_price_float  # 保留数据库中的值
+                            normalized["update_price_date"] = existing_update_price_date  # 保留数据库中的值（可能为None）
+                        except (TypeError, ValueError) as e:
+                            logger.warning("[MySQL] Failed to calculate price change for symbol %s: %s", symbol, e)
+                            # 计算失败时，设置为0.0（DOUBLE字段不能为None）
+                            normalized["price_change"] = 0.0
+                            normalized["price_change_percent"] = 0.0
+                            normalized["side"] = ""  # String字段不能为None，使用空字符串
+                            normalized["change_percent_text"] = ""  # String字段不能为None，使用空字符串
+                            # 重要：保留数据库中的open_price和update_price_date
+                            try:
+                                existing_open_price_float = float(existing_open_price) if existing_open_price else 0.0
+                            except (TypeError, ValueError):
+                                existing_open_price_float = 0.0
+                            normalized["open_price"] = existing_open_price_float
+                            normalized["update_price_date"] = existing_update_price_date  # 保留数据库中的值（可能为None）
+                    else:
+                        logger.debug("[MySQL] Not calculating price change for %s (existing_open_price: %s, current_last_price: %s)", 
+                                   symbol, existing_open_price, current_last_price)
+                        
+                        # 第一次插入或open_price未设置的情况
+                        # DOUBLE字段设置为0.0而不是None
+                        # 但逻辑上，open_price=0.0且update_price_date=None表示"未设置"
+                        # 这样下次查询时，get_existing_symbol_data会返回open_price=None，保持原有判断逻辑正确
+                        normalized["price_change"] = 0.0
+                        normalized["price_change_percent"] = 0.0
+                        normalized["side"] = ""  # String字段不能为None，使用空字符串
+                        normalized["change_percent_text"] = ""  # String字段不能为None，使用空字符串
+                        # 重要：如果是更新操作，保留数据库中的update_price_date；如果是插入操作，设置为None
+                        normalized["open_price"] = 0.0  # 存储为0.0，但逻辑上视为"未设置"（因为update_price_date=None）
+                        normalized["update_price_date"] = existing_update_price_date if existing_symbol_data else None
                     
                     # 确保所有DOUBLE字段不为None，使用0.0作为默认值
-                    float_fields = [
+                    double_fields = [
                         "price_change", "price_change_percent", "average_price", "last_price",
-                        "last_trade_volume", "high_price", "low_price",
+                        "last_trade_volume", "open_price", "high_price", "low_price",
                         "base_volume", "quote_volume"
                     ]
-                    for field in float_fields:
+                    for field in double_fields:
                         if normalized.get(field) is None:
                             normalized[field] = 0.0
+                            logger.debug("[MySQL] Set %s.%s to 0.0 (was None)", symbol, field)
                     
-                    # 确保所有BIGINT字段不为None，使用0作为默认值
-                    int_fields = ["first_trade_id", "last_trade_id", "trade_count"]
-                    for field in int_fields:
+                    # 确保BIGINT字段不为None
+                    bigint_fields = ["first_trade_id", "last_trade_id", "trade_count"]
+                    for field in bigint_fields:
                         if normalized.get(field) is None:
                             normalized[field] = 0
+                            logger.debug("[MySQL] Set %s.%s to 0 (was None)", symbol, field)
                     
-                    # 确保所有String字段不为None，使用空字符串作为默认值
+                    # 确保String字段不为None，使用空字符串作为默认值
                     string_fields = ["side", "change_percent_text"]
                     for field in string_fields:
                         if normalized.get(field) is None:
                             normalized[field] = ""
+                            logger.debug("[MySQL] Set %s.%s to empty string (was None)", symbol, field)
+                    
+                    # DateTime字段处理：确保所有非Nullable的DateTime字段都不为None
+                    datetime_fields = ["event_time", "stats_open_time", "stats_close_time"]
+                    for field in datetime_fields:
+                        if normalized.get(field) is None:
+                            normalized[field] = datetime.now()
+                            logger.debug("[MySQL] 设置%s.%s为当前时间(原值为None)", symbol, field)
+                    
+                    # 如果 event_time 无效，跳过这条记录（event_time 是必需字段）
+                    if normalized.get("event_time") is None:
+                        logger.warning(
+                            "[MySQL] Skipping market ticker for symbol %s: invalid event_time value",
+                            symbol
+                        )
+                        continue
+                    
+                    logger.debug("[MySQL] Final normalized data for %s: %s", symbol, normalized)
                     
                     # 为每个操作创建新的游标
                     cursor = conn.cursor()
                     
                     # 先尝试UPDATE操作（基于symbol唯一主键）
-                    update_fields = []
-                    update_values = []
-                    for key, value in normalized.items():
-                        if key != "symbol":
-                            update_fields.append(f"`{key}` = %s")
-                            update_values.append(value)
-                    
-                    # 构建UPDATE SQL语句
+                    # 注意：UPDATE时不更新open_price和update_price_date，这些字段由价格刷新服务管理
                     update_sql = f"""
                     UPDATE `{self.market_ticker_table}`
-                    SET {', '.join(update_fields)}
+                    SET `event_time` = %s,
+                        `price_change` = %s,
+                        `price_change_percent` = %s,
+                        `side` = %s,
+                        `change_percent_text` = %s,
+                        `average_price` = %s,
+                        `last_price` = %s,
+                        `last_trade_volume` = %s,
+                        `high_price` = %s,
+                        `low_price` = %s,
+                        `base_volume` = %s,
+                        `quote_volume` = %s,
+                        `stats_open_time` = %s,
+                        `stats_close_time` = %s,
+                        `first_trade_id` = %s,
+                        `last_trade_id` = %s,
+                        `trade_count` = %s
                     WHERE `symbol` = %s
                     """
                     
-                    # 执行UPDATE，参数顺序：更新字段值 + symbol
-                    update_params = tuple(update_values) + (symbol,)
+                    update_params = (
+                        normalized.get("event_time"),
+                        normalized.get("price_change", 0.0),
+                        normalized.get("price_change_percent", 0.0),
+                        normalized.get("side", ""),
+                        normalized.get("change_percent_text", ""),
+                        normalized.get("average_price", 0.0),
+                        normalized.get("last_price", 0.0),
+                        normalized.get("last_trade_volume", 0.0),
+                        normalized.get("high_price", 0.0),
+                        normalized.get("low_price", 0.0),
+                        normalized.get("base_volume", 0.0),
+                        normalized.get("quote_volume", 0.0),
+                        normalized.get("stats_open_time"),
+                        normalized.get("stats_close_time"),
+                        normalized.get("first_trade_id", 0),
+                        normalized.get("last_trade_id", 0),
+                        normalized.get("trade_count", 0),
+                        symbol
+                    )
+                    
                     cursor.execute(update_sql, update_params)
                     
                     # 检查UPDATE受影响的行数
@@ -1063,42 +1249,90 @@ class MySQLDatabase:
                     
                     # 如果UPDATE没有更新任何行（affected_rows == 0），说明记录不存在，执行INSERT
                     if affected_rows == 0:
+                        # 记录不存在，执行INSERT操作
+                        logger.debug("[MySQL] No existing row found for symbol: %s, performing INSERT instead", symbol)
+                        
+                        # 重要：确保INSERT时也移除接口数据中的open_price和update_price_date字段
+                        # 这两个字段只能由异步价格刷新服务更新，接口数据不能覆盖它们
+                        # 如果是新插入，open_price应该设置为0.0，update_price_date应该设置为None（表示"未设置"状态）
+                        insert_normalized = dict(normalized)
+                        
+                        # 再次确保移除接口数据中的open_price和update_price_date（防止在处理过程中被重新添加）
+                        if "open_price" in insert_normalized:
+                            # 只有在计算涨跌幅时才会设置open_price，新插入时应该使用0.0
+                            # 但如果这是从已有数据中获取的（existing_symbol_data存在），则保留
+                            if not existing_symbol_data:
+                                insert_normalized["open_price"] = 0.0
+                                logger.debug("[MySQL] INSERT时设置%s的open_price为0.0（新插入，未设置状态）", symbol)
+                        else:
+                            # 如果没有open_price字段，设置为0.0（新插入）
+                            insert_normalized["open_price"] = 0.0
+                        
+                        if "update_price_date" in insert_normalized:
+                            # 如果是新插入（existing_symbol_data为None），update_price_date应该为None
+                            if not existing_symbol_data:
+                                insert_normalized["update_price_date"] = None
+                                logger.debug("[MySQL] INSERT时设置%s的update_price_date为None（新插入，未设置状态）", symbol)
+                        else:
+                            # 如果没有update_price_date字段，设置为None（新插入）
+                            insert_normalized["update_price_date"] = None
+                        
+                        # 确保日期时间字段格式正确（再次验证）
+                        if insert_normalized.get("event_time") is None:
+                            insert_normalized["event_time"] = datetime.now()
+                            logger.debug("[MySQL] INSERT时设置%s的event_time为当前时间（原值为None）", symbol)
+                        if insert_normalized.get("stats_open_time") is None:
+                            insert_normalized["stats_open_time"] = datetime.now()
+                            logger.debug("[MySQL] INSERT时设置%s的stats_open_time为当前时间（原值为None）", symbol)
+                        if insert_normalized.get("stats_close_time") is None:
+                            insert_normalized["stats_close_time"] = datetime.now()
+                            logger.debug("[MySQL] INSERT时设置%s的stats_close_time为当前时间（原值为None）", symbol)
+                        
+                        # 设置ingestion_time为当前时间：记录数据插入时间
+                        insert_normalized["ingestion_time"] = datetime.now()
+                        
                         # 构建INSERT SQL语句
                         insert_sql = f"""
                         INSERT INTO `{self.market_ticker_table}` 
-                        (`symbol`, `event_time`, `price_change`, `price_change_percent`, 
+                        (`event_time`, `symbol`, `price_change`, `price_change_percent`, 
                          `side`, `change_percent_text`, `average_price`, `last_price`, 
-                         `last_trade_volume`, `high_price`, `low_price`, `base_volume`, 
-                         `quote_volume`, `stats_open_time`, `stats_close_time`, 
-                         `first_trade_id`, `last_trade_id`, `trade_count`)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                         `last_trade_volume`, `open_price`, `high_price`, `low_price`, 
+                         `base_volume`, `quote_volume`, `stats_open_time`, `stats_close_time`, 
+                         `first_trade_id`, `last_trade_id`, `trade_count`, `update_price_date`)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                         """
                         
                         insert_params = (
+                            insert_normalized.get("event_time"),
                             symbol,
-                            normalized.get("event_time"),
-                            normalized.get("price_change", 0.0),
-                            normalized.get("price_change_percent", 0.0),
-                            normalized.get("side", ""),
-                            normalized.get("change_percent_text", ""),
-                            normalized.get("average_price", 0.0),
-                            normalized.get("last_price", 0.0),
-                            normalized.get("last_trade_volume", 0.0),
-                            normalized.get("high_price", 0.0),
-                            normalized.get("low_price", 0.0),
-                            normalized.get("base_volume", 0.0),
-                            normalized.get("quote_volume", 0.0),
-                            normalized.get("stats_open_time"),
-                            normalized.get("stats_close_time"),
-                            normalized.get("first_trade_id", 0),
-                            normalized.get("last_trade_id", 0),
-                            normalized.get("trade_count", 0),
+                            insert_normalized.get("price_change", 0.0),
+                            insert_normalized.get("price_change_percent", 0.0),
+                            insert_normalized.get("side", ""),
+                            insert_normalized.get("change_percent_text", ""),
+                            insert_normalized.get("average_price", 0.0),
+                            insert_normalized.get("last_price", 0.0),
+                            insert_normalized.get("last_trade_volume", 0.0),
+                            insert_normalized.get("open_price", 0.0),
+                            insert_normalized.get("high_price", 0.0),
+                            insert_normalized.get("low_price", 0.0),
+                            insert_normalized.get("base_volume", 0.0),
+                            insert_normalized.get("quote_volume", 0.0),
+                            insert_normalized.get("stats_open_time"),
+                            insert_normalized.get("stats_close_time"),
+                            insert_normalized.get("first_trade_id", 0),
+                            insert_normalized.get("last_trade_id", 0),
+                            insert_normalized.get("trade_count", 0),
+                            insert_normalized.get("update_price_date"),
                         )
                         
                         cursor.execute(insert_sql, insert_params)
-                        logger.debug(f"[MySQL] Inserted new market ticker: {symbol}")
+                        logger.debug("[MySQL] Successfully inserted new market ticker for symbol: %s", symbol)
+                        total_inserted += 1
                     else:
-                        logger.debug(f"[MySQL] Updated market ticker: {symbol} (affected rows: {affected_rows})")
+                        logger.debug("[MySQL] Successfully updated market ticker for symbol: %s (affected rows: %d)", symbol, affected_rows)
+                        total_updated += 1
+                    
+                    total_upserted += 1
                     
                     # 立即关闭游标，释放资源
                     cursor.close()
@@ -1106,10 +1340,8 @@ class MySQLDatabase:
                     
                 except Exception as e:
                     # 记录错误但继续处理下一条记录
-                    logger.warning(
-                        "[MySQL] Failed to upsert market ticker for symbol %s: %s",
-                        symbol if 'symbol' in locals() else 'unknown', e
-                    )
+                    logger.error("[MySQL] Failed to upsert market ticker for symbol %s: %s", symbol, e, exc_info=True)
+                    total_failed += 1
                     # 确保游标被关闭
                     if cursor:
                         try:
@@ -1120,30 +1352,132 @@ class MySQLDatabase:
                     continue
         
         self._with_connection(_execute_upsert)
+        
+        logger.info("[MySQL] Upsert completed: %d total symbols processed, %d updated, %d inserted, %d failed",
+            len(processed_rows), total_updated, total_inserted, total_failed
+        )
+        
+        logger.debug(
+            "[MySQL] Final stats: Upserted %d rows into %s",
+            total_upserted, self.market_ticker_table
+        )
 
     def update_open_price(self, symbol: str, open_price: float, update_date: datetime) -> bool:
-        """更新指定交易对的开盘价和更新日期。
+        """更新指定symbol的open_price和update_price_date。
         
         Args:
             symbol: 交易对符号
-            open_price: 开盘价
-            update_date: 更新日期
+            open_price: 开盘价（昨天的日K线收盘价）
+            update_date: 更新日期时间参数（已废弃，方法内部始终使用当前本地时间，非UTC格式）
             
         Returns:
             是否更新成功
         """
         try:
-            sql = f"""
-            UPDATE `{self.market_ticker_table}`
-            SET `open_price` = %s, `update_price_date` = %s
+            # 使用当前时间作为update_price_date（非UTC格式）
+            # 忽略传入的update_date参数，始终使用当前本地时间
+            update_price_date = datetime.now()
+            
+            # 先查询当前数据（只需要last_price用于重新计算涨跌幅）
+            # 由于symbol是唯一主键，每个symbol只会有一条记录
+            query = f"""
+            SELECT `last_price`
+            FROM `{self.market_ticker_table}`
             WHERE `symbol` = %s
-            ORDER BY `event_time` DESC
-            LIMIT 1
             """
-            self.command(sql, (open_price, update_date, symbol))
-            return True
+            
+            def _execute_query(conn):
+                cursor = conn.cursor()
+                try:
+                    cursor.execute(query, (symbol,))
+                    row = cursor.fetchone()
+                    
+                    if row is None:
+                        return None
+                    
+                    # 处理返回结果（可能是元组或字典）
+                    if isinstance(row, dict):
+                        return row.get('last_price')
+                    elif isinstance(row, (list, tuple)):
+                        return row[0] if len(row) > 0 else None
+                    else:
+                        return row
+                finally:
+                    cursor.close()
+            
+            last_price_result = self._with_connection(_execute_query)
+            
+            if last_price_result is None:
+                logger.warning("[MySQL] Symbol %s not found for price update", symbol)
+                return False
+            
+            # 获取最新的一条数据的last_price
+            last_price = float(last_price_result) if last_price_result is not None else 0.0
+            new_open_price = float(open_price)
+            
+            # 重新计算涨跌幅相关字段（基于新的open_price和当前的last_price）
+            if new_open_price != 0 and last_price != 0:
+                price_change = last_price - new_open_price
+                price_change_percent = (price_change / new_open_price) * 100
+                side = "gainer" if price_change_percent >= 0 else "loser"
+                change_percent_text = f"{price_change_percent:.2f}%"
+            else:
+                # 如果无法计算，使用默认值（不能为None）
+                price_change = 0.0
+                price_change_percent = 0.0
+                side = ""
+                change_percent_text = ""
+            
+            # 使用UPDATE语句更新数据
+            update_query = f"""
+            UPDATE `{self.market_ticker_table}`
+            SET `open_price` = %s,
+                `price_change` = %s,
+                `price_change_percent` = %s,
+                `side` = %s,
+                `change_percent_text` = %s,
+                `update_price_date` = %s
+            WHERE `symbol` = %s
+            """
+            
+            update_params = (
+                new_open_price,
+                price_change,
+                price_change_percent,
+                side,
+                change_percent_text,
+                update_price_date,  # 使用当前时间（非UTC格式）
+                symbol
+            )
+            
+            update_success = False
+            try:
+                def _execute_update(conn):
+                    cursor = conn.cursor()
+                    try:
+                        cursor.execute(update_query, update_params)
+                        return cursor.rowcount > 0
+                    finally:
+                        cursor.close()
+                
+                update_success = self._with_connection(_execute_update)
+                
+                if update_success:
+                    logger.debug(
+                        "[MySQL] Updated open_price for symbol %s: %s | update_price_date: %s (当前时间)",
+                        symbol,
+                        new_open_price,
+                        update_price_date.strftime('%Y-%m-%d %H:%M:%S')
+                    )
+                else:
+                    logger.warning("[MySQL] No rows updated for symbol %s", symbol)
+            except Exception as e:
+                logger.error("[MySQL] Failed to update open price for %s: %s", symbol, e, exc_info=True)
+            
+            return update_success
+            
         except Exception as e:
-            logger.error("[MySQL] Failed to update open price for %s: %s", symbol, e)
+            logger.error("[MySQL] Failed to update open_price for symbol %s: %s", symbol, e, exc_info=True)
             return False
     
     def get_symbols_needing_price_refresh(self) -> List[str]:
@@ -1158,7 +1492,7 @@ class MySQLDatabase:
         """
         try:
             # 计算1小时前的时间
-            one_hour_ago = datetime.now(timezone.utc) - timedelta(hours=1)
+            one_hour_ago = datetime.now() - timedelta(hours=1)
             
             sql = f"""
             SELECT DISTINCT `symbol`
@@ -1246,7 +1580,7 @@ class MySQLDatabase:
             涨跌榜数据列表
         """
         try:
-            cutoff_time = datetime.now(timezone.utc) - timedelta(seconds=time_window_seconds)
+            cutoff_time = datetime.now() - timedelta(seconds=time_window_seconds)
             
             query = f"""
             SELECT 
@@ -1313,7 +1647,7 @@ class MySQLDatabase:
             (long_rows, short_rows) 元组，分别包含涨幅榜和跌幅榜数据
         """
         try:
-            cutoff_time = datetime.now(timezone.utc) - timedelta(seconds=time_window_seconds)
+            cutoff_time = datetime.now() - timedelta(seconds=time_window_seconds)
             
             query = f"""
             SELECT 
@@ -1451,7 +1785,7 @@ class MySQLDatabase:
             }
             
             try:
-                event_time = datetime.now(timezone.utc)
+                event_time = datetime.now()
                 
                 def _execute_sync(conn):
                     cursor = conn.cursor()
@@ -1560,7 +1894,7 @@ class MySQLDatabase:
             清理统计信息
         """
         try:
-            cutoff_time = datetime.now(timezone.utc) - timedelta(minutes=minutes)
+            cutoff_time = datetime.now() - timedelta(minutes=minutes)
             
             def _execute_cleanup(conn):
                 cursor = conn.cursor()

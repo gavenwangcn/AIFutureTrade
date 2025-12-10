@@ -135,22 +135,22 @@ async def refresh_price_for_symbol(
             return False
         
         # 更新open_price和update_price_date
-        # update_price_date设置为当前刷新时间（而不是当天的开始时间）
-        # 这样可以准确记录每次刷新的时间
-        refresh_time = datetime.now(timezone.utc)
+        # 注意：update_open_price方法内部会使用当前本地时间作为update_price_date
+        # 传入的update_date参数会被忽略，但为了兼容性仍然传递
+        refresh_time = datetime.now()  # 使用本地时间（非UTC）
         
         # 使用asyncio.to_thread避免阻塞事件循环
         success = await asyncio.to_thread(
             db.update_open_price,
             symbol=symbol,
             open_price=yesterday_close_price,
-            update_date=refresh_time
+            update_date=refresh_time  # 此参数会被方法内部忽略，方法会使用当前本地时间
         )
         
         if success:
             logger.info(
-                "[PriceRefresh] ✅ Symbol %s: 成功更新open_price = %s (昨天收盘价), update_price_date = %s (刷新时间)",
-                symbol, yesterday_close_price, refresh_time.strftime('%Y-%m-%d %H:%M:%S UTC')
+                "[PriceRefresh] ✅ Symbol %s: 成功更新open_price = %s (昨天收盘价), update_price_date = %s (当前本地时间)",
+                symbol, yesterday_close_price, refresh_time.strftime('%Y-%m-%d %H:%M:%S')
             )
         else:
             logger.warning("[PriceRefresh] ❌ Symbol %s: 更新open_price失败", symbol)
