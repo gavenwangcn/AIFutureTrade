@@ -42,9 +42,13 @@ def _normalize_ticker(raw: Dict[str, Any]) -> Dict[str, Any]:
     """标准化ticker数据，不再从报文中解析 price_change, price_change_percent, side, change_percent_text, open_price
     这些字段将在 upsert_market_tickers 中根据业务逻辑计算
     """
-    return {
+    symbol = raw.get("s", "")
+    logger.debug("[MarketStreams] Normalizing ticker data for symbol: %s", symbol)
+    logger.debug("[MarketStreams] Raw ticker data: %s", raw)
+    
+    normalized = {
         "event_time": _to_int(raw.get("E")),
-        "symbol": raw.get("s", ""),
+        "symbol": symbol,
         # 不再从报文中解析这些字段，将在 upsert_market_tickers 中计算
         # "price_change": _to_float(raw.get("p")),
         # "price_change_percent": _to_float(percent),
@@ -64,15 +68,22 @@ def _normalize_ticker(raw: Dict[str, Any]) -> Dict[str, Any]:
         "last_trade_id": _to_int(raw.get("L")),
         "trade_count": _to_int(raw.get("n")),
     }
+    
+    logger.debug("[MarketStreams] Normalized ticker data: %s", normalized)
+    return normalized
 
 
 def _extract_tickers(message: Any) -> List[Dict[str, Any]]:
+    logger.debug("[MarketStreams] Received raw message: %s", message)
+    
     if isinstance(message, (bytes, bytearray)):
         message = message.decode()
+        logger.debug("[MarketStreams] Decoded bytes message to string: %s", message[:100] + "..." if len(message) > 100 else message)
 
     if isinstance(message, str):
         try:
             message = json.loads(message)
+            logger.debug("[MarketStreams] Parsed JSON message: %s", type(message))
         except json.JSONDecodeError:
             logger.warning("[MarketStreams] Unable to decode message: %s", message)
             return []
@@ -81,32 +92,44 @@ def _extract_tickers(message: Any) -> List[Dict[str, Any]]:
     if hasattr(message, "model_dump"):
         try:
             message = message.model_dump()
+            logger.debug("[MarketStreams] Used model_dump to convert message object")
         except Exception:
             message = message.__dict__
+            logger.debug("[MarketStreams] Fallback to __dict__ for message object")
 
     if isinstance(message, dict):
         data = message.get("data") or message.get("tickers") or message.get("payload")
         if data is None:
             data = message
+        logger.debug("[MarketStreams] Extracted data from message: %s (type: %s)", "list" if isinstance(data, list) else "dict", type(data))
     else:
         data = message
+        logger.debug("[MarketStreams] Using raw message as data: %s (type: %s)", "list" if isinstance(data, list) else "dict", type(data))
 
     result: List[Dict[str, Any]] = []
     if isinstance(data, list):
         for item in data:
             if hasattr(item, "model_dump"):
                 try:
-                    result.append(item.model_dump())
+                    item_dict = item.model_dump()
+                    result.append(item_dict)
+                    logger.debug("[MarketStreams] Added item from model_dump: %s", item_dict.get("s"))
                     continue
                 except Exception:
-                    pass
+                    logger.debug("[MarketStreams] model_dump failed for item, falling back")
             if isinstance(item, dict):
                 result.append(item)
+                logger.debug("[MarketStreams] Added item as dict: %s", item.get("s"))
             else:
-                result.append(vars(item))
+                item_dict = vars(item)
+                result.append(item_dict)
+                logger.debug("[MarketStreams] Added item from __dict__: %s", item_dict.get("s"))
+        logger.info("[MarketStreams] Extracted %d tickers from message", len(result))
         return result
     if isinstance(data, dict):
+        logger.info("[MarketStreams] Extracted 1 ticker from message")
         return [data]
+    logger.debug("[MarketStreams] No tickers extracted from message")
     return []
 
 
@@ -130,12 +153,32 @@ class MarketTickerStream:
         self._MAX_CONNECTION_HOURS = 4
 
     async def _handle_message(self, message: Any) -> None:
+        logger.info("[MarketStreams] Starting to handle message")
+        
         tickers = _extract_tickers(message)
+        logger.info("[MarketStreams] Extracted %d tickers from message", len(tickers))
+        
         if not tickers:
+            logger.info("[MarketStreams] No tickers to process")
             return
+            
         normalized = [_normalize_ticker(ticker) for ticker in tickers]
-        # 使用优化后的增量插入逻辑
-        await asyncio.to_thread(self._db.upsert_market_tickers, normalized)
+        logger.info("[MarketStreams] Normalized %d tickers for database upsert", len(normalized))
+        
+        # 记录部分关键数据用于调试
+        if normalized:
+            sample = normalized[:3]  # 只记录前3个作为样本
+            logger.debug("[MarketStreams] Normalized data sample: %s", sample)
+        
+        try:
+            # 使用优化后的增量插入逻辑
+            logger.info("[MarketStreams] Calling upsert_market_tickers for %d symbols", len(normalized))
+            await asyncio.to_thread(self._db.upsert_market_tickers, normalized)
+            logger.info("[MarketStreams] Successfully completed upsert_market_tickers")
+        except Exception as e:
+            logger.error("[MarketStreams] Error during upsert_market_tickers: %s", e, exc_info=True)
+        
+        logger.info("[MarketStreams] Finished handling message")
 
 
 

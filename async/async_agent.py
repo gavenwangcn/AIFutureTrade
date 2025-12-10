@@ -54,6 +54,13 @@ def _lazy_import_leaderboard_cleanup():
     return module.run_cleanup_scheduler
 
 
+def _lazy_import_market_symbol_offline():
+    """延迟导入market_symbol_offline模块"""
+    import importlib
+    module = importlib.import_module('async.market_symbol_offline')
+    return module.run_market_symbol_offline_scheduler
+
+
 async def _run_market_tickers(duration: Optional[int] = None) -> None:
     run_market_ticker_stream, _ = _lazy_import_market_streams()
     await run_market_ticker_stream(run_seconds=duration)
@@ -85,6 +92,12 @@ async def _run_leaderboard_cleanup(duration: Optional[int] = None) -> None:
     """运行涨跌榜清理服务"""
     run_cleanup_scheduler = _lazy_import_leaderboard_cleanup()
     await run_cleanup_scheduler()
+
+
+async def _run_market_symbol_offline(duration: Optional[int] = None) -> None:
+    """运行市场Symbol下线服务"""
+    run_market_symbol_offline_scheduler = _lazy_import_market_symbol_offline()
+    await run_market_symbol_offline_scheduler()
 
 
 async def _run_data_agent_manager(duration: Optional[int] = None) -> None:
@@ -131,6 +144,7 @@ async def _run_all_services(duration: Optional[int] = None) -> None:
     - kline_cleanup: K线清理服务
     - price_refresh: 价格刷新服务
     - leaderboard_cleanup: 涨跌榜清理服务
+    - market_symbol_offline: 市场Symbol下线服务
     
     注意：
     - kline_sync服务已被data_agent_manager取代，不再使用
@@ -140,6 +154,7 @@ async def _run_all_services(duration: Optional[int] = None) -> None:
     run_kline_cleanup_scheduler = _lazy_import_kline_cleanup()
     run_price_refresh_scheduler = _lazy_import_price_refresh()
     run_leaderboard_cleanup_scheduler = _lazy_import_leaderboard_cleanup()
+    run_market_symbol_offline_scheduler = _lazy_import_market_symbol_offline()
     
     # 创建所有后台任务
     market_tickers_task = asyncio.create_task(run_market_ticker_stream(run_seconds=duration))
@@ -150,8 +165,9 @@ async def _run_all_services(duration: Optional[int] = None) -> None:
     kline_cleanup_task = asyncio.create_task(run_kline_cleanup_scheduler())
     price_refresh_task = asyncio.create_task(run_price_refresh_scheduler())
     leaderboard_cleanup_task = asyncio.create_task(run_leaderboard_cleanup_scheduler())
+    market_symbol_offline_task = asyncio.create_task(run_market_symbol_offline_scheduler())
     
-    logger.info("[AsyncAgent] Started all services: market_tickers, kline_cleanup, price_refresh, leaderboard_cleanup")
+    logger.info("[AsyncAgent] Started all services: market_tickers, kline_cleanup, price_refresh, leaderboard_cleanup, market_symbol_offline")
     logger.info("[AsyncAgent] Note: data_agent_manager is now a separate service (data-manager), see docker-compose.yml")
     
     # 等待所有任务（如果duration指定，则等待指定时间后停止）
@@ -161,14 +177,16 @@ async def _run_all_services(duration: Optional[int] = None) -> None:
         kline_cleanup_task.cancel()
         price_refresh_task.cancel()
         leaderboard_cleanup_task.cancel()
+        market_symbol_offline_task.cancel()
         with contextlib.suppress(asyncio.CancelledError):
             await market_tickers_task
             await kline_cleanup_task
             await price_refresh_task
             await leaderboard_cleanup_task
+            await market_symbol_offline_task
     else:
         # 持续运行，等待任一任务完成或取消
-        all_tasks = {market_tickers_task, kline_cleanup_task, price_refresh_task, leaderboard_cleanup_task}
+        all_tasks = {market_tickers_task, kline_cleanup_task, price_refresh_task, leaderboard_cleanup_task, market_symbol_offline_task}
         done, pending = await asyncio.wait(
             all_tasks,
             return_when=asyncio.FIRST_COMPLETED
@@ -187,6 +205,7 @@ TASK_REGISTRY: Dict[str, Callable[[Optional[int]], Awaitable[None]]] = {
     "kline_services": _run_kline_services,  # 同时运行同步和清理服务
     "price_refresh": _run_price_refresh,  # 价格刷新服务
     "leaderboard_cleanup": _run_leaderboard_cleanup,  # 涨跌榜清理服务
+    "market_symbol_offline": _run_market_symbol_offline,  # 市场Symbol下线服务
     # 注意：data_agent_manager 已迁移到独立的 data_manager.py 服务
     # 请使用 docker-compose.yml 中的 data-manager 服务
     "all": _run_all_services,  # 运行所有任务服务
