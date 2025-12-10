@@ -62,7 +62,7 @@
           <span>合约配置信息</span>
         </label>
       </div>
-      <small class="form-help">选择AI交易时获取交易对的数据源：涨跌榜（实时涨跌幅榜）或合约配置信息（futures表）</small>
+
     </div>
     <template #footer>
       <button class="btn-secondary" @click="handleClose">取消</button>

@@ -1041,7 +1041,7 @@ class ClickHouseDatabase:
         
         查询条件：
         - update_price_date 为空
-        - 或者 update_price_date 不为当天
+        - 或者 update_price_date 比当前时间晚1小时更新
         
         Returns:
             需要刷新价格的symbol列表（已去重并按字母顺序排序）
@@ -1053,7 +1053,7 @@ class ClickHouseDatabase:
             WHERE symbol != ''
             AND (
                 update_price_date IS NULL
-                OR toDate(update_price_date) != today()
+                OR update_price_date < now() - interval 1 hour
             )
             ORDER BY symbol
             """

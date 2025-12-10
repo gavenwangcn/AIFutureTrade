@@ -1,12 +1,12 @@
 """
-异步刷新实时价格服务
+异步刷新开盘价格服务
 
 此服务异步调用binance_futures模块中的get_klines方法获取最近两天的日K线数据，
 并刷新24_market_tickers表中的open_price字段。
 
 刷新逻辑：
 1. 每分钟最多刷新1000个symbol（可配置）
-2. 从24_market_tickers表获取update_price_date为空或不为当天的symbol（去重）
+2. 从24_market_tickers表获取update_price_date为空或比当前时间晚1小时更新的symbol（去重）
 3. 分批调用接口刷新价格
 4. open_price使用昨天的日K线收盘价，并更新update_price_date为当天时间
 5. 每小时执行一次（可配置，使用cron表达式）
@@ -466,4 +466,5 @@ if __name__ == "__main__":
     except KeyboardInterrupt:
         logger.info("[PriceRefresh] Interrupted by user")
         sys.exit(0)
+
 

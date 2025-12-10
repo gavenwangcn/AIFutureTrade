@@ -124,6 +124,10 @@ class MarketTickerStream:
         self._client = DerivativesTradingUsdsFutures(
             config_ws_streams=configuration_ws_streams
         )
+        # 连接生命周期管理
+        self._connection_creation_time: Optional[datetime] = None
+        # 最大连接时长：4小时
+        self._MAX_CONNECTION_HOURS = 4
 
     async def _handle_message(self, message: Any) -> None:
         tickers = _extract_tickers(message)
@@ -133,10 +137,23 @@ class MarketTickerStream:
         # 使用优化后的增量插入逻辑
         await asyncio.to_thread(self._db.upsert_market_tickers, normalized)
 
+
+
+    async def _should_reconnect(self) -> bool:
+        """检查是否需要重新连接（4小时到期）"""
+        if not self._connection_creation_time:
+            return False
+        elapsed_hours = (datetime.now(timezone.utc) - self._connection_creation_time).total_seconds() / 3600
+        return elapsed_hours >= self._MAX_CONNECTION_HOURS
+
     async def stream(self, run_seconds: Optional[int] = None) -> None:
         connection = None
         stream = None
         try:
+            # 记录连接创建时间
+            self._connection_creation_time = datetime.now(timezone.utc)
+            logger.info("[MarketStreams] Creating new WebSocket connection")
+            
             connection = await self._client.websocket_streams.create_connection()
             stream = await connection.all_market_tickers_streams()
             stream.on(
@@ -149,6 +166,10 @@ class MarketTickerStream:
                 await stream.unsubscribe()
             else:
                 while True:
+                    # 检查是否需要重新连接（24小时到期）
+                    if await self._should_reconnect():
+                        logger.info("[MarketStreams] Connection reached 4-hour limit, reconnecting...")
+                        break
                     await asyncio.sleep(0.5)
         except asyncio.CancelledError:
             raise
@@ -165,9 +186,37 @@ class MarketTickerStream:
 
 
 async def run_market_ticker_stream(run_seconds: Optional[int] = None) -> None:
+    """Run market ticker stream with automatic reconnection every 4 hours.
+    
+    Args:
+        run_seconds: Optional runtime in seconds before stopping the task.
+    """
     db = ClickHouseDatabase()
-    streamer = MarketTickerStream(db)
-    await streamer.stream(run_seconds=run_seconds)
+    
+    if run_seconds is not None:
+        # If a specific runtime is provided, run once
+        streamer = MarketTickerStream(db)
+        await streamer.stream(run_seconds=run_seconds)
+    else:
+        # Run indefinitely with automatic reconnection every 24 hours
+        start_time = datetime.now(timezone.utc)
+        while True:
+            streamer = MarketTickerStream(db)
+            try:
+                # Stream until connection needs to be refreshed (24 hours)
+                await streamer.stream()
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                logger.exception("[MarketStreams] Stream error, reconnecting...")
+                # Wait a short time before reconnecting to avoid rapid reconnection loops
+                await asyncio.sleep(5)
+            
+            # Check if we've been running for the requested duration
+            if run_seconds and (datetime.now(timezone.utc) - start_time).total_seconds() >= run_seconds:
+                break
+            
+            logger.info("[MarketStreams] Reconnecting to WebSocket...")
 
 
 def _normalize_kline(message_data: Any) -> Optional[Dict[str, Any]]:
