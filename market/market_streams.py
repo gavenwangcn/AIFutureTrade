@@ -16,6 +16,7 @@ from binance_sdk_derivatives_trading_usds_futures.derivatives_trading_usds_futur
     DERIVATIVES_TRADING_USDS_FUTURES_WS_STREAMS_PROD_URL,
     ConfigurationWebSocketStreams,
     DerivativesTradingUsdsFutures,
+    WebsocketMode,
 )
 
 import common.config as app_config
@@ -142,7 +143,10 @@ class MarketTickerStream:
             stream_url=os.getenv(
                 "STREAM_URL",
                 DERIVATIVES_TRADING_USDS_FUTURES_WS_STREAMS_PROD_URL,
-            )
+            ),
+            reconnect_delay=120,
+            mode=WebsocketMode.POOL,
+            pool_size=3
         )
         self._client = DerivativesTradingUsdsFutures(
             config_ws_streams=configuration_ws_streams
@@ -159,7 +163,7 @@ class MarketTickerStream:
         logger.debug("[MarketStreams] Extracted %d tickers from message", len(tickers))
         
         if not tickers:
-            logger.debug("[MarketStreams] No tickers to process")
+            logger.info("[MarketStreams] No tickers to process")
             return
             
         normalized = [_normalize_ticker(ticker) for ticker in tickers]
@@ -172,9 +176,9 @@ class MarketTickerStream:
         
         try:
             # 使用优化后的增量插入逻辑
-            logger.debug("[MarketStreams] Calling upsert_market_tickers for %d symbols", len(normalized))
+            logger.info("[MarketStreams] Calling upsert_market_tickers for %d symbols", len(normalized))
             await asyncio.to_thread(self._db.upsert_market_tickers, normalized)
-            logger.debug("[MarketStreams] Successfully completed upsert_market_tickers")
+            logger.info("[MarketStreams] Successfully completed upsert_market_tickers")
         except Exception as e:
             logger.error("[MarketStreams] Error during upsert_market_tickers: %s", e, exc_info=True)
         
