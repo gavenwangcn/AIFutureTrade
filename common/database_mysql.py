@@ -843,7 +843,14 @@ class MySQLDatabase:
     def upsert_market_tickers(self, rows: Iterable[Dict[str, Any]]) -> None:
         """Upsert市场行情数据（插入或更新）。
         
-        此方法会先查询现有数据，然后根据symbol进行插入或更新操作。
+        优化后的upsert逻辑：
+        1. 先执行UPDATE操作（基于symbol唯一主键）
+        2. 如果UPDATE返回受影响行数为0，说明记录不存在，则执行INSERT
+        3. 单行操作，不使用批量更新，提高效率
+        
+        注意：
+        - 不再需要先查询SELECT，直接尝试UPDATE即可
+        - UPDATE操作会排除open_price和update_price_date字段（这些字段由价格刷新服务管理）
         
         Args:
             rows: 市场行情数据字典的可迭代对象
@@ -852,61 +859,73 @@ class MySQLDatabase:
         if not rows_list:
             return
         
-        # 获取所有symbol
-        symbols = [row.get("symbol") for row in rows_list if row.get("symbol")]
-        if not symbols:
-            return
-        
-        # 获取现有数据
-        existing_data = self.get_existing_symbol_data(symbols)
-        
-        # 分离需要插入和更新的数据
-        to_insert = []
-        to_update = []
-        
-        for row in rows_list:
-            symbol = row.get("symbol")
-            if not symbol:
-                continue
-            
-            existing = existing_data.get(symbol)
-            if existing:
-                # 如果存在且open_price已设置，则更新
-                if existing.get("open_price") is not None:
-                    to_update.append(row)
-                else:
-                    # 如果open_price未设置，则插入新记录
-                    to_insert.append(row)
-            else:
-                # 不存在，插入新记录
-                to_insert.append(row)
-        
-        # 执行插入
-        if to_insert:
-            self.insert_market_tickers(to_insert)
-        
-        # 执行更新（使用INSERT ... ON DUPLICATE KEY UPDATE）
-        if to_update:
-            def _execute_upsert(conn):
-                cursor = conn.cursor()
-                try:
-                    for row in to_update:
-                        normalized = dict(row)
-                        symbol = normalized.get("symbol")
-                        
-                        # 移除open_price和update_price_date（这些字段由价格刷新服务管理）
-                        normalized.pop("open_price", None)
-                        normalized.pop("update_price_date", None)
-                        
-                        # 构建UPDATE语句
-                        update_fields = []
-                        update_values = []
-                        for key, value in normalized.items():
-                            if key != "symbol":
-                                update_fields.append(f"`{key}` = %s")
-                                update_values.append(value)
-                        
-                        sql = f"""
+        def _execute_upsert(conn):
+            cursor = conn.cursor()
+            try:
+                for row in rows_list:
+                    normalized = dict(row)
+                    symbol = normalized.get("symbol")
+                    
+                    if not symbol:
+                        continue
+                    
+                    # 移除open_price和update_price_date（这些字段由价格刷新服务管理）
+                    normalized.pop("open_price", None)
+                    normalized.pop("update_price_date", None)
+                    
+                    # 数据标准化处理
+                    normalized["event_time"] = _to_datetime(normalized.get("event_time"))
+                    normalized["stats_open_time"] = _to_datetime(normalized.get("stats_open_time"))
+                    normalized["stats_close_time"] = _to_datetime(normalized.get("stats_close_time"))
+                    
+                    # 确保所有DOUBLE字段不为None，使用0.0作为默认值
+                    float_fields = [
+                        "price_change", "price_change_percent", "average_price", "last_price",
+                        "last_trade_volume", "high_price", "low_price",
+                        "base_volume", "quote_volume"
+                    ]
+                    for field in float_fields:
+                        if normalized.get(field) is None:
+                            normalized[field] = 0.0
+                    
+                    # 确保所有BIGINT字段不为None，使用0作为默认值
+                    int_fields = ["first_trade_id", "last_trade_id", "trade_count"]
+                    for field in int_fields:
+                        if normalized.get(field) is None:
+                            normalized[field] = 0
+                    
+                    # 确保所有String字段不为None，使用空字符串作为默认值
+                    string_fields = ["side", "change_percent_text"]
+                    for field in string_fields:
+                        if normalized.get(field) is None:
+                            normalized[field] = ""
+                    
+                    # 先尝试UPDATE操作（基于symbol唯一主键）
+                    update_fields = []
+                    update_values = []
+                    for key, value in normalized.items():
+                        if key != "symbol":
+                            update_fields.append(f"`{key}` = %s")
+                            update_values.append(value)
+                    
+                    # 构建UPDATE SQL语句
+                    update_sql = f"""
+                    UPDATE `{self.market_ticker_table}`
+                    SET {', '.join(update_fields)}
+                    WHERE `symbol` = %s
+                    """
+                    
+                    # 执行UPDATE，参数顺序：更新字段值 + symbol
+                    update_params = tuple(update_values) + (symbol,)
+                    cursor.execute(update_sql, update_params)
+                    
+                    # 检查UPDATE受影响的行数
+                    affected_rows = cursor.rowcount
+                    
+                    # 如果UPDATE没有更新任何行（affected_rows == 0），说明记录不存在，执行INSERT
+                    if affected_rows == 0:
+                        # 构建INSERT SQL语句
+                        insert_sql = f"""
                         INSERT INTO `{self.market_ticker_table}` 
                         (`symbol`, `event_time`, `price_change`, `price_change_percent`, 
                          `side`, `change_percent_text`, `average_price`, `last_price`, 
@@ -914,13 +933,11 @@ class MySQLDatabase:
                          `quote_volume`, `stats_open_time`, `stats_close_time`, 
                          `first_trade_id`, `last_trade_id`, `trade_count`)
                         VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                        ON DUPLICATE KEY UPDATE
-                        {', '.join(update_fields)}
                         """
                         
-                        values = [
-                            normalized.get("symbol"),
-                            _to_datetime(normalized.get("event_time")),
+                        insert_params = (
+                            symbol,
+                            normalized.get("event_time"),
                             normalized.get("price_change", 0.0),
                             normalized.get("price_change_percent", 0.0),
                             normalized.get("side", ""),
@@ -932,18 +949,21 @@ class MySQLDatabase:
                             normalized.get("low_price", 0.0),
                             normalized.get("base_volume", 0.0),
                             normalized.get("quote_volume", 0.0),
-                            _to_datetime(normalized.get("stats_open_time")),
-                            _to_datetime(normalized.get("stats_close_time")),
+                            normalized.get("stats_open_time"),
+                            normalized.get("stats_close_time"),
                             normalized.get("first_trade_id", 0),
                             normalized.get("last_trade_id", 0),
                             normalized.get("trade_count", 0),
-                        ] + update_values
+                        )
                         
-                        cursor.execute(sql, values)
-                finally:
-                    cursor.close()
-            
-            self._with_connection(_execute_upsert)
+                        cursor.execute(insert_sql, insert_params)
+                        logger.debug(f"[MySQL] Inserted new market ticker: {symbol}")
+                    else:
+                        logger.debug(f"[MySQL] Updated market ticker: {symbol} (affected rows: {affected_rows})")
+            finally:
+                cursor.close()
+        
+        self._with_connection(_execute_upsert)
 
     def update_open_price(self, symbol: str, open_price: float, update_date: datetime) -> bool:
         """更新指定交易对的开盘价和更新日期。
