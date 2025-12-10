@@ -124,22 +124,43 @@ class MySQLConnectionPool:
         if not conn:
             return False
         
+        # 检查连接对象是否有必要的属性（基本有效性检查）
+        if not hasattr(conn, 'ping') or not hasattr(conn, '_sock'):
+            return False
+        
+        # 检查 socket 是否已关闭
+        try:
+            if conn._sock is None:
+                return False
+        except (AttributeError, OSError):
+            return False
+        
         try:
             # 使用ping方法检查连接是否活跃
             conn.ping(reconnect=False)
             return True
+        except (AttributeError, OSError, TypeError) as e:
+            # 连接对象已损坏或已关闭
+            error_type = type(e).__name__
+            error_msg = str(e)
+            logger.debug(
+                f"[MySQL] Connection health check failed (connection may be closed): "
+                f"{error_type}: {error_msg}"
+            )
+            return False
         except Exception as e:
             error_type = type(e).__name__
             error_msg = str(e)
             is_network_error = any(keyword in error_msg.lower() for keyword in [
-                'connection', 'broken', 'lost', 'timeout', 'reset', 'gone away'
+                'connection', 'broken', 'lost', 'timeout', 'reset', 'gone away',
+                'bad file descriptor', 'settimeout'
             ]) or any(keyword in error_type.lower() for keyword in [
-                'connection', 'timeout', 'operationalerror'
+                'connection', 'timeout', 'operationalerror', 'attributeerror', 'oserror'
             ])
             
             if is_network_error:
-                logger.warning(
-                    f"[MySQL] Connection health check detected network error: "
+                logger.debug(
+                    f"[MySQL] Connection health check detected error: "
                     f"{error_type}: {error_msg}"
                 )
             else:
@@ -163,9 +184,12 @@ class MySQLConnectionPool:
             
             # 检查连接是否健康，如果不健康则关闭并创建新连接
             if not self._is_connection_healthy(conn):
-                logger.warning(f"[MySQL] Connection from pool is unhealthy, closing and creating new one")
+                logger.debug(f"[MySQL] Connection from pool is unhealthy, closing and creating new one")
                 try:
                     conn.close()
+                except (AttributeError, OSError, TypeError) as close_error:
+                    # 连接可能已经关闭或损坏，忽略错误
+                    logger.debug(f"[MySQL] Error closing unhealthy connection (may already be closed): {close_error}")
                 except Exception as close_error:
                     logger.debug(f"[MySQL] Error closing unhealthy connection: {close_error}")
                 with self._lock:
@@ -191,9 +215,12 @@ class MySQLConnectionPool:
                 conn = self._pool.get(timeout=timeout)
                 # 再次检查连接健康
                 if conn and not self._is_connection_healthy(conn):
-                    logger.warning(f"[MySQL] Connection from pool is unhealthy after waiting")
+                    logger.debug(f"[MySQL] Connection from pool is unhealthy after waiting")
                     try:
                         conn.close()
+                    except (AttributeError, OSError, TypeError) as close_error:
+                        # 连接可能已经关闭或损坏，忽略错误
+                        logger.debug(f"[MySQL] Error closing unhealthy connection (may already be closed): {close_error}")
                     except Exception as close_error:
                         logger.debug(f"[MySQL] Error closing unhealthy connection: {close_error}")
                     with self._lock:
@@ -215,14 +242,64 @@ class MySQLConnectionPool:
         if not conn:
             return
         
+        # 检查连接是否已关闭或损坏
+        try:
+            # 检查连接对象是否有必要的属性
+            if not hasattr(conn, 'rollback') or not hasattr(conn, '_sock'):
+                logger.debug("[MySQL] Connection object is invalid, skipping release")
+                with self._lock:
+                    if self._current_connections > 0:
+                        self._current_connections -= 1
+                return
+            
+            # 检查 socket 是否已关闭
+            if conn._sock is None:
+                logger.debug("[MySQL] Connection socket is closed, skipping release")
+                with self._lock:
+                    if self._current_connections > 0:
+                        self._current_connections -= 1
+                return
+        except (AttributeError, OSError) as e:
+            logger.debug(f"[MySQL] Connection check failed, skipping release: {e}")
+            with self._lock:
+                if self._current_connections > 0:
+                    self._current_connections -= 1
+            return
+        
         try:
             # 回滚未提交的事务
-            conn.rollback()
+            try:
+                conn.rollback()
+            except (AttributeError, OSError, TypeError) as rollback_error:
+                # 连接已关闭或损坏，不能回滚
+                logger.debug(f"[MySQL] Failed to rollback connection: {rollback_error}")
+                # 不将损坏的连接放回池中
+                try:
+                    conn.close()
+                except Exception:
+                    pass
+                with self._lock:
+                    if self._current_connections > 0:
+                        self._current_connections -= 1
+                return
+            
             # 直接将连接放回池中，健康检查在 acquire() 时进行
             self._pool.put(conn)
             logger.debug(f"[MySQL] Released connection back to pool")
+        except (AttributeError, OSError, TypeError) as e:
+            # 连接已关闭或损坏，不能放回池中
+            error_msg = str(e)
+            if 'bad file descriptor' not in error_msg.lower():
+                logger.debug(f"[MySQL] Failed to release connection to pool: {e}, closing connection")
+            try:
+                conn.close()
+            except Exception:
+                pass
+            with self._lock:
+                if self._current_connections > 0:
+                    self._current_connections -= 1
         except Exception as e:
-            # 如果放回池中失败（例如池已满），尝试关闭连接
+            # 其他错误（例如池已满）
             logger.warning(f"[MySQL] Failed to release connection to pool: {e}, closing connection")
             try:
                 conn.close()
@@ -439,11 +516,12 @@ class MySQLDatabase:
                 error_msg = str(e)
                 
                 # 判断是否为网络/协议错误，需要重试
+                # 包括 "Packet sequence number wrong" 错误，这通常表示连接状态不一致
                 is_network_error = any(keyword in error_msg.lower() for keyword in [
                     'connection', 'broken', 'lost', 'timeout', 'reset', 'gone away',
-                    'operationalerror', 'interfaceerror'
+                    'operationalerror', 'interfaceerror', 'packet sequence', 'internalerror'
                 ]) or any(keyword in error_type.lower() for keyword in [
-                    'connection', 'timeout', 'operationalerror', 'interfaceerror'
+                    'connection', 'timeout', 'operationalerror', 'interfaceerror', 'internalerror'
                 ])
                 
                 # 如果已获取连接，需要处理连接（关闭或释放）
@@ -615,7 +693,16 @@ class MySQLDatabase:
                         AND table_name = %s
                     """, (table_name,))
                     result = cursor.fetchone()
-                    return result[0] > 0 if result else False
+                    if result is None:
+                        return False
+                    elif isinstance(result, dict):
+                        # 字典格式游标，获取第一个值
+                        return list(result.values())[0] > 0 if result else False
+                    elif isinstance(result, (list, tuple)):
+                        # 元组格式游标
+                        return result[0] > 0 if len(result) > 0 else False
+                    else:
+                        return int(result) > 0 if result else False
                 finally:
                     cursor.close()
             except Exception as e:
@@ -896,9 +983,10 @@ class MySQLDatabase:
             return
         
         def _execute_upsert(conn):
-            cursor = conn.cursor()
-            try:
-                for row in rows_list:
+            # 为每个操作创建新的游标，避免连接状态不一致
+            for row in rows_list:
+                cursor = None
+                try:
                     normalized = dict(row)
                     symbol = normalized.get("symbol")
                     
@@ -947,6 +1035,9 @@ class MySQLDatabase:
                     for field in string_fields:
                         if normalized.get(field) is None:
                             normalized[field] = ""
+                    
+                    # 为每个操作创建新的游标
+                    cursor = conn.cursor()
                     
                     # 先尝试UPDATE操作（基于symbol唯一主键）
                     update_fields = []
@@ -1008,8 +1099,25 @@ class MySQLDatabase:
                         logger.debug(f"[MySQL] Inserted new market ticker: {symbol}")
                     else:
                         logger.debug(f"[MySQL] Updated market ticker: {symbol} (affected rows: {affected_rows})")
-            finally:
-                cursor.close()
+                    
+                    # 立即关闭游标，释放资源
+                    cursor.close()
+                    cursor = None
+                    
+                except Exception as e:
+                    # 记录错误但继续处理下一条记录
+                    logger.warning(
+                        "[MySQL] Failed to upsert market ticker for symbol %s: %s",
+                        symbol if 'symbol' in locals() else 'unknown', e
+                    )
+                    # 确保游标被关闭
+                    if cursor:
+                        try:
+                            cursor.close()
+                        except Exception:
+                            pass
+                    # 继续处理下一条记录
+                    continue
         
         self._with_connection(_execute_upsert)
 
@@ -1037,6 +1145,56 @@ class MySQLDatabase:
         except Exception as e:
             logger.error("[MySQL] Failed to update open price for %s: %s", symbol, e)
             return False
+    
+    def get_symbols_needing_price_refresh(self) -> List[str]:
+        """获取需要刷新价格的symbol列表。
+        
+        刷新逻辑：
+        - 获取 update_price_date 为空或比当前时间早1小时以上的 symbol（去重）
+        - 返回去重后的 symbol 列表
+        
+        Returns:
+            需要刷新价格的 symbol 列表
+        """
+        try:
+            # 计算1小时前的时间
+            one_hour_ago = datetime.now(timezone.utc) - timedelta(hours=1)
+            
+            sql = f"""
+            SELECT DISTINCT `symbol`
+            FROM `{self.market_ticker_table}`
+            WHERE `update_price_date` IS NULL 
+               OR `update_price_date` < %s
+            ORDER BY `symbol`
+            """
+            
+            def _execute_query(conn):
+                cursor = conn.cursor()
+                try:
+                    cursor.execute(sql, (one_hour_ago,))
+                    rows = cursor.fetchall()
+                    # 处理返回结果（可能是元组或字典）
+                    symbols = []
+                    for row in rows:
+                        if isinstance(row, dict):
+                            symbols.append(row['symbol'])
+                        elif isinstance(row, (list, tuple)):
+                            symbols.append(row[0])
+                        else:
+                            symbols.append(str(row))
+                    return symbols
+                finally:
+                    cursor.close()
+            
+            symbols = self._with_connection(_execute_query)
+            logger.debug(
+                "[MySQL] Found %s symbols needing price refresh (update_price_date is NULL or older than 1 hour)",
+                len(symbols)
+            )
+            return symbols if symbols else []
+        except Exception as e:
+            logger.error("[MySQL] Failed to get symbols needing price refresh: %s", e)
+            return []
 
     # ==================================================================
     # Leaderboard 模块：表管理
@@ -1280,7 +1438,19 @@ class MySQLDatabase:
                         SELECT COUNT(*) FROM `{self.leaderboard_table}`
                         WHERE event_time < %s
                     """, (cutoff_time,))
-                    count_before = cursor.fetchone()[0] if cursor.rowcount > 0 else 0
+                    
+                    # 正确处理 fetchone() 的返回值（可能是元组、字典或 None）
+                    row = cursor.fetchone()
+                    if row is None:
+                        count_before = 0
+                    elif isinstance(row, dict):
+                        # 字典格式游标
+                        count_before = row.get('COUNT(*)', 0) or row.get(list(row.keys())[0], 0)
+                    elif isinstance(row, (list, tuple)):
+                        # 元组格式游标
+                        count_before = row[0] if len(row) > 0 else 0
+                    else:
+                        count_before = int(row) if row else 0
                     
                     # 执行删除
                     cursor.execute(f"""
