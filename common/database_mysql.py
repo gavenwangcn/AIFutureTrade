@@ -4,7 +4,7 @@ from __future__ import annotations
 import logging
 import threading
 import time
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from queue import Queue, Empty
 from typing import Any, Dict, Iterable, List, Optional, Callable, Tuple
 import pymysql
@@ -343,23 +343,36 @@ class MySQLConnectionPool:
 
 
 def _to_datetime(value: Any) -> Optional[datetime]:
-    """Convert various datetime formats to datetime object.
+    """Convert various datetime formats to naive datetime object (consistent with ingestion_time format).
     
     Args:
         value: Input value (datetime, timestamp, string, etc.)
         
     Returns:
-        datetime object or None
+        naive datetime object (without timezone) or None, consistent with ingestion_time format
         
     Note:
         - Handles both Unix timestamps (seconds) and millisecond timestamps
         - Binance WebSocket returns millisecond timestamps (13 digits)
         - Invalid or out-of-range timestamps return None
+        - All datetime objects are converted to naive datetime (no timezone) to match ingestion_time format
+        - If input datetime has timezone info, it's converted to UTC first, then timezone is removed
     """
     if value is None:
         return None
+    
     if isinstance(value, datetime):
-        return value
+        # 如果已经是 datetime 对象，确保转换为 naive datetime（不带时区）
+        # 与 ingestion_time 格式保持一致
+        if value.tzinfo is not None:
+            # 如果有时区信息，先转换为 UTC，然后移除时区信息
+            # 使用 UTC 作为标准，确保时间一致性
+            utc_value = value.astimezone(timezone.utc)
+            return utc_value.replace(tzinfo=None)
+        else:
+            # 如果没有时区信息，直接返回（已经是 naive datetime）
+            return value
+    
     if isinstance(value, (int, float)):
         # Handle timestamp (could be seconds or milliseconds)
         timestamp = float(value)
@@ -388,6 +401,8 @@ def _to_datetime(value: Any) -> Optional[datetime]:
             timestamp = timestamp / 1000.0
         
         try:
+            # datetime.fromtimestamp() 返回本地时间的 naive datetime
+            # 为了与 ingestion_time 保持一致，使用相同的方式
             return datetime.fromtimestamp(timestamp)
         except (ValueError, OSError) as e:
             logger.warning("[MySQL] Failed to convert timestamp %s to datetime: %s", value, e)
@@ -397,10 +412,15 @@ def _to_datetime(value: Any) -> Optional[datetime]:
         # Try to parse string
         try:
             # Try ISO format first
-            return datetime.fromisoformat(value.replace('Z', '+00:00'))
+            dt = datetime.fromisoformat(value.replace('Z', '+00:00'))
+            # 如果解析出的 datetime 有时区信息，转换为 UTC 后移除时区
+            if dt.tzinfo is not None:
+                utc_dt = dt.astimezone(timezone.utc)
+                return utc_dt.replace(tzinfo=None)
+            return dt
         except ValueError:
             try:
-                # Try common formats
+                # Try common formats (这些格式都是 naive datetime)
                 for fmt in ['%Y-%m-%d %H:%M:%S', '%Y-%m-%dT%H:%M:%S', '%Y-%m-%d']:
                     try:
                         return datetime.strptime(value, fmt)
@@ -1178,11 +1198,17 @@ class MySQLDatabase:
                             logger.debug("[MySQL] Set %s.%s to empty string (was None)", symbol, field)
                     
                     # DateTime字段处理：确保所有非Nullable的DateTime字段都不为None
+                    # 所有时间字段都使用与 ingestion_time 相同的格式（naive datetime，不带时区）
                     datetime_fields = ["event_time", "stats_open_time", "stats_close_time"]
                     for field in datetime_fields:
-                        if normalized.get(field) is None:
+                        field_value = normalized.get(field)
+                        if field_value is None:
                             normalized[field] = datetime.now()
                             logger.debug("[MySQL] 设置%s.%s为当前时间(原值为None)", symbol, field)
+                        elif isinstance(field_value, datetime) and field_value.tzinfo is not None:
+                            # 如果有时区信息，转换为 UTC 后移除时区（与 ingestion_time 格式一致）
+                            normalized[field] = field_value.astimezone(timezone.utc).replace(tzinfo=None)
+                            logger.debug("[MySQL] 转换%s.%s为naive datetime（移除时区信息，与ingestion_time格式一致）", symbol, field)
                     
                     # 如果 event_time 无效，跳过这条记录（event_time 是必需字段）
                     if normalized.get("event_time") is None:
@@ -1304,17 +1330,38 @@ class MySQLDatabase:
                             insert_normalized["update_price_date"] = None
                         
                         # 确保日期时间字段格式正确（再次验证）
+                        # 所有时间字段都使用与 ingestion_time 相同的格式（naive datetime，不带时区）
                         if insert_normalized.get("event_time") is None:
                             insert_normalized["event_time"] = datetime.now()
                             logger.debug("[MySQL] INSERT时设置%s的event_time为当前时间（原值为None）", symbol)
+                        else:
+                            # 确保 event_time 是 naive datetime（与 ingestion_time 格式一致）
+                            event_time = insert_normalized.get("event_time")
+                            if isinstance(event_time, datetime) and event_time.tzinfo is not None:
+                                insert_normalized["event_time"] = event_time.astimezone(timezone.utc).replace(tzinfo=None)
+                                logger.debug("[MySQL] INSERT时转换%s的event_time为naive datetime（移除时区信息）", symbol)
+                        
                         if insert_normalized.get("stats_open_time") is None:
                             insert_normalized["stats_open_time"] = datetime.now()
                             logger.debug("[MySQL] INSERT时设置%s的stats_open_time为当前时间（原值为None）", symbol)
+                        else:
+                            # 确保 stats_open_time 是 naive datetime（与 ingestion_time 格式一致）
+                            stats_open_time = insert_normalized.get("stats_open_time")
+                            if isinstance(stats_open_time, datetime) and stats_open_time.tzinfo is not None:
+                                insert_normalized["stats_open_time"] = stats_open_time.astimezone(timezone.utc).replace(tzinfo=None)
+                                logger.debug("[MySQL] INSERT时转换%s的stats_open_time为naive datetime（移除时区信息）", symbol)
+                        
                         if insert_normalized.get("stats_close_time") is None:
                             insert_normalized["stats_close_time"] = datetime.now()
                             logger.debug("[MySQL] INSERT时设置%s的stats_close_time为当前时间（原值为None）", symbol)
+                        else:
+                            # 确保 stats_close_time 是 naive datetime（与 ingestion_time 格式一致）
+                            stats_close_time = insert_normalized.get("stats_close_time")
+                            if isinstance(stats_close_time, datetime) and stats_close_time.tzinfo is not None:
+                                insert_normalized["stats_close_time"] = stats_close_time.astimezone(timezone.utc).replace(tzinfo=None)
+                                logger.debug("[MySQL] INSERT时转换%s的stats_close_time为naive datetime（移除时区信息）", symbol)
                         
-                        # 设置ingestion_time为当前时间：记录数据插入时间
+                        # 设置ingestion_time为当前时间：记录数据插入时间（naive datetime，不带时区）
                         insert_normalized["ingestion_time"] = datetime.now()
                         
                         # 构建INSERT SQL语句
