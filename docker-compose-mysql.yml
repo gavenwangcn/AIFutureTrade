@@ -11,7 +11,7 @@
 # ==============================================================================
 # 初始化说明：
 # - MySQL服务配置为可以外网访问（绑定到0.0.0.0）
-# - 端口3306映射到主机的3306端口
+# - 端口3306映射到主机的32123端口
 # - 数据持久化存储在mysql_data卷中
 # - 首次启动时会自动执行 /mysql/scripts/init-database.sh 脚本
 # - 脚本会配置所有用户使用 mysql_native_password 认证插件
@@ -40,7 +40,8 @@ services:
     container_name: aifuturetrade-mysql
     ports:
       # 绑定到0.0.0.0，允许外网访问
-      - "0.0.0.0:3306:3306"
+      # 主机端口32123映射到容器端口3306
+      - "0.0.0.0:32123:3306"
     environment:
       - MYSQL_ROOT_PASSWORD=aifuturetrade_root123
       - MYSQL_DATABASE=aifuturetrade

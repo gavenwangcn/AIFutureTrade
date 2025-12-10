@@ -41,8 +41,8 @@ services:
       - GUNICORN_KEEPALIVE=${GUNICORN_KEEPALIVE}
       - GUNICORN_MAX_REQUESTS=${GUNICORN_MAX_REQUESTS}
       # MySQL配置
-      - MYSQL_HOST=mysql
-      - MYSQL_PORT=3306
+      - MYSQL_HOST=193.134.209.95
+      - MYSQL_PORT=32123
       - MYSQL_USER=aifuturetrade
       - MYSQL_PASSWORD=aifuturetrade123
       - MYSQL_DATABASE=aifuturetrade
