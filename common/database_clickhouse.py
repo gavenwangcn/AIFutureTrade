@@ -493,8 +493,29 @@ class ClickHouseDatabase:
         """
         def _execute_command(client):
             if params:
-                # 使用参数化查询
-                return client.command(sql, params=params)
+                # 由于ClickHouse客户端不支持params参数，我们需要手动处理参数
+                # 使用字符串格式化来替换参数
+                formatted_sql = sql
+                for key, value in params.items():
+                    # 处理不同类型的参数
+                    if isinstance(value, str):
+                        # 字符串类型需要添加引号
+                        formatted_sql = formatted_sql.replace(f"%({key})s", f"'{value}'")
+                    elif isinstance(value, (int, float)):
+                        # 数字类型直接替换
+                        formatted_sql = formatted_sql.replace(f"%({key})s", str(value))
+                    elif isinstance(value, datetime):
+                        # 日期时间类型需要转换为字符串
+                        formatted_sql = formatted_sql.replace(f"%({key})s", f"'{value}'")
+                    elif value is None:
+                        # None值替换为NULL
+                        formatted_sql = formatted_sql.replace(f"%({key})s", "NULL")
+                    else:
+                        # 其他类型转换为字符串
+                        formatted_sql = formatted_sql.replace(f"%({key})s", str(value))
+                
+                # 执行格式化后的SQL
+                return client.command(formatted_sql)
             else:
                 # 直接执行SQL
                 return client.command(sql)
@@ -513,8 +534,29 @@ class ClickHouseDatabase:
         """
         def _execute_query(client):
             if params:
-                # 使用参数化查询
-                result = client.query(sql, params=params)
+                # 由于ClickHouse客户端不支持params参数，我们需要手动处理参数
+                # 使用字符串格式化来替换参数
+                formatted_sql = sql
+                for key, value in params.items():
+                    # 处理不同类型的参数
+                    if isinstance(value, str):
+                        # 字符串类型需要添加引号
+                        formatted_sql = formatted_sql.replace(f"%({key})s", f"'{value}'")
+                    elif isinstance(value, (int, float)):
+                        # 数字类型直接替换
+                        formatted_sql = formatted_sql.replace(f"%({key})s", str(value))
+                    elif isinstance(value, datetime):
+                        # 日期时间类型需要转换为字符串
+                        formatted_sql = formatted_sql.replace(f"%({key})s", f"'{value}'")
+                    elif value is None:
+                        # None值替换为NULL
+                        formatted_sql = formatted_sql.replace(f"%({key})s", "NULL")
+                    else:
+                        # 其他类型转换为字符串
+                        formatted_sql = formatted_sql.replace(f"%({key})s", str(value))
+                
+                # 执行格式化后的SQL
+                result = client.query(formatted_sql)
             else:
                 # 直接执行SQL
                 result = client.query(sql)
