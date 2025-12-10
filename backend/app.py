@@ -313,7 +313,6 @@ def _mysql_leaderboard_loop():
     
     # 获取配置参数，带默认值
     sync_interval = getattr(app_config, 'MYSQL_LEADERBOARD_SYNC_INTERVAL', 2)
-    time_window = getattr(app_config, 'MYSQL_LEADERBOARD_TIME_WINDOW', 5)  # 已废弃，保留以兼容
     top_n = getattr(app_config, 'MYSQL_LEADERBOARD_TOP_N', 10)
     
     logger.info(f"[MySQL Leaderboard Worker-{thread_id}] MySQL 涨幅榜同步循环启动，同步间隔: {sync_interval} 秒，前N名数量: {top_n}")

@@ -23,47 +23,20 @@ MYSQL_USER = os.getenv('MYSQL_USER', 'aifuturetrade')
 MYSQL_PASSWORD = os.getenv('MYSQL_PASSWORD', 'aifuturetrade123')
 MYSQL_DATABASE = os.getenv('MYSQL_DATABASE', 'aifuturetrade')
 
-# MySQL连接超时配置（秒）
-MYSQL_CONNECT_TIMEOUT = int(os.getenv('MYSQL_CONNECT_TIMEOUT', '30'))  # 连接超时，默认30秒
-MYSQL_READ_TIMEOUT = int(os.getenv('MYSQL_READ_TIMEOUT', '120'))  # 读取超时，默认120秒（2分钟）
-MYSQL_WRITE_TIMEOUT = int(os.getenv('MYSQL_WRITE_TIMEOUT', '120'))  # 写入超时，默认120秒（2分钟）
+# 注意：MySQL连接超时配置已移除，PyMySQL使用默认超时设置
+# 如需自定义超时，可在创建连接时通过 pymysql.connect() 的 connect_timeout 参数设置
 
 # MySQL表名配置
 MYSQL_MARKET_TICKER_TABLE = os.getenv('MYSQL_MARKET_TICKER_TABLE', '24_market_tickers')
 MYSQL_LEADERBOARD_TABLE = os.getenv('MYSQL_LEADERBOARD_TABLE', 'futures_leaderboard')
 MYSQL_MARKET_KLINES_TABLE = os.getenv('MYSQL_MARKET_KLINES_TABLE', 'market_klines')
 
-# ============ ClickHouse Configuration (保留以兼容旧代码) ============
-CLICKHOUSE_HOST = os.getenv('CLICKHOUSE_HOST', '193.134.209.95')
-CLICKHOUSE_PORT = int(os.getenv('CLICKHOUSE_PORT', '32123'))
-CLICKHOUSE_USER = os.getenv('CLICKHOUSE_USER', 'default')
-CLICKHOUSE_PASSWORD = os.getenv('CLICKHOUSE_PASSWORD', 'di88fg2k')
-CLICKHOUSE_DATABASE = os.getenv('CLICKHOUSE_DATABASE', 'default')
-CLICKHOUSE_SECURE = os.getenv('CLICKHOUSE_SECURE', '0').lower() in {'1', 'true', 'yes'}
-
-# ClickHouse连接超时配置（秒）
-CLICKHOUSE_CONNECT_TIMEOUT = int(os.getenv('CLICKHOUSE_CONNECT_TIMEOUT', '30'))  # 连接超时，默认30秒
-CLICKHOUSE_SEND_RECEIVE_TIMEOUT = int(os.getenv('CLICKHOUSE_SEND_RECEIVE_TIMEOUT', '120'))  # 发送/接收超时，默认120秒（2分钟）
-CLICKHOUSE_MAX_EXECUTION_TIME = int(os.getenv('CLICKHOUSE_MAX_EXECUTION_TIME', '120'))  # 查询执行超时，默认120秒（2分钟）
-
-# ClickHouse表名配置
-CLICKHOUSE_MARKET_TICKER_TABLE = os.getenv('CLICKHOUSE_MARKET_TICKER_TABLE', '24_market_tickers')
-CLICKHOUSE_LEADERBOARD_TABLE = os.getenv('CLICKHOUSE_LEADERBOARD_TABLE', 'futures_leaderboard')
-CLICKHOUSE_MARKET_KLINES_TABLE = os.getenv('CLICKHOUSE_MARKET_KLINES_TABLE', 'market_klines')
-
 # MySQL涨幅榜同步配置
-MYSQL_LEADERBOARD_SYNC_INTERVAL = int(os.getenv('MYSQL_LEADERBOARD_SYNC_INTERVAL', os.getenv('CLICKHOUSE_LEADERBOARD_SYNC_INTERVAL', '2')))  # 秒
-MYSQL_LEADERBOARD_TIME_WINDOW = int(os.getenv('MYSQL_LEADERBOARD_TIME_WINDOW', os.getenv('CLICKHOUSE_LEADERBOARD_TIME_WINDOW', '2')))  # 秒，查询时间窗口
-MYSQL_LEADERBOARD_TOP_N = int(os.getenv('MYSQL_LEADERBOARD_TOP_N', os.getenv('CLICKHOUSE_LEADERBOARD_TOP_N', '10')))  # 涨幅/跌幅前N名
-MYSQL_LEADERBOARD_CLEANUP_INTERVAL_MINUTES = int(os.getenv('MYSQL_LEADERBOARD_CLEANUP_INTERVAL_MINUTES', os.getenv('CLICKHOUSE_LEADERBOARD_CLEANUP_INTERVAL_MINUTES', '2')))  # 涨跌榜清理执行频率（分钟）
-MYSQL_LEADERBOARD_RETENTION_MINUTES = int(os.getenv('MYSQL_LEADERBOARD_RETENTION_MINUTES', os.getenv('CLICKHOUSE_LEADERBOARD_RETENTION_MINUTES', '5')))  # 保留最近N分钟内的涨跌榜批次
-
-# ClickHouse涨幅榜同步配置（保留以兼容旧代码）
-CLICKHOUSE_LEADERBOARD_SYNC_INTERVAL = int(os.getenv('CLICKHOUSE_LEADERBOARD_SYNC_INTERVAL', '2'))  # 秒
-CLICKHOUSE_LEADERBOARD_TIME_WINDOW = int(os.getenv('CLICKHOUSE_LEADERBOARD_TIME_WINDOW', '2'))  # 秒，查询时间窗口
-CLICKHOUSE_LEADERBOARD_TOP_N = int(os.getenv('CLICKHOUSE_LEADERBOARD_TOP_N', '10'))  # 涨幅/跌幅前N名
-CLICKHOUSE_LEADERBOARD_CLEANUP_INTERVAL_MINUTES = int(os.getenv('CLICKHOUSE_LEADERBOARD_CLEANUP_INTERVAL_MINUTES', '2'))  # 涨跌榜清理执行频率（分钟）
-CLICKHOUSE_LEADERBOARD_RETENTION_MINUTES = int(os.getenv('CLICKHOUSE_LEADERBOARD_RETENTION_MINUTES', '5'))  # 保留最近N分钟内的涨跌榜批次
+MYSQL_LEADERBOARD_SYNC_INTERVAL = int(os.getenv('MYSQL_LEADERBOARD_SYNC_INTERVAL', '2'))  # 秒
+# MYSQL_LEADERBOARD_TIME_WINDOW - 已废弃，不再使用
+MYSQL_LEADERBOARD_TOP_N = int(os.getenv('MYSQL_LEADERBOARD_TOP_N', '10'))  # 涨幅/跌幅前N名
+MYSQL_LEADERBOARD_CLEANUP_INTERVAL_MINUTES = int(os.getenv('MYSQL_LEADERBOARD_CLEANUP_INTERVAL_MINUTES', '2'))  # 涨跌榜清理执行频率（分钟）
+MYSQL_LEADERBOARD_RETENTION_MINUTES = int(os.getenv('MYSQL_LEADERBOARD_RETENTION_MINUTES', '5'))  # 保留最近N分钟内的涨跌榜批次
 
 # ============ K线同步配置 ============
 KLINE_SYNC_CHECK_INTERVAL = int(os.getenv('KLINE_SYNC_CHECK_INTERVAL', '10'))  # 秒，K线WebSocket巡检间隔
@@ -110,11 +83,8 @@ PRICE_REFRESH_MAX_PER_MINUTE = int(os.getenv('PRICE_REFRESH_MAX_PER_MINUTE', '10
 # ============ Trading配置 ============
 AUTO_TRADING = True
 TRADING_INTERVAL = 5  # seconds
-
-# ============ 前端刷新配置 ============
-MARKET_REFRESH = 2000  # ms - align with futures indicator frequency
-PORTFOLIO_REFRESH = 10000  # ms
 TRADE_FEE_RATE = 0.001  # 交易费率：0.1%（双向收费）
+# 注意：MARKET_REFRESH 和 PORTFOLIO_REFRESH 已移除，前端刷新配置在前端代码中管理
 
 # ============ AI交易决策配置 ============
 PROMPT_MARKET_SYMBOL_LIMIT = 5  # 每次调用AI模型时处理的合约数量
@@ -140,9 +110,9 @@ BINANCE_TESTNET = os.getenv('BINANCE_TESTNET', '0').lower() in {'1', 'true', 'ye
 # Binance期货市场数据配置
 FUTURES_TOP_GAINERS_LIMIT = 10
 FUTURES_TOP_GAINERS_REFRESH = 30  # seconds, can be adjusted per deployment needs
-FUTURES_INDICATOR_REFRESH = 2  # seconds
 FUTURES_KLINE_LIMIT = 300
 FUTURES_LEADERBOARD_REFRESH = 5  # seconds - 前端轮询刷新间隔（涨跌幅榜）
+# 注意：FUTURES_INDICATOR_REFRESH 已移除，未在代码中使用
 
 # K线数据获取配置
 KLINE_DATA_SOURCE = os.getenv('KLINE_DATA_SOURCE', 'sdk').lower()  # 数据源: 'sdk' 或 'db'

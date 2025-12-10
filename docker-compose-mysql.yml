@@ -1,0 +1,99 @@
+# ==============================================================================
+# Docker Compose 配置文件 - MySQL 数据库服务（独立服务）
+# ==============================================================================
+# 使用说明：
+# 1. 首次安装：docker-compose -f docker-compose-mysql.yml up -d
+#    - 会自动创建数据库和用户
+#    - 会自动配置认证插件为 mysql_native_password
+#    - 会自动应用高性能配置
+# 2. 停止MySQL服务：docker-compose -f docker-compose-mysql.yml down
+# 3. 查看MySQL日志：docker-compose -f docker-compose-mysql.yml logs -f mysql
+# ==============================================================================
+# 初始化说明：
+# - MySQL服务配置为可以外网访问（绑定到0.0.0.0）
+# - 端口3306映射到主机的3306端口
+# - 数据持久化存储在mysql_data卷中
+# - 首次启动时会自动执行 /mysql/scripts/init-database.sh 脚本
+# - 脚本会配置所有用户使用 mysql_native_password 认证插件
+# - 高性能配置从 /mysql/config/my.cnf 自动加载
+# ==============================================================================
+# 目录结构要求（Linux服务器）：
+# /mysql/
+#   ├── config/
+#   │   └── my.cnf                    # MySQL高性能配置文件
+#   └── scripts/
+#       ├── init-database.sh          # 数据库初始化脚本（必需）
+#       └── init-auth-plugin.sql      # 认证插件SQL脚本（可选，参考用）
+# ==============================================================================
+# 重要提示：
+# - 如果数据卷已存在，初始化脚本不会再次执行
+# - 如需重新初始化，请先删除数据卷：docker volume rm aifuturetrade_mysql_data
+# - 然后重新启动：docker-compose -f docker-compose-mysql.yml up -d
+# ==============================================================================
+
+services:
+  # ============================================================================
+  # MySQL数据库服务
+  # ============================================================================
+  mysql:
+    image: mysql:8.0
+    container_name: aifuturetrade-mysql
+    ports:
+      # 绑定到0.0.0.0，允许外网访问
+      - "0.0.0.0:3306:3306"
+    environment:
+      - MYSQL_ROOT_PASSWORD=aifuturetrade_root123
+      - MYSQL_DATABASE=aifuturetrade
+      - MYSQL_USER=aifuturetrade
+      - MYSQL_PASSWORD=aifuturetrade123
+    volumes:
+      - mysql_data:/var/lib/mysql
+      # 挂载高性能配置文件（从Linux固定目录 /mysql/config/）
+      # 注意：需要确保 /mysql/config/my.cnf 文件存在
+      - /mysql/config/my.cnf:/etc/mysql/conf.d/my.cnf:ro
+      # 挂载初始化脚本（首次启动时自动执行）
+      # 注意：MySQL 官方镜像会按字母顺序执行 /docker-entrypoint-initdb.d/ 目录下的所有脚本
+      # 使用 shell 脚本确保在 MySQL 完全启动后执行，更可靠
+      # 需要确保 /mysql/scripts/init-database.sh 文件存在且具有执行权限
+      - /mysql/scripts/init-database.sh:/docker-entrypoint-initdb.d/01-init-database.sh:ro
+      # 挂载日志目录（可选，用于日志持久化）
+      - mysql_logs:/var/log/mysql
+    # 配置MySQL监听所有网络接口（0.0.0.0），允许外网访问
+    # 注意：性能优化配置在 /mysql/config/my.cnf 文件中
+    command: 
+      - --bind-address=0.0.0.0
+      - --default-authentication-plugin=mysql_native_password
+    # 资源限制（根据服务器配置调整）
+    # 注意：如果使用 Docker Swarm，可以使用 deploy.resources
+    # 对于普通 docker-compose，资源限制需要在启动时通过 docker run 参数设置
+    # 或者使用 ulimits 限制某些资源
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
+    restart: unless-stopped
+    networks:
+      - aifuturetrade-network
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-paifuturetrade_root123"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s  # 启动后30秒内不检查健康状态
+
+# ==============================================================================
+# 网络配置
+# ==============================================================================
+networks:
+  aifuturetrade-network:
+    driver: bridge
+
+# ==============================================================================
+# 数据卷配置
+# ==============================================================================
+volumes:
+  mysql_data:
+    # MySQL数据持久化存储
+  mysql_logs:
+    # MySQL日志持久化存储（可选）
+

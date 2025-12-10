@@ -5,37 +5,17 @@
 # 如果看到警告，可以安全地忽略或移除version字段
 # ==============================================================================
 # 使用说明：
-# 1. 默认启动：docker-compose up -d（启动backend、frontend和async-agent服务）
-# 2. 启动数据服务：docker-compose -f docker-compose-data.yml up -d（启动data-manager和data-agent服务）
-# 3. 启动所有服务：docker-compose up -d && docker-compose -f docker-compose-data.yml up -d
+# 1. 启动MySQL服务：docker-compose -f docker-compose-mysql.yml up -d（必须先启动）
+# 2. 默认启动：docker-compose up -d（启动backend、frontend和async-agent服务）
+# 3. 启动数据服务：docker-compose -f docker-compose-data.yml up -d（启动data-manager和data-agent服务）
+# 4. 启动所有服务：docker-compose -f docker-compose-mysql.yml up -d && docker-compose up -d && docker-compose -f docker-compose-data.yml up -d
+# ==============================================================================
+# 注意：
+# - MySQL服务已拆分到 docker-compose-mysql.yml，需要先启动
+# - 其他服务通过 depends_on 依赖 MySQL 服务，但需要确保 MySQL 服务已启动
 # ==============================================================================
 
 services:
-  # ============================================================================
-  # MySQL数据库服务
-  # ============================================================================
-  mysql:
-    image: mysql:8.0
-    container_name: aifuturetrade-mysql
-    ports:
-      - "3306:3306"
-    environment:
-      - MYSQL_ROOT_PASSWORD=aifuturetrade_root123
-      - MYSQL_DATABASE=aifuturetrade
-      - MYSQL_USER=aifuturetrade
-      - MYSQL_PASSWORD=aifuturetrade123
-    volumes:
-      - mysql_data:/var/lib/mysql
-    command: --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
-    restart: unless-stopped
-    networks:
-      - aifuturetrade-network
-    healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-paifuturetrade_root123"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-
   # ============================================================================
   # 后端服务（Python Flask API）
   # ============================================================================
@@ -66,21 +46,6 @@ services:
       - MYSQL_USER=aifuturetrade
       - MYSQL_PASSWORD=aifuturetrade123
       - MYSQL_DATABASE=aifuturetrade
-      # ClickHouse配置（保留以兼容）
-      - CLICKHOUSE_HOST=${CLICKHOUSE_HOST}
-      - CLICKHOUSE_PORT=${CLICKHOUSE_PORT}
-      - CLICKHOUSE_USER=${CLICKHOUSE_USER}
-      - CLICKHOUSE_PASSWORD=${CLICKHOUSE_PASSWORD}
-      - CLICKHOUSE_DATABASE=${CLICKHOUSE_DATABASE}
-      - CLICKHOUSE_SECURE=${CLICKHOUSE_SECURE}
-      - CLICKHOUSE_MARKET_TICKER_TABLE=${CLICKHOUSE_MARKET_TICKER_TABLE}
-      - CLICKHOUSE_LEADERBOARD_TABLE=${CLICKHOUSE_LEADERBOARD_TABLE}
-      - CLICKHOUSE_LEADERBOARD_SYNC_INTERVAL=${CLICKHOUSE_LEADERBOARD_SYNC_INTERVAL}
-      - CLICKHOUSE_LEADERBOARD_TIME_WINDOW=${CLICKHOUSE_LEADERBOARD_TIME_WINDOW}
-      - CLICKHOUSE_LEADERBOARD_TOP_N=${CLICKHOUSE_LEADERBOARD_TOP_N}
-      - CLICKHOUSE_LEADERBOARD_CLEANUP_INTERVAL_MINUTES=${CLICKHOUSE_LEADERBOARD_CLEANUP_INTERVAL_MINUTES}
-      - CLICKHOUSE_LEADERBOARD_RETENTION_MINUTES=${CLICKHOUSE_LEADERBOARD_RETENTION_MINUTES}
-      - CLICKHOUSE_MARKET_KLINES_TABLE=${CLICKHOUSE_MARKET_KLINES_TABLE}
       # Binance配置
       - BINANCE_API_KEY=${BINANCE_API_KEY}
       - BINANCE_API_SECRET=${BINANCE_API_SECRET}
@@ -111,8 +76,8 @@ services:
     depends_on:
       backend:
         condition: service_started
-      mysql:
-        condition: service_healthy
+    # 注意：MySQL服务在docker-compose-mysql.yml中，需要先启动
+    # 如果MySQL服务未启动，请先运行：docker-compose -f docker-compose-mysql.yml up -d
     restart: unless-stopped
     networks:
       - aifuturetrade-network
@@ -138,16 +103,6 @@ services:
       - MYSQL_USER=aifuturetrade
       - MYSQL_PASSWORD=aifuturetrade123
       - MYSQL_DATABASE=aifuturetrade
-      # ClickHouse配置（保留以兼容）
-      - CLICKHOUSE_HOST=${CLICKHOUSE_HOST}
-      - CLICKHOUSE_PORT=${CLICKHOUSE_PORT}
-      - CLICKHOUSE_USER=${CLICKHOUSE_USER}
-      - CLICKHOUSE_PASSWORD=${CLICKHOUSE_PASSWORD}
-      - CLICKHOUSE_DATABASE=${CLICKHOUSE_DATABASE}
-      - CLICKHOUSE_SECURE=${CLICKHOUSE_SECURE}
-      - CLICKHOUSE_MARKET_TICKER_TABLE=${CLICKHOUSE_MARKET_TICKER_TABLE}
-      - CLICKHOUSE_LEADERBOARD_TABLE=${CLICKHOUSE_LEADERBOARD_TABLE}
-      - CLICKHOUSE_MARKET_KLINES_TABLE=${CLICKHOUSE_MARKET_KLINES_TABLE}
       # K线同步配置
       - KLINE_SYNC_CHECK_INTERVAL=${KLINE_SYNC_CHECK_INTERVAL}
       - KLINE_CLEANUP_CRON=${KLINE_CLEANUP_CRON}
@@ -163,9 +118,8 @@ services:
       # Binance配置
       - BINANCE_API_KEY=${BINANCE_API_KEY}
       - BINANCE_API_SECRET=${BINANCE_API_SECRET}
-    depends_on:
-      mysql:
-        condition: service_healthy
+    # 注意：MySQL服务在docker-compose-mysql.yml中，需要先启动
+    # 如果MySQL服务未启动，请先运行：docker-compose -f docker-compose-mysql.yml up -d
     restart: unless-stopped
     networks:
       - aifuturetrade-network
@@ -173,6 +127,8 @@ services:
 # ==============================================================================
 # 网络配置
 # ==============================================================================
+# 注意：网络名称与docker-compose-mysql.yml中的网络名称相同
+# Docker Compose会自动合并相同名称的网络，使服务可以互相通信
 networks:
   aifuturetrade-network:
     driver: bridge
@@ -180,5 +136,7 @@ networks:
 # ==============================================================================
 # 数据卷配置
 # ==============================================================================
+# 注意：卷名称与docker-compose-mysql.yml中的卷名称相同
+# Docker Compose会自动合并相同名称的卷，使数据可以共享
 volumes:
   mysql_data:

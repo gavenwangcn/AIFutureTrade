@@ -29,15 +29,12 @@ services:
     environment:
       # 设置PYTHONPATH，确保可以找到所有模块
       - PYTHONPATH=/app
-      # ClickHouse配置
-      - CLICKHOUSE_HOST=${CLICKHOUSE_HOST}
-      - CLICKHOUSE_PORT=${CLICKHOUSE_PORT}
-      - CLICKHOUSE_USER=${CLICKHOUSE_USER}
-      - CLICKHOUSE_PASSWORD=${CLICKHOUSE_PASSWORD}
-      - CLICKHOUSE_DATABASE=${CLICKHOUSE_DATABASE}
-      - CLICKHOUSE_SECURE=${CLICKHOUSE_SECURE}
-      - CLICKHOUSE_MARKET_TICKER_TABLE=${CLICKHOUSE_MARKET_TICKER_TABLE}
-      - CLICKHOUSE_MARKET_KLINES_TABLE=${CLICKHOUSE_MARKET_KLINES_TABLE}
+      # MySQL配置
+      - MYSQL_HOST=mysql
+      - MYSQL_PORT=3306
+      - MYSQL_USER=aifuturetrade
+      - MYSQL_PASSWORD=aifuturetrade123
+      - MYSQL_DATABASE=aifuturetrade
       # Data Agent配置
       - DATA_AGENT_MAX_SYMBOL=${DATA_AGENT_MAX_SYMBOL}
       - DATA_AGENT_REGISTER_PORT=${DATA_AGENT_REGISTER_PORT}
@@ -72,14 +69,12 @@ services:
     environment:
       # 设置PYTHONPATH，确保可以找到所有模块
       - PYTHONPATH=/app
-      # ClickHouse配置
-      - CLICKHOUSE_HOST=${CLICKHOUSE_HOST}
-      - CLICKHOUSE_PORT=${CLICKHOUSE_PORT}
-      - CLICKHOUSE_USER=${CLICKHOUSE_USER}
-      - CLICKHOUSE_PASSWORD=${CLICKHOUSE_PASSWORD}
-      - CLICKHOUSE_DATABASE=${CLICKHOUSE_DATABASE}
-      - CLICKHOUSE_SECURE=${CLICKHOUSE_SECURE}
-      - CLICKHOUSE_MARKET_KLINES_TABLE=${CLICKHOUSE_MARKET_KLINES_TABLE}
+      # MySQL配置
+      - MYSQL_HOST=mysql
+      - MYSQL_PORT=3306
+      - MYSQL_USER=aifuturetrade
+      - MYSQL_PASSWORD=aifuturetrade123
+      - MYSQL_DATABASE=aifuturetrade
       # Data Agent配置
       # 注意：在 Docker 网络中，DATA_AGENT_REGISTER_IP 应设置为服务名 'data-manager'
       # 如果未设置环境变量，使用 'data-manager' 作为默认值
