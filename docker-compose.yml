@@ -98,8 +98,8 @@ services:
       # 设置PYTHONPATH，确保可以找到所有模块
       - PYTHONPATH=/app
       # MySQL配置
-      - MYSQL_HOST=mysql
-      - MYSQL_PORT=3306
+      - MYSQL_HOST=193.134.209.95
+      - MYSQL_PORT=32123
       - MYSQL_USER=aifuturetrade
       - MYSQL_PASSWORD=aifuturetrade123
       - MYSQL_DATABASE=aifuturetrade
