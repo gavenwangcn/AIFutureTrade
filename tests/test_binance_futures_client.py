@@ -225,12 +225,12 @@ def exercise_binance_futures_client(api_key: str, api_secret: str) -> None:
     try:
         # 导入MarketDataFetcher类
         from market.market_data import MarketDataFetcher
-        from common.database_clickhouse import ClickHouseDatabase
+        from common.database_mysql import MySQLDatabase
         import json
         
         # 创建MarketDataFetcher实例（需要数据库连接）
         # 由于这是一个测试脚本，我们创建一个简单的数据库实例
-        db = ClickHouseDatabase(auto_init_tables=False)
+        db = MySQLDatabase(auto_init_tables=False)
         market_fetcher = MarketDataFetcher(db)
         
         # 设置币安期货客户端
@@ -259,4 +259,4 @@ if __name__ == "__main__":
     api_key_value, api_secret_value = _load_credentials()
     #sdk_exchange_information_health_check(api_key_value, api_secret_value)
     exercise_binance_futures_client(api_key_value, api_secret_value)
-
+

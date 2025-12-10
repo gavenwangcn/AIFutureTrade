@@ -6,7 +6,7 @@
     python tests/run_tests.py [test_name]
 
 示例:
-    python tests/run_tests.py test_database_clickhouse
+    python tests/run_tests.py test_database_mysql
     python tests/run_tests.py  # 运行所有测试
 """
 import sys
@@ -27,7 +27,7 @@ def test_imports():
     
     modules_to_test = [
         ("common.config", "配置模块"),
-        ("common.database_clickhouse", "ClickHouse数据库模块"),
+        ("common.database_mysql", "MySQL数据库模块"),
         ("common.binance_futures", "币安期货客户端模块"),
         ("market.market_data", "市场数据模块"),
         ("market.market_streams", "市场数据流模块"),
@@ -80,7 +80,7 @@ def run_test(test_name: str = None):
     else:
         # 运行所有测试
         test_files = [
-            "test_database_clickhouse",
+            "test_database_mysql",
             "test_binance_futures_client",
             "test_leaderboard_sync",
         ]

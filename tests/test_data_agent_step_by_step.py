@@ -18,7 +18,7 @@ if str(project_root) not in sys.path:
     sys.path.insert(0, str(project_root))
 
 from data.data_agent import DataAgentKlineManager, KLINE_INTERVALS
-from common.database_clickhouse import ClickHouseDatabase
+from common.database_mysql import MySQLDatabase
 
 # 配置日志
 logging.basicConfig(
@@ -87,7 +87,7 @@ class DataAgentStepByStepTester:
         Args:
             max_symbols: 最大symbol数量
         """
-        self.db = ClickHouseDatabase()
+        self.db = MySQLDatabase()
         self.kline_manager = DataAgentKlineManager(db=self.db, max_symbols=max_symbols)
         self.test_results: List[Dict[str, Any]] = []
         

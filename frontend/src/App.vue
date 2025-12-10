@@ -215,12 +215,12 @@
               </button>
               <button 
                 class="btn-secondary" 
-                :class="{ 'btn-running': clickhouseLeaderboardSyncRunning, 'btn-paused': !clickhouseLeaderboardSyncRunning }"
-                @click="toggleClickhouseLeaderboardSync"
-                title="ClickHouse 涨幅榜同步"
+                :class="{ 'btn-running': mysqlLeaderboardSyncRunning, 'btn-paused': !mysqlLeaderboardSyncRunning }"
+                @click="toggleMysqlLeaderboardSync"
+                title="MySQL 涨幅榜同步"
               >
-                <i :class="['bi', clickhouseLeaderboardSyncRunning ? 'bi-pause-circle' : 'bi-play-circle']"></i>
-                <span>{{ clickhouseLeaderboardSyncRunning ? '执行中' : '已暂停' }}</span>
+                <i :class="['bi', mysqlLeaderboardSyncRunning ? 'bi-pause-circle' : 'bi-play-circle']"></i>
+                <span>{{ mysqlLeaderboardSyncRunning ? '执行中' : '已暂停' }}</span>
               </button>
             </div>
           </div>
@@ -545,7 +545,7 @@ const {
   showLeverageModal,
   pendingLeverageModelId,
   leverageModelName,
-  clickhouseLeaderboardSyncRunning,
+  mysqlLeaderboardSyncRunning,
   initApp,
   handleRefresh,
   toggleLogger,
@@ -557,8 +557,8 @@ const {
   deleteModel,
   openLeverageModal,
   saveModelLeverage,
-  toggleClickhouseLeaderboardSync,
-  updateClickhouseLeaderboardSyncStatus,
+  toggleMysqlLeaderboardSync,
+  updateMysqlLeaderboardSyncStatus,
   getModelDisplayName,
   getProviderName,
   getLeverageText,

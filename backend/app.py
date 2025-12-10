@@ -96,18 +96,18 @@ with app.app_context():
     db.init_db()
     logger.info("Database tables initialized")
 
-# 应用启动时立即启动ClickHouse涨跌幅榜同步服务
+# 应用启动时立即启动MySQL涨跌幅榜同步服务
 # 这确保无论通过什么方式启动（直接运行、gunicorn等），都会自动启动服务
 def _init_background_services():
     """初始化后台服务（在应用启动时调用）"""
-    global clickhouse_leaderboard_running
+    global mysql_leaderboard_running
     
     logger.info("🚀 初始化后台服务...")
     
-    # 启动ClickHouse涨跌幅榜同步线程（默认运行状态）
-    logger.info("📊 启动ClickHouse涨跌幅榜同步服务...")
-    start_clickhouse_leaderboard_sync()
-    logger.info("✅ ClickHouse涨跌幅榜同步服务已启动（默认运行状态）")
+    # 启动MySQL涨跌幅榜同步线程（默认运行状态）
+    logger.info("📊 启动MySQL涨跌幅榜同步服务...")
+    start_mysql_leaderboard_sync()
+    logger.info("✅ MySQL涨跌幅榜同步服务已启动（默认运行状态）")
     
     logger.info("✅ 后台服务初始化完成")
 
@@ -120,15 +120,15 @@ LEADERBOARD_REFRESH_INTERVAL = getattr(app_config, 'FUTURES_LEADERBOARD_REFRESH'
 leaderboard_thread = None
 leaderboard_stop_event = threading.Event()
 
-# ClickHouse leaderboard sync
-clickhouse_leaderboard_thread = None
-clickhouse_leaderboard_stop_event = threading.Event()
-clickhouse_leaderboard_running = True  # 默认状态为运行状态
+# MySQL leaderboard sync
+mysql_leaderboard_thread = None
+mysql_leaderboard_stop_event = threading.Event()
+mysql_leaderboard_running = True  # 默认状态为运行状态
 # 添加线程锁以防止并发执行
-clickhouse_leaderboard_lock = threading.Lock()
+mysql_leaderboard_lock = threading.Lock()
 # 线程监控标志，用于自动重启
-clickhouse_leaderboard_monitor_thread = None
-clickhouse_leaderboard_monitor_stop_event = threading.Event()
+mysql_leaderboard_monitor_thread = None
+mysql_leaderboard_monitor_stop_event = threading.Event()
 
 # ============ Helper Functions ============
 
@@ -274,9 +274,9 @@ def _leaderboard_loop():
     
     logger.info(f"[Leaderboard Worker-{thread_id}] 涨跌幅榜同步循环停止，总循环次数: {cycle_count}")
 
-def _clickhouse_leaderboard_loop():
+def _mysql_leaderboard_loop():
     """
-    后台循环任务：定期从 ClickHouse 24_market_tickers 表同步涨跌幅榜数据到 futures_leaderboard 表
+    后台循环任务：定期从 MySQL 24_market_tickers 表同步涨跌幅榜数据到 futures_leaderboard 表
     
     核心功能：
     - 定期从24_market_tickers表获取最新的市场数据
@@ -286,7 +286,7 @@ def _clickhouse_leaderboard_loop():
     - 支持配置同步间隔、时间窗口和前N名数量
     
     执行流程：
-    1. 初始化ClickHouse连接
+    1. 初始化MySQL连接
     2. 获取配置参数
     3. 进入主循环：
        a. 查询最近时间窗口内的市场数据
@@ -297,37 +297,37 @@ def _clickhouse_leaderboard_loop():
     4. 收到停止信号时退出循环
     
     配置参数：
-    - CLICKHOUSE_LEADERBOARD_SYNC_INTERVAL: 同步间隔（秒）
-    - CLICKHOUSE_LEADERBOARD_TIME_WINDOW: 查询时间窗口（秒）
-    - CLICKHOUSE_LEADERBOARD_TOP_N: 涨跌幅前N名数量
+    - MYSQL_LEADERBOARD_SYNC_INTERVAL: 同步间隔（秒）
+    - MYSQL_LEADERBOARD_TIME_WINDOW: 查询时间窗口（秒）
+    - MYSQL_LEADERBOARD_TOP_N: 涨跌幅前N名数量
     
     注意：
     - 此函数包含异常处理，确保即使发生异常也不会退出循环
     - 只有在收到明确的停止信号时才会退出
     """
     # 延迟导入，避免循环导入问题
-    from common.database_clickhouse import ClickHouseDatabase
+    from common.database_mysql import MySQLDatabase
     
     # 获取当前线程ID，用于日志标识
     thread_id = threading.current_thread().ident
     
     # 获取配置参数，带默认值
-    sync_interval = getattr(app_config, 'CLICKHOUSE_LEADERBOARD_SYNC_INTERVAL', 2)
-    time_window = getattr(app_config, 'CLICKHOUSE_LEADERBOARD_TIME_WINDOW', 5)  # 已废弃，保留以兼容
-    top_n = getattr(app_config, 'CLICKHOUSE_LEADERBOARD_TOP_N', 10)
+    sync_interval = getattr(app_config, 'MYSQL_LEADERBOARD_SYNC_INTERVAL', 2)
+    time_window = getattr(app_config, 'MYSQL_LEADERBOARD_TIME_WINDOW', 5)  # 已废弃，保留以兼容
+    top_n = getattr(app_config, 'MYSQL_LEADERBOARD_TOP_N', 10)
     
-    logger.info(f"[ClickHouse Leaderboard Worker-{thread_id}] ClickHouse 涨幅榜同步循环启动，同步间隔: {sync_interval} 秒，前N名数量: {top_n}")
+    logger.info(f"[MySQL Leaderboard Worker-{thread_id}] MySQL 涨幅榜同步循环启动，同步间隔: {sync_interval} 秒，前N名数量: {top_n}")
     
     # 确保等待时间至少为1秒
     wait_seconds = max(1, sync_interval)
     cycle_count = 0
     db = None
     
-    # 在循环外创建ClickHouseDatabase实例，避免频繁创建和销毁连接
+    # 在循环外创建MySQLDatabase实例，避免频繁创建和销毁连接
     try:
-        db = ClickHouseDatabase(auto_init_tables=True)
+        db = MySQLDatabase(auto_init_tables=True)
     except Exception as exc:
-        logger.error(f"[ClickHouse Leaderboard Worker-{thread_id}] 初始化ClickHouse连接失败: {exc}，将在循环中重试初始化")
+        logger.error(f"[MySQL Leaderboard Worker-{thread_id}] 初始化MySQL连接失败: {exc}，将在循环中重试初始化")
         # 不直接返回，而是在循环中重试
     
     # 立即执行第一次同步（启动时立即刷新数据）
@@ -337,7 +337,7 @@ def _clickhouse_leaderboard_loop():
     try:
         # 如果数据库连接未初始化，尝试重新初始化
         if db is None:
-            db = ClickHouseDatabase(auto_init_tables=True)
+            db = MySQLDatabase(auto_init_tables=True)
         
         # 执行同步逻辑
         db.sync_leaderboard(
@@ -347,19 +347,19 @@ def _clickhouse_leaderboard_loop():
     except Exception as exc:
         # 处理同步失败的情况，但不退出循环
         cycle_duration = (datetime.now() - cycle_start_time).total_seconds()
-        logger.error(f"[ClickHouse Leaderboard Worker-{thread_id}] [循环 #{cycle_count}] 启动时首次同步失败: {exc}, 耗时: {cycle_duration:.3f} 秒")
+        logger.error(f"[MySQL Leaderboard Worker-{thread_id}] [循环 #{cycle_count}] 启动时首次同步失败: {exc}, 耗时: {cycle_duration:.3f} 秒")
         import traceback
-        logger.error(f"[ClickHouse Leaderboard Worker-{thread_id}] [循环 #{cycle_count}] 错误堆栈:\n{traceback.format_exc()}")
+        logger.error(f"[MySQL Leaderboard Worker-{thread_id}] [循环 #{cycle_count}] 错误堆栈:\n{traceback.format_exc()}")
     
     # 主循环：定期执行同步任务（永不退出，除非收到停止信号）
-    while not clickhouse_leaderboard_stop_event.is_set():
+    while not mysql_leaderboard_stop_event.is_set():
         cycle_count += 1
         cycle_start_time = datetime.now()
         
         try:
             # 如果数据库连接丢失，尝试重新初始化
             if db is None:
-                db = ClickHouseDatabase(auto_init_tables=True)
+                db = MySQLDatabase(auto_init_tables=True)
             
             # 执行同步逻辑
             db.sync_leaderboard(
@@ -370,77 +370,77 @@ def _clickhouse_leaderboard_loop():
         except Exception as exc:
             # 处理同步失败的情况，但不退出循环，继续重试
             cycle_duration = (datetime.now() - cycle_start_time).total_seconds()
-            logger.error(f"[ClickHouse Leaderboard Worker-{thread_id}] [循环 #{cycle_count}] 同步失败: {exc}, 耗时: {cycle_duration:.3f} 秒")
+            logger.error(f"[MySQL Leaderboard Worker-{thread_id}] [循环 #{cycle_count}] 同步失败: {exc}, 耗时: {cycle_duration:.3f} 秒")
             import traceback
             error_stack = traceback.format_exc()
-            logger.error(f"[ClickHouse Leaderboard Worker-{thread_id}] [循环 #{cycle_count}] 错误堆栈: {error_stack}")
+            logger.error(f"[MySQL Leaderboard Worker-{thread_id}] [循环 #{cycle_count}] 错误堆栈: {error_stack}")
             # 标记数据库连接可能已失效，下次循环时重新初始化
             db = None
         
         # 等待指定间隔后继续下一次循环
         # 使用wait()方法可以被停止事件中断
         # 如果等待期间收到停止信号，循环会退出
-        if clickhouse_leaderboard_stop_event.wait(wait_seconds):
+        if mysql_leaderboard_stop_event.wait(wait_seconds):
             # 如果wait返回True，说明在等待期间收到了停止信号
             break
     
     # 循环结束，记录停止信息
-    logger.info(f"[ClickHouse Leaderboard Worker-{thread_id}] ClickHouse 涨幅榜同步循环停止，总循环次数: {cycle_count}")
+    logger.info(f"[MySQL Leaderboard Worker-{thread_id}] MySQL 涨幅榜同步循环停止，总循环次数: {cycle_count}")
     
     # 更新运行状态
-    global clickhouse_leaderboard_running
-    with clickhouse_leaderboard_lock:
-        clickhouse_leaderboard_running = False
+    global mysql_leaderboard_running
+    with mysql_leaderboard_lock:
+        mysql_leaderboard_running = False
 
 
-def _clickhouse_leaderboard_monitor():
+def _mysql_leaderboard_monitor():
     """
-    监控线程：监控ClickHouse涨跌幅榜同步线程，如果线程意外退出则自动重启
+    监控线程：监控MySQL涨跌幅榜同步线程，如果线程意外退出则自动重启
     
     此监控线程确保同步服务持续运行，不会因为异常而停止
     """
-    global clickhouse_leaderboard_thread, clickhouse_leaderboard_running
+    global mysql_leaderboard_thread, mysql_leaderboard_running
     
-    logger.info("[ClickHouse Leaderboard Monitor] 🛡️  监控线程启动")
+    logger.info("[MySQL Leaderboard Monitor] 🛡️  监控线程启动")
     
-    while not clickhouse_leaderboard_monitor_stop_event.is_set():
+    while not mysql_leaderboard_monitor_stop_event.is_set():
         # 每10秒检查一次线程状态
-        clickhouse_leaderboard_monitor_stop_event.wait(10)
+        mysql_leaderboard_monitor_stop_event.wait(10)
         
-        if clickhouse_leaderboard_monitor_stop_event.is_set():
+        if mysql_leaderboard_monitor_stop_event.is_set():
             break
         
-        with clickhouse_leaderboard_lock:
+        with mysql_leaderboard_lock:
             # 检查线程是否还在运行
-            if clickhouse_leaderboard_running:
-                if clickhouse_leaderboard_thread and clickhouse_leaderboard_thread.is_alive():
+            if mysql_leaderboard_running:
+                if mysql_leaderboard_thread and mysql_leaderboard_thread.is_alive():
                     # 线程正常运行，继续监控
                     continue
                 else:
                     # 线程意外退出，需要重启
-                    logger.warning("[ClickHouse Leaderboard Monitor] ⚠️  检测到同步线程意外退出，准备自动重启...")
-                    clickhouse_leaderboard_running = False
+                    logger.warning("[MySQL Leaderboard Monitor] ⚠️  检测到同步线程意外退出，准备自动重启...")
+                    mysql_leaderboard_running = False
             
             # 如果运行状态为False，但用户没有明确停止，则自动重启
-            if not clickhouse_leaderboard_running and not clickhouse_leaderboard_stop_event.is_set():
-                logger.info("[ClickHouse Leaderboard Monitor] 🔄 自动重启同步线程...")
-                clickhouse_leaderboard_stop_event.clear()
-                clickhouse_leaderboard_running = True
+            if not mysql_leaderboard_running and not mysql_leaderboard_stop_event.is_set():
+                logger.info("[MySQL Leaderboard Monitor] 🔄 自动重启同步线程...")
+                mysql_leaderboard_stop_event.clear()
+                mysql_leaderboard_running = True
                 
-                clickhouse_leaderboard_thread = threading.Thread(
-                    target=_clickhouse_leaderboard_loop,
+                mysql_leaderboard_thread = threading.Thread(
+                    target=_mysql_leaderboard_loop,
                     daemon=True,
-                    name="ClickHouseLeaderboardSync"
+                    name="MySQLLeaderboardSync"
                 )
-                clickhouse_leaderboard_thread.start()
-                logger.info("[ClickHouse Leaderboard Monitor] ✅ 同步线程已自动重启")
+                mysql_leaderboard_thread.start()
+                logger.info("[MySQL Leaderboard Monitor] ✅ 同步线程已自动重启")
     
-    logger.info("[ClickHouse Leaderboard Monitor] 🛡️  监控线程停止")
+    logger.info("[MySQL Leaderboard Monitor] 🛡️  监控线程停止")
 
 
-def start_clickhouse_leaderboard_sync():
+def start_mysql_leaderboard_sync():
     """
-    启动 ClickHouse 涨幅榜同步线程
+    启动 MySQL 涨幅榜同步线程
     
     功能：
     - 检查同步线程是否已在运行
@@ -454,52 +454,52 @@ def start_clickhouse_leaderboard_sync():
     - 多次调用时，只有第一次会真正启动线程
     - 默认状态为运行状态，应用启动时自动执行
     """
-    global clickhouse_leaderboard_thread, clickhouse_leaderboard_running
-    global clickhouse_leaderboard_monitor_thread, clickhouse_leaderboard_monitor_stop_event
+    global mysql_leaderboard_thread, mysql_leaderboard_running
+    global mysql_leaderboard_monitor_thread, mysql_leaderboard_monitor_stop_event
     
     # 使用锁防止并发执行
-    with clickhouse_leaderboard_lock:
+    with mysql_leaderboard_lock:
         # 检查线程是否已在运行
-        if clickhouse_leaderboard_thread and clickhouse_leaderboard_thread.is_alive():
-            logger.warning("[ClickHouse Leaderboard] ⚠️  同步线程已在运行，无需重复启动")
+        if mysql_leaderboard_thread and mysql_leaderboard_thread.is_alive():
+            logger.warning("[MySQL Leaderboard] ⚠️  同步线程已在运行，无需重复启动")
             return
         
-        logger.info("[ClickHouse Leaderboard] 🚀 准备启动涨跌幅榜同步线程...")
+        logger.info("[MySQL Leaderboard] 🚀 准备启动涨跌幅榜同步线程...")
         
         # 重置停止事件和运行状态
-        clickhouse_leaderboard_stop_event.clear()
-        clickhouse_leaderboard_running = True
+        mysql_leaderboard_stop_event.clear()
+        mysql_leaderboard_running = True
         
         # 创建同步线程
-        clickhouse_leaderboard_thread = threading.Thread(
-            target=_clickhouse_leaderboard_loop,
+        mysql_leaderboard_thread = threading.Thread(
+            target=_mysql_leaderboard_loop,
             daemon=True,  # 设置为守护线程
-            name="ClickHouseLeaderboardSync"  # 设置线程名称，便于调试
+            name="MySQLLeaderboardSync"  # 设置线程名称，便于调试
         )
         
         # 启动线程
-        clickhouse_leaderboard_thread.start()
+        mysql_leaderboard_thread.start()
         
         # 记录启动信息
-        logger.info(f"[ClickHouse Leaderboard] ✅ 涨跌幅榜同步线程已启动")
-        logger.info(f"[ClickHouse Leaderboard] 📋 线程ID: {clickhouse_leaderboard_thread.ident}")
-        logger.info(f"[ClickHouse Leaderboard] 📋 线程名称: {clickhouse_leaderboard_thread.name}")
+        logger.info(f"[MySQL Leaderboard] ✅ 涨跌幅榜同步线程已启动")
+        logger.info(f"[MySQL Leaderboard] 📋 线程ID: {mysql_leaderboard_thread.ident}")
+        logger.info(f"[MySQL Leaderboard] 📋 线程名称: {mysql_leaderboard_thread.name}")
         
         # 启动监控线程（如果还没有启动）
-        if not clickhouse_leaderboard_monitor_thread or not clickhouse_leaderboard_monitor_thread.is_alive():
-            clickhouse_leaderboard_monitor_stop_event.clear()
-            clickhouse_leaderboard_monitor_thread = threading.Thread(
-                target=_clickhouse_leaderboard_monitor,
+        if not mysql_leaderboard_monitor_thread or not mysql_leaderboard_monitor_thread.is_alive():
+            mysql_leaderboard_monitor_stop_event.clear()
+            mysql_leaderboard_monitor_thread = threading.Thread(
+                target=_mysql_leaderboard_monitor,
                 daemon=True,
-                name="ClickHouseLeaderboardMonitor"
+                name="MySQLLeaderboardMonitor"
             )
-            clickhouse_leaderboard_monitor_thread.start()
-            logger.info("[ClickHouse Leaderboard] 🛡️  监控线程已启动")
+            mysql_leaderboard_monitor_thread.start()
+            logger.info("[MySQL Leaderboard] 🛡️  监控线程已启动")
 
 
-def stop_clickhouse_leaderboard_sync():
+def stop_mysql_leaderboard_sync():
     """
-    停止 ClickHouse 涨幅榜同步线程
+    停止 MySQL 涨幅榜同步线程
     
     功能：
     - 检查同步线程是否在运行
@@ -513,41 +513,41 @@ def stop_clickhouse_leaderboard_sync():
     - 调用后会立即返回，不会阻塞等待线程终止
     - 只有用户明确调用此函数时才会停止，不会自动暂停
     """
-    global clickhouse_leaderboard_running
-    global clickhouse_leaderboard_monitor_thread, clickhouse_leaderboard_monitor_stop_event
+    global mysql_leaderboard_running
+    global mysql_leaderboard_monitor_thread, mysql_leaderboard_monitor_stop_event
     
     # 使用锁防止并发执行
-    with clickhouse_leaderboard_lock:
+    with mysql_leaderboard_lock:
         # 检查线程是否在运行
-        if not clickhouse_leaderboard_running:
-            logger.warning("[ClickHouse Leaderboard] ⚠️  同步线程未运行，无需停止")
+        if not mysql_leaderboard_running:
+            logger.warning("[MySQL Leaderboard] ⚠️  同步线程未运行，无需停止")
             return
         
-        logger.info("[ClickHouse Leaderboard] 🛑 准备停止涨跌幅榜同步线程（用户手动停止）...")
+        logger.info("[MySQL Leaderboard] 🛑 准备停止涨跌幅榜同步线程（用户手动停止）...")
         
         # 设置停止状态和停止事件
-        clickhouse_leaderboard_running = False
-        clickhouse_leaderboard_stop_event.set()
+        mysql_leaderboard_running = False
+        mysql_leaderboard_stop_event.set()
         
         # 停止监控线程
-        if clickhouse_leaderboard_monitor_thread and clickhouse_leaderboard_monitor_thread.is_alive():
-            logger.info("[ClickHouse Leaderboard] 🛑 停止监控线程...")
-            clickhouse_leaderboard_monitor_stop_event.set()
-            clickhouse_leaderboard_monitor_thread.join(timeout=2)
+        if mysql_leaderboard_monitor_thread and mysql_leaderboard_monitor_thread.is_alive():
+            logger.info("[MySQL Leaderboard] 🛑 停止监控线程...")
+            mysql_leaderboard_monitor_stop_event.set()
+            mysql_leaderboard_monitor_thread.join(timeout=2)
         
         # 等待线程终止，最多5秒
-        if clickhouse_leaderboard_thread and clickhouse_leaderboard_thread.is_alive():
-            logger.info("[ClickHouse Leaderboard] ⏳ 等待线程终止...")
-            clickhouse_leaderboard_thread.join(timeout=5)
+        if mysql_leaderboard_thread and mysql_leaderboard_thread.is_alive():
+            logger.info("[MySQL Leaderboard] ⏳ 等待线程终止...")
+            mysql_leaderboard_thread.join(timeout=5)
             
-            if clickhouse_leaderboard_thread.is_alive():
-                logger.warning("[ClickHouse Leaderboard] ⚠️  线程未能在5秒内终止，可能已强制终止")
+            if mysql_leaderboard_thread.is_alive():
+                logger.warning("[MySQL Leaderboard] ⚠️  线程未能在5秒内终止，可能已强制终止")
             else:
-                logger.info("[ClickHouse Leaderboard] ✅ 线程已成功终止")
+                logger.info("[MySQL Leaderboard] ✅ 线程已成功终止")
         else:
-            logger.info("[ClickHouse Leaderboard] ✅ 线程已停止（未运行）")
+            logger.info("[MySQL Leaderboard] ✅ 线程已停止（未运行）")
         
-        logger.info("[ClickHouse Leaderboard] 📋 涨跌幅榜同步线程停止完成")
+        logger.info("[MySQL Leaderboard] 📋 涨跌幅榜同步线程停止完成")
 
 def start_leaderboard_worker():
     """Start background worker for leaderboard updates"""
@@ -1213,41 +1213,41 @@ def get_market_leaderboard():
         logger.error(f"Failed to load leaderboard: {exc}", exc_info=True)
         return jsonify({'error': str(exc), 'gainers': [], 'losers': []}), 500
 
-@app.route('/api/clickhouse/leaderboard/status', methods=['GET'])
-def get_clickhouse_leaderboard_status():
-    """Get ClickHouse leaderboard sync status
+@app.route('/api/mysql/leaderboard/status', methods=['GET'])
+def get_mysql_leaderboard_status():
+    """Get MySQL leaderboard sync status
     
     返回状态信息：
     - running: 运行状态（True表示运行中，False表示已停止）
     - thread_alive: 线程是否存活
     - 默认状态为运行状态（running=True）
     """
-    global clickhouse_leaderboard_running, clickhouse_leaderboard_thread
+    global mysql_leaderboard_running, mysql_leaderboard_thread
     
     # 检查线程实际状态，如果线程不存在或已死亡，但用户没有明确停止，则认为是运行状态
-    thread_alive = clickhouse_leaderboard_thread.is_alive() if clickhouse_leaderboard_thread else False
+    thread_alive = mysql_leaderboard_thread.is_alive() if mysql_leaderboard_thread else False
     
     # 如果线程已死亡但运行状态为True，说明线程意外退出，但用户期望运行
     # 这种情况下，返回running=True，让前端显示运行状态，监控线程会自动重启
-    actual_running = clickhouse_leaderboard_running or (not clickhouse_leaderboard_stop_event.is_set() and thread_alive)
+    actual_running = mysql_leaderboard_running or (not mysql_leaderboard_stop_event.is_set() and thread_alive)
     
     return jsonify({
         'running': actual_running,
         'thread_alive': thread_alive
     })
 
-@app.route('/api/clickhouse/leaderboard/control', methods=['POST'])
-def control_clickhouse_leaderboard():
-    """Control ClickHouse leaderboard sync (start/stop)"""
+@app.route('/api/mysql/leaderboard/control', methods=['POST'])
+def control_mysql_leaderboard():
+    """Control MySQL leaderboard sync (start/stop)"""
     data = request.json or {}
     action = data.get('action', '').lower()
     
     if action == 'start':
-        start_clickhouse_leaderboard_sync()
-        return jsonify({'message': 'ClickHouse leaderboard sync started', 'running': True})
+        start_mysql_leaderboard_sync()
+        return jsonify({'message': 'MySQL leaderboard sync started', 'running': True})
     elif action == 'stop':
-        stop_clickhouse_leaderboard_sync()
-        return jsonify({'message': 'ClickHouse leaderboard sync stopped', 'running': False})
+        stop_mysql_leaderboard_sync()
+        return jsonify({'message': 'MySQL leaderboard sync stopped', 'running': False})
 
 @app.route('/api/market/klines', methods=['GET'])
 def get_market_klines():
@@ -1324,10 +1324,10 @@ def get_market_klines():
         
         if source == 'db':
             # 从数据库获取数据
-            from common.database_clickhouse import ClickHouseDatabase
+            from common.database_mysql import MySQLDatabase
             logger.info(f"[API] 从数据库获取K线数据: symbol={symbol}, interval={interval}")
-            clickhouse_db = ClickHouseDatabase(auto_init_tables=False)
-            klines = clickhouse_db.get_market_klines(
+            mysql_db = MySQLDatabase(auto_init_tables=False)
+            klines = mysql_db.get_market_klines(
                 symbol=symbol,
                 interval=interval,
                 limit=limit,
@@ -1811,7 +1811,7 @@ if __name__ == '__main__':
     start_leaderboard_worker()
     logger.info("✅ 涨跌幅榜前端推送线程已启动")
     
-    # 初始化后台服务（包括ClickHouse涨跌幅榜同步线程）
+    # 初始化后台服务（包括MySQL涨跌幅榜同步线程）
     logger.info("📊 初始化后台服务...")
     _init_background_services()
     

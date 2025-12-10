@@ -656,7 +656,7 @@ async def test_data_agent_kline_processing(
         message_wait_time: 等待接收消息的时间（秒），如果为None则使用默认配置 MESSAGE_WAIT_TIME
     """
     from data.data_agent import DataAgentKlineManager, KLINE_INTERVALS as DATA_AGENT_KLINE_INTERVALS
-    from common.database_clickhouse import ClickHouseDatabase
+    from common.database_mysql import MySQLDatabase
     
     # 使用配置参数或默认值
     symbols = test_symbols if test_symbols is not None else TEST_SYMBOLS
@@ -670,7 +670,7 @@ async def test_data_agent_kline_processing(
     logger.info("=" * 80)
     
     # 初始化数据库和kline_manager
-    db = ClickHouseDatabase()
+    db = MySQLDatabase()
     # 使用测试配置的interval列表，如果为None则使用data_agent的配置
     test_intervals = TEST_KLINE_INTERVALS if TEST_KLINE_INTERVALS is not None else DATA_AGENT_KLINE_INTERVALS
     # 将interval列表传递给DataAgentKlineManager，而不是使用全局配置

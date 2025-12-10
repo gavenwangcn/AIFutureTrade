@@ -11,7 +11,7 @@ import pandas as pd
 from finta import TA as ta
 
 from common.binance_futures import BinanceFuturesClient
-from common.database_clickhouse import ClickHouseDatabase
+from common.database_mysql import MySQLDatabase
 
 logger = logging.getLogger(__name__)
 
@@ -34,9 +34,9 @@ class MarketDataFetcher:
         self._leaderboard_refresh = getattr(app_config, 'FUTURES_LEADERBOARD_REFRESH', 60)
         self._last_leaderboard_sync: float = 0
         self._leaderboard_lock = threading.Lock()
-        self._clickhouse_db: Optional[ClickHouseDatabase] = None
+        self._mysql_db: Optional[MySQLDatabase] = None
         self._init_futures_client()
-        self._init_clickhouse_db()
+        self._init_mysql_db()
 
     # ============ Initialization Methods ============
 
@@ -61,14 +61,14 @@ class MarketDataFetcher:
             logger.warning(f'[Futures] Unable to initialize Binance futures client: {exc}')
             self._futures_client = None
 
-    def _init_clickhouse_db(self):
-        """Initialize ClickHouse database connection"""
+    def _init_mysql_db(self):
+        """Initialize MySQL database connection"""
         try:
-            self._clickhouse_db = ClickHouseDatabase(auto_init_tables=True)
-            logger.info('[ClickHouse] ClickHouse database connection initialized')
+            self._mysql_db = MySQLDatabase(auto_init_tables=True)
+            logger.info('[MySQL] MySQL database connection initialized')
         except Exception as exc:
-            logger.warning('[ClickHouse] Failed to initialize ClickHouse connection: %s', exc)
-            self._clickhouse_db = None
+            logger.warning('[MySQL] Failed to initialize MySQL connection: %s', exc)
+            self._mysql_db = None
 
     # ============ Helper/Utility Methods ============
 
@@ -1234,13 +1234,13 @@ class MarketDataFetcher:
 
     def sync_leaderboard(self, force: bool = False, limit: Optional[int] = None) -> Dict[str, List[Dict]]:
         """
-        同步涨幅榜数据（从 ClickHouse 查询）
+        同步涨幅榜数据（从 MySQL 查询）
         
         优化逻辑：
-        1. 从 ClickHouse futures_leaderboard 表查询涨幅榜数据
+        1. 从 MySQL futures_leaderboard 表查询涨幅榜数据
         2. 不再查询 SQLite 数据库
         3. 不再实时计算 K线指标和 timeframes 数据
-        4. 使用 ClickHouse 表中的 last_price 字段作为最新价格
+        4. 使用 MySQL 表中的 last_price 字段作为最新价格
         
         Args:
             force: 是否强制刷新（保留参数以兼容现有调用，但实际不使用）
@@ -1253,21 +1253,21 @@ class MarketDataFetcher:
             limit = getattr(app_config, 'FUTURES_TOP_GAINERS_LIMIT', 10)
 
         logger.info(
-            '[Leaderboard] sync_leaderboard called | limit=%s (from ClickHouse)',
+            '[Leaderboard] sync_leaderboard called | limit=%s (from MySQL)',
             limit
         )
 
-        # 如果没有可用的 ClickHouse 连接，返回空数据
-        if not self._clickhouse_db:
-            logger.warning('[Leaderboard] ClickHouse unavailable, returning empty data')
+        # 如果没有可用的 MySQL 连接，返回空数据
+        if not self._mysql_db:
+            logger.warning('[Leaderboard] MySQL unavailable, returning empty data')
             return {'gainers': [], 'losers': []}
 
         try:
-            # 从 ClickHouse 查询涨幅榜数据
-            data = self._clickhouse_db.get_leaderboard(limit=limit)
+            # 从 MySQL 查询涨幅榜数据
+            data = self._mysql_db.get_leaderboard(limit=limit)
             
             # 转换数据格式以兼容现有接口
-            # ClickHouse 返回的数据格式：{'gainers': [...], 'losers': [...]}
+            # MySQL 返回的数据格式：{'gainers': [...], 'losers': [...]}
             # 需要转换为与原来 SQLite 返回格式一致的结构
             formatted_data = {
                 'gainers': [],
@@ -1287,7 +1287,7 @@ class MarketDataFetcher:
                     'exchange': 'BINANCE_FUTURES',
                     'side': 'gainer',
                     'rank': item.get('rank', 0),
-                    'price': item.get('price', 0.0),  # 使用 ClickHouse 的 last_price
+                    'price': item.get('price', 0.0),  # 使用 MySQL 的 last_price
                     'change_percent': item.get('change_percent', 0.0),
                     'quote_volume': item.get('quote_volume', 0.0),
                     'timeframes': {}  # 不再生成 timeframes 数据
@@ -1306,18 +1306,18 @@ class MarketDataFetcher:
                     'exchange': 'BINANCE_FUTURES',
                     'side': 'loser',
                     'rank': item.get('rank', 0),
-                    'price': item.get('price', 0.0),  # 使用 ClickHouse 的 last_price
+                    'price': item.get('price', 0.0),  # 使用 MySQL 的 last_price
                     'change_percent': item.get('change_percent', 0.0),
                     'quote_volume': item.get('quote_volume', 0.0),
                     'timeframes': {}  # 不再生成 timeframes 数据
                 })
             
-            logger.info('[Leaderboard] Returning leaderboard payload from ClickHouse: gainers=%s losers=%s',
+            logger.info('[Leaderboard] Returning leaderboard payload from MySQL: gainers=%s losers=%s',
                         len(formatted_data.get('gainers', [])), len(formatted_data.get('losers', [])))
             return formatted_data
             
         except Exception as exc:
-            logger.error('[Leaderboard] Failed to get leaderboard from ClickHouse: %s', exc, exc_info=True)
+            logger.error('[Leaderboard] Failed to get leaderboard from MySQL: %s', exc, exc_info=True)
             return {'gainers': [], 'losers': []}
 
     def get_leaderboard(self, limit: Optional[int] = None) -> Dict[str, List[Dict]]:

@@ -1,10 +1,10 @@
-"""Executable integration checks for ClickHouse leaderboard synchronization.
+"""Executable integration checks for MySQL leaderboard synchronization.
 
 Run with:
 
     python tests/test_leaderboard_sync.py
 
-The script reuses the main ClickHouse configuration from common.config and will
+The script reuses the main MySQL configuration from common.config and will
 exit with non-zero status if any check fails.
 
 Note: This test imports functions from backend.app, which requires the Flask
@@ -17,69 +17,70 @@ import sys
 import threading
 import time
 from typing import Callable, List, Tuple
+from datetime import datetime, timezone
 
 from backend.app import (
-    start_clickhouse_leaderboard_sync,
-    stop_clickhouse_leaderboard_sync,
-    clickhouse_leaderboard_stop_event,
-    clickhouse_leaderboard_running,
-    clickhouse_leaderboard_thread
+    start_mysql_leaderboard_sync,
+    stop_mysql_leaderboard_sync,
+    mysql_leaderboard_stop_event,
+    mysql_leaderboard_running,
+    mysql_leaderboard_thread
 )
-from common.database_clickhouse import ClickHouseDatabase
+from common.database_mysql import MySQLDatabase
 
 
-def _require_clickhouse() -> ClickHouseDatabase:
+def _require_mysql() -> MySQLDatabase:
     try:
-        return ClickHouseDatabase(auto_init_tables=True)
+        return MySQLDatabase(auto_init_tables=True)
     except Exception as exc:
-        raise RuntimeError(f"ClickHouse unavailable: {exc}") from exc
+        raise RuntimeError(f"MySQL unavailable: {exc}") from exc
 
 
 def _check_leaderboard_sync_starts() -> None:
     """Check that the leaderboard sync thread can be started"""
     # Ensure any existing thread is stopped
-    if clickhouse_leaderboard_running:
-        stop_clickhouse_leaderboard_sync()
+    if mysql_leaderboard_running:
+        stop_mysql_leaderboard_sync()
         time.sleep(0.1)  # Give time for thread to stop
     
     # Verify initial state
-    assert not clickhouse_leaderboard_running, "Leaderboard sync should not be running initially"
+    assert not mysql_leaderboard_running, "Leaderboard sync should not be running initially"
     
     # Start the sync thread
-    start_clickhouse_leaderboard_sync()
+    start_mysql_leaderboard_sync()
     
     # Check that it's running
-    assert clickhouse_leaderboard_running, "Leaderboard sync should be running after start"
-    assert not clickhouse_leaderboard_stop_event.is_set(), "Stop event should not be set after start"
+    assert mysql_leaderboard_running, "Leaderboard sync should be running after start"
+    assert not mysql_leaderboard_stop_event.is_set(), "Stop event should not be set after start"
     
     # Check that thread exists and is alive
-    assert clickhouse_leaderboard_thread is not None, "Leaderboard thread should not be None"
-    assert clickhouse_leaderboard_thread.is_alive(), "Leaderboard thread should be alive"
+    assert mysql_leaderboard_thread is not None, "Leaderboard thread should not be None"
+    assert mysql_leaderboard_thread.is_alive(), "Leaderboard thread should be alive"
     
     # Try to start again - should not create a new thread
-    thread_id_before = clickhouse_leaderboard_thread.ident
-    start_clickhouse_leaderboard_sync()
-    thread_id_after = clickhouse_leaderboard_thread.ident
+    thread_id_before = mysql_leaderboard_thread.ident
+    start_mysql_leaderboard_sync()
+    thread_id_after = mysql_leaderboard_thread.ident
     assert thread_id_before == thread_id_after, "Thread ID should be the same after second start call"
     
     # Stop the thread
-    stop_clickhouse_leaderboard_sync()
+    stop_mysql_leaderboard_sync()
     time.sleep(0.1)  # Give time for thread to stop
     
     # Check that it's stopped
-    assert not clickhouse_leaderboard_running, "Leaderboard sync should not be running after stop"
+    assert not mysql_leaderboard_running, "Leaderboard sync should not be running after stop"
 
 
-def _check_leaderboard_sync_functionality(db: ClickHouseDatabase) -> None:
+def _check_leaderboard_sync_functionality(db: MySQLDatabase) -> None:
     """Check that the leaderboard sync actually performs synchronization"""
     # Ensure any existing thread is stopped
-    if clickhouse_leaderboard_running:
-        stop_clickhouse_leaderboard_sync()
+    if mysql_leaderboard_running:
+        stop_mysql_leaderboard_sync()
         time.sleep(0.1)  # Give time for thread to stop
     
     # Clear any existing data in leaderboard table
     try:
-        db._client.command(f"TRUNCATE TABLE IF EXISTS {db.leaderboard_table}")
+        db.command(f"TRUNCATE TABLE `{db.leaderboard_table}`")
     except Exception:
         pass  # Ignore if table doesn't exist
     
@@ -90,7 +91,7 @@ def _check_leaderboard_sync_functionality(db: ClickHouseDatabase) -> None:
     db.ensure_market_ticker_table()
     
     # Insert test ticker data with positive and negative price changes
-    current_time = int(time.time() * 1000)
+    current_time = datetime.now(timezone.utc)
     test_tickers = [
         {
             "event_time": current_time,
@@ -105,7 +106,7 @@ def _check_leaderboard_sync_functionality(db: ClickHouseDatabase) -> None:
             "low_price": 195.0,
             "base_volume": 100.0,
             "quote_volume": 20000.0,
-            "stats_open_time": current_time - 60000,
+            "stats_open_time": current_time,
             "stats_close_time": current_time,
             "first_trade_id": 1,
             "last_trade_id": 10,
@@ -124,7 +125,7 @@ def _check_leaderboard_sync_functionality(db: ClickHouseDatabase) -> None:
             "low_price": 225.0,
             "base_volume": 150.0,
             "quote_volume": 35000.0,
-            "stats_open_time": current_time - 60000,
+            "stats_open_time": current_time,
             "stats_close_time": current_time,
             "first_trade_id": 11,
             "last_trade_id": 20,
@@ -139,11 +140,11 @@ def _check_leaderboard_sync_functionality(db: ClickHouseDatabase) -> None:
     import common.config as app_config
     
     # Temporarily modify the time window for testing
-    original_time_window = getattr(app_config, 'CLICKHOUSE_LEADERBOARD_TIME_WINDOW', 5)
-    app_config.CLICKHOUSE_LEADERBOARD_TIME_WINDOW = 60  # Use 60 seconds for testing
+    original_time_window = getattr(app_config, 'MYSQL_LEADERBOARD_TIME_WINDOW', 5)
+    app_config.MYSQL_LEADERBOARD_TIME_WINDOW = 60  # Use 60 seconds for testing
     
     try:
-        start_clickhouse_leaderboard_sync()
+        start_mysql_leaderboard_sync()
         
         # Wait a bit for the sync to happen (with a timeout)
         timeout = time.time() + 10  # 10 seconds timeout
@@ -151,8 +152,8 @@ def _check_leaderboard_sync_functionality(db: ClickHouseDatabase) -> None:
         while time.time() < timeout:
             # Check that data was synced to leaderboard table
             try:
-                result = db._client.query(f"SELECT count() FROM {db.leaderboard_table}")
-                count = result.result_rows[0][0]
+                result = db.query(f"SELECT COUNT(*) FROM `{db.leaderboard_table}`")
+                count = result[0][0] if result else 0
                 if count > 0:
                     synced = True
                     break
@@ -161,47 +162,47 @@ def _check_leaderboard_sync_functionality(db: ClickHouseDatabase) -> None:
             time.sleep(0.5)
         
         # Stop the thread
-        stop_clickhouse_leaderboard_sync()
+        stop_mysql_leaderboard_sync()
         time.sleep(0.1)  # Give time for thread to stop
         
         # Verify that sync happened
         assert synced, "Leaderboard table should have data after sync within timeout"
     finally:
         # Restore original time window
-        app_config.CLICKHOUSE_LEADERBOARD_TIME_WINDOW = original_time_window
+        app_config.MYSQL_LEADERBOARD_TIME_WINDOW = original_time_window
 
 
 def _check_leaderboard_sync_stop_functionality() -> None:
     """Check that the leaderboard sync can be properly stopped"""
     # Ensure any existing thread is stopped
-    if clickhouse_leaderboard_running:
-        stop_clickhouse_leaderboard_sync()
+    if mysql_leaderboard_running:
+        stop_mysql_leaderboard_sync()
         time.sleep(0.1)  # Give time for thread to stop
     
     # Start the sync thread
-    start_clickhouse_leaderboard_sync()
+    start_mysql_leaderboard_sync()
     
     # Verify it's running
-    assert clickhouse_leaderboard_running, "Leaderboard sync should be running after start"
+    assert mysql_leaderboard_running, "Leaderboard sync should be running after start"
     
     # Stop the thread
-    stop_clickhouse_leaderboard_sync()
+    stop_mysql_leaderboard_sync()
     time.sleep(0.1)  # Give time for thread to stop
     
     # Verify it's stopped
-    assert not clickhouse_leaderboard_running, "Leaderboard sync should not be running after stop"
-    assert clickhouse_leaderboard_stop_event.is_set(), "Stop event should be set after stop"
+    assert not mysql_leaderboard_running, "Leaderboard sync should not be running after stop"
+    assert mysql_leaderboard_stop_event.is_set(), "Stop event should be set after stop"
 
 
 def main() -> int:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)s | %(message)s")
     try:
-        db = _require_clickhouse()
+        db = _require_mysql()
     except RuntimeError as exc:
         logging.error(exc)
         return 1
 
-    checks: List[Tuple[str, Callable[[], None] | Callable[[ClickHouseDatabase], None]]] = [
+    checks: List[Tuple[str, Callable[[], None] | Callable[[MySQLDatabase], None]]] = [
         ("leaderboard_sync_starts", _check_leaderboard_sync_starts),
         ("leaderboard_sync_stop_functionality", _check_leaderboard_sync_stop_functionality),
         ("leaderboard_sync_functionality", lambda: _check_leaderboard_sync_functionality(db)),

@@ -15,10 +15,25 @@ GUNICORN_TIMEOUT = int(os.getenv('GUNICORN_TIMEOUT', '120'))  # Worker超时时�
 GUNICORN_KEEPALIVE = int(os.getenv('GUNICORN_KEEPALIVE', '5'))  # Keep-alive时间（秒）
 GUNICORN_MAX_REQUESTS = int(os.getenv('GUNICORN_MAX_REQUESTS', '1000'))  # 每个worker处理的最大请求数
 
-# ============ Database Configuration ============
-DATABASE_PATH = 'trading_bot.db'
 
-# ============ ClickHouse Configuration ============
+# ============ MySQL Configuration ============
+MYSQL_HOST = os.getenv('MYSQL_HOST', 'mysql')
+MYSQL_PORT = int(os.getenv('MYSQL_PORT', '3306'))
+MYSQL_USER = os.getenv('MYSQL_USER', 'aifuturetrade')
+MYSQL_PASSWORD = os.getenv('MYSQL_PASSWORD', 'aifuturetrade123')
+MYSQL_DATABASE = os.getenv('MYSQL_DATABASE', 'aifuturetrade')
+
+# MySQL连接超时配置（秒）
+MYSQL_CONNECT_TIMEOUT = int(os.getenv('MYSQL_CONNECT_TIMEOUT', '30'))  # 连接超时，默认30秒
+MYSQL_READ_TIMEOUT = int(os.getenv('MYSQL_READ_TIMEOUT', '120'))  # 读取超时，默认120秒（2分钟）
+MYSQL_WRITE_TIMEOUT = int(os.getenv('MYSQL_WRITE_TIMEOUT', '120'))  # 写入超时，默认120秒（2分钟）
+
+# MySQL表名配置
+MYSQL_MARKET_TICKER_TABLE = os.getenv('MYSQL_MARKET_TICKER_TABLE', '24_market_tickers')
+MYSQL_LEADERBOARD_TABLE = os.getenv('MYSQL_LEADERBOARD_TABLE', 'futures_leaderboard')
+MYSQL_MARKET_KLINES_TABLE = os.getenv('MYSQL_MARKET_KLINES_TABLE', 'market_klines')
+
+# ============ ClickHouse Configuration (保留以兼容旧代码) ============
 CLICKHOUSE_HOST = os.getenv('CLICKHOUSE_HOST', '193.134.209.95')
 CLICKHOUSE_PORT = int(os.getenv('CLICKHOUSE_PORT', '32123'))
 CLICKHOUSE_USER = os.getenv('CLICKHOUSE_USER', 'default')
@@ -36,7 +51,14 @@ CLICKHOUSE_MARKET_TICKER_TABLE = os.getenv('CLICKHOUSE_MARKET_TICKER_TABLE', '24
 CLICKHOUSE_LEADERBOARD_TABLE = os.getenv('CLICKHOUSE_LEADERBOARD_TABLE', 'futures_leaderboard')
 CLICKHOUSE_MARKET_KLINES_TABLE = os.getenv('CLICKHOUSE_MARKET_KLINES_TABLE', 'market_klines')
 
-# ClickHouse涨幅榜同步配置
+# MySQL涨幅榜同步配置
+MYSQL_LEADERBOARD_SYNC_INTERVAL = int(os.getenv('MYSQL_LEADERBOARD_SYNC_INTERVAL', os.getenv('CLICKHOUSE_LEADERBOARD_SYNC_INTERVAL', '2')))  # 秒
+MYSQL_LEADERBOARD_TIME_WINDOW = int(os.getenv('MYSQL_LEADERBOARD_TIME_WINDOW', os.getenv('CLICKHOUSE_LEADERBOARD_TIME_WINDOW', '2')))  # 秒，查询时间窗口
+MYSQL_LEADERBOARD_TOP_N = int(os.getenv('MYSQL_LEADERBOARD_TOP_N', os.getenv('CLICKHOUSE_LEADERBOARD_TOP_N', '10')))  # 涨幅/跌幅前N名
+MYSQL_LEADERBOARD_CLEANUP_INTERVAL_MINUTES = int(os.getenv('MYSQL_LEADERBOARD_CLEANUP_INTERVAL_MINUTES', os.getenv('CLICKHOUSE_LEADERBOARD_CLEANUP_INTERVAL_MINUTES', '2')))  # 涨跌榜清理执行频率（分钟）
+MYSQL_LEADERBOARD_RETENTION_MINUTES = int(os.getenv('MYSQL_LEADERBOARD_RETENTION_MINUTES', os.getenv('CLICKHOUSE_LEADERBOARD_RETENTION_MINUTES', '5')))  # 保留最近N分钟内的涨跌榜批次
+
+# ClickHouse涨幅榜同步配置（保留以兼容旧代码）
 CLICKHOUSE_LEADERBOARD_SYNC_INTERVAL = int(os.getenv('CLICKHOUSE_LEADERBOARD_SYNC_INTERVAL', '2'))  # 秒
 CLICKHOUSE_LEADERBOARD_TIME_WINDOW = int(os.getenv('CLICKHOUSE_LEADERBOARD_TIME_WINDOW', '2'))  # 秒，查询时间窗口
 CLICKHOUSE_LEADERBOARD_TOP_N = int(os.getenv('CLICKHOUSE_LEADERBOARD_TOP_N', '10'))  # 涨幅/跌幅前N名

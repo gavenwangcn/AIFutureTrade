@@ -256,7 +256,7 @@ def _setup_logging() -> None:
 def main() -> int:
     _setup_logging()
 
-    parser = argparse.ArgumentParser(description="Async agent for ClickHouse sync tasks")
+    parser = argparse.ArgumentParser(description="Async agent for MySQL sync tasks")
     parser.add_argument(
         "--task",
         choices=TASK_REGISTRY.keys(),

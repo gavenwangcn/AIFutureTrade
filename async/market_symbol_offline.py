@@ -9,7 +9,7 @@ from datetime import datetime, timezone, timedelta
 from typing import Optional
 
 import common.config as app_config
-from common.database_clickhouse import ClickHouseDatabase
+from common.database_mysql import MySQLDatabase
 
 logger = logging.getLogger(__name__)
 
@@ -61,7 +61,7 @@ async def delete_old_symbols() -> None:
         
         # 初始化数据库
         logger.info("[MarketSymbolOffline] [步骤1] 初始化数据库...")
-        db = ClickHouseDatabase(auto_init_tables=False)
+        db = MySQLDatabase(auto_init_tables=False)
         logger.info("[MarketSymbolOffline] [步骤1] ✅ 数据库初始化完成")
         
         # 计算截止日期
@@ -74,8 +74,8 @@ async def delete_old_symbols() -> None:
         
         # 查询要删除的记录数量
         count_query = f"""
-        SELECT COUNT(*) FROM {db.market_ticker_table}
-        WHERE ingestion_time < %(cutoff_date)s
+        SELECT COUNT(*) FROM `{db.market_ticker_table}`
+        WHERE ingestion_time < %s
         """
         
         logger.info("[MarketSymbolOffline] [步骤3] 查询要删除的记录数量...")
@@ -85,7 +85,7 @@ async def delete_old_symbols() -> None:
         result = await asyncio.to_thread(
             db.query,
             count_query,
-            params={"cutoff_date": cutoff_date}
+            (cutoff_date,)
         )
         
         count_duration = (datetime.now(timezone.utc) - count_start_time).total_seconds()
@@ -105,8 +105,8 @@ async def delete_old_symbols() -> None:
         
         # 执行删除操作
         delete_query = f"""
-        ALTER TABLE {db.market_ticker_table}
-        DELETE WHERE ingestion_time < %(cutoff_date)s
+        DELETE FROM `{db.market_ticker_table}`
+        WHERE ingestion_time < %s
         """
         
         logger.info("[MarketSymbolOffline] [步骤4] 执行删除操作...")
@@ -116,7 +116,7 @@ async def delete_old_symbols() -> None:
         await asyncio.to_thread(
             db.command,
             delete_query,
-            params={"cutoff_date": cutoff_date}
+            (cutoff_date,)
         )
         
         delete_duration = (datetime.now(timezone.utc) - delete_start_time).total_seconds()

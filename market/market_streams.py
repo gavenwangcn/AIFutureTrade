@@ -1,7 +1,7 @@
-"""Market data streaming via Binance websocket into ClickHouse.
+"""Market data streaming via Binance websocket into MySQL.
 
 Creates the 24_market_tickers table (if missing) and streams quotes from the
-all-market tickers websocket into ClickHouse for persistence.
+all-market tickers websocket into MySQL for persistence.
 """
 from __future__ import annotations
 
@@ -20,7 +20,7 @@ from binance_sdk_derivatives_trading_usds_futures.derivatives_trading_usds_futur
 from binance_common.constants import WebsocketMode
 
 import common.config as app_config
-from common.database_clickhouse import ClickHouseDatabase
+from common.database_mysql import MySQLDatabase
 
 logger = logging.getLogger(__name__)
 
@@ -135,9 +135,9 @@ def _extract_tickers(message: Any) -> List[Dict[str, Any]]:
 
 
 class MarketTickerStream:
-    """Stream Binance all-market tickers into ClickHouse."""
+    """Stream Binance all-market tickers into MySQL."""
 
-    def __init__(self, db: ClickHouseDatabase) -> None:
+    def __init__(self, db: MySQLDatabase) -> None:
         self._db = db
         configuration_ws_streams = ConfigurationWebSocketStreams(
             stream_url=os.getenv(
@@ -238,7 +238,7 @@ async def run_market_ticker_stream(run_seconds: Optional[int] = None) -> None:
     Args:
         run_seconds: Optional runtime in seconds before stopping the task.
     """
-    db = ClickHouseDatabase()
+    db = MySQLDatabase()
     
     if run_seconds is not None:
         # If a specific runtime is provided, run once
@@ -372,7 +372,7 @@ class KlineStreamManager:
     # Supported intervals
     INTERVALS = ['1w', '1d', '4h', '1h', '15m', '5m', '1m']
     
-    def __init__(self, db: ClickHouseDatabase) -> None:
+    def __init__(self, db: MySQLDatabase) -> None:
         self._db = db
         configuration_ws_streams = ConfigurationWebSocketStreams(
             stream_url=os.getenv(
@@ -524,7 +524,7 @@ class KlineStreamManager:
 
 async def run_kline_sync_agent(check_interval: int = 10) -> None:
     """Run kline websocket sync agent."""
-    db = ClickHouseDatabase()
+    db = MySQLDatabase()
     manager = KlineStreamManager(db)
     
     try:
@@ -553,7 +553,7 @@ if __name__ == "__main__":
     )
 
     parser = argparse.ArgumentParser(
-        description="Stream Binance market data into ClickHouse"
+        description="Stream Binance market data into MySQL"
     )
     parser.add_argument(
         "--mode",

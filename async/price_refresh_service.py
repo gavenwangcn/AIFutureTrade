@@ -37,7 +37,7 @@ from typing import List, Optional
 
 import common.config as app_config
 from common.binance_futures import BinanceFuturesClient
-from common.database_clickhouse import ClickHouseDatabase
+from common.database_mysql import MySQLDatabase
 
 logger = logging.getLogger(__name__)
 
@@ -71,7 +71,7 @@ def parse_cron_interval(cron_expr: str) -> int:
 
 async def refresh_price_for_symbol(
     binance_client: BinanceFuturesClient,
-    db: ClickHouseDatabase,
+    db: MySQLDatabase,
     symbol: str,
     target_date: datetime
 ) -> bool:
@@ -80,7 +80,7 @@ async def refresh_price_for_symbol(
     
     Args:
         binance_client: 币安期货客户端
-        db: ClickHouse数据库实例
+        db: MySQL数据库实例
         symbol: 交易对符号
         target_date: 目标日期（用于计算昨天）
         
@@ -167,7 +167,7 @@ async def refresh_price_for_symbol(
 
 async def refresh_prices_batch(
     binance_client: BinanceFuturesClient,
-    db: ClickHouseDatabase,
+    db: MySQLDatabase,
     symbols: List[str],
     target_date: datetime,
     max_per_minute: int = 1000
@@ -177,7 +177,7 @@ async def refresh_prices_batch(
     
     Args:
         binance_client: 币安期货客户端
-        db: ClickHouse数据库实例
+        db: MySQL数据库实例
         symbols: 需要刷新的symbol列表
         target_date: 目标日期
         max_per_minute: 每分钟最多刷新的symbol数量（默认1000）
@@ -293,7 +293,7 @@ async def refresh_all_prices() -> None:
     try:
         # 初始化数据库和币安客户端
         logger.info("[PriceRefresh] [步骤1] 初始化数据库和币安客户端...")
-        db = ClickHouseDatabase(auto_init_tables=False)
+        db = MySQLDatabase(auto_init_tables=False)
         
         binance_client = BinanceFuturesClient(
             api_key=app_config.BINANCE_API_KEY,

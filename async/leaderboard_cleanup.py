@@ -1,7 +1,7 @@
 """
-ClickHouse 涨跌榜数据定时清理服务
+MySQL 涨跌榜数据定时清理服务
 
-定期清除 ClickHouse futures_leaderboard 表中超过保留期的历史批次数据，
+定期清除 MySQL futures_leaderboard 表中超过保留期的历史批次数据，
 防止由于频繁插入最新涨跌榜导致数据量无限增长。
 """
 import asyncio
@@ -11,7 +11,7 @@ import time
 from datetime import datetime, timezone
 
 import common.config as app_config
-from common.database_clickhouse import ClickHouseDatabase
+from common.database_mysql import MySQLDatabase
 
 logger = logging.getLogger(__name__)
 
@@ -35,9 +35,9 @@ async def cleanup_old_leaderboard(minutes: int = 10) -> dict:
     )
     
     try:
-        logger.debug("[LeaderboardCleanup] 🔌 正在初始化 ClickHouse 数据库连接...")
-        db = ClickHouseDatabase(auto_init_tables=False)
-        logger.debug("[LeaderboardCleanup] ✅ ClickHouse 数据库连接已建立")
+        logger.debug("[LeaderboardCleanup] 🔌 正在初始化 MySQL 数据库连接...")
+        db = MySQLDatabase(auto_init_tables=False)
+        logger.debug("[LeaderboardCleanup] ✅ MySQL 数据库连接已建立")
         
         logger.debug("[LeaderboardCleanup] 📞 调用 cleanup_old_leaderboard 方法...")
         stats = db.cleanup_old_leaderboard(minutes=minutes)
@@ -78,7 +78,7 @@ async def cleanup_old_leaderboard(minutes: int = 10) -> dict:
         # 验证清理是否成功
         if stats.get('to_delete_count', 0) > 0:
             logger.info(
-                "[LeaderboardCleanup] ✅ 清理操作已成功提交 | 待删除: %s 条数据（ClickHouse 异步执行中）",
+                "[LeaderboardCleanup] ✅ 清理操作已成功提交 | 待删除: %s 条数据",
                 stats.get('to_delete_count', 0),
             )
         else:
@@ -118,8 +118,8 @@ async def cleanup_old_leaderboard(minutes: int = 10) -> dict:
 
 async def run_cleanup_scheduler() -> None:
     """运行定时清理调度器，固定间隔执行."""
-    interval_minutes = getattr(app_config, "CLICKHOUSE_LEADERBOARD_CLEANUP_INTERVAL_MINUTES", 10)
-    retention_minutes = getattr(app_config, "CLICKHOUSE_LEADERBOARD_RETENTION_MINUTES", 10)
+    interval_minutes = getattr(app_config, "MYSQL_LEADERBOARD_CLEANUP_INTERVAL_MINUTES", 10)
+    retention_minutes = getattr(app_config, "MYSQL_LEADERBOARD_RETENTION_MINUTES", 10)
 
     interval_minutes = max(1, int(interval_minutes))
     retention_minutes = max(1, int(retention_minutes))

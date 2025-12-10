@@ -1,6 +1,6 @@
 """
-Database management module - ClickHouse implementation
-基础配置数据库操作模块，使用 ClickHouse 作为存储引擎
+Database management module - MySQL implementation
+基础配置数据库操作模块，使用 MySQL 作为存储引擎
 """
 import json
 import logging
@@ -8,31 +8,33 @@ import uuid
 import common.config as app_config
 from datetime import datetime, timezone
 from typing import List, Dict, Optional, Any, Callable, Tuple
-from common.database_clickhouse import ClickHouseConnectionPool
+from common.database_mysql import MySQLConnectionPool
+import pymysql
+from pymysql import cursors
 
 logger = logging.getLogger(__name__)
 
 
 class Database:
-    """Database management class using ClickHouse as storage backend.
+    """Database management class using MySQL as storage backend.
     
-    注意：此模块已从 SQLite 迁移到 ClickHouse，保持与原 SQLite 版本的方法签名和返回值格式兼容。
+    注意：此模块已从 ClickHouse 迁移到 MySQL，保持与原版本的方法签名和返回值格式兼容。
     """
     
     def __init__(self, db_path: str = 'trading_bot.db'):
         """Initialize database connection.
         
         Args:
-            db_path: 保留此参数以保持兼容性，但不再使用（ClickHouse 使用配置中的连接信息）
+            db_path: 保留此参数以保持兼容性，但不再使用（MySQL 使用配置中的连接信息）
         """
-        # 使用 ClickHouse 连接池，参考 database_clickhouse.py 的模式
-        self._pool = ClickHouseConnectionPool(
-            host=app_config.CLICKHOUSE_HOST,
-            port=app_config.CLICKHOUSE_PORT,
-            username=app_config.CLICKHOUSE_USER,
-            password=app_config.CLICKHOUSE_PASSWORD,
-            database=app_config.CLICKHOUSE_DATABASE,
-            secure=app_config.CLICKHOUSE_SECURE,
+        # 使用 MySQL 连接池，参考 database_mysql.py 的模式
+        self._pool = MySQLConnectionPool(
+            host=app_config.MYSQL_HOST,
+            port=app_config.MYSQL_PORT,
+            user=app_config.MYSQL_USER,
+            password=app_config.MYSQL_PASSWORD,
+            database=app_config.MYSQL_DATABASE,
+            charset='utf8mb4',
             min_connections=5,
             max_connections=50,
             connection_timeout=30
@@ -55,38 +57,38 @@ class Database:
         self.asset_table = "asset"
     
     def _with_connection(self, func: Callable, *args, **kwargs) -> Any:
-        """Execute a function with a ClickHouse connection from the pool.
+        """Execute a function with a MySQL connection from the pool.
         
         注意：此方法使用 try-finally 确保连接总是被释放。
-        如果发生网络错误（如 IncompleteRead、ProtocolError），连接会被正确关闭。
+        如果发生网络错误，连接会被正确关闭。
         """
-        client = self._pool.acquire()
-        if not client:
-            raise Exception("Failed to acquire ClickHouse connection")
+        conn = self._pool.acquire()
+        if not conn:
+            raise Exception("Failed to acquire MySQL connection")
         
         connection_handled = False  # 标记连接是否已被处理
         try:
-            return func(client, *args, **kwargs)
+            return func(conn, *args, **kwargs)
         except Exception as e:
             # 检查是否为网络/协议错误
             error_type = type(e).__name__
             error_msg = str(e)
             is_network_error = any(keyword in error_msg.lower() for keyword in [
-                'connection', 'broken', 'aborted', 'protocol', 'chunk', 
-                'incompleteread', 'incomplete read', 'timeout', 'reset'
+                'connection', 'broken', 'lost', 'timeout', 'reset', 'gone away',
+                'operationalerror', 'interfaceerror'
             ]) or any(keyword in error_type.lower() for keyword in [
-                'connection', 'protocol', 'timeout', 'incompleteread', 'protocolerror'
+                'connection', 'timeout', 'operationalerror', 'interfaceerror'
             ])
             
             if is_network_error:
                 # 对于网络错误，连接可能已损坏，应该关闭而不是放回池中
                 logger.warning(
-                    f"[Database] Network/Protocol error detected, closing damaged connection: "
+                    f"[Database] Network error detected, closing damaged connection: "
                     f"{error_type}: {error_msg}"
                 )
                 try:
-                    if hasattr(client, 'close'):
-                        client.close()
+                    conn.rollback()
+                    conn.close()
                 except Exception as close_error:
                     logger.debug(f"[Database] Error closing failed connection: {close_error}")
                 # 减少连接计数
@@ -97,42 +99,64 @@ class Database:
                 # 重新抛出异常
                 raise
             else:
-                # 对于非网络错误，正常释放连接（在 finally 中处理）
+                # 对于非网络错误，回滚事务并正常释放连接（在 finally 中处理）
+                try:
+                    conn.rollback()
+                except Exception:
+                    pass
                 raise
         finally:
             # 只有在连接未被处理的情况下才释放连接
-            if client and not connection_handled:
+            if conn and not connection_handled:
                 try:
-                    self._pool.release(client)
+                    conn.commit()
+                    self._pool.release(conn)
                 except Exception as release_error:
                     # 如果释放失败，尝试关闭连接
                     logger.warning(
                         f"[Database] Failed to release connection, closing it: {release_error}"
                     )
                     try:
-                        if hasattr(client, 'close'):
-                            client.close()
+                        conn.rollback()
+                        conn.close()
                     except Exception:
                         pass
                     with self._pool._lock:
                         if self._pool._current_connections > 0:
                             self._pool._current_connections -= 1
     
-    def command(self, sql: str) -> None:
+    def command(self, sql: str, params: Dict[str, Any] = None) -> None:
         """Execute a raw SQL command."""
-        def _execute_command(client):
-            client.command(sql)
+        def _execute_command(conn):
+            cursor = conn.cursor()
+            try:
+                if params:
+                    cursor.execute(sql, params)
+                else:
+                    cursor.execute(sql)
+            finally:
+                cursor.close()
         self._with_connection(_execute_command)
     
-    def query(self, sql: str) -> List[Tuple]:
+    def query(self, sql: str, params: tuple = None) -> List[Tuple]:
         """Execute a query and return results.
         
-        注意：ClickHouse 的参数化查询支持有限，这里直接执行 SQL 字符串。
-        所有参数都应该在调用前通过字符串格式化安全地嵌入到 SQL 中。
+        注意：MySQL 支持参数化查询，使用 %s 作为占位符。
         """
-        def _execute_query(client):
-            result = client.query(sql)
-            return result.result_rows
+        def _execute_query(conn):
+            cursor = conn.cursor()
+            try:
+                if params:
+                    cursor.execute(sql, params)
+                else:
+                    cursor.execute(sql)
+                rows = cursor.fetchall()
+                # 转换为元组列表以保持兼容性
+                if rows and isinstance(rows[0], dict):
+                    return [tuple(row.values()) for row in rows]
+                return rows
+            finally:
+                cursor.close()
         return self._with_connection(_execute_query)
     
     def insert_rows(self, table: str, rows: List[List[Any]], column_names: List[str]) -> None:
@@ -140,8 +164,18 @@ class Database:
         if not rows:
             return
         
-        def _execute_insert(client):
-            client.insert(table, rows, column_names=column_names)
+        def _execute_insert(conn):
+            cursor = conn.cursor()
+            try:
+                # 构建INSERT语句
+                columns_str = ', '.join([f"`{col}`" for col in column_names])
+                placeholders = ', '.join(['%s'] * len(column_names))
+                sql = f"INSERT INTO `{table}` ({columns_str}) VALUES ({placeholders})"
+                
+                # 批量插入
+                cursor.executemany(sql, rows)
+            finally:
+                cursor.close()
         
         self._with_connection(_execute_insert)
     
@@ -151,7 +185,7 @@ class Database:
     
     def init_db(self):
         """Initialize database tables - only CREATE TABLE IF NOT EXISTS, no migration logic"""
-        logger.info("[Database] Initializing ClickHouse tables...")
+        logger.info("[Database] Initializing MySQL tables...")
         
         # Providers table (API提供方)
         self._ensure_providers_table()
@@ -198,22 +232,21 @@ class Database:
         # Insert default settings if no settings exist
         self._init_default_settings()
         
-        logger.info("[Database] ClickHouse tables initialized")
+        logger.info("[Database] MySQL tables initialized")
     
     def _ensure_providers_table(self):
         """Create providers table if not exists"""
         ddl = f"""
-        CREATE TABLE IF NOT EXISTS {self.providers_table} (
-            id String,
-            name String,
-            api_url String,
-            api_key String,
-            models String,
-            provider_type String DEFAULT 'openai',
-            created_at DateTime DEFAULT now()
-        )
-        ENGINE = MergeTree
-        ORDER BY (id, created_at)
+        CREATE TABLE IF NOT EXISTS `{self.providers_table}` (
+            `id` VARCHAR(36) PRIMARY KEY,
+            `name` VARCHAR(200) NOT NULL,
+            `api_url` VARCHAR(500) NOT NULL,
+            `api_key` VARCHAR(500) NOT NULL,
+            `models` TEXT,
+            `provider_type` VARCHAR(50) DEFAULT 'openai',
+            `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP,
+            INDEX `idx_created_at` (`created_at`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
         """
         self.command(ddl)
         logger.debug(f"[Database] Ensured table {self.providers_table} exists")
@@ -221,21 +254,21 @@ class Database:
     def _ensure_models_table(self):
         """Create models table if not exists"""
         ddl = f"""
-        CREATE TABLE IF NOT EXISTS {self.models_table} (
-            id String,
-            name String,
-            provider_id String,
-            model_name String,
-            initial_capital Float64 DEFAULT 10000,
-            leverage UInt8 DEFAULT 10,
-            auto_trading_enabled UInt8 DEFAULT 1,
-            api_key String,
-            api_secret String,
-            symbol_source String DEFAULT 'leaderboard',  -- 【新增字段】交易对数据源：'leaderboard'（涨跌榜，默认）或'future'（合约配置信息表）
-            created_at DateTime DEFAULT now()
-        )
-        ENGINE = MergeTree
-        ORDER BY (id, created_at)
+        CREATE TABLE IF NOT EXISTS `{self.models_table}` (
+            `id` VARCHAR(36) PRIMARY KEY,
+            `name` VARCHAR(200) NOT NULL,
+            `provider_id` VARCHAR(36) NOT NULL,
+            `model_name` VARCHAR(200) NOT NULL,
+            `initial_capital` DOUBLE DEFAULT 10000,
+            `leverage` TINYINT UNSIGNED DEFAULT 10,
+            `auto_trading_enabled` TINYINT UNSIGNED DEFAULT 1,
+            `api_key` VARCHAR(500),
+            `api_secret` VARCHAR(500),
+            `symbol_source` VARCHAR(50) DEFAULT 'leaderboard',
+            `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP,
+            INDEX `idx_provider_id` (`provider_id`),
+            INDEX `idx_created_at` (`created_at`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
         """
         self.command(ddl)
         logger.debug(f"[Database] Ensured table {self.models_table} exists")
@@ -243,20 +276,21 @@ class Database:
     def _ensure_portfolios_table(self):
         """Create portfolios table if not exists"""
         ddl = f"""
-        CREATE TABLE IF NOT EXISTS {self.portfolios_table} (
-            id String,
-            model_id String,
-            symbol String,
-            position_amt Float64,
-            avg_price Float64,
-            leverage UInt8 DEFAULT 1,
-            position_side String DEFAULT 'LONG',
-            initial_margin Float64 DEFAULT 0.0,
-            unrealized_profit Float64 DEFAULT 0.0,
-            updated_at DateTime DEFAULT now()
-        )
-        ENGINE = ReplacingMergeTree(updated_at)
-        ORDER BY (model_id, symbol, position_side)
+        CREATE TABLE IF NOT EXISTS `{self.portfolios_table}` (
+            `id` VARCHAR(36) PRIMARY KEY,
+            `model_id` VARCHAR(36) NOT NULL,
+            `symbol` VARCHAR(50) NOT NULL,
+            `position_amt` DOUBLE DEFAULT 0.0,
+            `avg_price` DOUBLE DEFAULT 0.0,
+            `leverage` TINYINT UNSIGNED DEFAULT 1,
+            `position_side` VARCHAR(10) DEFAULT 'LONG',
+            `initial_margin` DOUBLE DEFAULT 0.0,
+            `unrealized_profit` DOUBLE DEFAULT 0.0,
+            `updated_at` DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            UNIQUE KEY `uk_model_symbol_side` (`model_id`, `symbol`, `position_side`),
+            INDEX `idx_model_id` (`model_id`),
+            INDEX `idx_updated_at` (`updated_at`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
         """
         self.command(ddl)
         logger.debug(f"[Database] Ensured table {self.portfolios_table} exists")
@@ -264,21 +298,21 @@ class Database:
     def _ensure_trades_table(self):
         """Create trades table if not exists"""
         ddl = f"""
-        CREATE TABLE IF NOT EXISTS {self.trades_table} (
-            id String,
-            model_id String,
-            future String,
-            signal String,
-            quantity Float64,
-            price Float64,
-            leverage UInt8 DEFAULT 1,
-            side String DEFAULT 'long',
-            pnl Float64 DEFAULT 0,
-            fee Float64 DEFAULT 0,
-            timestamp DateTime DEFAULT now()
-        )
-        ENGINE = MergeTree
-        ORDER BY (model_id, timestamp, future)
+        CREATE TABLE IF NOT EXISTS `{self.trades_table}` (
+            `id` VARCHAR(36) PRIMARY KEY,
+            `model_id` VARCHAR(36) NOT NULL,
+            `future` VARCHAR(50) NOT NULL,
+            `signal` VARCHAR(50) NOT NULL,
+            `quantity` DOUBLE DEFAULT 0.0,
+            `price` DOUBLE DEFAULT 0.0,
+            `leverage` TINYINT UNSIGNED DEFAULT 1,
+            `side` VARCHAR(10) DEFAULT 'long',
+            `pnl` DOUBLE DEFAULT 0,
+            `fee` DOUBLE DEFAULT 0,
+            `timestamp` DATETIME DEFAULT CURRENT_TIMESTAMP,
+            INDEX `idx_model_timestamp` (`model_id`, `timestamp`),
+            INDEX `idx_future` (`future`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
         """
         self.command(ddl)
         logger.debug(f"[Database] Ensured table {self.trades_table} exists")
@@ -286,16 +320,15 @@ class Database:
     def _ensure_conversations_table(self):
         """Create conversations table if not exists"""
         ddl = f"""
-        CREATE TABLE IF NOT EXISTS {self.conversations_table} (
-            id String,
-            model_id String,
-            user_prompt String,
-            ai_response String,
-            cot_trace String,
-            timestamp DateTime DEFAULT now()
-        )
-        ENGINE = MergeTree
-        ORDER BY (model_id, timestamp)
+        CREATE TABLE IF NOT EXISTS `{self.conversations_table}` (
+            `id` VARCHAR(36) PRIMARY KEY,
+            `model_id` VARCHAR(36) NOT NULL,
+            `user_prompt` LONGTEXT,
+            `ai_response` LONGTEXT,
+            `cot_trace` LONGTEXT,
+            `timestamp` DATETIME DEFAULT CURRENT_TIMESTAMP,
+            INDEX `idx_model_timestamp` (`model_id`, `timestamp`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
         """
         self.command(ddl)
         logger.debug(f"[Database] Ensured table {self.conversations_table} exists")
@@ -303,18 +336,17 @@ class Database:
     def _ensure_account_values_table(self):
         """Create account_values table if not exists"""
         ddl = f"""
-        CREATE TABLE IF NOT EXISTS {self.account_values_table} (
-            id String,
-            model_id String,
-            account_alias String DEFAULT '',
-            balance Float64,
-            available_balance Float64,
-            cross_wallet_balance Float64,
-            cross_un_pnl Float64 DEFAULT 0.0,
-            timestamp DateTime DEFAULT now()
-        )
-        ENGINE = MergeTree
-        ORDER BY (model_id, account_alias, timestamp)
+        CREATE TABLE IF NOT EXISTS `{self.account_values_table}` (
+            `id` VARCHAR(36) PRIMARY KEY,
+            `model_id` VARCHAR(36) NOT NULL,
+            `account_alias` VARCHAR(100) DEFAULT '',
+            `balance` DOUBLE DEFAULT 0.0,
+            `available_balance` DOUBLE DEFAULT 0.0,
+            `cross_wallet_balance` DOUBLE DEFAULT 0.0,
+            `cross_un_pnl` DOUBLE DEFAULT 0.0,
+            `timestamp` DATETIME DEFAULT CURRENT_TIMESTAMP,
+            INDEX `idx_model_alias_timestamp` (`model_id`, `account_alias`, `timestamp`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
         """
         self.command(ddl)
         logger.debug(f"[Database] Ensured table {self.account_values_table} exists")
@@ -322,16 +354,14 @@ class Database:
     def _ensure_settings_table(self):
         """Create settings table if not exists"""
         ddl = f"""
-        CREATE TABLE IF NOT EXISTS {self.settings_table} (
-            id String,
-            trading_frequency_minutes UInt32 DEFAULT 60,
-            trading_fee_rate Float64 DEFAULT 0.001,
-            show_system_prompt UInt8 DEFAULT 0,
-            created_at DateTime DEFAULT now(),
-            updated_at DateTime DEFAULT now()
-        )
-        ENGINE = ReplacingMergeTree(updated_at)
-        ORDER BY id
+        CREATE TABLE IF NOT EXISTS `{self.settings_table}` (
+            `id` VARCHAR(36) PRIMARY KEY,
+            `trading_frequency_minutes` INT UNSIGNED DEFAULT 60,
+            `trading_fee_rate` DOUBLE DEFAULT 0.001,
+            `show_system_prompt` TINYINT UNSIGNED DEFAULT 0,
+            `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP,
+            `updated_at` DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
         """
         self.command(ddl)
         logger.debug(f"[Database] Ensured table {self.settings_table} exists")
@@ -339,15 +369,14 @@ class Database:
     def _ensure_model_prompts_table(self):
         """Create model_prompts table if not exists"""
         ddl = f"""
-        CREATE TABLE IF NOT EXISTS {self.model_prompts_table} (
-            id String,
-            model_id String,
-            buy_prompt String,
-            sell_prompt String,
-            updated_at DateTime DEFAULT now()
-        )
-        ENGINE = ReplacingMergeTree(updated_at)
-        ORDER BY model_id
+        CREATE TABLE IF NOT EXISTS `{self.model_prompts_table}` (
+            `id` VARCHAR(36) PRIMARY KEY,
+            `model_id` VARCHAR(36) NOT NULL,
+            `buy_prompt` TEXT,
+            `sell_prompt` TEXT,
+            `updated_at` DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            UNIQUE KEY `uk_model_id` (`model_id`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
         """
         self.command(ddl)
         logger.debug(f"[Database] Ensured table {self.model_prompts_table} exists")
@@ -355,18 +384,18 @@ class Database:
     def _ensure_model_futures_table(self):
         """Create model_futures table if not exists"""
         ddl = f"""
-        CREATE TABLE IF NOT EXISTS {self.model_futures_table} (
-            id String,
-            model_id String,
-            symbol String,
-            contract_symbol String,
-            name String,
-            exchange String DEFAULT 'BINANCE_FUTURES',
-            link String,
-            sort_order Int32 DEFAULT 0
-        )
-        ENGINE = ReplacingMergeTree(sort_order)
-        ORDER BY (model_id, symbol)
+        CREATE TABLE IF NOT EXISTS `{self.model_futures_table}` (
+            `id` VARCHAR(36) PRIMARY KEY,
+            `model_id` VARCHAR(36) NOT NULL,
+            `symbol` VARCHAR(50) NOT NULL,
+            `contract_symbol` VARCHAR(100) DEFAULT '',
+            `name` VARCHAR(200) DEFAULT '',
+            `exchange` VARCHAR(50) DEFAULT 'BINANCE_FUTURES',
+            `link` VARCHAR(500) DEFAULT '',
+            `sort_order` INT DEFAULT 0,
+            UNIQUE KEY `uk_model_symbol` (`model_id`, `symbol`),
+            INDEX `idx_sort_order` (`sort_order`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
         """
         self.command(ddl)
         logger.debug(f"[Database] Ensured table {self.model_futures_table} exists")
@@ -374,18 +403,18 @@ class Database:
     def _ensure_futures_table(self):
         """Create futures table if not exists"""
         ddl = f"""
-        CREATE TABLE IF NOT EXISTS {self.futures_table} (
-            id String,
-            symbol String,
-            contract_symbol String,
-            name String,
-            exchange String DEFAULT 'BINANCE_FUTURES',
-            link String,
-            sort_order Int32 DEFAULT 0,
-            created_at DateTime DEFAULT now()
-        )
-        ENGINE = ReplacingMergeTree(created_at)
-        ORDER BY symbol
+        CREATE TABLE IF NOT EXISTS `{self.futures_table}` (
+            `id` VARCHAR(36) PRIMARY KEY,
+            `symbol` VARCHAR(50) NOT NULL,
+            `contract_symbol` VARCHAR(100) DEFAULT '',
+            `name` VARCHAR(200) DEFAULT '',
+            `exchange` VARCHAR(50) DEFAULT 'BINANCE_FUTURES',
+            `link` VARCHAR(500) DEFAULT '',
+            `sort_order` INT DEFAULT 0,
+            `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE KEY `uk_symbol` (`symbol`),
+            INDEX `idx_sort_order` (`sort_order`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
         """
         self.command(ddl)
         logger.debug(f"[Database] Ensured table {self.futures_table} exists")
@@ -393,22 +422,22 @@ class Database:
     def _ensure_futures_leaderboard_table(self):
         """Create futures_leaderboard table if not exists"""
         ddl = f"""
-        CREATE TABLE IF NOT EXISTS {self.futures_leaderboard_table} (
-            id String,
-            symbol String,
-            contract_symbol String,
-            name String,
-            exchange String DEFAULT 'BINANCE_FUTURES',
-            side String,
-            rank UInt8,
-            price Float64,
-            change_percent Float64,
-            quote_volume Float64,
-            timeframes String,
-            updated_at DateTime DEFAULT now()
-        )
-        ENGINE = ReplacingMergeTree(updated_at)
-        ORDER BY (symbol, side)
+        CREATE TABLE IF NOT EXISTS `{self.futures_leaderboard_table}` (
+            `id` VARCHAR(36) PRIMARY KEY,
+            `symbol` VARCHAR(50) NOT NULL,
+            `contract_symbol` VARCHAR(100) DEFAULT '',
+            `name` VARCHAR(200) DEFAULT '',
+            `exchange` VARCHAR(50) DEFAULT 'BINANCE_FUTURES',
+            `side` VARCHAR(10) NOT NULL,
+            `rank` TINYINT UNSIGNED DEFAULT 0,
+            `price` DOUBLE DEFAULT 0.0,
+            `change_percent` DOUBLE DEFAULT 0.0,
+            `quote_volume` DOUBLE DEFAULT 0.0,
+            `timeframes` VARCHAR(200) DEFAULT '',
+            `updated_at` DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            UNIQUE KEY `uk_symbol_side` (`symbol`, `side`),
+            INDEX `idx_rank` (`rank`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
         """
         self.command(ddl)
         logger.debug(f"[Database] Ensured table {self.futures_leaderboard_table} exists")
@@ -416,20 +445,20 @@ class Database:
     def _ensure_accounts_table(self):
         """Create accounts table if not exists"""
         ddl = f"""
-        CREATE TABLE IF NOT EXISTS {self.accounts_table} (
-            account_alias String,
-            asset String,
-            balance Float64,
-            cross_wallet_balance Float64,
-            cross_un_pnl Float64,
-            available_balance Float64,
-            max_withdraw_amount Float64,
-            margin_available UInt8,
-            update_time UInt64,
-            created_at DateTime DEFAULT now()
-        )
-        ENGINE = ReplacingMergeTree(update_time)
-        ORDER BY (account_alias, asset)
+        CREATE TABLE IF NOT EXISTS `{self.accounts_table}` (
+            `account_alias` VARCHAR(100) NOT NULL,
+            `asset` VARCHAR(50) NOT NULL,
+            `balance` DOUBLE DEFAULT 0.0,
+            `cross_wallet_balance` DOUBLE DEFAULT 0.0,
+            `cross_un_pnl` DOUBLE DEFAULT 0.0,
+            `available_balance` DOUBLE DEFAULT 0.0,
+            `max_withdraw_amount` DOUBLE DEFAULT 0.0,
+            `margin_available` TINYINT UNSIGNED DEFAULT 0,
+            `update_time` BIGINT UNSIGNED DEFAULT 0,
+            `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (`account_alias`, `asset`),
+            INDEX `idx_update_time` (`update_time`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
         """
         self.command(ddl)
         logger.debug(f"[Database] Ensured table {self.accounts_table} exists")
@@ -437,24 +466,23 @@ class Database:
     def _ensure_account_asset_table(self):
         """Create account_asset table if not exists"""
         ddl = f"""
-        CREATE TABLE IF NOT EXISTS {self.account_asset_table} (
-            account_alias String,
-            total_initial_margin Float64 DEFAULT 0.0,
-            total_maint_margin Float64 DEFAULT 0.0,
-            total_wallet_balance Float64 DEFAULT 0.0,
-            total_unrealized_profit Float64 DEFAULT 0.0,
-            total_margin_balance Float64 DEFAULT 0.0,
-            total_position_initial_margin Float64 DEFAULT 0.0,
-            total_open_order_initial_margin Float64 DEFAULT 0.0,
-            total_cross_wallet_balance Float64 DEFAULT 0.0,
-            total_cross_un_pnl Float64 DEFAULT 0.0,
-            available_balance Float64 DEFAULT 0.0,
-            max_withdraw_amount Float64 DEFAULT 0.0,
-            update_time UInt64,
-            created_at DateTime DEFAULT now()
-        )
-        ENGINE = ReplacingMergeTree(update_time)
-        ORDER BY (account_alias, update_time)
+        CREATE TABLE IF NOT EXISTS `{self.account_asset_table}` (
+            `account_alias` VARCHAR(100) PRIMARY KEY,
+            `total_initial_margin` DOUBLE DEFAULT 0.0,
+            `total_maint_margin` DOUBLE DEFAULT 0.0,
+            `total_wallet_balance` DOUBLE DEFAULT 0.0,
+            `total_unrealized_profit` DOUBLE DEFAULT 0.0,
+            `total_margin_balance` DOUBLE DEFAULT 0.0,
+            `total_position_initial_margin` DOUBLE DEFAULT 0.0,
+            `total_open_order_initial_margin` DOUBLE DEFAULT 0.0,
+            `total_cross_wallet_balance` DOUBLE DEFAULT 0.0,
+            `total_cross_un_pnl` DOUBLE DEFAULT 0.0,
+            `available_balance` DOUBLE DEFAULT 0.0,
+            `max_withdraw_amount` DOUBLE DEFAULT 0.0,
+            `update_time` BIGINT UNSIGNED DEFAULT 0,
+            `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP,
+            INDEX `idx_update_time` (`update_time`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
         """
         self.command(ddl)
         logger.debug(f"[Database] Ensured table {self.account_asset_table} exists")
@@ -462,25 +490,25 @@ class Database:
     def _ensure_asset_table(self):
         """Create asset table if not exists"""
         ddl = f"""
-        CREATE TABLE IF NOT EXISTS {self.asset_table} (
-            account_alias String,
-            asset String,
-            wallet_balance Float64 DEFAULT 0.0,
-            unrealized_profit Float64 DEFAULT 0.0,
-            margin_balance Float64 DEFAULT 0.0,
-            maint_margin Float64 DEFAULT 0.0,
-            initial_margin Float64 DEFAULT 0.0,
-            position_initial_margin Float64 DEFAULT 0.0,
-            open_order_initial_margin Float64 DEFAULT 0.0,
-            cross_wallet_balance Float64 DEFAULT 0.0,
-            cross_un_pnl Float64 DEFAULT 0.0,
-            available_balance Float64 DEFAULT 0.0,
-            max_withdraw_amount Float64 DEFAULT 0.0,
-            update_time UInt64,
-            created_at DateTime DEFAULT now()
-        )
-        ENGINE = ReplacingMergeTree(update_time)
-        ORDER BY (account_alias, asset)
+        CREATE TABLE IF NOT EXISTS `{self.asset_table}` (
+            `account_alias` VARCHAR(100) NOT NULL,
+            `asset` VARCHAR(50) NOT NULL,
+            `wallet_balance` DOUBLE DEFAULT 0.0,
+            `unrealized_profit` DOUBLE DEFAULT 0.0,
+            `margin_balance` DOUBLE DEFAULT 0.0,
+            `maint_margin` DOUBLE DEFAULT 0.0,
+            `initial_margin` DOUBLE DEFAULT 0.0,
+            `position_initial_margin` DOUBLE DEFAULT 0.0,
+            `open_order_initial_margin` DOUBLE DEFAULT 0.0,
+            `cross_wallet_balance` DOUBLE DEFAULT 0.0,
+            `cross_un_pnl` DOUBLE DEFAULT 0.0,
+            `available_balance` DOUBLE DEFAULT 0.0,
+            `max_withdraw_amount` DOUBLE DEFAULT 0.0,
+            `update_time` BIGINT UNSIGNED DEFAULT 0,
+            `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (`account_alias`, `asset`),
+            INDEX `idx_update_time` (`update_time`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
         """
         self.command(ddl)
         logger.debug(f"[Database] Ensured table {self.asset_table} exists")
@@ -489,7 +517,7 @@ class Database:
         """Initialize default settings if none exist"""
         try:
             # 检查是否有设置记录
-            result = self.query(f"SELECT count() as cnt FROM {self.settings_table}")
+            result = self.query(f"SELECT COUNT(*) as cnt FROM `{self.settings_table}`")
             if result and result[0][0] == 0:
                 # 插入默认设置
                 settings_id = str(uuid.uuid4())
@@ -786,12 +814,12 @@ class Database:
                 return
             
             # 删除相关数据
-            self.command(f"ALTER TABLE {self.portfolios_table} DELETE WHERE model_id = '{model_uuid}'")
-            self.command(f"ALTER TABLE {self.trades_table} DELETE WHERE model_id = '{model_uuid}'")
-            self.command(f"ALTER TABLE {self.conversations_table} DELETE WHERE model_id = '{model_uuid}'")
-            self.command(f"ALTER TABLE {self.account_values_table} DELETE WHERE model_id = '{model_uuid}'")
-            self.command(f"ALTER TABLE {self.model_futures_table} DELETE WHERE model_id = '{model_uuid}'")
-            self.command(f"ALTER TABLE {self.models_table} DELETE WHERE id = '{model_uuid}'")
+            self.command(f"DELETE FROM `{self.portfolios_table}` WHERE model_id = %s", (model_uuid,))
+            self.command(f"DELETE FROM `{self.trades_table}` WHERE model_id = %s", (model_uuid,))
+            self.command(f"DELETE FROM `{self.conversations_table}` WHERE model_id = %s", (model_uuid,))
+            self.command(f"DELETE FROM `{self.account_values_table}` WHERE model_id = %s", (model_uuid,))
+            self.command(f"DELETE FROM `{self.model_futures_table}` WHERE model_id = %s", (model_uuid,))
+            self.command(f"DELETE FROM `{self.models_table}` WHERE id = %s", (model_uuid,))
         except Exception as e:
             logger.error(f"[Database] Failed to delete model {model_id}: {e}")
             raise
@@ -1116,11 +1144,11 @@ class Database:
                 return []
             
             rows = self.query(f"""
-                SELECT * FROM {self.conversations_table}
-                WHERE model_id = '{model_uuid}'
+                SELECT * FROM `{self.conversations_table}`
+                WHERE model_id = %s
                 ORDER BY timestamp DESC
-                LIMIT {limit}
-            """)
+                LIMIT %s
+            """, (model_uuid, limit))
             columns = ["id", "model_id", "user_prompt", "ai_response", "cot_trace", "timestamp"]
             return self._rows_to_dicts(rows, columns)
         except Exception as e:

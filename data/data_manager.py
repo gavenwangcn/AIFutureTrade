@@ -31,7 +31,7 @@ if str(project_root) not in sys.path:
 
 import common.config as app_config
 from data.data_agent_manager import DataAgentManager, run_manager_http_server
-from common.database_clickhouse import ClickHouseDatabase
+from common.database_mysql import MySQLDatabase
 
 logger = logging.getLogger(__name__)
 
@@ -47,12 +47,12 @@ async def run_data_manager_service(duration: Optional[int] = None) -> None:
     logger.info("=" * 80)
     
     # 初始化数据库连接
-    logger.info("[DataManager] 📊 初始化 ClickHouse 数据库连接...")
+    logger.info("[DataManager] 📊 初始化 MySQL 数据库连接...")
     try:
-        db = ClickHouseDatabase()
-        logger.info("[DataManager] ✅ ClickHouse 数据库连接成功")
+        db = MySQLDatabase()
+        logger.info("[DataManager] ✅ MySQL 数据库连接成功")
     except Exception as e:
-        logger.error("[DataManager] ❌ ClickHouse 数据库连接失败: %s", e, exc_info=True)
+        logger.error("[DataManager] ❌ MySQL 数据库连接失败: %s", e, exc_info=True)
         raise
     
     # 初始化 DataAgentManager

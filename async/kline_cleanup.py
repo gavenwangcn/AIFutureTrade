@@ -1,7 +1,7 @@
 """
 K线数据定时清理服务
 
-定时清除ClickHouse中超过保留期的K线数据。
+定时清除MySQL中超过保留期的K线数据。
 """
 import asyncio
 import logging
@@ -9,7 +9,7 @@ import sys
 from datetime import datetime
 
 import common.config as app_config
-from common.database_clickhouse import ClickHouseDatabase
+from common.database_mysql import MySQLDatabase
 
 logger = logging.getLogger(__name__)
 
@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 async def cleanup_old_klines(days: int = 2) -> None:
     """清理超过指定天数的K线数据"""
     try:
-        db = ClickHouseDatabase(auto_init_tables=False)
+        db = MySQLDatabase(auto_init_tables=False)
         result = db.cleanup_old_klines(days=days)
         logger.info("[KlineCleanup] Cleanup initiated for klines older than %s days", days)
     except Exception as e:

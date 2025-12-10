@@ -40,8 +40,8 @@ export function useTradingApp() {
   const trades = ref([])
   const conversations = ref([])
   
-  // ClickHouse 涨幅榜同步状态
-  const clickhouseLeaderboardSyncRunning = ref(true)
+  // MySQL 涨幅榜同步状态
+  const mysqlLeaderboardSyncRunning = ref(true)
   
   // UI 状态
   const loggerEnabled = ref(localStorage.getItem('frontendLoggingEnabled') !== 'false')
@@ -1045,31 +1045,31 @@ export function useTradingApp() {
   }
   
   /**
-   * 切换 ClickHouse 涨幅榜同步
+   * 切换 MySQL 涨幅榜同步
    */
-  const toggleClickhouseLeaderboardSync = async () => {
-    const action = clickhouseLeaderboardSyncRunning.value ? 'stop' : 'start'
+  const toggleMysqlLeaderboardSync = async () => {
+    const action = mysqlLeaderboardSyncRunning.value ? 'stop' : 'start'
     
     try {
       const { apiPost } = await import('../utils/api.js')
-      const data = await apiPost('/api/clickhouse/leaderboard/control', { action })
-      clickhouseLeaderboardSyncRunning.value = data.running || false
+      const data = await apiPost('/api/mysql/leaderboard/control', { action })
+      mysqlLeaderboardSyncRunning.value = data.running || false
     } catch (error) {
-      console.error('[TradingApp] Error toggling ClickHouse sync:', error)
+      console.error('[TradingApp] Error toggling MySQL sync:', error)
       alert('操作失败')
     }
   }
   
   /**
-   * 更新 ClickHouse 涨幅榜同步状态
+   * 更新 MySQL 涨幅榜同步状态
    */
-  const updateClickhouseLeaderboardSyncStatus = async () => {
+  const updateMysqlLeaderboardSyncStatus = async () => {
     try {
       const { apiGet } = await import('../utils/api.js')
-      const data = await apiGet('/api/clickhouse/leaderboard/status')
-      clickhouseLeaderboardSyncRunning.value = data.running || false
+      const data = await apiGet('/api/mysql/leaderboard/status')
+      mysqlLeaderboardSyncRunning.value = data.running || false
     } catch (error) {
-      console.error('[TradingApp] Error getting ClickHouse status:', error)
+      console.error('[TradingApp] Error getting MySQL status:', error)
     }
   }
 
@@ -1232,7 +1232,7 @@ export function useTradingApp() {
     showLeverageModal,
     pendingLeverageModelId,
     leverageModelName,
-    clickhouseLeaderboardSyncRunning,
+    mysqlLeaderboardSyncRunning,
     loading,
     isLoading,
     errors,
@@ -1249,8 +1249,8 @@ export function useTradingApp() {
     deleteModel,
     openLeverageModal,
     saveModelLeverage,
-    toggleClickhouseLeaderboardSync,
-    updateClickhouseLeaderboardSyncStatus,
+    toggleMysqlLeaderboardSync,
+    updateMysqlLeaderboardSyncStatus,
     getModelDisplayName,
     getProviderName,
     getLeverageText,

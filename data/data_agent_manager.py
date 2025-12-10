@@ -17,7 +17,7 @@ import aiohttp
 from enum import Enum
 
 import common.config as app_config
-from common.database_clickhouse import ClickHouseDatabase
+from common.database_mysql import MySQLDatabase
 
 logger = logging.getLogger(__name__)
 
@@ -83,7 +83,7 @@ class DataAgentManager:
     
     # ============ 初始化 ============
     
-    def __init__(self, db: ClickHouseDatabase):
+    def __init__(self, db: MySQLDatabase):
         self._db = db
         self._agents: Dict[tuple, DataAgentInfo] = {}  # {(ip, port): DataAgentInfo}，port是指令端口
         self._lock = asyncio.Lock()

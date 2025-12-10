@@ -39,7 +39,7 @@ from binance_sdk_derivatives_trading_usds_futures.derivatives_trading_usds_futur
 )
 
 import common.config as app_config
-from common.database_clickhouse import ClickHouseDatabase
+from common.database_mysql import MySQLDatabase
 from market.market_streams import _normalize_kline
 
 logger = logging.getLogger(__name__)
@@ -98,7 +98,7 @@ class DataAgentKlineManager:
     **重要说明：K线监听是长期运行的异步任务**
     - 连接构建完成后会一直保持活跃，持续接收K线消息
     - 不会主动关闭连接（除非服务关闭或连接出错）
-    - 所有连接会持续运行，同步K线数据到ClickHouse数据库
+    - 所有连接会持续运行，同步K线数据到MySQL数据库
     
     主要功能包括：
     - 客户端初始化和连接管理
@@ -113,11 +113,11 @@ class DataAgentKlineManager:
     # 初始化方法
     # ============================================================================
     
-    def __init__(self, db: ClickHouseDatabase, max_symbols: int = 100, intervals: Optional[List[str]] = None):
+    def __init__(self, db: MySQLDatabase, max_symbols: int = 100, intervals: Optional[List[str]] = None):
         """初始化 DataAgentKlineManager。
         
         Args:
-            db: ClickHouse数据库实例
+            db: MySQL数据库实例
             max_symbols: 最大symbol数量
             intervals: K线时间间隔列表，如果为None则使用全局配置 KLINE_INTERVALS
         """
@@ -1512,7 +1512,7 @@ class DataAgentKlineManager:
         该方法会：
         1. 规范化K线数据格式
         2. 只处理完结的K线（x=True），跳过未完结的K线
-        3. 将数据插入ClickHouse数据库
+        3. 将数据插入MySQL数据库
         
         注意：
         - 空消息会被跳过（不记录为错误）
@@ -2525,7 +2525,7 @@ async def run_data_agent(
         register_port: async_agent的端口号
         agent_ip: 当前data_agent的IP地址（用于注册）
     """
-    db = ClickHouseDatabase()
+    db = MySQLDatabase()
     kline_manager = DataAgentKlineManager(db, max_symbols=max_symbols)
     
     # 启动指令服务器（处理添加symbol等指令）
