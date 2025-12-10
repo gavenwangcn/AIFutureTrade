@@ -1117,7 +1117,7 @@ class ClickHouseDatabase:
                     # 执行UPDATE操作
                     logger.debug("[ClickHouse] Executing UPDATE for symbol: %s", symbol)
                     self.command(update_query, params=normalized)
-                    logger.info("[ClickHouse] Successfully updated market ticker for symbol: %s", symbol)
+                    logger.debug("[ClickHouse] Successfully updated market ticker for symbol: %s", symbol)
                     total_updated += 1
                 else:
                     # 记录不存在，执行INSERT操作
@@ -1145,7 +1145,7 @@ class ClickHouseDatabase:
                     
                     logger.debug("[ClickHouse] Executing INSERT for symbol: %s", symbol)
                     self.command(insert_query, params=normalized)
-                    logger.info("[ClickHouse] Successfully inserted new market ticker for symbol: %s", symbol)
+                    logger.debug("[ClickHouse] Successfully inserted new market ticker for symbol: %s", symbol)
                     total_inserted += 1
                     
                 total_upserted += 1
