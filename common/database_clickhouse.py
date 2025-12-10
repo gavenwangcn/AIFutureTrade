@@ -481,31 +481,43 @@ class ClickHouseDatabase:
     # 通用数据库操作方法
     # ==================================================================
     
-    def command(self, sql: str) -> None:
-        """执行原始SQL命令。
+    def command(self, sql: str, params: Dict[str, Any] = None) -> Any:
+        """执行原始SQL命令并返回结果。
         
         Args:
             sql: 要执行的SQL命令字符串
+            params: 可选的参数字典，用于参数化查询
+        
+        Returns:
+            执行结果，可能包含影响的行数等信息
         """
         def _execute_command(client):
-            client.command(sql)
+            if params:
+                # 使用参数化查询
+                return client.command(sql, params=params)
+            else:
+                # 直接执行SQL
+                return client.command(sql)
         
-        self._with_connection(_execute_command)
+        return self._with_connection(_execute_command)
     
-    def query(self, sql: str) -> List[Tuple]:
+    def query(self, sql: str, params: Dict[str, Any] = None) -> List[Tuple]:
         """执行查询并返回结果。
-        
-        注意：ClickHouse 的参数化查询支持有限，这里直接执行 SQL 字符串。
-        所有参数都应该在调用前通过字符串格式化安全地嵌入到 SQL 中。
         
         Args:
             sql: 要执行的 SQL 查询字符串
+            params: 可选的参数字典，用于参数化查询
             
         Returns:
             查询结果的行列表，每行是一个元组
         """
         def _execute_query(client):
-            result = client.query(sql)
+            if params:
+                # 使用参数化查询
+                result = client.query(sql, params=params)
+            else:
+                # 直接执行SQL
+                result = client.query(sql)
             return result.result_rows
         
         return self._with_connection(_execute_query)
@@ -587,10 +599,11 @@ class ClickHouseDatabase:
             last_trade_id UInt64,
             trade_count UInt64,
             ingestion_time DateTime DEFAULT now(),
-            update_price_date Nullable(DateTime)
+            update_price_date Nullable(DateTime),
+            PRIMARY KEY symbol
         )
         ENGINE = MergeTree
-        ORDER BY (symbol, stats_close_time, event_time)
+        ORDER BY (symbol)
         """
         self.command(ddl)
         logger.info("[ClickHouse] Ensured table %s exists", self.market_ticker_table)
@@ -800,7 +813,7 @@ class ClickHouseDatabase:
         2. 对于同一批数据中的重复symbol，只保留最新的一条（基于stats_close_time）
         3. 查询数据库中已有的symbol数据，获取open_price信息
         4. 根据已有open_price计算涨跌幅相关字段
-        5. 执行批量插入操作
+        5. 对每条数据执行UPDATE操作，如果UPDATE返回0行更新则执行INSERT操作
         
         核心逻辑：
         - 首次插入时，price_change, price_change_percent, side, change_percent_text, open_price 都为空
@@ -827,29 +840,6 @@ class ClickHouseDatabase:
             logger.debug("[ClickHouse] No USDT symbols to upsert")
             return
             
-        column_names = [
-            "event_time",
-            "symbol",
-            "price_change",
-            "price_change_percent",
-            "side",
-            "change_percent_text",
-            "average_price",
-            "last_price",
-            "last_trade_volume",
-            "open_price",
-            "high_price",
-            "low_price",
-            "base_volume",
-            "quote_volume",
-            "stats_open_time",
-            "stats_close_time",
-            "first_trade_id",
-            "last_trade_id",
-            "trade_count",
-            "update_price_date",
-        ]
-
         # 处理数据：对于同一批数据中的重复symbol，只保留最新的一条（基于stats_close_time）
         symbol_data_map: Dict[str, Dict[str, Any]] = {}
         
@@ -894,9 +884,7 @@ class ClickHouseDatabase:
         symbols_to_upsert = list(symbol_data_map.keys())
         existing_data = self.get_existing_symbol_data(symbols_to_upsert)
         
-        # 准备插入数据（每个symbol只有一条最新数据）
-        prepared_rows: List[List[Any]] = []
-        
+        # 处理每条symbol数据，执行UPDATE或INSERT操作
         for symbol, normalized in symbol_data_map.items():
             # 获取当前报文的last_price
             try:
@@ -999,37 +987,69 @@ class ClickHouseDatabase:
             if "ingestion_time" in normalized and normalized.get("ingestion_time") is None:
                 normalized["ingestion_time"] = datetime.now(timezone.utc)
             
-            # 准备行数据，确保所有字段都有值
-            row_data = []
-            for name in column_names:
-                value = normalized.get(name)
-                # 对于非Nullable的DateTime字段，确保不为None
-                if name in ["event_time", "stats_open_time", "stats_close_time", "ingestion_time"]:
-                    if value is None:
-                        value = datetime.now(timezone.utc)
-                row_data.append(value)
+            # 执行单条数据的UPDATE操作
+            update_query = f"""
+            ALTER TABLE {self.market_ticker_table} UPDATE 
+            event_time = %(event_time)s, 
+            price_change = %(price_change)s, 
+            price_change_percent = %(price_change_percent)s, 
+            side = %(side)s, 
+            change_percent_text = %(change_percent_text)s, 
+            average_price = %(average_price)s, 
+            last_price = %(last_price)s, 
+            last_trade_volume = %(last_trade_volume)s, 
+            high_price = %(high_price)s, 
+            low_price = %(low_price)s, 
+            base_volume = %(base_volume)s, 
+            quote_volume = %(quote_volume)s, 
+            stats_open_time = %(stats_open_time)s, 
+            stats_close_time = %(stats_close_time)s, 
+            first_trade_id = %(first_trade_id)s, 
+            last_trade_id = %(last_trade_id)s, 
+            trade_count = %(trade_count)s
+            WHERE symbol = %(symbol)s
+            """
             
-            prepared_rows.append(row_data)
-        
-        # For ClickHouse, the most efficient way to upsert is to delete existing rows first, then insert new ones
-        # This is more efficient than UPDATE for MergeTree tables
-        if symbols_to_upsert:
-            # Delete existing rows with the same symbols
-            # 使用去重后的symbol列表，避免重复删除
-            unique_symbols = list(set(symbols_to_upsert))
-            symbols_str = "', '".join(unique_symbols)
-            delete_query = f"ALTER TABLE {self.market_ticker_table} DELETE WHERE symbol IN ('{symbols_str}')"
             try:
-                self.command(delete_query)
-                logger.debug("[ClickHouse] Deleted existing rows for symbols: %s", unique_symbols)
+                # 首先检查symbol是否存在
+                check_query = f"SELECT count() FROM {self.market_ticker_table} WHERE symbol = %(symbol)s"
+                result = self.query(check_query, params=normalized)
+                count = int(result[0][0]) if result else 0
+                
+                if count > 0:
+                    # 执行UPDATE操作
+                    self.command(update_query, params=normalized)
+                    logger.debug("[ClickHouse] Updated market ticker for symbol: %s", symbol)
+                else:
+                    # 记录不存在，执行INSERT操作
+                    logger.debug("[ClickHouse] No existing row found for symbol: %s, performing INSERT instead", symbol)
+                    
+                    # 准备INSERT字段和值
+                    insert_columns = [
+                        "event_time", "symbol", "price_change", "price_change_percent", "side", 
+                        "change_percent_text", "average_price", "last_price", "last_trade_volume", 
+                        "open_price", "high_price", "low_price", "base_volume", "quote_volume", 
+                        "stats_open_time", "stats_close_time", "first_trade_id", "last_trade_id", 
+                        "trade_count", "update_price_date"
+                    ]
+                    
+                    # 构建INSERT查询
+                    placeholders = ', '.join([f"%({col})s" for col in insert_columns])
+                    insert_query = f"""
+                    INSERT INTO {self.market_ticker_table} ({', '.join(insert_columns)})
+                    VALUES ({placeholders})
+                    """
+                    
+                    # 执行INSERT操作
+                    self.command(insert_query, params=normalized)
+                    logger.debug("[ClickHouse] Inserted new market ticker for symbol: %s", symbol)
+                    
             except Exception as e:
-                logger.warning("[ClickHouse] Failed to delete existing rows: %s", e)
+                logger.error("[ClickHouse] Failed to upsert market ticker for symbol %s: %s", symbol, e)
         
-        # Insert new rows (每个symbol只有一条数据)
-        self.insert_rows(self.market_ticker_table, prepared_rows, column_names)
         logger.debug(
             "[ClickHouse] Upserted %s rows into %s (ensured no duplicate symbols)",
-            len(prepared_rows), self.market_ticker_table
+            len(symbol_data_map), self.market_ticker_table
         )
     
     # ==================================================================
@@ -1186,28 +1206,29 @@ class ClickHouseDatabase:
             
             # 删除旧数据并插入新数据（ClickHouse的UPDATE方式）
             delete_query = f"ALTER TABLE {self.market_ticker_table} DELETE WHERE symbol = '{symbol}'"
+            update_success = False
             try:
                 self.command(delete_query)
+                # 只有当删除操作成功时才执行插入操作
+                self.insert_rows(self.market_ticker_table, [updated_row], column_names)
+                update_success = True
+                
+                # 记录时间转换信息，用于调试时区问题
+                if update_date:
+                    naive_dt = _to_naive_datetime(update_date)
+                    logger.debug(
+                        "[ClickHouse] Updated open_price for symbol %s: %s | update_price_date: %s (UTC) -> %s (naive, stored)",
+                        symbol,
+                        new_open_price,
+                        update_date.strftime('%Y-%m-%d %H:%M:%S %Z') if hasattr(update_date, 'strftime') else str(update_date),
+                        naive_dt.strftime('%Y-%m-%d %H:%M:%S')
+                    )
+                else:
+                    logger.debug("[ClickHouse] Updated open_price for symbol %s: %s", symbol, new_open_price)
             except Exception as e:
-                logger.warning("[ClickHouse] Failed to delete old row for %s: %s", symbol, e)
+                logger.error("[ClickHouse] Failed to update open price for %s: %s", symbol, e)
             
-            # 插入更新后的数据
-            self.insert_rows(self.market_ticker_table, [updated_row], column_names)
-            
-            # 记录时间转换信息，用于调试时区问题
-            if update_date:
-                naive_dt = _to_naive_datetime(update_date)
-                logger.debug(
-                    "[ClickHouse] Updated open_price for symbol %s: %s | update_price_date: %s (UTC) -> %s (naive, stored)",
-                    symbol,
-                    new_open_price,
-                    update_date.strftime('%Y-%m-%d %H:%M:%S %Z') if hasattr(update_date, 'strftime') else str(update_date),
-                    naive_dt.strftime('%Y-%m-%d %H:%M:%S')
-                )
-            else:
-                logger.debug("[ClickHouse] Updated open_price for symbol %s: %s", symbol, new_open_price)
-            
-            return True
+            return update_success
             
         except Exception as e:
             logger.error("[ClickHouse] Failed to update open_price for symbol %s: %s", symbol, e, exc_info=True)
