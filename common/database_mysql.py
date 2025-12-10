@@ -1194,6 +1194,15 @@ class MySQLDatabase:
                     
                     logger.debug("[MySQL] Final normalized data for %s: %s", symbol, normalized)
                     
+                    # 在执行SQL前检查连接是否健康
+                    try:
+                        # 尝试ping连接以检查是否有效
+                        conn.ping(reconnect=False)
+                    except (AttributeError, Exception) as ping_error:
+                        # 连接已断开，抛出异常让外层重试机制处理
+                        logger.warning("[MySQL] Connection is not healthy for symbol %s: %s, will retry", symbol, ping_error)
+                        raise Exception(f"Connection lost: {ping_error}")
+                    
                     # 为每个操作创建新的游标
                     cursor = conn.cursor()
                     
@@ -1242,7 +1251,24 @@ class MySQLDatabase:
                         symbol
                     )
                     
-                    cursor.execute(update_sql, update_params)
+                    try:
+                        cursor.execute(update_sql, update_params)
+                    except (pymysql.err.InterfaceError, pymysql.err.OperationalError, Exception) as db_error:
+                        # 连接错误，关闭游标并抛出异常让外层重试
+                        if cursor:
+                            try:
+                                cursor.close()
+                            except Exception:
+                                pass
+                        cursor = None
+                        error_type = type(db_error).__name__
+                        # 检查是否为连接相关错误
+                        if isinstance(db_error, (pymysql.err.InterfaceError, pymysql.err.OperationalError)) or 'interface' in error_type.lower() or 'operational' in error_type.lower():
+                            logger.warning("[MySQL] Database connection error for symbol %s: %s, will retry", symbol, db_error)
+                            raise Exception(f"Database connection error: {db_error}")
+                        else:
+                            # 其他错误，继续抛出
+                            raise
                     
                     # 检查UPDATE受影响的行数
                     affected_rows = cursor.rowcount
@@ -1325,9 +1351,26 @@ class MySQLDatabase:
                             insert_normalized.get("update_price_date"),
                         )
                         
-                        cursor.execute(insert_sql, insert_params)
-                        logger.debug("[MySQL] Successfully inserted new market ticker for symbol: %s", symbol)
-                        total_inserted += 1
+                        try:
+                            cursor.execute(insert_sql, insert_params)
+                            logger.debug("[MySQL] Successfully inserted new market ticker for symbol: %s", symbol)
+                            total_inserted += 1
+                        except (pymysql.err.InterfaceError, pymysql.err.OperationalError, Exception) as db_error:
+                            # 连接错误，关闭游标并抛出异常让外层重试
+                            if cursor:
+                                try:
+                                    cursor.close()
+                                except Exception:
+                                    pass
+                            cursor = None
+                            error_type = type(db_error).__name__
+                            # 检查是否为连接相关错误
+                            if isinstance(db_error, (pymysql.err.InterfaceError, pymysql.err.OperationalError)) or 'interface' in error_type.lower() or 'operational' in error_type.lower():
+                                logger.warning("[MySQL] Database connection error during INSERT for symbol %s: %s, will retry", symbol, db_error)
+                                raise Exception(f"Database connection error during INSERT: {db_error}")
+                            else:
+                                # 其他错误，继续抛出
+                                raise
                     else:
                         logger.debug("[MySQL] Successfully updated market ticker for symbol: %s (affected rows: %d)", symbol, affected_rows)
                         total_updated += 1
@@ -1339,17 +1382,38 @@ class MySQLDatabase:
                     cursor = None
                     
                 except Exception as e:
-                    # 记录错误但继续处理下一条记录
-                    logger.error("[MySQL] Failed to upsert market ticker for symbol %s: %s", symbol, e, exc_info=True)
-                    total_failed += 1
-                    # 确保游标被关闭
-                    if cursor:
-                        try:
-                            cursor.close()
-                        except Exception:
-                            pass
-                    # 继续处理下一条记录
-                    continue
+                    error_msg = str(e)
+                    error_type = type(e).__name__
+                    
+                    # 判断是否为连接错误，需要重新获取连接
+                    is_connection_error = any(keyword in error_msg.lower() for keyword in [
+                        'connection', 'interfaceerror', 'operationalerror', 'connection lost', 
+                        'database connection error', 'bad file descriptor'
+                    ]) or 'InterfaceError' in error_type or 'OperationalError' in error_type
+                    
+                    if is_connection_error:
+                        # 连接错误，抛出异常让 _with_connection 的重试机制处理
+                        logger.warning("[MySQL] Connection error for symbol %s: %s, will retry via _with_connection", symbol, e)
+                        # 确保游标被关闭
+                        if cursor:
+                            try:
+                                cursor.close()
+                            except Exception:
+                                pass
+                        # 抛出异常，让外层重试机制处理
+                        raise
+                    else:
+                        # 其他错误，记录但继续处理下一条记录
+                        logger.error("[MySQL] Failed to upsert market ticker for symbol %s: %s", symbol, e, exc_info=True)
+                        total_failed += 1
+                        # 确保游标被关闭
+                        if cursor:
+                            try:
+                                cursor.close()
+                            except Exception:
+                                pass
+                        # 继续处理下一条记录
+                        continue
         
         self._with_connection(_execute_upsert)
         
