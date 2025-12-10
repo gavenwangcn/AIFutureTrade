@@ -1296,6 +1296,138 @@ class MySQLDatabase:
     # Leaderboard 模块：数据插入和更新
     # ==================================================================
     
+    def calculate_leaderboard_from_tickers(
+        self,
+        top_n: int = 10,
+        time_window_seconds: int = 2
+    ) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+        """从市场行情数据计算涨跌榜。
+        
+        从 24_market_tickers 表查询最近时间窗口内的数据，计算涨跌幅并排序。
+        
+        Args:
+            top_n: 返回前N名数量
+            time_window_seconds: 时间窗口（秒），只查询最近N秒内的数据
+            
+        Returns:
+            (long_rows, short_rows) 元组，分别包含涨幅榜和跌幅榜数据
+        """
+        try:
+            cutoff_time = datetime.now(timezone.utc) - timedelta(seconds=time_window_seconds)
+            
+            query = f"""
+            SELECT 
+                symbol, last_price, open_price, quote_volume, event_time
+            FROM `{self.market_ticker_table}`
+            WHERE event_time >= %s
+            AND open_price > 0
+            AND last_price > 0
+            ORDER BY event_time DESC
+            """
+            
+            def _execute_query(conn):
+                cursor = conn.cursor()
+                try:
+                    cursor.execute(query, (cutoff_time,))
+                    rows = cursor.fetchall()
+                    
+                    # 转换为字典列表
+                    tickers = []
+                    for row in rows:
+                        if isinstance(row, dict):
+                            tickers.append(row)
+                        elif isinstance(row, (list, tuple)):
+                            tickers.append({
+                                'symbol': row[0] if len(row) > 0 else '',
+                                'last_price': float(row[1]) if len(row) > 1 and row[1] is not None else 0.0,
+                                'open_price': float(row[2]) if len(row) > 2 and row[2] is not None else 0.0,
+                                'quote_volume': float(row[3]) if len(row) > 3 and row[3] is not None else 0.0,
+                                'event_time': row[4] if len(row) > 4 else None,
+                            })
+                    
+                    return tickers
+                finally:
+                    cursor.close()
+            
+            tickers = self._with_connection(_execute_query)
+            
+            if not tickers:
+                logger.debug("[MySQL] No tickers found for leaderboard calculation")
+                return [], []
+            
+            # 计算涨跌幅并分组（每个symbol只保留最新的记录）
+            symbol_data = {}
+            for ticker in tickers:
+                symbol = ticker.get('symbol')
+                if not symbol:
+                    continue
+                
+                # 如果该symbol已有数据，保留最新的（event_time更晚的）
+                if symbol in symbol_data:
+                    existing_time = symbol_data[symbol].get('event_time')
+                    current_time = ticker.get('event_time')
+                    if existing_time and current_time and current_time < existing_time:
+                        continue
+                
+                open_price = ticker.get('open_price', 0.0)
+                last_price = ticker.get('last_price', 0.0)
+                
+                # 计算涨跌幅
+                if open_price > 0:
+                    change_percent = ((last_price - open_price) / open_price) * 100.0
+                else:
+                    change_percent = 0.0
+                
+                symbol_data[symbol] = {
+                    'symbol': symbol,
+                    'contract_symbol': symbol,
+                    'name': symbol.replace('USDT', '') if symbol.endswith('USDT') else symbol,
+                    'exchange': 'BINANCE_FUTURES',
+                    'price': last_price,
+                    'change_percent': change_percent,
+                    'quote_volume': ticker.get('quote_volume', 0.0),
+                    'timeframes': '',
+                    'event_time': ticker.get('event_time'),
+                }
+            
+            # 转换为列表并排序
+            ticker_list = list(symbol_data.values())
+            
+            # 涨幅榜（change_percent >= 0，按降序排序）
+            gainers = [
+                {**item, 'rank': idx + 1}
+                for idx, item in enumerate(
+                    sorted(
+                        [t for t in ticker_list if t['change_percent'] >= 0],
+                        key=lambda x: x['change_percent'],
+                        reverse=True
+                    )[:top_n]
+                )
+            ]
+            
+            # 跌幅榜（change_percent < 0，按升序排序，绝对值大的在前）
+            losers = [
+                {**item, 'rank': idx + 1}
+                for idx, item in enumerate(
+                    sorted(
+                        [t for t in ticker_list if t['change_percent'] < 0],
+                        key=lambda x: x['change_percent'],
+                        reverse=False
+                    )[:top_n]
+                )
+            ]
+            
+            logger.debug(
+                "[MySQL] Calculated leaderboard: %d gainers, %d losers",
+                len(gainers), len(losers)
+            )
+            
+            return gainers, losers
+            
+        except Exception as e:
+            logger.error("[MySQL] Failed to calculate leaderboard from tickers: %s", e, exc_info=True)
+            return [], []
+    
     def sync_leaderboard(
         self,
         long_rows: List[Dict[str, Any]],

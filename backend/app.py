@@ -314,8 +314,9 @@ def _mysql_leaderboard_loop():
     # 获取配置参数，带默认值
     sync_interval = getattr(app_config, 'MYSQL_LEADERBOARD_SYNC_INTERVAL', 2)
     top_n = getattr(app_config, 'MYSQL_LEADERBOARD_TOP_N', 10)
+    time_window_seconds = sync_interval  # 使用同步间隔作为时间窗口
     
-    logger.info(f"[MySQL Leaderboard Worker-{thread_id}] MySQL 涨幅榜同步循环启动，同步间隔: {sync_interval} 秒，前N名数量: {top_n}")
+    logger.info(f"[MySQL Leaderboard Worker-{thread_id}] MySQL 涨幅榜同步循环启动，同步间隔: {sync_interval} 秒，前N名数量: {top_n}，时间窗口: {time_window_seconds} 秒")
     
     # 确保等待时间至少为1秒
     wait_seconds = max(1, sync_interval)
@@ -338,10 +339,16 @@ def _mysql_leaderboard_loop():
         if db is None:
             db = MySQLDatabase(auto_init_tables=True)
         
+        # 从市场行情数据计算涨跌榜
+        long_rows, short_rows = db.calculate_leaderboard_from_tickers(
+            top_n=top_n,
+            time_window_seconds=time_window_seconds
+        )
+        
         # 执行同步逻辑
         db.sync_leaderboard(
-            time_window_seconds=time_window,
-            top_n=top_n
+            long_rows=long_rows,
+            short_rows=short_rows
         )
     except Exception as exc:
         # 处理同步失败的情况，但不退出循环
@@ -360,10 +367,16 @@ def _mysql_leaderboard_loop():
             if db is None:
                 db = MySQLDatabase(auto_init_tables=True)
             
+            # 从市场行情数据计算涨跌榜
+            long_rows, short_rows = db.calculate_leaderboard_from_tickers(
+                top_n=top_n,
+                time_window_seconds=time_window_seconds
+            )
+            
             # 执行同步逻辑
             db.sync_leaderboard(
-                time_window_seconds=time_window,
-                top_n=top_n
+                long_rows=long_rows,
+                short_rows=short_rows
             )
             
         except Exception as exc:

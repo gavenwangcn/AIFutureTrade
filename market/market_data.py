@@ -1264,18 +1264,20 @@ class MarketDataFetcher:
 
         try:
             # 从 MySQL 查询涨幅榜数据
-            data = self._mysql_db.get_leaderboard(limit=limit)
+            # get_leaderboard 需要 side 参数，分别获取 'LONG' 和 'SHORT' 的数据
+            gainers = self._mysql_db.get_leaderboard(side='LONG', limit=limit)
+            losers = self._mysql_db.get_leaderboard(side='SHORT', limit=limit)
             
             # 转换数据格式以兼容现有接口
             # MySQL 返回的数据格式：{'gainers': [...], 'losers': [...]}
             # 需要转换为与原来 SQLite 返回格式一致的结构
             formatted_data = {
-                'gainers': [],
-                'losers': []
+                'gainers': gainers if gainers else [],
+                'losers': losers if losers else []
             }
             
             # 格式化涨幅榜数据
-            for item in data.get('gainers', []):
+            for item in gainers:
                 symbol = item.get('symbol', '')
                 # 提取基础符号（去掉 USDT 后缀）
                 base_symbol = symbol.replace(self._futures_quote_asset, '') if symbol.endswith(self._futures_quote_asset) else symbol
@@ -1287,14 +1289,14 @@ class MarketDataFetcher:
                     'exchange': 'BINANCE_FUTURES',
                     'side': 'gainer',
                     'rank': item.get('rank', 0),
-                    'price': item.get('price', 0.0),  # 使用 MySQL 的 last_price
+                    'price': item.get('price', 0.0),  # 使用 MySQL 的 price
                     'change_percent': item.get('change_percent', 0.0),
                     'quote_volume': item.get('quote_volume', 0.0),
                     'timeframes': {}  # 不再生成 timeframes 数据
                 })
             
             # 格式化跌幅榜数据
-            for item in data.get('losers', []):
+            for item in losers:
                 symbol = item.get('symbol', '')
                 # 提取基础符号（去掉 USDT 后缀）
                 base_symbol = symbol.replace(self._futures_quote_asset, '') if symbol.endswith(self._futures_quote_asset) else symbol
@@ -1306,7 +1308,7 @@ class MarketDataFetcher:
                     'exchange': 'BINANCE_FUTURES',
                     'side': 'loser',
                     'rank': item.get('rank', 0),
-                    'price': item.get('price', 0.0),  # 使用 MySQL 的 last_price
+                    'price': item.get('price', 0.0),  # 使用 MySQL 的 price
                     'change_percent': item.get('change_percent', 0.0),
                     'quote_volume': item.get('quote_volume', 0.0),
                     'timeframes': {}  # 不再生成 timeframes 数据
