@@ -793,8 +793,8 @@ class ClickHouseDatabase:
             normalized["stats_close_time"] = _to_datetime(normalized.get("stats_close_time"))
             
             # 确保所有Float64字段不为None，使用0.0作为默认值
-            # Float64字段列表：price_change, price_change_percent, average_price, last_price,
-            # last_trade_volume, open_price, high_price, low_price, base_volume, quote_volume
+            # 这是因为ClickHouse的Float64类型不接受None值
+            # Float64字段包括：涨跌幅相关、价格相关、成交量相关的字段
             float64_fields = [
                 "price_change", "price_change_percent", "average_price", "last_price",
                 "last_trade_volume", "open_price", "high_price", "low_price",
@@ -852,98 +852,133 @@ class ClickHouseDatabase:
         
         功能说明：
         1. 筛选出以USDT结尾的交易对
-        2. 对于同一批数据中的重复symbol，只保留最新的一条（基于stats_close_time）
-        3. 查询数据库中已有的symbol数据，获取open_price信息
-        4. 根据已有open_price计算涨跌幅相关字段
-        5. 对每条数据执行UPDATE操作，如果UPDATE返回0行更新则执行INSERT操作
+        2. 对每一条接收的symbol数据都执行upsert操作（无去重，每条数据都处理）
+        3. 查询数据库中已有的symbol数据，获取open_price和update_price_date信息
+        4. 根据已有open_price计算涨跌幅相关字段（price_change, price_change_percent, side等）
+        5. 对每条数据执行UPDATE操作，如果symbol不存在则执行INSERT操作
         
         核心逻辑：
-        - 首次插入时，price_change, price_change_percent, side, change_percent_text, open_price 都为空
-        - 更新时，如果数据库中open_price有值，则通过last_price和open_price计算涨跌幅指标
-        - 保留原有open_price和update_price_date，这两个字段只能由异步价格刷新服务更新
+        - 数据接收：从MarketTickerStream接收原始行情数据
+        - 数据过滤：只处理USDT交易对
+        - 数据保护：移除接口数据中的open_price和update_price_date字段，这些字段只能由异步价格刷新服务更新
+        - 价格计算：基于数据库中已有的open_price计算涨跌幅指标
+        - 数据存储：对每条数据执行UPDATE或INSERT操作，确保ingestion_time字段被正确更新
         
-        数据处理：
-        1. 规范化时间字段为datetime对象
-        2. 移除接口数据中的open_price和update_price_date字段（保护机制）
-        3. 智能处理重复数据，确保每个symbol只保留最新记录
+        数据处理规则：
+        1. 时间字段规范化：将event_time, stats_open_time, stats_close_time转换为datetime对象
+        2. 字段类型保证：确保Float64字段使用0.0作为默认值，UInt64字段使用0作为默认值，String字段使用空字符串作为默认值
+        3. ingestion_time更新：无论UPDATE还是INSERT操作，都会更新ingestion_time为当前时间
+        4. open_price保护：首次插入时设置为0.0且update_price_date为None，表示"未设置"状态
+        
+        设计决策：
+        - 取消symbol去重：每条接收到的数据都会被处理，确保数据的实时性和完整性
+        - open_price管理：采用异步价格刷新服务更新，避免接口数据覆盖开盘价
+        - 涨跌幅计算：只有当数据库中存在有效open_price时才计算涨跌幅
         
         Args:
             rows: 市场行情数据的迭代器，每个元素是包含行情信息的字典
         
         Returns:
             None
+            
+        调用示例：
+            from common.database_clickhouse import ClickHouseDatabase
+            db = ClickHouseDatabase()
+            market_data = [{'symbol': 'BTCUSDT', 'last_price': 35000, ...}]
+            db.upsert_market_tickers(market_data)
         """
+        logger.info("[ClickHouse] Starting upsert_market_tickers")
+        
         if not rows:
+            logger.info("[ClickHouse] No rows provided for upsert, returning")
             return
             
-        # Filter rows to only include symbols ending with "USDT"
+        # 筛选出USDT交易对：只处理以"USDT"结尾的交易对
+        # 这是业务需求，系统只关注USDT计价的交易对
         usdt_rows = [row for row in rows if row.get("symbol", "").endswith("USDT")]
+        logger.info("[ClickHouse] 从%d条总数据中筛选出%d条USDT交易对数据", len(list(rows)), len(usdt_rows))
+        
         if not usdt_rows:
             logger.debug("[ClickHouse] No USDT symbols to upsert")
             return
             
-        # 处理数据：对于同一批数据中的重复symbol，只保留最新的一条（基于stats_close_time）
-        symbol_data_map: Dict[str, Dict[str, Any]] = {}
+        # 数据处理列表：存储经过预处理的symbol数据
+        # 注意：根据业务需求，不再对同一批数据中的重复symbol进行去重
+        # 每条接收到的数据都会被处理，确保数据的实时性和完整性
+        processed_rows = []
         
         for row in usdt_rows:
             normalized = dict(row)
             
+            symbol = normalized.get("symbol")
+            if not symbol:
+                logger.debug("[ClickHouse] Skipping row without symbol: %s", row)
+                continue
+            
             # 重要：移除接口数据中的 open_price 和 update_price_date 字段
-            # 这两个字段只能由异步价格刷新服务更新，接口数据不能覆盖它们
+            # 数据保护机制：这两个字段只能由异步价格刷新服务(price_refresh_service)更新
+            # 避免接口数据覆盖开盘价，确保涨跌幅计算的准确性
             if "open_price" in normalized:
                 del normalized["open_price"]
-                logger.debug("[ClickHouse] 移除接口数据中的 open_price 字段（只能由异步价格刷新服务更新）")
+                logger.debug("[ClickHouse] 移除了%s的open_price字段(该字段只能由异步价格刷新服务更新)", symbol)
             if "update_price_date" in normalized:
                 del normalized["update_price_date"]
-                logger.debug("[ClickHouse] 移除接口数据中的 update_price_date 字段（只能由异步价格刷新服务更新）")
+                logger.debug("[ClickHouse] 移除了%s的update_price_date字段(该字段只能由异步价格刷新服务更新)", symbol)
             
             normalized["event_time"] = _to_datetime(normalized.get("event_time"))
             normalized["stats_open_time"] = _to_datetime(normalized.get("stats_open_time"))
             normalized["stats_close_time"] = _to_datetime(normalized.get("stats_close_time"))
             
-            symbol = normalized.get("symbol")
-            if not symbol:
-                continue
-            
-            stats_close_time = normalized.get("stats_close_time")
-            
-            # 如果该symbol已存在，比较stats_close_time，只保留最新的
-            if symbol in symbol_data_map:
-                existing_stats_close_time = symbol_data_map[symbol].get("stats_close_time")
-                if stats_close_time and existing_stats_close_time:
-                    if stats_close_time > existing_stats_close_time:
-                        symbol_data_map[symbol] = normalized
-                elif stats_close_time:
-                    # 当前数据有stats_close_time，保留当前数据
-                    symbol_data_map[symbol] = normalized
-            else:
-                symbol_data_map[symbol] = normalized
+            logger.debug("[ClickHouse] Adding symbol %s to upsert list", symbol)
+            processed_rows.append((symbol, normalized))
         
-        if not symbol_data_map:
+        logger.info("[ClickHouse] Processed %d USDT symbols for upsert", len(processed_rows))
+        
+        if not processed_rows:
+            logger.info("[ClickHouse] No symbols to upsert after processing, returning")
             return
         
-        # 查询现有symbol的数据，获取open_price
-        symbols_to_upsert = list(symbol_data_map.keys())
-        existing_data = self.get_existing_symbol_data(symbols_to_upsert)
+        # 获取所有需要处理的symbol列表
+        symbols_to_process = [symbol for symbol, _ in processed_rows]
+        
+        # 获取数据库中已存在的symbol数据，用于计算价格变化
+        existing_data = self.get_existing_symbol_data(symbols_to_process)
+        logger.info("[ClickHouse] Retrieved existing data for %d symbols", len(existing_data))
         
         # 处理每条symbol数据，执行UPDATE或INSERT操作
-        for symbol, normalized in symbol_data_map.items():
+        total_upserted = 0
+        total_updated = 0
+        total_inserted = 0
+        total_failed = 0
+        
+        for symbol, normalized in processed_rows:
+            logger.debug("[ClickHouse] Processing symbol: %s", symbol)
+            logger.debug("[ClickHouse] Raw data for %s: %s", symbol, normalized)
+            
             # 获取当前报文的last_price
             try:
                 current_last_price = float(normalized.get("last_price", 0))
-            except (TypeError, ValueError):
+                logger.debug("[ClickHouse] Extracted last_price for %s: %f", symbol, current_last_price)
+            except (TypeError, ValueError) as e:
                 current_last_price = 0.0
+                logger.warning("[ClickHouse] Failed to extract last_price for %s, defaulting to 0: %s", symbol, e)
             
             # 判断是插入还是更新
             existing_symbol_data = existing_data.get(symbol)
             existing_open_price = existing_symbol_data.get("open_price") if existing_symbol_data else None
             existing_update_price_date = existing_symbol_data.get("update_price_date") if existing_symbol_data else None
             
+            logger.debug("[ClickHouse] Existing data for %s: open_price=%s, update_price_date=%s", 
+                       symbol, existing_open_price, existing_update_price_date)
+            
             # 关键逻辑：判断open_price是否已设置
             # existing_open_price为None表示未设置（即使数据库中存储的是0.0，如果update_price_date为None也视为未设置）
             # existing_open_price不为None且不为0表示已设置且有有效值
             # 如果是更新且open_price有值（不为None且不为0），则计算涨跌幅相关字段
             if existing_open_price is not None and existing_open_price != 0 and current_last_price != 0:
+                logger.debug("[ClickHouse] Calculating price change for %s (existing_open_price: %s, current_last_price: %s)", 
+                           symbol, existing_open_price, current_last_price)
+                
                 try:
                     existing_open_price_float = float(existing_open_price)
                     current_last_price_float = float(current_last_price)
@@ -959,6 +994,9 @@ class ClickHouseDatabase:
                     
                     # 设置 change_percent_text = price_change_percent + "%"
                     change_percent_text = f"{price_change_percent:.2f}%"
+                    
+                    logger.debug("[ClickHouse] Calculated price change for %s: %f (%.2f%%), side: %s", 
+                               symbol, price_change, price_change_percent, side)
                     
                     # 重要：保持原有的open_price和update_price_date，不更新
                     # 这两个字段只能由异步价格刷新服务更新，接口数据不能覆盖它们
@@ -979,6 +1017,9 @@ class ClickHouseDatabase:
                     normalized["open_price"] = existing_open_price_float if existing_open_price_float else 0.0
                     normalized["update_price_date"] = existing_update_price_date  # 保留数据库中的值（可能为None）
             else:
+                logger.debug("[ClickHouse] Not calculating price change for %s (existing_open_price: %s, current_last_price: %s)", 
+                           symbol, existing_open_price, current_last_price)
+                
                 # 第一次插入或open_price未设置的情况
                 # Float64字段设置为0.0而不是None（因为ClickHouse Float64不接受None）
                 # 但逻辑上，open_price=0.0且update_price_date=None表示"未设置"
@@ -991,6 +1032,8 @@ class ClickHouseDatabase:
                 normalized["open_price"] = 0.0  # 存储为0.0，但逻辑上视为"未设置"（因为update_price_date=None）
                 normalized["update_price_date"] = existing_update_price_date if existing_symbol_data else None
             
+
+            
             # 确保所有Float64字段不为None，使用0.0作为默认值
             # Float64字段列表：price_change, price_change_percent, average_price, last_price,
             # last_trade_volume, open_price, high_price, low_price, base_volume, quote_volume
@@ -1002,12 +1045,14 @@ class ClickHouseDatabase:
             for field in float64_fields:
                 if normalized.get(field) is None:
                     normalized[field] = 0.0
+                    logger.debug("[ClickHouse] Set %s.%s to 0.0 (was None)", symbol, field)
             
             # 确保UInt64字段不为None
             uint64_fields = ["first_trade_id", "last_trade_id", "trade_count"]
             for field in uint64_fields:
                 if normalized.get(field) is None:
                     normalized[field] = 0
+                    logger.debug("[ClickHouse] Set %s.%s to 0 (was None)", symbol, field)
             
             # 确保String字段不为None，使用空字符串作为默认值
             # String字段：side, change_percent_text（表结构中这些字段不是Nullable）
@@ -1015,21 +1060,28 @@ class ClickHouseDatabase:
             for field in string_fields:
                 if normalized.get(field) is None:
                     normalized[field] = ""
+                    logger.debug("[ClickHouse] Set %s.%s to empty string (was None)", symbol, field)
             
             # DateTime字段处理：确保所有非Nullable的DateTime字段都不为None
-            # event_time, stats_open_time, stats_close_time 已经在前面通过_to_datetime处理过了
-            # ingestion_time 如果没有值，使用当前时间
-            # update_price_date 可以为None（因为表结构中是Nullable(DateTime)）
+            # - event_time, stats_open_time, stats_close_time：行情相关的时间字段，必须有值
+            # - ingestion_time：数据摄入时间，在UPDATE/INSERT时会单独设置
+            # - update_price_date：价格更新时间，可为None（仅在异步价格刷新服务更新时设置）
             datetime_fields = ["event_time", "stats_open_time", "stats_close_time"]
             for field in datetime_fields:
                 if normalized.get(field) is None:
                     normalized[field] = datetime.now(timezone.utc)
+                    logger.debug("[ClickHouse] 设置%s.%s为当前时间(原值为None)", symbol, field)
             
             # ingestion_time 字段处理（如果有的话）
             if "ingestion_time" in normalized and normalized.get("ingestion_time") is None:
                 normalized["ingestion_time"] = datetime.now(timezone.utc)
+                logger.debug("[ClickHouse] Set %s.ingestion_time to current time (was None)", symbol)
+            
+            logger.debug("[ClickHouse] Final normalized data for %s: %s", symbol, normalized)
             
             # 执行单条数据的UPDATE操作
+            # 使用ALTER TABLE UPDATE语法更新现有记录
+            # 注意：无论数据是否有变化，都会更新ingestion_time为当前时间
             update_query = f"""
             ALTER TABLE {self.market_ticker_table} UPDATE 
             event_time = %(event_time)s, 
@@ -1048,7 +1100,8 @@ class ClickHouseDatabase:
             stats_close_time = %(stats_close_time)s, 
             first_trade_id = %(first_trade_id)s, 
             last_trade_id = %(last_trade_id)s, 
-            trade_count = %(trade_count)s
+            trade_count = %(trade_count)s, 
+            ingestion_time = now()  # 强制更新数据摄入时间
             WHERE symbol = %(symbol)s
             """
             
@@ -1058,22 +1111,30 @@ class ClickHouseDatabase:
                 result = self.query(check_query, params=normalized)
                 count = int(result[0][0]) if result else 0
                 
+                logger.debug("[ClickHouse] Checked existence for %s: found %d rows", symbol, count)
+                
                 if count > 0:
                     # 执行UPDATE操作
+                    logger.debug("[ClickHouse] Executing UPDATE for symbol: %s", symbol)
                     self.command(update_query, params=normalized)
-                    logger.debug("[ClickHouse] Updated market ticker for symbol: %s", symbol)
+                    logger.info("[ClickHouse] Successfully updated market ticker for symbol: %s", symbol)
+                    total_updated += 1
                 else:
                     # 记录不存在，执行INSERT操作
                     logger.debug("[ClickHouse] No existing row found for symbol: %s, performing INSERT instead", symbol)
                     
-                    # 准备INSERT字段和值
+                    # 准备INSERT字段：定义要插入的所有字段
+                    # 注意：包含了所有必要的行情字段，以及ingestion_time和update_price_date
                     insert_columns = [
                         "event_time", "symbol", "price_change", "price_change_percent", "side", 
-                        "change_percent_text", "average_price", "last_price", "last_trade_volume", 
-                        "open_price", "high_price", "low_price", "base_volume", "quote_volume", 
-                        "stats_open_time", "stats_close_time", "first_trade_id", "last_trade_id", 
-                        "trade_count", "update_price_date"
+                        "change_percent_text", "average_price", "last_price", "last_trade_id", 
+                        "last_trade_volume", "open_price", "high_price", "low_price", "base_volume", 
+                        "quote_volume", "stats_open_time", "stats_close_time", "first_trade_id", 
+                        "trade_count", "ingestion_time", "update_price_date"
                     ]
+                    
+                    # 设置ingestion_time为当前UTC时间：记录数据插入时间
+                    normalized["ingestion_time"] = datetime.now(timezone.utc)
                     
                     # 构建INSERT查询
                     placeholders = ', '.join([f"%({col})s" for col in insert_columns])
@@ -1082,16 +1143,23 @@ class ClickHouseDatabase:
                     VALUES ({placeholders})
                     """
                     
-                    # 执行INSERT操作
+                    logger.debug("[ClickHouse] Executing INSERT for symbol: %s", symbol)
                     self.command(insert_query, params=normalized)
-                    logger.debug("[ClickHouse] Inserted new market ticker for symbol: %s", symbol)
+                    logger.info("[ClickHouse] Successfully inserted new market ticker for symbol: %s", symbol)
+                    total_inserted += 1
                     
+                total_upserted += 1
             except Exception as e:
-                logger.error("[ClickHouse] Failed to upsert market ticker for symbol %s: %s", symbol, e)
+                logger.error("[ClickHouse] Failed to upsert market ticker for symbol %s: %s", symbol, e, exc_info=True)
+                total_failed += 1
+        
+        logger.info("[ClickHouse] Upsert completed: %d total symbols processed, %d updated, %d inserted, %d failed",
+            len(processed_rows), total_updated, total_inserted, total_failed
+        )
         
         logger.debug(
-            "[ClickHouse] Upserted %s rows into %s (ensured no duplicate symbols)",
-            len(symbol_data_map), self.market_ticker_table
+            "[ClickHouse] Final stats: Upserted %d rows into %s",
+            total_upserted, self.market_ticker_table
         )
     
     # ==================================================================
