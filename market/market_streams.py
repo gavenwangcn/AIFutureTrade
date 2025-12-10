@@ -124,10 +124,10 @@ def _extract_tickers(message: Any) -> List[Dict[str, Any]]:
                 item_dict = vars(item)
                 result.append(item_dict)
                 logger.debug("[MarketStreams] Added item from __dict__: %s", item_dict.get("s"))
-        logger.info("[MarketStreams] Extracted %d tickers from message", len(result))
+        logger.debug("[MarketStreams] Extracted %d tickers from message", len(result))
         return result
     if isinstance(data, dict):
-        logger.info("[MarketStreams] Extracted 1 ticker from message")
+        logger.debug("[MarketStreams] Extracted 1 ticker from message")
         return [data]
     logger.debug("[MarketStreams] No tickers extracted from message")
     return []
@@ -153,17 +153,17 @@ class MarketTickerStream:
         self._MAX_CONNECTION_HOURS = 4
 
     async def _handle_message(self, message: Any) -> None:
-        logger.info("[MarketStreams] Starting to handle message")
+        logger.debug("[MarketStreams] Starting to handle message")
         
         tickers = _extract_tickers(message)
-        logger.info("[MarketStreams] Extracted %d tickers from message", len(tickers))
+        logger.debug("[MarketStreams] Extracted %d tickers from message", len(tickers))
         
         if not tickers:
-            logger.info("[MarketStreams] No tickers to process")
+            logger.debug("[MarketStreams] No tickers to process")
             return
             
         normalized = [_normalize_ticker(ticker) for ticker in tickers]
-        logger.info("[MarketStreams] Normalized %d tickers for database upsert", len(normalized))
+        logger.debug("[MarketStreams] Normalized %d tickers for database upsert", len(normalized))
         
         # 记录部分关键数据用于调试
         if normalized:
@@ -172,13 +172,13 @@ class MarketTickerStream:
         
         try:
             # 使用优化后的增量插入逻辑
-            logger.info("[MarketStreams] Calling upsert_market_tickers for %d symbols", len(normalized))
+            logger.debug("[MarketStreams] Calling upsert_market_tickers for %d symbols", len(normalized))
             await asyncio.to_thread(self._db.upsert_market_tickers, normalized)
-            logger.info("[MarketStreams] Successfully completed upsert_market_tickers")
+            logger.debug("[MarketStreams] Successfully completed upsert_market_tickers")
         except Exception as e:
             logger.error("[MarketStreams] Error during upsert_market_tickers: %s", e, exc_info=True)
         
-        logger.info("[MarketStreams] Finished handling message")
+        logger.debug("[MarketStreams] Finished handling message")
 
 
 
@@ -195,7 +195,7 @@ class MarketTickerStream:
         try:
             # 记录连接创建时间
             self._connection_creation_time = datetime.now(timezone.utc)
-            logger.info("[MarketStreams] Creating new WebSocket connection")
+            logger.debug("[MarketStreams] Creating new WebSocket connection")
             
             connection = await self._client.websocket_streams.create_connection()
             stream = await connection.all_market_tickers_streams()
@@ -211,7 +211,7 @@ class MarketTickerStream:
                 while True:
                     # 检查是否需要重新连接（24小时到期）
                     if await self._should_reconnect():
-                        logger.info("[MarketStreams] Connection reached 4-hour limit, reconnecting...")
+                        logger.debug("[MarketStreams] Connection reached 4-hour limit, reconnecting...")
                         break
                     await asyncio.sleep(0.5)
         except asyncio.CancelledError:
@@ -259,7 +259,7 @@ async def run_market_ticker_stream(run_seconds: Optional[int] = None) -> None:
             if run_seconds and (datetime.now(timezone.utc) - start_time).total_seconds() >= run_seconds:
                 break
             
-            logger.info("[MarketStreams] Reconnecting to WebSocket...")
+            logger.debug("[MarketStreams] Reconnecting to WebSocket...")
 
 
 def _normalize_kline(message_data: Any) -> Optional[Dict[str, Any]]:
@@ -578,4 +578,4 @@ if __name__ == "__main__":
         else:
             asyncio.run(run_market_ticker_stream(run_seconds=args.duration))
     except KeyboardInterrupt:
-        logger.info("[MarketStreams] Interrupted by user")
+        logger.debug("[MarketStreams] Interrupted by user")
