@@ -1105,31 +1105,13 @@ class ClickHouseDatabase:
             # 由于ClickHouse的UPDATE操作是异步的，我们使用DELETE + INSERT的方式更可靠
             # 但为了性能，我们可以使用ALTER TABLE UPDATE
             
-            # 先查询当前数据
+            # 先查询当前数据（只需要last_price用于重新计算涨跌幅）
             query = f"""
             SELECT 
-                event_time,
-                symbol,
-                price_change,
-                price_change_percent,
-                side,
-                change_percent_text,
-                average_price,
-                last_price,
-                last_trade_volume,
-                high_price,
-                low_price,
-                base_volume,
-                quote_volume,
-                stats_open_time,
-                stats_close_time,
-                first_trade_id,
-                last_trade_id,
-                trade_count,
-                ingestion_time
+                last_price
             FROM (
                 SELECT 
-                    *,
+                    last_price,
                     ROW_NUMBER() OVER (PARTITION BY symbol ORDER BY event_time DESC) as rn
                 FROM {self.market_ticker_table}
                 WHERE symbol = '{symbol}'
@@ -1149,21 +1131,8 @@ class ClickHouseDatabase:
             # 获取最新的一条数据
             row = result.result_rows[0]
             
-            # 准备更新后的数据
-            column_names = [
-                "event_time", "symbol", "price_change", "price_change_percent", "side",
-                "change_percent_text", "average_price", "last_price", "last_trade_volume",
-                "open_price", "high_price", "low_price", "base_volume", "quote_volume",
-                "stats_open_time", "stats_close_time", "first_trade_id", "last_trade_id",
-                "trade_count", "ingestion_time", "update_price_date"
-            ]
-            
             # 重新计算涨跌幅相关字段（基于新的open_price和当前的last_price）
-            # 查询返回的列顺序：event_time, symbol, price_change, price_change_percent, side,
-            # change_percent_text, average_price, last_price, last_trade_volume, high_price,
-            # low_price, base_volume, quote_volume, stats_open_time, stats_close_time,
-            # first_trade_id, last_trade_id, trade_count, ingestion_time
-            last_price = float(row[7]) if row[7] is not None else 0.0  # last_price在索引7
+            last_price = float(row[0]) if row[0] is not None else 0.0  # last_price在索引0
             new_open_price = float(open_price)
             
             if new_open_price != 0 and last_price != 0:
@@ -1178,50 +1147,44 @@ class ClickHouseDatabase:
                 side = ""
                 change_percent_text = ""
             
-            # 构建更新后的行数据
-            # 确保所有字段都有正确的类型和默认值
-            updated_row = [
-                _to_datetime(row[0]),  # event_time (DateTime)
-                _normalize_field_value(row[1], "String", "symbol"),  # symbol (String)
-                _normalize_field_value(price_change, "Float64", "price_change"),  # price_change (Float64)
-                _normalize_field_value(price_change_percent, "Float64", "price_change_percent"),  # price_change_percent (Float64)
-                _normalize_field_value(side, "String", "side"),  # side (String)
-                _normalize_field_value(change_percent_text, "String", "change_percent_text"),  # change_percent_text (String)
-                _normalize_field_value(row[6], "Float64", "average_price"),  # average_price (Float64)
-                _normalize_field_value(row[7], "Float64", "last_price"),  # last_price (Float64)
-                _normalize_field_value(row[8], "Float64", "last_trade_volume"),  # last_trade_volume (Float64)
-                _normalize_field_value(new_open_price, "Float64", "open_price"),  # open_price (Float64)
-                _normalize_field_value(row[9], "Float64", "high_price"),  # high_price (Float64)
-                _normalize_field_value(row[10], "Float64", "low_price"),  # low_price (Float64)
-                _normalize_field_value(row[11], "Float64", "base_volume"),  # base_volume (Float64)
-                _normalize_field_value(row[12], "Float64", "quote_volume"),  # quote_volume (Float64)
-                _to_datetime(row[13]),  # stats_open_time (DateTime)
-                _to_datetime(row[14]),  # stats_close_time (DateTime)
-                _normalize_field_value(row[15], "UInt64", "first_trade_id"),  # first_trade_id (UInt64)
-                _normalize_field_value(row[16], "UInt64", "last_trade_id"),  # last_trade_id (UInt64)
-                _normalize_field_value(row[17], "UInt64", "trade_count"),  # trade_count (UInt64)
-                _to_datetime(row[18]) if row[18] else datetime.now(timezone.utc),  # ingestion_time (DateTime)
-                _to_naive_datetime(update_date) if update_date else None  # update_price_date (Nullable(DateTime)) - 转换为naive datetime避免时区问题
+            # 转换update_date为naive datetime以避免时区问题
+            naive_update_date = _to_naive_datetime(update_date) if update_date else None
+            
+            # 使用直接的UPDATE语句更新数据
+            update_query = f"""
+                ALTER TABLE {self.market_ticker_table} UPDATE 
+                    open_price = ?, 
+                    price_change = ?, 
+                    price_change_percent = ?, 
+                    side = ?, 
+                    change_percent_text = ?, 
+                    update_price_date = ? 
+                WHERE symbol = ?
+            """
+            
+            params = [
+                new_open_price,
+                price_change,
+                price_change_percent,
+                side,
+                change_percent_text,
+                naive_update_date,
+                symbol
             ]
             
-            # 删除旧数据并插入新数据（ClickHouse的UPDATE方式）
-            delete_query = f"ALTER TABLE {self.market_ticker_table} DELETE WHERE symbol = '{symbol}'"
             update_success = False
             try:
-                self.command(delete_query)
-                # 只有当删除操作成功时才执行插入操作
-                self.insert_rows(self.market_ticker_table, [updated_row], column_names)
+                self.command(update_query, params)
                 update_success = True
                 
                 # 记录时间转换信息，用于调试时区问题
                 if update_date:
-                    naive_dt = _to_naive_datetime(update_date)
                     logger.debug(
                         "[ClickHouse] Updated open_price for symbol %s: %s | update_price_date: %s (UTC) -> %s (naive, stored)",
                         symbol,
                         new_open_price,
                         update_date.strftime('%Y-%m-%d %H:%M:%S %Z') if hasattr(update_date, 'strftime') else str(update_date),
-                        naive_dt.strftime('%Y-%m-%d %H:%M:%S')
+                        naive_update_date.strftime('%Y-%m-%d %H:%M:%S')
                     )
                 else:
                     logger.debug("[ClickHouse] Updated open_price for symbol %s: %s", symbol, new_open_price)
