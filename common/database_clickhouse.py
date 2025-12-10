@@ -505,8 +505,8 @@ class ClickHouseDatabase:
                         # 数字类型直接替换
                         formatted_sql = formatted_sql.replace(f"%({key})s", str(value))
                     elif isinstance(value, datetime):
-                        # 日期时间类型需要转换为字符串
-                        formatted_sql = formatted_sql.replace(f"%({key})s", f"'{value}'")
+                        # 日期时间类型需要转换为ClickHouse支持的格式: %Y-%m-%d %H:%M:%S
+                        formatted_sql = formatted_sql.replace(f"%({key})s", f"'{value.strftime('%Y-%m-%d %H:%M:%S')}'")
                     elif value is None:
                         # None值替换为NULL
                         formatted_sql = formatted_sql.replace(f"%({key})s", "NULL")
@@ -546,8 +546,8 @@ class ClickHouseDatabase:
                         # 数字类型直接替换
                         formatted_sql = formatted_sql.replace(f"%({key})s", str(value))
                     elif isinstance(value, datetime):
-                        # 日期时间类型需要转换为字符串
-                        formatted_sql = formatted_sql.replace(f"%({key})s", f"'{value}'")
+                        # 日期时间类型需要转换为ClickHouse支持的格式: %Y-%m-%d %H:%M:%S
+                        formatted_sql = formatted_sql.replace(f"%({key})s", f"'{value.strftime('%Y-%m-%d %H:%M:%S')}'")
                     elif value is None:
                         # None值替换为NULL
                         formatted_sql = formatted_sql.replace(f"%({key})s", "NULL")
@@ -1192,27 +1192,27 @@ class ClickHouseDatabase:
             # 转换update_date为naive datetime以避免时区问题
             naive_update_date = _to_naive_datetime(update_date) if update_date else None
             
-            # 使用直接的UPDATE语句更新数据
+            # 使用直接的UPDATE语句更新数据，使用命名参数格式
             update_query = f"""
                 ALTER TABLE {self.market_ticker_table} UPDATE 
-                    open_price = ?, 
-                    price_change = ?, 
-                    price_change_percent = ?, 
-                    side = ?, 
-                    change_percent_text = ?, 
-                    update_price_date = ? 
-                WHERE symbol = ?
+                    open_price = %(open_price)s, 
+                    price_change = %(price_change)s, 
+                    price_change_percent = %(price_change_percent)s, 
+                    side = %(side)s, 
+                    change_percent_text = %(change_percent_text)s, 
+                    update_price_date = %(update_price_date)s 
+                WHERE symbol = %(symbol)s
             """
             
-            params = [
-                new_open_price,
-                price_change,
-                price_change_percent,
-                side,
-                change_percent_text,
-                naive_update_date,
-                symbol
-            ]
+            params = {
+                "open_price": new_open_price,
+                "price_change": price_change,
+                "price_change_percent": price_change_percent,
+                "side": side,
+                "change_percent_text": change_percent_text,
+                "update_price_date": naive_update_date,
+                "symbol": symbol
+            }
             
             update_success = False
             try:
