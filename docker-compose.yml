@@ -136,9 +136,10 @@ services:
 # ==============================================================================
 # 注意：网络名称与docker-compose-mysql.yml中的网络名称相同
 # Docker Compose会自动合并相同名称的网络，使服务可以互相通信
+# 注意：网络名称使用硬编码，确保与docker-compose-mysql.yml一致
 networks:
-  ${DOCKER_NETWORK_NAME:-aifuturetrade-network}:
-    driver: ${DOCKER_NETWORK_DRIVER:-bridge}
+  aifuturetrade-network:
+    driver: bridge
 
 # ==============================================================================
 # 数据卷配置
