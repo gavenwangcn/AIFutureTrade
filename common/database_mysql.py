@@ -1448,9 +1448,10 @@ class MySQLDatabase:
             是否更新成功
         """
         try:
-            # 使用当前时间作为update_price_date（非UTC格式）
-            # 忽略传入的update_date参数，始终使用当前本地时间
-            update_price_date = datetime.now()
+            # 使用UTC+8时间作为update_price_date
+            # 忽略传入的update_date参数，始终使用当前UTC+8时间
+            utc8 = timezone(timedelta(hours=8))
+            update_price_date = datetime.now(utc8)
             new_open_price = float(open_price)
             
             # 使用单个原子SQL语句完成更新，避免先查询后更新的两步操作
@@ -1546,6 +1547,10 @@ class MySQLDatabase:
             def _execute_query(conn):
                 cursor = conn.cursor()
                 try:
+                    # 获取执行的真实SQL（包含参数值）
+                    real_sql = cursor.mogrify(sql, (one_hour_ago,))
+                    logger.info("[MySQL] Executing get_symbols_needing_price_refresh SQL: %s", real_sql)
+                    
                     cursor.execute(sql, (one_hour_ago,))
                     rows = cursor.fetchall()
                     # 处理返回结果（可能是元组或字典）

@@ -134,9 +134,10 @@ async def refresh_price_for_symbol(
             return False
         
         # 更新open_price和update_price_date
-        # 注意：update_open_price方法内部会使用当前本地时间作为update_price_date
-        # 传入的update_date参数会被忽略，但为了兼容性仍然传递
-        refresh_time = datetime.now()  # 使用本地时间（非UTC）
+            # 注意：update_open_price方法内部会使用当前UTC+8时间作为update_price_date
+            # 传入的update_date参数会被忽略，但为了兼容性仍然传递
+            utc8 = timezone(timedelta(hours=8))
+            refresh_time = datetime.now(utc8)  # 使用UTC+8时间
         
         # 使用asyncio.to_thread避免阻塞事件循环
         success = await asyncio.to_thread(
@@ -148,7 +149,7 @@ async def refresh_price_for_symbol(
         
         if success:
             logger.info(
-                "[PriceRefresh] ✅ Symbol %s: 成功更新open_price = %s (昨天收盘价), update_price_date = %s (当前本地时间)",
+                "[PriceRefresh] ✅ Symbol %s: 成功更新open_price = %s (昨天收盘价), update_price_date = %s (当前UTC+8时间)",
                 symbol, yesterday_close_price, refresh_time.strftime('%Y-%m-%d %H:%M:%S')
             )
         else:
@@ -282,7 +283,7 @@ async def refresh_prices_batch(
 
 async def refresh_all_prices() -> None:
     """刷新所有需要更新价格的symbol"""
-    refresh_start_time = datetime.now(timezone.utc)
+    refresh_start_time = datetime.now()
     logger.info("=" * 80)
     logger.info("[PriceRefresh] ========== 开始执行异步价格刷新任务 ==========")
     logger.info("[PriceRefresh] 执行时间: %s", refresh_start_time.strftime('%Y-%m-%d %H:%M:%S UTC'))
@@ -307,11 +308,11 @@ async def refresh_all_prices() -> None:
         # 获取需要刷新的symbol列表
         # 使用asyncio.to_thread避免阻塞事件循环
         logger.info("[PriceRefresh] [步骤2] 查询需要刷新价格的symbol列表...")
-        query_start_time = datetime.now(timezone.utc)
+        query_start_time = datetime.now()
         logger.info("[PriceRefresh] [步骤2] 开始调用db.get_symbols_needing_price_refresh()")
         symbols = await asyncio.to_thread(db.get_symbols_needing_price_refresh)
         logger.info("[PriceRefresh] [步骤2] 成功获取db.get_symbols_needing_price_refresh()返回值")
-        query_duration = (datetime.now(timezone.utc) - query_start_time).total_seconds()
+        query_duration = (datetime.now() - query_start_time).total_seconds()
         
         logger.info(
             "[PriceRefresh] [步骤2] 查询完成，耗时: %.2f秒，返回了 %s 个symbol",
@@ -396,7 +397,7 @@ async def run_price_refresh_scheduler() -> None:
     
     logger.info("=" * 80)
     logger.info("[PriceRefresh] ========== 价格刷新调度器启动 ==========")
-    logger.info("[PriceRefresh] 启动时间: %s", datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC'))
+    logger.info("[PriceRefresh] 启动时间: %s", datetime.now().strftime('%Y-%m-%d %H:%M:%S UTC'))
     logger.info("[PriceRefresh] Cron表达式: %s", cron_expr)
     logger.info("[PriceRefresh] 执行间隔: %s 秒 (%.2f 分钟)", interval_seconds, interval_seconds / 60)
     logger.info("[PriceRefresh] 每分钟最多刷新: %s 个symbol", max_per_minute)
@@ -419,7 +420,7 @@ async def run_price_refresh_scheduler() -> None:
         
         # 定时执行
         while True:
-            next_execution_time = datetime.now(timezone.utc) + timedelta(seconds=interval_seconds)
+            next_execution_time = datetime.now() + timedelta(seconds=interval_seconds)
             logger.info(
                 "[PriceRefresh] [调度器] 等待 %s 秒后执行下一次刷新 (下次执行时间: %s)",
                 interval_seconds,
@@ -441,13 +442,13 @@ async def run_price_refresh_scheduler() -> None:
         logger.info("=" * 80)
         logger.info("[PriceRefresh] [调度器] ========== 价格刷新调度器被用户停止 ==========")
         logger.info("[PriceRefresh] [调度器] 总执行次数: %s", execution_count)
-        logger.info("[PriceRefresh] [调度器] 停止时间: %s", datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC'))
+        logger.info("[PriceRefresh] [调度器] 停止时间: %s", datetime.now().strftime('%Y-%m-%d %H:%M:%S UTC'))
         logger.info("=" * 80)
     except Exception as e:
         logger.error("=" * 80)
         logger.error("[PriceRefresh] [调度器] ========== 价格刷新调度器发生错误 ==========")
         logger.error("[PriceRefresh] [调度器] 总执行次数: %s", execution_count)
-        logger.error("[PriceRefresh] [调度器] 错误时间: %s", datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC'))
+        logger.error("[PriceRefresh] [调度器] 错误时间: %s", datetime.now().strftime('%Y-%m-%d %H:%M:%S UTC'))
         logger.error("[PriceRefresh] [调度器] 错误信息: %s", e, exc_info=True)
         logger.error("=" * 80)
 
