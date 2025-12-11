@@ -46,50 +46,7 @@ def _check_insert_rows(db: MySQLDatabase) -> None:
         db.command(f"DROP TABLE IF EXISTS `{table_name}`")
 
 
-def _check_insert_market_tickers(db: MySQLDatabase) -> None:
-    db.ensure_market_ticker_table()
-    symbol = f"TEST_{uuid.uuid4().hex[:8].upper()}"
-    row = {
-        "event_time": datetime.fromtimestamp(1764142935.194, tz=timezone.utc),
-        "symbol": symbol,
-        "price_change": 0.1,
-        "price_change_percent": 0.2,
-        "average_price": 0.3,
-        "last_price": 0.4,
-        "last_trade_volume": 0.5,
-        "open_price": 0.6,
-        "high_price": 0.7,
-        "low_price": 0.8,
-        "base_volume": 0.9,
-        "quote_volume": 1.0,
-        "stats_open_time": datetime.fromtimestamp(1764056520.0, tz=timezone.utc),
-        "stats_close_time": datetime.fromtimestamp(1764142935.064, tz=timezone.utc),
-        "first_trade_id": 4,
-        "last_trade_id": 5,
-        "trade_count": 6,
-    }
-    db.insert_market_tickers([row])
-    result = db.query(
-        f"""
-        SELECT symbol,
-               side,
-               change_percent_text,
-               UNIX_TIMESTAMP(event_time) as event_ts,
-               UNIX_TIMESTAMP(stats_open_time) as open_ts,
-               UNIX_TIMESTAMP(stats_close_time) as close_ts
-        FROM `{MARKET_TICKER_TABLE}`
-        WHERE symbol = %s
-        ORDER BY event_time DESC
-        LIMIT 1
-        """,
-        (symbol,)
-    )
-    assert result, "insert_market_tickers failed"
-    stored_symbol, side, pct_text, event_ts, open_ts, close_ts = result[0]
-    assert stored_symbol == symbol, "Symbol mismatch"
-    assert side in {"gainer", "loser", ""}, "Side not derived"
-    assert pct_text.endswith("%") or pct_text == "", "change_percent_text not formatted"
-    assert event_ts > 0 and open_ts > 0 and close_ts > 0, "timestamps not stored"
+
 
 
 def main() -> int:
@@ -103,7 +60,6 @@ def main() -> int:
     checks: List[Tuple[str, Callable[[MySQLDatabase], None]]] = [
         ("ensure_table_exists", _check_table_exists),
         ("insert_rows", _check_insert_rows),
-        ("insert_market_tickers", _check_insert_market_tickers),
     ]
 
     all_passed = True

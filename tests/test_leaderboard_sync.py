@@ -133,7 +133,7 @@ def _check_leaderboard_sync_functionality(db: MySQLDatabase) -> None:
         }
     ]
     
-    db.insert_market_tickers(test_tickers)
+    db.upsert_market_tickers(test_tickers)
     
     # Start the sync thread with a larger time window to ensure test data is captured
     # We use a 60-second window to make sure our test data is included

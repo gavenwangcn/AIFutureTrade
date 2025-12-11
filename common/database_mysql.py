@@ -527,6 +527,42 @@ class MySQLDatabase:
     # 连接管理方法
     # ==================================================================
     
+    def cleanup_old_klines(self, days: int = 2) -> Dict[str, int]:
+        """清理超过指定天数的K线数据
+        
+        Args:
+            days: 保留天数，超过该天数的数据将被删除
+            
+        Returns:
+            Dict[str, int]: 各表清理的记录数
+        """
+        result = {}
+        
+        def _cleanup(conn, days):
+            # 计算截止时间
+            cutoff_time = datetime.now() - timedelta(days=days)
+            logger.info(f"[KlineCleanup] Cleaning up klines older than {cutoff_time} from all tables")
+            
+            for interval, table_name in self.market_klines_tables.items():
+                try:
+                    cursor = conn.cursor()
+                    sql = f"DELETE FROM `{table_name}` WHERE `event_time` < %s"
+                    affected_rows = cursor.execute(sql, (cutoff_time,))
+                    result[interval] = affected_rows
+                    logger.info(f"[KlineCleanup] Cleaned {affected_rows} records from {table_name}")
+                    cursor.close()
+                except Exception as e:
+                    logger.error(f"[KlineCleanup] Error cleaning {table_name}: {e}")
+                    result[interval] = 0
+            
+            return result
+        
+        try:
+            return self._with_connection(_cleanup, days)
+        except Exception as e:
+            logger.error(f"[KlineCleanup] Failed to cleanup klines: {e}")
+            return result
+
     def _with_connection(self, func: Callable, *args, **kwargs) -> Any:
         """Execute a function with a MySQL connection from the pool.
         
@@ -932,89 +968,6 @@ class MySQLDatabase:
     # Market Ticker 模块：数据插入和更新
     # ==================================================================
     
-    def insert_market_tickers(self, rows: Iterable[Dict[str, Any]]) -> None:
-        """插入市场行情数据到market_ticker表。
-        
-        此方法会对输入数据进行标准化处理，包括：
-        1. 移除接口数据中的open_price和update_price_date字段（这两个字段只能由异步价格刷新服务更新）
-        2. 确保日期时间字段格式正确
-        3. 为Float64字段设置默认值0.0
-        4. 为UInt64字段设置默认值0
-        5. 为String字段设置默认值空字符串
-        
-        Args:
-            rows: 市场行情数据字典的可迭代对象
-        """
-        column_names = [
-            "event_time",
-            "symbol",
-            "price_change",
-            "price_change_percent",
-            "side",
-            "change_percent_text",
-            "average_price",
-            "last_price",
-            "last_trade_volume",
-            "open_price",
-            "high_price",
-            "low_price",
-            "base_volume",
-            "quote_volume",
-            "stats_open_time",
-            "stats_close_time",
-            "first_trade_id",
-            "last_trade_id",
-            "trade_count",
-            "update_price_date",
-        ]
-
-        prepared_rows: List[List[Any]] = []
-        for row in rows:
-            normalized = dict(row)
-            
-            # 重要：移除接口数据中的 open_price 和 update_price_date 字段
-            # 这两个字段只能由异步价格刷新服务更新，接口数据不能覆盖它们
-            if "open_price" in normalized:
-                del normalized["open_price"]
-                logger.debug("[MySQL] 移除接口数据中的 open_price 字段（只能由异步价格刷新服务更新）")
-            if "update_price_date" in normalized:
-                del normalized["update_price_date"]
-                logger.debug("[MySQL] 移除接口数据中的 update_price_date 字段（只能由异步价格刷新服务更新）")
-            
-            # 将时间字段转换为北京时区 (UTC+8)
-            normalized["event_time"] = _to_beijing_datetime(normalized.get("event_time"))
-            normalized["stats_open_time"] = _to_beijing_datetime(normalized.get("stats_open_time"))
-            normalized["stats_close_time"] = _to_beijing_datetime(normalized.get("stats_close_time"))
-            
-            # 确保所有DOUBLE字段不为None，使用0.0作为默认值
-            float_fields = [
-                "price_change", "price_change_percent", "average_price", "last_price",
-                "last_trade_volume", "open_price", "high_price", "low_price",
-                "base_volume", "quote_volume"
-            ]
-            for field in float_fields:
-                if normalized.get(field) is None:
-                    normalized[field] = 0.0
-            
-            # 确保所有BIGINT字段不为None，使用0作为默认值
-            int_fields = ["first_trade_id", "last_trade_id", "trade_count"]
-            for field in int_fields:
-                if normalized.get(field) is None:
-                    normalized[field] = 0
-            
-            # 确保所有String字段不为None，使用空字符串作为默认值
-            string_fields = ["side", "change_percent_text"]
-            for field in string_fields:
-                if normalized.get(field) is None:
-                    normalized[field] = ""
-            
-            # 构建行数据
-            row_data = [normalized.get(col, None) for col in column_names]
-            prepared_rows.append(row_data)
-        
-        if prepared_rows:
-            self.insert_rows(self.market_ticker_table, prepared_rows, column_names)
-
     def upsert_market_tickers(self, rows: Iterable[Dict[str, Any]]) -> None:
         """更新或插入市场行情数据（upsert操作）。
         
@@ -1088,9 +1041,9 @@ class MySQLDatabase:
                 del normalized["update_price_date"]
                 logger.debug("[MySQL] 移除了%s的update_price_date字段(该字段只能由异步价格刷新服务更新)", symbol)
             
-            normalized["event_time"] = _to_datetime(normalized.get("event_time"))
-            normalized["stats_open_time"] = _to_datetime(normalized.get("stats_open_time"))
-            normalized["stats_close_time"] = _to_datetime(normalized.get("stats_close_time"))
+            normalized["event_time"] = _to_beijing_datetime(normalized.get("event_time"))
+            normalized["stats_open_time"] = _to_beijing_datetime(normalized.get("stats_open_time"))
+            normalized["stats_close_time"] = _to_beijing_datetime(normalized.get("stats_close_time"))
             
             logger.debug("[MySQL] Adding symbol %s to upsert list", symbol)
             processed_rows.append((symbol, normalized))
@@ -1254,8 +1207,9 @@ class MySQLDatabase:
                     
                     # 在执行SQL前检查连接是否健康
                     try:
-                        # 尝试ping连接以检查是否有效
-                        conn.ping(reconnect=False)
+                        # 尝试ping连接以检查是否有效，如果连接断开则自动重新连接
+                        conn.ping(reconnect=True)
+                        logger.debug("[MySQL] Connection ping successful for symbol %s", symbol)
                     except (AttributeError, Exception) as ping_error:
                         # 连接已断开，抛出异常让外层重试机制处理
                         logger.warning("[MySQL] Connection is not healthy for symbol %s: %s, will retry", symbol, ping_error)
@@ -1264,32 +1218,53 @@ class MySQLDatabase:
                     # 为每个操作创建新的游标
                     cursor = conn.cursor()
                     
-                    # 先尝试UPDATE操作（基于symbol唯一主键）
-                    # 注意：UPDATE时不更新open_price和update_price_date，这些字段由价格刷新服务管理
-                    update_sql = f"""
-                    UPDATE `{self.market_ticker_table}`
-                    SET `event_time` = %s,
-                        `price_change` = %s,
-                        `price_change_percent` = %s,
-                        `side` = %s,
-                        `change_percent_text` = %s,
-                        `average_price` = %s,
-                        `last_price` = %s,
-                        `last_trade_volume` = %s,
-                        `high_price` = %s,
-                        `low_price` = %s,
-                        `base_volume` = %s,
-                        `quote_volume` = %s,
-                        `stats_open_time` = %s,
-                        `stats_close_time` = %s,
-                        `first_trade_id` = %s,
-                        `last_trade_id` = %s,
-                        `trade_count` = %s
-                    WHERE `symbol` = %s
+                    # 使用INSERT ... ON DUPLICATE KEY UPDATE语句替代先更新后插入的模式，减少死锁风险
+                    # 这种方式在一条SQL语句中完成更新或插入操作，MySQL会自动处理锁的获取和释放
+                    insert_sql = f"""
+                    INSERT INTO `{self.market_ticker_table}` 
+                    (`event_time`, `symbol`, `price_change`, `price_change_percent`, 
+                     `side`, `change_percent_text`, `average_price`, `last_price`, 
+                     `last_trade_volume`, `open_price`, `high_price`, `low_price`, 
+                     `base_volume`, `quote_volume`, `stats_open_time`, `stats_close_time`, 
+                     `first_trade_id`, `last_trade_id`, `trade_count`, `update_price_date`,
+                     `ingestion_time`)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    ON DUPLICATE KEY UPDATE
+                        event_time = VALUES(event_time),
+                        price_change = VALUES(price_change),
+                        price_change_percent = VALUES(price_change_percent),
+                        side = VALUES(side),
+                        change_percent_text = VALUES(change_percent_text),
+                        average_price = VALUES(average_price),
+                        last_price = VALUES(last_price),
+                        last_trade_volume = VALUES(last_trade_volume),
+                        high_price = VALUES(high_price),
+                        low_price = VALUES(low_price),
+                        base_volume = VALUES(base_volume),
+                        quote_volume = VALUES(quote_volume),
+                        stats_open_time = VALUES(stats_open_time),
+                        stats_close_time = VALUES(stats_close_time),
+                        first_trade_id = VALUES(first_trade_id),
+                        last_trade_id = VALUES(last_trade_id),
+                        trade_count = VALUES(trade_count),
+                        ingestion_time = VALUES(ingestion_time)
+                        /* 注意：不更新open_price和update_price_date字段，这些字段由异步价格刷新服务管理 */
                     """
                     
-                    update_params = (
+                    # 准备插入参数
+                    # 处理open_price和update_price_date字段
+                    insert_open_price = normalized.get("open_price", 0.0)
+                    insert_update_price_date = normalized.get("update_price_date")
+                    
+                    # 如果是新插入（existing_symbol_data不存在），确保open_price为0.0，update_price_date为None
+                    if not existing_symbol_data:
+                        insert_open_price = 0.0
+                        insert_update_price_date = None
+                        logger.debug("[MySQL] 设置%s的open_price为0.0，update_price_date为None（新插入，未设置状态）", symbol)
+                    
+                    insert_params = (
                         normalized.get("event_time"),
+                        symbol,
                         normalized.get("price_change", 0.0),
                         normalized.get("price_change_percent", 0.0),
                         normalized.get("side", ""),
@@ -1297,6 +1272,7 @@ class MySQLDatabase:
                         normalized.get("average_price", 0.0),
                         normalized.get("last_price", 0.0),
                         normalized.get("last_trade_volume", 0.0),
+                        insert_open_price,
                         normalized.get("high_price", 0.0),
                         normalized.get("low_price", 0.0),
                         normalized.get("base_volume", 0.0),
@@ -1306,13 +1282,26 @@ class MySQLDatabase:
                         normalized.get("first_trade_id", 0),
                         normalized.get("last_trade_id", 0),
                         normalized.get("trade_count", 0),
-                        symbol
+                        insert_update_price_date,
+                        datetime.now()  # ingestion_time
                     )
                     
                     try:
-                        cursor.execute(update_sql, update_params)
-                    except (pymysql.err.InterfaceError, pymysql.err.OperationalError, Exception) as db_error:
-                        # 连接错误，关闭游标并抛出异常让外层重试
+                        # 再次检查连接状态，确保执行前连接仍然有效
+                        conn.ping(reconnect=True)
+                        
+                        # 执行SQL语句
+                        cursor.execute(insert_sql, insert_params)
+                        
+                        # 检查操作类型（插入或更新）
+                        if cursor.lastrowid > 0:
+                            logger.debug("[MySQL] Successfully inserted new market ticker for symbol: %s", symbol)
+                            total_inserted += 1
+                        else:
+                            logger.debug("[MySQL] Successfully updated market ticker for symbol: %s", symbol)
+                            total_updated += 1
+                    except (pymysql.err.InterfaceError, pymysql.err.OperationalError, pymysql.err.InternalError, ValueError, Exception) as db_error:
+                        # 连接错误或参数错误，关闭游标并抛出异常让外层重试
                         if cursor:
                             try:
                                 cursor.close()
@@ -1320,139 +1309,19 @@ class MySQLDatabase:
                                 pass
                         cursor = None
                         error_type = type(db_error).__name__
-                        # 检查是否为连接相关错误
-                        if isinstance(db_error, (pymysql.err.InterfaceError, pymysql.err.OperationalError)) or 'interface' in error_type.lower() or 'operational' in error_type.lower():
-                            logger.warning("[MySQL] Database connection error for symbol %s: %s, will retry", symbol, db_error)
-                            raise Exception(f"Database connection error: {db_error}")
+                        error_msg = str(db_error)
+                        
+                        # 检查是否为连接相关错误、内存视图错误或数据包序列错误
+                        if (isinstance(db_error, (pymysql.err.InterfaceError, pymysql.err.OperationalError, pymysql.err.InternalError)) or 
+                            'interface' in error_type.lower() or 'operational' in error_type.lower() or 
+                            'internalerror' in error_type.lower() or
+                            'PyMemoryView_FromBuffer' in error_msg or 'buf must not be NULL' in error_msg or
+                            'Packet sequence number' in error_msg):
+                            logger.warning("[MySQL] Database connection or memory error for symbol %s: %s, will retry", symbol, db_error)
+                            raise Exception(f"Database connection or memory error: {db_error}")
                         else:
                             # 其他错误，继续抛出
                             raise
-                    
-                    # 检查UPDATE受影响的行数
-                    affected_rows = cursor.rowcount
-                    
-                    # 如果UPDATE没有更新任何行（affected_rows == 0），说明记录不存在，执行INSERT
-                    if affected_rows == 0:
-                        # 记录不存在，执行INSERT操作
-                        logger.debug("[MySQL] No existing row found for symbol: %s, performing INSERT instead", symbol)
-                        
-                        # 重要：确保INSERT时也移除接口数据中的open_price和update_price_date字段
-                        # 这两个字段只能由异步价格刷新服务更新，接口数据不能覆盖它们
-                        # 如果是新插入，open_price应该设置为0.0，update_price_date应该设置为None（表示"未设置"状态）
-                        insert_normalized = dict(normalized)
-                        
-                        # 再次确保移除接口数据中的open_price和update_price_date（防止在处理过程中被重新添加）
-                        if "open_price" in insert_normalized:
-                            # 只有在计算涨跌幅时才会设置open_price，新插入时应该使用0.0
-                            # 但如果这是从已有数据中获取的（existing_symbol_data存在），则保留
-                            if not existing_symbol_data:
-                                insert_normalized["open_price"] = 0.0
-                                logger.debug("[MySQL] INSERT时设置%s的open_price为0.0（新插入，未设置状态）", symbol)
-                        else:
-                            # 如果没有open_price字段，设置为0.0（新插入）
-                            insert_normalized["open_price"] = 0.0
-                        
-                        if "update_price_date" in insert_normalized:
-                            # 如果是新插入（existing_symbol_data为None），update_price_date应该为None
-                            if not existing_symbol_data:
-                                insert_normalized["update_price_date"] = None
-                                logger.debug("[MySQL] INSERT时设置%s的update_price_date为None（新插入，未设置状态）", symbol)
-                        else:
-                            # 如果没有update_price_date字段，设置为None（新插入）
-                            insert_normalized["update_price_date"] = None
-                        
-                        # 确保日期时间字段格式正确（再次验证）
-                        # 所有时间字段都使用与 ingestion_time 相同的格式（naive datetime，不带时区）
-                        if insert_normalized.get("event_time") is None:
-                            insert_normalized["event_time"] = datetime.now()
-                            logger.debug("[MySQL] INSERT时设置%s的event_time为当前时间（原值为None）", symbol)
-                        else:
-                            # 确保 event_time 是 naive datetime（与 ingestion_time 格式一致）
-                            event_time = insert_normalized.get("event_time")
-                            if isinstance(event_time, datetime) and event_time.tzinfo is not None:
-                                insert_normalized["event_time"] = event_time.astimezone(timezone.utc).replace(tzinfo=None)
-                                logger.debug("[MySQL] INSERT时转换%s的event_time为naive datetime（移除时区信息）", symbol)
-                        
-                        if insert_normalized.get("stats_open_time") is None:
-                            insert_normalized["stats_open_time"] = datetime.now()
-                            logger.debug("[MySQL] INSERT时设置%s的stats_open_time为当前时间（原值为None）", symbol)
-                        else:
-                            # 确保 stats_open_time 是 naive datetime（与 ingestion_time 格式一致）
-                            stats_open_time = insert_normalized.get("stats_open_time")
-                            if isinstance(stats_open_time, datetime) and stats_open_time.tzinfo is not None:
-                                insert_normalized["stats_open_time"] = stats_open_time.astimezone(timezone.utc).replace(tzinfo=None)
-                                logger.debug("[MySQL] INSERT时转换%s的stats_open_time为naive datetime（移除时区信息）", symbol)
-                        
-                        if insert_normalized.get("stats_close_time") is None:
-                            insert_normalized["stats_close_time"] = datetime.now()
-                            logger.debug("[MySQL] INSERT时设置%s的stats_close_time为当前时间（原值为None）", symbol)
-                        else:
-                            # 确保 stats_close_time 是 naive datetime（与 ingestion_time 格式一致）
-                            stats_close_time = insert_normalized.get("stats_close_time")
-                            if isinstance(stats_close_time, datetime) and stats_close_time.tzinfo is not None:
-                                insert_normalized["stats_close_time"] = stats_close_time.astimezone(timezone.utc).replace(tzinfo=None)
-                                logger.debug("[MySQL] INSERT时转换%s的stats_close_time为naive datetime（移除时区信息）", symbol)
-                        
-                        # 设置ingestion_time为当前时间：记录数据插入时间（naive datetime，不带时区）
-                        insert_normalized["ingestion_time"] = datetime.now()
-                        
-                        # 构建INSERT SQL语句
-                        insert_sql = f"""
-                        INSERT INTO `{self.market_ticker_table}` 
-                        (`event_time`, `symbol`, `price_change`, `price_change_percent`, 
-                         `side`, `change_percent_text`, `average_price`, `last_price`, 
-                         `last_trade_volume`, `open_price`, `high_price`, `low_price`, 
-                         `base_volume`, `quote_volume`, `stats_open_time`, `stats_close_time`, 
-                         `first_trade_id`, `last_trade_id`, `trade_count`, `update_price_date`)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                        """
-                        
-                        insert_params = (
-                            insert_normalized.get("event_time"),
-                            symbol,
-                            insert_normalized.get("price_change", 0.0),
-                            insert_normalized.get("price_change_percent", 0.0),
-                            insert_normalized.get("side", ""),
-                            insert_normalized.get("change_percent_text", ""),
-                            insert_normalized.get("average_price", 0.0),
-                            insert_normalized.get("last_price", 0.0),
-                            insert_normalized.get("last_trade_volume", 0.0),
-                            insert_normalized.get("open_price", 0.0),
-                            insert_normalized.get("high_price", 0.0),
-                            insert_normalized.get("low_price", 0.0),
-                            insert_normalized.get("base_volume", 0.0),
-                            insert_normalized.get("quote_volume", 0.0),
-                            insert_normalized.get("stats_open_time"),
-                            insert_normalized.get("stats_close_time"),
-                            insert_normalized.get("first_trade_id", 0),
-                            insert_normalized.get("last_trade_id", 0),
-                            insert_normalized.get("trade_count", 0),
-                            insert_normalized.get("update_price_date"),
-                        )
-                        
-                        try:
-                            cursor.execute(insert_sql, insert_params)
-                            logger.debug("[MySQL] Successfully inserted new market ticker for symbol: %s", symbol)
-                            total_inserted += 1
-                        except (pymysql.err.InterfaceError, pymysql.err.OperationalError, Exception) as db_error:
-                            # 连接错误，关闭游标并抛出异常让外层重试
-                            if cursor:
-                                try:
-                                    cursor.close()
-                                except Exception:
-                                    pass
-                            cursor = None
-                            error_type = type(db_error).__name__
-                            # 检查是否为连接相关错误
-                            if isinstance(db_error, (pymysql.err.InterfaceError, pymysql.err.OperationalError)) or 'interface' in error_type.lower() or 'operational' in error_type.lower():
-                                logger.warning("[MySQL] Database connection error during INSERT for symbol %s: %s, will retry", symbol, db_error)
-                                raise Exception(f"Database connection error during INSERT: {db_error}")
-                            else:
-                                # 其他错误，继续抛出
-                                raise
-                    else:
-                        logger.debug("[MySQL] Successfully updated market ticker for symbol: %s (affected rows: %d)", symbol, affected_rows)
-                        total_updated += 1
                     
                     total_upserted += 1
                     
@@ -1466,9 +1335,9 @@ class MySQLDatabase:
                     
                     # 判断是否为连接错误，需要重新获取连接
                     is_connection_error = any(keyword in error_msg.lower() for keyword in [
-                        'connection', 'interfaceerror', 'operationalerror', 'connection lost', 
-                        'database connection error', 'bad file descriptor'
-                    ]) or 'InterfaceError' in error_type or 'OperationalError' in error_type
+                        'connection', 'interfaceerror', 'operationalerror', 'internalerror', 'connection lost', 
+                        'database connection error', 'bad file descriptor', 'packet sequence'
+                    ]) or 'InterfaceError' in error_type or 'OperationalError' in error_type or 'InternalError' in error_type
                     
                     if is_connection_error:
                         # 连接错误，抛出异常让 _with_connection 的重试机制处理
