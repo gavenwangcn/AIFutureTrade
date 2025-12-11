@@ -153,8 +153,8 @@ class MarketTickerStream:
         )
         # 连接生命周期管理
         self._connection_creation_time: Optional[datetime] = None
-        # 最大连接时长：4小时
-        self._MAX_CONNECTION_HOURS = 4
+        # 最大连接时长：30分钟
+        self._MAX_CONNECTION_HOURS = 0.5
 
     async def _handle_message(self, message: Any) -> None:
         logger.debug("[MarketStreams] Starting to handle message")
@@ -187,7 +187,7 @@ class MarketTickerStream:
 
 
     async def _should_reconnect(self) -> bool:
-        """检查是否需要重新连接（4小时到期）"""
+        """检查是否需要重新连接（30分钟到期）"""
         if not self._connection_creation_time:
             return False
         elapsed_hours = (datetime.now(timezone.utc) - self._connection_creation_time).total_seconds() / 3600
@@ -213,9 +213,9 @@ class MarketTickerStream:
                 await stream.unsubscribe()
             else:
                 while True:
-                    # 检查是否需要重新连接（24小时到期）
+                    # 检查是否需要重新连接（30分钟到期）
                     if await self._should_reconnect():
-                        logger.debug("[MarketStreams] Connection reached 4-hour limit, reconnecting...")
+                        logger.debug("[MarketStreams] Connection reached 30-minute limit, reconnecting...")
                         break
                     await asyncio.sleep(0.5)
         except asyncio.CancelledError:
@@ -233,7 +233,7 @@ class MarketTickerStream:
 
 
 async def run_market_ticker_stream(run_seconds: Optional[int] = None) -> None:
-    """Run market ticker stream with automatic reconnection every 4 hours.
+    """Run market ticker stream with automatic reconnection every 30 minutes.
     
     Args:
         run_seconds: Optional runtime in seconds before stopping the task.
@@ -245,12 +245,12 @@ async def run_market_ticker_stream(run_seconds: Optional[int] = None) -> None:
         streamer = MarketTickerStream(db)
         await streamer.stream(run_seconds=run_seconds)
     else:
-        # Run indefinitely with automatic reconnection every 24 hours
+        # Run indefinitely with automatic reconnection every 30 minutes
         start_time = datetime.now(timezone.utc)
         while True:
             streamer = MarketTickerStream(db)
             try:
-                # Stream until connection needs to be refreshed (24 hours)
+                # Stream until connection needs to be refreshed (30 minutes)
                 await streamer.stream()
             except asyncio.CancelledError:
                 raise
@@ -477,43 +477,6 @@ class KlineStreamManager:
                     del self._active_streams[key]
                 return False
     
-    async def sync_with_leaderboard(self) -> None:
-        """Sync streams with current leaderboard symbols."""
-        try:
-            # Get current leaderboard symbols
-            symbols = await asyncio.to_thread(self._db.get_leaderboard_symbols)
-            symbol_set = {s.upper() for s in symbols}
-            
-            # Expected streams: all combinations of symbols and intervals
-            expected_streams = {
-                (symbol, interval)
-                for symbol in symbol_set
-                for interval in self.INTERVALS
-            }
-            
-            # Current active streams
-            current_streams = set(self._active_streams.keys())
-            
-            # Add missing streams
-            to_add = expected_streams - current_streams
-            for symbol, interval in to_add:
-                await self.add_stream(symbol, interval)
-            
-            # Remove extra streams
-            to_remove = current_streams - expected_streams
-            for symbol, interval in to_remove:
-                await self.remove_stream(symbol, interval)
-            
-            logger.info(
-                "[KlineStream] Sync complete: %s symbols, %s streams (added: %s, removed: %s)",
-                len(symbol_set),
-                len(expected_streams),
-                len(to_add),
-                len(to_remove)
-            )
-        except Exception as e:
-            logger.error("[KlineStream] Sync error: %s", e, exc_info=True)
-    
     async def cleanup(self) -> None:
         """Cleanup all streams."""
         async with self._lock:
@@ -523,24 +486,15 @@ class KlineStreamManager:
 
 
 async def run_kline_sync_agent(check_interval: int = 10) -> None:
-    """Run kline websocket sync agent."""
-    db = MySQLDatabase()
-    manager = KlineStreamManager(db)
+    """Run kline websocket sync agent.
     
-    try:
-        # Initial sync
-        await manager.sync_with_leaderboard()
-        
-        # Periodic sync
-        while True:
-            await asyncio.sleep(check_interval)
-            await manager.sync_with_leaderboard()
-    except asyncio.CancelledError:
-        raise
-    except Exception as e:
-        logger.exception("[KlineSyncAgent] Error: %s", e)
-    finally:
-        await manager.cleanup()
+    注意：此方法已简化，不再与涨跌榜同步。K线流管理现在由其他机制处理。
+    """
+    logger.warning("[KlineSyncAgent] run_kline_sync_agent 已废弃，K线流管理现在由其他机制处理")
+    # 此方法保留以兼容旧代码，但不再执行任何操作
+    while True:
+        await asyncio.sleep(check_interval)
+        # 不再执行同步操作
 
 
 if __name__ == "__main__":

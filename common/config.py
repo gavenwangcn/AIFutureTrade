@@ -28,15 +28,8 @@ MYSQL_DATABASE = os.getenv('MYSQL_DATABASE', 'aifuturetrade')
 
 # MySQL表名配置
 MYSQL_MARKET_TICKER_TABLE = os.getenv('MYSQL_MARKET_TICKER_TABLE', '24_market_tickers')
-MYSQL_LEADERBOARD_TABLE = os.getenv('MYSQL_LEADERBOARD_TABLE', 'futures_leaderboard')
 MYSQL_MARKET_KLINES_TABLE = os.getenv('MYSQL_MARKET_KLINES_TABLE', 'market_klines')
 
-# MySQL涨幅榜同步配置
-MYSQL_LEADERBOARD_SYNC_INTERVAL = int(os.getenv('MYSQL_LEADERBOARD_SYNC_INTERVAL', '2'))  # 秒
-# MYSQL_LEADERBOARD_TIME_WINDOW - 已废弃，不再使用
-MYSQL_LEADERBOARD_TOP_N = int(os.getenv('MYSQL_LEADERBOARD_TOP_N', '10'))  # 涨幅/跌幅前N名
-MYSQL_LEADERBOARD_CLEANUP_INTERVAL_MINUTES = int(os.getenv('MYSQL_LEADERBOARD_CLEANUP_INTERVAL_MINUTES', '2'))  # 涨跌榜清理执行频率（分钟）
-MYSQL_LEADERBOARD_RETENTION_MINUTES = int(os.getenv('MYSQL_LEADERBOARD_RETENTION_MINUTES', '5'))  # 保留最近N分钟内的涨跌榜批次
 
 # ============ K线同步配置 ============
 KLINE_SYNC_CHECK_INTERVAL = int(os.getenv('KLINE_SYNC_CHECK_INTERVAL', '10'))  # 秒，K线WebSocket巡检间隔

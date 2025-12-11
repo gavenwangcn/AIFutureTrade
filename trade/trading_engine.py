@@ -1398,7 +1398,7 @@ class TradingEngine:
         【核心改造方法】根据模型的symbol_source选择买入候选交易对
         
         此方法是symbol_source功能的核心实现，根据模型配置选择不同的数据源：
-        - symbol_source='leaderboard'（默认）：从涨跌榜（futures_leaderboard表）获取候选
+        - symbol_source='leaderboard'（默认）：从涨跌榜（24_market_tickers表）获取候选
         - symbol_source='future'：从futures表获取所有已配置的交易对
         
         调用链：

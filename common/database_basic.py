@@ -51,7 +51,6 @@ class Database:
         self.model_prompts_table = "model_prompts"
         self.model_futures_table = "model_futures"
         self.futures_table = "futures"
-        self.futures_leaderboard_table = "futures_leaderboard"
         self.accounts_table = "accounts"
         self.account_asset_table = "account_asset"
         self.asset_table = "asset"
@@ -217,8 +216,6 @@ class Database:
         # Futures table (USDS-M contract universe)
         self._ensure_futures_table()
         
-        # Futures leaderboard table
-        self._ensure_futures_leaderboard_table()
         
         # Accounts table
         self._ensure_accounts_table()
@@ -419,28 +416,6 @@ class Database:
         self.command(ddl)
         logger.debug(f"[Database] Ensured table {self.futures_table} exists")
     
-    def _ensure_futures_leaderboard_table(self):
-        """Create futures_leaderboard table if not exists"""
-        ddl = f"""
-        CREATE TABLE IF NOT EXISTS `{self.futures_leaderboard_table}` (
-            `id` VARCHAR(36) PRIMARY KEY,
-            `symbol` VARCHAR(50) NOT NULL,
-            `contract_symbol` VARCHAR(100) DEFAULT '',
-            `name` VARCHAR(200) DEFAULT '',
-            `exchange` VARCHAR(50) DEFAULT 'BINANCE_FUTURES',
-            `side` VARCHAR(10) NOT NULL,
-            `position` TINYINT UNSIGNED DEFAULT 0 COMMENT '排名位置（1表示第1名，2表示第2名，以此类推）',
-            `price` DOUBLE DEFAULT 0.0,
-            `change_percent` DOUBLE DEFAULT 0.0,
-            `quote_volume` DOUBLE DEFAULT 0.0,
-            `timeframes` VARCHAR(200) DEFAULT '',
-            `updated_at` DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-            UNIQUE KEY `uk_symbol_side` (`symbol`, `side`),
-            INDEX `idx_position` (`position`)
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-        """
-        self.command(ddl)
-        logger.debug(f"[Database] Ensured table {self.futures_leaderboard_table} exists")
     
     def _ensure_accounts_table(self):
         """Create accounts table if not exists"""
@@ -694,7 +669,7 @@ class Database:
         
         【symbol_source字段说明】
         此字段用于AI交易买入决策时确定交易对数据来源：
-        - 'leaderboard': 从涨跌榜（futures_leaderboard表）获取交易对，这是默认值，保持向后兼容
+        - 'leaderboard': 从涨跌榜（24_market_tickers表）获取交易对，这是默认值，保持向后兼容
         - 'future': 从合约配置信息表（futures表）获取所有已配置的交易对
         
         该字段仅在buy类型的AI交互中使用，sell逻辑不受影响。
@@ -1707,82 +1682,6 @@ class Database:
             logger.error(f"[Database] Failed to update settings: {e}")
             return False
     
-    # ==================================================================
-    # Leaderboard Management
-    # ==================================================================
-    
-    def upsert_leaderboard_entries(self, entries: List[Dict]):
-        """Insert or update leaderboard entries"""
-        if not entries:
-            return
-        
-        try:
-            rows_to_insert = []
-            for entry in entries:
-                try:
-                    entry_id = self._generate_id()
-                    rows_to_insert.append([
-                        entry_id,
-                        entry['symbol'],
-                        entry['contract_symbol'],
-                        entry.get('name', ''),
-                        entry.get('exchange', 'BINANCE_FUTURES'),
-                        entry['side'],
-                        entry.get('position', entry.get('rank', 0)),  # 兼容 position 和 rank
-                        entry.get('price', 0.0),
-                        entry.get('change_percent', 0.0),
-                        entry.get('quote_volume', 0.0),
-                        json.dumps(entry.get('timeframes', {}), ensure_ascii=False),
-                        datetime.now(timezone(timedelta(hours=8)))
-                    ])
-                except KeyError as exc:
-                    logger.warning(f"[Database] 无法写入涨跌幅榜：缺少字段 {exc}")
-            
-            if rows_to_insert:
-                self.insert_rows(
-                    self.futures_leaderboard_table,
-                    rows_to_insert,
-                    ["id", "symbol", "contract_symbol", "name", "exchange", "side", "position", "price", "change_percent", "quote_volume", "timeframes", "updated_at"]
-                )
-        except Exception as e:
-            logger.error(f"[Database] Failed to upsert leaderboard entries: {e}")
-            raise
-    
-    def get_futures_leaderboard(self, side: Optional[str] = None, limit: int = 10) -> Dict[str, List[Dict]]:
-        """Get futures leaderboard data"""
-        try:
-            def fetch(side_key: str) -> List[Dict]:
-                rows = self.query(f"""
-                    SELECT symbol, contract_symbol, name, exchange, side,
-                           position, price, change_percent, quote_volume, timeframes, updated_at
-                    FROM {self.futures_leaderboard_table} FINAL
-                    WHERE side = '{side_key}'
-                    ORDER BY position ASC
-                    LIMIT {limit}
-                """)
-                columns = ["symbol", "contract_symbol", "name", "exchange", "side", "position", "price", "change_percent", "quote_volume", "timeframes", "updated_at"]
-                results = self._rows_to_dicts(rows, columns)
-                for result in results:
-                    try:
-                        result['timeframes'] = json.loads(result['timeframes']) if result['timeframes'] else {}
-                    except json.JSONDecodeError:
-                        result['timeframes'] = {}
-                return results
-            
-            result: Dict[str, List[Dict]] = {'gainers': [], 'losers': []}
-            side_map = {'gainer': 'gainers', 'loser': 'losers'}
-            
-            if side:
-                normalized = side_map.get(side, side)
-                result[normalized] = fetch(side)
-            else:
-                for raw_key, target_key in side_map.items():
-                    result[target_key] = fetch(raw_key)
-            
-            return result
-        except Exception as e:
-            logger.error(f"[Database] Failed to get futures leaderboard: {e}")
-            return {'gainers': [], 'losers': []}
     
     # ==================================================================
     # Accounts Management (账户信息管理)
