@@ -1471,7 +1471,7 @@ class MySQLDatabase:
                     ELSE ''
                 END,
                 `change_percent_text` = CASE 
-                    WHEN `last_price` > 0 AND %s > 0 THEN CONCAT(FORMAT(((`last_price` - %s) / %s) * 100, 2), '%')
+                    WHEN `last_price` > 0 AND %s > 0 THEN CONCAT(FORMAT(((`last_price` - %s) / %s) * 100, 2), '%%')
                     ELSE ''
                 END,
                 `update_price_date` = %s
