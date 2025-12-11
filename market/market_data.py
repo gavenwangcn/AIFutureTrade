@@ -1234,10 +1234,7 @@ class MarketDataFetcher:
 
     def sync_leaderboard(self, force: bool = False, limit: Optional[int] = None) -> Dict[str, List[Dict]]:
         """
-        同步涨幅榜数据（从 24_market_tickers 表查询，已废弃，保留以兼容旧代码）
-        
-        注意：此方法已废弃，新的实现直接从 24_market_tickers 表查询，不再使用 futures_leaderboard 表
-        请使用 MySQLDatabase.get_gainers_from_tickers() 和 get_losers_from_tickers() 方法
+        同步涨幅榜数据（从 24_market_tickers 表查询）
         
         Args:
             force: 是否强制刷新（保留参数以兼容现有调用，但实际不使用）
@@ -1260,14 +1257,8 @@ class MarketDataFetcher:
             return {'gainers': [], 'losers': []}
 
         try:
-            # 从 24_market_tickers 表直接查询涨跌幅榜数据
-            gainers = self._mysql_db.get_gainers_from_tickers(limit=limit)
-            losers = self._mysql_db.get_losers_from_tickers(limit=limit)
-            
-            formatted_data = {
-                'gainers': gainers if gainers else [],
-                'losers': losers if losers else []
-            }
+            # 从 24_market_tickers 表直接查询涨跌幅榜数据（一次查询获取）
+            formatted_data = self._mysql_db.get_leaderboard_from_tickers(limit=limit)
             
             logger.info('[Leaderboard] Returning leaderboard payload from 24_market_tickers: gainers=%s losers=%s',
                         len(formatted_data.get('gainers', [])), len(formatted_data.get('losers', [])))

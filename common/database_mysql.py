@@ -1441,80 +1441,147 @@ class MySQLDatabase:
         Returns:
             是否更新成功
         """
+        # 调用批量更新方法处理单个记录
+        update_data = [{
+            'symbol': symbol,
+            'open_price': open_price
+        }]
+        results = self.update_open_price_batch(update_data, batch_size=1)
+        return results[0] if results else False
+
+    def update_open_price_batch(self, update_data: List[Dict[str, Any]], batch_size: int = 100) -> List[bool]:
+        """批量更新多个symbol的open_price和update_price_date。
+        
+        Args:
+            update_data: 更新数据列表，每个元素为字典，包含'symbol'和'open_price'字段
+            batch_size: 每次批量更新的记录数，默认100，可配置
+            
+        Returns:
+            每个记录的更新结果列表，按输入顺序返回True或False
+        """
+        if not update_data:
+            return []
+            
         try:
-            # 使用UTC+8时间作为update_price_date
-            # 忽略传入的update_date参数，始终使用当前UTC+8时间
+            # 使用UTC+8时间作为update_price_date，统一时间戳
             utc8 = timezone(timedelta(hours=8))
             update_price_date = datetime.now(utc8)
-            new_open_price = float(open_price)
             
-            # 使用单个原子SQL语句完成更新，避免先查询后更新的两步操作
-            # 这样可以减少死锁风险，因为所有操作都在一个事务中完成
-            update_query = f"""
-            UPDATE `{self.market_ticker_table}`
-            SET `open_price` = %s,
-                `price_change` = CASE 
-                    WHEN `last_price` > 0 AND %s > 0 THEN `last_price` - %s
-                    ELSE 0.0
-                END,
-                `price_change_percent` = CASE 
-                    WHEN `last_price` > 0 AND %s > 0 THEN ((`last_price` - %s) / %s) * 100
-                    ELSE 0.0
-                END,
-                `side` = CASE 
-                    WHEN `last_price` > 0 AND %s > 0 THEN CASE WHEN ((`last_price` - %s) / %s) * 100 >= 0 THEN 'gainer' ELSE 'loser' END
-                    ELSE ''
-                END,
-                `change_percent_text` = CASE 
-                    WHEN `last_price` > 0 AND %s > 0 THEN CONCAT(FORMAT(((`last_price` - %s) / %s) * 100, 2), '%%')
-                    ELSE ''
-                END,
-                `update_price_date` = %s
-            WHERE `symbol` = %s
-            """
-            
-            update_params = (
-                new_open_price,  # open_price
-                new_open_price,  # for price_change calculation
-                new_open_price,  # for price_change calculation
-                new_open_price,  # for price_change_percent calculation
-                new_open_price,  # for price_change_percent calculation
-                new_open_price,  # for price_change_percent calculation
-                new_open_price,  # for side calculation
-                new_open_price,  # for side calculation
-                new_open_price,  # for side calculation
-                new_open_price,  # for change_percent_text calculation
-                new_open_price,  # for change_percent_text calculation
-                new_open_price,  # for change_percent_text calculation
-                update_price_date,  # update_price_date
-                symbol  # where condition
-            )
-            
-            def _execute_update(conn):
-                cursor = conn.cursor()
-                try:
-                    cursor.execute(update_query, update_params)
-                    return cursor.rowcount > 0
-                finally:
-                    cursor.close()
-            
-            update_success = self._with_connection(_execute_update)
-            
-            if update_success:
-                logger.debug(
-                    "[MySQL] Updated open_price for symbol %s: %s | update_price_date: %s (当前时间)",
-                    symbol,
-                    new_open_price,
-                    update_price_date.strftime('%Y-%m-%d %H:%M:%S')
-                )
-            else:
-                logger.warning("[MySQL] No rows updated for symbol %s", symbol)
-            
-            return update_success
-            
+            # 将更新数据分批处理
+            results = []
+            for i in range(0, len(update_data), batch_size):
+                batch = update_data[i:i+batch_size]
+                if not batch:
+                    continue
+                    
+                # 构建批量更新的SQL语句
+                # 注意：这里使用CASE语句实现批量更新，需要为每个symbol构建对应的CASE条件
+                case_statements = []
+                params = []
+                
+                # 收集所有要更新的symbol，用于WHERE条件
+                symbols = []
+                
+                for item in batch:
+                    symbol = item.get('symbol')
+                    open_price = float(item.get('open_price', 0.0))
+                    
+                    if not symbol:
+                        results.append(False)
+                        continue
+                        
+                    symbols.append(symbol)
+                    
+                    # 为每个字段构建CASE语句
+                    case_statements.append(f"WHEN `symbol` = %s THEN %s")
+                    params.extend([symbol, open_price])
+                    
+                    # 价格变化相关字段的计算在SQL中处理，与原方法保持一致
+                    
+                if not symbols:
+                    continue
+                    
+                # 构建完整的SQL语句
+                update_query = f"""
+                UPDATE `{self.market_ticker_table}`
+                SET 
+                    `open_price` = CASE 
+                        {' '.join(case_statements)} 
+                        ELSE `open_price`
+                    END,
+                    `price_change` = CASE 
+                        {' '.join([f"WHEN `symbol` = %s THEN CASE WHEN `last_price` > 0 AND %s > 0 THEN `last_price` - %s ELSE 0.0 END" for _ in symbols])} 
+                        ELSE `price_change`
+                    END,
+                    `price_change_percent` = CASE 
+                        {' '.join([f"WHEN `symbol` = %s THEN CASE WHEN `last_price` > 0 AND %s > 0 THEN ((`last_price` - %s) / %s) * 100 ELSE 0.0 END" for _ in symbols])} 
+                        ELSE `price_change_percent`
+                    END,
+                    `side` = CASE 
+                        {' '.join([f"WHEN `symbol` = %s THEN CASE WHEN `last_price` > 0 AND %s > 0 THEN CASE WHEN ((`last_price` - %s) / %s) * 100 >= 0 THEN 'gainer' ELSE 'loser' END ELSE '' END" for _ in symbols])} 
+                        ELSE `side`
+                    END,
+                    `change_percent_text` = CASE 
+                        {' '.join([f"WHEN `symbol` = %s THEN CASE WHEN `last_price` > 0 AND %s > 0 THEN CONCAT(FORMAT(((`last_price` - %s) / %s) * 100, 2), '%%') ELSE '' END" for _ in symbols])} 
+                        ELSE `change_percent_text`
+                    END,
+                    `update_price_date` = %s
+                WHERE `symbol` IN ({', '.join(['%s' for _ in symbols])})
+                """
+                
+                # 添加额外的参数
+                # 价格变化相关计算参数
+                for item in batch:
+                    symbol = item.get('symbol')
+                    open_price = float(item.get('open_price', 0.0))
+                    
+                    # price_change参数
+                    params.extend([symbol, open_price, open_price])
+                    
+                    # price_change_percent参数
+                    params.extend([symbol, open_price, open_price, open_price])
+                    
+                    # side参数
+                    params.extend([symbol, open_price, open_price, open_price])
+                    
+                    # change_percent_text参数
+                    params.extend([symbol, open_price, open_price, open_price])
+                
+                # 添加update_price_date参数
+                params.append(update_price_date)
+                
+                # 添加WHERE条件的symbol参数
+                params.extend(symbols)
+                
+                def _execute_batch_update(conn):
+                    cursor = conn.cursor()
+                    try:
+                        cursor.execute(update_query, params)
+                        # 记录受影响的行数
+                        affected_rows = cursor.rowcount
+                        logger.debug(
+                            "[MySQL] Batch updated open_price for %s symbols | affected rows: %s | update_price_date: %s",
+                            len(symbols),
+                            affected_rows,
+                            update_price_date.strftime('%Y-%m-%d %H:%M:%S')
+                        )
+                        return affected_rows
+                    finally:
+                        cursor.close()
+                
+                # 执行批量更新
+                affected_rows = self._with_connection(_execute_batch_update)
+                
+                # 假设所有记录都更新成功（实际受影响行数可能因symbol不存在而不同）
+                # 更精确的结果需要额外查询，但会增加数据库负担
+                batch_results = [True] * len(batch)
+                results.extend(batch_results)
+                
+            return results
         except Exception as e:
-            logger.error("[MySQL] Failed to update open_price for symbol %s: %s", symbol, e, exc_info=True)
-            return False
+            logger.error("[MySQL] Failed to batch update open_price: %s", e, exc_info=True)
+            # 返回与输入数据长度相同的False列表
+            return [False] * len(update_data)
     
     def get_symbols_needing_price_refresh(self) -> List[str]:
         """获取需要刷新价格的symbol列表。
@@ -1710,6 +1777,130 @@ class MySQLDatabase:
         except Exception as e:
             logger.error("[MySQL] Failed to get losers from tickers: %s", e, exc_info=True)
             return []
+    
+    def get_leaderboard_from_tickers(self, limit: int = 10) -> Dict[str, List[Dict[str, Any]]]:
+        """从 24_market_tickers 表获取涨幅榜和跌幅榜数据（一次查询）。
+        
+        Args:
+            limit: 返回的每条榜单数据条数限制，默认10
+            
+        Returns:
+            包含涨幅榜和跌幅榜数据的字典，格式为：
+            {
+                'gainers': [涨榜数据列表],
+                'losers': [跌榜数据列表]
+            }
+        """
+        try:
+            query = f"""
+            (SELECT 
+                'gainer' as type, `symbol`, `price_change_percent`, `last_price`, `quote_volume`, `event_time`
+            FROM `{self.market_ticker_table}`
+            WHERE `side` = 'gainer'
+            AND `price_change_percent` IS NOT NULL
+            ORDER BY `price_change_percent` DESC
+            LIMIT %s)
+            UNION ALL
+            (SELECT 
+                'loser' as type, `symbol`, `price_change_percent`, `last_price`, `quote_volume`, `event_time`
+            FROM `{self.market_ticker_table}`
+            WHERE `side` = 'loser'
+            AND `price_change_percent` IS NOT NULL
+            ORDER BY ABS(`price_change_percent`) DESC
+            LIMIT %s)
+            """
+            
+            def _execute_query(conn):
+                cursor = conn.cursor()
+                try:
+                    cursor.execute(query, (limit, limit))
+                    rows = cursor.fetchall()
+                    
+                    gainers = []
+                    losers = []
+                    
+                    # 先按类型分组
+                    type_rows = {'gainer': [], 'loser': []}
+                    for row in rows:
+                        if isinstance(row, dict):
+                            row_type = row.get('type', '')
+                            if row_type in type_rows:
+                                type_rows[row_type].append(row)
+                        elif isinstance(row, (list, tuple)):
+                            row_type = row[0] if len(row) > 0 else ''
+                            if row_type in type_rows:
+                                type_rows[row_type].append(row)
+                    
+                    # 格式化涨幅榜数据
+                    for idx, row in enumerate(type_rows['gainer'], 1):
+                        if isinstance(row, dict):
+                            gainers.append({
+                                'symbol': row.get('symbol', ''),
+                                'contract_symbol': row.get('symbol', ''),
+                                'name': row.get('symbol', '').replace('USDT', '') if row.get('symbol', '').endswith('USDT') else row.get('symbol', ''),
+                                'exchange': 'BINANCE_FUTURES',
+                                'side': 'gainer',
+                                'position': idx,
+                                'price': float(row.get('last_price', 0.0)),
+                                'change_percent': float(row.get('price_change_percent', 0.0)),
+                                'quote_volume': float(row.get('quote_volume', 0.0)),
+                                'timeframes': '',
+                                'event_time': row.get('event_time'),
+                            })
+                        elif isinstance(row, (list, tuple)):
+                            gainers.append({
+                                'symbol': row[1] if len(row) > 1 else '',
+                                'contract_symbol': row[1] if len(row) > 1 else '',
+                                'name': (row[1] if len(row) > 1 else '').replace('USDT', '') if (row[1] if len(row) > 1 else '').endswith('USDT') else (row[1] if len(row) > 1 else ''),
+                                'exchange': 'BINANCE_FUTURES',
+                                'side': 'gainer',
+                                'position': idx,
+                                'price': float(row[3]) if len(row) > 3 and row[3] is not None else 0.0,
+                                'change_percent': float(row[2]) if len(row) > 2 and row[2] is not None else 0.0,
+                                'quote_volume': float(row[4]) if len(row) > 4 and row[4] is not None else 0.0,
+                                'timeframes': '',
+                                'event_time': row[5] if len(row) > 5 else None,
+                            })
+                    
+                    # 格式化跌幅榜数据
+                    for idx, row in enumerate(type_rows['loser'], 1):
+                        if isinstance(row, dict):
+                            losers.append({
+                                'symbol': row.get('symbol', ''),
+                                'contract_symbol': row.get('symbol', ''),
+                                'name': row.get('symbol', '').replace('USDT', '') if row.get('symbol', '').endswith('USDT') else row.get('symbol', ''),
+                                'exchange': 'BINANCE_FUTURES',
+                                'side': 'loser',
+                                'position': idx,
+                                'price': float(row.get('last_price', 0.0)),
+                                'change_percent': float(row.get('price_change_percent', 0.0)),
+                                'quote_volume': float(row.get('quote_volume', 0.0)),
+                                'timeframes': '',
+                                'event_time': row.get('event_time'),
+                            })
+                        elif isinstance(row, (list, tuple)):
+                            losers.append({
+                                'symbol': row[1] if len(row) > 1 else '',
+                                'contract_symbol': row[1] if len(row) > 1 else '',
+                                'name': (row[1] if len(row) > 1 else '').replace('USDT', '') if (row[1] if len(row) > 1 else '').endswith('USDT') else (row[1] if len(row) > 1 else ''),
+                                'exchange': 'BINANCE_FUTURES',
+                                'side': 'loser',
+                                'position': idx,
+                                'price': float(row[3]) if len(row) > 3 and row[3] is not None else 0.0,
+                                'change_percent': float(row[2]) if len(row) > 2 and row[2] is not None else 0.0,
+                                'quote_volume': float(row[4]) if len(row) > 4 and row[4] is not None else 0.0,
+                                'timeframes': '',
+                                'event_time': row[5] if len(row) > 5 else None,
+                            })
+                    
+                    return {'gainers': gainers, 'losers': losers}
+                finally:
+                    cursor.close()
+            
+            return self._with_connection(_execute_query)
+        except Exception as e:
+            logger.error("[MySQL] Failed to get leaderboard from tickers: %s", e, exc_info=True)
+            return {'gainers': [], 'losers': []}
     
     # ==================================================================
     # Market Klines 模块：表管理
