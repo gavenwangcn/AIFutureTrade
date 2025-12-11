@@ -694,7 +694,26 @@ class BinanceFuturesAccountClient:
         """
         try:
             response = self._rest.futures_account_balance_v3()
-            return response.data().to_json()
+            data = response.data()
+            
+            # futures_account_balance_v3 返回的是列表，需要特殊处理
+            if isinstance(data, list):
+                # 如果是列表，直接转换为JSON字符串
+                import json
+                return json.dumps(data, default=str)
+            elif hasattr(data, 'to_json'):
+                # 如果是对象且有to_json方法，使用to_json
+                return data.to_json()
+            else:
+                # 其他情况，尝试转换为字典后序列化
+                import json
+                if hasattr(data, 'model_dump'):
+                    return json.dumps(data.model_dump(), default=str)
+                elif hasattr(data, 'dict'):
+                    return json.dumps(data.dict(), default=str)
+                else:
+                    # 最后尝试直接序列化
+                    return json.dumps(data, default=str)
         except Exception as e:
             logger.error(f"[BinanceFuturesAccountClient] Failed to get account balance: {e}")
             raise
