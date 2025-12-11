@@ -41,11 +41,17 @@ def _load_credentials() -> tuple[str, str]:
     return api_key, api_secret
 
 
-def exercise_binance_futures_account_client(api_key: str, api_secret: str) -> None:
+def test_get_account(api_key: str, api_secret: str) -> None:
+    """
+    测试 get_account() 方法
+    
+    Args:
+        api_key: Binance API密钥
+        api_secret: Binance API密钥
+    """
     client = BinanceFuturesAccountClient(api_key=api_key, api_secret=api_secret)
     logging.info("Created BinanceFuturesAccountClient: quote_asset=%s", client.quote_asset)
-
-    # 测试get_account方法
+    
     logging.info("Testing get_account()...")
     try:
         account_info_json = client.get_account()
@@ -61,8 +67,20 @@ def exercise_binance_futures_account_client(api_key: str, api_secret: str) -> No
         logging.info("get_account() test passed")
     except Exception as e:
         logging.error(f"Error in get_account(): {e}", exc_info=True)
+        raise
 
-    # 测试get_account_asset方法
+
+def test_get_account_asset(api_key: str, api_secret: str) -> None:
+    """
+    测试 get_account_asset() 方法
+    
+    Args:
+        api_key: Binance API密钥
+        api_secret: Binance API密钥
+    """
+    client = BinanceFuturesAccountClient(api_key=api_key, api_secret=api_secret)
+    logging.info("Created BinanceFuturesAccountClient: quote_asset=%s", client.quote_asset)
+    
     logging.info("Testing get_account_asset()...")
     try:
         account_asset_json = client.get_account_asset()
@@ -73,7 +91,7 @@ def exercise_binance_futures_account_client(api_key: str, api_secret: str) -> No
             logging.info(f"Number of assets: {len(account_asset)}")
             # 打印部分资产信息
             for asset in account_asset[:3]:
-                if 'asset' in asset:
+                if isinstance(asset, dict) and 'asset' in asset:
                     asset_name = asset['asset']
                     balance = asset.get('balance', 'N/A')
                     wallet_balance = asset.get('walletBalance', 'N/A')
@@ -83,8 +101,30 @@ def exercise_binance_futures_account_client(api_key: str, api_secret: str) -> No
         logging.info("get_account_asset() test passed")
     except Exception as e:
         logging.error(f"Error in get_account_asset(): {e}", exc_info=True)
+        raise
 
+
+def exercise_binance_futures_account_client(api_key: str, api_secret: str) -> None:
+    """
+    执行所有测试方法
+    
+    Args:
+        api_key: Binance API密钥
+        api_secret: Binance API密钥
+    """
+    logging.info("=" * 60)
+    logging.info("Starting BinanceFuturesAccountClient tests")
+    logging.info("=" * 60)
+    
+    # 测试get_account方法
+    test_get_account(api_key, api_secret)
+    
+    # 测试get_account_asset方法
+    #test_get_account_asset(api_key, api_secret)
+    
+    logging.info("=" * 60)
     logging.info("All BinanceFuturesAccountClient method calls completed.")
+    logging.info("=" * 60)
 
 
 if __name__ == "__main__":
