@@ -383,7 +383,7 @@ async def run_price_refresh_scheduler() -> None:
     cron_expr = getattr(
         app_config,
         'PRICE_REFRESH_CRON',
-        '0 */1 * * *'  # 默认每小时执行一次
+        '*/5 * * * *'  # 默认每5分钟执行一次
     )
     max_per_minute = getattr(
         app_config,

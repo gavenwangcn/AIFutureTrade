@@ -131,36 +131,53 @@ class MySQLConnectionPool:
         # 检查 socket 是否已关闭
         try:
             if conn._sock is None:
+                logger.debug("[MySQL] Connection socket is None")
                 return False
         except (AttributeError, OSError):
+            logger.debug("[MySQL] Error accessing connection socket")
+            return False
+        
+        # 检查文件描述符是否有效
+        try:
+            if hasattr(conn._sock, 'fileno'):
+                fileno = conn._sock.fileno()
+                if fileno < 0:
+                    logger.debug("[MySQL] Connection socket has invalid file descriptor")
+                    return False
+        except (AttributeError, OSError):
+            logger.debug("[MySQL] Error checking socket file descriptor")
             return False
         
         try:
             # 使用ping方法检查连接是否活跃
             conn.ping(reconnect=False)
             return True
-        except (AttributeError, OSError, TypeError) as e:
+        except (AttributeError, OSError, TypeError, ValueError) as e:
             # 连接对象已损坏或已关闭
+            # 特别检查"read of closed file"错误
             error_type = type(e).__name__
             error_msg = str(e)
-            logger.debug(
-                f"[MySQL] Connection health check failed (connection may be closed): "
-                f"{error_type}: {error_msg}"
-            )
+            if "read of closed file" in error_msg.lower():
+                logger.debug("[MySQL] Connection health check failed: read of closed file")
+            else:
+                logger.debug(
+                    f"[MySQL] Connection health check failed (connection may be closed): "
+                    f"{error_type}: {error_msg}"
+                )
             return False
         except Exception as e:
             error_type = type(e).__name__
             error_msg = str(e)
             is_network_error = any(keyword in error_msg.lower() for keyword in [
                 'connection', 'broken', 'lost', 'timeout', 'reset', 'gone away',
-                'bad file descriptor', 'settimeout'
+                'bad file descriptor', 'settimeout', 'read of closed file'
             ]) or any(keyword in error_type.lower() for keyword in [
-                'connection', 'timeout', 'operationalerror', 'attributeerror', 'oserror'
+                'connection', 'timeout', 'operationalerror', 'attributeerror', 'oserror', 'valueerror'
             ])
             
             if is_network_error:
                 logger.debug(
-                    f"[MySQL] Connection health check detected error: "
+                    f"[MySQL] Connection health check detected network error: "
                     f"{error_type}: {error_msg}"
                 )
             else:
@@ -259,6 +276,23 @@ class MySQLConnectionPool:
                     if self._current_connections > 0:
                         self._current_connections -= 1
                 return
+            
+            # 检查文件描述符是否有效
+            if hasattr(conn._sock, 'fileno'):
+                try:
+                    fileno = conn._sock.fileno()
+                    if fileno < 0:
+                        logger.debug("[MySQL] Connection socket has invalid file descriptor, skipping release")
+                        with self._lock:
+                            if self._current_connections > 0:
+                                self._current_connections -= 1
+                        return
+                except (AttributeError, OSError):
+                    logger.debug("[MySQL] Error checking socket file descriptor, skipping release")
+                    with self._lock:
+                        if self._current_connections > 0:
+                            self._current_connections -= 1
+                    return
         except (AttributeError, OSError) as e:
             logger.debug(f"[MySQL] Connection check failed, skipping release: {e}")
             with self._lock:
@@ -270,9 +304,14 @@ class MySQLConnectionPool:
             # 回滚未提交的事务
             try:
                 conn.rollback()
-            except (AttributeError, OSError, TypeError) as rollback_error:
+            except (AttributeError, OSError, TypeError, ValueError) as rollback_error:
                 # 连接已关闭或损坏，不能回滚
-                logger.debug(f"[MySQL] Failed to rollback connection: {rollback_error}")
+                error_msg = str(rollback_error)
+                # 特别检查"read of closed file"错误
+                if "read of closed file" in error_msg.lower():
+                    logger.debug("[MySQL] Connection has closed file error during rollback, skipping release")
+                else:
+                    logger.debug(f"[MySQL] Failed to rollback connection: {rollback_error}")
                 # 不将损坏的连接放回池中
                 try:
                     conn.close()
@@ -286,10 +325,13 @@ class MySQLConnectionPool:
             # 直接将连接放回池中，健康检查在 acquire() 时进行
             self._pool.put(conn)
             logger.debug(f"[MySQL] Released connection back to pool")
-        except (AttributeError, OSError, TypeError) as e:
+        except (AttributeError, OSError, TypeError, ValueError) as e:
             # 连接已关闭或损坏，不能放回池中
             error_msg = str(e)
-            if 'bad file descriptor' not in error_msg.lower():
+            # 特别检查"read of closed file"错误
+            if "read of closed file" in error_msg.lower():
+                logger.debug("[MySQL] Connection has closed file error during release, closing connection")
+            elif 'bad file descriptor' not in error_msg.lower():
                 logger.debug(f"[MySQL] Failed to release connection to pool: {e}, closing connection")
             try:
                 conn.close()
@@ -611,12 +653,14 @@ class MySQLDatabase:
                 # 判断是否为网络/协议错误或死锁错误，需要重试
                 # 包括 "Packet sequence number wrong" 错误，这通常表示连接状态不一致
                 # 包括 MySQL 死锁错误 (1213)，这是一种需要重试的资源竞争错误
+                # 包括 "read of closed file" 错误，这通常表示底层连接已关闭
                 is_network_error = any(keyword in error_msg.lower() for keyword in [
                     'connection', 'broken', 'lost', 'timeout', 'reset', 'gone away',
                     'operationalerror', 'interfaceerror', 'packet sequence', 'internalerror',
-                    'deadlock found'
+                    'deadlock found', 'read of closed file'
                 ]) or any(keyword in error_type.lower() for keyword in [
-                    'connection', 'timeout', 'operationalerror', 'interfaceerror', 'internalerror'
+                    'connection', 'timeout', 'operationalerror', 'interfaceerror', 'internalerror',
+                    'valueerror'
                 ]) or (isinstance(e, pymysql.err.MySQLError) and e.args[0] == 1213)
                 
                 # 如果已获取连接，需要处理连接（关闭或释放）
@@ -671,19 +715,28 @@ class MySQLDatabase:
                 
                 # 判断是否需要重试
                 if attempt < max_retries - 1:
-                    # 计算等待时间（指数退避）
-                    wait_time = retry_delay * (2 ** attempt)
-                    
-                    if is_network_error:
+                    # 计算等待时间
+                    # 为死锁错误使用特殊的重试策略（更长的初始延迟和更慢的增长）
+                    if is_network_error and (isinstance(e, pymysql.err.MySQLError) and e.args[0] == 1213 or 'deadlock' in error_msg.lower()):
+                        # 死锁错误：初始延迟1秒，增长因子1.5（更慢的增长）
+                        wait_time = 1.0 * (1.5 ** attempt)
                         logger.warning(
-                            f"[MySQL] Network error on attempt {attempt + 1}/{max_retries}: "
+                            f"[MySQL] Deadlock error on attempt {attempt + 1}/{max_retries}: "
                             f"{error_type}: {error_msg}. Retrying in {wait_time:.2f} seconds..."
                         )
                     else:
-                        logger.warning(
-                            f"[MySQL] Error on attempt {attempt + 1}/{max_retries}: "
-                            f"{error_type}: {error_msg}. Retrying in {wait_time:.2f} seconds..."
-                        )
+                        # 其他错误使用原有指数退避策略
+                        wait_time = retry_delay * (2 ** attempt)
+                        if is_network_error:
+                            logger.warning(
+                                f"[MySQL] Network error on attempt {attempt + 1}/{max_retries}: "
+                                f"{error_type}: {error_msg}. Retrying in {wait_time:.2f} seconds..."
+                            )
+                        else:
+                            logger.warning(
+                                f"[MySQL] Error on attempt {attempt + 1}/{max_retries}: "
+                                f"{error_type}: {error_msg}. Retrying in {wait_time:.2f} seconds..."
+                            )
                     
                     time.sleep(wait_time)
                     continue
@@ -1051,10 +1104,10 @@ class MySQLDatabase:
             logger.debug("[MySQL] Adding symbol %s to upsert list", symbol)
             processed_rows.append((symbol, normalized))
         
-        logger.info("[MySQL] Processed %d USDT symbols for upsert", len(processed_rows))
+        logger.debug("[MySQL] Processed %d USDT symbols for upsert", len(processed_rows))
         
         if not processed_rows:
-            logger.info("[MySQL] No symbols to upsert after processing, returning")
+            logger.debug("[MySQL] No symbols to upsert after processing, returning")
             return
         
         # 获取所有需要处理的symbol列表
@@ -1062,7 +1115,7 @@ class MySQLDatabase:
         
         # 获取数据库中已存在的symbol数据，用于计算价格变化
         existing_data = self.get_existing_symbol_data(symbols_to_process)
-        logger.info("[MySQL] Retrieved existing data for %d symbols", len(existing_data))
+        logger.debug("[MySQL] Retrieved existing data for %d symbols", len(existing_data))
         
         # 处理每条symbol数据，执行UPDATE或INSERT操作
         total_upserted = 0
@@ -1070,11 +1123,49 @@ class MySQLDatabase:
         total_inserted = 0
         total_failed = 0
         
-        def _execute_upsert(conn):
+        # 使用整个SDK返回的批次作为一个批量处理单元
+        logger.debug("[MySQL] Processing %d symbols as one batch (SDK returned batch)", len(processed_rows))
+        
+        def _execute_upsert_batch(conn, batch):
             nonlocal total_upserted, total_updated, total_inserted, total_failed
             
-            for symbol, normalized in processed_rows:
-                cursor = None
+            # 准备批量插入的SQL语句
+            insert_sql = f"""
+            INSERT INTO `{self.market_ticker_table}` 
+            (`event_time`, `symbol`, `price_change`, `price_change_percent`, 
+             `side`, `change_percent_text`, `average_price`, `last_price`, 
+             `last_trade_volume`, `open_price`, `high_price`, `low_price`, 
+             `base_volume`, `quote_volume`, `stats_open_time`, `stats_close_time`, 
+             `first_trade_id`, `last_trade_id`, `trade_count`, `update_price_date`,
+             `ingestion_time`)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            ON DUPLICATE KEY UPDATE
+                event_time = VALUES(event_time),
+                price_change = VALUES(price_change),
+                price_change_percent = VALUES(price_change_percent),
+                side = VALUES(side),
+                change_percent_text = VALUES(change_percent_text),
+                average_price = VALUES(average_price),
+                last_price = VALUES(last_price),
+                last_trade_volume = VALUES(last_trade_volume),
+                high_price = VALUES(high_price),
+                low_price = VALUES(low_price),
+                base_volume = VALUES(base_volume),
+                quote_volume = VALUES(quote_volume),
+                stats_open_time = VALUES(stats_open_time),
+                stats_close_time = VALUES(stats_close_time),
+                first_trade_id = VALUES(first_trade_id),
+                last_trade_id = VALUES(last_trade_id),
+                trade_count = VALUES(trade_count),
+                ingestion_time = VALUES(ingestion_time)
+                /* 注意：不更新open_price和update_price_date字段，这些字段由异步价格刷新服务管理 */
+            """
+            
+            batch_params = []
+            valid_symbols = []
+            
+            # 预处理所有批次数据
+            for symbol, normalized in batch:
                 try:
                     logger.debug("[MySQL] Processing symbol: %s", symbol)
                     logger.debug("[MySQL] Raw data for %s: %s", symbol, normalized)
@@ -1208,53 +1299,6 @@ class MySQLDatabase:
                     
                     logger.debug("[MySQL] Final normalized data for %s: %s", symbol, normalized)
                     
-                    # 在执行SQL前检查连接是否健康
-                    try:
-                        # 尝试ping连接以检查是否有效，如果连接断开则自动重新连接
-                        conn.ping(reconnect=True)
-                        logger.debug("[MySQL] Connection ping successful for symbol %s", symbol)
-                    except (AttributeError, Exception) as ping_error:
-                        # 连接已断开，抛出异常让外层重试机制处理
-                        logger.warning("[MySQL] Connection is not healthy for symbol %s: %s, will retry", symbol, ping_error)
-                        raise Exception(f"Connection lost: {ping_error}")
-                    
-                    # 为每个操作创建新的游标
-                    cursor = conn.cursor()
-                    
-                    # 使用INSERT ... ON DUPLICATE KEY UPDATE语句替代先更新后插入的模式，减少死锁风险
-                    # 这种方式在一条SQL语句中完成更新或插入操作，MySQL会自动处理锁的获取和释放
-                    insert_sql = f"""
-                    INSERT INTO `{self.market_ticker_table}` 
-                    (`event_time`, `symbol`, `price_change`, `price_change_percent`, 
-                     `side`, `change_percent_text`, `average_price`, `last_price`, 
-                     `last_trade_volume`, `open_price`, `high_price`, `low_price`, 
-                     `base_volume`, `quote_volume`, `stats_open_time`, `stats_close_time`, 
-                     `first_trade_id`, `last_trade_id`, `trade_count`, `update_price_date`,
-                     `ingestion_time`)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                    ON DUPLICATE KEY UPDATE
-                        event_time = VALUES(event_time),
-                        price_change = VALUES(price_change),
-                        price_change_percent = VALUES(price_change_percent),
-                        side = VALUES(side),
-                        change_percent_text = VALUES(change_percent_text),
-                        average_price = VALUES(average_price),
-                        last_price = VALUES(last_price),
-                        last_trade_volume = VALUES(last_trade_volume),
-                        high_price = VALUES(high_price),
-                        low_price = VALUES(low_price),
-                        base_volume = VALUES(base_volume),
-                        quote_volume = VALUES(quote_volume),
-                        stats_open_time = VALUES(stats_open_time),
-                        stats_close_time = VALUES(stats_close_time),
-                        first_trade_id = VALUES(first_trade_id),
-                        last_trade_id = VALUES(last_trade_id),
-                        trade_count = VALUES(trade_count),
-                        ingestion_time = VALUES(ingestion_time)
-                        /* 注意：不更新open_price和update_price_date字段，这些字段由异步价格刷新服务管理 */
-                    """
-                    
-                    # 准备插入参数
                     # 处理open_price和update_price_date字段
                     insert_open_price = normalized.get("open_price", 0.0)
                     insert_update_price_date = normalized.get("update_price_date")
@@ -1265,6 +1309,7 @@ class MySQLDatabase:
                         insert_update_price_date = None
                         logger.debug("[MySQL] 设置%s的open_price为0.0，update_price_date为None（新插入，未设置状态）", symbol)
                     
+                    # 准备插入参数
                     insert_params = (
                         normalized.get("event_time"),
                         symbol,
@@ -1289,86 +1334,100 @@ class MySQLDatabase:
                         _to_beijing_datetime(datetime.now(timezone.utc))  # ingestion_time (converted to Beijing time UTC+8)
                     )
                     
-                    try:
-                        # 再次检查连接状态，确保执行前连接仍然有效
-                        conn.ping(reconnect=True)
-                        
-                        # 执行SQL语句
-                        cursor.execute(insert_sql, insert_params)
-                        
-                        # 检查操作类型（插入或更新）
-                        if cursor.lastrowid > 0:
-                            logger.debug("[MySQL] Successfully inserted new market ticker for symbol: %s", symbol)
-                            total_inserted += 1
-                        else:
-                            logger.debug("[MySQL] Successfully updated market ticker for symbol: %s", symbol)
-                            total_updated += 1
-                    except (pymysql.err.InterfaceError, pymysql.err.OperationalError, pymysql.err.InternalError, ValueError, Exception) as db_error:
-                        # 连接错误或参数错误，关闭游标并抛出异常让外层重试
-                        if cursor:
-                            try:
-                                cursor.close()
-                            except Exception:
-                                pass
-                        cursor = None
-                        error_type = type(db_error).__name__
-                        error_msg = str(db_error)
-                        
-                        # 检查是否为连接相关错误、内存视图错误或数据包序列错误
-                        if (isinstance(db_error, (pymysql.err.InterfaceError, pymysql.err.OperationalError, pymysql.err.InternalError)) or 
-                            'interface' in error_type.lower() or 'operational' in error_type.lower() or 
-                            'internalerror' in error_type.lower() or
-                            'PyMemoryView_FromBuffer' in error_msg or 'buf must not be NULL' in error_msg or
-                            'Packet sequence number' in error_msg):
-                            logger.warning("[MySQL] Database connection or memory error for symbol %s: %s, will retry", symbol, db_error)
-                            raise Exception(f"Database connection or memory error: {db_error}")
-                        else:
-                            # 其他错误，继续抛出
-                            raise
-                    
-                    total_upserted += 1
-                    
-                    # 立即关闭游标，释放资源
-                    cursor.close()
-                    cursor = None
+                    batch_params.append(insert_params)
+                    valid_symbols.append(symbol)
                     
                 except Exception as e:
-                    error_msg = str(e)
-                    error_type = type(e).__name__
-                    
-                    # 判断是否为连接错误，需要重新获取连接
-                    is_connection_error = any(keyword in error_msg.lower() for keyword in [
-                        'connection', 'interfaceerror', 'operationalerror', 'internalerror', 'connection lost', 
-                        'database connection error', 'bad file descriptor', 'packet sequence'
-                    ]) or 'InterfaceError' in error_type or 'OperationalError' in error_type or 'InternalError' in error_type
-                    
-                    if is_connection_error:
-                        # 连接错误，抛出异常让 _with_connection 的重试机制处理
-                        logger.warning("[MySQL] Connection error for symbol %s: %s, will retry via _with_connection", symbol, e)
-                        # 确保游标被关闭
-                        if cursor:
-                            try:
-                                cursor.close()
-                            except Exception:
-                                pass
-                        # 抛出异常，让外层重试机制处理
-                        raise
-                    else:
-                        # 其他错误，记录但继续处理下一条记录
-                        logger.error("[MySQL] Failed to upsert market ticker for symbol %s: %s", symbol, e, exc_info=True)
-                        total_failed += 1
-                        # 确保游标被关闭
-                        if cursor:
-                            try:
-                                cursor.close()
-                            except Exception:
-                                pass
-                        # 继续处理下一条记录
-                        continue
+                    logger.error("[MySQL] Failed to prepare data for symbol %s: %s", symbol, e, exc_info=True)
+                    total_failed += 1
+                    continue
+            
+            # 如果没有有效的数据，直接返回
+            if not batch_params:
+                logger.debug("[MySQL] No valid data to upsert in this batch")
+                return
+            
+            cursor = None
+            try:
+                # 在执行SQL前检查连接是否健康
+                try:
+                    # 尝试ping连接以检查是否有效，如果连接断开则自动重新连接
+                    conn.ping(reconnect=True)
+                    logger.debug("[MySQL] Connection ping successful for batch upsert")
+                except (AttributeError, Exception) as ping_error:
+                    # 连接已断开，抛出异常让外层重试机制处理
+                    logger.warning("[MySQL] Connection is not healthy for batch upsert: %s, will retry", ping_error)
+                    raise Exception(f"Connection lost: {ping_error}")
+                
+                # 再次检查连接状态，确保不会使用已关闭的连接
+                if hasattr(conn, '_sock') and conn._sock is None:
+                    logger.warning("[MySQL] Connection socket is closed for batch upsert, will retry")
+                    raise Exception("Connection socket is closed")
+                
+                # 为批量操作创建游标
+                cursor = conn.cursor()
+                
+                # 使用executemany执行批量插入/更新操作
+                logger.debug("[MySQL] Executing batch upsert for %d symbols", len(batch_params))
+                cursor.executemany(insert_sql, batch_params)
+                
+                # 批量操作影响的总行数（插入+更新）
+                affected_rows = cursor.rowcount
+                logger.debug("[MySQL] Batch upsert affected %d rows", affected_rows)
+                
+                # 由于无法直接区分插入和更新的数量（executemany返回的是影响的总行数）
+                # 我们使用一种近似方法：假设大部分操作是更新
+                # 如果需要精确统计，可以在批量操作后查询每个symbol的状态，但会增加额外开销
+                total_upserted += affected_rows
+                total_updated += affected_rows
+                
+                # 提交事务
+                conn.commit()
+                logger.debug("[MySQL] Batch upsert committed successfully")
+                
+            except (pymysql.err.InterfaceError, pymysql.err.OperationalError, pymysql.err.InternalError, ValueError, Exception) as db_error:
+                # 连接错误或参数错误，关闭游标并抛出异常让外层重试
+                if cursor:
+                    try:
+                        cursor.close()
+                    except Exception:
+                        pass
+                cursor = None
+                error_type = type(db_error).__name__
+                error_msg = str(db_error)
+                
+                # 检查是否为连接相关错误、内存视图错误或数据包序列错误
+                if (isinstance(db_error, (pymysql.err.InterfaceError, pymysql.err.OperationalError, pymysql.err.InternalError)) or 
+                    'interface' in error_type.lower() or 'operational' in error_type.lower() or 
+                    'internalerror' in error_type.lower() or
+                    'PyMemoryView_FromBuffer' in error_msg or 'buf must not be NULL' in error_msg or
+                    'Packet sequence number' in error_msg):
+                    logger.warning("[MySQL] Database connection or memory error for batch upsert: %s, will retry", db_error)
+                    raise Exception(f"Database connection or memory error: {db_error}")
+                else:
+                    # 其他错误，继续抛出
+                    raise
+            
+            # 立即关闭游标，释放资源
+            if cursor:
+                cursor.close()
+                cursor = None
         
-        self._with_connection(_execute_upsert)
+        # 对整个SDK返回的批次执行upsert操作
+        batch_symbols = [symbol for symbol, _ in processed_rows]
+        logger.debug("[MySQL] Processing SDK batch: symbols %s", ", ".join(batch_symbols))
         
-        logger.info("[MySQL] Upsert completed: %d total symbols processed, %d updated, %d inserted, %d failed",
+        # 为SDK返回的批次创建一个闭包函数
+        def _execute_current_batch(conn):
+            return _execute_upsert_batch(conn, processed_rows)
+        
+        # 执行当前批次的upsert操作
+        self._with_connection(_execute_current_batch)
+        
+        logger.debug("[MySQL] SDK batch completed: total_upserted=%d, total_updated=%d, total_inserted=%d, total_failed=%d", 
+                   total_upserted, total_updated, total_inserted, total_failed)
+        
+        logger.debug("[MySQL] Upsert completed: %d total symbols processed, %d updated, %d inserted, %d failed",
             len(processed_rows), total_updated, total_inserted, total_failed
         )
         

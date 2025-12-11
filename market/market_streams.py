@@ -176,9 +176,9 @@ class MarketTickerStream:
         
         try:
             # 使用优化后的增量插入逻辑
-            logger.info("[MarketStreams] Calling upsert_market_tickers for %d symbols", len(normalized))
+            logger.debug("[MarketStreams] Calling upsert_market_tickers for %d symbols", len(normalized))
             await asyncio.to_thread(self._db.upsert_market_tickers, normalized)
-            logger.info("[MarketStreams] Successfully completed upsert_market_tickers")
+            logger.debug("[MarketStreams] Successfully completed upsert_market_tickers")
         except Exception as e:
             logger.error("[MarketStreams] Error during upsert_market_tickers: %s", e, exc_info=True)
         
