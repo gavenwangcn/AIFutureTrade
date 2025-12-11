@@ -119,10 +119,10 @@ def exercise_binance_futures_account_client(api_key: str, api_secret: str) -> No
     logging.info("=" * 60)
     
     # 测试get_account方法
-    #test_get_account(api_key, api_secret)
+    test_get_account(api_key, api_secret)
     
     # 测试get_account_asset方法
-    test_get_account_asset(api_key, api_secret)
+    # test_get_account_asset(api_key, api_secret)
     
     logging.info("=" * 60)
     logging.info("All BinanceFuturesAccountClient method calls completed.")
