@@ -80,7 +80,21 @@ export const marketApi = {
   getPrices: () => apiGet('/api/market/prices'),
 
   /**
-   * 获取涨跌幅榜
+   * 获取涨幅榜
+   */
+  getGainers: (limit = 10) => {
+    return apiGet('/api/market/leaderboard/gainers', { limit })
+  },
+
+  /**
+   * 获取跌幅榜
+   */
+  getLosers: (limit = 10) => {
+    return apiGet('/api/market/leaderboard/losers', { limit })
+  },
+
+  /**
+   * 获取涨跌幅榜（已废弃，保留以兼容旧代码）
    */
   getLeaderboard: (limit = 10, force = false) => {
     const params = { limit }

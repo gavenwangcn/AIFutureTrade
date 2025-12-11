@@ -22,8 +22,17 @@ export function useTradingApp() {
   const marketPrices = ref([])
   const leaderboardGainers = ref([])
   const leaderboardLosers = ref([])
+  // 涨幅榜状态
+  const gainersStatus = ref('等待数据...')
+  const gainersStatusType = ref('default') // 'updating' | 'success' | 'error' | 'default'
+  const isRefreshingGainers = ref(false)
+  // 跌幅榜状态
+  const losersStatus = ref('等待数据...')
+  const losersStatusType = ref('default') // 'updating' | 'success' | 'error' | 'default'
+  const isRefreshingLosers = ref(false)
+  // 兼容旧代码的状态（已废弃）
   const leaderboardStatus = ref('等待数据...')
-  const leaderboardStatusType = ref('default') // 'updating' | 'success' | 'error' | 'default'
+  const leaderboardStatusType = ref('default')
   const isRefreshingLeaderboard = ref(false)
   const isRefreshingAll = ref(false)
   
@@ -59,6 +68,8 @@ export function useTradingApp() {
     models: false,
     marketPrices: false,
     leaderboard: false,
+    gainers: false,
+    losers: false,
     portfolio: false,
     positions: false,
     trades: false,
@@ -71,7 +82,9 @@ export function useTradingApp() {
   // WebSocket连接
   const socket = ref(null)
   let websocketMonitorInterval = null // WebSocket 监控定时器
-  let leaderboardRefreshInterval = null // 涨跌榜自动刷新定时器（轮询方式，默认5秒）
+  let gainersRefreshInterval = null // 涨幅榜自动刷新定时器（轮询方式，默认5秒）
+  let losersRefreshInterval = null // 跌幅榜自动刷新定时器（轮询方式，默认5秒）
+  let leaderboardRefreshInterval = null // 涨跌榜自动刷新定时器（已废弃，保留以兼容旧代码）
   
   // ECharts 实例
   const accountChart = ref(null)
@@ -237,41 +250,91 @@ export function useTradingApp() {
   }
 
   /**
-   * 启动涨跌榜自动刷新（轮询方式）
+   * 启动涨幅榜自动刷新（轮询方式）
    * 使用配置的刷新时间（FUTURES_LEADERBOARD_REFRESH，默认5秒）
-   * 整体刷新渲染，不是一条一条刷新
    */
-  const startLeaderboardAutoRefresh = () => {
+  const startGainersAutoRefresh = () => {
     // 清除已有定时器
-    if (leaderboardRefreshInterval) {
-      clearInterval(leaderboardRefreshInterval)
-      leaderboardRefreshInterval = null
+    if (gainersRefreshInterval) {
+      clearInterval(gainersRefreshInterval)
+      gainersRefreshInterval = null
     }
 
     // 立即获取一次数据
-    loadLeaderboard(false)
+    loadGainers()
 
     // 使用配置的刷新时间（默认5秒，与后端FUTURES_LEADERBOARD_REFRESH配置一致）
-    // 前端轮询时间应该与后端同步间隔一致，确保数据实时性
-    const refreshInterval = 5000 // 5秒，与后端FUTURES_LEADERBOARD_REFRESH=5一致
+    const refreshInterval = 5000 // 5秒
     
-    leaderboardRefreshInterval = setInterval(() => {
-      console.log(`[TradingApp] 轮询刷新涨跌榜数据（${refreshInterval/1000}秒间隔）`)
-      loadLeaderboard(false) // 整体刷新，不是一条一条刷新
+    gainersRefreshInterval = setInterval(() => {
+      console.log(`[TradingApp] 轮询刷新涨幅榜数据（${refreshInterval/1000}秒间隔）`)
+      loadGainers()
     }, refreshInterval)
 
-    console.log(`[TradingApp] ✅ 涨跌榜自动刷新已启动（轮询方式，${refreshInterval/1000}秒间隔）`)
+    console.log(`[TradingApp] ✅ 涨幅榜自动刷新已启动（轮询方式，${refreshInterval/1000}秒间隔）`)
   }
 
   /**
-   * 停止涨跌榜自动刷新
+   * 停止涨幅榜自动刷新
+   */
+  const stopGainersAutoRefresh = () => {
+    if (gainersRefreshInterval) {
+      clearInterval(gainersRefreshInterval)
+      gainersRefreshInterval = null
+      console.log('[TradingApp] 涨幅榜自动刷新已停止')
+    }
+  }
+
+  /**
+   * 启动跌幅榜自动刷新（轮询方式）
+   * 使用配置的刷新时间（FUTURES_LEADERBOARD_REFRESH，默认5秒）
+   */
+  const startLosersAutoRefresh = () => {
+    // 清除已有定时器
+    if (losersRefreshInterval) {
+      clearInterval(losersRefreshInterval)
+      losersRefreshInterval = null
+    }
+
+    // 立即获取一次数据
+    loadLosers()
+
+    // 使用配置的刷新时间（默认5秒，与后端FUTURES_LEADERBOARD_REFRESH配置一致）
+    const refreshInterval = 5000 // 5秒
+    
+    losersRefreshInterval = setInterval(() => {
+      console.log(`[TradingApp] 轮询刷新跌幅榜数据（${refreshInterval/1000}秒间隔）`)
+      loadLosers()
+    }, refreshInterval)
+
+    console.log(`[TradingApp] ✅ 跌幅榜自动刷新已启动（轮询方式，${refreshInterval/1000}秒间隔）`)
+  }
+
+  /**
+   * 停止跌幅榜自动刷新
+   */
+  const stopLosersAutoRefresh = () => {
+    if (losersRefreshInterval) {
+      clearInterval(losersRefreshInterval)
+      losersRefreshInterval = null
+      console.log('[TradingApp] 跌幅榜自动刷新已停止')
+    }
+  }
+
+  /**
+   * 启动涨跌榜自动刷新（已废弃，保留以兼容旧代码）
+   */
+  const startLeaderboardAutoRefresh = () => {
+    startGainersAutoRefresh()
+    startLosersAutoRefresh()
+  }
+
+  /**
+   * 停止涨跌榜自动刷新（已废弃，保留以兼容旧代码）
    */
   const stopLeaderboardAutoRefresh = () => {
-    if (leaderboardRefreshInterval) {
-      clearInterval(leaderboardRefreshInterval)
-      leaderboardRefreshInterval = null
-      console.log('[TradingApp] 涨跌榜自动刷新已停止')
-    }
+    stopGainersAutoRefresh()
+    stopLosersAutoRefresh()
   }
 
   // ============ 数据加载方法 ============
@@ -324,65 +387,114 @@ export function useTradingApp() {
   }
 
   /**
-   * 加载涨跌幅榜
+   * 加载涨幅榜
    */
-  const loadLeaderboard = async (force = false) => {
-    loading.value.leaderboard = true
-    isRefreshingLeaderboard.value = true
-    errors.value.leaderboard = null
+  const loadGainers = async () => {
+    loading.value.gainers = true
+    isRefreshingGainers.value = true
+    errors.value.gainers = null
     
-    // 更新状态为刷新中（黄色）
-    leaderboardStatus.value = '正在更新...'
-    leaderboardStatusType.value = 'updating'
+    // 更新状态为刷新中
+    gainersStatus.value = '正在更新...'
+    gainersStatusType.value = 'updating'
     
     try {
-      const data = await marketApi.getLeaderboard(10, force)
-      // 后端返回格式：{ success: true, gainers: [], losers: [] } 或直接返回 { gainers: [], losers: [] }
-      if (data.success !== false) {
-        const gainers = data.gainers || []
-        const losers = data.losers || []
-        
+      const data = await marketApi.getGainers(10)
+      const gainers = data.gainers || []
+      
       // 检查是否有数据
-      if (gainers.length > 0 || losers.length > 0) {
-        // 整体刷新渲染：直接替换整个数组（不是一条一条刷新）
+      if (gainers.length > 0) {
+        // 整体刷新渲染：直接替换整个数组
         leaderboardGainers.value = gainers
-        leaderboardLosers.value = losers
-          
-          // 更新成功：显示日期时间格式（绿色）
-          const updateTime = new Date()
-          const dateStr = updateTime.toLocaleDateString('zh-CN', {
-            year: 'numeric',
-            month: '2-digit',
-            day: '2-digit'
-          })
-          const timeStr = updateTime.toLocaleTimeString('zh-CN', {
-            hour12: false,
-            hour: '2-digit',
-            minute: '2-digit',
-            second: '2-digit'
-          })
-          leaderboardStatus.value = `最后更新: ${dateStr} ${timeStr}`
-          leaderboardStatusType.value = 'success'
-        } else {
-          // 没有数据：显示更新失败（白色）
-          leaderboardStatus.value = '更新失败'
-          leaderboardStatusType.value = 'error'
-        }
+        
+        // 更新成功：显示日期时间格式（绿色）
+        const updateTime = new Date()
+        const dateStr = updateTime.toLocaleDateString('zh-CN', {
+          year: 'numeric',
+          month: '2-digit',
+          day: '2-digit'
+        })
+        const timeStr = updateTime.toLocaleTimeString('zh-CN', {
+          hour12: false,
+          hour: '2-digit',
+          minute: '2-digit',
+          second: '2-digit'
+        })
+        gainersStatus.value = `最后更新: ${dateStr} ${timeStr}`
+        gainersStatusType.value = 'success'
       } else {
-        // 更新失败：显示更新失败（白色）
-        leaderboardStatus.value = '更新失败'
-        leaderboardStatusType.value = 'error'
+        // 没有数据：显示更新失败
+        gainersStatus.value = '更新失败'
+        gainersStatusType.value = 'error'
       }
     } catch (error) {
-      console.error('[TradingApp] Error loading leaderboard:', error)
-      errors.value.leaderboard = error.message
-      // 更新失败：显示更新失败（白色）
-      leaderboardStatus.value = '更新失败'
-      leaderboardStatusType.value = 'error'
+      console.error('[TradingApp] Error loading gainers:', error)
+      errors.value.gainers = error.message
+      gainersStatus.value = '更新失败'
+      gainersStatusType.value = 'error'
     } finally {
-      loading.value.leaderboard = false
-      isRefreshingLeaderboard.value = false
+      loading.value.gainers = false
+      isRefreshingGainers.value = false
     }
+  }
+
+  /**
+   * 加载跌幅榜
+   */
+  const loadLosers = async () => {
+    loading.value.losers = true
+    isRefreshingLosers.value = true
+    errors.value.losers = null
+    
+    // 更新状态为刷新中
+    losersStatus.value = '正在更新...'
+    losersStatusType.value = 'updating'
+    
+    try {
+      const data = await marketApi.getLosers(10)
+      const losers = data.losers || []
+      
+      // 检查是否有数据
+      if (losers.length > 0) {
+        // 整体刷新渲染：直接替换整个数组
+        leaderboardLosers.value = losers
+        
+        // 更新成功：显示日期时间格式（绿色）
+        const updateTime = new Date()
+        const dateStr = updateTime.toLocaleDateString('zh-CN', {
+          year: 'numeric',
+          month: '2-digit',
+          day: '2-digit'
+        })
+        const timeStr = updateTime.toLocaleTimeString('zh-CN', {
+          hour12: false,
+          hour: '2-digit',
+          minute: '2-digit',
+          second: '2-digit'
+        })
+        losersStatus.value = `最后更新: ${dateStr} ${timeStr}`
+        losersStatusType.value = 'success'
+      } else {
+        // 没有数据：显示更新失败
+        losersStatus.value = '更新失败'
+        losersStatusType.value = 'error'
+      }
+    } catch (error) {
+      console.error('[TradingApp] Error loading losers:', error)
+      errors.value.losers = error.message
+      losersStatus.value = '更新失败'
+      losersStatusType.value = 'error'
+    } finally {
+      loading.value.losers = false
+      isRefreshingLosers.value = false
+    }
+  }
+
+  /**
+   * 加载涨跌幅榜（已废弃，保留以兼容旧代码）
+   */
+  const loadLeaderboard = async (force = false) => {
+    await Promise.all([loadGainers(), loadLosers()])
   }
 
   /**
@@ -1187,7 +1299,8 @@ export function useTradingApp() {
   // 组件卸载时清理资源
   onUnmounted(() => {
     // 停止涨跌榜自动刷新
-    stopLeaderboardAutoRefresh()
+    stopGainersAutoRefresh()
+    stopLosersAutoRefresh()
     
     // 清理 WebSocket 连接
     if (socket.value) {
@@ -1213,6 +1326,15 @@ export function useTradingApp() {
     marketPrices,
     leaderboardGainers,
     leaderboardLosers,
+    // 涨幅榜状态
+    gainersStatus,
+    gainersStatusType,
+    isRefreshingGainers,
+    // 跌幅榜状态
+    losersStatus,
+    losersStatusType,
+    isRefreshingLosers,
+    // 兼容旧代码的状态（已废弃）
     leaderboardStatus,
     leaderboardStatusType,
     isRefreshingLeaderboard,
@@ -1266,12 +1388,22 @@ export function useTradingApp() {
     loadModels,
     loadProviders,
     loadMarketPrices,
-    loadLeaderboard,
+    loadGainers,
+    loadLosers,
+    loadLeaderboard, // 已废弃，保留以兼容旧代码
     loadPortfolio,
     loadAggregatedData,
     loadPositions,
     loadTrades,
     loadConversations,
+    
+    // 涨跌榜自动刷新方法
+    startGainersAutoRefresh,
+    stopGainersAutoRefresh,
+    startLosersAutoRefresh,
+    stopLosersAutoRefresh,
+    startLeaderboardAutoRefresh, // 已废弃，保留以兼容旧代码
+    stopLeaderboardAutoRefresh, // 已废弃，保留以兼容旧代码
     
     // 图表更新方法
     updateAccountChart

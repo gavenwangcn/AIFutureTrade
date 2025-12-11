@@ -153,9 +153,29 @@
     gap: 12px;
 }
 
+.column-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 12px;
+    flex-wrap: wrap;
+}
+
 .column-title {
     font-size: 16px;
     font-weight: 600;
+    flex: 1;
+}
+
+.status-indicator.small {
+    padding: 4px 8px;
+    font-size: 11px;
+}
+
+.btn-small {
+    padding: 4px 8px;
+    font-size: 12px;
+    min-width: auto;
 }
 
 .leaderboard-list {

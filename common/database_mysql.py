@@ -1606,8 +1606,140 @@ class MySQLDatabase:
         logger.info("[MySQL] Ensured table %s exists", self.leaderboard_table)
 
     # ==================================================================
-    # Leaderboard 模块：数据查询
+    # Leaderboard 模块：数据查询（从 24_market_tickers 表直接查询）
     # ==================================================================
+    
+    def get_gainers_from_tickers(self, limit: int = 10) -> List[Dict[str, Any]]:
+        """从 24_market_tickers 表获取涨幅榜数据。
+        
+        Args:
+            limit: 返回的记录数限制，默认10
+            
+        Returns:
+            涨幅榜数据列表，按 price_change_percent 降序排列
+        """
+        try:
+            query = f"""
+            SELECT 
+                `symbol`, `price_change_percent`, `last_price`, `quote_volume`,
+                `event_time`, `side`
+            FROM `{self.market_ticker_table}`
+            WHERE `side` = 'gainer'
+            AND `price_change_percent` IS NOT NULL
+            ORDER BY `price_change_percent` DESC
+            LIMIT %s
+            """
+            
+            def _execute_query(conn):
+                cursor = conn.cursor()
+                try:
+                    cursor.execute(query, (limit,))
+                    rows = cursor.fetchall()
+                    
+                    result = []
+                    for idx, row in enumerate(rows, 1):
+                        if isinstance(row, dict):
+                            result.append({
+                                'symbol': row.get('symbol', ''),
+                                'contract_symbol': row.get('symbol', ''),
+                                'name': row.get('symbol', '').replace('USDT', '') if row.get('symbol', '').endswith('USDT') else row.get('symbol', ''),
+                                'exchange': 'BINANCE_FUTURES',
+                                'side': 'gainer',
+                                'position': idx,
+                                'price': float(row.get('last_price', 0.0)),
+                                'change_percent': float(row.get('price_change_percent', 0.0)),
+                                'quote_volume': float(row.get('quote_volume', 0.0)),
+                                'timeframes': '',
+                                'event_time': row.get('event_time'),
+                            })
+                        elif isinstance(row, (list, tuple)):
+                            result.append({
+                                'symbol': row[0] if len(row) > 0 else '',
+                                'contract_symbol': row[0] if len(row) > 0 else '',
+                                'name': (row[0] if len(row) > 0 else '').replace('USDT', '') if (row[0] if len(row) > 0 else '').endswith('USDT') else (row[0] if len(row) > 0 else ''),
+                                'exchange': 'BINANCE_FUTURES',
+                                'side': 'gainer',
+                                'position': idx,
+                                'price': float(row[2]) if len(row) > 2 and row[2] is not None else 0.0,
+                                'change_percent': float(row[1]) if len(row) > 1 and row[1] is not None else 0.0,
+                                'quote_volume': float(row[3]) if len(row) > 3 and row[3] is not None else 0.0,
+                                'timeframes': '',
+                                'event_time': row[4] if len(row) > 4 else None,
+                            })
+                    return result
+                finally:
+                    cursor.close()
+            
+            return self._with_connection(_execute_query)
+        except Exception as e:
+            logger.error("[MySQL] Failed to get gainers from tickers: %s", e, exc_info=True)
+            return []
+    
+    def get_losers_from_tickers(self, limit: int = 10) -> List[Dict[str, Any]]:
+        """从 24_market_tickers 表获取跌幅榜数据。
+        
+        Args:
+            limit: 返回的记录数限制，默认10
+            
+        Returns:
+            跌幅榜数据列表，按 price_change_percent 绝对值降序排列（注意 price_change_percent 为负值）
+        """
+        try:
+            query = f"""
+            SELECT 
+                `symbol`, `price_change_percent`, `last_price`, `quote_volume`,
+                `event_time`, `side`
+            FROM `{self.market_ticker_table}`
+            WHERE `side` = 'loser'
+            AND `price_change_percent` IS NOT NULL
+            ORDER BY ABS(`price_change_percent`) DESC
+            LIMIT %s
+            """
+            
+            def _execute_query(conn):
+                cursor = conn.cursor()
+                try:
+                    cursor.execute(query, (limit,))
+                    rows = cursor.fetchall()
+                    
+                    result = []
+                    for idx, row in enumerate(rows, 1):
+                        if isinstance(row, dict):
+                            result.append({
+                                'symbol': row.get('symbol', ''),
+                                'contract_symbol': row.get('symbol', ''),
+                                'name': row.get('symbol', '').replace('USDT', '') if row.get('symbol', '').endswith('USDT') else row.get('symbol', ''),
+                                'exchange': 'BINANCE_FUTURES',
+                                'side': 'loser',
+                                'position': idx,
+                                'price': float(row.get('last_price', 0.0)),
+                                'change_percent': float(row.get('price_change_percent', 0.0)),
+                                'quote_volume': float(row.get('quote_volume', 0.0)),
+                                'timeframes': '',
+                                'event_time': row.get('event_time'),
+                            })
+                        elif isinstance(row, (list, tuple)):
+                            result.append({
+                                'symbol': row[0] if len(row) > 0 else '',
+                                'contract_symbol': row[0] if len(row) > 0 else '',
+                                'name': (row[0] if len(row) > 0 else '').replace('USDT', '') if (row[0] if len(row) > 0 else '').endswith('USDT') else (row[0] if len(row) > 0 else ''),
+                                'exchange': 'BINANCE_FUTURES',
+                                'side': 'loser',
+                                'position': idx,
+                                'price': float(row[2]) if len(row) > 2 and row[2] is not None else 0.0,
+                                'change_percent': float(row[1]) if len(row) > 1 and row[1] is not None else 0.0,
+                                'quote_volume': float(row[3]) if len(row) > 3 and row[3] is not None else 0.0,
+                                'timeframes': '',
+                                'event_time': row[4] if len(row) > 4 else None,
+                            })
+                    return result
+                finally:
+                    cursor.close()
+            
+            return self._with_connection(_execute_query)
+        except Exception as e:
+            logger.error("[MySQL] Failed to get losers from tickers: %s", e, exc_info=True)
+            return []
     
     def get_leaderboard(
         self,
@@ -1615,7 +1747,7 @@ class MySQLDatabase:
         limit: int = 10,
         time_window_seconds: int = 2
     ) -> List[Dict[str, Any]]:
-        """获取涨跌榜数据。
+        """获取涨跌榜数据（已废弃，保留以兼容旧代码）。
         
         Args:
             side: 'LONG' 或 'SHORT'

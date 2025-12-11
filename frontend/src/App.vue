@@ -194,39 +194,33 @@
               <p class="section-description">与市场行情模块保持一致的多维指标，横屏布局实时洞察强势与弱势合约。</p>
             </div>
             <div class="leaderboard-meta">
-              <span 
-                class="status-indicator" 
-                :class="{
-                  updating: leaderboardStatusType === 'updating',
-                  success: leaderboardStatusType === 'success',
-                  error: leaderboardStatusType === 'error'
-                }"
-              >
-                {{ leaderboardStatus }}
-              </span>
-              <button 
-                class="btn-secondary" 
-                :class="{ refreshing: isRefreshingLeaderboard }"
-                @click="refreshLeaderboard"
-                :disabled="isRefreshingLeaderboard"
-              >
-                <i class="bi bi-lightning-charge" :class="{ spin: isRefreshingLeaderboard }"></i> 
-                {{ isRefreshingLeaderboard ? '刷新中...' : '手动刷新' }}
-              </button>
-              <button 
-                class="btn-secondary" 
-                :class="{ 'btn-running': mysqlLeaderboardSyncRunning, 'btn-paused': !mysqlLeaderboardSyncRunning }"
-                @click="toggleMysqlLeaderboardSync"
-                title="MySQL 涨幅榜同步"
-              >
-                <i :class="['bi', mysqlLeaderboardSyncRunning ? 'bi-pause-circle' : 'bi-play-circle']"></i>
-                <span>{{ mysqlLeaderboardSyncRunning ? '执行中' : '已暂停' }}</span>
-              </button>
+              <span class="status-indicator info">数据实时更新中</span>
             </div>
           </div>
           <div class="leaderboard-columns">
             <div class="leaderboard-column">
-              <div class="column-title positive">涨幅榜 TOP</div>
+              <div class="column-header">
+                <div class="column-title positive">涨幅榜 TOP</div>
+                <span 
+                  class="status-indicator small" 
+                  :class="{
+                    updating: gainersStatusType === 'updating',
+                    success: gainersStatusType === 'success',
+                    error: gainersStatusType === 'error'
+                  }"
+                >
+                  {{ gainersStatus }}
+                </span>
+                <button 
+                  class="btn-secondary btn-small" 
+                  :class="{ refreshing: isRefreshingGainers }"
+                  @click="loadGainers"
+                  :disabled="isRefreshingGainers"
+                  title="手动刷新涨幅榜"
+                >
+                  <i class="bi bi-lightning-charge" :class="{ spin: isRefreshingGainers }"></i>
+                </button>
+              </div>
               <div class="leaderboard-list">
                   <div v-for="(item, index) in leaderboardGainers" :key="item.symbol || index" class="leaderboard-item" @click="openKlineChartFromMarket(item.symbol, item.contract_symbol)">
                   <div class="leaderboard-rank">{{ index + 1 }}</div>
@@ -245,7 +239,28 @@
               </div>
             </div>
             <div class="leaderboard-column">
-              <div class="column-title negative">跌幅榜 TOP</div>
+              <div class="column-header">
+                <div class="column-title negative">跌幅榜 TOP</div>
+                <span 
+                  class="status-indicator small" 
+                  :class="{
+                    updating: losersStatusType === 'updating',
+                    success: losersStatusType === 'success',
+                    error: losersStatusType === 'error'
+                  }"
+                >
+                  {{ losersStatus }}
+                </span>
+                <button 
+                  class="btn-secondary btn-small" 
+                  :class="{ refreshing: isRefreshingLosers }"
+                  @click="loadLosers"
+                  :disabled="isRefreshingLosers"
+                  title="手动刷新跌幅榜"
+                >
+                  <i class="bi bi-lightning-charge" :class="{ spin: isRefreshingLosers }"></i>
+                </button>
+              </div>
               <div class="leaderboard-list">
                   <div v-for="(item, index) in leaderboardLosers" :key="item.symbol || index" class="leaderboard-item" @click="openKlineChartFromMarket(item.symbol, item.contract_symbol)">
                   <div class="leaderboard-rank">{{ index + 1 }}</div>
@@ -526,10 +541,14 @@ const {
   marketPrices,
   leaderboardGainers,
   leaderboardLosers,
-  leaderboardStatus,
-  leaderboardStatusType,
-  isRefreshingLeaderboard,
-  isRefreshingAll,
+  // 涨幅榜状态
+  gainersStatus,
+  gainersStatusType,
+  isRefreshingGainers,
+  // 跌幅榜状态
+  losersStatus,
+  losersStatusType,
+  isRefreshingLosers,
   portfolio,
   accountValueHistory,
   aggregatedChartData,
@@ -545,20 +564,18 @@ const {
   showLeverageModal,
   pendingLeverageModelId,
   leverageModelName,
-  mysqlLeaderboardSyncRunning,
   initApp,
   handleRefresh,
   toggleLogger,
   handleExecute,
   handlePauseAuto,
-  refreshLeaderboard,
+  loadGainers,
+  loadLosers,
   selectModel,
   showAggregatedView,
   deleteModel,
   openLeverageModal,
   saveModelLeverage,
-  toggleMysqlLeaderboardSync,
-  updateMysqlLeaderboardSyncStatus,
   getModelDisplayName,
   getProviderName,
   getLeverageText,

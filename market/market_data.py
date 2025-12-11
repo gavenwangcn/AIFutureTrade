@@ -1234,13 +1234,10 @@ class MarketDataFetcher:
 
     def sync_leaderboard(self, force: bool = False, limit: Optional[int] = None) -> Dict[str, List[Dict]]:
         """
-        同步涨幅榜数据（从 MySQL 查询）
+        同步涨幅榜数据（从 24_market_tickers 表查询，已废弃，保留以兼容旧代码）
         
-        优化逻辑：
-        1. 从 MySQL futures_leaderboard 表查询涨幅榜数据
-        2. 不再查询 SQLite 数据库
-        3. 不再实时计算 K线指标和 timeframes 数据
-        4. 使用 MySQL 表中的 last_price 字段作为最新价格
+        注意：此方法已废弃，新的实现直接从 24_market_tickers 表查询，不再使用 futures_leaderboard 表
+        请使用 MySQLDatabase.get_gainers_from_tickers() 和 get_losers_from_tickers() 方法
         
         Args:
             force: 是否强制刷新（保留参数以兼容现有调用，但实际不使用）
@@ -1253,7 +1250,7 @@ class MarketDataFetcher:
             limit = getattr(app_config, 'FUTURES_TOP_GAINERS_LIMIT', 10)
 
         logger.info(
-            '[Leaderboard] sync_leaderboard called | limit=%s (from MySQL)',
+            '[Leaderboard] sync_leaderboard called | limit=%s (from 24_market_tickers)',
             limit
         )
 
@@ -1263,63 +1260,21 @@ class MarketDataFetcher:
             return {'gainers': [], 'losers': []}
 
         try:
-            # 从 MySQL 查询涨幅榜数据
-            # get_leaderboard 需要 side 参数，分别获取 'LONG' 和 'SHORT' 的数据
-            gainers = self._mysql_db.get_leaderboard(side='LONG', limit=limit)
-            losers = self._mysql_db.get_leaderboard(side='SHORT', limit=limit)
+            # 从 24_market_tickers 表直接查询涨跌幅榜数据
+            gainers = self._mysql_db.get_gainers_from_tickers(limit=limit)
+            losers = self._mysql_db.get_losers_from_tickers(limit=limit)
             
-            # 转换数据格式以兼容现有接口
-            # MySQL 返回的数据格式：{'gainers': [...], 'losers': [...]}
-            # 需要转换为与原来 SQLite 返回格式一致的结构
             formatted_data = {
                 'gainers': gainers if gainers else [],
                 'losers': losers if losers else []
             }
             
-            # 格式化涨幅榜数据
-            for item in gainers:
-                symbol = item.get('symbol', '')
-                # 提取基础符号（去掉 USDT 后缀）
-                base_symbol = symbol.replace(self._futures_quote_asset, '') if symbol.endswith(self._futures_quote_asset) else symbol
-                
-                formatted_data['gainers'].append({
-                    'symbol': base_symbol,
-                    'contract_symbol': symbol,
-                    'name': base_symbol,
-                    'exchange': 'BINANCE_FUTURES',
-                    'side': 'gainer',
-                    'position': item.get('position', 0),
-                    'price': item.get('price', 0.0),  # 使用 MySQL 的 price
-                    'change_percent': item.get('change_percent', 0.0),
-                    'quote_volume': item.get('quote_volume', 0.0),
-                    'timeframes': {}  # 不再生成 timeframes 数据
-                })
-            
-            # 格式化跌幅榜数据
-            for item in losers:
-                symbol = item.get('symbol', '')
-                # 提取基础符号（去掉 USDT 后缀）
-                base_symbol = symbol.replace(self._futures_quote_asset, '') if symbol.endswith(self._futures_quote_asset) else symbol
-                
-                formatted_data['losers'].append({
-                    'symbol': base_symbol,
-                    'contract_symbol': symbol,
-                    'name': base_symbol,
-                    'exchange': 'BINANCE_FUTURES',
-                    'side': 'loser',
-                    'position': item.get('position', 0),
-                    'price': item.get('price', 0.0),  # 使用 MySQL 的 price
-                    'change_percent': item.get('change_percent', 0.0),
-                    'quote_volume': item.get('quote_volume', 0.0),
-                    'timeframes': {}  # 不再生成 timeframes 数据
-                })
-            
-            logger.info('[Leaderboard] Returning leaderboard payload from MySQL: gainers=%s losers=%s',
+            logger.info('[Leaderboard] Returning leaderboard payload from 24_market_tickers: gainers=%s losers=%s',
                         len(formatted_data.get('gainers', [])), len(formatted_data.get('losers', [])))
             return formatted_data
             
         except Exception as exc:
-            logger.error('[Leaderboard] Failed to get leaderboard from MySQL: %s', exc, exc_info=True)
+            logger.error('[Leaderboard] Failed to get leaderboard from 24_market_tickers: %s', exc, exc_info=True)
             return {'gainers': [], 'losers': []}
 
     def get_leaderboard(self, limit: Optional[int] = None) -> Dict[str, List[Dict]]:
