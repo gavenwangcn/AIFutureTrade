@@ -613,6 +613,93 @@ class BinanceFuturesClient:
             return []
 
 
+class BinanceFuturesAccountClient:
+    """
+    币安期货账户客户端 - 专注于账户功能的客户端
+    
+    提供获取账户信息、账户资产等功能，
+    支持传入不同的api_key和api_secret进行操作。
+    """
+
+    def __init__(
+        self,
+        api_key: str,
+        api_secret: str,
+        quote_asset: str = "USDT",
+        base_path: Optional[str] = None,
+        testnet: bool = False,
+    ):
+        """
+        初始化币安期货账户客户端
+        
+        Args:
+            api_key: 币安API密钥
+            api_secret: 币安API密钥
+            quote_asset: 计价资产，默认为USDT
+            base_path: 自定义REST API基础路径（可选）
+            testnet: 是否使用测试网络，默认False
+        """
+        if not BINANCE_SDK_AVAILABLE:
+            raise RuntimeError(
+                "Binance official futures SDK not available. Install 'binance-common' "
+                "and related packages or set BINANCE_API_KEY/SECRET empty to disable."
+            ) from _BINANCE_IMPORT_ERROR
+
+        # 确定REST API基础路径
+        rest_base = base_path or (
+            DERIVATIVES_TRADING_USDS_FUTURES_REST_API_TESTNET_URL
+            if testnet
+            else DERIVATIVES_TRADING_USDS_FUTURES_REST_API_PROD_URL
+        )
+
+        # 创建SDK配置和客户端
+        configuration = ConfigurationRestAPI(
+            api_key=api_key,
+            api_secret=api_secret,
+            base_path=rest_base,
+        )
+
+        self.quote_asset = quote_asset.upper()
+        self._client = DerivativesTradingUsdsFutures(config_rest_api=configuration)
+        self._rest = self._client.rest_api
+    
+    def get_account(self) -> str:
+        """
+        获取账户信息
+        
+        Returns:
+            账户信息的JSON字符串
+        
+        Raises:
+            RuntimeError: 如果SDK不可用
+            Exception: 如果API调用失败
+        """
+        try:
+            response = self._rest.account_information_v3()
+            return response.data().to_json()
+        except Exception as e:
+            logger.error(f"[BinanceFuturesAccountClient] Failed to get account information: {e}")
+            raise
+    
+    def get_account_asset(self) -> str:
+        """
+        获取账户资产信息
+        
+        Returns:
+            账户资产信息的JSON字符串
+        
+        Raises:
+            RuntimeError: 如果SDK不可用
+            Exception: 如果API调用失败
+        """
+        try:
+            response = self._rest.futures_account_balance_v3()
+            return response.data().to_json()
+        except Exception as e:
+            logger.error(f"[BinanceFuturesAccountClient] Failed to get account balance: {e}")
+            raise
+
+
 class BinanceFuturesOrderClient:
     """
     币安期货订单客户端 - 专注于交易功能的客户端
