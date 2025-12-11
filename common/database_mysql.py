@@ -1734,7 +1734,16 @@ class MySQLDatabase:
                 try:
                     cursor.execute(query, (cutoff_date,))
                     result = cursor.fetchone()
-                    return int(result[0]) if result else 0
+                    if result is None:
+                        return 0
+                    elif isinstance(result, dict):
+                        # 字典格式游标，获取第一个值（COUNT(*)的结果）
+                        return int(list(result.values())[0]) if result else 0
+                    elif isinstance(result, (list, tuple)):
+                        # 元组格式游标
+                        return int(result[0]) if len(result) > 0 else 0
+                    else:
+                        return 0
                 finally:
                     cursor.close()
             
