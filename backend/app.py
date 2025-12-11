@@ -5,7 +5,7 @@ eventlet.monkey_patch()
 """
 Flask application for AI Futures Trading System
 """
-from flask import Flask, render_template, request, jsonify
+from flask import Flask, request, jsonify
 from flask_cors import CORS
 from flask_socketio import SocketIO, emit
 import os
@@ -21,7 +21,6 @@ from common.database_account import AccountDatabase
 from common.binance_futures import BinanceFuturesAccountClient
 from common.version import __version__
 from trade.prompt_defaults import DEFAULT_BUY_CONSTRAINTS, DEFAULT_SELL_CONSTRAINTS
-import json
 
 import common.config as app_config
 import logging
@@ -363,25 +362,36 @@ def index():
         'api_endpoint': '/api/'
     })
 
-@app.route('/lib/<path:filename>')
-def serve_lib_file(filename):
-    """Serve files from static/lib/ directory"""
-    from flask import send_from_directory
-    import os
-    lib_path = os.path.join(app.root_path, 'static', 'lib')
-    return send_from_directory(lib_path, filename)
 
 # ============ Provider API Endpoints ============
+# API提供方管理：用于配置和管理AI模型提供方（如OpenAI、DeepSeek等）
 
 @app.route('/api/providers', methods=['GET'])
 def get_providers():
-    """Get all API providers"""
+    """
+    获取所有API提供方列表
+    
+    Returns:
+        JSON: 提供方列表，包含id、name、api_url、api_key等信息
+    """
     providers = db.get_all_providers()
     return jsonify(providers)
 
 @app.route('/api/providers', methods=['POST'])
 def add_provider():
-    """Add new API provider"""
+    """
+    添加新的API提供方
+    
+    Request Body:
+        name (str): 提供方名称
+        api_url (str): API地址
+        api_key (str): API密钥
+        models (str, optional): 支持的模型列表（逗号分隔）
+        provider_type (str, optional): 提供方类型，默认'openai'
+    
+    Returns:
+        JSON: 包含新创建的提供方ID和成功消息
+    """
     data = request.json
     try:
         provider_id = db.add_provider(
@@ -397,7 +407,15 @@ def add_provider():
 
 @app.route('/api/providers/<int:provider_id>', methods=['DELETE', 'OPTIONS'])
 def delete_provider(provider_id):
-    """Delete API provider"""
+    """
+    删除API提供方
+    
+    Args:
+        provider_id (int): 提供方ID
+    
+    Returns:
+        JSON: 删除操作结果
+    """
     # 处理 OPTIONS 预检请求
     if request.method == 'OPTIONS':
         response = jsonify({})
@@ -416,7 +434,16 @@ def delete_provider(provider_id):
 
 @app.route('/api/providers/models', methods=['POST'])
 def fetch_provider_models():
-    """Fetch available models from provider's API"""
+    """
+    从提供方API获取可用的模型列表
+    
+    Request Body:
+        api_url (str): API地址
+        api_key (str): API密钥
+    
+    Returns:
+        JSON: 包含可用模型列表
+    """
     data = request.json
     api_url = data.get('api_url')
     api_key = data.get('api_key')
@@ -427,7 +454,7 @@ def fetch_provider_models():
     try:
         models = []
 
-        # Try to detect provider type and call appropriate API
+        # 根据提供方类型调用相应的API
         if 'openai.com' in api_url.lower():
             import requests
             headers = {
@@ -449,7 +476,7 @@ def fetch_provider_models():
                 result = response.json()
                 models = [m['id'] for m in result.get('data', [])]
         else:
-            # Default: return common model names
+            # 默认返回常用模型名称
             models = ['gpt-3.5-turbo', 'gpt-4', 'gpt-4-turbo']
 
         return jsonify({'models': models})
@@ -458,10 +485,16 @@ def fetch_provider_models():
         return jsonify({'error': f'Failed to fetch models: {str(e)}'}), 500
 
 # ============ Futures Configuration API Endpoints ============
+# 合约配置管理：用于配置和管理交易合约信息（如BTCUSDT、ETHUSDT等）
 
 @app.route('/api/futures', methods=['GET'])
 def list_futures():
-    """Get all futures configurations"""
+    """
+    获取所有合约配置列表
+    
+    Returns:
+        JSON: 合约配置列表，包含symbol、contract_symbol、name等信息
+    """
     try:
         futures = db.get_futures()
         return jsonify(futures)
@@ -470,7 +503,20 @@ def list_futures():
 
 @app.route('/api/futures', methods=['POST'])
 def add_future_config():
-    """Add new future configuration"""
+    """
+    添加新的合约配置
+    
+    Request Body:
+        symbol (str): 交易对符号（如BTC）
+        contract_symbol (str): 合约符号（如BTCUSDT）
+        name (str): 合约名称（如比特币永续合约）
+        exchange (str, optional): 交易所，默认'BINANCE_FUTURES'
+        link (str, optional): 相关链接
+        sort_order (int, optional): 排序顺序，默认0
+    
+    Returns:
+        JSON: 包含新创建的合约ID和成功消息
+    """
     data = request.json or {}
     symbol = data.get('symbol', '').strip().upper()
     contract_symbol = data.get('contract_symbol', '').strip().upper()
@@ -502,7 +548,15 @@ def add_future_config():
 
 @app.route('/api/futures/<int:future_id>', methods=['DELETE', 'OPTIONS'])
 def delete_future_config(future_id):
-    """Delete future configuration"""
+    """
+    删除合约配置
+    
+    Args:
+        future_id (int): 合约ID
+    
+    Returns:
+        JSON: 删除操作结果
+    """
     # 处理 OPTIONS 预检请求
     if request.method == 'OPTIONS':
         response = jsonify({})
@@ -520,10 +574,16 @@ def delete_future_config(future_id):
         return jsonify({'success': False, 'error': str(e)}), 500
 
 # ============ Model API Endpoints ============
+# 交易模型管理：用于创建、配置和管理AI交易模型
 
 @app.route('/api/models', methods=['GET'])
 def get_models():
-    """Get all trading models"""
+    """
+    获取所有交易模型列表
+    
+    Returns:
+        JSON: 模型列表，包含id、name、provider_id、model_name等信息
+    """
     models = db.get_all_models()
     return jsonify(models)
 
@@ -548,7 +608,7 @@ def add_model():
 
         # 获取account_alias和is_virtual参数
         account_alias = data.get('account_alias', '').strip()
-        is_virtual = data.get('is_virtual', False)
+        is_virtual = data.get('is_virtual', True)  # 默认值为 True（虚拟账户）
         
         # 验证account_alias必填
         if not account_alias:
@@ -589,6 +649,19 @@ def add_model():
             trade_fee_rate=TRADE_FEE_RATE
         )
         logger.info(f"Model {model_id} ({data['name']}) initialized")
+        
+        # 初始化模型的默认prompts（从prompt_defaults.py读取）
+        try:
+            from trade.prompt_defaults import DEFAULT_BUY_CONSTRAINTS, DEFAULT_SELL_CONSTRAINTS
+            db.upsert_model_prompt(
+                model_id=model_id,
+                buy_prompt=DEFAULT_BUY_CONSTRAINTS,
+                sell_prompt=DEFAULT_SELL_CONSTRAINTS
+            )
+            logger.info(f"Model {model_id} default prompts initialized")
+        except Exception as prompt_err:
+            logger.warning(f"Failed to initialize default prompts for model {model_id}: {prompt_err}")
+            # 不阻止模型创建，prompts初始化失败不影响模型创建
 
         return jsonify({'id': model_id, 'message': 'Model added successfully'})
 
@@ -598,7 +671,15 @@ def add_model():
 
 @app.route('/api/models/<int:model_id>', methods=['DELETE', 'OPTIONS'])
 def delete_model(model_id):
-    """Delete trading model"""
+    """
+    删除交易模型
+    
+    Args:
+        model_id (int): 模型ID
+    
+    Returns:
+        JSON: 删除操作结果
+    """
     # 处理 OPTIONS 预检请求
     if request.method == 'OPTIONS':
         response = jsonify({})
@@ -623,7 +704,15 @@ def delete_model(model_id):
 
 @app.route('/api/models/<int:model_id>/portfolio', methods=['GET'])
 def get_portfolio(model_id):
-    """Get model portfolio data"""
+    """
+    获取模型的投资组合数据
+    
+    Args:
+        model_id (int): 模型ID
+    
+    Returns:
+        JSON: 包含投资组合、账户价值历史、自动交易状态等信息
+    """
     model = db.get_model(model_id)
     if not model:
         return jsonify({'error': f'Model {model_id} not found'}), 404
@@ -648,21 +737,51 @@ def get_portfolio(model_id):
 
 @app.route('/api/models/<int:model_id>/trades', methods=['GET'])
 def get_trades(model_id):
-    """Get model trade history"""
+    """
+    获取模型的交易历史记录
+    
+    Args:
+        model_id (int): 模型ID
+    
+    Query Parameters:
+        limit (int, optional): 返回记录数限制，默认50
+    
+    Returns:
+        JSON: 交易记录列表
+    """
     limit = request.args.get('limit', 50, type=int)
     trades = db.get_trades(model_id, limit=limit)
     return jsonify(trades)
 
 @app.route('/api/models/<int:model_id>/conversations', methods=['GET'])
 def get_conversations(model_id):
-    """Get model conversation history"""
+    """
+    获取模型的对话历史记录
+    
+    Args:
+        model_id (int): 模型ID
+    
+    Query Parameters:
+        limit (int, optional): 返回记录数限制，默认20
+    
+    Returns:
+        JSON: 对话记录列表
+    """
     limit = request.args.get('limit', 20, type=int)
     conversations = db.get_conversations(model_id, limit=limit)
     return jsonify(conversations)
 
 @app.route('/api/models/<int:model_id>/prompts', methods=['GET'])
 def get_model_prompts(model_id):
-    """Get model prompt configuration"""
+    """
+    获取模型的提示词配置（买入和卖出策略）
+    
+    Args:
+        model_id (int): 模型ID
+    
+    Returns:
+        JSON: 包含买入和卖出提示词配置
+    """
     model = db.get_model(model_id)
     if not model:
         return jsonify({'error': 'Model not found'}), 404
@@ -682,7 +801,19 @@ def get_model_prompts(model_id):
 
 @app.route('/api/models/<int:model_id>/prompts', methods=['PUT'])
 def update_model_prompts(model_id):
-    """Update model prompt configuration"""
+    """
+    更新模型的提示词配置
+    
+    Args:
+        model_id (int): 模型ID
+    
+    Request Body:
+        buy_prompt (str, optional): 买入策略提示词
+        sell_prompt (str, optional): 卖出策略提示词
+    
+    Returns:
+        JSON: 更新操作结果
+    """
     model = db.get_model(model_id)
     if not model:
         return jsonify({'error': 'Model not found'}), 404
@@ -699,7 +830,18 @@ def update_model_prompts(model_id):
 
 @app.route('/api/models/<int:model_id>/leverage', methods=['POST'])
 def update_model_leverage(model_id):
-    """Update model leverage"""
+    """
+    更新模型的杠杆倍数
+    
+    Args:
+        model_id (int): 模型ID
+    
+    Request Body:
+        leverage (int): 杠杆倍数（必须大于0）
+    
+    Returns:
+        JSON: 更新后的杠杆倍数
+    """
     data = request.json or {}
     if 'leverage' not in data:
         return jsonify({'error': 'leverage is required'}), 400
@@ -717,7 +859,18 @@ def update_model_leverage(model_id):
 
 @app.route('/api/models/<int:model_id>/execute', methods=['POST'])
 def execute_trading(model_id):
-    """Execute trading cycle for a model"""
+    """
+    手动执行一次交易周期（用于测试或手动触发交易）
+    
+    Args:
+        model_id (int): 模型ID
+    
+    Returns:
+        JSON: 交易执行结果，包含成功状态和执行详情
+    
+    Note:
+        手动执行会自动启用该模型的自动交易功能
+    """
     if model_id not in trading_engines:
         engine, error = init_trading_engine_for_model(model_id)
         if error:
@@ -737,7 +890,18 @@ def execute_trading(model_id):
 
 @app.route('/api/models/<int:model_id>/auto-trading', methods=['POST'])
 def set_model_auto_trading(model_id):
-    """Enable or disable auto trading for a model"""
+    """
+    启用或禁用模型的自动交易功能
+    
+    Args:
+        model_id (int): 模型ID
+    
+    Request Body:
+        enabled (bool): 是否启用自动交易
+    
+    Returns:
+        JSON: 更新后的自动交易状态
+    """
     data = request.json or {}
     if 'enabled' not in data:
         return jsonify({'error': 'enabled flag is required'}), 400
@@ -758,7 +922,12 @@ def set_model_auto_trading(model_id):
 
 @app.route('/api/aggregated/portfolio', methods=['GET'])
 def get_aggregated_portfolio():
-    """Get aggregated portfolio data across all models"""
+    """
+    获取所有模型的聚合投资组合数据
+    
+    Returns:
+        JSON: 包含所有模型的汇总投资组合、图表数据等信息
+    """
     symbols = get_tracked_symbols()
     prices_data = market_fetcher.get_current_prices(symbols)
     current_prices = {symbol: data['price'] for symbol, data in prices_data.items()}
@@ -827,10 +996,16 @@ def get_aggregated_portfolio():
     })
 
 # ============ Market Data API Endpoints ============
+# 市场数据接口：提供实时市场行情、涨跌幅榜、K线数据、技术指标等
 
 @app.route('/api/market/prices', methods=['GET'])
 def get_market_prices():
-    """Get current market prices for both configured futures and model positions"""
+    """
+    获取当前市场价格（包括配置的合约和模型持仓的合约）
+    
+    Returns:
+        JSON: 价格数据字典，key为交易对符号，value包含价格和来源信息
+    """
     # 获取配置的合约
     configured_symbols = get_tracked_symbols()
     configured_prices = market_fetcher.get_prices(configured_symbols)
@@ -968,9 +1143,17 @@ def get_market_leaderboard_losers():
 
 @app.route('/api/market/leaderboard', methods=['GET'])
 def get_market_leaderboard():
-    """Get market leaderboard data (已废弃，保留以兼容旧代码)
+    """
+    获取涨跌幅榜数据（已废弃，保留以兼容旧代码）
     
     注意：此接口已废弃，请使用 /api/market/leaderboard/gainers 和 /api/market/leaderboard/losers
+    
+    Query Parameters:
+        limit (int, optional): 返回记录数限制，默认10
+        force (int, optional): 是否强制刷新，默认0
+    
+    Returns:
+        JSON: 包含涨幅榜和跌幅榜数据
     """
     limit = request.args.get('limit', type=int) or 10
     force = request.args.get('force', default=0, type=int)
@@ -1250,12 +1433,19 @@ def get_market_klines():
         logger.error(f"[API] 获取K线数据失败: symbol={symbol}, interval={interval}, source={source}, error={e}", exc_info=True)
         return jsonify({'error': str(e)}), 500
 
+# ============ WebSocket Handlers ============
+# WebSocket事件处理：用于实时数据推送（K线数据等）
+
 @socketio.on('leaderboard:request')
 def handle_leaderboard_request(payload=None):
-    """WebSocket handler for leaderboard requests (已废弃，前端已改为轮询方式)
+    """
+    WebSocket处理：涨跌幅榜请求（已废弃，前端已改为轮询方式）
     
     注意：涨跌幅榜已改为前端轮询方式获取数据，不再通过WebSocket推送。
     此handler保留以兼容旧版本前端，但建议前端使用 /api/market/leaderboard API接口。
+    
+    Args:
+        payload (dict, optional): 请求参数，包含limit等
     """
     payload = payload or {}
     limit = payload.get('limit', 10)
@@ -1276,11 +1466,16 @@ def handle_leaderboard_request(payload=None):
 
 @socketio.on('klines:subscribe')
 def handle_klines_subscribe(payload=None):
-    """WebSocket handler for K线订阅请求
+    """
+    WebSocket处理：订阅K线实时数据推送
     
-    参数:
-        symbol: 交易对符号（如 'BTCUSDT'）
-        interval: 时间间隔（'1m', '5m', '15m', '1h', '4h', '1d', '1w'）
+    Args:
+        payload (dict): 订阅参数
+            symbol (str): 交易对符号（如 'BTCUSDT'）
+            interval (str): 时间间隔（'1m', '5m', '15m', '1h', '4h', '1d', '1w'）
+    
+    Note:
+        订阅后，客户端将定期收到该交易对的K线更新数据
     """
     payload = payload or {}
     symbol = payload.get('symbol', '').upper()
@@ -1330,7 +1525,14 @@ def handle_klines_subscribe(payload=None):
 
 @socketio.on('klines:unsubscribe')
 def handle_klines_unsubscribe(payload=None):
-    """WebSocket handler for K线取消订阅"""
+    """
+    WebSocket处理：取消K线订阅
+    
+    Args:
+        payload (dict): 取消订阅参数
+            symbol (str): 交易对符号（如 'BTCUSDT'）
+            interval (str): 时间间隔（'1m', '5m', '15m', '1h', '4h', '1d', '1w'）
+    """
     payload = payload or {}
     symbol = payload.get('symbol', '').upper()
     interval = payload.get('interval', '5m')
@@ -1467,10 +1669,16 @@ def start_kline_push_worker():
     logger.info("[KLine Push] K线实时推送工作线程已启动")
 
 # ============ Settings API Endpoints ============
+# 系统设置管理：用于配置交易频率、手续费率等系统参数
 
 @app.route('/api/settings', methods=['GET'])
 def get_settings():
-    """Get system settings"""
+    """
+    获取系统设置
+    
+    Returns:
+        JSON: 系统设置信息，包括交易频率、手续费率等
+    """
     try:
         settings = db.get_settings()
         return jsonify(settings)
@@ -1479,7 +1687,17 @@ def get_settings():
 
 @app.route('/api/settings', methods=['PUT'])
 def update_settings():
-    """Update system settings"""
+    """
+    更新系统设置
+    
+    Request Body:
+        trading_frequency_minutes (int, optional): 交易频率（分钟），默认60
+        trading_fee_rate (float, optional): 手续费率，默认0.001
+        show_system_prompt (bool, optional): 是否显示系统提示，默认False
+    
+    Returns:
+        JSON: 更新操作结果
+    """
     try:
         data = request.json or {}
         trading_frequency_minutes = int(data.get('trading_frequency_minutes', 60))
@@ -1499,39 +1717,17 @@ def update_settings():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
-# ============ Version API Endpoints ============
-
-@app.route('/api/version', methods=['GET'])
-def get_version():
-    """Get current version information"""
-    return jsonify({
-        'current_version': __version__
-    })
-
-@app.route('/api/check-update', methods=['GET'])
-def check_update():
-    """Check for application updates"""
-    try:
-        return jsonify({
-            'update_available': False,
-            'current_version': __version__,
-            'latest_version': __version__,
-            'error': None
-        })
-    except Exception as e:
-        logger.error(f"Check update failed: {e}")
-        return jsonify({
-            'update_available': False,
-            'current_version': __version__,
-            'latest_version': __version__,
-            'error': str(e)
-        }), 500
-
 # ============ Account Management API Endpoints ============
+# 账户管理：用于添加、查询、删除交易账户（Binance API密钥管理）
 
 @app.route('/api/accounts', methods=['GET'])
 def get_all_accounts():
-    """查询所有账户信息"""
+    """
+    查询所有账户信息
+    
+    Returns:
+        JSON: 账户列表，包含account_name、balance、crossWalletBalance等信息
+    """
     try:
         account_db = AccountDatabase(auto_init_tables=False)
         accounts = account_db.get_all_accounts()
@@ -1542,7 +1738,20 @@ def get_all_accounts():
 
 @app.route('/api/accounts', methods=['POST'])
 def add_account():
-    """添加新账户"""
+    """
+    添加新账户（通过Binance API密钥验证并保存账户信息）
+    
+    Request Body:
+        account_name (str): 账户名称（必填）
+        api_key (str): Binance API密钥（必填）
+        api_secret (str): Binance API密钥（必填）
+    
+    Returns:
+        JSON: 包含account_alias和成功消息
+    
+    Note:
+        此接口会调用Binance API验证密钥有效性，并获取账户资产信息
+    """
     data = request.json or {}
     account_name = data.get('account_name', '').strip()
     api_key = data.get('api_key', '').strip()
@@ -1619,7 +1828,15 @@ def add_account():
 
 @app.route('/api/accounts/<account_alias>', methods=['DELETE', 'OPTIONS'])
 def delete_account(account_alias):
-    """删除账户"""
+    """
+    删除账户
+    
+    Args:
+        account_alias (str): 账户别名（账户唯一标识）
+    
+    Returns:
+        JSON: 删除操作结果
+    """
     # 处理 OPTIONS 预检请求
     if request.method == 'OPTIONS':
         response = jsonify({})

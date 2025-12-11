@@ -41,7 +41,7 @@
             <i class="bi bi-gear"></i>
             设置
           </button>
-          <button class="btn-secondary" @click="showStrategyModal = true" title="配置当前模型的买卖提示词">
+          <button class="btn-secondary" @click="handleStrategyConfigClick" title="配置当前模型的买卖提示词">
             <i class="bi bi-sliders"></i>
             策略配置
           </button>
@@ -587,6 +587,7 @@ const {
   selectModel,
   showAggregatedView,
   deleteModel,
+  handleStrategyConfigClick,
   openLeverageModal,
   saveModelLeverage,
   getModelDisplayName,

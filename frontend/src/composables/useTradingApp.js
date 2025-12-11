@@ -22,6 +22,8 @@ export function useTradingApp() {
   const marketPrices = ref([])
   const leaderboardGainers = ref([])
   const leaderboardLosers = ref([])
+  // 市场行情价格刷新状态
+  const isRefreshingMarketPrices = ref(false)
   // 涨幅榜状态
   const gainersStatus = ref('等待数据...')
   const gainersStatusType = ref('default') // 'updating' | 'success' | 'error' | 'default'
@@ -83,6 +85,7 @@ export function useTradingApp() {
   // WebSocket连接
   const socket = ref(null)
   let websocketMonitorInterval = null // WebSocket 监控定时器
+  let marketPricesRefreshInterval = null // 市场行情价格自动刷新定时器（轮询方式，默认10秒）
   let gainersRefreshInterval = null // 涨幅榜自动刷新定时器（轮询方式，默认5秒）
   let losersRefreshInterval = null // 跌幅榜自动刷新定时器（轮询方式，默认5秒）
   let leaderboardRefreshInterval = null // 涨跌榜自动刷新定时器（已废弃，保留以兼容旧代码）
@@ -251,6 +254,43 @@ export function useTradingApp() {
   }
 
   /**
+   * 启动市场行情价格自动刷新（轮询方式）
+   * 使用配置的刷新时间（FUTURES_MARKET_PRICES_REFRESH，默认10秒）
+   */
+  const startMarketPricesAutoRefresh = () => {
+    // 清除已有定时器
+    if (marketPricesRefreshInterval) {
+      clearInterval(marketPricesRefreshInterval)
+      marketPricesRefreshInterval = null
+    }
+
+    // 立即获取一次数据
+    loadMarketPrices()
+
+    // 使用配置的刷新时间（默认10秒，与后端FUTURES_MARKET_PRICES_REFRESH配置一致）
+    // 注意：前端暂时硬编码为10秒，后续可通过API获取配置
+    const refreshInterval = 10000 // 10秒
+    
+    marketPricesRefreshInterval = setInterval(() => {
+      console.log(`[TradingApp] 轮询刷新市场行情价格数据（${refreshInterval/1000}秒间隔）`)
+      loadMarketPrices()
+    }, refreshInterval)
+
+    console.log(`[TradingApp] ✅ 市场行情价格自动刷新已启动（轮询方式，${refreshInterval/1000}秒间隔）`)
+  }
+
+  /**
+   * 停止市场行情价格自动刷新
+   */
+  const stopMarketPricesAutoRefresh = () => {
+    if (marketPricesRefreshInterval) {
+      clearInterval(marketPricesRefreshInterval)
+      marketPricesRefreshInterval = null
+      console.log('[TradingApp] 市场行情价格自动刷新已停止')
+    }
+  }
+
+  /**
    * 启动涨幅榜自动刷新（轮询方式）
    * 使用配置的刷新时间（FUTURES_LEADERBOARD_REFRESH，默认5秒）
    */
@@ -363,6 +403,7 @@ export function useTradingApp() {
    */
   const loadMarketPrices = async () => {
     loading.value.marketPrices = true
+    isRefreshingMarketPrices.value = true
     errors.value.marketPrices = null
     try {
       const data = await marketApi.getPrices()
@@ -384,6 +425,7 @@ export function useTradingApp() {
       errors.value.marketPrices = error.message
     } finally {
       loading.value.marketPrices = false
+      isRefreshingMarketPrices.value = false
     }
   }
 
@@ -954,7 +996,10 @@ export function useTradingApp() {
         loadLeaderboard()
       ])
       
-      // 启动涨跌榜自动刷新（30秒轮询备用方案）
+      // 启动市场行情价格自动刷新（10秒轮询）
+      startMarketPricesAutoRefresh()
+      
+      // 启动涨跌榜自动刷新（5秒轮询）
       startLeaderboardAutoRefresh()
       
       console.log('[TradingApp] ✅ 初始数据加载完成')
@@ -1100,6 +1145,14 @@ export function useTradingApp() {
   /**
    * 删除模型
    */
+  const handleStrategyConfigClick = () => {
+    if (!currentModelId.value) {
+      alert('请选择对应模型，或初始化模型')
+      return
+    }
+    showStrategyModal.value = true
+  }
+  
   const deleteModel = async (modelId) => {
     if (!confirm('确定要删除这个模型吗？')) return
     
@@ -1299,6 +1352,9 @@ export function useTradingApp() {
   
   // 组件卸载时清理资源
   onUnmounted(() => {
+    // 停止市场行情价格自动刷新
+    stopMarketPricesAutoRefresh()
+    
     // 停止涨跌榜自动刷新
     stopGainersAutoRefresh()
     stopLosersAutoRefresh()
@@ -1327,6 +1383,8 @@ export function useTradingApp() {
     marketPrices,
     leaderboardGainers,
     leaderboardLosers,
+    // 市场行情价格刷新状态
+    isRefreshingMarketPrices,
     // 涨幅榜状态
     gainersStatus,
     gainersStatusType,
@@ -1371,6 +1429,7 @@ export function useTradingApp() {
     selectModel,
     showAggregatedView,
     deleteModel,
+    handleStrategyConfigClick,
     openLeverageModal,
     saveModelLeverage,
     toggleMysqlLeaderboardSync,
@@ -1399,6 +1458,9 @@ export function useTradingApp() {
     loadTrades,
     loadConversations,
     
+    // 市场行情价格自动刷新方法
+    startMarketPricesAutoRefresh,
+    stopMarketPricesAutoRefresh,
     // 涨跌榜自动刷新方法
     startGainersAutoRefresh,
     stopGainersAutoRefresh,

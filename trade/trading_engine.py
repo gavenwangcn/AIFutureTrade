@@ -1,5 +1,19 @@
 """
-Trading Engine - Core trading logic for executing AI trading decisions
+交易引擎 - AI交易决策执行的核心逻辑模块
+
+本模块提供完整的AI交易执行流程，包括：
+- 买入/卖出决策周期的执行
+- 市场数据获取和处理
+- AI决策的批量处理和并发执行
+- 订单执行（开仓、平仓、止损、止盈）
+- 账户信息管理和记录
+
+主要功能：
+1. 主交易周期：execute_trading_cycle() - 统一入口，协调买入和卖出服务
+2. 买入服务：execute_buy_cycle() - 从涨跌幅榜选择候选，调用AI决策并执行买入
+3. 卖出服务：execute_sell_cycle() - 对持仓进行卖出/平仓决策并执行
+4. 订单执行：支持开仓、平仓、止损、止盈等多种订单类型
+5. 并发处理：使用多线程批量处理AI决策，提高执行效率
 """
 from datetime import datetime, timezone, timedelta
 from typing import Dict, List, Optional
@@ -14,19 +28,30 @@ from common.binance_futures import BinanceFuturesOrderClient
 logger = logging.getLogger(__name__)
 
 class TradingEngine:
+    """
+    交易引擎类 - 负责执行AI交易决策的完整流程
+    
+    每个模型实例对应一个TradingEngine，独立管理该模型的交易逻辑。
+    支持买入和卖出两个独立的服务线程，以不同的周期执行交易决策。
+    """
+    
     def __init__(self, model_id: int, db, market_fetcher, ai_trader, trade_fee_rate: float = 0.001,
                  buy_cycle_interval: int = 5, sell_cycle_interval: int = 5):
         """
-        Initialize trading engine for a model
+        初始化交易引擎
         
         Args:
-            model_id: 模型ID
-            db: 数据库实例
-            market_fetcher: 市场数据获取器
-            ai_trader: AI交易决策器
-            trade_fee_rate: 交易费率
-            buy_cycle_interval: 买入周期间隔（秒）
-            sell_cycle_interval: 卖出周期间隔（秒）
+            model_id: 模型ID，用于标识和管理不同的交易模型
+            db: 数据库实例，用于数据持久化
+            market_fetcher: 市场数据获取器，用于获取实时价格和技术指标
+            ai_trader: AI交易决策器，用于生成买入/卖出决策
+            trade_fee_rate: 交易费率，默认0.001（0.1%）
+            buy_cycle_interval: 买入周期间隔（秒），默认5秒
+            sell_cycle_interval: 卖出周期间隔（秒），默认5秒
+        
+        Note:
+            - Binance订单客户端不在初始化时创建，改为每次使用时新建实例
+            - 确保每次交易都使用最新的 model 表中的 api_key 和 api_secret
         """
         self.model_id = model_id
         self.db = db
@@ -44,12 +69,12 @@ class TradingEngine:
         # 全局交易锁，用于协调买入和卖出服务线程之间的并发操作
         self.trading_lock = threading.Lock()
         
-        # 【Binance订单客户端】每个model使用独立的实例，使用model表中的api_key和api_secret初始化
-        # 这样每个model可以使用不同的API账户进行交易
-        self.binance_order_client = None
-        self._init_binance_order_client()
+        # 【Binance订单客户端】不再在初始化时创建，改为每次使用时新建实例
+        # 确保每次交易都使用最新的 model 表中的 api_key 和 api_secret
+        # 这样每个model可以使用不同的API账户进行交易，且每次都是最新的凭证
 
-    # ============ Main Trading Cycle ============
+    # ============ 主交易周期方法 ============
+    # 提供完整的交易周期执行流程，包括买入和卖出决策
 
     def execute_sell_cycle(self) -> Dict:
         """
@@ -437,9 +462,15 @@ class TradingEngine:
                 'error': str(e)
             }
             
+    # ============ 服务线程管理方法 ============
+    # 管理买入和卖出服务的后台线程，实现周期性自动交易
+    
     def _run_buy_service(self):
         """
-        运行买入服务的循环
+        运行买入服务的后台循环线程
+        
+        此方法在独立线程中运行，按照buy_cycle_interval周期执行买入决策。
+        当running标志为False时，循环退出。
         """
         logger.info(f"[Model {self.model_id}] [买入服务] 启动，执行周期: {self.buy_cycle_interval}秒")
         import time
@@ -459,7 +490,10 @@ class TradingEngine:
         
     def _run_sell_service(self):
         """
-        运行卖出服务的循环
+        运行卖出服务的后台循环线程
+        
+        此方法在独立线程中运行，按照sell_cycle_interval周期执行卖出决策。
+        当running标志为False时，循环退出。
         """
         logger.info(f"[Model {self.model_id}] [卖出服务] 启动，执行周期: {self.sell_cycle_interval}秒")
         import time
@@ -479,16 +513,30 @@ class TradingEngine:
     
     def execute_trading_cycle(self):
         """
-        启动买入和卖出两个独立的AI决策交易服务，并立即执行一次完整的交易周期
+        执行完整的交易周期（主入口方法）
         
-        两个服务将在独立线程中以各自的周期执行：
-        - 买入服务：使用买入prompt配置，在买入循环周期中执行
-        - 卖出服务：使用卖出prompt配置，在卖出循环周期中执行
+        此方法是交易引擎的主入口，被backend/app.py调用：
+        - 自动交易循环：trading_loop() -> execute_trading_cycle()
+        - 手动执行：/api/models/<id>/execute -> execute_trading_cycle()
         
-        执行周期可通过构造函数配置，默认为5秒
+        流程：
+        1. 停止已有的服务线程（如果存在）
+        2. 启动买入和卖出两个独立的服务线程
+        3. 立即执行一次完整的买入和卖出周期（兼容原有调用方式）
+        
+        两个服务线程：
+        - 买入服务：使用买入prompt配置，在buy_cycle_interval周期中执行
+        - 卖出服务：使用卖出prompt配置，在sell_cycle_interval周期中执行
         
         返回：
-            Dict: 包含执行结果的字典，兼容原有格式
+            Dict: {
+                'success': bool,  # 是否成功
+                'executions': List,  # 执行结果列表
+                'portfolio': Dict,  # 最终持仓信息
+                'conversations': List,  # 对话类型列表 ['sell', 'buy']
+                'message': str,  # 状态消息
+                'error': str  # 错误信息（如果有）
+            }
         """
         # 停止已有的服务
         self.stop_trading_services()
@@ -545,7 +593,12 @@ class TradingEngine:
     
     def stop_trading_services(self):
         """
-        停止买入和卖出交易服务
+        停止买入和卖出交易服务线程
+        
+        此方法会：
+        1. 设置running标志为False，通知服务线程退出
+        2. 等待服务线程完成当前周期后退出
+        3. 清理线程资源
         """
         logger.info(f"[Model {self.model_id}] 正在停止交易服务...")
         self.running = False
@@ -567,88 +620,85 @@ class TradingEngine:
 
     # ============ Binance Order Client Initialization ============
     
-    def _init_binance_order_client(self):
+    # ============ Binance客户端管理方法 ============
+    # 管理Binance订单客户端的创建，确保使用最新的API凭证
+    
+    def _create_binance_order_client(self) -> Optional[BinanceFuturesOrderClient]:
         """
-        初始化Binance期货订单客户端
+        创建新的Binance期货订单客户端实例
         
         【重要说明】
-        每个model使用独立的BinanceFuturesOrderClient实例，使用model表中的api_key和api_secret进行初始化。
-        这样每个model可以使用不同的API账户进行交易，实现账户隔离。
+        每次调用都创建一个新的BinanceFuturesOrderClient实例，使用model表中的api_key和api_secret进行初始化。
+        这样确保每次交易都使用最新的凭证，避免凭证过期或变更导致的问题。
         
         【初始化流程】
-        1. 从model表获取api_key和api_secret
-        2. 验证API密钥是否存在
-        3. 使用API密钥初始化BinanceFuturesOrderClient实例
-        4. 如果初始化失败，binance_order_client设置为None，交易操作将跳过SDK调用
+        1. 从model表获取api_key和api_secret（每次都重新获取，确保使用最新值）
+        2. 验证API密钥是否存在且不为空（严格验证）
+        3. 使用API密钥创建新的BinanceFuturesOrderClient实例
+        4. 如果创建失败，返回None，交易操作将跳过SDK调用（仅记录到数据库）
         
         【使用场景】
-        - _execute_buy: 调用trailing_stop_market_trade
-        - _execute_close: 调用close_position_trade
-        - _execute_stop_loss: 调用stop_loss_trade
-        - _execute_take_profit: 调用take_profit_trade
+        - _execute_buy: 调用trailing_stop_market_trade（跟踪止损开仓）
+        - _execute_close: 调用close_position_trade（平仓）
+        - _execute_stop_loss: 调用stop_loss_trade（止损）
+        - _execute_take_profit: 调用take_profit_trade（止盈）
+        
+        Returns:
+            BinanceFuturesOrderClient实例，如果创建失败则返回None
+        
+        Note:
+            如果返回None，交易操作仍会记录到数据库，但不会调用Binance SDK
         """
         try:
-            # 【步骤1】从model表获取API密钥
+            # 【步骤1】从model表获取API密钥（每次都重新获取，确保使用最新值）
             model = self.db.get_model(self.model_id)
             if not model:
-                logger.warning(f"[Model {self.model_id}] Model not found, cannot initialize Binance order client")
-                self.binance_order_client = None
-                return
+                logger.error(f"[Model {self.model_id}] Model not found, cannot create Binance order client")
+                return None
             
             api_key = model.get('api_key', '')
             api_secret = model.get('api_secret', '')
             
-            # 【步骤2】验证API密钥是否存在
-            if not api_key or not api_secret:
-                logger.warning(f"[Model {self.model_id}] API key/secret not configured in model table, Binance order client disabled")
-                logger.warning(f"[Model {self.model_id}] SDK calls will be skipped, only database records will be created")
-                self.binance_order_client = None
-                return
+            # 【步骤2】验证API密钥是否存在且不为空（严格验证）
+            if not api_key or not api_key.strip():
+                logger.error(f"[Model {self.model_id}] API key is empty or not configured in model table")
+                logger.error(f"[Model {self.model_id}] SDK calls will be skipped, only database records will be created")
+                return None
             
-            # 【步骤3】使用model的API密钥初始化Binance订单客户端
-            # 每个model使用独立的实例，实现账户隔离
+            if not api_secret or not api_secret.strip():
+                logger.error(f"[Model {self.model_id}] API secret is empty or not configured in model table")
+                logger.error(f"[Model {self.model_id}] SDK calls will be skipped, only database records will be created")
+                return None
+            
+            # 【步骤3】使用model的API密钥创建新的Binance订单客户端实例
+            # 每次调用都创建新实例，确保使用最新的凭证
             testnet = getattr(app_config, 'BINANCE_TESTNET', False)
-            self.binance_order_client = BinanceFuturesOrderClient(
-                api_key=api_key,
-                api_secret=api_secret,
+            client = BinanceFuturesOrderClient(
+                api_key=api_key.strip(),
+                api_secret=api_secret.strip(),
                 quote_asset='USDT',
                 testnet=testnet
             )
-            logger.info(f"[Model {self.model_id}] Binance order client initialized successfully with model's API credentials")
+            logger.info(f"[Model {self.model_id}] Created new Binance order client instance with model's API credentials")
             logger.debug(f"[Model {self.model_id}] API key: {api_key[:8]}... (truncated for security)")
+            return client
         except Exception as e:
-            logger.error(f"[Model {self.model_id}] Failed to initialize Binance order client: {e}")
+            logger.error(f"[Model {self.model_id}] Failed to create Binance order client: {e}", exc_info=True)
             logger.error(f"[Model {self.model_id}] SDK calls will be skipped, only database records will be created")
-            self.binance_order_client = None
+            return None
+
+    # ============ 市场数据获取方法 ============
+    # 提供市场数据获取、处理和技术指标计算功能
     
-    def _ensure_binance_order_client(self) -> bool:
-        """
-        确保Binance订单客户端已初始化
-        
-        如果客户端未初始化，尝试重新初始化。
-        用于在运行时检查客户端状态。
-        
-        Returns:
-            bool: 客户端是否可用
-        """
-        if self.binance_order_client is not None:
-            return True
-        
-        # 尝试重新初始化
-        logger.debug(f"[Model {self.model_id}] Binance order client not initialized, attempting to reinitialize...")
-        self._init_binance_order_client()
-        return self.binance_order_client is not None
-
-    # ============ Market Data Methods ============
-
     def _get_tracked_symbols(self) -> List[str]:
-        """获取模型跟踪的期货合约列表
+        """
+        获取模型跟踪的期货合约列表
         
-        从model_futures表获取当前模型关联的所有期货合约，而不是使用全局配置
-        这样每个模型可以独立跟踪不同的期货合约集合
+        从model_futures表获取当前模型关联的所有期货合约，而不是使用全局配置。
+        这样每个模型可以独立跟踪不同的期货合约集合。
         
         Returns:
-            List[str]: 合约symbol列表
+            List[str]: 合约symbol列表（如 ['BTC', 'ETH']）
         """
         return [future['symbol'] for future in self.db.get_model_futures(self.model_id)]
 
@@ -712,7 +762,15 @@ class TradingEngine:
         return merged_data
         
     def _extract_price_map(self, market_state: Dict) -> Dict[str, float]:
-        """Extract price map from market state"""
+        """
+        从市场状态中提取价格映射
+        
+        Args:
+            market_state: 市场状态字典，包含各交易对的价格和技术指标
+        
+        Returns:
+            Dict[str, float]: 价格映射，key为交易对符号，value为价格
+        """
         prices = {}
         for symbol, payload in (market_state or {}).items():
             price = payload.get('price') if isinstance(payload, dict) else None
@@ -879,33 +937,127 @@ class TradingEngine:
 
         return snapshot
 
-    # ============ Account Information Methods ============
-
+    # ============ 账户信息管理方法 ============
+    # 构建和管理账户信息，用于AI决策
+    
     def _build_account_info(self, portfolio: Dict) -> Dict:
-        """Build account information for AI decision making"""
+        """
+        构建账户信息用于AI决策
+        
+        根据model的is_virtual值判断数据源：
+        - 如果是virtual (True)：从account_values表获取最新记录
+        - 如果不是virtual (False)：从account_asset表通过account_alias获取数据
+        
+        字段映射：
+        - total_wallet_balance -> balance
+        - total_cross_wallet_balance -> cross_wallet_balance
+        - available_balance -> available_balance
+        - total_cross_un_pnl -> cross_un_pnl
+        """
         model = self.db.get_model(self.model_id)
-        initial_capital = model['initial_capital']
-        # 【安全访问】使用.get()方法避免KeyError
-        total_value = portfolio.get('total_value', 0)
-        total_return = ((total_value - initial_capital) / initial_capital) * 100 if initial_capital > 0 else 0
+        if not model:
+            logger.error(f"[Model {self.model_id}] Model not found when building account info")
+            return {
+                'current_time': datetime.now(timezone(timedelta(hours=8))).strftime('%Y-%m-%d %H:%M:%S'),
+                'total_return': 0.0,
+                'initial_capital': 0.0,
+                'balance': 0.0,
+                'available_balance': 0.0,
+                'cross_wallet_balance': 0.0,
+                'cross_un_pnl': 0.0
+            }
+        
+        initial_capital = model.get('initial_capital', 0)
+        is_virtual = model.get('is_virtual', False)
+        account_alias = model.get('account_alias', '')
+        
+        # 根据is_virtual判断数据源
+        if is_virtual:
+            # 从account_values表获取最新记录
+            account_data = self.db.get_latest_account_value(self.model_id)
+            if account_data:
+                balance = account_data.get('balance', 0.0)
+                available_balance = account_data.get('available_balance', 0.0)
+                cross_wallet_balance = account_data.get('cross_wallet_balance', 0.0)
+                cross_un_pnl = account_data.get('cross_un_pnl', 0.0)
+            else:
+                # 如果没有记录，使用portfolio数据作为fallback
+                balance = portfolio.get('total_value', 0)
+                available_balance = portfolio.get('cash', 0)
+                cross_wallet_balance = portfolio.get('positions_value', 0)
+                cross_un_pnl = 0.0
+                logger.warning(f"[Model {self.model_id}] No account_values record found for virtual model, using portfolio data")
+        else:
+            # 从account_asset表通过account_alias获取数据
+            if not account_alias:
+                logger.warning(f"[Model {self.model_id}] account_alias is empty for non-virtual model, using portfolio data")
+                balance = portfolio.get('total_value', 0)
+                available_balance = portfolio.get('cash', 0)
+                cross_wallet_balance = portfolio.get('positions_value', 0)
+                cross_un_pnl = 0.0
+            else:
+                account_data = self.db.get_account_asset(account_alias)
+                if account_data:
+                    balance = account_data.get('balance', 0.0)
+                    available_balance = account_data.get('available_balance', 0.0)
+                    cross_wallet_balance = account_data.get('cross_wallet_balance', 0.0)
+                    cross_un_pnl = account_data.get('cross_un_pnl', 0.0)
+                else:
+                    # 如果account_asset表中没有数据，使用portfolio数据作为fallback
+                    balance = portfolio.get('total_value', 0)
+                    available_balance = portfolio.get('cash', 0)
+                    cross_wallet_balance = portfolio.get('positions_value', 0)
+                    cross_un_pnl = 0.0
+                    logger.warning(f"[Model {self.model_id}] No account_asset record found for account_alias={account_alias}, using portfolio data")
+        
+        # 计算总收益率
+        total_return = ((balance - initial_capital) / initial_capital) * 100 if initial_capital > 0 else 0
 
         return {
             'current_time': datetime.now(timezone(timedelta(hours=8))).strftime('%Y-%m-%d %H:%M:%S'),
             'total_return': total_return,
-            'initial_capital': initial_capital
+            'initial_capital': initial_capital,
+            'balance': balance,
+            'available_balance': available_balance,
+            'cross_wallet_balance': cross_wallet_balance,
+            'cross_un_pnl': cross_un_pnl
         }
 
-    # ============ Prompt Template Methods ============
-
+    # ============ 提示词管理方法 ============
+    # 获取和管理AI决策的提示词模板
+    
     def _get_prompt_templates(self) -> Dict[str, str]:
-        """Get prompt templates for buy and sell decisions"""
+        """
+        获取买入和卖出决策的提示词模板
+        
+        Returns:
+            Dict[str, str]: {
+                'buy': str,  # 买入决策提示词
+                'sell': str  # 卖出决策提示词
+            }
+        
+        Note:
+            如果模型没有自定义提示词，则使用默认提示词（DEFAULT_BUY_CONSTRAINTS, DEFAULT_SELL_CONSTRAINTS）
+        """
         prompt_config = self.db.get_model_prompt(self.model_id) or {}
         buy_prompt = prompt_config.get('buy_prompt') or DEFAULT_BUY_CONSTRAINTS
         sell_prompt = prompt_config.get('sell_prompt') or DEFAULT_SELL_CONSTRAINTS
         return {'buy': buy_prompt, 'sell': sell_prompt}
 
     def _record_ai_conversation(self, payload: Dict):
-        """Record AI conversation to database"""
+        """
+        记录AI对话到数据库
+        
+        Args:
+            payload: AI决策返回的完整数据，包含：
+                - prompt: 发送给AI的提示词
+                - raw_response: AI的原始响应
+                - cot_trace: 思维链追踪（如果有）
+                - decisions: AI的决策结果（如果raw_response不是字符串）
+        
+        Note:
+            对话记录用于后续分析和审计，帮助理解AI的决策过程
+        """
         prompt = payload.get('prompt')
         raw_response = payload.get('raw_response')
         cot_trace = payload.get('cot_trace') or ''
@@ -918,8 +1070,9 @@ class TradingEngine:
             cot_trace=cot_trace
         )
 
-    # ============ Buy Candidate Selection Methods ============
-
+    # ============ 批量决策处理方法 ============
+    # 使用多线程批量处理AI决策，提高执行效率
+    
     def _make_batch_buy_decisions(
         self,
         candidates: List[Dict],
@@ -1393,6 +1546,9 @@ class TradingEngine:
                 'skipped': True
             }
 
+    # ============ 候选选择方法 ============
+    # 根据模型配置选择买入候选交易对
+    
     def _select_buy_candidates(self, portfolio: Dict) -> list:
         """
         【核心改造方法】根据模型的symbol_source选择买入候选交易对
@@ -1458,10 +1614,31 @@ class TradingEngine:
             filtered = [item for item in gainers if item.get('symbol') not in held]
             return filtered[:available_slots]
 
-    # ============ Decision Execution Methods ============
-
+    # ============ 决策执行方法 ============
+    # 统一执行AI交易决策，支持多种交易信号类型
+    
     def _execute_decisions(self, decisions: Dict, market_state: Dict, portfolio: Dict) -> list:
-        """Execute AI trading decisions with thread safety"""
+        """
+        执行AI交易决策（线程安全）
+        
+        根据AI返回的signal字段，调用相应的执行方法：
+        - 'buy_to_enter' / 'sell_to_enter': 调用 _execute_buy（开仓）
+        - 'close_position': 调用 _execute_close（平仓）
+        - 'stop_loss': 调用 _execute_stop_loss（止损）
+        - 'take_profit': 调用 _execute_take_profit（止盈）
+        - 'hold': 保持观望，不执行任何操作
+        
+        Args:
+            decisions: AI决策字典，key为交易对符号，value为决策详情
+            market_state: 市场状态数据
+            portfolio: 当前持仓组合信息
+        
+        Returns:
+            List[Dict]: 执行结果列表，每个元素包含执行详情或错误信息
+        
+        Note:
+            此方法使用trading_lock确保线程安全，避免买入和卖出服务同时执行交易操作
+        """
         results = []
 
         tracked = set(self._get_tracked_symbols())
@@ -1513,8 +1690,9 @@ class TradingEngine:
 
         return results
 
-    # ============ Trade Execution Methods ============
-
+    # ============ 订单执行方法 ============
+    # 执行具体的交易订单操作：开仓、平仓、止损、止盈
+    
     def _execute_buy(self, symbol: str, decision: Dict, market_state: Dict, portfolio: Dict) -> Dict:
         """
         执行开仓操作（统一方法，支持开多和开空）
@@ -1598,15 +1776,16 @@ class TradingEngine:
         # 但按照用户要求，buy操作对应trailing_stop_market_trade
         # 这里先更新数据库记录持仓，然后设置trailing stop保护
         sdk_response = None
-        # 【使用model独立的binance_order_client】确保客户端已初始化
-        if self._ensure_binance_order_client():
+        # 【每次创建新的Binance订单客户端】确保使用最新的model对应的api_key和api_secret
+        binance_client = self._create_binance_order_client()
+        if binance_client:
             try:
                 # 获取回调幅度（从决策中获取，默认1.0）
                 callback_rate = float(decision.get('callback_rate', 1.0))
                 callback_rate = max(0.1, min(10.0, callback_rate))  # 限制在0.1-10范围内
                 
                 logger.info(f"TRADE: Calling SDK - trailing_stop_market_trade for {symbol}, side={trailing_stop_side} (protect {position_side}), callback_rate={callback_rate}%")
-                sdk_response = self.binance_order_client.trailing_stop_market_trade(
+                sdk_response = binance_client.trailing_stop_market_trade(
                     symbol=symbol,
                     side=trailing_stop_side,  # 根据position_side动态决定保护方向
                     callback_rate=callback_rate,
@@ -1617,7 +1796,7 @@ class TradingEngine:
                 logger.error(f"TRADE: SDK call failed ({trade_signal.upper()}/trailing_stop) model={self.model_id} symbol={symbol}: {sdk_err}")
                 # SDK调用失败不影响数据库记录，继续执行
         else:
-            logger.warning(f"TRADE: Binance order client not available for model {self.model_id}, skipping SDK call for {symbol}")
+            logger.warning(f"TRADE: Failed to create Binance order client for model {self.model_id}, skipping SDK call for {symbol}")
 
         # 【更新持仓】使用根据signal自动确定的position_side
         try:
@@ -1661,7 +1840,34 @@ class TradingEngine:
         }
 
     def _execute_close(self, symbol: str, decision: Dict, market_state: Dict, portfolio: Dict) -> Dict:
-        """Execute close position order"""
+        """
+        执行平仓操作
+        
+        根据持仓的position_side自动确定平仓方向：
+        - LONG持仓：使用SELL方向平仓（平多仓）
+        - SHORT持仓：使用BUY方向平仓（平空仓）
+        
+        Args:
+            symbol: 交易对符号
+            decision: AI决策详情，包含signal='close_position'
+            market_state: 市场状态数据，包含当前价格
+            portfolio: 当前持仓组合信息
+        
+        Returns:
+            Dict: 执行结果，包含：
+                - symbol: 交易对符号
+                - signal: 'close_position'
+                - position_amt: 平仓数量
+                - price: 平仓价格
+                - pnl: 净盈亏
+                - fee: 手续费
+                - message: 执行消息
+        
+        Note:
+            - 使用STOP_MARKET订单类型，以当前价格作为触发价格（立即触发）
+            - 计算毛盈亏和净盈亏（扣除手续费）
+            - 平仓后更新数据库持仓记录
+        """
         # 【安全访问】使用.get()方法避免KeyError
         positions = portfolio.get('positions', []) or []
         position = None
@@ -1701,12 +1907,13 @@ class TradingEngine:
         # 注意：close_position_trade只支持STOP_MARKET或TAKE_PROFIT_MARKET，不支持MARKET
         # 对于立即平仓，使用当前价格作为stop_price的STOP_MARKET订单
         sdk_response = None
-        # 【使用model独立的binance_order_client】确保客户端已初始化
-        if self._ensure_binance_order_client():
+        # 【每次创建新的Binance订单客户端】确保使用最新的model对应的api_key和api_secret
+        binance_client = self._create_binance_order_client()
+        if binance_client:
             try:
                 # 使用STOP_MARKET订单类型，以当前价格作为触发价格（立即触发）
                 logger.info(f"TRADE: Calling SDK - close_position_trade for {symbol}, side={side_for_trade}, order_type=STOP_MARKET, stop_price={current_price}")
-                sdk_response = self.binance_order_client.close_position_trade(
+                sdk_response = binance_client.close_position_trade(
                     symbol=symbol,
                     side=side_for_trade,
                     order_type='STOP_MARKET',
@@ -1718,7 +1925,7 @@ class TradingEngine:
                 logger.error(f"TRADE: SDK call failed (CLOSE) model={self.model_id} symbol={symbol}: {sdk_err}")
                 # SDK调用失败不影响数据库记录，继续执行
         else:
-            logger.warning(f"TRADE: Binance order client not available, skipping SDK call for {symbol}")
+            logger.warning(f"TRADE: Failed to create Binance order client for model {self.model_id}, skipping SDK call for {symbol}")
 
         # Close position in database
         try:
@@ -1751,7 +1958,26 @@ class TradingEngine:
         }
 
     def _execute_stop_loss(self, symbol: str, decision: Dict, market_state: Dict, portfolio: Dict) -> Dict:
-        """Execute stop loss order"""
+        """
+        执行止损操作
+        
+        根据持仓的position_side自动确定止损方向：
+        - LONG持仓：使用SELL方向止损（价格下跌时触发）
+        - SHORT持仓：使用BUY方向止损（价格上涨时触发）
+        
+        Args:
+            symbol: 交易对符号
+            decision: AI决策详情，包含signal='stop_loss'和stop_price（止损价格）
+            market_state: 市场状态数据
+            portfolio: 当前持仓组合信息
+        
+        Returns:
+            Dict: 执行结果，包含止损单详情
+        
+        Note:
+            - 使用STOP_MARKET订单类型，只需要stop_price参数
+            - 止损单可能不会立即成交，这里只是下单记录
+        """
         # 【安全访问】使用.get()方法避免KeyError
         positions = portfolio.get('positions', []) or []
         position = None
@@ -1784,12 +2010,13 @@ class TradingEngine:
         
         # 【调用SDK执行交易】使用stop_loss_trade
         sdk_response = None
-        # 【使用model独立的binance_order_client】确保客户端已初始化
-        if self._ensure_binance_order_client():
+        # 【每次创建新的Binance订单客户端】确保使用最新的model对应的api_key和api_secret
+        binance_client = self._create_binance_order_client()
+        if binance_client:
             try:
                 # 使用STOP_MARKET订单类型（只需要stop_price，不需要quantity和price）
                 logger.info(f"TRADE: Calling SDK - stop_loss_trade for {symbol}, side={side_for_trade}, stop_price={stop_price}")
-                sdk_response = self.binance_order_client.stop_loss_trade(
+                sdk_response = binance_client.stop_loss_trade(
                     symbol=symbol,
                     side=side_for_trade,
                     order_type='STOP_MARKET',  # 使用STOP_MARKET类型，只需要stop_price
@@ -1801,7 +2028,7 @@ class TradingEngine:
                 logger.error(f"TRADE: SDK call failed (STOP_LOSS) model={self.model_id} symbol={symbol}: {sdk_err}")
                 # SDK调用失败不影响数据库记录，继续执行
         else:
-            logger.warning(f"TRADE: Binance order client not available, skipping SDK call for {symbol}")
+            logger.warning(f"TRADE: Failed to create Binance order client for model {self.model_id}, skipping SDK call for {symbol}")
         
         # 计算预估手续费（止损单可能不会立即成交，这里只是预估）
         trade_amount = position_amt * stop_price
@@ -1832,7 +2059,26 @@ class TradingEngine:
         }
 
     def _execute_take_profit(self, symbol: str, decision: Dict, market_state: Dict, portfolio: Dict) -> Dict:
-        """Execute take profit order"""
+        """
+        执行止盈操作
+        
+        根据持仓的position_side自动确定止盈方向：
+        - LONG持仓：使用SELL方向止盈（价格上涨到目标价时触发）
+        - SHORT持仓：使用BUY方向止盈（价格下跌到目标价时触发）
+        
+        Args:
+            symbol: 交易对符号
+            decision: AI决策详情，包含signal='take_profit'和stop_price（止盈价格）
+            market_state: 市场状态数据
+            portfolio: 当前持仓组合信息
+        
+        Returns:
+            Dict: 执行结果，包含止盈单详情
+        
+        Note:
+            - 使用TAKE_PROFIT_MARKET订单类型，只需要stop_price参数
+            - 止盈单可能不会立即成交，这里只是下单记录
+        """
         # 【安全访问】使用.get()方法避免KeyError
         positions = portfolio.get('positions', []) or []
         position = None
@@ -1865,12 +2111,13 @@ class TradingEngine:
         
         # 【调用SDK执行交易】使用take_profit_trade
         sdk_response = None
-        # 【使用model独立的binance_order_client】确保客户端已初始化
-        if self._ensure_binance_order_client():
+        # 【每次创建新的Binance订单客户端】确保使用最新的model对应的api_key和api_secret
+        binance_client = self._create_binance_order_client()
+        if binance_client:
             try:
                 # 使用TAKE_PROFIT_MARKET订单类型（只需要stop_price，不需要quantity和price）
                 logger.info(f"TRADE: Calling SDK - take_profit_trade for {symbol}, side={side_for_trade}, stop_price={stop_price}")
-                sdk_response = self.binance_order_client.take_profit_trade(
+                sdk_response = binance_client.take_profit_trade(
                     symbol=symbol,
                     side=side_for_trade,
                     order_type='TAKE_PROFIT_MARKET',  # 使用TAKE_PROFIT_MARKET类型，只需要stop_price
@@ -1882,7 +2129,7 @@ class TradingEngine:
                 logger.error(f"TRADE: SDK call failed (TAKE_PROFIT) model={self.model_id} symbol={symbol}: {sdk_err}")
                 # SDK调用失败不影响数据库记录，继续执行
         else:
-            logger.warning(f"TRADE: Binance order client not available, skipping SDK call for {symbol}")
+            logger.warning(f"TRADE: Failed to create Binance order client for model {self.model_id}, skipping SDK call for {symbol}")
         
         # 计算预估手续费（止盈单可能不会立即成交，这里只是预估）
         trade_amount = position_amt * stop_price
@@ -1933,7 +2180,22 @@ class TradingEngine:
         return max(0, leverage)
 
     def _resolve_leverage(self, decision: Dict) -> int:
-        """Resolve leverage from decision or model configuration"""
+        """
+        解析杠杆倍数（优先使用AI决策中的杠杆，否则使用模型配置）
+        
+        Args:
+            decision: AI决策字典，可能包含leverage字段
+        
+        Returns:
+            int: 最终使用的杠杆倍数
+        
+        优先级：
+        1. 如果模型配置的杠杆为0，则使用AI决策中的杠杆
+        2. 否则使用模型配置的杠杆（忽略AI决策中的杠杆）
+        
+        Note:
+            此方法确保杠杆倍数至少为1，避免无效配置
+        """
         configured = getattr(self, 'current_model_leverage', None)
         if configured is None:
             configured = self._get_model_leverage()

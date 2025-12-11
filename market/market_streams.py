@@ -1,7 +1,22 @@
-"""Market data streaming via Binance websocket into MySQL.
+"""
+市场数据流模块 - 通过币安WebSocket将市场数据流式传输到MySQL
 
-Creates the 24_market_tickers table (if missing) and streams quotes from the
-all-market tickers websocket into MySQL for persistence.
+本模块提供以下功能：
+1. Ticker流：实时接收所有交易对的24小时ticker数据，存储到24_market_tickers表
+2. K线数据规范化：提供K线数据的规范化函数，供其他模块使用
+
+主要组件：
+- MarketTickerStream: 管理全市场ticker的WebSocket流
+- run_market_ticker_stream: 运行ticker流的主入口函数（支持自动重连）
+- _normalize_kline: K线数据规范化函数（供data_agent模块使用）
+
+使用场景：
+- 后台服务：通过async_agent启动ticker流服务
+- 数据规范化：data_agent模块使用_normalize_kline函数处理K线数据
+
+注意：
+- Ticker流每30分钟自动重连（币安WebSocket连接限制）
+- K线流管理已迁移到data_agent模块，本模块不再提供KlineStreamManager
 """
 from __future__ import annotations
 
@@ -9,7 +24,7 @@ import asyncio
 import json
 import logging
 import os
-from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Optional
 from datetime import datetime, timezone
 
 from binance_sdk_derivatives_trading_usds_futures.derivatives_trading_usds_futures import (
@@ -25,7 +40,18 @@ from common.database_mysql import MySQLDatabase
 logger = logging.getLogger(__name__)
 
 
+# ============ 工具函数：数据类型转换 ============
+
 def _to_float(value: Any) -> float:
+    """
+    将值转换为浮点数
+    
+    Args:
+        value: 待转换的值（可能是字符串、数字等）
+    
+    Returns:
+        float: 转换后的浮点数，转换失败时返回0.0
+    """
     try:
         return float(value)
     except (TypeError, ValueError):
@@ -33,15 +59,56 @@ def _to_float(value: Any) -> float:
 
 
 def _to_int(value: Any) -> int:
+    """
+    将值转换为整数
+    
+    Args:
+        value: 待转换的值（可能是字符串、数字等）
+    
+    Returns:
+        int: 转换后的整数，转换失败时返回0
+    """
     try:
         return int(value)
     except (TypeError, ValueError):
         return 0
 
 
+# ============ Ticker数据处理函数 ============
+
 def _normalize_ticker(raw: Dict[str, Any]) -> Dict[str, Any]:
-    """标准化ticker数据，不再从报文中解析 price_change, price_change_percent, side, change_percent_text, open_price
-    这些字段将在 upsert_market_tickers 中根据业务逻辑计算
+    """
+    标准化ticker数据
+    
+    将币安WebSocket返回的原始ticker数据转换为标准格式，
+    用于存储到24_market_tickers表。
+    
+    注意：不再从报文中解析以下字段，这些字段将在upsert_market_tickers中根据业务逻辑计算：
+    - price_change: 价格变化
+    - price_change_percent: 价格变化百分比
+    - side: 涨跌方向（gainer/loser）
+    - change_percent_text: 价格变化百分比文本
+    - open_price: 开盘价
+    
+    Args:
+        raw: 币安WebSocket返回的原始ticker数据字典
+    
+    Returns:
+        Dict[str, Any]: 标准化后的ticker数据字典，包含以下字段：
+            - event_time: 事件时间戳（毫秒）
+            - symbol: 交易对符号
+            - average_price: 加权平均价
+            - last_price: 最新价格
+            - last_trade_volume: 最新交易量
+            - high_price: 24小时最高价
+            - low_price: 24小时最低价
+            - base_volume: 24小时基础资产成交量
+            - quote_volume: 24小时计价资产成交量
+            - stats_open_time: 统计开始时间（毫秒）
+            - stats_close_time: 统计结束时间（毫秒）
+            - first_trade_id: 首笔交易ID
+            - last_trade_id: 末笔交易ID
+            - trade_count: 24小时交易笔数
     """
     symbol = raw.get("s", "")
     logger.debug("[MarketStreams] Normalizing ticker data for symbol: %s", symbol)
@@ -75,6 +142,31 @@ def _normalize_ticker(raw: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def _extract_tickers(message: Any) -> List[Dict[str, Any]]:
+    """
+    从WebSocket消息中提取ticker数据列表
+    
+    支持多种消息格式：
+    - bytes/bytearray: 自动解码为字符串
+    - JSON字符串: 自动解析为字典
+    - SDK响应对象: 使用model_dump()或__dict__转换
+    - 字典: 直接提取data/tickers/payload字段，或使用整个字典
+    - 列表: 直接返回
+    
+    Args:
+        message: WebSocket接收到的原始消息，可能是：
+            - bytes/bytearray: 字节数据
+            - str: JSON字符串
+            - dict: 字典对象
+            - list: 列表对象
+            - SDK响应对象: 具有model_dump()或__dict__属性的对象
+    
+    Returns:
+        List[Dict[str, Any]]: ticker数据字典列表
+    
+    Note:
+        - 如果消息格式无法识别，返回空列表
+        - 支持嵌套的SDK响应对象（列表中的元素也可能是SDK对象）
+    """
     logger.debug("[MarketStreams] Received raw message: %s", message)
     
     if isinstance(message, (bytes, bytearray)):
@@ -134,10 +226,34 @@ def _extract_tickers(message: Any) -> List[Dict[str, Any]]:
     return []
 
 
+# ============ Ticker流管理类 ============
+
 class MarketTickerStream:
-    """Stream Binance all-market tickers into MySQL."""
+    """
+    全市场Ticker流管理器
+    
+    负责通过币安WebSocket接收所有交易对的24小时ticker数据，
+    并将数据存储到MySQL的24_market_tickers表中。
+    
+    特性：
+    - 自动重连：每30分钟自动重新建立连接（币安WebSocket连接限制）
+    - 增量更新：使用upsert_market_tickers实现增量插入/更新
+    - 异常处理：完善的错误处理和日志记录
+    
+    使用示例：
+        streamer = MarketTickerStream(db)
+        await streamer.stream()  # 无限运行，自动重连
+        # 或
+        await streamer.stream(run_seconds=60)  # 运行60秒后停止
+    """
 
     def __init__(self, db: MySQLDatabase) -> None:
+        """
+        初始化Ticker流管理器
+        
+        Args:
+            db: MySQL数据库实例，用于存储ticker数据
+        """
         self._db = db
         configuration_ws_streams = ConfigurationWebSocketStreams(
             stream_url=os.getenv(
@@ -157,6 +273,22 @@ class MarketTickerStream:
         self._MAX_CONNECTION_HOURS = 0.5
 
     async def _handle_message(self, message: Any) -> None:
+        """
+        处理WebSocket接收到的ticker消息
+        
+        流程：
+        1. 从消息中提取ticker数据列表
+        2. 标准化每个ticker数据
+        3. 批量插入/更新到数据库（使用upsert_market_tickers）
+        
+        Args:
+            message: WebSocket接收到的原始消息
+        
+        Note:
+            - 如果消息中没有ticker数据，直接返回
+            - 使用asyncio.to_thread在线程池中执行数据库操作，避免阻塞事件循环
+            - 异常会被记录但不会中断流处理
+        """
         logger.debug("[MarketStreams] Starting to handle message")
         
         tickers = _extract_tickers(message)
@@ -175,7 +307,7 @@ class MarketTickerStream:
             logger.debug("[MarketStreams] Normalized data sample: %s", sample)
         
         try:
-            # 使用优化后的增量插入逻辑
+            # 使用优化后的增量插入逻辑（在线程池中执行，避免阻塞）
             logger.debug("[MarketStreams] Calling upsert_market_tickers for %d symbols", len(normalized))
             await asyncio.to_thread(self._db.upsert_market_tickers, normalized)
             logger.debug("[MarketStreams] Successfully completed upsert_market_tickers")
@@ -187,13 +319,42 @@ class MarketTickerStream:
 
 
     async def _should_reconnect(self) -> bool:
-        """检查是否需要重新连接（30分钟到期）"""
+        """
+        检查是否需要重新连接
+        
+        币安WebSocket连接有30分钟的限制，超过30分钟需要重新建立连接。
+        
+        Returns:
+            bool: 如果需要重新连接返回True，否则返回False
+        
+        Note:
+            - 如果连接创建时间未记录，返回False（不重连）
+            - 连接时长超过_MAX_CONNECTION_HOURS（0.5小时）时返回True
+        """
         if not self._connection_creation_time:
             return False
         elapsed_hours = (datetime.now(timezone.utc) - self._connection_creation_time).total_seconds() / 3600
         return elapsed_hours >= self._MAX_CONNECTION_HOURS
 
     async def stream(self, run_seconds: Optional[int] = None) -> None:
+        """
+        启动ticker流并持续接收数据
+        
+        建立WebSocket连接，订阅全市场ticker流，并持续接收数据直到：
+        - 连接达到30分钟限制（自动重连）
+        - 指定运行时长到期（run_seconds参数）
+        - 发生异常或取消
+        
+        Args:
+            run_seconds: 可选，运行时长（秒）。如果指定，运行指定时长后停止；
+                         如果为None，则无限运行直到连接达到30分钟限制或发生异常
+        
+        Note:
+            - 连接创建时间会被记录，用于判断是否需要重连
+            - 每0.5秒检查一次是否需要重连
+            - 异常会被捕获并记录，但不会中断流处理
+            - 退出时会自动取消订阅并关闭连接
+        """
         connection = None
         stream = None
         try:
@@ -232,11 +393,28 @@ class MarketTickerStream:
                 await connection.close_connection(close_session=True)
 
 
+# ============ Ticker流主入口函数 ============
+
 async def run_market_ticker_stream(run_seconds: Optional[int] = None) -> None:
-    """Run market ticker stream with automatic reconnection every 30 minutes.
+    """
+    运行全市场ticker流服务（主入口函数）
+    
+    创建MarketTickerStream实例并启动流服务，支持自动重连。
+    每30分钟自动重新建立连接（币安WebSocket连接限制）。
+    
+    使用场景：
+    - 后台服务：通过async_agent启动，持续运行
+    - 测试/调试：可以指定运行时长进行测试
     
     Args:
-        run_seconds: Optional runtime in seconds before stopping the task.
+        run_seconds: 可选，运行时长（秒）。如果指定，运行指定时长后停止；
+                     如果为None，则无限运行直到被取消
+    
+    Note:
+        - 如果指定了run_seconds，只运行一次
+        - 如果未指定run_seconds，会无限循环运行，每次连接30分钟后自动重连
+        - 异常会被捕获并记录，然后等待5秒后重连（避免快速重连循环）
+        - 可以通过asyncio.CancelledError取消任务
     """
     db = MySQLDatabase()
     
@@ -266,21 +444,56 @@ async def run_market_ticker_stream(run_seconds: Optional[int] = None) -> None:
             logger.debug("[MarketStreams] Reconnecting to WebSocket...")
 
 
+# ============ K线数据处理函数 ============
+
 def _normalize_kline(message_data: Any) -> Optional[Dict[str, Any]]:
     """
-    Normalize kline data from SDK response.
+    规范化K线数据（供data_agent模块使用）
     
-    Expected format:
-    e='kline' E=1764148546845 s='BTCUSDT' k=KlineCandlestickStreamsResponseK(...)
+    将币安WebSocket返回的原始K线数据转换为标准格式，
+    用于存储到market_klines表。
     
-    注意：此函数只负责规范化数据格式，不进行业务逻辑判断（如是否完结）。
-    是否完结的判断应该在调用此函数后进行。
+    预期格式：
+        e='kline' E=1764148546845 s='BTCUSDT' k=KlineCandlestickStreamsResponseK(...)
+    
+    注意：
+    - 此函数只负责规范化数据格式，不进行业务逻辑判断（如是否完结）
+    - 是否完结的判断应该在调用此函数后进行
+    - is_closed字段会被设置，但调用方需要检查该字段来决定是否插入数据库
+    
+    Args:
+        message_data: 币安WebSocket返回的原始K线消息，可能是：
+            - SDK响应对象（具有model_dump()或__dict__属性）
+            - 字典对象
+            - None或空数据
     
     Returns:
-        Normalized kline data dict if the message is valid, None otherwise.
-        None is returned in the following cases:
-        - Empty or invalid message
-        - Missing required fields
+        Optional[Dict[str, Any]]: 规范化后的K线数据字典，包含以下字段：
+            - event_time: 事件时间（datetime对象）
+            - symbol: 交易对符号（大写）
+            - contract_type: 合约类型（默认PERPETUAL）
+            - kline_start_time: K线开始时间（datetime对象）
+            - kline_end_time: K线结束时间（datetime对象）
+            - interval: 时间间隔（如'1m', '5m', '1h'等）
+            - first_trade_id: 首笔交易ID
+            - last_trade_id: 末笔交易ID
+            - open_price: 开盘价
+            - close_price: 收盘价
+            - high_price: 最高价
+            - low_price: 最低价
+            - base_volume: 基础资产成交量
+            - quote_volume: 计价资产成交量
+            - trade_count: 交易笔数
+            - is_closed: 是否完结（1=完结，0=未完结）
+            - taker_buy_base_volume: 主动买入基础资产成交量
+            - taker_buy_quote_volume: 主动买入计价资产成交量
+        
+        如果消息无效或缺少必需字段，返回None。
+    
+    Note:
+        - 时间戳从毫秒转换为datetime对象（UTC时区）
+        - 如果时间戳转换失败，使用默认时间（1970-01-01）
+        - 异常会被捕获并记录，返回None
     """
     try:
         # Check for empty or None message
@@ -366,131 +579,27 @@ def _normalize_kline(message_data: Any) -> Optional[Dict[str, Any]]:
         return None
 
 
-class KlineStreamManager:
-    """Manage kline websocket streams for leaderboard symbols."""
-    
-    # Supported intervals
-    INTERVALS = ['1w', '1d', '4h', '1h', '15m', '5m', '1m']
-    
-    def __init__(self, db: MySQLDatabase) -> None:
-        self._db = db
-        configuration_ws_streams = ConfigurationWebSocketStreams(
-            stream_url=os.getenv(
-                "STREAM_URL",
-                DERIVATIVES_TRADING_USDS_FUTURES_WS_STREAMS_PROD_URL,
-            )
-        )
-        self._client = DerivativesTradingUsdsFutures(
-            config_ws_streams=configuration_ws_streams
-        )
-        # Track active streams: {(symbol, interval): (connection, stream)}
-        self._active_streams: Dict[Tuple[str, str], Tuple[Any, Any]] = {}
-        self._lock = asyncio.Lock()
-    
-    async def _handle_kline_message(self, symbol: str, interval: str, message: Any) -> None:
-        """Handle kline message and insert into database.
-        
-        注意：
-        - 只处理完结的K线（x=True），跳过未完结的K线
-        - _normalize_kline 函数只负责数据格式转换，不进行业务逻辑判断
-        - 是否完结的判断在规范化后进行，只有完结的K线才会被插入数据库
-        """
-        try:
-            # Check for empty message
-            if message is None:
-                logger.debug("[KlineStream] ⏭️  跳过空消息 %s %s", symbol, interval)
-                return
-            
-            # 规范化K线数据（_normalize_kline 只负责数据格式转换，不进行业务逻辑判断）
-            normalized = _normalize_kline(message)
-            
-            if normalized:
-                # 检查是否完结：只有完结的K线（is_closed=1）才会被插入数据库
-                is_closed = normalized.get("is_closed", 0)
-                if is_closed != 1:
-                    # 未完结的K线，正常跳过，不插入数据库
-                    logger.debug(
-                        "[KlineStream] ⏭️  跳过未完结的K线（is_closed=%s） %s %s",
-                        is_closed, symbol, interval
-                    )
-                    return
-                
-                # 只有完结的K线（x=True, is_closed=1）才会被插入数据库
-                await asyncio.to_thread(self._db.insert_market_klines, [normalized])
-                logger.debug("[KlineStream] ✅ 已插入完结K线: %s %s", symbol, interval)
-            else:
-                # normalized is None means:
-                # 1. Empty message (already checked above)
-                # 2. Invalid message format - already logged in _normalize_kline
-                logger.debug("[KlineStream] ⏭️  跳过无效K线: %s %s", symbol, interval)
-        except Exception as e:
-            logger.error("[KlineStream] ❌ 处理K线消息时出错 %s %s: %s", symbol, interval, e, exc_info=True)
-    
-    async def add_stream(self, symbol: str, interval: str) -> bool:
-        """Add a kline stream for symbol and interval."""
-        key = (symbol.upper(), interval)
-        
-        async with self._lock:
-            if key in self._active_streams:
-                logger.debug("[KlineStream] Stream already exists: %s %s", symbol, interval)
-                return True
-            
-            try:
-                connection = await self._client.websocket_streams.create_connection()
-                stream = await connection.kline_candlestick_streams(
-                    symbol=symbol.lower(),
-                    interval=interval
-                )
-                
-                # Set up message handler
-                def handler(data: Any) -> None:
-                    asyncio.create_task(self._handle_kline_message(symbol, interval, data))
-                
-                stream.on("message", handler)
-                
-                self._active_streams[key] = (connection, stream)
-                logger.info("[KlineStream] Added stream: %s %s", symbol, interval)
-                return True
-            except Exception as e:
-                logger.error("[KlineStream] Failed to add stream %s %s: %s", symbol, interval, e)
-                return False
-    
-    async def remove_stream(self, symbol: str, interval: str) -> bool:
-        """Remove a kline stream."""
-        key = (symbol.upper(), interval)
-        
-        async with self._lock:
-            if key not in self._active_streams:
-                return True
-            
-            try:
-                connection, stream = self._active_streams[key]
-                await stream.unsubscribe()
-                await connection.close_connection(close_session=True)
-                del self._active_streams[key]
-                logger.info("[KlineStream] Removed stream: %s %s", symbol, interval)
-                return True
-            except Exception as e:
-                logger.error("[KlineStream] Failed to remove stream %s %s: %s", symbol, interval, e)
-                # Remove from dict even if unsubscribe fails
-                if key in self._active_streams:
-                    del self._active_streams[key]
-                return False
-    
-    async def cleanup(self) -> None:
-        """Cleanup all streams."""
-        async with self._lock:
-            keys = list(self._active_streams.keys())
-            for symbol, interval in keys:
-                await self.remove_stream(symbol, interval)
-
+# ============ 废弃的K线流管理类（已迁移到data_agent模块） ============
+# 
+# 注意：KlineStreamManager类已被废弃，K线流管理功能已迁移到data_agent模块。
+# 保留run_kline_sync_agent函数仅用于兼容旧代码，实际不再执行任何操作。
 
 async def run_kline_sync_agent(check_interval: int = 10) -> None:
-    """Run kline websocket sync agent.
-    
-    注意：此方法已简化，不再与涨跌榜同步。K线流管理现在由其他机制处理。
     """
-    logger.warning("[KlineSyncAgent] run_kline_sync_agent 已废弃，K线流管理现在由其他机制处理")
+    运行K线同步代理（已废弃）
+    
+    注意：此方法已废弃，不再执行任何操作。
+    K线流管理现在由data_agent模块的DataAgentKlineManager处理。
+    
+    保留此函数仅用于兼容旧代码（async_agent.py中可能仍有调用）。
+    
+    Args:
+        check_interval: 检查间隔（秒），已不再使用
+    
+    Deprecated:
+        此函数已被废弃，请使用data_agent模块的K线流管理功能。
+    """
+    logger.warning("[KlineSyncAgent] run_kline_sync_agent 已废弃，K线流管理现在由data_agent模块处理")
     # 此方法保留以兼容旧代码，但不再执行任何操作
     while True:
         await asyncio.sleep(check_interval)

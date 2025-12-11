@@ -1,6 +1,28 @@
 """
-Database management module - MySQL implementation
-基础配置数据库操作模块，使用 MySQL 作为存储引擎
+基础数据库操作模块 - MySQL实现
+
+本模块提供Database类，封装所有业务数据的MySQL数据库操作，包括：
+1. 提供商管理：LLM提供商的增删改查
+2. 模型管理：交易模型的增删改查、配置管理
+3. 投资组合管理：持仓、账户价值记录
+4. 交易记录：交易历史的记录和查询
+5. 对话记录：AI对话历史的记录和查询
+6. 合约配置：期货合约配置管理
+7. 账户资产：账户资产信息管理
+8. 提示词管理：模型买卖提示词配置
+
+主要组件：
+- Database: 基础数据库操作封装类
+
+使用场景：
+- 后端API：为所有业务API提供数据访问
+- 交易引擎：trading_engine模块使用Database管理模型、持仓、交易记录
+- 前端展示：通过后端API间接使用Database查询数据
+
+注意：
+- 使用MySQL连接池管理数据库连接
+- 所有表结构在init_db()中自动创建
+- UUID和整数ID之间的转换用于兼容性
 """
 import json
 import logging
@@ -16,16 +38,45 @@ logger = logging.getLogger(__name__)
 
 
 class Database:
-    """Database management class using MySQL as storage backend.
+    """
+    基础数据库操作封装类
     
-    注意：此模块已从 ClickHouse 迁移到 MySQL，保持与原版本的方法签名和返回值格式兼容。
+    封装所有业务数据的MySQL数据库操作，包括提供商、模型、投资组合、交易记录等。
+    使用连接池管理数据库连接，支持高并发访问。
+    
+    主要功能：
+    - 提供商管理：LLM提供商的增删改查
+    - 模型管理：交易模型的增删改查、自动交易开关、杠杆设置
+    - 投资组合管理：持仓更新、账户价值记录、投资组合查询
+    - 交易记录：交易历史的记录和查询
+    - 对话记录：AI对话历史的记录和查询
+    - 合约配置：期货合约配置管理
+    - 账户资产：账户资产信息管理
+    - 提示词管理：模型买卖提示词配置
+    
+    使用示例：
+        db = Database()
+        db.init_db()  # 初始化所有表
+        model = db.get_model(model_id)
+        portfolio = db.get_portfolio(model_id, current_prices)
+        db.add_trade(model_id, symbol, signal, quantity, price)
+    
+    注意：
+        - 已从ClickHouse迁移到MySQL，保持方法签名和返回值格式兼容
+        - db_path参数保留以保持兼容性，但不再使用
     """
     
     def __init__(self, db_path: str = 'trading_bot.db'):
-        """Initialize database connection.
+        """
+        初始化数据库连接
         
         Args:
-            db_path: 保留此参数以保持兼容性，但不再使用（MySQL 使用配置中的连接信息）
+            db_path: 保留此参数以保持兼容性，但不再使用（MySQL使用配置中的连接信息）
+        
+        Note:
+            - 创建MySQL连接池（最小5个连接，最大50个连接）
+            - 定义所有业务表的表名
+            - 不自动初始化表结构，需要调用init_db()方法
         """
         # 使用 MySQL 连接池，参考 database_mysql.py 的模式
         self._pool = MySQLConnectionPool(
@@ -177,9 +228,7 @@ class Database:
         
         self._with_connection(_execute_insert)
     
-    # ==================================================================
-    # 数据库初始化
-    # ==================================================================
+    # ============ 初始化方法 ============
     
     def init_db(self):
         """Initialize database tables - only CREATE TABLE IF NOT EXISTS, no migration logic"""
@@ -521,9 +570,7 @@ class Database:
         """Convert rows to list of dictionaries"""
         return [self._row_to_dict(row, columns) for row in rows]
     
-    # ==================================================================
-    # Provider Management
-    # ==================================================================
+    # ============ Provider（提供商）管理方法 ============
     
     def add_provider(self, name: str, api_url: str, api_key: str, models: str = '', provider_type: str = 'openai') -> int:
         """Add new API provider
@@ -616,9 +663,7 @@ class Database:
             logger.error(f"[Database] Failed to delete provider {provider_id}: {e}")
             raise
     
-    # ==================================================================
-    # Model Management
-    # ==================================================================
+    # ============ Model（模型）管理方法 ============
     
     def _get_model_id_mapping(self) -> Dict[int, str]:
         """Get mapping from int ID to UUID string ID for models"""
@@ -650,7 +695,7 @@ class Database:
     
     def add_model(self, name: str, provider_id: int, model_name: str,
                  initial_capital: float = 10000, leverage: int = 10, api_key: str = '', api_secret: str = '', 
-                 account_alias: str = '', is_virtual: bool = False, symbol_source: str = 'leaderboard') -> int:
+                 account_alias: str = '', is_virtual: bool = True, symbol_source: str = 'leaderboard') -> int:
         """
         Add new trading model
         
@@ -719,6 +764,21 @@ class Database:
                 [[model_id, name, provider_uuid, model_name, initial_capital, leverage, 1, final_api_key, final_api_secret, account_alias, 1 if is_virtual else 0, symbol_source, datetime.now(timezone.utc)]],
                 ["id", "name", "provider_id", "model_name", "initial_capital", "leverage", "auto_trading_enabled", "api_key", "api_secret", "account_alias", "is_virtual", "symbol_source", "created_at"]
             )
+            
+            # 初始化account_values表的一条记录（确保account_alias插入到account_values表中）
+            try:
+                av_id = self._generate_id()
+                # 初始值使用initial_capital作为balance
+                self.insert_rows(
+                    self.account_values_table,
+                    [[av_id, model_id, account_alias or '', initial_capital, initial_capital, initial_capital, 0.0, datetime.now(timezone.utc)]],
+                    ["id", "model_id", "account_alias", "balance", "available_balance", "cross_wallet_balance", "cross_un_pnl", "timestamp"]
+                )
+                logger.debug(f"[Database] Initialized account_values record for model {self._uuid_to_int(model_id)} with account_alias={account_alias}")
+            except Exception as av_err:
+                logger.warning(f"[Database] Failed to initialize account_values record for model {self._uuid_to_int(model_id)}: {av_err}")
+                # 不阻止模型创建，account_values初始化失败不影响模型创建
+            
             return self._uuid_to_int(model_id)
         except Exception as e:
             logger.error(f"[Database] Failed to add model: {e}")
@@ -889,9 +949,7 @@ class Database:
             logger.error(f"[Database] Failed to update leverage for model {model_id}: {e}")
             return False
     
-    # ==================================================================
-    # Portfolio Management
-    # ==================================================================
+    # ============ Portfolio（投资组合）管理方法 ============
     
     def update_position(self, model_id: int, symbol: str, position_amt: float,
                        avg_price: float, leverage: int = 1, position_side: str = 'LONG',
@@ -1056,9 +1114,7 @@ class Database:
             logger.error(f"[Database] Failed to close position: {e}")
             raise
     
-    # ==================================================================
-    # Trade Records
-    # ==================================================================
+    # ============ Trade（交易记录）管理方法 ============
     
     def add_trade(self, model_id: int, future: str, signal: str, quantity: float,
               price: float, leverage: int = 1, side: str = 'long', pnl: float = 0, fee: float = 0):
@@ -1100,9 +1156,7 @@ class Database:
             logger.error(f"[Database] Failed to get trades for model {model_id}: {e}")
             return []
     
-    # ==================================================================
-    # Conversation History
-    # ==================================================================
+    # ============ Conversation（对话记录）管理方法 ============
     
     def add_conversation(self, model_id: int, user_prompt: str,
                         ai_response: str, cot_trace: str = ''):
@@ -1144,9 +1198,7 @@ class Database:
             logger.error(f"[Database] Failed to get conversations for model {model_id}: {e}")
             return []
     
-    # ==================================================================
-    # Account Value History
-    # ==================================================================
+    # ============ Account Value（账户价值）管理方法 ============
     
     def record_account_value(self, model_id: int, balance: float,
                             available_balance: float, cross_wallet_balance: float,
@@ -1318,9 +1370,7 @@ class Database:
             logger.error(f"[Database] Failed to get multi-model chart data: {e}")
             return []
     
-    # ==================================================================
-    # Prompt Configuration
-    # ==================================================================
+    # ============ Prompt（提示词）管理方法 ============
     
     def get_model_prompt(self, model_id: int) -> Optional[Dict]:
         """Get model prompt configuration"""
@@ -1331,9 +1381,11 @@ class Database:
                 return None
             
             rows = self.query(f"""
-                SELECT * FROM {self.model_prompts_table} FINAL
-                WHERE model_id = '{model_uuid}'
-            """)
+                SELECT `id`, `model_id`, `buy_prompt`, `sell_prompt`, `updated_at`
+                FROM `{self.model_prompts_table}`
+                WHERE `model_id` = %s
+                LIMIT 1
+            """, (model_uuid,))
             if not rows:
                 return None
             
@@ -1353,26 +1405,36 @@ class Database:
             if not model_uuid:
                 return False
             
-            if (not buy_prompt or not buy_prompt.strip()) and (not sell_prompt or not sell_prompt.strip()):
-                # 删除记录
-                self.command(f"ALTER TABLE {self.model_prompts_table} DELETE WHERE model_id = '{model_uuid}'")
-                return True
-            
-            # 使用 ReplacingMergeTree，直接插入即可
+            # MySQL使用 INSERT ... ON DUPLICATE KEY UPDATE
             prompt_id = self._generate_id()
-            self.insert_rows(
-                self.model_prompts_table,
-                [[prompt_id, model_uuid, buy_prompt or '', sell_prompt or '', datetime.now(timezone.utc)]],
-                ["id", "model_id", "buy_prompt", "sell_prompt", "updated_at"]
-            )
+            buy_prompt_value = buy_prompt.strip() if buy_prompt and buy_prompt.strip() else ''
+            sell_prompt_value = sell_prompt.strip() if sell_prompt and sell_prompt.strip() else ''
+            updated_at = datetime.now(timezone.utc)
+            
+            def _execute_upsert(conn):
+                cursor = conn.cursor()
+                try:
+                    sql = f"""
+                        INSERT INTO `{self.model_prompts_table}` 
+                        (`id`, `model_id`, `buy_prompt`, `sell_prompt`, `updated_at`)
+                        VALUES (%s, %s, %s, %s, %s)
+                        ON DUPLICATE KEY UPDATE
+                        `buy_prompt` = VALUES(`buy_prompt`),
+                        `sell_prompt` = VALUES(`sell_prompt`),
+                        `updated_at` = VALUES(`updated_at`)
+                    """
+                    cursor.execute(sql, (prompt_id, model_uuid, buy_prompt_value, sell_prompt_value, updated_at))
+                    conn.commit()
+                finally:
+                    cursor.close()
+            
+            self._with_connection(_execute_upsert)
             return True
         except Exception as e:
             logger.error(f"[Database] Failed to upsert model prompt for model {model_id}: {e}")
             return False
     
-    # ==================================================================
-    # Futures Universe Management
-    # ==================================================================
+    # ============ Futures（合约配置）管理方法 ============
     
     def get_futures(self) -> List[Dict]:
         """Get all futures configurations"""
@@ -1437,6 +1499,8 @@ class Database:
             logger.error(f"[Database] Failed to delete future {future_id}: {e}")
             raise
     
+    # ============ Futures（合约配置）管理方法 ============
+    
     def get_future_configs(self) -> List[Dict]:
         """Get future configurations"""
         try:
@@ -1455,9 +1519,7 @@ class Database:
         """Get list of future symbols"""
         return [future['symbol'] for future in self.get_future_configs()]
     
-    # ==================================================================
-    # Model Futures Configuration
-    # ==================================================================
+    # ============ Model Futures（模型合约关联）管理方法 ============
     
     def add_model_future(self, model_id: int, symbol: str, contract_symbol: str,
                          name: str, exchange: str = 'BINANCE_FUTURES',
@@ -1643,9 +1705,7 @@ class Database:
             logger.error(f"[Database] Failed to clear model futures for model {model_id}: {e}")
             raise
     
-    # ==================================================================
-    # Settings Management
-    # ==================================================================
+    # ============ Settings（系统设置）管理方法 ============
     
     def get_settings(self) -> Dict:
         """Get system settings"""
@@ -1702,9 +1762,7 @@ class Database:
     # 账户管理功能已迁移到 AccountDatabase 类（使用 account_asset 表）
     # ==================================================================
     
-    # ==================================================================
-    # Account Asset Management (账户资产管理)
-    # ==================================================================
+    # ============ Account Asset（账户资产）管理方法 ============
     
     def add_account_asset(self, account_alias: str,
                          total_initial_margin: float = 0.0,
@@ -1771,18 +1829,23 @@ class Database:
             
         Returns:
             账户资产信息字典，如果不存在则返回None
+            返回格式包含字段映射：
+            - balance: total_wallet_balance
+            - cross_wallet_balance: total_cross_wallet_balance
+            - available_balance: available_balance
+            - cross_un_pnl: total_cross_un_pnl
         """
         try:
             rows = self.query(f"""
-                SELECT account_alias, total_initial_margin, total_maint_margin, total_wallet_balance,
-                       total_unrealized_profit, total_margin_balance, total_position_initial_margin,
-                       total_open_order_initial_margin, total_cross_wallet_balance, total_cross_un_pnl,
-                       available_balance, max_withdraw_amount, update_time, created_at
-                FROM {self.account_asset_table} FINAL
-                WHERE account_alias = '{account_alias}'
-                ORDER BY update_time DESC
+                SELECT `account_alias`, `total_initial_margin`, `total_maint_margin`, `total_wallet_balance`,
+                       `total_unrealized_profit`, `total_margin_balance`, `total_position_initial_margin`,
+                       `total_open_order_initial_margin`, `total_cross_wallet_balance`, `total_cross_un_pnl`,
+                       `available_balance`, `max_withdraw_amount`, `update_time`, `created_at`
+                FROM `{self.account_asset_table}`
+                WHERE `account_alias` = %s
+                ORDER BY `update_time` DESC
                 LIMIT 1
-            """)
+            """, (account_alias,))
             
             if not rows:
                 return None
@@ -1793,24 +1856,60 @@ class Database:
                       "available_balance", "max_withdraw_amount", "update_time", "created_at"]
             result = self._row_to_dict(rows[0], columns)
             
-            # 转换为驼峰命名格式
+            # 返回标准格式，字段映射为AI需要的格式
             return {
-                "accountAlias": result["account_alias"],
-                "totalInitialMargin": str(result["total_initial_margin"]),
-                "totalMaintMargin": str(result["total_maint_margin"]),
-                "totalWalletBalance": str(result["total_wallet_balance"]),
-                "totalUnrealizedProfit": str(result["total_unrealized_profit"]),
-                "totalMarginBalance": str(result["total_margin_balance"]),
-                "totalPositionInitialMargin": str(result["total_position_initial_margin"]),
-                "totalOpenOrderInitialMargin": str(result["total_open_order_initial_margin"]),
-                "totalCrossWalletBalance": str(result["total_cross_wallet_balance"]),
-                "totalCrossUnPnl": str(result["total_cross_un_pnl"]),
-                "availableBalance": str(result["available_balance"]),
-                "maxWithdrawAmount": str(result["max_withdraw_amount"]),
-                "updateTime": result["update_time"]
+                "account_alias": result["account_alias"],
+                "balance": float(result["total_wallet_balance"]) if result["total_wallet_balance"] is not None else 0.0,
+                "cross_wallet_balance": float(result["total_cross_wallet_balance"]) if result["total_cross_wallet_balance"] is not None else 0.0,
+                "available_balance": float(result["available_balance"]) if result["available_balance"] is not None else 0.0,
+                "cross_un_pnl": float(result["total_cross_un_pnl"]) if result["total_cross_un_pnl"] is not None else 0.0
             }
         except Exception as e:
             logger.error(f"[Database] Failed to get account asset {account_alias}: {e}")
+            return None
+    
+    def get_latest_account_value(self, model_id: int) -> Optional[Dict]:
+        """
+        获取模型最新的账户价值记录（从account_values表）
+        
+        Args:
+            model_id: 模型ID
+            
+        Returns:
+            账户价值信息字典，如果不存在则返回None
+            包含字段：balance, available_balance, cross_wallet_balance, cross_un_pnl, account_alias
+        """
+        try:
+            model_mapping = self._get_model_id_mapping()
+            model_uuid = model_mapping.get(model_id)
+            if not model_uuid:
+                return None
+            
+            rows = self.query(f"""
+                SELECT `account_alias`, `balance`, `available_balance`, 
+                       `cross_wallet_balance`, `cross_un_pnl`, `timestamp`
+                FROM `{self.account_values_table}`
+                WHERE `model_id` = %s
+                ORDER BY `timestamp` DESC
+                LIMIT 1
+            """, (model_uuid,))
+            
+            if not rows:
+                return None
+            
+            columns = ["account_alias", "balance", "available_balance", 
+                      "cross_wallet_balance", "cross_un_pnl", "timestamp"]
+            result = self._row_to_dict(rows[0], columns)
+            
+            return {
+                "account_alias": result["account_alias"] or '',
+                "balance": float(result["balance"]) if result["balance"] is not None else 0.0,
+                "available_balance": float(result["available_balance"]) if result["available_balance"] is not None else 0.0,
+                "cross_wallet_balance": float(result["cross_wallet_balance"]) if result["cross_wallet_balance"] is not None else 0.0,
+                "cross_un_pnl": float(result["cross_un_pnl"]) if result["cross_un_pnl"] is not None else 0.0
+            }
+        except Exception as e:
+            logger.error(f"[Database] Failed to get latest account value for model {model_id}: {e}")
             return None
     
     def get_all_account_assets(self, account_alias: str = None) -> List[Dict]:
@@ -1967,9 +2066,7 @@ class Database:
             logger.error(f"[Database] Failed to delete account asset {account_alias}: {e}")
             return False
     
-    # ==================================================================
-    # Asset Management (资产表管理，与account_asset为1对多关系)
-    # ==================================================================
+    # ============ Asset（资产明细）管理方法 ============
     
     def add_asset(self, account_alias: str, asset: str,
                  wallet_balance: float = 0.0,

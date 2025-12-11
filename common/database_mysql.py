@@ -1,4 +1,27 @@
-"""MySQL database utilities for market data storage."""
+"""
+MySQL数据库工具模块 - 市场数据存储和管理
+
+本模块提供MySQL数据库的连接池管理和市场数据CRUD操作，包括：
+1. 连接池管理：MySQLConnectionPool类，管理数据库连接池
+2. Ticker数据：24_market_tickers表的增删改查操作
+3. K线数据：market_klines表的增删改查操作（按时间周期分表）
+4. 数据代理：market_data_agent表的代理管理操作
+
+主要组件：
+- MySQLConnectionPool: MySQL连接池管理器
+- MySQLDatabase: MySQL数据库操作封装类
+
+使用场景：
+- 市场数据流：market_streams模块使用upsert_market_tickers存储ticker数据
+- 涨跌榜查询：market_data模块使用get_leaderboard_from_tickers查询涨跌榜
+- K线数据：data_agent模块使用insert_market_klines和get_market_klines管理K线数据
+- 数据清理：async模块使用cleanup_old_klines清理过期数据
+
+注意：
+- 使用连接池管理数据库连接，避免连接数过多
+- K线数据按时间周期分表存储（1m, 5m, 15m, 1h, 4h, 1d, 1w）
+- 所有操作都通过连接池获取连接，使用完毕后自动归还
+"""
 from __future__ import annotations
 
 import logging
@@ -19,12 +42,31 @@ logger = logging.getLogger(__name__)
 
 
 class MySQLConnectionPool:
-    """MySQL connection pool to manage database connections.
+    """
+    MySQL连接池管理器
     
-    This class manages a pool of MySQL connections to avoid creating
-    too many connections to the MySQL server. It provides methods to acquire
-    and release connections, and supports dynamic expansion up to a maximum
-    number of connections.
+    管理MySQL数据库连接池，避免创建过多连接导致数据库压力过大。
+    支持动态扩展连接数，最大连接数可配置。
+    
+    主要特性：
+    - 连接池管理：维护最小和最大连接数
+    - 连接健康检查：自动检测并移除失效连接
+    - 动态扩展：根据需求动态创建新连接
+    - 线程安全：使用锁保护连接池操作
+    
+    使用示例：
+        pool = MySQLConnectionPool(
+            host='localhost',
+            port=3306,
+            user='root',
+            password='password',
+            database='mydb',
+            min_connections=5,
+            max_connections=50
+        )
+        conn = pool.acquire()
+        # 使用连接...
+        pool.release(conn)
     """
     
     def __init__(
@@ -511,13 +553,40 @@ def _to_beijing_datetime(value: Any) -> Optional[datetime]:
 
 
 class MySQLDatabase:
-    """Encapsulates MySQL connectivity and CRUD helpers."""
+    """
+    MySQL数据库操作封装类
+    
+    封装MySQL数据库的连接和CRUD操作，提供市场数据相关的数据库操作方法。
+    使用连接池管理数据库连接，支持高并发访问。
+    
+    主要功能：
+    - Ticker数据管理：24_market_tickers表的增删改查
+    - K线数据管理：market_klines表的增删改查（按时间周期分表）
+    - 涨跌榜查询：从ticker表查询涨跌幅排行榜
+    - 数据代理管理：market_data_agent表的代理信息管理
+    - 数据清理：清理过期的K线数据
+    
+    使用示例：
+        db = MySQLDatabase(auto_init_tables=True)
+        db.upsert_market_tickers(ticker_data)
+        leaderboard = db.get_leaderboard_from_tickers(limit=10)
+        klines = db.get_market_klines('BTCUSDT', '1h', limit=100)
+    """
 
-    # ==================================================================
-    # 初始化和连接管理
-    # ==================================================================
+    # ============ 初始化方法 ============
     
     def __init__(self, *, auto_init_tables: bool = True) -> None:
+        """
+        初始化MySQL数据库操作类
+        
+        Args:
+            auto_init_tables: 是否自动初始化表结构，默认为True
+        
+        Note:
+            - 创建MySQL连接池（最小5个连接，最大50个连接）
+            - 如果auto_init_tables为True，自动创建所需的数据表
+            - K线表按时间周期分表：market_klines_1w, market_klines_1d等
+        """
         # Create a connection pool instead of individual connections
         self._pool = MySQLConnectionPool(
             host=app_config.MYSQL_HOST,
@@ -559,9 +628,7 @@ class MySQLDatabase:
             self.ensure_market_data_agent_table()
             self.ensure_market_klines_table()
     
-    # ==================================================================
-    # 连接管理方法
-    # ==================================================================
+    # ============ 连接管理方法 ============
     
     def cleanup_old_klines(self, days: int = 2) -> Dict[str, int]:
         """清理超过指定天数的K线数据
@@ -599,6 +666,8 @@ class MySQLDatabase:
             logger.error(f"[KlineCleanup] Failed to cleanup klines: {e}")
             return result
 
+    # ============ 基础数据库操作方法 ============
+    
     def _with_connection(self, func: Callable, *args, **kwargs) -> Any:
         """Execute a function with a MySQL connection from the pool.
         
@@ -1637,6 +1706,98 @@ class MySQLDatabase:
             logger.error("[MySQL] Failed to get symbols needing price refresh: %s", e)
             return []
 
+    def count_old_tickers(self, cutoff_date: datetime) -> int:
+        """
+        统计需要删除的过期ticker记录数量
+        
+        查询24_market_tickers表中ingestion_time早于指定日期的记录数量。
+        用于在删除操作前统计需要删除的记录数。
+        
+        Args:
+            cutoff_date: 截止日期，ingestion_time早于此日期的记录将被统计
+        
+        Returns:
+            int: 需要删除的记录数量，查询失败时返回0
+        
+        Note:
+            - 使用ingestion_time字段作为判断标准
+            - 查询失败时返回0，不会抛出异常
+        """
+        try:
+            query = f"""
+            SELECT COUNT(*) FROM `{self.market_ticker_table}`
+            WHERE ingestion_time < %s
+            """
+            
+            def _execute_query(conn):
+                cursor = conn.cursor()
+                try:
+                    cursor.execute(query, (cutoff_date,))
+                    result = cursor.fetchone()
+                    return int(result[0]) if result else 0
+                finally:
+                    cursor.close()
+            
+            count = self._with_connection(_execute_query)
+            logger.debug(
+                "[MySQL] Found %d old ticker records before %s",
+                count,
+                cutoff_date.strftime('%Y-%m-%d %H:%M:%S UTC')
+            )
+            return count
+        except Exception as e:
+            logger.error("[MySQL] Failed to count old tickers: %s", e, exc_info=True)
+            return 0
+
+    def delete_old_tickers(self, cutoff_date: datetime) -> int:
+        """
+        删除过期的ticker记录
+        
+        删除24_market_tickers表中ingestion_time早于指定日期的所有记录。
+        用于定期清理历史数据，释放存储空间。
+        
+        Args:
+            cutoff_date: 截止日期，ingestion_time早于此日期的记录将被删除
+        
+        Returns:
+            int: 实际删除的记录数量，删除失败时返回0
+        
+        Note:
+            - 使用ingestion_time字段作为判断标准
+            - 删除操作不可逆，请谨慎使用
+            - 删除失败时返回0，不会抛出异常
+            - 建议先调用count_old_tickers确认要删除的记录数
+        """
+        try:
+            query = f"""
+            DELETE FROM `{self.market_ticker_table}`
+            WHERE ingestion_time < %s
+            """
+            
+            def _execute_delete(conn):
+                cursor = conn.cursor()
+                try:
+                    cursor.execute(query, (cutoff_date,))
+                    deleted_count = cursor.rowcount
+                    conn.commit()
+                    return deleted_count
+                except Exception as e:
+                    conn.rollback()
+                    raise e
+                finally:
+                    cursor.close()
+            
+            deleted_count = self._with_connection(_execute_delete)
+            logger.info(
+                "[MySQL] Deleted %d old ticker records before %s",
+                deleted_count,
+                cutoff_date.strftime('%Y-%m-%d %H:%M:%S UTC')
+            )
+            return deleted_count
+        except Exception as e:
+            logger.error("[MySQL] Failed to delete old tickers: %s", e, exc_info=True)
+            return 0
+
     # ==================================================================
     # Leaderboard 模块：表管理
     # ==================================================================
@@ -1904,7 +2065,7 @@ class MySQLDatabase:
     
     # ==================================================================
     # Market Klines 模块：表管理
-    # ==================================================================
+    # ============ K线表操作方法 ============
     
     def ensure_market_klines_table(self) -> None:
         """Create per-interval market_klines tables if they do not exist.
@@ -2096,6 +2257,8 @@ class MySQLDatabase:
     # ==================================================================
     # Market Data Agent 模块：表管理
     # ==================================================================
+    
+    # ============ 数据代理表操作方法 ============
     
     def ensure_market_data_agent_table(self) -> None:
         """Create the market data agent table if it does not exist."""

@@ -87,16 +87,23 @@ const handleSave = async () => {
   
   loading.value = true
   try {
-    await modelApi.updatePrompts(props.modelId, {
+    const response = await modelApi.updatePrompts(props.modelId, {
       buy_prompt: formData.value.buyPrompt || null,
       sell_prompt: formData.value.sellPrompt || null
     })
-    alert('策略配置保存成功')
-    emit('update:visible', false)
-    emit('close')
+    
+    // 检查响应是否成功
+    if (response && response.success) {
+      alert('策略配置保存成功')
+      // 保存成功后关闭弹框
+      emit('update:visible', false)
+      emit('close')
+    } else {
+      throw new Error(response?.error || '保存失败')
+    }
   } catch (error) {
     console.error('[StrategyModal] Error saving prompts:', error)
-    alert('保存策略配置失败')
+    alert('保存策略配置失败: ' + (error.message || '未知错误'))
   } finally {
     loading.value = false
   }

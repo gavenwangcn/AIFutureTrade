@@ -1,33 +1,42 @@
 """
-异步刷新开盘价格服务
+价格刷新服务模块 - 异步刷新24_market_tickers表的开盘价格
 
-此服务异步调用binance_futures模块中的get_klines方法获取最近两天的日K线数据，
-并刷新24_market_tickers表中的open_price字段。
+本模块提供异步价格刷新服务，用于定期更新24_market_tickers表中的open_price字段。
+通过获取币安期货的日K线数据，使用昨天的收盘价作为今天的开盘价。
+
+主要功能：
+1. 单个symbol刷新：获取日K线数据并更新open_price
+2. 批量刷新：分批处理多个symbol，控制刷新频率
+3. 定时调度：根据cron表达式定时执行刷新任务
 
 刷新逻辑：
-1. 每分钟最多刷新1000个symbol（可配置）
-2. 从24_market_tickers表获取update_price_date为空或比当前时间晚1小时更新的symbol（去重）
-3. 分批调用接口刷新价格
-4. open_price使用昨天的日K线收盘价，并更新update_price_date为当天时间
-5. 每小时执行一次（可配置，使用cron表达式）
+1. 从24_market_tickers表查询需要刷新的symbol（update_price_date为空或超过1小时未更新）
+2. 获取最近2天的日K线数据（limit=2）
+3. 使用昨天的收盘价（klines[0]['close']）作为今天的open_price
+4. 更新update_price_date为当前UTC+8时间
+5. 每分钟最多刷新1000个symbol（可配置，PRICE_REFRESH_MAX_PER_MINUTE）
+6. 根据cron表达式定时执行（默认每5分钟，PRICE_REFRESH_CRON）
 
 K线数据格式说明：
 - 旧格式：[open_time, open, high, low, close, volume, ...]（列表格式）
 - 新格式：{
     "open_time": int,           # 开盘时间（毫秒时间戳）
-    "open_time_dt": datetime,   # 开盘时间（日期格式）
     "open": str,                # 开盘价
     "high": str,                # 最高价
     "low": str,                 # 最低价
     "close": str,               # 收盘价
     "volume": str,              # 成交量
-    "close_time": int,          # 收盘时间（毫秒时间戳）
-    "close_time_dt": datetime,  # 收盘时间（日期格式）
-    "quote_asset_volume": str,  # 成交额
-    "number_of_trades": int,    # 成交笔数
-    "taker_buy_base_volume": str,   # 主动买入成交量
-    "taker_buy_quote_volume": str   # 主动买入成交额
+    ...
   }（字典格式）
+
+使用场景：
+- 后台服务：通过async_agent启动定时刷新任务
+- 手动执行：可以直接调用refresh_all_prices()执行一次刷新
+
+注意：
+- 使用asyncio.to_thread避免阻塞事件循环
+- 支持并发刷新多个symbol，提高效率
+- 自动处理网络错误和异常情况
 """
 import asyncio
 import logging
@@ -42,11 +51,27 @@ from common.database_mysql import MySQLDatabase
 logger = logging.getLogger(__name__)
 
 
+# ============ 工具函数 ============
+
 def parse_cron_interval(cron_expr: str) -> int:
     """
-    简单解析cron表达式，返回执行间隔（秒）
-    支持格式: "0 */1 * * *" (每小时) 或 "*/30 * * * *" (每30分钟)
-    默认返回1小时（3600秒）
+    解析cron表达式，返回执行间隔（秒）
+    
+    支持格式：
+    - "0 */1 * * *" (每小时) -> 3600秒
+    - "*/30 * * * *" (每30分钟) -> 1800秒
+    - "*/5 * * * *" (每5分钟) -> 300秒
+    
+    Args:
+        cron_expr: cron表达式字符串
+    
+    Returns:
+        int: 执行间隔（秒），解析失败时默认返回3600秒（1小时）
+    
+    Note:
+        - 只支持简单的cron表达式格式
+        - 优先解析小时部分，其次解析分钟部分
+        - 如果解析失败，返回默认值3600秒
     """
     try:
         parts = cron_expr.strip().split()
@@ -69,22 +94,32 @@ def parse_cron_interval(cron_expr: str) -> int:
     return 3600
 
 
+# ============ 单个Symbol刷新方法 ============
+
 async def refresh_price_for_symbol(
     binance_client: BinanceFuturesClient,
     db: MySQLDatabase,
     symbol: str
 ) -> bool:
     """
-    刷新单个symbol的open_price
+    刷新单个symbol的开盘价格
+    
+    获取最近2天的日K线数据，使用昨天的收盘价作为今天的open_price，
+    并更新24_market_tickers表中的open_price和update_price_date字段。
     
     Args:
-        binance_client: 币安期货客户端
+        binance_client: 币安期货客户端实例
         db: MySQL数据库实例
-        symbol: 交易对符号
-        target_date: 目标日期（用于计算昨天）
-        
+        symbol: 交易对符号（如'BTCUSDT'）
+    
     Returns:
-        是否刷新成功
+        bool: 刷新是否成功
+    
+    Note:
+        - 使用asyncio.to_thread避免阻塞事件循环
+        - 兼容旧列表格式和新字典格式的K线数据
+        - 如果K线数据不足或价格无效，返回False
+        - update_price_date使用当前UTC+8时间
     """
     try:
         # 获取最近两天的日K线数据（limit=2）
@@ -165,6 +200,8 @@ async def refresh_price_for_symbol(
         return False
 
 
+# ============ 批量刷新方法 ============
+
 async def refresh_prices_batch(
     binance_client: BinanceFuturesClient,
     db: MySQLDatabase,
@@ -172,17 +209,27 @@ async def refresh_prices_batch(
     max_per_minute: int = 1000
 ) -> dict:
     """
-    分批刷新价格
+    分批刷新多个symbol的开盘价格
+    
+    将symbol列表分成多个批次，每批最多max_per_minute个，
+    批次内并发刷新，批次间等待60秒以避免API限流。
     
     Args:
-        binance_client: 币安期货客户端
+        binance_client: 币安期货客户端实例
         db: MySQL数据库实例
         symbols: 需要刷新的symbol列表
-        target_date: 目标日期
         max_per_minute: 每分钟最多刷新的symbol数量（默认1000）
-        
+    
     Returns:
-        刷新结果统计
+        Dict: 刷新结果统计，包含：
+            - total: 总数量
+            - success: 成功数量
+            - failed: 失败数量
+    
+    Note:
+        - 批次内使用asyncio.gather并发执行，提高效率
+        - 批次间等待60秒，避免API限流
+        - 记录详细的批次统计和累计统计信息
     """
     if not symbols:
         logger.info("[PriceRefresh] [批量刷新] 没有需要刷新的symbol")
@@ -281,8 +328,23 @@ async def refresh_prices_batch(
     }
 
 
+# ============ 主刷新方法 ============
+
 async def refresh_all_prices() -> None:
-    """刷新所有需要更新价格的symbol"""
+    """
+    刷新所有需要更新价格的symbol（主入口方法）
+    
+    流程：
+    1. 初始化数据库和币安客户端
+    2. 查询需要刷新的symbol列表（从24_market_tickers表）
+    3. 调用批量刷新方法处理所有symbol
+    4. 输出详细的执行统计信息
+    
+    Note:
+        - 如果没有需要刷新的symbol，直接返回
+        - 记录详细的执行步骤和耗时信息
+        - 异常会被捕获并记录，不会中断执行
+    """
     refresh_start_time = datetime.now(timezone(timedelta(hours=8)))
     logger.info("=" * 80)
     logger.info("[PriceRefresh] ========== 开始执行异步价格刷新任务 ==========")
@@ -379,8 +441,25 @@ async def refresh_all_prices() -> None:
         logger.error("=" * 80)
 
 
+# ============ 调度器方法 ============
+
 async def run_price_refresh_scheduler() -> None:
-    """运行价格刷新调度器"""
+    """
+    运行价格刷新调度器（主调度入口）
+    
+    根据配置的cron表达式定时执行价格刷新任务。
+    启动时立即执行一次，然后按配置的间隔循环执行。
+    
+    配置参数：
+    - PRICE_REFRESH_CRON: cron表达式（默认'*/5 * * * *'，每5分钟）
+    - PRICE_REFRESH_MAX_PER_MINUTE: 每分钟最多刷新数量（默认1000）
+    
+    Note:
+        - 启动时立即执行一次刷新
+        - 然后根据cron表达式解析的间隔循环执行
+        - 支持KeyboardInterrupt优雅停止
+        - 记录每次执行的详细信息
+    """
     cron_expr = getattr(
         app_config,
         'PRICE_REFRESH_CRON',

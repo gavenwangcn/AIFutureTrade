@@ -119,7 +119,7 @@ const formData = ref({
   displayName: '',
   initialCapital: 100000,
   accountAlias: '',
-  isVirtual: false,
+  isVirtual: true,  // 默认值为 true（虚拟账户）
   symbolSource: 'leaderboard'  // 默认使用涨跌榜
 })
 
@@ -214,7 +214,7 @@ const clearForm = () => {
     displayName: '',
     initialCapital: 100000,
     accountAlias: '',
-    isVirtual: false,
+    isVirtual: true,  // 重置为默认值 true（虚拟账户）
     symbolSource: 'leaderboard'  // 重置为默认值
   }
   availableModels.value = []
