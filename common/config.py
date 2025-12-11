@@ -47,7 +47,7 @@ MYSQL_MARKET_KLINES_TABLE = os.getenv('MYSQL_MARKET_KLINES_TABLE', 'market_kline
 # ============ 币安API配置 ============
 
 # 币安API密钥配置
-BINANCE_API_KEY = os.getenv('BINANCE_API_KEY', 'LBtjhBgX1RCksNJDdOoJPeDD30Z70YIGHHH9DrqjIDDkK7xcPRQcgydPxGRr6MN1')  # 币安API密钥
+BINANCE_API_KEY = os.getenv('BINANCE_API_KEY', 'eric')  # 币安API密钥
 BINANCE_API_SECRET = os.getenv('BINANCE_API_SECRET', '55arJnwlytDflHv151UpHN1s32ACnJZEs86mbc79wGyeuSUJNHTDPN7jEgBbqO6I')  # 币安API密钥
 FUTURES_QUOTE_ASSET = 'USDT'  # 期货计价资产，固定为USDT
 
