@@ -36,8 +36,8 @@ class MySQLConnectionPool:
         password: str,
         database: str,
         charset: str = 'utf8mb4',
-        min_connections: int = 5,
-        max_connections: int = 20,
+        min_connections: int = 10,
+        max_connections: int = 50,
         connection_timeout: int = 30
     ):
         """Initialize the connection pool.
@@ -608,14 +608,16 @@ class MySQLDatabase:
                 error_type = type(e).__name__
                 error_msg = str(e)
                 
-                # 判断是否为网络/协议错误，需要重试
+                # 判断是否为网络/协议错误或死锁错误，需要重试
                 # 包括 "Packet sequence number wrong" 错误，这通常表示连接状态不一致
+                # 包括 MySQL 死锁错误 (1213)，这是一种需要重试的资源竞争错误
                 is_network_error = any(keyword in error_msg.lower() for keyword in [
                     'connection', 'broken', 'lost', 'timeout', 'reset', 'gone away',
-                    'operationalerror', 'interfaceerror', 'packet sequence', 'internalerror'
+                    'operationalerror', 'interfaceerror', 'packet sequence', 'internalerror',
+                    'deadlock found'
                 ]) or any(keyword in error_type.lower() for keyword in [
                     'connection', 'timeout', 'operationalerror', 'interfaceerror', 'internalerror'
-                ])
+                ]) or (isinstance(e, pymysql.err.MySQLError) and e.args[0] == 1213)
                 
                 # 如果已获取连接，需要处理连接（关闭或释放）
                 if connection_acquired and conn:
@@ -991,6 +993,7 @@ class MySQLDatabase:
         3. ingestion_time更新：无论UPDATE还是INSERT操作，都会更新ingestion_time为当前时间
         4. open_price保护：首次插入时设置为0.0且update_price_date为None，表示"未设置"状态
         
+        
         设计决策：
         - 取消symbol去重：每条接收到的数据都会被处理，确保数据的实时性和完整性
         - open_price管理：采用异步价格刷新服务更新，避免接口数据覆盖开盘价
@@ -1283,7 +1286,7 @@ class MySQLDatabase:
                         normalized.get("last_trade_id", 0),
                         normalized.get("trade_count", 0),
                         insert_update_price_date,
-                        datetime.now()  # ingestion_time
+                        _to_beijing_datetime(datetime.now(timezone.utc))  # ingestion_time (converted to Beijing time UTC+8)
                     )
                     
                     try:
@@ -1389,102 +1392,69 @@ class MySQLDatabase:
             # 使用当前时间作为update_price_date（非UTC格式）
             # 忽略传入的update_date参数，始终使用当前本地时间
             update_price_date = datetime.now()
-            
-            # 先查询当前数据（只需要last_price用于重新计算涨跌幅）
-            # 由于symbol是唯一主键，每个symbol只会有一条记录
-            query = f"""
-            SELECT `last_price`
-            FROM `{self.market_ticker_table}`
-            WHERE `symbol` = %s
-            """
-            
-            def _execute_query(conn):
-                cursor = conn.cursor()
-                try:
-                    cursor.execute(query, (symbol,))
-                    row = cursor.fetchone()
-                    
-                    if row is None:
-                        return None
-                    
-                    # 处理返回结果（可能是元组或字典）
-                    if isinstance(row, dict):
-                        return row.get('last_price')
-                    elif isinstance(row, (list, tuple)):
-                        return row[0] if len(row) > 0 else None
-                    else:
-                        return row
-                finally:
-                    cursor.close()
-            
-            last_price_result = self._with_connection(_execute_query)
-            
-            if last_price_result is None:
-                logger.warning("[MySQL] Symbol %s not found for price update", symbol)
-                return False
-            
-            # 获取最新的一条数据的last_price
-            last_price = float(last_price_result) if last_price_result is not None else 0.0
             new_open_price = float(open_price)
             
-            # 重新计算涨跌幅相关字段（基于新的open_price和当前的last_price）
-            if new_open_price != 0 and last_price != 0:
-                price_change = last_price - new_open_price
-                price_change_percent = (price_change / new_open_price) * 100
-                side = "gainer" if price_change_percent >= 0 else "loser"
-                change_percent_text = f"{price_change_percent:.2f}%"
-            else:
-                # 如果无法计算，使用默认值（不能为None）
-                price_change = 0.0
-                price_change_percent = 0.0
-                side = ""
-                change_percent_text = ""
-            
-            # 使用UPDATE语句更新数据
+            # 使用单个原子SQL语句完成更新，避免先查询后更新的两步操作
+            # 这样可以减少死锁风险，因为所有操作都在一个事务中完成
             update_query = f"""
             UPDATE `{self.market_ticker_table}`
             SET `open_price` = %s,
-                `price_change` = %s,
-                `price_change_percent` = %s,
-                `side` = %s,
-                `change_percent_text` = %s,
+                `price_change` = CASE 
+                    WHEN `last_price` > 0 AND %s > 0 THEN `last_price` - %s
+                    ELSE 0.0
+                END,
+                `price_change_percent` = CASE 
+                    WHEN `last_price` > 0 AND %s > 0 THEN ((`last_price` - %s) / %s) * 100
+                    ELSE 0.0
+                END,
+                `side` = CASE 
+                    WHEN `last_price` > 0 AND %s > 0 THEN CASE WHEN ((`last_price` - %s) / %s) * 100 >= 0 THEN 'gainer' ELSE 'loser' END
+                    ELSE ''
+                END,
+                `change_percent_text` = CASE 
+                    WHEN `last_price` > 0 AND %s > 0 THEN CONCAT(FORMAT(((`last_price` - %s) / %s) * 100, 2), '%')
+                    ELSE ''
+                END,
                 `update_price_date` = %s
             WHERE `symbol` = %s
             """
             
             update_params = (
-                new_open_price,
-                price_change,
-                price_change_percent,
-                side,
-                change_percent_text,
-                update_price_date,  # 使用当前时间（非UTC格式）
-                symbol
+                new_open_price,  # open_price
+                new_open_price,  # for price_change calculation
+                new_open_price,  # for price_change calculation
+                new_open_price,  # for price_change_percent calculation
+                new_open_price,  # for price_change_percent calculation
+                new_open_price,  # for price_change_percent calculation
+                new_open_price,  # for side calculation
+                new_open_price,  # for side calculation
+                new_open_price,  # for side calculation
+                new_open_price,  # for change_percent_text calculation
+                new_open_price,  # for change_percent_text calculation
+                new_open_price,  # for change_percent_text calculation
+                update_price_date,  # update_price_date
+                symbol  # where condition
             )
             
-            update_success = False
-            try:
-                def _execute_update(conn):
-                    cursor = conn.cursor()
-                    try:
-                        cursor.execute(update_query, update_params)
-                        return cursor.rowcount > 0
-                    finally:
-                        cursor.close()
-                
-                update_success = self._with_connection(_execute_update)
-                
-                if update_success:
-                    logger.debug(
-                        "[MySQL] Updated open_price for symbol %s: %s | update_price_date: %s (当前时间)",
-                        symbol,
-                        new_open_price,
-                        update_price_date.strftime('%Y-%m-%d %H:%M:%S')
-                    )
-                else:
-                    logger.warning("[MySQL] No rows updated for symbol %s", symbol)
-            except Exception as e:
-                logger.error("[MySQL] Failed to update open price for %s: %s", symbol, e, exc_info=True)
+            def _execute_update(conn):
+                cursor = conn.cursor()
+                try:
+                    cursor.execute(update_query, update_params)
+                    return cursor.rowcount > 0
+                finally:
+                    cursor.close()
+            
+            update_success = self._with_connection(_execute_update)
+            
+            if update_success:
+                logger.debug(
+                    "[MySQL] Updated open_price for symbol %s: %s | update_price_date: %s (当前时间)",
+                    symbol,
+                    new_open_price,
+                    update_price_date.strftime('%Y-%m-%d %H:%M:%S')
+                )
+            else:
+                logger.warning("[MySQL] No rows updated for symbol %s", symbol)
             
             return update_success
             
@@ -1507,11 +1477,11 @@ class MySQLDatabase:
             one_hour_ago = datetime.now() - timedelta(hours=1)
             
             sql = f"""
-            SELECT DISTINCT `symbol`
+            SELECT `symbol`
             FROM `{self.market_ticker_table}`
             WHERE `update_price_date` IS NULL 
                OR `update_price_date` < %s
-            ORDER BY `symbol`
+            ORDER BY `event_time`
             """
             
             def _execute_query(conn):
