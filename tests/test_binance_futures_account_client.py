@@ -71,39 +71,7 @@ def test_get_account(api_key: str, api_secret: str) -> None:
         raise
 
 
-def test_get_account_asset(api_key: str, api_secret: str) -> None:
-    """
-    测试 get_account_asset() 方法
-    
-    Args:
-        api_key: Binance API密钥
-        api_secret: Binance API密钥
-    """
-    client = BinanceFuturesAccountClient(api_key=api_key, api_secret=api_secret)
-    logging.info("Created BinanceFuturesAccountClient: quote_asset=%s", client.quote_asset)
-    
-    logging.info("Testing get_account_asset()...")
-    try:
-        account_asset_json = client.get_account_asset()
-        # 解析JSON以验证格式
-        account_asset = json.loads(account_asset_json)
-        logging.info("account asset json: %s", account_asset_json)
-        logging.info("get_account_asset() returned valid JSON data")
-        if isinstance(account_asset, list):
-            logging.info(f"Number of assets: {len(account_asset)}")
-            # 打印部分资产信息
-            for asset in account_asset[:3]:
-                if isinstance(asset, dict) and 'asset' in asset:
-                    asset_name = asset['asset']
-                    balance = asset.get('balance', 'N/A')
-                    wallet_balance = asset.get('walletBalance', 'N/A')
-                    logging.info(f"Asset: {asset_name}, Balance: {balance}, Wallet Balance: {wallet_balance}")
-        elif isinstance(account_asset, dict):
-            logging.info(f"Asset info keys: {list(account_asset.keys())[:10]}...")
-        logging.info("get_account_asset() test passed")
-    except Exception as e:
-        logging.error(f"Error in get_account_asset(): {e}", exc_info=True)
-        raise
+# get_account_asset() 方法已废弃，不再测试
 
 
 def exercise_binance_futures_account_client(api_key: str, api_secret: str) -> None:
@@ -121,8 +89,7 @@ def exercise_binance_futures_account_client(api_key: str, api_secret: str) -> No
     # 测试get_account方法
     #test_get_account(api_key, api_secret)
     
-    # 测试get_account_asset方法
-    test_get_account_asset(api_key, api_secret)
+    # get_account_asset方法已废弃，不再测试
     
     logging.info("=" * 60)
     logging.info("All BinanceFuturesAccountClient method calls completed.")

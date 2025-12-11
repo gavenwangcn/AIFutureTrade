@@ -51,7 +51,6 @@ class Database:
         self.model_prompts_table = "model_prompts"
         self.model_futures_table = "model_futures"
         self.futures_table = "futures"
-        self.accounts_table = "accounts"
         self.account_asset_table = "account_asset"
         self.asset_table = "asset"
     
@@ -217,10 +216,7 @@ class Database:
         self._ensure_futures_table()
         
         
-        # Accounts table
-        self._ensure_accounts_table()
-        
-        # Account asset table
+        # Account asset table (accounts表已废弃，不再创建)
         self._ensure_account_asset_table()
         
         # Asset table
@@ -420,30 +416,16 @@ class Database:
         logger.debug(f"[Database] Ensured table {self.futures_table} exists")
     
     
-    def _ensure_accounts_table(self):
-        """Create accounts table if not exists"""
-        ddl = f"""
-        CREATE TABLE IF NOT EXISTS `{self.accounts_table}` (
-            `account_alias` VARCHAR(100) PRIMARY KEY,
-            `api_key` VARCHAR(500) NOT NULL,
-            `api_secret` VARCHAR(500) NOT NULL,
-            `balance` DOUBLE DEFAULT 0.0,
-            `cross_wallet_balance` DOUBLE DEFAULT 0.0,
-            `available_balance` DOUBLE DEFAULT 0.0,
-            `update_time` BIGINT UNSIGNED DEFAULT 0,
-            `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP,
-            UNIQUE INDEX `idx_account_alias` (`account_alias`),
-            INDEX `idx_update_time` (`update_time`)
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-        """
-        self.command(ddl)
-        logger.debug(f"[Database] Ensured table {self.accounts_table} exists")
+    # accounts表已废弃，不再创建
     
     def _ensure_account_asset_table(self):
         """Create account_asset table if not exists"""
         ddl = f"""
         CREATE TABLE IF NOT EXISTS `{self.account_asset_table}` (
             `account_alias` VARCHAR(100) PRIMARY KEY,
+            `account_name` VARCHAR(200) NOT NULL,
+            `api_key` VARCHAR(500) NOT NULL,
+            `api_secret` VARCHAR(500) NOT NULL,
             `total_initial_margin` DOUBLE DEFAULT 0.0,
             `total_maint_margin` DOUBLE DEFAULT 0.0,
             `total_wallet_balance` DOUBLE DEFAULT 0.0,
@@ -458,8 +440,7 @@ class Database:
             `update_time` BIGINT UNSIGNED DEFAULT 0,
             `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP,
             UNIQUE INDEX `idx_account_alias` (`account_alias`),
-            INDEX `idx_update_time` (`update_time`),
-            FOREIGN KEY (`account_alias`) REFERENCES `{self.accounts_table}`(`account_alias`) ON DELETE CASCADE
+            INDEX `idx_update_time` (`update_time`)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
         """
         self.command(ddl)
@@ -487,7 +468,7 @@ class Database:
             PRIMARY KEY (`account_alias`, `asset`),
             INDEX `idx_account_alias` (`account_alias`),
             INDEX `idx_update_time` (`update_time`),
-            FOREIGN KEY (`account_alias`) REFERENCES `{self.accounts_table}`(`account_alias`) ON DELETE CASCADE
+            FOREIGN KEY (`account_alias`) REFERENCES `{self.account_asset_table}`(`account_alias`) ON DELETE CASCADE
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
         """
         self.command(ddl)
@@ -687,9 +668,9 @@ class Database:
             model_name: 模型名称
             initial_capital: 初始资金
             leverage: 杠杆倍数
-            api_key: API密钥（如果提供了account_alias，则从accounts表获取）
-            api_secret: API密钥（如果提供了account_alias，则从accounts表获取）
-            account_alias: 账户别名（可选，如果提供则从accounts表获取api_key和api_secret）
+            api_key: API密钥（如果提供了account_alias，则从account_asset表获取）
+            api_secret: API密钥（如果提供了account_alias，则从account_asset表获取）
+            account_alias: 账户别名（可选，如果提供则从account_asset表获取api_key和api_secret）
             is_virtual: 是否虚拟账户，默认False
             symbol_source: 交易对来源，'future'（合约配置信息）或'leaderboard'（涨跌榜），默认'leaderboard'
         """
@@ -702,24 +683,35 @@ class Database:
             logger.warning(f"[Database] Invalid symbol_source value '{symbol_source}', using default 'leaderboard'")
             symbol_source = 'leaderboard'
         
-        # 如果提供了account_alias，从accounts表获取api_key和api_secret
+        # 如果提供了account_alias，从account_asset表获取api_key和api_secret
         final_api_key = api_key
         final_api_secret = api_secret
         if account_alias:
             try:
                 account_rows = self.query(f"""
-                    SELECT api_key, api_secret FROM `{self.accounts_table}`
+                    SELECT api_key, api_secret FROM `{self.account_asset_table}`
                     WHERE account_alias = %s
                     LIMIT 1
                 """, (account_alias,))
                 if account_rows and len(account_rows) > 0:
                     final_api_key = account_rows[0][0] if account_rows[0][0] else api_key
                     final_api_secret = account_rows[0][1] if account_rows[0][1] else api_secret
+                    # 验证从数据库获取的api_key和api_secret不能为空
+                    if not final_api_key or not final_api_key.strip():
+                        raise ValueError(f"Account {account_alias} has empty api_key in database")
+                    if not final_api_secret or not final_api_secret.strip():
+                        raise ValueError(f"Account {account_alias} has empty api_secret in database")
                 else:
-                    logger.warning(f"[Database] Account {account_alias} not found, using provided api_key/api_secret")
+                    raise ValueError(f"Account {account_alias} not found in database")
             except Exception as e:
                 logger.error(f"[Database] Failed to get account credentials for {account_alias}: {e}")
-                # 如果查询失败，使用提供的api_key和api_secret
+                raise
+        
+        # 验证最终使用的api_key和api_secret不能为空
+        if not final_api_key or not final_api_key.strip():
+            raise ValueError("api_key is required and cannot be empty")
+        if not final_api_secret or not final_api_secret.strip():
+            raise ValueError("api_secret is required and cannot be empty")
         
         try:
             self.insert_rows(
@@ -1706,224 +1698,9 @@ class Database:
     
     
     # ==================================================================
-    # Accounts Management (账户信息管理)
+    # Accounts Management (账户信息管理) - 已废弃，accounts表已删除
+    # 账户管理功能已迁移到 AccountDatabase 类（使用 account_asset 表）
     # ==================================================================
-    
-    def add_account(self, account_alias: str, asset: str, balance: float,
-                    cross_wallet_balance: float, cross_un_pnl: float,
-                    available_balance: float, max_withdraw_amount: float,
-                    margin_available: bool, update_time: int) -> bool:
-        """
-        添加或更新账户信息
-        
-        Args:
-            account_alias: 账户唯一识别码
-            asset: 资产类型（如USDT）
-            balance: 总余额
-            cross_wallet_balance: 全仓余额
-            cross_un_pnl: 全仓持仓未实现盈亏
-            available_balance: 下单可用余额
-            max_withdraw_amount: 最大可转出余额
-            margin_available: 是否可用作联合保证金
-            update_time: 更新时间（毫秒时间戳）
-            
-        Returns:
-            操作是否成功
-        """
-        try:
-            self.insert_rows(
-                self.accounts_table,
-                [[account_alias, asset, balance, cross_wallet_balance, cross_un_pnl,
-                  available_balance, max_withdraw_amount, 1 if margin_available else 0,
-                  update_time, datetime.now(timezone.utc)]],
-                ["account_alias", "asset", "balance", "cross_wallet_balance", "cross_un_pnl",
-                 "available_balance", "max_withdraw_amount", "margin_available", "update_time", "created_at"]
-            )
-            logger.debug(f"[Database] Added/Updated account: {account_alias}, asset: {asset}")
-            return True
-        except Exception as e:
-            logger.error(f"[Database] Failed to add account {account_alias}: {e}")
-            raise
-    
-    def get_account(self, account_alias: str, asset: str = None) -> Optional[Dict]:
-        """
-        获取账户信息
-        
-        Args:
-            account_alias: 账户唯一识别码
-            asset: 资产类型（可选，如果指定则只返回该资产的信息）
-            
-        Returns:
-            账户信息字典，如果不存在则返回None
-        """
-        try:
-            if asset:
-                rows = self.query(f"""
-                    SELECT account_alias, asset, balance, cross_wallet_balance, cross_un_pnl,
-                           available_balance, max_withdraw_amount, margin_available, update_time, created_at
-                    FROM {self.accounts_table} FINAL
-                    WHERE account_alias = '{account_alias}' AND asset = '{asset}'
-                    ORDER BY update_time DESC
-                    LIMIT 1
-                """)
-            else:
-                rows = self.query(f"""
-                    SELECT account_alias, asset, balance, cross_wallet_balance, cross_un_pnl,
-                           available_balance, max_withdraw_amount, margin_available, update_time, created_at
-                    FROM {self.accounts_table} FINAL
-                    WHERE account_alias = '{account_alias}'
-                    ORDER BY update_time DESC
-                    LIMIT 1
-                """)
-            
-            if not rows:
-                return None
-            
-            columns = ["account_alias", "asset", "balance", "cross_wallet_balance", "cross_un_pnl",
-                      "available_balance", "max_withdraw_amount", "margin_available", "update_time", "created_at"]
-            result = self._row_to_dict(rows[0], columns)
-            # 转换字段名以匹配原始JSON格式
-            return {
-                "accountAlias": result["account_alias"],
-                "asset": result["asset"],
-                "balance": str(result["balance"]),
-                "crossWalletBalance": str(result["cross_wallet_balance"]),
-                "crossUnPnl": str(result["cross_un_pnl"]),
-                "availableBalance": str(result["available_balance"]),
-                "maxWithdrawAmount": str(result["max_withdraw_amount"]),
-                "marginAvailable": bool(result["margin_available"]),
-                "updateTime": result["update_time"]
-            }
-        except Exception as e:
-            logger.error(f"[Database] Failed to get account {account_alias}: {e}")
-            return None
-    
-    def get_all_accounts(self, account_alias: str = None) -> List[Dict]:
-        """
-        获取所有账户信息或指定账户的所有资产信息
-        
-        Args:
-            account_alias: 账户唯一识别码（可选，如果指定则只返回该账户的所有资产）
-            
-        Returns:
-            账户信息列表
-        """
-        try:
-            if account_alias:
-                rows = self.query(f"""
-                    SELECT account_alias, asset, balance, cross_wallet_balance, cross_un_pnl,
-                           available_balance, max_withdraw_amount, margin_available, update_time, created_at
-                    FROM {self.accounts_table} FINAL
-                    WHERE account_alias = '{account_alias}'
-                    ORDER BY asset ASC, update_time DESC
-                """)
-            else:
-                rows = self.query(f"""
-                    SELECT account_alias, asset, balance, cross_wallet_balance, cross_un_pnl,
-                           available_balance, max_withdraw_amount, margin_available, update_time, created_at
-                    FROM {self.accounts_table} FINAL
-                    ORDER BY account_alias ASC, asset ASC, update_time DESC
-                """)
-            
-            columns = ["account_alias", "asset", "balance", "cross_wallet_balance", "cross_un_pnl",
-                      "available_balance", "max_withdraw_amount", "margin_available", "update_time", "created_at"]
-            results = self._rows_to_dicts(rows, columns)
-            
-            # 转换字段名以匹配原始JSON格式
-            formatted_results = []
-            for result in results:
-                formatted_results.append({
-                    "accountAlias": result["account_alias"],
-                    "asset": result["asset"],
-                    "balance": str(result["balance"]),
-                    "crossWalletBalance": str(result["cross_wallet_balance"]),
-                    "crossUnPnl": str(result["cross_un_pnl"]),
-                    "availableBalance": str(result["available_balance"]),
-                    "maxWithdrawAmount": str(result["max_withdraw_amount"]),
-                    "marginAvailable": bool(result["margin_available"]),
-                    "updateTime": result["update_time"]
-                })
-            
-            return formatted_results
-        except Exception as e:
-            logger.error(f"[Database] Failed to get all accounts: {e}")
-            return []
-    
-    def update_account(self, account_alias: str, asset: str, balance: float = None,
-                      cross_wallet_balance: float = None, cross_un_pnl: float = None,
-                      available_balance: float = None, max_withdraw_amount: float = None,
-                      margin_available: bool = None, update_time: int = None) -> bool:
-        """
-        更新账户信息（部分字段）
-        
-        Args:
-            account_alias: 账户唯一识别码
-            asset: 资产类型
-            balance: 总余额（可选）
-            cross_wallet_balance: 全仓余额（可选）
-            cross_un_pnl: 全仓持仓未实现盈亏（可选）
-            available_balance: 下单可用余额（可选）
-            max_withdraw_amount: 最大可转出余额（可选）
-            margin_available: 是否可用作联合保证金（可选）
-            update_time: 更新时间（可选，如果不提供则使用当前时间戳）
-            
-        Returns:
-            操作是否成功
-        """
-        try:
-            # 先获取现有账户信息
-            existing = self.get_account(account_alias, asset)
-            if not existing:
-                logger.warning(f"[Database] Account {account_alias} with asset {asset} not found for update")
-                return False
-            
-            # 使用提供的值或保留现有值
-            final_balance = balance if balance is not None else float(existing["balance"])
-            final_cross_wallet_balance = cross_wallet_balance if cross_wallet_balance is not None else float(existing["crossWalletBalance"])
-            final_cross_un_pnl = cross_un_pnl if cross_un_pnl is not None else float(existing["crossUnPnl"])
-            final_available_balance = available_balance if available_balance is not None else float(existing["availableBalance"])
-            final_max_withdraw_amount = max_withdraw_amount if max_withdraw_amount is not None else float(existing["maxWithdrawAmount"])
-            final_margin_available = margin_available if margin_available is not None else existing["marginAvailable"]
-            final_update_time = update_time if update_time is not None else existing["updateTime"]
-            
-            # 使用 add_account 方法（ReplacingMergeTree会自动去重）
-            return self.add_account(
-                account_alias=account_alias,
-                asset=asset,
-                balance=final_balance,
-                cross_wallet_balance=final_cross_wallet_balance,
-                cross_un_pnl=final_cross_un_pnl,
-                available_balance=final_available_balance,
-                max_withdraw_amount=final_max_withdraw_amount,
-                margin_available=final_margin_available,
-                update_time=final_update_time
-            )
-        except Exception as e:
-            logger.error(f"[Database] Failed to update account {account_alias}: {e}")
-            return False
-    
-    def delete_account(self, account_alias: str, asset: str = None) -> bool:
-        """
-        删除账户信息
-        
-        Args:
-            account_alias: 账户唯一识别码
-            asset: 资产类型（可选，如果指定则只删除该资产的信息，否则删除该账户的所有资产信息）
-            
-        Returns:
-            操作是否成功
-        """
-        try:
-            if asset:
-                self.command(f"ALTER TABLE {self.accounts_table} DELETE WHERE account_alias = '{account_alias}' AND asset = '{asset}'")
-                logger.debug(f"[Database] Deleted account: {account_alias}, asset: {asset}")
-            else:
-                self.command(f"ALTER TABLE {self.accounts_table} DELETE WHERE account_alias = '{account_alias}'")
-                logger.debug(f"[Database] Deleted all accounts for: {account_alias}")
-            return True
-        except Exception as e:
-            logger.error(f"[Database] Failed to delete account {account_alias}: {e}")
-            return False
     
     # ==================================================================
     # Account Asset Management (账户资产管理)

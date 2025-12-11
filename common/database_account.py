@@ -23,15 +23,14 @@ class AccountDatabase:
             auto_init_tables: 是否自动初始化表结构，默认True（注意：表结构在database_basic.py中统一管理）
         """
         self.db = MySQLDatabase(auto_init_tables=auto_init_tables)
-        self.accounts_table = "accounts"
         self.account_asset_table = "account_asset"
         self.asset_table = "asset"
     
     def add_account(
         self,
+        account_name: str,
         api_key: str,
         api_secret: str,
-        account_data: Dict[str, Any],
         account_asset_data: Dict[str, Any],
         asset_list: List[Dict[str, Any]]
     ) -> str:
@@ -39,57 +38,41 @@ class AccountDatabase:
         添加账户信息
         
         Args:
+            account_name: 账户中文名称（必填）
             api_key: API密钥
             api_secret: API密钥
-            account_data: get_account返回的账户数据（已解析）
-            account_asset_data: get_account_asset返回的账户资产汇总数据（已解析）
-            asset_list: get_account_asset返回的资产列表（已解析，不包含positions）
+            account_asset_data: get_account返回的账户资产汇总数据（已解析，包含totalInitialMargin等字段）
+            asset_list: get_account返回的assets数组（已解析，不包含positions）
             
         Returns:
-            account_alias字符串
+            account_alias字符串（自生成）
         """
-        # 从account_data中提取account_alias（SDK返回的字段名可能是accountAlias或account_alias）
-        account_alias = account_data.get('accountAlias') or account_data.get('account_alias')
+        import hashlib
+        import time
         
-        if not account_alias:
-            logger.error(f"account_alias not found in account_data. Available keys: {list(account_data.keys())}")
-            raise ValueError("account_alias not found in account_data. Please check SDK response structure.")
+        if not account_name or not account_name.strip():
+            raise ValueError("account_name is required and cannot be empty")
+        
+        # 生成account_alias：使用api_key的前8位 + 时间戳后6位
+        api_key_hash = hashlib.md5(api_key.encode()).hexdigest()[:8]
+        timestamp_suffix = str(int(time.time()))[-6:]
+        account_alias = f"{api_key_hash}_{timestamp_suffix}"
         
         # 获取当前时间戳（毫秒）
         update_time = int(datetime.now(timezone.utc).timestamp() * 1000)
         
-        # 从account_data中提取字段
-        balance = float(account_data.get('totalWalletBalance', 0))
-        cross_wallet_balance = float(account_data.get('totalCrossWalletBalance', 0))
-        available_balance = float(account_data.get('availableBalance', 0))
-        
-        # 插入account表
-        account_insert = f"""
-        INSERT INTO `{self.accounts_table}` 
-        (`account_alias`, `api_key`, `api_secret`, `balance`, `cross_wallet_balance`, `available_balance`, `update_time`, `created_at`)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-        ON DUPLICATE KEY UPDATE
-        `api_key` = VALUES(`api_key`),
-        `api_secret` = VALUES(`api_secret`),
-        `balance` = VALUES(`balance`),
-        `cross_wallet_balance` = VALUES(`cross_wallet_balance`),
-        `available_balance` = VALUES(`available_balance`),
-        `update_time` = VALUES(`update_time`)
-        """
-        self.db.command(
-            account_insert,
-            (account_alias, api_key, api_secret, balance, cross_wallet_balance, available_balance, update_time, datetime.now(timezone.utc))
-        )
-        
-        # 插入account_asset表
+        # 插入account_asset表（包含account_name、api_key和api_secret）
         account_asset_insert = f"""
         INSERT INTO `{self.account_asset_table}` 
-        (`account_alias`, `total_initial_margin`, `total_maint_margin`, `total_wallet_balance`, 
+        (`account_alias`, `account_name`, `api_key`, `api_secret`, `total_initial_margin`, `total_maint_margin`, `total_wallet_balance`, 
          `total_unrealized_profit`, `total_margin_balance`, `total_position_initial_margin`, 
          `total_open_order_initial_margin`, `total_cross_wallet_balance`, `total_cross_un_pnl`, 
          `available_balance`, `max_withdraw_amount`, `update_time`, `created_at`)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         ON DUPLICATE KEY UPDATE
+        `account_name` = VALUES(`account_name`),
+        `api_key` = VALUES(`api_key`),
+        `api_secret` = VALUES(`api_secret`),
         `total_initial_margin` = VALUES(`total_initial_margin`),
         `total_maint_margin` = VALUES(`total_maint_margin`),
         `total_wallet_balance` = VALUES(`total_wallet_balance`),
@@ -107,6 +90,9 @@ class AccountDatabase:
             account_asset_insert,
             (
                 account_alias,
+                account_name.strip(),
+                api_key,
+                api_secret,
                 float(account_asset_data.get('totalInitialMargin', 0)),
                 float(account_asset_data.get('totalMaintMargin', 0)),
                 float(account_asset_data.get('totalWalletBalance', 0)),
@@ -161,7 +147,7 @@ class AccountDatabase:
     
     def delete_account(self, account_alias: str) -> bool:
         """
-        删除账户信息（级联删除account_asset和asset表的数据）
+        删除账户信息（级联删除asset表的数据）
         
         Args:
             account_alias: 账户唯一标识
@@ -170,8 +156,10 @@ class AccountDatabase:
             是否删除成功
         """
         try:
-            # 由于设置了外键CASCADE，删除account表记录会自动删除account_asset和asset表的记录
-            self.db.command(f"DELETE FROM `{self.accounts_table}` WHERE `account_alias` = %s", (account_alias,))
+            # 先删除asset表的数据（由于外键CASCADE，删除account_asset会自动删除asset表的数据）
+            self.db.command(f"DELETE FROM `{self.asset_table}` WHERE `account_alias` = %s", (account_alias,))
+            # 删除account_asset表的数据
+            self.db.command(f"DELETE FROM `{self.account_asset_table}` WHERE `account_alias` = %s", (account_alias,))
             logger.info(f"[AccountDatabase] Account deleted successfully: account_alias={account_alias}")
             return True
         except Exception as e:
@@ -183,12 +171,12 @@ class AccountDatabase:
         查询所有账户信息
         
         Returns:
-            账户信息列表，包含balance、crossWalletBalance、availableBalance等字段
+            账户信息列表，包含total_wallet_balance（总余额）、total_cross_wallet_balance（全仓余额）、available_balance（下单可用余额）等字段
         """
         try:
             query = f"""
-            SELECT `account_alias`, `balance`, `cross_wallet_balance`, `available_balance`, `update_time`, `created_at`
-            FROM `{self.accounts_table}`
+            SELECT `account_alias`, `account_name`, `total_wallet_balance`, `total_cross_wallet_balance`, `available_balance`, `update_time`, `created_at`
+            FROM `{self.account_asset_table}`
             ORDER BY `created_at` DESC
             """
             rows = self.db.query(query)
@@ -197,11 +185,12 @@ class AccountDatabase:
             for row in rows:
                 accounts.append({
                     'account_alias': row[0],
-                    'balance': float(row[1]) if row[1] is not None else 0.0,
-                    'crossWalletBalance': float(row[2]) if row[2] is not None else 0.0,
-                    'availableBalance': float(row[3]) if row[3] is not None else 0.0,
-                    'update_time': row[4] if row[4] is not None else 0,
-                    'created_at': row[5].isoformat() if row[5] else None
+                    'account_name': row[1] if row[1] else '',  # account_name
+                    'balance': float(row[2]) if row[2] is not None else 0.0,  # total_wallet_balance -> balance
+                    'crossWalletBalance': float(row[3]) if row[3] is not None else 0.0,  # total_cross_wallet_balance -> crossWalletBalance
+                    'availableBalance': float(row[4]) if row[4] is not None else 0.0,  # available_balance -> availableBalance
+                    'update_time': row[5] if row[5] is not None else 0,
+                    'created_at': row[6].isoformat() if row[6] else None
                 })
             
             logger.debug(f"[AccountDatabase] Retrieved {len(accounts)} accounts")

@@ -33,14 +33,17 @@
       <input v-model.number="formData.initialCapital" type="number" class="form-input" />
     </div>
     <div class="form-group">
-      <label>选择账户</label>
-      <select v-model="formData.accountAlias" class="form-input">
+      <label>选择账户 <span style="color: red;">*</span></label>
+      <select v-model="formData.accountAlias" class="form-input" required>
         <option value="">请选择账户</option>
         <option v-for="account in accounts" :key="account.account_alias" :value="account.account_alias">
-          {{ account.account_alias }}
+          {{ account.account_name || account.account_alias }}
         </option>
       </select>
-      <small class="form-help">从已添加的账户中选择</small>
+      <small class="form-help">从已添加的账户中选择（必填）</small>
+      <div v-if="accounts.length === 0" class="form-help" style="color: red;">
+        暂无可用账户，请先添加账户
+      </div>
     </div>
     <div class="form-group">
       <label>是否虚拟</label>
@@ -158,8 +161,20 @@ const handleProviderChange = () => {
 
 // 提交模型
 const handleSubmit = async () => {
-  if (!formData.value.providerId || !formData.value.modelName || !formData.value.displayName || !formData.value.accountAlias) {
-    alert('请填写所有必填字段（包括选择账户）')
+  if (!formData.value.providerId || !formData.value.modelName || !formData.value.displayName) {
+    alert('请填写所有必填字段')
+    return
+  }
+  
+  // 检查账户列表是否为空
+  if (accounts.value.length === 0) {
+    alert('暂无可用账户，请先添加账户')
+    return
+  }
+  
+  // 检查是否选择了账户
+  if (!formData.value.accountAlias || !formData.value.accountAlias.trim()) {
+    alert('请选择账户（必填）')
     return
   }
   

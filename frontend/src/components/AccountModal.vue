@@ -7,21 +7,26 @@
   >
     <div v-if="error" class="alert alert-error">{{ error }}</div>
     <div class="form-group">
-      <label>API Key</label>
-      <input v-model="formData.apiKey" type="text" class="form-input" placeholder="请输入API Key" />
-      <small class="form-help">币安期货API密钥</small>
+      <label>账户名称 <span style="color: red;">*</span></label>
+      <input v-model="formData.accountName" type="text" class="form-input" placeholder="请输入账户中文名称" />
+      <small class="form-help">用于标识账户的中文名称（必填）</small>
     </div>
     <div class="form-group">
-      <label>API Secret</label>
-      <input v-model="formData.apiSecret" type="password" class="form-input" placeholder="请输入API Secret" />
-      <small class="form-help">币安期货API密钥</small>
+      <label>API Key <span style="color: red;">*</span></label>
+      <input v-model="formData.apiKey" type="text" class="form-input" placeholder="请输入API Key" required />
+      <small class="form-help">币安期货API密钥（必填）</small>
+    </div>
+    <div class="form-group">
+      <label>API Secret <span style="color: red;">*</span></label>
+      <input v-model="formData.apiSecret" type="password" class="form-input" placeholder="请输入API Secret" required />
+      <small class="form-help">币安期货API密钥（必填）</small>
     </div>
     <div class="form-group">
       <label>已添加账户</label>
       <div class="provider-list">
         <div v-for="account in accounts" :key="account.account_alias" class="provider-item">
           <div class="provider-info">
-            <div class="provider-name">账户: {{ account.account_alias }}</div>
+            <div class="provider-name">账户: {{ account.account_name || account.account_alias }}</div>
             <div class="provider-url account-balance">
               <span class="balance-item">总余额: {{ formatBalance(account.balance) }}</span>
               <span class="balance-item">全仓余额: {{ formatBalance(account.crossWalletBalance) }}</span>
@@ -62,6 +67,7 @@ const props = defineProps({
 const emit = defineEmits(['update:visible', 'close', 'refresh'])
 
 const formData = ref({
+  accountName: '',
   apiKey: '',
   apiSecret: ''
 })
@@ -104,14 +110,23 @@ const loadAccounts = async () => {
 const handleSave = async () => {
   error.value = ''
   
-  if (!formData.value.apiKey || !formData.value.apiSecret) {
-    error.value = '请填写API Key和API Secret'
+  if (!formData.value.accountName || !formData.value.accountName.trim()) {
+    error.value = '请填写账户名称'
+    return
+  }
+  if (!formData.value.apiKey || !formData.value.apiKey.trim()) {
+    error.value = '请填写API Key（必填）'
+    return
+  }
+  if (!formData.value.apiSecret || !formData.value.apiSecret.trim()) {
+    error.value = '请填写API Secret（必填）'
     return
   }
   
   loading.value = true
   try {
     await accountApi.create({
+      account_name: formData.value.accountName.trim(),
       api_key: formData.value.apiKey.trim(),
       api_secret: formData.value.apiSecret.trim()
     })
@@ -154,6 +169,7 @@ const handleDelete = async (accountAlias) => {
 
 const clearForm = () => {
   formData.value = {
+    accountName: '',
     apiKey: '',
     apiSecret: ''
   }
