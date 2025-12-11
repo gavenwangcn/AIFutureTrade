@@ -675,7 +675,7 @@ class BinanceFuturesAccountClient:
             Exception: 如果API调用失败
         """
         try:
-            response = self._rest.account_information_v2()
+            response = self._rest.account_information_v3()
             return response.data().to_json()
         except Exception as e:
             logger.error(f"[BinanceFuturesAccountClient] Failed to get account information: {e}")
@@ -694,7 +694,7 @@ class BinanceFuturesAccountClient:
         """
         try:
             import json
-            response = self._rest.futures_account_balance_v3()
+            response = self._rest.futures_account_balance_v2()
             data = response.data()
             
             # futures_account_balance_v3 返回的是列表，需要特殊处理
