@@ -134,10 +134,10 @@ async def refresh_price_for_symbol(
             return False
         
         # 更新open_price和update_price_date
-            # 注意：update_open_price方法内部会使用当前UTC+8时间作为update_price_date
-            # 传入的update_date参数会被忽略，但为了兼容性仍然传递
-            utc8 = timezone(timedelta(hours=8))
-            refresh_time = datetime.now(utc8)  # 使用UTC+8时间
+        # 注意：update_open_price方法内部会使用当前UTC+8时间作为update_price_date
+        # 传入的update_date参数会被忽略，但为了兼容性仍然传递
+        utc8 = timezone(timedelta(hours=8))
+        refresh_time = datetime.now(utc8)  # 使用UTC+8时间
         
         # 使用asyncio.to_thread避免阻塞事件循环
         success = await asyncio.to_thread(
@@ -337,7 +337,7 @@ async def refresh_all_prices() -> None:
         )
         logger.info("[PriceRefresh] [步骤3] 配置参数: max_per_minute=%s", max_per_minute)
         
-            # 执行批量刷新
+        # 执行批量刷新
         logger.info("[PriceRefresh] [步骤3] 开始执行批量价格刷新...")
         batch_start_time = datetime.now(timezone(timedelta(hours=8)))
         result = await refresh_prices_batch(
