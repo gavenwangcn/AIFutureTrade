@@ -582,7 +582,7 @@ class MySQLDatabase:
         
         def _cleanup(conn, days):
             # 计算截止时间
-            cutoff_time = datetime.now() - timedelta(days=days)
+            cutoff_time = datetime.now(timezone(timedelta(hours=8))) - timedelta(days=days)
             logger.info(f"[KlineCleanup] Cleaning up klines older than {cutoff_time} from all tables")
             
             for interval, table_name in self.market_klines_tables.items():
@@ -1282,7 +1282,7 @@ class MySQLDatabase:
                     for field in datetime_fields:
                         field_value = normalized.get(field)
                         if field_value is None:
-                            normalized[field] = datetime.now()
+                            normalized[field] = datetime.now(timezone(timedelta(hours=8)))
                             logger.debug("[MySQL] 设置%s.%s为当前时间(原值为None)", symbol, field)
                         elif isinstance(field_value, datetime) and field_value.tzinfo is not None:
                             # 如果有时区信息，转换为 UTC 后移除时区（与 ingestion_time 格式一致）
@@ -1534,7 +1534,7 @@ class MySQLDatabase:
         """
         try:
             # 计算1小时前的时间
-            one_hour_ago = datetime.now() - timedelta(hours=1)
+            one_hour_ago = datetime.now(timezone(timedelta(hours=8))) - timedelta(hours=1)
             
             sql = f"""
             SELECT `symbol`
@@ -1626,7 +1626,7 @@ class MySQLDatabase:
             涨跌榜数据列表
         """
         try:
-            cutoff_time = datetime.now() - timedelta(seconds=time_window_seconds)
+            cutoff_time = datetime.now(timezone(timedelta(hours=8))) - timedelta(seconds=time_window_seconds)
             
             query = f"""
             SELECT 
@@ -1693,7 +1693,7 @@ class MySQLDatabase:
             (long_rows, short_rows) 元组，分别包含涨幅榜和跌幅榜数据
         """
         try:
-            cutoff_time = datetime.now() - timedelta(seconds=time_window_seconds)
+            cutoff_time = datetime.now(timezone(timedelta(hours=8))) - timedelta(seconds=time_window_seconds)
             
             query = f"""
             SELECT 
@@ -1831,7 +1831,7 @@ class MySQLDatabase:
             }
             
             try:
-                event_time = datetime.now()
+                event_time = datetime.now(timezone(timedelta(hours=8)))
                 
                 def _execute_sync(conn):
                     cursor = conn.cursor()
@@ -1940,7 +1940,7 @@ class MySQLDatabase:
             清理统计信息
         """
         try:
-            cutoff_time = datetime.now() - timedelta(minutes=minutes)
+            cutoff_time = datetime.now(timezone(timedelta(hours=8))) - timedelta(minutes=minutes)
             
             def _execute_cleanup(conn):
                 cursor = conn.cursor()

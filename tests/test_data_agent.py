@@ -102,7 +102,7 @@ def print_kline_data(kline_data: Any, symbol: str, interval: str):
         interval: 时间间隔
     """
     # 计算日期标签
-    today = datetime.now()
+    today = datetime.now(timezone(timedelta(hours=8)))
     yesterday = today - timedelta(days=1)
     
     # 提取K线数据

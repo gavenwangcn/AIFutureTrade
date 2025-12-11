@@ -13,7 +13,7 @@ import asyncio
 import os
 import logging
 import json
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import List, Dict, Any, Optional
 
 from binance_sdk_derivatives_trading_usds_futures.derivatives_trading_usds_futures import (
@@ -246,16 +246,16 @@ async def close_stream_async(stream: Any, symbol: str, interval: str):
         interval: 时间间隔
     """
     logger.info("[WebSocketTest] [%s %s] 🔌 开始关闭订阅...", symbol, interval)
-    close_start = datetime.now()
+    close_start = datetime.now(timezone(timedelta(hours=8)))
     try:
         await stream.unsubscribe()
-        close_duration = (datetime.now() - close_start).total_seconds()
+        close_duration = (datetime.now(timezone(timedelta(hours=8))) - close_start).total_seconds()
         logger.info(
             "[WebSocketTest] [%s %s] ✅ 订阅已关闭 (耗时: %.3fs)",
             symbol, interval, close_duration
         )
     except Exception as e:
-        close_duration = (datetime.now() - close_start).total_seconds()
+        close_duration = (datetime.now(timezone(timedelta(hours=8))) - close_start).total_seconds()
         logger.error(
             "[WebSocketTest] [%s %s] ❌ 关闭订阅失败 (耗时: %.3fs): %s",
             symbol, interval, close_duration, e, exc_info=True
@@ -303,7 +303,7 @@ async def kline_candlestick_streams(
         logger.info("[WebSocketTest] ✅ WebSocket连接创建成功: %s", connection)
         
         # 计算昨天和今天的日期
-        today = datetime.now()
+        today = datetime.now(timezone(timedelta(hours=8)))
         yesterday = today - timedelta(days=1)
         
         logger.info("=" * 80)
@@ -408,8 +408,8 @@ async def kline_candlestick_streams(
         logger.info("=" * 80)
         
         # 检查连接有效期
-        connection_created_at = datetime.now()
-        connection_duration = datetime.now() - connection_created_at
+        connection_created_at = datetime.now(timezone(timedelta(hours=8)))
+        connection_duration = datetime.now(timezone(timedelta(hours=8))) - connection_created_at
         logger.info("[WebSocketTest] 连接持续时间: %s", connection_duration)
         if connection_duration > timedelta(hours=24):
             logger.warning("[WebSocketTest] ⚠️  连接已超过24小时有效期，应重新连接")
@@ -419,16 +419,16 @@ async def kline_candlestick_streams(
     finally:
         if connection:
             logger.info("[WebSocketTest] 🔌 开始关闭WebSocket连接...")
-            close_start = datetime.now()
+            close_start = datetime.now(timezone(timedelta(hours=8)))
             try:
                 await connection.close_connection(close_session=True)
-                close_duration = (datetime.now() - close_start).total_seconds()
+                close_duration = (datetime.now(timezone(timedelta(hours=8))) - close_start).total_seconds()
                 logger.info(
                     "[WebSocketTest] ✅ 连接已关闭 (耗时: %.3fs)",
                     close_duration
                 )
             except Exception as e:
-                close_duration = (datetime.now() - close_start).total_seconds()
+                close_duration = (datetime.now(timezone(timedelta(hours=8))) - close_start).total_seconds()
                 logger.error(
                     "[WebSocketTest] ❌ 关闭连接失败 (耗时: %.3fs): %s",
                     close_duration, e, exc_info=True

@@ -5,7 +5,7 @@ import time
 import logging
 import threading
 import common.config as app_config
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Dict, List, Optional
 import pandas as pd
 from finta import TA as ta
@@ -160,7 +160,7 @@ class MarketDataFetcher:
         Returns:
             价格数据字典，key为交易对符号，value为价格信息。如果SDK获取失败，返回空字典。
         """
-        now = datetime.now()
+        now = datetime.now(timezone(timedelta(hours=8)))
         
         # 实时获取价格数据（不使用缓存）
         live_prices = self.get_current_prices(symbols)

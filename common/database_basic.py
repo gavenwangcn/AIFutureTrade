@@ -6,7 +6,7 @@ import json
 import logging
 import uuid
 import common.config as app_config
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import List, Dict, Optional, Any, Callable, Tuple
 from common.database_mysql import MySQLConnectionPool
 import pymysql
@@ -1733,7 +1733,7 @@ class Database:
                         entry.get('change_percent', 0.0),
                         entry.get('quote_volume', 0.0),
                         json.dumps(entry.get('timeframes', {}), ensure_ascii=False),
-                        datetime.now()
+                        datetime.now(timezone(timedelta(hours=8)))
                     ])
                 except KeyError as exc:
                     logger.warning(f"[Database] 无法写入涨跌幅榜：缺少字段 {exc}")

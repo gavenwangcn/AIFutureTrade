@@ -1,7 +1,7 @@
 """
 Trading Engine - Core trading logic for executing AI trading decisions
 """
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 from typing import Dict, List, Optional
 import json
 import logging
@@ -70,7 +70,7 @@ class TradingEngine:
             }
         """
         logger.debug(f"[Model {self.model_id}] [卖出服务] ========== 开始执行卖出决策周期 ==========")
-        cycle_start_time = datetime.now()
+        cycle_start_time = datetime.now(timezone(timedelta(hours=8)))
         
         try:
             # ========== 阶段1: 初始化数据准备 ==========
@@ -155,7 +155,7 @@ class TradingEngine:
                 # 创建线程安全锁（用于保护portfolio和executions的更新）
                 portfolio_lock = threading.Lock()
                 has_sell_decision = False
-                batch_start_time = datetime.now()
+                batch_start_time = datetime.now(timezone(timedelta(hours=8)))
 
                 # 使用线程池并发处理各批次
                 logger.debug(f"[Model {self.model_id}] [卖出服务] 创建线程池，最大工作线程数: {thread_count}")
@@ -196,7 +196,7 @@ class TradingEngine:
                             import traceback
                             logger.debug(f"[Model {self.model_id}] [卖出服务] 异常堆栈:{traceback.format_exc()}")
 
-                batch_end_time = datetime.now()
+                batch_end_time = datetime.now(timezone(timedelta(hours=8)))
                 batch_duration = (batch_end_time - batch_start_time).total_seconds()
                 logger.debug(f"[Model {self.model_id}] [卖出服务] 所有批次处理完成: "
                             f"完成批次数={completed_batches}/{len(batches)}, "
@@ -241,7 +241,7 @@ class TradingEngine:
             self.db.sync_model_futures_from_portfolio(self.model_id)
             
             # ========== 交易周期完成 ==========
-            cycle_end_time = datetime.now()
+            cycle_end_time = datetime.now(timezone(timedelta(hours=8)))
             cycle_duration = (cycle_end_time - cycle_start_time).total_seconds()
             logger.debug(f"[Model {self.model_id}] [卖出服务] ========== 卖出决策周期执行完成 ==========")
             logger.debug(f"[Model {self.model_id}] [卖出服务] 执行统计: "
@@ -257,7 +257,7 @@ class TradingEngine:
             }
 
         except Exception as e:
-            cycle_end_time = datetime.now()
+            cycle_end_time = datetime.now(timezone(timedelta(hours=8)))
             cycle_duration = (cycle_end_time - cycle_start_time).total_seconds()
             logger.error(f"[Model {self.model_id}] [卖出服务] ========== 卖出决策周期执行失败 ==========")
             logger.error(f"[Model {self.model_id}] [卖出服务] 错误信息: {e}")
@@ -288,7 +288,7 @@ class TradingEngine:
             }
         """
         logger.debug(f"[Model {self.model_id}] [买入服务] ========== 开始执行买入决策周期 ==========")
-        cycle_start_time = datetime.now()
+        cycle_start_time = datetime.now(timezone(timedelta(hours=8)))
         
         try:
             # ========== 阶段1: 初始化数据准备 ==========
@@ -409,7 +409,7 @@ class TradingEngine:
             self.db.sync_model_futures_from_portfolio(self.model_id)
             
             # ========== 交易周期完成 ==========
-            cycle_end_time = datetime.now()
+            cycle_end_time = datetime.now(timezone(timedelta(hours=8)))
             cycle_duration = (cycle_end_time - cycle_start_time).total_seconds()
             logger.debug(f"[Model {self.model_id}] [买入服务] ========== 买入决策周期执行完成 ==========")
             logger.debug(f"[Model {self.model_id}] [买入服务] 执行统计: "
@@ -425,7 +425,7 @@ class TradingEngine:
             }
 
         except Exception as e:
-            cycle_end_time = datetime.now()
+            cycle_end_time = datetime.now(timezone(timedelta(hours=8)))
             cycle_duration = (cycle_end_time - cycle_start_time).total_seconds()
             logger.error(f"[Model {self.model_id}] [买入服务] ========== 买入决策周期执行失败 ==========")
             logger.error(f"[Model {self.model_id}] [买入服务] 错误信息: {e}")
@@ -890,7 +890,7 @@ class TradingEngine:
         total_return = ((total_value - initial_capital) / initial_capital) * 100 if initial_capital > 0 else 0
 
         return {
-            'current_time': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+            'current_time': datetime.now(timezone(timedelta(hours=8))).strftime('%Y-%m-%d %H:%M:%S'),
             'total_return': total_return,
             'initial_capital': initial_capital
         }
@@ -972,7 +972,7 @@ class TradingEngine:
         # 创建线程安全锁（用于保护portfolio和executions的更新）
         portfolio_lock = threading.Lock()
         has_buy_decision = False
-        batch_start_time = datetime.now()
+        batch_start_time = datetime.now(timezone(timedelta(hours=8)))
 
         # 使用线程池并发处理各批次
         logger.debug(f"[Model {self.model_id}] [分批买入] 创建线程池，最大工作线程数: {thread_count}")
@@ -1016,7 +1016,7 @@ class TradingEngine:
                     import traceback
                     logger.debug(f"[Model {self.model_id}] [分批买入] 异常堆栈:\n{traceback.format_exc()}")
 
-        batch_end_time = datetime.now()
+        batch_end_time = datetime.now(timezone(timedelta(hours=8)))
         batch_duration = (batch_end_time - batch_start_time).total_seconds()
         logger.debug(f"[Model {self.model_id}] [分批买入] 所有批次处理完成: "
                     f"完成批次数={completed_batches}/{len(batches)}, "
@@ -1054,7 +1054,7 @@ class TradingEngine:
         注意：此方法在独立线程中执行，需要线程安全处理
         """
         thread_id = threading.current_thread().ident
-        batch_start_time = datetime.now()
+        batch_start_time = datetime.now(timezone(timedelta(hours=8)))
         batch_symbols = [pos.get('symbol', 'N/A') for pos in batch_positions]  # 【字段更新】使用新字段名symbol替代future
         
         logger.debug(f"[Model {self.model_id}] [线程-{thread_id}] [卖出批次 {batch_num}/{total_batches}] "
@@ -1071,14 +1071,14 @@ class TradingEngine:
             logger.debug(f"[Model {self.model_id}] [线程-{thread_id}] [卖出批次 {batch_num}/{total_batches}] "
                         f"[步骤2] 调用AI模型进行卖出决策...")
             
-            ai_call_start = datetime.now()
+            ai_call_start = datetime.now(timezone(timedelta(hours=8)))
             sell_payload = self.ai_trader.make_sell_decision(
                 batch_portfolio,
                 market_state,
                 account_info,
                 constraints_text=constraints_text
             )
-            ai_call_duration = (datetime.now() - ai_call_start).total_seconds()
+            ai_call_duration = (datetime.now(timezone(timedelta(hours=8))) - ai_call_start).total_seconds()
             
             is_skipped = sell_payload.get('skipped', False)
             has_prompt = bool(sell_payload.get('prompt'))
@@ -1118,10 +1118,10 @@ class TradingEngine:
             # ========== 步骤5: 获取锁并执行决策（线程安全） ==========
             logger.debug(f"[Model {self.model_id}] [线程-{thread_id}] [卖出批次 {batch_num}/{total_batches}] "
                         f"[步骤5] 等待获取锁以执行决策...")
-            lock_acquire_start = datetime.now()
+            lock_acquire_start = datetime.now(timezone(timedelta(hours=8)))
             
             with portfolio_lock:
-                lock_acquire_duration = (datetime.now() - lock_acquire_start).total_seconds()
+                lock_acquire_duration = (datetime.now(timezone(timedelta(hours=8))) - lock_acquire_start).total_seconds()
                 logger.debug(f"[Model {self.model_id}] [线程-{thread_id}] [卖出批次 {batch_num}/{total_batches}] "
                             f"[步骤5.1] 锁已获取，等待时间={lock_acquire_duration:.3f}秒")
                 
@@ -1138,13 +1138,13 @@ class TradingEngine:
                 # 执行决策
                 logger.debug(f"[Model {self.model_id}] [线程-{thread_id}] [卖出批次 {batch_num}/{total_batches}] "
                             f"[步骤5.3] 开始执行决策...")
-                execution_start = datetime.now()
+                execution_start = datetime.now(timezone(timedelta(hours=8)))
                 batch_results = self._execute_decisions(
                     decisions,
                     market_state,
                     latest_portfolio
                 )
-                execution_duration = (datetime.now() - execution_start).total_seconds()
+                execution_duration = (datetime.now(timezone(timedelta(hours=8))) - execution_start).total_seconds()
                 logger.debug(f"[Model {self.model_id}] [线程-{thread_id}] [卖出批次 {batch_num}/{total_batches}] "
                             f"[步骤5.3] 决策执行完成: 耗时={execution_duration:.2f}秒, 结果数={len(batch_results)}")
                 
@@ -1168,7 +1168,7 @@ class TradingEngine:
                 logger.info(f"[Model {self.model_id}] 卖出批次 {batch_num}/{total_batches} 执行完成, 决策数: {len(decisions)}, 执行结果: {len(batch_results)}")
             
             # ========== 步骤6: 记录批次处理时间 ==========
-            batch_duration = (datetime.now() - batch_start_time).total_seconds()
+            batch_duration = (datetime.now(timezone(timedelta(hours=8))) - batch_start_time).total_seconds()
             logger.debug(f"[Model {self.model_id}] [线程-{thread_id}] [卖出批次 {batch_num}/{total_batches}] "
                         f"批次处理完成，耗时: {batch_duration:.2f}秒")
             
@@ -1210,7 +1210,7 @@ class TradingEngine:
         注意：此方法在独立线程中执行，需要线程安全处理
         """
         thread_id = threading.current_thread().ident
-        batch_start_time = datetime.now()
+        batch_start_time = datetime.now(timezone(timedelta(hours=8)))
         batch_symbols = [c.get('symbol', 'N/A') for c in batch_candidates]
         
         logger.debug(f"[Model {self.model_id}] [线程-{thread_id}] [批次 {batch_num}/{total_batches}] "
@@ -1230,7 +1230,7 @@ class TradingEngine:
             model = self.db.get_model(self.model_id)
             symbol_source = model.get('symbol_source', 'leaderboard') if model else 'leaderboard'
             
-            ai_call_start = datetime.now()
+            ai_call_start = datetime.now(timezone(timedelta(hours=8)))
             buy_payload = self.ai_trader.make_buy_decision(
                 batch_candidates,
                 portfolio,
@@ -1240,7 +1240,7 @@ class TradingEngine:
                 market_snapshot=market_snapshot,
                 symbol_source=symbol_source  # 【新增参数】传递数据源类型，用于调整prompt文本
             )
-            ai_call_duration = (datetime.now() - ai_call_start).total_seconds()
+            ai_call_duration = (datetime.now(timezone(timedelta(hours=8))) - ai_call_start).total_seconds()
             
             is_skipped = buy_payload.get('skipped', False)
             has_prompt = bool(buy_payload.get('prompt'))
@@ -1285,10 +1285,10 @@ class TradingEngine:
             # ========== 步骤4: 获取锁并执行决策（线程安全） ==========
             logger.debug(f"[Model {self.model_id}] [线程-{thread_id}] [批次 {batch_num}/{total_batches}] "
                         f"[步骤4] 等待获取锁以执行决策...")
-            lock_acquire_start = datetime.now()
+            lock_acquire_start = datetime.now(timezone(timedelta(hours=8)))
             
             with portfolio_lock:
-                lock_acquire_duration = (datetime.now() - lock_acquire_start).total_seconds()
+                lock_acquire_duration = (datetime.now(timezone(timedelta(hours=8))) - lock_acquire_start).total_seconds()
                 logger.debug(f"[Model {self.model_id}] [线程-{thread_id}] [批次 {batch_num}/{total_batches}] "
                             f"[步骤4.1] 锁已获取，等待时间={lock_acquire_duration:.3f}秒")
                 
@@ -1305,13 +1305,13 @@ class TradingEngine:
                 # 执行决策
                 logger.debug(f"[Model {self.model_id}] [线程-{thread_id}] [批次 {batch_num}/{total_batches}] "
                             f"[步骤4.3] 开始执行决策...")
-                execution_start = datetime.now()
+                execution_start = datetime.now(timezone(timedelta(hours=8)))
                 batch_results = self._execute_decisions(
                     decisions,
                     market_state,
                     latest_portfolio
                 )
-                execution_duration = (datetime.now() - execution_start).total_seconds()
+                execution_duration = (datetime.now(timezone(timedelta(hours=8))) - execution_start).total_seconds()
                 logger.debug(f"[Model {self.model_id}] [线程-{thread_id}] [批次 {batch_num}/{total_batches}] "
                             f"[步骤4.3] 决策执行完成: 耗时={execution_duration:.2f}秒, 结果数={len(batch_results)}")
                 
@@ -1370,7 +1370,7 @@ class TradingEngine:
                             f"[步骤4.5] 状态更新完成，释放锁")
 
             # ========== 批次处理完成 ==========
-            batch_end_time = datetime.now()
+            batch_end_time = datetime.now(timezone(timedelta(hours=8)))
             batch_duration = (batch_end_time - batch_start_time).total_seconds()
             logger.debug(f"[Model {self.model_id}] [线程-{thread_id}] [批次 {batch_num}/{total_batches}] "
                         f"批次处理完成: 总耗时={batch_duration:.2f}秒")
@@ -1378,7 +1378,7 @@ class TradingEngine:
             return buy_payload
 
         except Exception as exc:
-            batch_end_time = datetime.now()
+            batch_end_time = datetime.now(timezone(timedelta(hours=8)))
             batch_duration = (batch_end_time - batch_start_time).total_seconds()
             logger.error(f"[Model {self.model_id}] [线程-{thread_id}] [批次 {batch_num}/{total_batches}] "
                         f"处理失败: {exc}, 耗时={batch_duration:.2f}秒")

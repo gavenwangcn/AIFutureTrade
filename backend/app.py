@@ -12,7 +12,7 @@ import os
 import time
 import threading
 import json
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from trade.trading_engine import TradingEngine
 from market.market_data import MarketDataFetcher
 from trade.ai_trader import AITrader
@@ -244,7 +244,7 @@ def _leaderboard_loop():
     
     while not leaderboard_stop_event.is_set():
         cycle_count += 1
-        cycle_start_time = datetime.now()
+        cycle_start_time = datetime.now(timezone(timedelta(hours=8)))
         
         try:
             # 调用同步方法（不强制刷新，使用缓存机制）
@@ -264,7 +264,7 @@ def _leaderboard_loop():
                 logger.warning(f"[Leaderboard Worker-{thread_id}] [循环 #{cycle_count}] 同步返回空数据")
                 
         except Exception as exc:
-            cycle_duration = (datetime.now() - cycle_start_time).total_seconds()
+            cycle_duration = (datetime.now(timezone(timedelta(hours=8))) - cycle_start_time).total_seconds()
             logger.error(f"[Leaderboard Worker-{thread_id}] [循环 #{cycle_count}] 涨跌幅榜同步失败: {exc}, 耗时: {cycle_duration:.2f} 秒")
             import traceback
             logger.error(f"[Leaderboard Worker-{thread_id}] [循环 #{cycle_count}] 错误堆栈:\n{traceback.format_exc()}")
@@ -332,7 +332,7 @@ def _mysql_leaderboard_loop():
     
     # 立即执行第一次同步（启动时立即刷新数据）
     cycle_count += 1
-    cycle_start_time = datetime.now()
+    cycle_start_time = datetime.now(timezone(timedelta(hours=8)))
     
     try:
         # 如果数据库连接未初始化，尝试重新初始化
@@ -352,7 +352,7 @@ def _mysql_leaderboard_loop():
         )
     except Exception as exc:
         # 处理同步失败的情况，但不退出循环
-        cycle_duration = (datetime.now() - cycle_start_time).total_seconds()
+        cycle_duration = (datetime.now(timezone(timedelta(hours=8))) - cycle_start_time).total_seconds()
         logger.error(f"[MySQL Leaderboard Worker-{thread_id}] [循环 #{cycle_count}] 启动时首次同步失败: {exc}, 耗时: {cycle_duration:.3f} 秒")
         import traceback
         logger.error(f"[MySQL Leaderboard Worker-{thread_id}] [循环 #{cycle_count}] 错误堆栈:\n{traceback.format_exc()}")
@@ -360,7 +360,7 @@ def _mysql_leaderboard_loop():
     # 主循环：定期执行同步任务（永不退出，除非收到停止信号）
     while not mysql_leaderboard_stop_event.is_set():
         cycle_count += 1
-        cycle_start_time = datetime.now()
+        cycle_start_time = datetime.now(timezone(timedelta(hours=8)))
         
         try:
             # 如果数据库连接丢失，尝试重新初始化
@@ -381,7 +381,7 @@ def _mysql_leaderboard_loop():
             
         except Exception as exc:
             # 处理同步失败的情况，但不退出循环，继续重试
-            cycle_duration = (datetime.now() - cycle_start_time).total_seconds()
+            cycle_duration = (datetime.now(timezone(timedelta(hours=8))) - cycle_start_time).total_seconds()
             logger.error(f"[MySQL Leaderboard Worker-{thread_id}] [循环 #{cycle_count}] 同步失败: {exc}, 耗时: {cycle_duration:.3f} 秒")
             import traceback
             error_stack = traceback.format_exc()
@@ -581,7 +581,7 @@ def trading_loop():
                 continue
 
             logger.info(f"\n{'='*60}")
-            logger.info(f"CYCLE: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+            logger.info(f"CYCLE: {datetime.now(timezone(timedelta(hours=8))).strftime('%Y-%m-%d %H:%M:%S')}")
             logger.info(f"Active models: {len(trading_engines)}")
             logger.info(f"{'='*60}")
 
@@ -1213,7 +1213,7 @@ def get_market_leaderboard():
         result = {
             'gainers': data.get('gainers', [])[:limit],  # 确保最多返回limit条
             'losers': data.get('losers', [])[:limit],   # 确保最多返回limit条
-            'timestamp': int(datetime.now().timestamp() * 1000)  # 添加时间戳，便于前端判断数据新鲜度
+            'timestamp': int(datetime.now(timezone(timedelta(hours=8))).timestamp() * 1000)  # 添加时间戳，便于前端判断数据新鲜度
         }
         
         gainers_count = len(result['gainers'])
@@ -1578,7 +1578,7 @@ def handle_klines_subscribe(payload=None):
         kline_subscriptions[room] = {
             'symbol': symbol,
             'interval': interval,
-            'last_update_time': datetime.now()
+            'last_update_time': datetime.now(timezone(timedelta(hours=8)))
         }
         current_count = len(kline_subscriptions)
     
