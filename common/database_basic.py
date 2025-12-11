@@ -423,6 +423,8 @@ class Database:
         CREATE TABLE IF NOT EXISTS `{self.accounts_table}` (
             `account_alias` VARCHAR(100) NOT NULL,
             `asset` VARCHAR(50) NOT NULL,
+            `api_key` VARCHAR(500) NOT NULL, 
+            `api_secret` VARCHAR(500) NOT NULL,
             `balance` DOUBLE DEFAULT 0.0,
             `cross_wallet_balance` DOUBLE DEFAULT 0.0,
             `cross_un_pnl` DOUBLE DEFAULT 0.0,
