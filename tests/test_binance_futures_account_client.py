@@ -57,6 +57,7 @@ def test_get_account(api_key: str, api_secret: str) -> None:
         account_info_json = client.get_account()
         # 解析JSON以验证格式
         account_info = json.loads(account_info_json)
+        logging.info("account json: %s", account_info_json)
         logging.info("get_account() returned valid JSON data")
         logging.info(f"Account info keys: {list(account_info.keys())[:10]}...")
         # 打印部分重要信息
@@ -86,6 +87,7 @@ def test_get_account_asset(api_key: str, api_secret: str) -> None:
         account_asset_json = client.get_account_asset()
         # 解析JSON以验证格式
         account_asset = json.loads(account_asset_json)
+        logging.info("account asset json: %s", account_asset_json)
         logging.info("get_account_asset() returned valid JSON data")
         if isinstance(account_asset, list):
             logging.info(f"Number of assets: {len(account_asset)}")
