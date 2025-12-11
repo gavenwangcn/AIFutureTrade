@@ -693,24 +693,50 @@ class BinanceFuturesAccountClient:
             Exception: 如果API调用失败
         """
         try:
+            import json
             response = self._rest.futures_account_balance_v3()
             data = response.data()
             
             # futures_account_balance_v3 返回的是列表，需要特殊处理
             if isinstance(data, list):
-                # 如果是列表，直接转换为JSON字符串
-                import json
-                return json.dumps(data, default=str)
+                # 将列表中的每个元素转换为字典
+                result_list = []
+                for item in data:
+                    # 使用BinanceFuturesClient的_ensure_dict方法将对象转换为字典
+                    dict_item = BinanceFuturesClient._ensure_dict(item)
+                    if dict_item:
+                        result_list.append(dict_item)
+                    elif isinstance(item, dict):
+                        # 如果已经是字典，直接使用
+                        result_list.append(item)
+                    else:
+                        # 如果转换失败，尝试其他方法
+                        try:
+                            if hasattr(item, 'to_json'):
+                                parsed = json.loads(item.to_json())
+                                result_list.append(parsed)
+                            elif hasattr(item, 'model_dump'):
+                                result_list.append(item.model_dump())
+                            elif hasattr(item, 'dict'):
+                                result_list.append(item.dict())
+                            else:
+                                # 最后尝试直接序列化
+                                result_list.append(json.loads(json.dumps(item, default=str)))
+                        except Exception as e:
+                            logger.warning(f"[BinanceFuturesAccountClient] Failed to convert item to dict: {e}")
+                            # 如果都失败了，跳过该元素或使用字符串表示
+                            continue
+                return json.dumps(result_list, default=str)
             elif hasattr(data, 'to_json'):
                 # 如果是对象且有to_json方法，使用to_json
                 return data.to_json()
             else:
                 # 其他情况，尝试转换为字典后序列化
-                import json
-                if hasattr(data, 'model_dump'):
-                    return json.dumps(data.model_dump(), default=str)
-                elif hasattr(data, 'dict'):
-                    return json.dumps(data.dict(), default=str)
+                dict_data = BinanceFuturesClient._ensure_dict(data)
+                if dict_data:
+                    return json.dumps(dict_data, default=str)
+                elif isinstance(data, dict):
+                    return json.dumps(data, default=str)
                 else:
                     # 最后尝试直接序列化
                     return json.dumps(data, default=str)
