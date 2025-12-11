@@ -93,8 +93,8 @@ LOG_FORMAT = '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 LOG_DATE_FORMAT = '%Y-%m-%d %H:%M:%S'
 
 # ============ Binance Futures Integration ============
-BINANCE_API_KEY = os.getenv('BINANCE_API_KEY', 'Eric')
-BINANCE_API_SECRET = os.getenv('BINANCE_API_SECRET', 'rg5CRfwMCbkFCZBQKatrnlM7ALOQQDDyfRyaLUs4TduxSRP8WQwk4PrcksHgWP4j')
+BINANCE_API_KEY = os.getenv('BINANCE_API_KEY', 'LBtjhBgX1RCksNJDdOoJPeDD30Z70YIGHHH9DrqjIDDkK7xcPRQcgydPxGRr6MN1')
+BINANCE_API_SECRET = os.getenv('BINANCE_API_SECRET', '55arJnwlytDflHv151UpHN1s32ACnJZEs86mbc79wGyeuSUJNHTDPN7jEgBbqO6I')
 FUTURES_QUOTE_ASSET = 'USDT'
 # Binance交易模式配置：'test'（测试接口，默认）或 'real'（真实交易接口）
 BINANCE_TRADE_MODE = os.getenv('BINANCE_TRADE_MODE', 'test').lower()  # 默认使用测试接口

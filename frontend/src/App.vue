@@ -49,6 +49,10 @@
             <i class="bi bi-cloud-plus"></i>
             API提供方
           </button>
+          <button class="btn-secondary" @click="showAccountModal = true">
+            <i class="bi bi-person-plus"></i>
+            添加账户
+          </button>
           <button class="btn-secondary" @click="showFutureConfigModal = true">
             <i class="bi bi-file-earmark-plus"></i>
             添加合约
@@ -485,6 +489,13 @@
       @refresh="handleRefresh"
     />
     
+    <AccountModal
+      :visible="showAccountModal"
+      @update:visible="showAccountModal = $event"
+      @close="showAccountModal = false"
+      @refresh="handleRefresh"
+    />
+    
     <AddModelModal
       :visible="showAddModelModal"
       @update:visible="showAddModelModal = $event"
@@ -531,6 +542,7 @@ import SettingsModal from './components/SettingsModal.vue'
 import StrategyModal from './components/StrategyModal.vue'
 import FutureConfigModal from './components/FutureConfigModal.vue'
 import ApiProviderModal from './components/ApiProviderModal.vue'
+import AccountModal from './components/AccountModal.vue'
 import AddModelModal from './components/AddModelModal.vue'
 import { useTradingApp } from './composables/useTradingApp'
 
@@ -560,6 +572,7 @@ const {
   showStrategyModal,
   showFutureConfigModal,
   showApiProviderModal,
+  showAccountModal,
   showAddModelModal,
   showLeverageModal,
   pendingLeverageModelId,

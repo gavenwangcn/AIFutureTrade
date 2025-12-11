@@ -261,9 +261,12 @@ class Database:
             `auto_trading_enabled` TINYINT UNSIGNED DEFAULT 1,
             `api_key` VARCHAR(500),
             `api_secret` VARCHAR(500),
+            `account_alias` VARCHAR(100),
+            `is_virtual` TINYINT UNSIGNED DEFAULT 0,
             `symbol_source` VARCHAR(50) DEFAULT 'leaderboard',
             `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP,
             INDEX `idx_provider_id` (`provider_id`),
+            INDEX `idx_account_alias` (`account_alias`),
             INDEX `idx_created_at` (`created_at`)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
         """
@@ -421,19 +424,15 @@ class Database:
         """Create accounts table if not exists"""
         ddl = f"""
         CREATE TABLE IF NOT EXISTS `{self.accounts_table}` (
-            `account_alias` VARCHAR(100) NOT NULL,
-            `asset` VARCHAR(50) NOT NULL,
-            `api_key` VARCHAR(500) NOT NULL, 
+            `account_alias` VARCHAR(100) PRIMARY KEY,
+            `api_key` VARCHAR(500) NOT NULL,
             `api_secret` VARCHAR(500) NOT NULL,
             `balance` DOUBLE DEFAULT 0.0,
             `cross_wallet_balance` DOUBLE DEFAULT 0.0,
-            `cross_un_pnl` DOUBLE DEFAULT 0.0,
             `available_balance` DOUBLE DEFAULT 0.0,
-            `max_withdraw_amount` DOUBLE DEFAULT 0.0,
-            `margin_available` TINYINT UNSIGNED DEFAULT 0,
             `update_time` BIGINT UNSIGNED DEFAULT 0,
             `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP,
-            PRIMARY KEY (`account_alias`, `asset`),
+            UNIQUE INDEX `idx_account_alias` (`account_alias`),
             INDEX `idx_update_time` (`update_time`)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
         """
@@ -458,7 +457,9 @@ class Database:
             `max_withdraw_amount` DOUBLE DEFAULT 0.0,
             `update_time` BIGINT UNSIGNED DEFAULT 0,
             `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP,
-            INDEX `idx_update_time` (`update_time`)
+            UNIQUE INDEX `idx_account_alias` (`account_alias`),
+            INDEX `idx_update_time` (`update_time`),
+            FOREIGN KEY (`account_alias`) REFERENCES `{self.accounts_table}`(`account_alias`) ON DELETE CASCADE
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
         """
         self.command(ddl)
@@ -484,7 +485,9 @@ class Database:
             `update_time` BIGINT UNSIGNED DEFAULT 0,
             `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP,
             PRIMARY KEY (`account_alias`, `asset`),
-            INDEX `idx_update_time` (`update_time`)
+            INDEX `idx_account_alias` (`account_alias`),
+            INDEX `idx_update_time` (`update_time`),
+            FOREIGN KEY (`account_alias`) REFERENCES `{self.accounts_table}`(`account_alias`) ON DELETE CASCADE
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
         """
         self.command(ddl)
@@ -665,7 +668,8 @@ class Database:
             return {}
     
     def add_model(self, name: str, provider_id: int, model_name: str,
-                 initial_capital: float = 10000, leverage: int = 10, api_key: str = '', api_secret: str = '', symbol_source: str = 'leaderboard') -> int:
+                 initial_capital: float = 10000, leverage: int = 10, api_key: str = '', api_secret: str = '', 
+                 account_alias: str = '', is_virtual: bool = False, symbol_source: str = 'leaderboard') -> int:
         """
         Add new trading model
         
@@ -683,8 +687,10 @@ class Database:
             model_name: 模型名称
             initial_capital: 初始资金
             leverage: 杠杆倍数
-            api_key: API密钥
-            api_secret: API密钥
+            api_key: API密钥（如果提供了account_alias，则从accounts表获取）
+            api_secret: API密钥（如果提供了account_alias，则从accounts表获取）
+            account_alias: 账户别名（可选，如果提供则从accounts表获取api_key和api_secret）
+            is_virtual: 是否虚拟账户，默认False
             symbol_source: 交易对来源，'future'（合约配置信息）或'leaderboard'（涨跌榜），默认'leaderboard'
         """
         model_id = self._generate_id()
@@ -696,11 +702,30 @@ class Database:
             logger.warning(f"[Database] Invalid symbol_source value '{symbol_source}', using default 'leaderboard'")
             symbol_source = 'leaderboard'
         
+        # 如果提供了account_alias，从accounts表获取api_key和api_secret
+        final_api_key = api_key
+        final_api_secret = api_secret
+        if account_alias:
+            try:
+                account_rows = self.query(f"""
+                    SELECT api_key, api_secret FROM `{self.accounts_table}`
+                    WHERE account_alias = %s
+                    LIMIT 1
+                """, (account_alias,))
+                if account_rows and len(account_rows) > 0:
+                    final_api_key = account_rows[0][0] if account_rows[0][0] else api_key
+                    final_api_secret = account_rows[0][1] if account_rows[0][1] else api_secret
+                else:
+                    logger.warning(f"[Database] Account {account_alias} not found, using provided api_key/api_secret")
+            except Exception as e:
+                logger.error(f"[Database] Failed to get account credentials for {account_alias}: {e}")
+                # 如果查询失败，使用提供的api_key和api_secret
+        
         try:
             self.insert_rows(
                 self.models_table,
-                [[model_id, name, provider_uuid, model_name, initial_capital, leverage, 1, api_key, api_secret, symbol_source, datetime.now(timezone.utc)]],
-                ["id", "name", "provider_id", "model_name", "initial_capital", "leverage", "auto_trading_enabled", "api_key", "api_secret", "symbol_source", "created_at"]
+                [[model_id, name, provider_uuid, model_name, initial_capital, leverage, 1, final_api_key, final_api_secret, account_alias, 1 if is_virtual else 0, symbol_source, datetime.now(timezone.utc)]],
+                ["id", "name", "provider_id", "model_name", "initial_capital", "leverage", "auto_trading_enabled", "api_key", "api_secret", "account_alias", "is_virtual", "symbol_source", "created_at"]
             )
             return self._uuid_to_int(model_id)
         except Exception as e:
@@ -718,7 +743,7 @@ class Database:
             # 查询 model 和关联的 provider
             rows = self.query(f"""
                 SELECT m.id, m.name, m.provider_id, m.model_name, m.initial_capital, 
-                       m.leverage, m.auto_trading_enabled, m.symbol_source, m.created_at,
+                       m.leverage, m.auto_trading_enabled, m.account_alias, m.is_virtual, m.symbol_source, m.created_at,
                        p.api_key, p.api_url, p.provider_type
                 FROM {self.models_table} m
                 LEFT JOIN {self.providers_table} p ON m.provider_id = p.id
@@ -729,7 +754,7 @@ class Database:
                 return None
             
             columns = ["id", "name", "provider_id", "model_name", "initial_capital", 
-                      "leverage", "auto_trading_enabled", "symbol_source", "created_at",
+                      "leverage", "auto_trading_enabled", "account_alias", "is_virtual", "symbol_source", "created_at",
                       "api_key", "api_url", "provider_type"]
             result = self._row_to_dict(rows[0], columns)
             # 转换 ID 为 int 以保持兼容性
@@ -744,6 +769,11 @@ class Database:
             # 如果数据库中没有该字段或值为空，默认使用'leaderboard'以保持向后兼容
             if not result.get('symbol_source'):
                 result['symbol_source'] = 'leaderboard'
+            # 【兼容性处理】确保is_virtual有默认值
+            if result.get('is_virtual') is None:
+                result['is_virtual'] = False
+            else:
+                result['is_virtual'] = bool(result.get('is_virtual', 0))
             return result
         except Exception as e:
             logger.error(f"[Database] Failed to get model {model_id}: {e}")
@@ -754,14 +784,14 @@ class Database:
         try:
             rows = self.query(f"""
                 SELECT m.id, m.name, m.provider_id, m.model_name, m.initial_capital,
-                       m.leverage, m.auto_trading_enabled, m.symbol_source, m.created_at,
+                       m.leverage, m.auto_trading_enabled, m.account_alias, m.is_virtual, m.symbol_source, m.created_at,
                        p.name as provider_name
                 FROM {self.models_table} m
                 LEFT JOIN {self.providers_table} p ON m.provider_id = p.id
                 ORDER BY m.created_at DESC
             """)
             columns = ["id", "name", "provider_id", "model_name", "initial_capital",
-                      "leverage", "auto_trading_enabled", "symbol_source", "created_at", "provider_name"]
+                      "leverage", "auto_trading_enabled", "account_alias", "is_virtual", "symbol_source", "created_at", "provider_name"]
             results = self._rows_to_dicts(rows, columns)
             
             # 转换 ID 为 int 以保持兼容性
@@ -776,6 +806,11 @@ class Database:
                 # 【兼容性处理】确保symbol_source有默认值（处理旧数据或字段缺失的情况）
                 if not result.get('symbol_source'):
                     result['symbol_source'] = 'leaderboard'
+                # 【兼容性处理】确保is_virtual有默认值
+                if result.get('is_virtual') is None:
+                    result['is_virtual'] = False
+                else:
+                    result['is_virtual'] = bool(result.get('is_virtual', 0))
             return results
         except Exception as e:
             logger.error(f"[Database] Failed to get all models: {e}")
@@ -821,14 +856,12 @@ class Database:
                 provider_mapping = self._get_provider_id_mapping()
                 provider_uuid = provider_mapping.get(provider_id_int, '')
             
-            # 使用 DELETE + INSERT 实现 UPDATE
-            self.command(f"ALTER TABLE {self.models_table} DELETE WHERE id = '{model_uuid}'")
-            self.insert_rows(
-                self.models_table,
-                [[model_uuid, model['name'], provider_uuid, model['model_name'],
-                  model['initial_capital'], model['leverage'], 1 if enabled else 0, model.get('created_at', datetime.now(timezone.utc))]],
-                ["id", "name", "provider_id", "model_name", "initial_capital", "leverage", "auto_trading_enabled", "created_at"]
-            )
+            # 使用 UPDATE 语句更新（MySQL支持UPDATE）
+            self.command(f"""
+                UPDATE `{self.models_table}` 
+                SET `auto_trading_enabled` = %s
+                WHERE `id` = %s
+            """, (1 if enabled else 0, model_uuid))
             return True
         except Exception as e:
             logger.error(f"[Database] Failed to update auto trading flag for model {model_id}: {e}")
@@ -853,25 +886,12 @@ class Database:
             if not model_uuid:
                 return False
             
-            model = self.get_model(model_id)
-            if not model:
-                return False
-            
-            # 获取 provider UUID
-            provider_id_int = model.get('provider_id')
-            provider_uuid = ''
-            if provider_id_int:
-                provider_mapping = self._get_provider_id_mapping()
-                provider_uuid = provider_mapping.get(provider_id_int, '')
-            
-            # 使用 DELETE + INSERT 实现 UPDATE
-            self.command(f"ALTER TABLE {self.models_table} DELETE WHERE id = '{model_uuid}'")
-            self.insert_rows(
-                self.models_table,
-                [[model_uuid, model['name'], provider_uuid, model['model_name'],
-                  model['initial_capital'], leverage, model.get('auto_trading_enabled', 1), model.get('created_at', datetime.now(timezone.utc))]],
-                ["id", "name", "provider_id", "model_name", "initial_capital", "leverage", "auto_trading_enabled", "created_at"]
-            )
+            # 使用 UPDATE 语句更新（MySQL支持UPDATE）
+            self.command(f"""
+                UPDATE `{self.models_table}` 
+                SET `leverage` = %s
+                WHERE `id` = %s
+            """, (leverage, model_uuid))
             return True
         except Exception as e:
             logger.error(f"[Database] Failed to update leverage for model {model_id}: {e}")

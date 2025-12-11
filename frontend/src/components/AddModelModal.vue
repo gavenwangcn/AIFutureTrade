@@ -33,12 +33,37 @@
       <input v-model.number="formData.initialCapital" type="number" class="form-input" />
     </div>
     <div class="form-group">
-      <label>SDK Key</label>
-      <input v-model="formData.apiKey" type="text" class="form-input" placeholder="请输入API密钥" />
+      <label>选择账户</label>
+      <select v-model="formData.accountAlias" class="form-input">
+        <option value="">请选择账户</option>
+        <option v-for="account in accounts" :key="account.account_alias" :value="account.account_alias">
+          {{ account.account_alias }}
+        </option>
+      </select>
+      <small class="form-help">从已添加的账户中选择</small>
     </div>
     <div class="form-group">
-      <label>SDK Secret</label>
-      <input v-model="formData.apiSecret" type="password" class="form-input" placeholder="请输入API密钥" />
+      <label>是否虚拟</label>
+      <div class="radio-group">
+        <label class="radio-label">
+          <input 
+            type="radio" 
+            v-model="formData.isVirtual" 
+            :value="false" 
+            class="radio-input"
+          />
+          <span>否</span>
+        </label>
+        <label class="radio-label">
+          <input 
+            type="radio" 
+            v-model="formData.isVirtual" 
+            :value="true" 
+            class="radio-input"
+          />
+          <span>是</span>
+        </label>
+      </div>
     </div>
     <div class="form-group">
       <label>交易对数据源</label>
@@ -74,7 +99,7 @@
 <script setup>
 import { ref, watch } from 'vue'
 import Modal from './Modal.vue'
-import { providerApi, modelApi } from '../services/api.js'
+import { providerApi, modelApi, accountApi } from '../services/api.js'
 
 const props = defineProps({
   visible: {
@@ -90,12 +115,13 @@ const formData = ref({
   modelName: '',
   displayName: '',
   initialCapital: 100000,
-  apiKey: '',
-  apiSecret: '',
+  accountAlias: '',
+  isVirtual: false,
   symbolSource: 'leaderboard'  // 默认使用涨跌榜
 })
 
 const providers = ref([])
+const accounts = ref([])
 const availableModels = ref([])
 const loading = ref(false)
 
@@ -106,6 +132,16 @@ const loadProviders = async () => {
     providers.value = Array.isArray(data) ? data : []
   } catch (err) {
     console.error('[AddModelModal] Error loading providers:', err)
+  }
+}
+
+// 加载账户列表
+const loadAccounts = async () => {
+  try {
+    const data = await accountApi.getAll()
+    accounts.value = Array.isArray(data) ? data : []
+  } catch (err) {
+    console.error('[AddModelModal] Error loading accounts:', err)
   }
 }
 
@@ -122,8 +158,8 @@ const handleProviderChange = () => {
 
 // 提交模型
 const handleSubmit = async () => {
-  if (!formData.value.providerId || !formData.value.modelName || !formData.value.displayName || !formData.value.apiKey || !formData.value.apiSecret) {
-    alert('请填写所有必填字段')
+  if (!formData.value.providerId || !formData.value.modelName || !formData.value.displayName || !formData.value.accountAlias) {
+    alert('请填写所有必填字段（包括选择账户）')
     return
   }
   
@@ -139,8 +175,8 @@ const handleSubmit = async () => {
       model_name: formData.value.modelName,
       name: formData.value.displayName,
       initial_capital: formData.value.initialCapital,
-      api_key: formData.value.apiKey,
-      api_secret: formData.value.apiSecret,
+      account_alias: formData.value.accountAlias,
+      is_virtual: formData.value.isVirtual,
       symbol_source: formData.value.symbolSource
     })
     alert('模型添加成功')
@@ -150,7 +186,7 @@ const handleSubmit = async () => {
     emit('refresh')
   } catch (err) {
     console.error('[AddModelModal] Error creating model:', err)
-    alert('添加模型失败')
+    alert('添加模型失败: ' + (err.message || '未知错误'))
   } finally {
     loading.value = false
   }
@@ -162,8 +198,8 @@ const clearForm = () => {
     modelName: '',
     displayName: '',
     initialCapital: 100000,
-    apiKey: '',
-    apiSecret: '',
+    accountAlias: '',
+    isVirtual: false,
     symbolSource: 'leaderboard'  // 重置为默认值
   }
   availableModels.value = []
@@ -179,6 +215,7 @@ const handleClose = () => {
 watch(() => props.visible, (newVal) => {
   if (newVal) {
     loadProviders()
+    loadAccounts()
   }
 })
 </script>

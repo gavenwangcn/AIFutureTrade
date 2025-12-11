@@ -189,3 +189,23 @@ export const settingsApi = {
   update: (data) => apiPut('/api/settings', data)
 }
 
+/**
+ * 账户管理相关 API
+ */
+export const accountApi = {
+  /**
+   * 获取所有账户
+   */
+  getAll: () => apiGet('/api/accounts'),
+
+  /**
+   * 添加账户
+   */
+  create: (data) => apiPost('/api/accounts', data),
+
+  /**
+   * 删除账户
+   */
+  delete: (accountAlias) => apiDelete(`/api/accounts/${accountAlias}`)
+}
+

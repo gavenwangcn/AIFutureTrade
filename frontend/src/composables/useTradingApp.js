@@ -58,6 +58,7 @@ export function useTradingApp() {
   const showStrategyModal = ref(false)
   const showFutureConfigModal = ref(false)
   const showApiProviderModal = ref(false)
+  const showAccountModal = ref(false)
   const showAddModelModal = ref(false)
   const showLeverageModal = ref(false)
   const pendingLeverageModelId = ref(null)
@@ -1350,6 +1351,7 @@ export function useTradingApp() {
     showStrategyModal,
     showFutureConfigModal,
     showApiProviderModal,
+    showAccountModal,
     showAddModelModal,
     showLeverageModal,
     pendingLeverageModelId,

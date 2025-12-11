@@ -17,8 +17,11 @@ from trade.trading_engine import TradingEngine
 from market.market_data import MarketDataFetcher
 from trade.ai_trader import AITrader
 from common.database_basic import Database
+from common.database_account import AccountDatabase
+from common.binance_futures import BinanceFuturesAccountClient
 from common.version import __version__
 from trade.prompt_defaults import DEFAULT_BUY_CONSTRAINTS, DEFAULT_SELL_CONSTRAINTS
+import json
 
 import common.config as app_config
 import logging
@@ -543,14 +546,23 @@ def add_model():
         if not provider:
             return jsonify({'error': 'Provider not found'}), 404
 
+        # 获取account_alias和is_virtual参数
+        account_alias = data.get('account_alias', '').strip()
+        is_virtual = data.get('is_virtual', False)
+        # 兼容旧版本：如果没有account_alias，则使用api_key和api_secret
+        api_key = data.get('api_key', '')
+        api_secret = data.get('api_secret', '')
+        
         model_id = db.add_model(
             name=data['name'],
             provider_id=data['provider_id'],
             model_name=data['model_name'],
             initial_capital=float(data.get('initial_capital', 100000)),
             leverage=int(data.get('leverage', 10)),
-            api_key=data.get('api_key', ''),
-            api_secret=data.get('api_secret', ''),
+            api_key=api_key,
+            api_secret=api_secret,
+            account_alias=account_alias,
+            is_virtual=bool(is_virtual),
             symbol_source=data.get('symbol_source', 'leaderboard')  # 【新增参数】交易对数据源，默认'leaderboard'保持向后兼容
         )
 
@@ -1509,6 +1521,164 @@ def check_update():
             'latest_version': __version__,
             'error': str(e)
         }), 500
+
+# ============ Account Management API Endpoints ============
+
+@app.route('/api/accounts', methods=['GET'])
+def get_all_accounts():
+    """查询所有账户信息"""
+    try:
+        account_db = AccountDatabase(auto_init_tables=False)
+        accounts = account_db.get_all_accounts()
+        return jsonify(accounts)
+    except Exception as e:
+        logger.error(f"Failed to get all accounts: {e}", exc_info=True)
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/accounts', methods=['POST'])
+def add_account():
+    """添加新账户"""
+    data = request.json or {}
+    api_key = data.get('api_key', '').strip()
+    api_secret = data.get('api_secret', '').strip()
+    
+    if not api_key or not api_secret:
+        return jsonify({'error': 'api_key and api_secret are required'}), 400
+    
+    try:
+        # 1. 创建BinanceFuturesAccountClient对象
+        client = BinanceFuturesAccountClient(api_key=api_key, api_secret=api_secret)
+        
+        # 2. 调用get_account方法获取账户数据
+        account_json = client.get_account()
+        account_data = json.loads(account_json)
+        
+        # 3. 调用get_account_asset方法获取账户资产数据
+        account_asset_json = client.get_account_asset()
+        account_asset_data = json.loads(account_asset_json)
+        
+        # 4. 解析account_asset_data，提取汇总信息和资产列表
+        # account_asset_data是一个列表，每个元素是一个资产对象
+        # 需要计算汇总信息
+        total_initial_margin = 0.0
+        total_maint_margin = 0.0
+        total_wallet_balance = 0.0
+        total_unrealized_profit = 0.0
+        total_margin_balance = 0.0
+        total_position_initial_margin = 0.0
+        total_open_order_initial_margin = 0.0
+        total_cross_wallet_balance = 0.0
+        total_cross_un_pnl = 0.0
+        available_balance = 0.0
+        max_withdraw_amount = 0.0
+        
+        asset_list = []
+        
+        if isinstance(account_asset_data, list):
+            for asset_item in account_asset_data:
+                # 提取每个资产的详细信息（注意：SDK返回的字段名可能是驼峰命名）
+                # 兼容不同的字段命名方式
+                asset_info = {
+                    'asset': asset_item.get('asset', ''),
+                    'walletBalance': float(asset_item.get('walletBalance', asset_item.get('wallet_balance', 0))),
+                    'unrealizedProfit': float(asset_item.get('unrealizedProfit', asset_item.get('unrealized_profit', 0))),
+                    'marginBalance': float(asset_item.get('marginBalance', asset_item.get('margin_balance', 0))),
+                    'maintMargin': float(asset_item.get('maintMargin', asset_item.get('maint_margin', 0))),
+                    'initialMargin': float(asset_item.get('initialMargin', asset_item.get('initial_margin', 0))),
+                    'positionInitialMargin': float(asset_item.get('positionInitialMargin', asset_item.get('position_initial_margin', 0))),
+                    'openOrderInitialMargin': float(asset_item.get('openOrderInitialMargin', asset_item.get('open_order_initial_margin', 0))),
+                    'crossWalletBalance': float(asset_item.get('crossWalletBalance', asset_item.get('cross_wallet_balance', 0))),
+                    'crossUnPnl': float(asset_item.get('crossUnPnl', asset_item.get('cross_un_pnl', 0))),
+                    'availableBalance': float(asset_item.get('availableBalance', asset_item.get('available_balance', 0))),
+                    'maxWithdrawAmount': float(asset_item.get('maxWithdrawAmount', asset_item.get('max_withdraw_amount', 0)))
+                }
+                asset_list.append(asset_info)
+                
+                # 累加汇总信息
+                total_initial_margin += asset_info['initialMargin']
+                total_maint_margin += asset_info['maintMargin']
+                total_wallet_balance += asset_info['walletBalance']
+                total_unrealized_profit += asset_info['unrealizedProfit']
+                total_margin_balance += asset_info['marginBalance']
+                total_position_initial_margin += asset_info['positionInitialMargin']
+                total_open_order_initial_margin += asset_info['openOrderInitialMargin']
+                total_cross_wallet_balance += asset_info['crossWalletBalance']
+                total_cross_un_pnl += asset_info['crossUnPnl']
+                available_balance += asset_info['availableBalance']
+                max_withdraw_amount += asset_info['maxWithdrawAmount']
+        
+        # 构建account_asset汇总数据
+        account_asset_summary = {
+            'totalInitialMargin': total_initial_margin,
+            'totalMaintMargin': total_maint_margin,
+            'totalWalletBalance': total_wallet_balance,
+            'totalUnrealizedProfit': total_unrealized_profit,
+            'totalMarginBalance': total_margin_balance,
+            'totalPositionInitialMargin': total_position_initial_margin,
+            'totalOpenOrderInitialMargin': total_open_order_initial_margin,
+            'totalCrossWalletBalance': total_cross_wallet_balance,
+            'totalCrossUnPnl': total_cross_un_pnl,
+            'availableBalance': available_balance,
+            'maxWithdrawAmount': max_withdraw_amount
+        }
+        
+        # 从account_data中提取account_alias（SDK返回的字段名可能是accountAlias或account_alias）
+        account_alias = account_data.get('accountAlias') or account_data.get('account_alias')
+        
+        if not account_alias:
+            logger.error(f"account_alias not found in account_data. Response keys: {list(account_data.keys())}")
+            return jsonify({'error': 'account_alias not found in SDK response'}), 500
+        
+        # 从account_data中提取balance、crossWalletBalance、availableBalance
+        # account_data可能包含totalWalletBalance、totalCrossWalletBalance等字段
+        # 如果没有，则使用account_asset_summary中的值
+        account_balance = float(account_data.get('totalWalletBalance', account_data.get('total_wallet_balance', total_wallet_balance)))
+        account_cross_wallet_balance = float(account_data.get('totalCrossWalletBalance', account_data.get('total_cross_wallet_balance', total_cross_wallet_balance)))
+        account_available_balance = float(account_data.get('availableBalance', account_data.get('available_balance', available_balance)))
+        
+        # 更新account_data，确保包含必要的字段
+        account_data['totalWalletBalance'] = account_balance
+        account_data['totalCrossWalletBalance'] = account_cross_wallet_balance
+        account_data['availableBalance'] = account_available_balance
+        
+        # 5. 保存到数据库
+        account_db = AccountDatabase(auto_init_tables=False)
+        account_alias = account_db.add_account(
+            api_key=api_key,
+            api_secret=api_secret,
+            account_data=account_data,
+            account_asset_data=account_asset_summary,
+            asset_list=asset_list
+        )
+        
+        logger.info(f"Account added successfully: account_alias={account_alias}")
+        return jsonify({
+            'account_alias': account_alias,
+            'message': 'Account added successfully'
+        })
+    except Exception as e:
+        logger.error(f"Failed to add account: {e}", exc_info=True)
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/accounts/<account_alias>', methods=['DELETE', 'OPTIONS'])
+def delete_account(account_alias):
+    """删除账户"""
+    # 处理 OPTIONS 预检请求
+    if request.method == 'OPTIONS':
+        response = jsonify({})
+        response.headers.add('Access-Control-Allow-Origin', '*')
+        response.headers.add('Access-Control-Allow-Methods', 'DELETE, OPTIONS')
+        response.headers.add('Access-Control-Allow-Headers', 'Content-Type')
+        return response
+    
+    try:
+        account_db = AccountDatabase(auto_init_tables=False)
+        account_db.delete_account(account_alias)
+        logger.info(f"Account {account_alias} deleted successfully")
+        return jsonify({'success': True, 'message': 'Account deleted successfully'})
+    except Exception as e:
+        logger.error(f"Failed to delete account {account_alias}: {e}", exc_info=True)
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 # ============ Main Entry Point ============
 
