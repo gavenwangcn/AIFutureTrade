@@ -432,6 +432,43 @@ def _to_datetime(value: Any) -> Optional[datetime]:
     return None
 
 
+def _to_beijing_datetime(value: Any) -> Optional[datetime]:
+    """Convert various datetime formats to naive datetime object in Beijing time (UTC+8).
+    
+    Args:
+        value: Input value (datetime, timestamp, string, etc.)
+        
+    Returns:
+        naive datetime object (without timezone) in Beijing time (UTC+8) or None
+    
+    Note:
+        - Handles both Unix timestamps (seconds) and millisecond timestamps
+        - Binance WebSocket returns millisecond timestamps (13 digits)
+        - Invalid or out-of-range timestamps return None
+        - All datetime objects are converted to Beijing time (UTC+8) as naive datetime
+        - If input datetime has timezone info, it's converted to UTC+8 first, then timezone is removed
+    """
+    # 先使用 _to_datetime 函数将输入转换为 UTC naive datetime
+    utc_naive_dt = _to_datetime(value)
+    
+    if utc_naive_dt is None:
+        return None
+    
+    try:
+        # 将 UTC naive datetime 转换为带 UTC 时区的 datetime
+        utc_dt = utc_naive_dt.replace(tzinfo=timezone.utc)
+        
+        # 转换为北京时区 (UTC+8)
+        beijing_tz = timezone(timedelta(hours=8))
+        beijing_dt = utc_dt.astimezone(beijing_tz)
+        
+        # 移除时区信息，返回 naive datetime
+        return beijing_dt.replace(tzinfo=None)
+    except Exception as e:
+        logger.warning("[MySQL] Failed to convert to Beijing time: %s", e)
+        return None
+
+
 class MySQLDatabase:
     """Encapsulates MySQL connectivity and CRUD helpers."""
     
@@ -815,8 +852,8 @@ class MySQLDatabase:
         4. 返回格式化的字典，方便upsert_market_tickers方法快速查找和使用
         
         查询逻辑：
-        - 使用窗口函数为每个交易对筛选最新的一条记录
-        - 按event_time降序排序，确保获取最新数据
+        - 直接查询指定的symbol列表
+        - 由于symbol是主键，每个交易对只有一条记录
         - 只查询指定的symbol列表，提高查询效率
         
         特殊处理：
@@ -846,14 +883,8 @@ class MySQLDatabase:
                 open_price,
                 last_price,
                 update_price_date
-            FROM (
-                SELECT 
-                    *,
-                    ROW_NUMBER() OVER (PARTITION BY symbol ORDER BY event_time DESC) as rn
-                FROM `{self.market_ticker_table}`
-                WHERE symbol IN ({placeholders})
-            ) AS ranked
-            WHERE rn = 1
+            FROM `{self.market_ticker_table}`
+            WHERE symbol IN ({placeholders})
             """
             
             def _execute_query(conn):
@@ -950,9 +981,10 @@ class MySQLDatabase:
                 del normalized["update_price_date"]
                 logger.debug("[MySQL] 移除接口数据中的 update_price_date 字段（只能由异步价格刷新服务更新）")
             
-            normalized["event_time"] = _to_datetime(normalized.get("event_time"))
-            normalized["stats_open_time"] = _to_datetime(normalized.get("stats_open_time"))
-            normalized["stats_close_time"] = _to_datetime(normalized.get("stats_close_time"))
+            # 将时间字段转换为北京时区 (UTC+8)
+            normalized["event_time"] = _to_beijing_datetime(normalized.get("event_time"))
+            normalized["stats_open_time"] = _to_beijing_datetime(normalized.get("stats_open_time"))
+            normalized["stats_close_time"] = _to_beijing_datetime(normalized.get("stats_close_time"))
             
             # 确保所有DOUBLE字段不为None，使用0.0作为默认值
             float_fields = [

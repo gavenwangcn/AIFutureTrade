@@ -1733,7 +1733,7 @@ class Database:
                         entry.get('change_percent', 0.0),
                         entry.get('quote_volume', 0.0),
                         json.dumps(entry.get('timeframes', {}), ensure_ascii=False),
-                        datetime.now(timezone.utc)
+                        datetime.now()
                     ])
                 except KeyError as exc:
                     logger.warning(f"[Database] 无法写入涨跌幅榜：缺少字段 {exc}")
