@@ -152,19 +152,8 @@ class TradingEngine:
             logger.info(f"[Model {self.model_id}] [卖出服务] [阶段2.1] 当前持仓数量: {positions_count}")
             
             if positions_count > 0:
-                # 确保market_state中的价格是实时的（重新获取一次以确保最新）
-                # 在构建sell prompt时，实时更新持仓合约的价格
+                # 获取持仓列表（market_state已在_get_market_state中获取了实时价格，无需重复获取）
                 positions = portfolio.get('positions', []) or []
-                if positions:
-                    position_symbols = [pos.get('symbol') for pos in positions if pos.get('symbol')]
-                    if position_symbols:
-                        # 实时获取持仓合约的最新价格（不使用缓存）
-                        realtime_prices = self.market_fetcher.get_current_prices(position_symbols)
-                        # 更新market_state中的价格
-                        for symbol, price_info in realtime_prices.items():
-                            if symbol in market_state:
-                                market_state[symbol]['price'] = price_info.get('price', market_state[symbol].get('price', 0))
-                                logger.debug(f"[Model {self.model_id}] [卖出服务] 更新持仓 {symbol} 实时价格: ${price_info.get('price', 0):.4f}")
                 
                 # 分批处理卖出决策，每批处理指定数量的symbol
                 logger.info(f"[Model {self.model_id}] [卖出服务] [阶段2.2] 开始分批处理卖出决策...")
@@ -200,14 +189,24 @@ class TradingEngine:
                     # 提交所有批次任务到线程池
                     futures = []
                     for batch_idx, batch_positions in enumerate(batches):
-                        batch_symbols = [pos.get('future', 'N/A') for pos in batch_positions]
-                        logger.info(f"[Model {self.model_id}] [卖出服务] 提交批次 {batch_idx + 1}/{len(batches)} 到线程池: {batch_symbols}")
+                        # 提取当前批次的symbol列表
+                        batch_symbols = [pos.get('symbol', 'N/A') for pos in batch_positions]
+                        
+                        # 为当前批次创建只包含对应symbol的market_state子集
+                        batch_market_state = {}
+                        for symbol in batch_symbols:
+                            if symbol != 'N/A' and symbol in market_state:
+                                batch_market_state[symbol] = market_state[symbol]
+                        
+                        logger.info(f"[Model {self.model_id}] [卖出服务] 提交批次 {batch_idx + 1}/{len(batches)} 到线程池: "
+                                    f"symbols={batch_symbols}, market_state包含{len(batch_market_state)}个symbol")
+                        
                         future = executor.submit(
                             self._process_and_execute_sell_batch,
                             batch_positions,
                             portfolio,
                             account_info,
-                            market_state,
+                            batch_market_state,  # 只传递当前批次对应的market_state
                             prompt_templates['sell'],
                             portfolio_lock,
                             executions,
@@ -310,10 +309,19 @@ class TradingEngine:
         """
         执行买入决策周期
         
-        流程：
-        1. 初始化数据准备：获取市场状态、持仓信息、账户信息、买入提示词模板等
-        2. 买入决策处理：从涨跌幅榜选择候选，调用AI模型获取买入决策并执行
-        3. 记录账户价值快照
+        优化后的流程：
+        1. 初始化数据准备：获取模型配置、持仓信息、账户信息、买入提示词模板等
+        2. 候选symbol选择与市场状态构建：
+           - 根据模型的symbol_source字段获取候选symbol来源（leaderboard或future）
+           - 过滤已持仓的symbol（可配置）
+           - 基于候选symbol列表获取市场状态信息（价格、成交量、K线指标）
+        3. 买入决策处理：调用AI模型获取买入决策并执行
+        4. 记录账户价值快照
+        
+        主要优化：
+        - 合并了market_snapshot和market_state，统一使用market_state
+        - 根据symbol_source统一获取候选symbol，避免重复筛选
+        - 基于候选symbol列表统一获取市场数据，逻辑更清晰
         
         返回：
             Dict: {
@@ -342,35 +350,26 @@ class TradingEngine:
             # ========== 阶段1: 初始化数据准备 ==========
             logger.info(f"[Model {self.model_id}] [买入服务] [阶段1] 开始初始化数据准备")
             
-            # 获取市场状态（包含价格和技术指标）
-            logger.info(f"[Model {self.model_id}] [买入服务] [阶段1.1] 获取持仓合约symbols持仓合约信息...")
-            market_state = self._get_market_state()
-            logger.info(f"[Model {self.model_id}] [买入服务] [阶段1.1] 持仓合约信息获取完成, symbols数: {len(market_state)}")
+            # 获取模型配置（包含symbol_source）
+            symbol_source = model.get('symbol_source', 'leaderboard')
+            logger.info(f"[Model {self.model_id}] [买入服务] [阶段1.1] 模型symbol_source配置: {symbol_source}")
             
-            # 提取当前价格映射（用于计算持仓价值）
-            current_prices = self._extract_price_map(market_state)
-            logger.info(f"[Model {self.model_id}] [买入服务] [阶段1.2] 价格映射提取完成, 价格数量: {len(current_prices)}")
-            
-            # 获取当前持仓信息
-            portfolio = self.db.get_portfolio(self.model_id, current_prices)
-            logger.info(f"[Model {self.model_id}] [买入服务] [阶段1.3] 持仓信息获取完成: "
+            # 获取当前持仓信息（先使用空价格映射，后续会更新）
+            portfolio = self.db.get_portfolio(self.model_id, {})
+            logger.info(f"[Model {self.model_id}] [买入服务] [阶段1.2] 持仓信息获取完成: "
                         f"总价值=${portfolio.get('total_value', 0):.2f}, "
                         f"现金=${portfolio.get('cash', 0):.2f}, "
                         f"持仓数={len(portfolio.get('positions', []) or [])}")
             
             # 构建账户信息（用于AI决策）
             account_info = self._build_account_info(portfolio)
-            logger.info(f"[Model {self.model_id}] [买入服务] [阶段1.4] 账户信息构建完成: "
+            logger.info(f"[Model {self.model_id}] [买入服务] [阶段1.3] 账户信息构建完成: "
                         f"初始资金=${account_info.get('initial_capital', 0):.2f}, "
                         f"总收益率={account_info.get('total_return', 0):.2f}%")
             
             # 获取提示词模板（仅买入约束）
             prompt_templates = self._get_prompt_templates()
-            logger.info(f"[Model {self.model_id}] [买入服务] [阶段1.5] 买入提示词模板获取完成")
-            
-            # 获取市场快照（涨跌幅榜，用于AI决策参考）
-            market_snapshot = self._get_prompt_market_snapshot()
-            logger.info(f"[Model {self.model_id}] [买入服务] [阶段1.6] 市场信息快照获取完成, 快照数量: {len(market_snapshot)}")
+            logger.info(f"[Model {self.model_id}] [买入服务] [阶段1.4] 买入提示词模板获取完成")
             
             # 初始化执行结果和对话记录
             executions = []
@@ -380,23 +379,34 @@ class TradingEngine:
             # ========== 阶段2: 买入决策处理（分批多线程） ==========
             logger.info(f"[Model {self.model_id}] [买入服务] [阶段2] 开始处理买入决策")
             
-            # 从涨跌幅榜选择买入候选
-            logger.info(f"[Model {self.model_id}] [买入服务] [阶段2.1] 从涨跌幅榜选择买入候选...")
-            buy_candidates = self._select_buy_candidates(portfolio)
-            logger.info(f"[Model {self.model_id}] [买入服务] [阶段2.1] 买入候选选择完成, 候选数量: {len(buy_candidates)}")
-            if buy_candidates:
-                for idx, candidate in enumerate(buy_candidates[:5]):  # 只记录前5个
-                    logger.debug(f"[Model {self.model_id}] [买入服务] [阶段2.1.{idx+1}] 候选: "
-                                f"{candidate.get('symbol')}, "
-                                f"价格=${candidate.get('price', 0):.4f}, "
-                                f"涨跌幅={candidate.get('change_percent', 0):.2f}%")
+            # 步骤1: 根据symbol_source获取候选symbol并构建市场状态
+            logger.info(f"[Model {self.model_id}] [买入服务] [阶段2.1] 根据symbol_source获取候选symbol并构建市场状态...")
+            buy_candidates, market_state = self._select_buy_candidates(portfolio, symbol_source)
+            logger.info(f"[Model {self.model_id}] [买入服务] [阶段2.1] 候选symbol选择完成: "
+                        f"候选数量={len(buy_candidates)}, "
+                        f"市场状态symbol数={len(market_state)}")
             
             if buy_candidates:
-                # 将候选合约添加到市场状态中
-                logger.info(f"[Model {self.model_id}] [买入服务] [阶段2.2] 将候选合约添加到市场状态...")
-                market_state = self._augment_market_state_with_candidates(market_state, buy_candidates)
+                # 记录前几个候选的详细信息
+                for idx, candidate in enumerate(buy_candidates[:5]):
+                    symbol = candidate.get('symbol', 'N/A')
+                    market_info = market_state.get(symbol.upper() if symbol != 'N/A' else symbol, {})
+                    price = market_info.get('price', candidate.get('price', 0))
+                    change = market_info.get('change_24h', candidate.get('change_percent', 0))
+                    logger.debug(f"[Model {self.model_id}] [买入服务] [阶段2.1.{idx+1}] 候选: "
+                                f"{symbol}, "
+                                f"价格=${price:.4f}, "
+                                f"涨跌幅={change:.2f}%")
+                
+                # 提取当前价格映射（用于计算持仓价值和后续处理）
                 current_prices = self._extract_price_map(market_state)
-                logger.info(f"[Model {self.model_id}] [买入服务] [阶段2.2] 市场状态更新完成, 总合约数: {len(market_state)}")
+                logger.info(f"[Model {self.model_id}] [买入服务] [阶段2.2] 价格映射提取完成, 价格数量: {len(current_prices)}")
+                
+                # 更新持仓信息（使用最新价格）
+                portfolio = self.db.get_portfolio(self.model_id, current_prices)
+                logger.info(f"[Model {self.model_id}] [买入服务] [阶段2.3] 持仓信息已更新: "
+                            f"总价值=${portfolio.get('total_value', 0):.2f}, "
+                            f"现金=${portfolio.get('cash', 0):.2f}")
                 
                 # 构建约束条件（用于AI决策）
                 constraints = {
@@ -404,28 +414,30 @@ class TradingEngine:
                     'occupied': len(portfolio.get('positions', []) or []),
                     'available_cash': portfolio.get('cash', 0)
                 }
-                logger.info(f"[Model {self.model_id}] [买入服务] [阶段2.3] 约束条件构建完成: "
+                logger.info(f"[Model {self.model_id}] [买入服务] [阶段2.4] 约束条件构建完成: "
                             f"最大持仓数={constraints['max_positions']}, "
                             f"已占用={constraints['occupied']}, "
                             f"可用现金=${constraints['available_cash']:.2f}")
                 
                 # 分批处理买入决策（多线程并发，每批立即执行）
-                logger.info(f"[Model {self.model_id}] [买入服务] [阶段2.4] 开始分批处理买入决策（多线程）...")
+                logger.info(f"[Model {self.model_id}] [买入服务] [阶段2.5] 开始分批处理买入决策（多线程）...")
                 self._make_batch_buy_decisions(
                     buy_candidates,
                     portfolio,
                     account_info,
                     constraints,
                     prompt_templates['buy'],
-                    market_snapshot,
                     market_state,
                     executions,
                     conversation_prompts,
-                    current_prices
+                    current_prices,
+                    symbol_source
                 )
-                logger.info(f"[Model {self.model_id}] [买入服务] [阶段2.4] 分批买入决策处理完成")
+                logger.info(f"[Model {self.model_id}] [买入服务] [阶段2.5] 分批买入决策处理完成")
             else:
                 logger.info(f"[Model {self.model_id}] [买入服务] [阶段2] 无买入候选，跳过买入决策处理")
+                # 即使没有候选，也需要更新current_prices用于后续记录账户价值
+                current_prices = {}
             
             logger.info(f"[Model {self.model_id}] [买入服务] [阶段2] 买入决策处理完成")
 
@@ -717,23 +729,77 @@ class TradingEngine:
         """
         获取模型跟踪的期货合约列表
         
-        从model_futures表获取当前模型关联的所有期货合约，而不是使用全局配置。
+        从portfolios表中通过关联model_id做去重获取所有交易过的期货合约symbol。
         这样每个模型可以独立跟踪不同的期货合约集合。
         
         Returns:
             List[str]: 合约symbol列表（如 ['BTC', 'ETH']）
         """
-        return [future['symbol'] for future in self.db.get_model_futures(self.model_id)]
+        try:
+            # 获取model_id到UUID的映射
+            model_mapping = self.db._get_model_id_mapping()
+            model_uuid = model_mapping.get(self.model_id)
+            if not model_uuid:
+                logger.warning(f"[Model {self.model_id}] Model UUID not found, returning empty symbol list")
+                return []
+            
+            # 从portfolios表获取当前模型所有交易过的去重symbol合约
+            rows = self.db.query(f"""
+                SELECT DISTINCT symbol
+                FROM `{self.db.portfolios_table}`
+                WHERE model_id = '{model_uuid}'
+                ORDER BY symbol ASC
+            """)
+            
+            symbols = [row[0] for row in rows] if rows else []
+            logger.debug(f"[Model {self.model_id}] Retrieved {len(symbols)} tracked symbols from portfolios table")
+            return symbols
+        except Exception as e:
+            logger.error(f"[Model {self.model_id}] Failed to get tracked symbols from portfolios table: {e}", exc_info=True)
+            return []
 
+    def _get_held_symbols(self) -> List[str]:
+        """
+        获取模型当前持仓的期货合约symbol列表（去重）
+        
+        从portfolios表中通过关联model_id获取当前有持仓的symbol（position_amt != 0），
+        用于卖出服务获取市场状态。
+        
+        Returns:
+            List[str]: 当前持仓的合约symbol列表（如 ['BTC', 'ETH']）
+        """
+        try:
+            # 获取model_id到UUID的映射
+            model_mapping = self.db._get_model_id_mapping()
+            model_uuid = model_mapping.get(self.model_id)
+            if not model_uuid:
+                logger.warning(f"[Model {self.model_id}] Model UUID not found, returning empty symbol list")
+                return []
+            
+            # 从portfolios表获取当前模型有持仓的去重symbol合约（position_amt != 0）
+            rows = self.db.query(f"""
+                SELECT DISTINCT symbol
+                FROM `{self.db.portfolios_table}`
+                WHERE model_id = '{model_uuid}' AND position_amt != 0
+                ORDER BY symbol ASC
+            """)
+            
+            symbols = [row[0] for row in rows] if rows else []
+            logger.debug(f"[Model {self.model_id}] Retrieved {len(symbols)} held symbols from portfolios table")
+            return symbols
+        except Exception as e:
+            logger.error(f"[Model {self.model_id}] Failed to get held symbols from portfolios table: {e}", exc_info=True)
+            return []
+    
     def _get_market_state(self) -> Dict:
         """
         获取当前市场状态（包含价格和技术指标）
         
-        此方法用于AI交易决策，使用实时价格数据，不使用任何缓存。
-        每次调用都实时从交易所获取最新价格，确保AI决策基于最新市场数据。
+        此方法用于AI交易决策（卖出服务），使用实时价格数据，不使用任何缓存。
+        只获取当前有持仓的symbol的市场状态，确保AI决策基于最新市场数据。
         """
         market_state = {}
-        symbols = self._get_tracked_symbols()
+        symbols = self._get_held_symbols()
         # 使用 get_current_prices 确保实时价格，不使用缓存
         prices = self.market_fetcher.get_current_prices(symbols)
 
@@ -800,190 +866,6 @@ class TradingEngine:
             if price is not None:
                 prices[symbol] = price
         return prices
-
-    def _augment_market_state_with_candidates(self, market_state: Dict, candidates: list) -> Dict:
-        """
-        使用候选合约增强市场状态（使用实时价格）
-        
-        从涨幅榜获取的候选合约价格可能不是最新的，此方法会实时获取最新价格
-        以确保AI决策基于实时市场数据。
-        """
-        augmented = dict(market_state)
-        
-        # 提取候选合约的符号列表
-        candidate_symbols = []
-        for entry in candidates:
-            symbol = entry.get('symbol')
-            if symbol:
-                candidate_symbols.append(symbol.upper())
-        
-        # 实时获取候选合约的最新价格（不使用缓存）
-        if candidate_symbols:
-            realtime_prices = self.market_fetcher.get_current_prices(candidate_symbols)
-        else:
-            realtime_prices = {}
-        
-        # 使用实时价格更新候选合约信息
-        for entry in candidates:
-            symbol = entry.get('symbol')
-            if not symbol:
-                continue
-            symbol = symbol.upper()
-            
-            # 如果市场状态中已有该符号的实时数据，跳过
-            if symbol in augmented and augmented[symbol].get('price'):
-                continue
-            
-            # 优先使用实时价格，如果没有则使用候选中的价格作为降级方案
-            realtime_price_info = realtime_prices.get(symbol, {})
-            if realtime_price_info and realtime_price_info.get('price', 0) > 0:
-                # 使用实时价格数据
-                augmented[symbol] = {
-                    'price': realtime_price_info.get('price', 0),
-                    'name': realtime_price_info.get('name', symbol),
-                    'exchange': realtime_price_info.get('exchange', 'BINANCE_FUTURES'),
-                    'contract_symbol': entry.get('contract_symbol') or f"{symbol}USDT",
-                    'change_24h': realtime_price_info.get('change_24h', 0),
-                    'daily_volume': realtime_price_info.get('daily_volume', 0),
-                    'timeframes': {},  # 技术指标会在需要时实时计算
-                    'source': 'realtime'
-                }
-            else:
-                # 降级方案：使用候选中的价格（但标记为非实时）
-                augmented[symbol] = {
-                    'price': entry.get('price', 0),
-                    'name': entry.get('name', symbol),
-                    'exchange': entry.get('exchange', 'BINANCE_FUTURES'),
-                    'contract_symbol': entry.get('contract_symbol') or f"{symbol}USDT",
-                    'timeframes': entry.get('timeframes') or {},
-                    'source': 'leaderboard_fallback'  # 标记为降级数据
-                }
-                logger.warning(f"[Model {self.model_id}] 候选合约 {symbol} 无法获取实时价格，使用涨幅榜价格")
-        
-        return augmented
-
-    def _get_prompt_market_snapshot(self) -> List[Dict]:
-        """
-        【改造方法】获取用于prompt的市场快照（使用实时价格）
-        
-        根据模型的symbol_source选择数据源：
-        - leaderboard: 从涨跌榜获取（默认，保持向后兼容）
-        - future: 从futures表获取所有已配置的交易对
-        
-        此方法用于构建AI交易的prompt，确保所有价格数据都是实时的，
-        不使用任何缓存，以保证AI决策基于最新市场数据。
-        
-        调用链：
-        execute_buy_cycle() -> _get_prompt_market_snapshot() -> get_leaderboard() 或 get_configured_futures_symbols()
-        
-        注意：
-        - 无论从哪个数据源获取，后续都会统一获取实时价格和技术指标
-        - 此方法仅用于buy类型的prompt构建，sell逻辑不受影响
-        """
-        # 【获取模型配置】读取模型的symbol_source字段，决定使用哪个数据源
-        model = self.db.get_model(self.model_id)
-        symbol_source = model.get('symbol_source', 'leaderboard') if model else 'leaderboard'
-        logger.info(f"[Model {self.model_id}] 模型交易市场信息来源symbol_source配置: {symbol_source}")
-        
-        limit = getattr(app_config, 'PROMPT_MARKET_SYMBOL_LIMIT', 5)
-        limit = max(1, int(limit))
-
-        if symbol_source == 'future':
-            # 【数据源分支1】从futures表获取所有已配置的交易对
-            # 适用于全市场扫描策略，提供更全面的市场数据
-            try:
-                entries = self.market_fetcher.get_configured_futures_symbols()
-                if not entries:
-                    logger.warning(f"[Model {self.model_id}] 未获取到futures表配置的交易对")
-                    return []
-                # 【数量限制】与leaderboard保持一致，取前limit*2个（模拟涨跌榜的gainers+losers数量）
-                entries = entries[:limit * 2]
-            except Exception as exc:
-                logger.warning(f"[Model {self.model_id}] 获取futures表市场快照失败: {exc}")
-                return []
-        else:
-            # 【数据源分支2】默认从涨跌榜获取（leaderboard）
-            # 适用于关注市场热点的策略，优先选择涨跌幅较大的交易对
-            try:
-                leaderboard = self.market_fetcher.get_leaderboard(limit=limit)
-            except Exception as exc:
-                logger.warning(f"[Model {self.model_id}] 获取涨跌榜市场信息快照失败: {exc}")
-                return []
-
-            # 同时获取涨幅榜和跌幅榜数据，提供更全面的市场信息
-            gainers = leaderboard.get('gainers') or []
-            losers = leaderboard.get('losers') or []
-            
-            # 合并涨幅榜和跌幅榜的前limit个条目
-            entries = gainers[:limit] + losers[:limit]
-            if not entries:
-                return []
-            
-            logger.info(f"[Model {self.model_id}] 从涨跌榜市场信息获取到 {len(entries)} 个市场快照条目")
-        
-        # 构建快照
-        snapshot = []
-        
-        # 只有当数据源是future时，才获取实时价格
-        realtime_prices = {}
-        if symbol_source == 'future':
-            # 提取所有合约符号
-            contract_symbols = [entry.get('contract_symbol') for entry in entries if entry.get('contract_symbol')]
-            # 实时获取这些合约符号的最新价格（不使用缓存）
-            if contract_symbols:
-                realtime_prices = self.market_fetcher.get_current_prices_by_contract(contract_symbols)
-        
-        for entry in entries:
-            symbol = entry.get('symbol')
-            if not symbol:
-                continue
-            
-            if symbol_source == 'future':
-                # 获取实时价格信息
-                # 使用contract_symbol来查找实时价格
-                contract_symbol = entry.get('contract_symbol')
-                realtime_info = realtime_prices.get(contract_symbol, {})
-                
-                # 优先使用实时价格，如果没有则使用entry中的价格作为降级方案
-                if realtime_info and realtime_info.get('price', 0) > 0:
-                    price = realtime_info.get('price', 0)
-                    quote_volume = realtime_info.get('daily_volume', entry.get('quote_volume', 0))
-                else:
-                    price = entry.get('price', 0)
-                    quote_volume = entry.get('quote_volume', 0)
-                    logger.warning(f"[Model {self.model_id}] 市场快照中 {contract_symbol} 无法获取实时价格，使用futures表价格")
-            else:
-                # 涨跌榜来源的symbol直接使用数据库中的价格（已基本实时）
-                price = entry.get('last_price', 0)
-                quote_volume = entry.get('quote_volume', 0)
-            
-            # 实时计算技术指标（无缓存）
-            # 当symbol_source为'future'时，使用contract_symbol作为参数
-            # 当symbol_source为'leaderboard'时，使用symbol作为参数
-            if symbol_source == 'future':
-                merged_data = self._merge_timeframe_data(entry.get('contract_symbol', symbol))
-                timeframes = merged_data.get(entry.get('contract_symbol', symbol), {}) if merged_data else {}
-            else:
-                merged_data = self._merge_timeframe_data(symbol)
-                timeframes = merged_data.get(symbol, {}) if merged_data else {}
-            
-            # 根据数据源类型设置正确的symbol字段
-            # 从futures表获取的数据使用contract_symbol作为symbol字段
-            # 从涨跌榜获取的数据使用原始symbol字段
-            if symbol_source == 'future':
-                snapshot_symbol = entry.get('contract_symbol', symbol)
-            else:
-                snapshot_symbol = symbol
-                
-            snapshot.append({
-                'symbol': snapshot_symbol,
-                'contract_symbol': entry.get('contract_symbol') or f"{symbol}",
-                'price': price,  # 使用实时价格
-                'quote_volume': quote_volume,
-                'timeframes': timeframes  # 使用实时计算的技术指标
-            })
-
-        return snapshot
 
     # ============ 账户信息管理方法 ============
     # 构建和管理账户信息，用于AI决策
@@ -1128,11 +1010,11 @@ class TradingEngine:
         account_info: Dict,
         constraints: Dict,
         constraints_text: str,
-        market_snapshot: Optional[List[Dict]],
         market_state: Dict,
         executions: List,
         conversation_prompts: List,
-        current_prices: Dict[str, float]
+        current_prices: Dict[str, float],
+        symbol_source: str = 'leaderboard'
     ):
         """
         分批处理买入决策（多线程并发，每批立即执行）
@@ -1181,8 +1063,20 @@ class TradingEngine:
             # 提交所有批次任务到线程池
             futures = []
             for batch_idx, batch in enumerate(batches):
+                # 提取当前批次的symbol列表
                 batch_symbols = [c.get('symbol', 'N/A') for c in batch]
-                logger.debug(f"[Model {self.model_id}] [分批买入] 提交批次 {batch_idx + 1}/{len(batches)} 到线程池: {batch_symbols}")
+                
+                # 为当前批次创建只包含对应symbol的market_state子集
+                batch_market_state = {}
+                for symbol in batch_symbols:
+                    if symbol != 'N/A':
+                        symbol_upper = symbol.upper()
+                        if symbol_upper in market_state:
+                            batch_market_state[symbol_upper] = market_state[symbol_upper]
+                
+                logger.debug(f"[Model {self.model_id}] [分批买入] 提交批次 {batch_idx + 1}/{len(batches)} 到线程池: "
+                            f"symbols={batch_symbols}, market_state包含{len(batch_market_state)}个symbol")
+                
                 future = executor.submit(
                     self._process_and_execute_batch,
                     batch,
@@ -1190,13 +1084,13 @@ class TradingEngine:
                     account_info,
                     constraints,
                     constraints_text,
-                    market_snapshot,
-                    market_state,
+                    batch_market_state,  # 只传递当前批次对应的market_state
                     current_prices,
                     portfolio_lock,
                     executions,
                     batch_idx + 1,
-                    len(batches)
+                    len(batches),
+                    symbol_source
                 )
                 futures.append(future)
             logger.debug(f"[Model {self.model_id}] [分批买入] 所有批次任务已提交，等待执行完成...")
@@ -1390,13 +1284,13 @@ class TradingEngine:
         account_info: Dict,
         constraints: Dict,
         constraints_text: str,
-        market_snapshot: Optional[List[Dict]],
         market_state: Dict,
         current_prices: Dict[str, float],
         portfolio_lock: threading.Lock,
         executions: List,
         batch_num: int,
-        total_batches: int
+        total_batches: int,
+        symbol_source: str = 'leaderboard'
     ) -> Dict:
         """
         处理单个批次：调用AI决策并立即执行
@@ -1426,10 +1320,22 @@ class TradingEngine:
                         f"当前持仓数={constraints.get('occupied', 0)}, "
                         f"可用现金=${constraints.get('available_cash', 0):.2f}")
             
-            # 【传递symbol_source参数】获取模型的symbol_source配置，传递给AI决策方法
-            # 这样AI可以根据数据源类型调整prompt文本，让模型知道交易对来自哪个数据源
-            model = self.db.get_model(self.model_id)
-            symbol_source = model.get('symbol_source', 'leaderboard') if model else 'leaderboard'
+            # 将market_state转换为market_snapshot格式（用于AI决策）
+            # market_snapshot格式：List[Dict]，每个Dict包含symbol、price、timeframes等
+            market_snapshot = []
+            for candidate in batch_candidates:
+                symbol = candidate.get('symbol', '').upper()
+                if symbol in market_state:
+                    state_info = market_state[symbol]
+                    snapshot_entry = {
+                        'symbol': symbol,
+                        'contract_symbol': state_info.get('contract_symbol', f"{symbol}USDT"),
+                        'price': state_info.get('price', 0),
+                        'quote_volume': state_info.get('quote_volume', state_info.get('daily_volume', 0)),
+                        'change_percent': state_info.get('change_24h', 0),
+                        'timeframes': state_info.get('indicators', {}).get('timeframes', {})
+                    }
+                    market_snapshot.append(snapshot_entry)
             
             ai_call_start = datetime.now(timezone(timedelta(hours=8)))
             buy_payload = self.ai_trader.make_buy_decision(
@@ -1438,8 +1344,8 @@ class TradingEngine:
                 account_info,
                 constraints,
                 constraints_text=constraints_text,
-                market_snapshot=market_snapshot,
-                symbol_source=symbol_source  # 【新增参数】传递数据源类型，用于调整prompt文本
+                market_snapshot=market_snapshot if market_snapshot else None,
+                symbol_source=symbol_source
             )
             ai_call_duration = (datetime.now(timezone(timedelta(hours=8))) - ai_call_start).total_seconds()
             
@@ -1597,7 +1503,219 @@ class TradingEngine:
     # ============ 候选选择方法 ============
     # 根据模型配置选择买入候选交易对
     
-    def _select_buy_candidates(self, portfolio: Dict) -> list:
+    def _should_filter_held_symbols(self) -> bool:
+        """
+        配置方法：决定是否过滤已持仓的symbol
+        
+        此方法用于控制候选symbol选择逻辑，后期可以通过配置或模型设置来决定是否过滤已持仓的symbol。
+        
+        Returns:
+            bool: True表示过滤已持仓的symbol，False表示不过滤
+        """
+        # 默认过滤已持仓的symbol，避免重复开仓
+        # 后期可以通过配置或模型设置来调整此行为
+        return True
+    
+    def _get_candidate_symbols_by_source(self, symbol_source: str, limit: int = None) -> List[Dict]:
+        """
+        根据模型的symbol_source字段获取候选symbol列表
+        
+        Args:
+            symbol_source: 数据源类型，'leaderboard' 或 'future'
+            limit: 可选的数量限制
+            
+        Returns:
+            List[Dict]: 候选symbol列表，每个元素包含symbol等基本信息
+        """
+        if symbol_source == 'future':
+            # 从futures表获取所有已配置的交易对
+            try:
+                entries = self.market_fetcher.get_configured_futures_symbols()
+                if not entries:
+                    logger.warning(f"[Model {self.model_id}] 未获取到futures表配置的交易对")
+                    return []
+                # 应用数量限制
+                if limit:
+                    entries = entries[:limit]
+                return entries
+            except Exception as exc:
+                logger.warning(f"[Model {self.model_id}] 获取futures表候选symbol失败: {exc}")
+                return []
+        else:
+            # 默认从涨跌榜获取（leaderboard）
+            try:
+                limit = limit or getattr(app_config, 'PROMPT_MARKET_SYMBOL_LIMIT', 5)
+                limit = max(1, int(limit))
+                leaderboard = self.market_fetcher.get_leaderboard(limit=limit)
+                
+                # 合并涨幅榜和跌幅榜
+                gainers = leaderboard.get('gainers') or []
+                losers = leaderboard.get('losers') or []
+                entries = gainers[:limit] + losers[:limit]
+                
+                logger.info(f"[Model {self.model_id}] 从涨跌榜获取到 {len(entries)} 个候选symbol")
+                return entries
+            except Exception as exc:
+                logger.warning(f"[Model {self.model_id}] 获取涨跌榜候选symbol失败: {exc}")
+                return []
+    
+    def _filter_candidates_by_portfolio(self, candidates: List[Dict], portfolio: Dict) -> List[Dict]:
+        """
+        根据持仓信息过滤候选symbol列表
+        
+        Args:
+            candidates: 候选symbol列表
+            portfolio: 当前持仓组合信息
+            
+        Returns:
+            List[Dict]: 过滤后的候选symbol列表
+        """
+        if not self._should_filter_held_symbols():
+            return candidates
+        
+        # 计算已持仓的交易对
+        held = {pos['symbol'] for pos in (portfolio.get('positions') or [])}
+        
+        # 过滤掉已持仓的交易对
+        filtered = []
+        for candidate in candidates:
+            symbol = candidate.get('symbol')
+            if symbol and symbol not in held:
+                filtered.append(candidate)
+        
+        filtered_count = len(candidates) - len(filtered)
+        if filtered_count > 0:
+            logger.info(f"[Model {self.model_id}] 过滤掉 {filtered_count} 个已持仓的候选symbol")
+        
+        return filtered
+    
+    def _build_market_state_for_candidates(self, candidates: List[Dict], symbol_source: str) -> Dict:
+        """
+        基于候选symbol列表构建市场状态信息（包含价格、成交量、K线指标）
+        
+        Args:
+            candidates: 候选symbol列表
+            symbol_source: 数据源类型，用于确定使用symbol还是contract_symbol
+            
+        Returns:
+            Dict: 市场状态字典，key为symbol，value为包含价格、成交量、技术指标等信息
+        """
+        market_state = {}
+        
+        if not candidates:
+            return market_state
+        
+        # 提取symbol列表（根据数据源决定使用symbol还是contract_symbol）
+        symbol_list = []
+        symbol_to_contract = {}
+        for candidate in candidates:
+            symbol = candidate.get('symbol')
+            if not symbol:
+                continue
+            
+            if symbol_source == 'future':
+                # 使用contract_symbol作为查询参数
+                contract_symbol = candidate.get('contract_symbol') or f"{symbol}USDT"
+                symbol_to_contract[symbol] = contract_symbol
+                symbol_list.append(contract_symbol)
+            else:
+                # 使用symbol作为查询参数
+                symbol_list.append(symbol.upper())
+        
+        if not symbol_list:
+            return market_state
+        
+        # 获取实时价格
+        if symbol_source == 'future':
+            prices = self.market_fetcher.get_current_prices_by_contract(symbol_list)
+        else:
+            prices = self.market_fetcher.get_current_prices(symbol_list)
+        
+        # 为每个候选symbol构建市场状态
+        for candidate in candidates:
+            symbol = candidate.get('symbol')
+            if not symbol:
+                continue
+            
+            symbol_upper = symbol.upper()
+            
+            # 确定用于获取技术指标的symbol和价格查询的key
+            if symbol_source == 'future':
+                contract_symbol = symbol_to_contract.get(symbol, candidate.get('contract_symbol') or f"{symbol}USDT")
+                query_symbol = contract_symbol  # 用于获取技术指标
+                price_key = contract_symbol  # 用于查询价格
+            else:
+                query_symbol = symbol_upper  # 用于获取技术指标
+                price_key = symbol_upper  # 用于查询价格
+            
+            # 获取价格信息
+            price_info = prices.get(price_key, {})
+            
+            if not price_info:
+                logger.warning(f"[Model {self.model_id}] 无法获取 {symbol} 的实时价格")
+                continue
+            
+            # 获取技术指标（所有时间周期）
+            merged_data = self._merge_timeframe_data(query_symbol)
+            timeframes_data = merged_data.get(query_symbol, {}) if merged_data else {}
+            
+            # 构建市场状态条目
+            market_state[symbol_upper] = {
+                'price': price_info.get('price', candidate.get('price', candidate.get('last_price', 0))),
+                'name': candidate.get('name', symbol),
+                'exchange': candidate.get('exchange', 'BINANCE_FUTURES'),
+                'contract_symbol': candidate.get('contract_symbol') or f"{symbol}USDT",
+                'change_24h': price_info.get('change_24h', candidate.get('change_percent', 0)),
+                'daily_volume': price_info.get('daily_volume', candidate.get('quote_volume', 0)),
+                'quote_volume': price_info.get('daily_volume', candidate.get('quote_volume', 0)),
+                'indicators': {'timeframes': timeframes_data} if timeframes_data else {},
+                'source': symbol_source
+            }
+        
+        logger.info(f"[Model {self.model_id}] 为 {len(market_state)} 个候选symbol构建了市场状态信息")
+        return market_state
+    
+    def _select_buy_candidates(self, portfolio: Dict, symbol_source: str) -> tuple[List[Dict], Dict]:
+        """
+        【重构方法】选择买入候选交易对并构建对应的市场状态
+        
+        新逻辑：
+        1. 根据模型的symbol_source字段获取候选symbol来源
+        2. 过滤已持仓的symbol（可配置）
+        3. 基于候选symbol列表获取市场快照信息（价格、成交量、K线指标）
+        
+        Args:
+            portfolio: 当前持仓组合信息
+            symbol_source: 数据源类型，'leaderboard' 或 'future'
+            
+        Returns:
+            tuple: (候选symbol列表, 市场状态字典)
+        """
+        # 步骤1: 根据symbol_source获取候选symbol列表
+        limit = getattr(app_config, 'PROMPT_MARKET_SYMBOL_LIMIT', 5)
+        candidates = self._get_candidate_symbols_by_source(symbol_source, limit=limit * 2)
+        
+        if not candidates:
+            logger.info(f"[Model {self.model_id}] 未获取到候选symbol")
+            return [], {}
+        
+        logger.info(f"[Model {self.model_id}] 从{symbol_source}数据源获取到 {len(candidates)} 个候选symbol")
+        
+        # 步骤2: 过滤已持仓的symbol（可配置）
+        filtered_candidates = self._filter_candidates_by_portfolio(candidates, portfolio)
+        
+        if not filtered_candidates:
+            logger.info(f"[Model {self.model_id}] 过滤后无可用候选symbol")
+            return [], {}
+        
+        logger.info(f"[Model {self.model_id}] 过滤后剩余 {len(filtered_candidates)} 个候选symbol")
+        
+        # 步骤3: 基于候选symbol列表获取市场状态信息（价格、成交量、K线指标）
+        market_state = self._build_market_state_for_candidates(filtered_candidates, symbol_source)
+        
+        return filtered_candidates, market_state
+    
+    def _select_buy_candidates_old(self, portfolio: Dict) -> list:
         """
         【核心改造方法】选择买入候选交易对
         
