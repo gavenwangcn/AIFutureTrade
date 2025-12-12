@@ -229,6 +229,56 @@ class BinanceFuturesClient:
                 pass
         return None
 
+
+
+    def get_order_book_ticker(self, symbol: Optional[str] = None) -> List[Dict[str, Any]]:
+        """
+        获取最优挂单价格（Order Book Ticker）
+        
+        该接口返回指定交易对或所有交易对的最优买卖挂单价格信息，
+        包括当前的买一价、买一量、卖一价、卖一量等数据。
+        
+        Args:
+            symbol: 交易对符号，如 'BTC' 或 'BTCUSDT'（可选）。
+                   如果不提供，则返回所有交易对的最优挂单价格。
+            
+        Returns:
+            最优挂单价格信息列表，每个元素包含交易对的最优买卖价格和数量。
+        
+        Raises:
+            RuntimeError: 如果SDK不可用
+            Exception: 如果API调用失败
+        """
+        try:
+            # 如果提供了symbol参数，格式化交易对
+            formatted_symbol = None
+            if symbol:
+                formatted_symbol = self.format_symbol(symbol)
+                logger.info(f"[Binance Futures] 获取最优挂单价格，交易对: {formatted_symbol}")
+            else:
+                logger.info("[Binance Futures] 获取所有交易对的最优挂单价格")
+            
+            # 调用REST API接口
+            response = self._rest.symbol_order_book_ticker(symbol=formatted_symbol)
+            
+            # 获取响应数据
+            data = response.data()
+            
+            # 处理响应数据
+            if isinstance(data, list):
+                # 如果返回的是列表，直接转换每个元素为字典
+                tickers = [self._ensure_dict(item) for item in data]
+            else:
+                # 如果返回的是单个对象，转换为字典并包装为列表
+                tickers = [self._ensure_dict(data)]
+            
+            logger.info(f"[Binance Futures] 成功获取最优挂单价格，返回 {len(tickers)} 条数据")
+            return tickers
+            
+        except Exception as e:
+            logger.error(f"[Binance Futures] 获取最优挂单价格失败: {e}")
+            raise
+
     def _flatten_to_dicts(self, payload: Any, context: str) -> List[Dict[str, Any]]:
         """
         将SDK响应扁平化为字典列表
@@ -304,6 +354,24 @@ class BinanceFuturesClient:
             
         Returns:
             字典，key为交易对符号，value为24小时统计数据
+            {
+                "symbol": "BTCUSDT",
+                "priceChange": "-94.99999800",    //24小时价格变动
+                "priceChangePercent": "-95.960",  //24小时价格变动百分比
+                "weightedAvgPrice": "0.29628482", //加权平均价
+                "lastPrice": "4.00000200",        //最近一次成交价
+                "lastQty": "200.00000000",        //最近一次成交额
+                "openPrice": "99.00000000",       //24小时内第一次成交的价格
+                "highPrice": "100.00000000",      //24小时最高价
+                "lowPrice": "0.10000000",         //24小时最低价
+                "volume": "8913.30000000",        //24小时成交量
+                "quoteVolume": "15.30000000",     //24小时成交额
+                "openTime": 1499783499040,        //24小时内，第一笔交易的发生时间
+                "closeTime": 1499869899040,       //24小时内，最后一笔交易的发生时间
+                "firstId": 28385,   // 首笔成交id
+                "lastId": 28460,    // 末笔成交id
+                "count": 76         // 成交笔数
+            }
         """
         logger.info(f"[Binance Futures] 开始获取24小时价格变动统计，交易对数量: {len(symbols)}")
         
@@ -367,49 +435,7 @@ class BinanceFuturesClient:
 
         return result
 
-    def get_top_gainers(self, limit: Optional[int] = None) -> List[Dict]:
-        """
-        获取涨幅榜（24小时涨幅最大的交易对）
-        
-        Args:
-            limit: 返回的交易对数量，默认10
-            
-        Returns:
-            交易对列表，按涨幅降序排列
-        """
-        if limit is None:
-            limit = 10
 
-        logger.info(f"[Binance Futures] 开始获取涨幅榜，limit={limit}")
-
-        try:
-            # 获取所有交易对的24小时统计
-            response = self._rest.ticker24hr_price_change_statistics()
-            dict_entries = self._flatten_to_dicts(
-                response.data(),
-                "ticker24hr_price_change_statistics",
-            )
-
-            if not dict_entries:
-                logger.warning("[Binance Futures] 涨幅榜无返回数据")
-                return []
-
-            # 按价格变动百分比排序（降序）
-            sorted_entries = sorted(
-                dict_entries,
-                key=lambda x: float(x.get("priceChangePercent", x.get("P", 0)) or 0),
-                reverse=True,
-            )
-
-            # 返回前limit个
-            top_gainers = sorted_entries[:limit]
-            logger.info(f"[Binance Futures] 涨幅榜获取完成，返回 {len(top_gainers)} 个交易对")
-
-            return top_gainers
-
-        except Exception as exc:
-            logger.error(f"[Binance Futures] 获取涨幅榜失败: {exc}", exc_info=True)
-            return []
 
     def get_symbol_prices(self, symbols: List[str]) -> Dict[str, Dict]:
         """
@@ -880,6 +906,61 @@ class BinanceFuturesOrderClient:
 
         return flattened
 
+    def get_order_book_ticker(self, symbol: Optional[str] = None) -> List[Dict[str, Any]]:
+        """
+        获取最优挂单价格（Order Book Ticker）
+        
+        该接口返回指定交易对或所有交易对的最优买卖挂单价格信息，
+        包括当前的买一价、买一量、卖一价、卖一量等数据。
+        
+        Args:
+            symbol: 交易对符号，如 'BTC' 或 'BTCUSDT'（可选）。
+                   如果不提供，则返回所有交易对的最优挂单价格。
+            
+        Returns:
+            最优挂单价格信息列表，每个元素包含交易对的最优买卖价格和数量。
+        {
+            "symbol": "BTCUSDT", // 交易对
+            "bidPrice": "4.00000000", //最优买单价
+            "bidQty": "431.00000000", //挂单量
+            "askPrice": "4.00000200", //最优卖单价
+            "askQty": "9.00000000", //挂单量
+            "time": 1589437530011   // 撮合引擎时间
+        }
+        Raises:
+            RuntimeError: 如果SDK不可用
+            Exception: 如果API调用失败
+        """
+        try:
+            # 如果提供了symbol参数，格式化交易对
+            formatted_symbol = None
+            if symbol:
+                formatted_symbol = self.format_symbol(symbol)
+                logger.info(f"[Binance Futures] 获取最优挂单价格，交易对: {formatted_symbol}")
+            else:
+                logger.info("[Binance Futures] 获取所有交易对的最优挂单价格")
+            
+            # 调用REST API接口
+            response = self._rest.symbol_order_book_ticker(symbol=formatted_symbol)
+            
+            # 获取响应数据
+            data = response.data()
+            
+            # 处理响应数据
+            if isinstance(data, list):
+                # 如果返回的是列表，直接转换每个元素为字典
+                tickers = [self._ensure_dict(item) for item in data]
+            else:
+                # 如果返回的是单个对象，转换为字典并包装为列表
+                tickers = [self._ensure_dict(data)]
+            
+            logger.info(f"[Binance Futures] 成功获取最优挂单价格，返回 {len(tickers)} 条数据")
+            return tickers
+            
+        except Exception as e:
+            logger.error(f"[Binance Futures] 获取最优挂单价格失败: {e}")
+            raise
+
     # ============ 交易方法 ============
     
     def _execute_order(self, order_params: Dict[str, Any], context: str = "交易") -> Dict[str, Any]:
@@ -892,6 +973,34 @@ class BinanceFuturesOrderClient:
             
         Returns:
             订单响应数据
+            {
+ 	            "clientOrderId": "testOrder", // 用户自定义的订单号
+ 	            "cumQty": "0",
+ 	            "cumQuote": "0", // 成交金额
+ 	            "executedQty": "0", // 成交量
+ 	            "orderId": 22542179, // 系统订单号
+ 	            "avgPrice": "0.00000",	// 平均成交价
+ 	            "origQty": "10", // 原始委托数量
+ 	            "price": "0", // 委托价格
+ 	            "reduceOnly": false, // 仅减仓
+ 	            "side": "SELL", // 买卖方向
+ 	            "positionSide": "SHORT", // 持仓方向
+ 	            "status": "NEW", // 订单状态
+ 	            "stopPrice": "0", // 触发价，对`TRAILING_STOP_MARKET`无效
+ 	            "closePosition": false,   // 是否条件全平仓
+ 	            "symbol": "BTCUSDT", // 交易对
+ 	            "timeInForce": "GTD", // 有效方法
+ 	            "type": "TRAILING_STOP_MARKET", // 订单类型
+ 	            "origType": "TRAILING_STOP_MARKET",  // 触发前订单类型
+ 	            "activatePrice": "9020", // 跟踪止损激活价格, 仅`TRAILING_STOP_MARKET` 订单返回此字段
+  	            "priceRate": "0.3",	// 跟踪止损回调比例, 仅`TRAILING_STOP_MARKET` 订单返回此字段
+ 	            "updateTime": 1566818724722, // 更新时间
+ 	            "workingType": "CONTRACT_PRICE", // 条件价格触发类型
+ 	            "priceProtect": false,            // 是否开启条件单触发保护
+ 	            "priceMatch": "NONE",              //盘口价格下单模式
+ 	            "selfTradePreventionMode": "NONE", //订单自成交保护模式
+ 	            "goodTillDate": 1693207680000      //订单TIF为GTD时的自动取消时间
+            }
         """
         # 【交易模式切换】根据配置选择使用测试接口或真实交易接口
         trade_mode = getattr(app_config, 'BINANCE_TRADE_MODE', 'test').lower()

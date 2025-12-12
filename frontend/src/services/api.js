@@ -67,7 +67,12 @@ export const modelApi = {
   /**
    * 获取聚合投资组合数据
    */
-  getAggregatedPortfolio: () => apiGet('/api/aggregated/portfolio')
+  getAggregatedPortfolio: () => apiGet('/api/aggregated/portfolio'),
+
+  /**
+   * 获取模型持仓合约列表
+   */
+  getPortfolioSymbols: (modelId) => apiGet(`/api/models/${modelId}/portfolio/symbols`)
 }
 
 /**

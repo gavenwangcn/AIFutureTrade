@@ -2361,3 +2361,40 @@ class MySQLDatabase:
             logger.error("[MySQL] Failed to get agent connection info: %s", e)
             return []
 
+    def get_model_portfolio_symbols(self, model_id: int) -> List[str]:
+        """获取指定模型的持仓合约symbol列表
+        
+        Args:
+            model_id: 模型ID
+            
+        Returns:
+            去重后的symbol列表
+        """
+        try:
+            query = f"""
+            SELECT DISTINCT symbol
+            FROM portfolios
+            WHERE model_id = %s AND position_amt != 0
+            ORDER BY symbol ASC
+            """
+            
+            def _execute_query(conn):
+                cursor = conn.cursor()
+                try:
+                    cursor.execute(query, (model_id,))
+                    rows = cursor.fetchall()
+                    symbols = []
+                    for row in rows:
+                        if isinstance(row, dict):
+                            symbols.append(row.get('symbol', ''))
+                        elif len(row) > 0:
+                            symbols.append(row[0])
+                    return symbols
+                finally:
+                    cursor.close()
+            
+            return self._with_connection(_execute_query)
+        except Exception as e:
+            logger.error("[MySQL] Failed to get model portfolio symbols: %s", e)
+            return []
+

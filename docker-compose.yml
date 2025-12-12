@@ -37,7 +37,6 @@ services:
       - ./data:/app/data
     environment:
       # 基础配置
-      - DATABASE_PATH=${DATABASE_PATH:-/app/data/trading_bot.db}
       - USE_GUNICORN=${USE_GUNICORN:-true}
       - FLASK_ENV=${FLASK_ENV:-production}
       # Gunicorn配置

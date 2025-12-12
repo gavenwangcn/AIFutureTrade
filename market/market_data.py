@@ -271,12 +271,15 @@ class MarketDataFetcher:
         Returns:
             价格数据字典，key为交易对符号，value为价格信息
         """
-        futures = self._get_configured_futures()
-        if not futures:
-            return {}
-
+        # 如果提供了symbols参数，直接构造futures列表，不需要查询数据库
         if symbols:
-            futures = [f for f in futures if f['symbol'] in symbols]
+            # 直接为传入的symbols构造简单的futures列表，只包含symbol字段
+            futures = [{'symbol': symbol} for symbol in symbols]
+        else:
+            # 如果没有提供symbols参数，才从数据库获取所有配置的合约
+            futures = self._get_configured_futures()
+            if not futures:
+                return {}
 
         if not futures:
             return {}

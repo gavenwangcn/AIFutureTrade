@@ -50,6 +50,7 @@ export function useTradingApp() {
   const positions = ref([])
   const trades = ref([])
   const conversations = ref([])
+  const modelPortfolioSymbols = ref([]) // 模型持仓合约列表
   
   // MySQL 涨幅榜同步状态
   const mysqlLeaderboardSyncRunning = ref(true)
@@ -76,7 +77,8 @@ export function useTradingApp() {
     portfolio: false,
     positions: false,
     trades: false,
-    conversations: false
+    conversations: false,
+    portfolioSymbols: false
   })
   
   // 错误状态
@@ -85,9 +87,10 @@ export function useTradingApp() {
   // WebSocket连接
   const socket = ref(null)
   let websocketMonitorInterval = null // WebSocket 监控定时器
-  let marketPricesRefreshInterval = null // 市场行情价格自动刷新定时器（轮询方式，默认10秒）
-  let gainersRefreshInterval = null // 涨幅榜自动刷新定时器（轮询方式，默认5秒）
-  let losersRefreshInterval = null // 跌幅榜自动刷新定时器（轮询方式，默认5秒）
+let marketPricesRefreshInterval = null // 市场行情价格自动刷新定时器（轮询方式，默认10秒）
+let gainersRefreshInterval = null // 涨幅榜自动刷新定时器（轮询方式，默认5秒）
+let losersRefreshInterval = null // 跌幅榜自动刷新定时器（轮询方式，默认5秒）
+let portfolioSymbolsRefreshInterval = null // 模型持仓合约列表自动刷新定时器（轮询方式，默认10秒）
   let leaderboardRefreshInterval = null // 涨跌榜自动刷新定时器（已废弃，保留以兼容旧代码）
   
   // ECharts 实例
@@ -363,6 +366,42 @@ export function useTradingApp() {
   }
 
   /**
+   * 启动模型持仓合约列表自动刷新（轮询方式）
+   * 使用配置的刷新时间（默认10秒）
+   */
+  const startPortfolioSymbolsAutoRefresh = () => {
+    // 清除已有定时器
+    if (portfolioSymbolsRefreshInterval) {
+      clearInterval(portfolioSymbolsRefreshInterval)
+      portfolioSymbolsRefreshInterval = null
+    }
+
+    // 立即获取一次数据
+    loadModelPortfolioSymbols()
+
+    // 使用配置的刷新时间（默认10秒，可配置）
+    const refreshInterval = 10000 // 10秒
+    
+    portfolioSymbolsRefreshInterval = setInterval(() => {
+      console.log(`[TradingApp] 轮询刷新模型持仓合约列表数据（${refreshInterval/1000}秒间隔）`)
+      loadModelPortfolioSymbols()
+    }, refreshInterval)
+
+    console.log(`[TradingApp] ✅ 模型持仓合约列表自动刷新已启动（轮询方式，${refreshInterval/1000}秒间隔）`)
+  }
+
+  /**
+   * 停止模型持仓合约列表自动刷新
+   */
+  const stopPortfolioSymbolsAutoRefresh = () => {
+    if (portfolioSymbolsRefreshInterval) {
+      clearInterval(portfolioSymbolsRefreshInterval)
+      portfolioSymbolsRefreshInterval = null
+      console.log('[TradingApp] 模型持仓合约列表自动刷新已停止')
+    }
+  }
+
+  /**
    * 启动涨跌榜自动刷新（已废弃，保留以兼容旧代码）
    */
   const startLeaderboardAutoRefresh = () => {
@@ -541,6 +580,29 @@ export function useTradingApp() {
   }
 
   /**
+   * 加载模型持仓合约列表
+   */
+  const loadModelPortfolioSymbols = async () => {
+    if (!currentModelId.value) {
+      modelPortfolioSymbols.value = []
+      return
+    }
+    
+    loading.value.portfolioSymbols = true
+    errors.value.portfolioSymbols = null
+    try {
+      const response = await modelApi.getPortfolioSymbols(currentModelId.value)
+      modelPortfolioSymbols.value = response.data || []
+    } catch (error) {
+      console.error('[TradingApp] Error loading model portfolio symbols:', error)
+      errors.value.portfolioSymbols = error.message
+      modelPortfolioSymbols.value = []
+    } finally {
+      loading.value.portfolioSymbols = false
+    }
+  }
+  
+  /**
    * 加载投资组合数据
    */
   const loadPortfolio = async () => {
@@ -564,6 +626,8 @@ export function useTradingApp() {
           updateAccountChart(data.account_value_history, portfolio.value.totalValue, false)
         }
       }
+      // 加载模型持仓合约列表
+      await loadModelPortfolioSymbols()
     } catch (error) {
       console.error('[TradingApp] Error loading portfolio:', error)
       errors.value.portfolio = error.message
@@ -610,6 +674,8 @@ export function useTradingApp() {
     currentModelId.value = null
     isAggregatedView.value = true
     await loadAggregatedData()
+    // 切换到聚合视图时停止模型持仓合约列表自动刷新
+    stopPortfolioSymbolsAutoRefresh()
   }
   
   /**
@@ -1126,8 +1192,11 @@ export function useTradingApp() {
       loadPortfolio(),
       loadPositions(),
       loadTrades(),
-      loadConversations()
+      loadConversations(),
+      loadModelPortfolioSymbols() // 立即加载一次模型持仓合约数据
     ])
+    // 选择模型后启动模型持仓合约列表自动刷新
+    startPortfolioSymbolsAutoRefresh()
   }
   
   /**
@@ -1359,6 +1428,9 @@ export function useTradingApp() {
     stopGainersAutoRefresh()
     stopLosersAutoRefresh()
     
+    // 停止模型持仓合约列表自动刷新
+    stopPortfolioSymbolsAutoRefresh()
+    
     // 清理 WebSocket 连接
     if (socket.value) {
       console.log('[WebSocket] 组件卸载，断开 WebSocket 连接')
@@ -1404,6 +1476,7 @@ export function useTradingApp() {
     positions,
     trades,
     conversations,
+    modelPortfolioSymbols,
     loggerEnabled,
     showSettingsModal,
     showStrategyModal,
@@ -1457,6 +1530,7 @@ export function useTradingApp() {
     loadPositions,
     loadTrades,
     loadConversations,
+    loadModelPortfolioSymbols,
     
     // 市场行情价格自动刷新方法
     startMarketPricesAutoRefresh,

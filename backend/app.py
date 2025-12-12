@@ -85,12 +85,8 @@ logger = logging.getLogger(__name__)
 
 # ============ Global Configuration ============
 
-DEFAULT_DB_PATH = 'trading_bot.db'
-env_db_path = os.getenv('DATABASE_PATH')
-config_db_path = getattr(app_config, 'DATABASE_PATH', None)
-db_path = env_db_path or config_db_path or DEFAULT_DB_PATH
-
-db = Database(db_path)
+# Database initialization (using MySQL configuration from app_config)
+db = Database()
 
 # Initialize database tables immediately when the application starts
 # This ensures tables are created even when running with gunicorn or other WSGI servers
@@ -280,7 +276,7 @@ def trading_loop():
     while auto_trading:
         try:
             if not trading_engines:
-                time.sleep(30)
+                time.sleep(10)
                 continue
 
             logger.info(f"\n{'='*60}")
@@ -741,6 +737,50 @@ def get_portfolio(model_id):
         'leverage': model.get('leverage', 10)
     })
 
+@app.route('/api/models/<int:model_id>/portfolio/symbols', methods=['GET'])
+def get_model_portfolio_symbols(model_id):
+    """
+    获取模型的持仓合约symbol列表及其实时价格和当日成交额等市场数据
+    
+    Args:
+        model_id (int): 模型ID
+    
+    Returns:
+        JSON: 包含symbol列表及其实时价格、当日成交额、涨跌百分比等市场数据
+    """
+    model = db.get_model(model_id)
+    if not model:
+        return jsonify({'error': f'Model {model_id} not found'}), 404
+    
+    from common.database_mysql import MySQLDatabase
+    mysql_db = MySQLDatabase(auto_init_tables=False)
+    
+    # 获取模型持有symbols列表
+    symbols = mysql_db.get_model_portfolio_symbols(model_id)
+    
+    if not symbols:
+        return jsonify({'data': []}), 200
+    
+    # 获取实时价格数据
+    prices_data = market_fetcher.get_prices(symbols)
+    
+    # 构建响应数据
+    result = []
+    for symbol in symbols:
+        symbol_data = {
+            'symbol': symbol,
+            'price': prices_data.get(symbol, {}).get('price', 0),
+            'change': prices_data.get(symbol, {}).get('change', 0),
+            'changePercent': prices_data.get(symbol, {}).get('changePercent', 0),
+            'volume': prices_data.get(symbol, {}).get('volume', 0),
+            'quoteVolume': prices_data.get(symbol, {}).get('quoteVolume', 0),
+            'high': prices_data.get(symbol, {}).get('high', 0),
+            'low': prices_data.get(symbol, {}).get('low', 0)
+        }
+        result.append(symbol_data)
+    
+    return jsonify({'data': result}), 200
+
 @app.route('/api/models/<int:model_id>/trades', methods=['GET'])
 def get_trades(model_id):
     """
@@ -1006,8 +1046,7 @@ def get_aggregated_portfolio():
 
 @app.route('/api/market/prices', methods=['GET'])
 def get_market_prices():
-    """
-    获取当前市场价格（包括配置的合约和模型持仓的合约）
+    """获取当前市场价格（仅返回配置的合约信息）
     
     Returns:
         JSON: 价格数据字典，key为交易对符号，value包含价格和来源信息
@@ -1019,29 +1058,6 @@ def get_market_prices():
     # 为配置的合约添加来源标记
     for symbol in configured_prices:
         configured_prices[symbol]['source'] = 'configured'
-    
-    # 获取所有模型的持仓合约
-    models = db.get_all_models()
-    position_symbols = set()
-    for model in models:
-        try:
-            portfolio = db.get_portfolio(model['id'], {})
-            for pos in portfolio.get('positions', []):
-                symbol = pos.get('symbol')
-                if symbol:
-                    position_symbols.add(symbol)
-        except Exception:
-            continue
-    
-    # 获取持仓合约的价格数据（排除已配置的合约，避免重复）
-    position_symbols = [s for s in position_symbols if s not in configured_symbols]
-    if position_symbols:
-        position_prices = market_fetcher.get_prices(position_symbols)
-        # 为持仓合约添加来源标记
-        for symbol in position_prices:
-            position_prices[symbol]['source'] = 'position'
-        # 合并数据
-        configured_prices.update(position_prices)
     
     return jsonify(configured_prices)
 
@@ -1441,34 +1457,6 @@ def get_market_klines():
 
 # ============ WebSocket Handlers ============
 # WebSocket事件处理：用于实时数据推送（K线数据等）
-
-@socketio.on('leaderboard:request')
-def handle_leaderboard_request(payload=None):
-    """
-    WebSocket处理：涨跌幅榜请求（已废弃，前端已改为轮询方式）
-    
-    注意：涨跌幅榜已改为前端轮询方式获取数据，不再通过WebSocket推送。
-    此handler保留以兼容旧版本前端，但建议前端使用 /api/market/leaderboard API接口。
-    
-    Args:
-        payload (dict, optional): 请求参数，包含limit等
-    """
-    payload = payload or {}
-    limit = payload.get('limit', 10)
-    
-    logger.warning(f"[Leaderboard Request] WebSocket leaderboard:request 已废弃，建议使用 /api/market/leaderboard API接口（轮询方式）")
-    
-    try:
-        # 获取涨跌榜数据
-        data = market_fetcher.sync_leaderboard(force=False, limit=limit)
-        
-        # 发送数据更新事件（兼容旧版本前端）
-        emit('leaderboard:update', data)
-        logger.debug(f"[Leaderboard Request] Leaderboard update emitted to client (兼容模式)")
-        
-    except Exception as exc:
-        logger.error(f"[Leaderboard Request] Failed to fetch leaderboard data: limit={limit}, error={str(exc)}", exc_info=True)
-        emit('leaderboard:error', {'message': str(exc)})
 
 @socketio.on('klines:subscribe')
 def handle_klines_subscribe(payload=None):

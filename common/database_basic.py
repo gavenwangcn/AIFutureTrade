@@ -63,20 +63,17 @@ class Database:
     
     注意：
         - 已从ClickHouse迁移到MySQL，保持方法签名和返回值格式兼容
-        - db_path参数保留以保持兼容性，但不再使用
     """
     
-    def __init__(self, db_path: str = 'trading_bot.db'):
+    def __init__(self):
         """
         初始化数据库连接
-        
-        Args:
-            db_path: 保留此参数以保持兼容性，但不再使用（MySQL使用配置中的连接信息）
         
         Note:
             - 创建MySQL连接池（最小5个连接，最大50个连接）
             - 定义所有业务表的表名
             - 不自动初始化表结构，需要调用init_db()方法
+            - 使用配置文件中的MySQL连接信息
         """
         # 使用 MySQL 连接池，参考 database_mysql.py 的模式
         self._pool = MySQLConnectionPool(

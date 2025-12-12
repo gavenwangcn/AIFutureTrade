@@ -327,6 +327,47 @@
           </div>
         </div>
 
+        <!-- Model Portfolio Symbols -->
+        <div v-show="!isAggregatedView" class="content-card">
+          <div class="card-header">
+            <h3 class="card-title">{{ getModelDisplayName(currentModel) }} - 持仓合约实时行情</h3>
+            <span class="card-subtitle">展示该模型持仓合约的实时数据走势</span>
+          </div>
+          <div class="card-body">
+            <div v-if="modelPortfolioSymbols.length > 0" class="model-portfolio-symbols-grid">
+              <div 
+                v-for="(item, index) in modelPortfolioSymbols" 
+                :key="item.symbol"
+                class="model-portfolio-symbol-item"
+                @click="openKlineChartFromMarket(item.symbol)"
+              >
+                <div class="price-card">
+                    <div class="price-left">
+                      <div class="price-symbol-large">{{ item.symbol }}</div>
+                      <div class="price-contract-name">{{ item.symbol }}永续合约</div>
+                    </div>
+                    <div class="price-right">
+                      <div class="price-value-large">${{ formatPrice(item.price) }}</div>
+                      <div class="price-change-with-arrow" :class="getSymbolChangeClass(item.symbol)">
+                        <span class="change-arrow">{{ getSymbolChangeArrow(item.symbol) }}</span>
+                        <span class="change-value">{{ item.changePercent.toFixed(2) }}%</span>
+                      </div>
+                      <div class="price-volume-chinese">
+                        <span class="volume-label">当日成交额: </span>
+                        <span class="volume-value">{{ formatVolumeChinese(item.quoteVolume) }}</span>
+                      </div>
+                    </div>
+                  </div>
+              </div>
+            </div>
+            <div v-else class="no-data-container">
+              <div class="no-data-icon">📊</div>
+              <div class="no-data-text">暂无持仓合约数据</div>
+              <div class="no-data-subtext">该模型当前没有持仓合约或数据加载失败</div>
+            </div>
+          </div>
+        </div>
+
         <!-- Tabs -->
         <div v-show="!isAggregatedView" class="content-card">
           <div class="card-tabs">
@@ -599,7 +640,8 @@ const {
   formatPnl,
   getPnlClass,
   formatVolumeChinese,
-  formatTime
+  formatTime,
+  modelPortfolioSymbols
 } = useTradingApp()
 
 const showKlineChart = ref(false)
@@ -633,6 +675,51 @@ const handleSaveLeverage = async () => {
 const openKlineChartFromMarket = (symbol, contractSymbol) => {
   const finalSymbol = contractSymbol || symbol
   openKlineChart(finalSymbol)
+}
+
+// 辅助函数：获取symbol的价格数据
+const getSymbolPrice = (symbol) => {
+  // 优先从模型持仓数据中获取价格
+  const portfolioData = modelPortfolioSymbols.value.find(item => item.symbol === symbol)
+  if (portfolioData) return portfolioData.price || 0
+  
+  // 如果模型持仓数据中没有，再从市场价格数据中获取
+  const priceData = marketPrices.value.find(item => item.symbol === symbol)
+  return priceData ? priceData.price : 0
+}
+
+// 辅助函数：获取symbol的涨跌幅百分比
+const getSymbolChangePercent = (symbol) => {
+  // 优先从模型持仓数据中获取涨跌幅
+  const portfolioData = modelPortfolioSymbols.value.find(item => item.symbol === symbol)
+  if (portfolioData) return portfolioData.changePercent || portfolioData.change || 0
+  
+  // 如果模型持仓数据中没有，再从市场价格数据中获取
+  const priceData = marketPrices.value.find(item => item.symbol === symbol)
+  return priceData ? (priceData.change_percent || priceData.change || 0) : 0
+}
+
+// 辅助函数：获取symbol的涨跌幅箭头
+const getSymbolChangeArrow = (symbol) => {
+  const changePercent = getSymbolChangePercent(symbol)
+  return changePercent >= 0 ? '▲' : '▼'
+}
+
+// 辅助函数：获取symbol的涨跌幅样式类
+const getSymbolChangeClass = (symbol) => {
+  const changePercent = getSymbolChangePercent(symbol)
+  return changePercent >= 0 ? 'positive' : 'negative'
+}
+
+// 辅助函数：获取symbol的成交量
+const getSymbolVolume = (symbol) => {
+  // 优先从模型持仓数据中获取成交量
+  const portfolioData = modelPortfolioSymbols.value.find(item => item.symbol === symbol)
+  if (portfolioData) return portfolioData.quoteVolume || portfolioData.volume || 0
+  
+  // 如果模型持仓数据中没有，再从市场价格数据中获取
+  const priceData = marketPrices.value.find(item => item.symbol === symbol)
+  return priceData ? (priceData.daily_volume || priceData.quote_volume || 0) : 0
 }
 
 onMounted(() => {

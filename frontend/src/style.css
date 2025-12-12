@@ -848,6 +848,151 @@ body {
     padding: 16px;
     background: var(--bg-1);
     border-radius: 12px;
+}
+
+/* Model Portfolio Symbols */
+.model-portfolio-symbols-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+    gap: 16px;
+    max-width: 100%;
+}
+
+@media (min-width: 1800px) {
+    .model-portfolio-symbols-grid {
+        grid-template-columns: repeat(6, 1fr);
+    }
+}
+
+@media (min-width: 1500px) and (max-width: 1799px) {
+    .model-portfolio-symbols-grid {
+        grid-template-columns: repeat(5, 1fr);
+    }
+}
+
+@media (min-width: 1200px) and (max-width: 1499px) {
+    .model-portfolio-symbols-grid {
+        grid-template-columns: repeat(4, 1fr);
+    }
+}
+
+@media (min-width: 900px) and (max-width: 1199px) {
+    .model-portfolio-symbols-grid {
+        grid-template-columns: repeat(3, 1fr);
+    }
+}
+
+@media (min-width: 600px) and (max-width: 899px) {
+    .model-portfolio-symbols-grid {
+        grid-template-columns: repeat(2, 1fr);
+    }
+}
+
+@media (max-width: 599px) {
+    .model-portfolio-symbols-grid {
+        grid-template-columns: 1fr;
+    }
+}
+
+.model-portfolio-symbol-item {
+    padding: 16px;
+    background: var(--bg-1);
+    border-radius: 12px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+    transition: all 0.2s ease;
+    cursor: pointer;
+}
+
+.model-portfolio-symbol-item:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+}
+
+.model-portfolio-symbol-item .price-card {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    width: 100%;
+    height: 100%;
+}
+
+.model-portfolio-symbol-item .price-left {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 4px;
+}
+
+.model-portfolio-symbol-item .price-symbol-large {
+    font-size: 18px;
+    font-weight: 700;
+    color: var(--text-1);
+}
+
+.model-portfolio-symbol-item .price-contract-name {
+    font-size: 12px;
+    color: var(--text-2);
+}
+
+.model-portfolio-symbol-item .price-right {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 4px;
+}
+
+.model-portfolio-symbol-item .price-value-large {
+    font-size: 16px;
+    font-weight: 700;
+    color: var(--text-1);
+}
+
+.model-portfolio-symbol-item .price-change-with-arrow {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 14px;
+    font-weight: 600;
+}
+
+.model-portfolio-symbol-item .price-change-with-arrow.positive {
+    color: var(--success);
+}
+
+.model-portfolio-symbol-item .price-change-with-arrow.negative {
+    color: var(--danger);
+}
+
+.model-portfolio-symbol-item .change-arrow {
+    font-size: 12px;
+}
+
+.model-portfolio-symbol-item .change-value {
+    font-size: 14px;
+}
+
+.model-portfolio-symbol-item .price-volume-chinese {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 2px;
+    font-size: 12px;
+    color: var(--text-2);
+}
+
+.model-portfolio-symbol-item .volume-label {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.model-portfolio-symbol-item .volume-value {
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--text-1);
+}
+
+.price-item {
     border: 1px solid var(--border-1);
     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
     position: relative;
@@ -950,6 +1095,37 @@ body {
     color: var(--text-2);
     font-weight: 500;
     font-size: 12px;
+}
+
+/* 无数据提示样式 */
+.no-data-container {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 60px 20px;
+    text-align: center;
+    background-color: var(--bg-2);
+    border-radius: 8px;
+}
+
+.no-data-icon {
+    font-size: 48px;
+    margin-bottom: 16px;
+    opacity: 0.6;
+}
+
+.no-data-text {
+    font-size: 18px;
+    font-weight: 600;
+    color: var(--text-1);
+    margin-bottom: 8px;
+}
+
+.no-data-subtext {
+    font-size: 14px;
+    color: var(--text-3);
+    line-height: 1.5;
 }
 
 .price-item::after {
