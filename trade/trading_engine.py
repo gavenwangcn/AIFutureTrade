@@ -725,39 +725,6 @@ class TradingEngine:
     # ============ 市场数据获取方法 ============
     # 提供市场数据获取、处理和技术指标计算功能
     
-    def _get_tracked_symbols(self) -> List[str]:
-        """
-        获取模型跟踪的期货合约列表
-        
-        从portfolios表中通过关联model_id做去重获取所有交易过的期货合约symbol。
-        这样每个模型可以独立跟踪不同的期货合约集合。
-        
-        Returns:
-            List[str]: 合约symbol列表（如 ['BTC', 'ETH']）
-        """
-        try:
-            # 获取model_id到UUID的映射
-            model_mapping = self.db._get_model_id_mapping()
-            model_uuid = model_mapping.get(self.model_id)
-            if not model_uuid:
-                logger.warning(f"[Model {self.model_id}] Model UUID not found, returning empty symbol list")
-                return []
-            
-            # 从portfolios表获取当前模型所有交易过的去重symbol合约
-            rows = self.db.query(f"""
-                SELECT DISTINCT symbol
-                FROM `{self.db.portfolios_table}`
-                WHERE model_id = '{model_uuid}'
-                ORDER BY symbol ASC
-            """)
-            
-            symbols = [row[0] for row in rows] if rows else []
-            logger.debug(f"[Model {self.model_id}] Retrieved {len(symbols)} tracked symbols from portfolios table")
-            return symbols
-        except Exception as e:
-            logger.error(f"[Model {self.model_id}] Failed to get tracked symbols from portfolios table: {e}", exc_info=True)
-            return []
-
     def _get_held_symbols(self) -> List[str]:
         """
         获取模型当前持仓的期货合约symbol列表（去重）
@@ -768,28 +735,9 @@ class TradingEngine:
         Returns:
             List[str]: 当前持仓的合约symbol列表（如 ['BTC', 'ETH']）
         """
-        try:
-            # 获取model_id到UUID的映射
-            model_mapping = self.db._get_model_id_mapping()
-            model_uuid = model_mapping.get(self.model_id)
-            if not model_uuid:
-                logger.warning(f"[Model {self.model_id}] Model UUID not found, returning empty symbol list")
-                return []
-            
-            # 从portfolios表获取当前模型有持仓的去重symbol合约（position_amt != 0）
-            rows = self.db.query(f"""
-                SELECT DISTINCT symbol
-                FROM `{self.db.portfolios_table}`
-                WHERE model_id = '{model_uuid}' AND position_amt != 0
-                ORDER BY symbol ASC
-            """)
-            
-            symbols = [row[0] for row in rows] if rows else []
-            logger.debug(f"[Model {self.model_id}] Retrieved {len(symbols)} held symbols from portfolios table")
-            return symbols
-        except Exception as e:
-            logger.error(f"[Model {self.model_id}] Failed to get held symbols from portfolios table: {e}", exc_info=True)
-            return []
+        symbols = self.db.get_model_held_symbols(self.model_id)
+        logger.debug(f"[Model {self.model_id}] Retrieved {len(symbols)} held symbols from portfolios table")
+        return symbols
     
     def _get_market_state(self) -> Dict:
         """
@@ -1717,40 +1665,6 @@ class TradingEngine:
         
         return filtered_candidates, market_state
     
-    def _select_buy_candidates_old(self, portfolio: Dict) -> list:
-        """
-        【核心改造方法】选择买入候选交易对
-        
-        此方法从模型跟踪的合约中选择买入候选交易对：
-        1. 获取模型当前跟踪的所有合约symbol（已在_get_market_state中获取过）
-        2. 过滤掉已持仓的交易对，避免重复开仓
-        
-        调用链：
-        execute_buy_cycle() -> _select_buy_candidates() -> _get_tracked_symbols()
-        
-        注意：
-        - 此方法仅用于buy类型的AI交互，sell逻辑不受影响
-        - 已持仓的交易对会被自动过滤，避免重复开仓
-        - 不再提前限制候选数量，而是将所有候选提供给模型，由模型自行决策
-        
-        Args:
-            portfolio: 当前持仓组合信息
-            
-        Returns:
-            候选交易对列表，已过滤掉已持仓的交易对
-        """
-        # 计算已持仓的交易对
-        held = {pos['symbol'] for pos in (portfolio.get('positions') or [])}
-        
-        # 从模型跟踪的合约中获取所有symbol（已在_get_market_state中获取过）
-        tracked_symbols = self._get_tracked_symbols()
-        
-        # 过滤掉已持仓的交易对，避免重复开仓
-        filtered = [{'symbol': symbol} for symbol in tracked_symbols if symbol not in held]
-        
-        logger.info(f"[Model {self.model_id}] 从跟踪的合约中获取到 {len(filtered)} 个候选交易对")
-        return filtered
-
     # ============ 决策执行方法 ============
     # 统一执行AI交易决策，支持多种交易信号类型
     
@@ -1778,7 +1692,6 @@ class TradingEngine:
         """
         results = []
 
-        tracked = set(self._get_tracked_symbols())
         positions_map = {pos['symbol']: pos for pos in portfolio.get('positions', [])}
 
         # 获取全局交易锁，确保买入和卖出服务线程不会同时执行交易操作
@@ -1786,9 +1699,6 @@ class TradingEngine:
             logger.debug(f"[Model {self.model_id}] [交易执行] 获取到交易锁，开始执行交易决策")
             
             for symbol, decision in decisions.items():
-                if symbol not in tracked:
-                    continue
-
                 signal = decision.get('signal', '').lower()
 
                 try:

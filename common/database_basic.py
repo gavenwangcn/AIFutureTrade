@@ -1552,49 +1552,40 @@ class Database:
             logger.error(f"[Database] Failed to delete model future: {e}")
             raise
     
-    def get_model_futures(self, model_id: int) -> List[Dict]:
+    def get_model_held_symbols(self, model_id: int) -> List[str]:
         """
-        获取模型持有的期货合约symbol，按symbol去重
+        获取模型当前持仓的期货合约symbol列表（去重）
+        
+        从portfolios表中通过关联model_id获取当前有持仓的symbol（position_amt != 0），
+        用于卖出服务获取市场状态。
         
         Args:
             model_id: 模型ID
             
         Returns:
-            List[Dict]: 期货合约配置列表，每个字典包含id, model_id, symbol等字段
+            List[str]: 当前持仓的合约symbol列表（如 ['BTC', 'ETH']）
         """
         try:
             model_mapping = self._get_model_id_mapping()
             model_uuid = model_mapping.get(model_id)
             if not model_uuid:
+                logger.warning(f"[Database] Model {model_id} UUID not found")
                 return []
             
-            # 从portfolios表查询模型持有的symbol，按symbol去重
+            # 从portfolios表获取当前模型有持仓的去重symbol合约（position_amt != 0）
             rows = self.query(f"""
-                SELECT DISTINCT CONCAT(model_id, '_', symbol) as id, model_id, symbol
-                FROM {self.portfolios_table} FINAL
+                SELECT DISTINCT symbol
+                FROM `{self.portfolios_table}`
                 WHERE model_id = '{model_uuid}' AND position_amt != 0
                 ORDER BY symbol ASC
             """)
             
-            results = []
-            for row in rows:
-                # 构建返回结构，为portfolios表中不存在的字段提供默认值
-                results.append({
-                    'id': row[0],
-                    'model_id': model_id,  # 转换为int类型
-                    'symbol': row[2],
-                    'contract_symbol': row[2],  # 使用symbol作为contract_symbol的默认值
-                    'name': row[2],  # 使用symbol作为name的默认值
-                    'exchange': 'Binance',  # 默认交易所
-                    'link': '',  # 默认链接为空
-                    'sort_order': 0  # 默认排序为0
-                })
-            
-            return results
+            symbols = [row[0] for row in rows] if rows else []
+            return symbols
         except Exception as e:
-            logger.error(f"[Database] Failed to get model futures for model {model_id}: {e}")
+            logger.error(f"[Database] Failed to get model held symbols for model {model_id}: {e}")
             return []
-            
+    
     def sync_model_futures_from_portfolio(self, model_id: int) -> bool:
         """
         从portfolios表同步去重的future信息到model_future表
