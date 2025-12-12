@@ -120,6 +120,7 @@ class AITrader:
             - 决策格式：{"SYMBOL": {"signal": "buy_to_enter|sell_to_enter|hold", ...}}
             - 系统会根据signal自动设置position_side（LONG或SHORT）
         """
+        logger.info(f"[{self.provider_type}] 开始生成买入决策, 候选交易对数量: {len(candidates)}, 模型: {self.model_name}")
         if not candidates:
             return {'decisions': {}, 'prompt': None, 'raw_response': None, 'cot_trace': None, 'skipped': True}
 
@@ -172,8 +173,8 @@ class AITrader:
         Note:
             - 如果portfolio中没有持仓，返回skipped=True的结果
             - 决策格式：{"SYMBOL": {"signal": "close_position|stop_loss|take_profit|hold", ...}}
-            - stop_loss和take_profit需要提供stop_price（触发价格）
         """
+        logger.info(f"[{self.provider_type}] 开始生成卖出决策, 持仓数量: {len(portfolio.get('positions') or [])}, 模型: {self.model_name}")
         if not portfolio.get('positions'):
             return {'decisions': {}, 'prompt': None, 'raw_response': None, 'cot_trace': None, 'skipped': True}
 
@@ -682,8 +683,10 @@ class AITrader:
         Raises:
             Exception: LLM API调用失败时抛出异常
         """
+        logger.info(f"[{self.provider_type}] 开始调用LLM API请求决策，模型: {self.model_name}")
         response = self._call_llm(prompt)
         decisions, cot_trace = self._parse_response(response)
+        logger.info(f"[{self.provider_type}] LLM决策生成完成，共生成 {len(decisions)} 个交易对的决策")
         return {
             'decisions': decisions,
             'prompt': prompt,

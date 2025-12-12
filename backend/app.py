@@ -117,14 +117,20 @@ leaderboard_stop_event = threading.Event()
 
 def init_trading_engine_for_model(model_id: int):
     """Initialize trading engine for a model if possible."""
+    logger.info(f"Initializing trading engine for model {model_id}...")
+    
     model = db.get_model(model_id)
     if not model:
+        logger.warning(f"Model {model_id} not found, cannot initialize trading engine")
         return None, 'Model not found'
 
     provider = db.get_provider(model['provider_id'])
     if not provider:
+        logger.warning(f"Provider not found for model {model_id}, cannot initialize trading engine")
         return None, 'Provider not found'
 
+    logger.info(f"Creating AITrader instance for model {model_id} with provider {provider.get('provider_type', 'openai')} and model {model['model_name']}")
+    
     trading_engines[model_id] = TradingEngine(
         model_id=model_id,
         db=db,
@@ -137,6 +143,8 @@ def init_trading_engine_for_model(model_id: int):
         ),
         trade_fee_rate=TRADE_FEE_RATE
     )
+    
+    logger.info(f"Successfully initialized trading engine for model {model_id}")
     return trading_engines[model_id], None
 
 def get_tracked_symbols():

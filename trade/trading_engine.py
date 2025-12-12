@@ -94,17 +94,17 @@ class TradingEngine:
                 'error': str  # 错误信息（如果失败）
             }
         """
-        logger.debug(f"[Model {self.model_id}] [卖出服务] ========== 开始执行卖出决策周期 ==========")
+        logger.info(f"[Model {self.model_id}] [卖出服务] ========== 开始执行卖出决策周期 ==========")
         cycle_start_time = datetime.now(timezone(timedelta(hours=8)))
         
         try:
             # ========== 阶段1: 初始化数据准备 ==========
-            logger.debug(f"[Model {self.model_id}] [卖出服务] [阶段1] 开始初始化数据准备")
+            logger.info(f"[Model {self.model_id}] [卖出服务] [阶段1] 开始初始化数据准备")
             
             # 获取市场状态（包含价格和技术指标）
             logger.debug(f"[Model {self.model_id}] [卖出服务] [阶段1.1] 获取市场状态...")
             market_state = self._get_market_state()
-            logger.debug(f"[Model {self.model_id}] [卖出服务] [阶段1.1] 市场状态获取完成, 跟踪合约数: {len(market_state)}")
+            logger.info(f"[Model {self.model_id}] [卖出服务] [阶段1.1] 市场状态获取完成, 跟踪合约数: {len(market_state)}")
             
             # 提取当前价格映射（用于计算持仓价值）
             current_prices = self._extract_price_map(market_state)
@@ -112,14 +112,14 @@ class TradingEngine:
             
             # 获取当前持仓信息
             portfolio = self.db.get_portfolio(self.model_id, current_prices)
-            logger.debug(f"[Model {self.model_id}] [卖出服务] [阶段1.3] 持仓信息获取完成: "
+            logger.info(f"[Model {self.model_id}] [卖出服务] [阶段1.3] 持仓信息获取完成: "
                         f"总价值=${portfolio.get('total_value', 0):.2f}, "
                         f"现金=${portfolio.get('cash', 0):.2f}, "
                         f"持仓数={len(portfolio.get('positions', []) or [])}")
             
             # 构建账户信息（用于AI决策）
             account_info = self._build_account_info(portfolio)
-            logger.debug(f"[Model {self.model_id}] [卖出服务] [阶段1.4] 账户信息构建完成: "
+            logger.info(f"[Model {self.model_id}] [卖出服务] [阶段1.4] 账户信息构建完成: "
                         f"初始资金=${account_info.get('initial_capital', 0):.2f}, "
                         f"总收益率={account_info.get('total_return', 0):.2f}%")
             
@@ -133,11 +133,11 @@ class TradingEngine:
             logger.debug(f"[Model {self.model_id}] [卖出服务] [阶段1] 初始化完成")
 
             # ========== 阶段2: 卖出/平仓决策处理 ==========
-            logger.debug(f"[Model {self.model_id}] [卖出服务] [阶段2] 开始处理卖出/平仓决策")
+            logger.info(f"[Model {self.model_id}] [卖出服务] [阶段2] 开始处理卖出/平仓决策")
             
             # 检查是否有持仓需要处理
             positions_count = len(portfolio.get('positions', []) or [])
-            logger.debug(f"[Model {self.model_id}] [卖出服务] [阶段2.1] 当前持仓数量: {positions_count}")
+            logger.info(f"[Model {self.model_id}] [卖出服务] [阶段2.1] 当前持仓数量: {positions_count}")
             
             if positions_count > 0:
                 # 确保market_state中的价格是实时的（重新获取一次以确保最新）
@@ -312,17 +312,17 @@ class TradingEngine:
                 'error': str  # 错误信息（如果失败）
             }
         """
-        logger.debug(f"[Model {self.model_id}] [买入服务] ========== 开始执行买入决策周期 ==========")
+        logger.info(f"[Model {self.model_id}] [买入服务] ========== 开始执行买入决策周期 ==========")
         cycle_start_time = datetime.now(timezone(timedelta(hours=8)))
         
         try:
             # ========== 阶段1: 初始化数据准备 ==========
-            logger.debug(f"[Model {self.model_id}] [买入服务] [阶段1] 开始初始化数据准备")
+            logger.info(f"[Model {self.model_id}] [买入服务] [阶段1] 开始初始化数据准备")
             
             # 获取市场状态（包含价格和技术指标）
             logger.debug(f"[Model {self.model_id}] [买入服务] [阶段1.1] 获取市场状态...")
             market_state = self._get_market_state()
-            logger.debug(f"[Model {self.model_id}] [买入服务] [阶段1.1] 市场状态获取完成, 跟踪合约数: {len(market_state)}")
+            logger.info(f"[Model {self.model_id}] [买入服务] [阶段1.1] 市场状态获取完成, 跟踪合约数: {len(market_state)}")
             
             # 提取当前价格映射（用于计算持仓价值）
             current_prices = self._extract_price_map(market_state)
@@ -330,14 +330,14 @@ class TradingEngine:
             
             # 获取当前持仓信息
             portfolio = self.db.get_portfolio(self.model_id, current_prices)
-            logger.debug(f"[Model {self.model_id}] [买入服务] [阶段1.3] 持仓信息获取完成: "
+            logger.info(f"[Model {self.model_id}] [买入服务] [阶段1.3] 持仓信息获取完成: "
                         f"总价值=${portfolio.get('total_value', 0):.2f}, "
                         f"现金=${portfolio.get('cash', 0):.2f}, "
                         f"持仓数={len(portfolio.get('positions', []) or [])}")
             
             # 构建账户信息（用于AI决策）
             account_info = self._build_account_info(portfolio)
-            logger.debug(f"[Model {self.model_id}] [买入服务] [阶段1.4] 账户信息构建完成: "
+            logger.info(f"[Model {self.model_id}] [买入服务] [阶段1.4] 账户信息构建完成: "
                         f"初始资金=${account_info.get('initial_capital', 0):.2f}, "
                         f"总收益率={account_info.get('total_return', 0):.2f}%")
             
@@ -347,7 +347,7 @@ class TradingEngine:
             
             # 获取市场快照（涨跌幅榜，用于AI决策参考）
             market_snapshot = self._get_prompt_market_snapshot()
-            logger.debug(f"[Model {self.model_id}] [买入服务] [阶段1.6] 市场快照获取完成, 快照数量: {len(market_snapshot)}")
+            logger.info(f"[Model {self.model_id}] [买入服务] [阶段1.6] 市场快照获取完成, 快照数量: {len(market_snapshot)}")
             
             # 初始化执行结果和对话记录
             executions = []
@@ -355,12 +355,12 @@ class TradingEngine:
             logger.debug(f"[Model {self.model_id}] [买入服务] [阶段1] 初始化完成")
 
             # ========== 阶段2: 买入决策处理（分批多线程） ==========
-            logger.debug(f"[Model {self.model_id}] [买入服务] [阶段2] 开始处理买入决策")
+            logger.info(f"[Model {self.model_id}] [买入服务] [阶段2] 开始处理买入决策")
             
             # 从涨跌幅榜选择买入候选
             logger.debug(f"[Model {self.model_id}] [买入服务] [阶段2.1] 从涨跌幅榜选择买入候选...")
             buy_candidates = self._select_buy_candidates(portfolio)
-            logger.debug(f"[Model {self.model_id}] [买入服务] [阶段2.1] 买入候选选择完成, 候选数量: {len(buy_candidates)}")
+            logger.info(f"[Model {self.model_id}] [买入服务] [阶段2.1] 买入候选选择完成, 候选数量: {len(buy_candidates)}")
             if buy_candidates:
                 for idx, candidate in enumerate(buy_candidates[:5]):  # 只记录前5个
                     logger.debug(f"[Model {self.model_id}] [买入服务] [阶段2.1.{idx+1}] 候选: "

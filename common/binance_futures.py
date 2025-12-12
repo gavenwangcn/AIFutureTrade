@@ -405,7 +405,7 @@ class BinanceFuturesClient:
         Returns:
             字典，key为交易对符号，value为实时价格数据
         """
-        logger.info(f"[Binance Futures] 开始获取实时价格，交易对数量: {len(symbols)}")
+        logger.debug(f"[Binance Futures] 开始获取实时价格，交易对数量: {len(symbols)}")
 
         payload: Dict[str, Dict] = {}
         if not symbols:
@@ -457,7 +457,7 @@ class BinanceFuturesClient:
                     continue
 
             total_duration = time.time() - fetch_start
-            logger.info(
+            logger.debug(
                 f"[Binance Futures] 实时价格获取完成, 成功 {success}/{total}, 总耗时 {total_duration:.3f} 秒"
             )
 
