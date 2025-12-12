@@ -98,6 +98,18 @@ class TradingEngine:
         cycle_start_time = datetime.now(timezone(timedelta(hours=8)))
         
         try:
+            # 检查模型是否存在
+            model = self.db.get_model(self.model_id)
+            if not model:
+                logger.warning(f"[Model {self.model_id}] [卖出服务] 模型不存在，跳过卖出决策周期")
+                return {
+                    'success': False,
+                    'executions': [],
+                    'portfolio': {},
+                    'conversations': [],
+                    'error': f"Model {self.model_id} not found"
+                }
+                
             # ========== 阶段1: 初始化数据准备 ==========
             logger.info(f"[Model {self.model_id}] [卖出服务] [阶段1] 开始初始化数据准备")
             
@@ -316,13 +328,24 @@ class TradingEngine:
         cycle_start_time = datetime.now(timezone(timedelta(hours=8)))
         
         try:
+            # 检查模型是否存在
+            model = self.db.get_model(self.model_id)
+            if not model:
+                logger.warning(f"[Model {self.model_id}] [买入服务] 模型不存在，跳过买入决策周期")
+                return {
+                    'success': False,
+                    'executions': [],
+                    'portfolio': {},
+                    'conversations': [],
+                    'error': f"Model {self.model_id} not found"
+                }
             # ========== 阶段1: 初始化数据准备 ==========
             logger.info(f"[Model {self.model_id}] [买入服务] [阶段1] 开始初始化数据准备")
             
             # 获取市场状态（包含价格和技术指标）
-            logger.info(f"[Model {self.model_id}] [买入服务] [阶段1.1] 获取持仓合约model_futures持仓合约信息...")
+            logger.info(f"[Model {self.model_id}] [买入服务] [阶段1.1] 获取持仓合约symbols持仓合约信息...")
             market_state = self._get_market_state()
-            logger.info(f"[Model {self.model_id}] [买入服务] [阶段1.1] 持仓合约信息获取完成, model_futures数: {len(market_state)}")
+            logger.info(f"[Model {self.model_id}] [买入服务] [阶段1.1] 持仓合约信息获取完成, symbols数: {len(market_state)}")
             
             # 提取当前价格映射（用于计算持仓价值）
             current_prices = self._extract_price_map(market_state)
@@ -1576,19 +1599,19 @@ class TradingEngine:
     
     def _select_buy_candidates(self, portfolio: Dict) -> list:
         """
-        【核心改造方法】根据模型的symbol_source选择买入候选交易对
+        【核心改造方法】选择买入候选交易对
         
-        此方法是symbol_source功能的核心实现，根据模型配置选择不同的数据源：
-        - symbol_source='leaderboard'（默认）：从涨跌榜（24_market_tickers表）获取候选
-        - symbol_source='future'：从futures表获取所有已配置的交易对
+        此方法从模型跟踪的合约中选择买入候选交易对：
+        1. 获取模型当前跟踪的所有合约symbol（已在_get_market_state中获取过）
+        2. 过滤掉已持仓的交易对，避免重复开仓
         
         调用链：
-        execute_buy_cycle() -> _select_buy_candidates() -> get_leaderboard() 或 get_configured_futures_symbols()
+        execute_buy_cycle() -> _select_buy_candidates() -> _get_tracked_symbols()
         
         注意：
         - 此方法仅用于buy类型的AI交互，sell逻辑不受影响
-        - 无论从哪个数据源获取，后续的价格获取、技术指标计算等逻辑都保持一致
         - 已持仓的交易对会被自动过滤，避免重复开仓
+        - 不再提前限制候选数量，而是将所有候选提供给模型，由模型自行决策
         
         Args:
             portfolio: 当前持仓组合信息
@@ -1596,49 +1619,17 @@ class TradingEngine:
         Returns:
             候选交易对列表，已过滤掉已持仓的交易对
         """
-        # 【获取模型配置】读取模型的symbol_source字段，决定使用哪个数据源
-        model = self.db.get_model(self.model_id)
-        symbol_source = model.get('symbol_source', 'leaderboard') if model else 'leaderboard'
-        
-        # 计算可用持仓槽位
+        # 计算已持仓的交易对
         held = {pos['symbol'] for pos in (portfolio.get('positions') or [])}
-        available_slots = max(0, self.max_positions - len(held))
-        if available_slots <= 0:
-            return []
         
-        if symbol_source == 'future':
-            # 【数据源分支1】从futures表获取所有已配置的交易对
-            # 适用于全市场扫描策略，不依赖涨跌榜的热度排序
-            try:
-                futures_list = self.market_fetcher.get_configured_futures_symbols()
-                if not futures_list:
-                    logger.warning(f"[Model {self.model_id}] 未获取到futures表配置的交易对")
-                    return []
-                
-                # 过滤掉已持仓的交易对，避免重复开仓
-                filtered = [item for item in futures_list if item.get('symbol') not in held]
-                logger.debug(f"[Model {self.model_id}] 从futures表获取到 {len(filtered)} 个候选交易对")
-                return filtered[:available_slots]
-            except Exception as exc:
-                logger.warning(f"[Model {self.model_id}] 获取futures表候选失败: {exc}")
-                return []
-        else:
-            # 【数据源分支2】默认从涨跌榜获取（leaderboard）
-            # 适用于关注市场热点的策略，优先选择涨幅较大的交易对
-            try:
-                leaderboard = self.market_fetcher.get_leaderboard()
-            except Exception as exc:
-                logger.warning(f"[Model {self.model_id}] 获取涨幅榜候选失败: {exc}")
-                return []
-
-            gainers = leaderboard.get('gainers') or []
-            if not gainers:
-                return []
-
-            # 过滤掉已持仓的交易对
-            filtered = [item for item in gainers if item.get('symbol') not in held]
-            logger.debug(f"[Model {self.model_id}] 从涨跌榜获取到 {len(filtered)} 个候选交易对")
-            return filtered[:available_slots]
+        # 从模型跟踪的合约中获取所有symbol（已在_get_market_state中获取过）
+        tracked_symbols = self._get_tracked_symbols()
+        
+        # 过滤掉已持仓的交易对，避免重复开仓
+        filtered = [{'symbol': symbol} for symbol in tracked_symbols if symbol not in held]
+        
+        logger.info(f"[Model {self.model_id}] 从跟踪的合约中获取到 {len(filtered)} 个候选交易对")
+        return filtered
 
     # ============ 决策执行方法 ============
     # 统一执行AI交易决策，支持多种交易信号类型

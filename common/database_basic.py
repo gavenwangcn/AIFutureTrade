@@ -1554,7 +1554,7 @@ class Database:
     
     def get_model_futures(self, model_id: int) -> List[Dict]:
         """
-        获取模型关联的期货合约配置，按symbol去重
+        获取模型持有的期货合约symbol，按symbol去重
         
         Args:
             model_id: 模型ID
@@ -1568,18 +1568,28 @@ class Database:
             if not model_uuid:
                 return []
             
-            # 在查询中添加DISTINCT关键字，确保按symbol去重
+            # 从portfolios表查询模型持有的symbol，按symbol去重
             rows = self.query(f"""
-                SELECT DISTINCT id, model_id, symbol, contract_symbol, name, exchange, link, sort_order
-                FROM {self.model_futures_table} FINAL
-                WHERE model_id = '{model_uuid}'
-                ORDER BY sort_order DESC, symbol ASC
+                SELECT DISTINCT CONCAT(model_id, '_', symbol) as id, model_id, symbol
+                FROM {self.portfolios_table} FINAL
+                WHERE model_id = '{model_uuid}' AND position_amt != 0
+                ORDER BY symbol ASC
             """)
-            columns = ["id", "model_id", "symbol", "contract_symbol", "name", "exchange", "link", "sort_order"]
-            results = self._rows_to_dicts(rows, columns)
-            # 转换 model_id 为 int
-            for result in results:
-                result['model_id'] = model_id
+            
+            results = []
+            for row in rows:
+                # 构建返回结构，为portfolios表中不存在的字段提供默认值
+                results.append({
+                    'id': row[0],
+                    'model_id': model_id,  # 转换为int类型
+                    'symbol': row[2],
+                    'contract_symbol': row[2],  # 使用symbol作为contract_symbol的默认值
+                    'name': row[2],  # 使用symbol作为name的默认值
+                    'exchange': 'Binance',  # 默认交易所
+                    'link': '',  # 默认链接为空
+                    'sort_order': 0  # 默认排序为0
+                })
+            
             return results
         except Exception as e:
             logger.error(f"[Database] Failed to get model futures for model {model_id}: {e}")
@@ -1617,8 +1627,20 @@ class Database:
             """)
             portfolio_symbols = [row[0] for row in rows]
             
-            # 2. 获取当前model_futures表中的合约列表
-            current_model_futures = self.get_model_futures(model_id)
+            # 2. 获取当前model_futures表中的合约列表（直接查询，不调用get_model_futures）
+            rows = self.query(f"""
+                SELECT id, model_id, symbol
+                FROM {self.model_futures_table} FINAL
+                WHERE model_id = '{model_uuid}'
+                ORDER BY symbol ASC
+            """)
+            current_model_futures = []
+            for row in rows:
+                current_model_futures.append({
+                    'id': row[0],
+                    'model_id': model_id,
+                    'symbol': row[2]
+                })
             current_symbols = {future['symbol']: future for future in current_model_futures}
             
             # 3. 确定需要添加和删除的合约
