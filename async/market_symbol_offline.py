@@ -1,7 +1,7 @@
 """
 异步市场Symbol下线服务
 
-此服务定时读取24_market_tickers表中超过指定天数（默认2天）的数据，并批量删除。
+此服务定时读取24_market_tickers表中超过指定分钟数（默认15分钟）的数据，并批量删除。
 
 主要功能：
 1. 统计需要删除的记录数量
@@ -10,8 +10,8 @@
 
 数据清理逻辑：
 - 使用ingestion_time字段作为判断标准
-- 删除ingestion_time早于（当前时间 - 保留天数）的所有记录
-- 默认保留2天数据（可通过MARKET_SYMBOL_RETENTION_DAYS配置）
+- 删除ingestion_time早于（当前时间 - 保留分钟数）的所有记录
+- 默认保留15分钟数据（可通过MARKET_SYMBOL_RETENTION_MINUTES配置）
 
 使用场景：
 - 后台服务：通过async_agent启动定时清理任务
@@ -104,10 +104,10 @@ async def delete_old_symbols() -> None:
     
     try:
         # 获取配置
-        retention_days = getattr(
+        retention_minutes = getattr(
             app_config,
-            'MARKET_SYMBOL_RETENTION_DAYS',
-            2  # 默认保留2天
+            'MARKET_SYMBOL_RETENTION_MINUTES',
+            15  # 默认保留15分钟
         )
         
         # 初始化数据库
@@ -116,10 +116,10 @@ async def delete_old_symbols() -> None:
         logger.info("[MarketSymbolOffline] [步骤1] ✅ 数据库初始化完成")
         
         # 计算截止日期
-        cutoff_date = datetime.now(utc8) - timedelta(days=retention_days)
+        cutoff_date = datetime.now(utc8) - timedelta(minutes=retention_minutes)
         logger.info(
-            "[MarketSymbolOffline] [步骤2] 计算截止日期: 当前时间 - %s 天 = %s",
-            retention_days,
+            "[MarketSymbolOffline] [步骤2] 计算截止日期: 当前时间 - %s 分钟 = %s",
+            retention_minutes,
             cutoff_date.strftime('%Y-%m-%d %H:%M:%S UTC+8')
         )
         
@@ -173,7 +173,7 @@ async def delete_old_symbols() -> None:
         logger.info("[MarketSymbolOffline] 完成时间: %s", datetime.now(utc8).strftime('%Y-%m-%d %H:%M:%S UTC+8'))
         logger.info("[MarketSymbolOffline] 总耗时: %.2f秒 (%.2f分钟)", total_duration, total_duration / 60)
         logger.info("[MarketSymbolOffline] 统计信息:")
-        logger.info("[MarketSymbolOffline]   - 保留天数: %s 天", retention_days)
+        logger.info("[MarketSymbolOffline]   - 保留分钟: %s 分钟", retention_minutes)
         logger.info("[MarketSymbolOffline]   - 截止日期: %s", cutoff_date.strftime('%Y-%m-%d %H:%M:%S UTC+8'))
         logger.info("[MarketSymbolOffline]   - 删除记录数: %s 条", deleted_count)
         logger.info("=" * 80)
@@ -199,8 +199,8 @@ async def run_market_symbol_offline_scheduler() -> None:
     启动时立即执行一次，然后按配置的间隔循环执行。
     
     配置参数：
-    - MARKET_SYMBOL_OFFLINE_CRON: cron表达式（默认'0 */8 * * *'，每8小时）
-    - MARKET_SYMBOL_RETENTION_DAYS: 数据保留天数（默认2天）
+- MARKET_SYMBOL_OFFLINE_CRON: cron表达式（默认'*/20 * * * *'，每20分钟）
+- MARKET_SYMBOL_RETENTION_MINUTES: 数据保留分钟数（默认15分钟）
     
     Note:
         - 启动时立即执行一次清理
@@ -215,12 +215,12 @@ async def run_market_symbol_offline_scheduler() -> None:
     cron_expr = getattr(
         app_config,
         'MARKET_SYMBOL_OFFLINE_CRON',
-        '0 */8 * * *'  # 默认每8小时执行一次
+        '*/20 * * * *'  # 默认每20分钟执行一次
     )
-    retention_days = getattr(
+    retention_minutes = getattr(
         app_config,
-        'MARKET_SYMBOL_RETENTION_DAYS',
-        2  # 默认保留2天
+        'MARKET_SYMBOL_RETENTION_MINUTES',
+        15  # 默认保留15分钟
     )
     
     # 解析执行间隔
@@ -230,8 +230,8 @@ async def run_market_symbol_offline_scheduler() -> None:
     logger.info("[MarketSymbolOffline] ========== 市场Symbol下线调度器启动 ==========")
     logger.info("[MarketSymbolOffline] 启动时间: %s", datetime.now(utc8).strftime('%Y-%m-%d %H:%M:%S UTC+8'))
     logger.info("[MarketSymbolOffline] Cron表达式: %s", cron_expr)
-    logger.info("[MarketSymbolOffline] 执行间隔: %s 秒 (%.2f 小时)", interval_seconds, interval_seconds / 3600)
-    logger.info("[MarketSymbolOffline] 数据保留天数: %s 天", retention_days)
+    logger.info("[MarketSymbolOffline] 执行间隔: %s 秒 (%.2f 分钟)", interval_seconds, interval_seconds / 60)
+    logger.info("[MarketSymbolOffline] 数据保留分钟: %s 分钟", retention_minutes)
     logger.info("=" * 80)
     
     execution_count = 0

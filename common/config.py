@@ -80,8 +80,8 @@ PRICE_REFRESH_CRON = os.getenv('PRICE_REFRESH_CRON', '*/5 * * * *')  # Cron表�
 PRICE_REFRESH_MAX_PER_MINUTE = int(os.getenv('PRICE_REFRESH_MAX_PER_MINUTE', '1000'))  # 每分钟最多刷新的symbol数量
 
 # 市场Symbol下线服务配置
-MARKET_SYMBOL_OFFLINE_CRON = os.getenv('MARKET_SYMBOL_OFFLINE_CRON', '0 */8 * * *')  # Cron表达式，默认每8小时执行一次
-MARKET_SYMBOL_RETENTION_DAYS = int(os.getenv('MARKET_SYMBOL_RETENTION_DAYS', '2'))  # Ticker数据保留天数，默认2天
+MARKET_SYMBOL_OFFLINE_CRON = os.getenv('MARKET_SYMBOL_OFFLINE_CRON', '*/20 * * * *')  # Cron表达式，默认每20分钟执行一次
+MARKET_SYMBOL_RETENTION_MINUTES = int(os.getenv('MARKET_SYMBOL_RETENTION_MINUTES', '15'))  # Ticker数据保留分钟数，默认15分钟
 
 # ============ Data Agent配置 ============
 
