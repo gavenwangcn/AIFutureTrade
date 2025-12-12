@@ -1171,7 +1171,8 @@ class TradingEngine:
                 batch_portfolio,
                 market_state,
                 account_info,
-                constraints_text=constraints_text
+                constraints_text=constraints_text,
+                model_id=self.model_id
             )
             ai_call_duration = (datetime.now(timezone(timedelta(hours=8))) - ai_call_start).total_seconds()
             
@@ -1345,7 +1346,8 @@ class TradingEngine:
                 constraints,
                 constraints_text=constraints_text,
                 market_snapshot=market_snapshot if market_snapshot else None,
-                symbol_source=symbol_source
+                symbol_source=symbol_source,
+                model_id=self.model_id
             )
             ai_call_duration = (datetime.now(timezone(timedelta(hours=8))) - ai_call_start).total_seconds()
             

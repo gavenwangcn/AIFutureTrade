@@ -20,8 +20,15 @@ import logging
 from typing import Dict, Optional, Tuple, List
 from openai import OpenAI, APIConnectionError, APIError
 
-
 logger = logging.getLogger(__name__)
+
+# 尝试导入tiktoken用于token计算，如果不可用则使用简单估算
+try:
+    import tiktoken
+    TIKTOKEN_AVAILABLE = True
+except ImportError:
+    TIKTOKEN_AVAILABLE = False
+    logger.warning("tiktoken not available, will use simple token estimation")
 
 
 class AITrader:
@@ -73,7 +80,8 @@ class AITrader:
         constraints: Optional[Dict] = None,
         constraints_text: Optional[str] = None,
         market_snapshot: Optional[List[Dict]] = None,
-        symbol_source: str = 'leaderboard'
+        symbol_source: str = 'leaderboard',
+        model_id: Optional[int] = None
     ) -> Dict:
         """
         生成买入/开仓决策
@@ -126,14 +134,15 @@ class AITrader:
 
         # 【传递symbol_source】将数据源类型传递给prompt构建方法，用于调整prompt文本
         prompt = self._build_buy_prompt(candidates, portfolio, account_info, constraints or {}, constraints_text, market_snapshot, symbol_source)
-        return self._request_decisions(prompt)
+        return self._request_decisions(prompt, decision_type='buy', model_id=model_id)
 
     def make_sell_decision(
         self,
         portfolio: Dict,
         market_state: Dict,
         account_info: Dict,
-        constraints_text: Optional[str] = None
+        constraints_text: Optional[str] = None,
+        model_id: Optional[int] = None
     ) -> Dict:
         """
         生成卖出/平仓决策
@@ -179,7 +188,7 @@ class AITrader:
             return {'decisions': {}, 'prompt': None, 'raw_response': None, 'cot_trace': None, 'skipped': True}
 
         prompt = self._build_sell_prompt(portfolio, market_state, account_info, constraints_text)
-        return self._request_decisions(prompt)
+        return self._request_decisions(prompt, decision_type='sell', model_id=model_id)
 
     # ============ 提示词构建方法 ============
     
@@ -661,17 +670,20 @@ class AITrader:
 
     # ============ 响应处理方法 ============
     
-    def _request_decisions(self, prompt: str) -> Dict:
+    def _request_decisions(self, prompt: str, decision_type: str = 'unknown', model_id: Optional[int] = None) -> Dict:
         """
         请求LLM生成决策并解析响应
         
         这是决策生成的核心流程：
-        1. 调用LLM API获取响应
-        2. 解析响应中的决策和推理过程
-        3. 返回标准格式的结果字典
+        1. 计算prompt的token数量
+        2. 调用LLM API获取响应
+        3. 解析响应中的决策和推理过程
+        4. 返回标准格式的结果字典
         
         Args:
             prompt: 发送给LLM的提示词文本
+            decision_type: 决策类型，'buy'（买入）或'sell'（卖出）
+            model_id: 模型ID（可选），用于日志记录
         
         Returns:
             Dict: 包含以下字段的字典：
@@ -683,6 +695,14 @@ class AITrader:
         Raises:
             Exception: LLM API调用失败时抛出异常
         """
+        # 计算prompt的token数量
+        token_count = self._count_tokens(prompt)
+        decision_type_name = '买入' if decision_type == 'buy' else '卖出' if decision_type == 'sell' else '未知'
+        model_info = f"Model ID: {model_id}" if model_id else "Model ID: 未知"
+        
+        logger.info(f"[{self.provider_type}] [{decision_type_name}决策] {model_info} | "
+                   f"Prompt Token数量: {token_count} | 模型: {self.model_name}")
+        
         logger.info(f"[{self.provider_type}] 开始调用LLM API请求决策，模型: {self.model_name}")
         response = self._call_llm(prompt)
         decisions, cot_trace = self._parse_response(response)
@@ -693,6 +713,46 @@ class AITrader:
             'raw_response': response,
             'cot_trace': cot_trace
         }
+    
+    def _count_tokens(self, text: str) -> int:
+        """
+        计算文本的token数量
+        
+        优先使用tiktoken库进行精确计算，如果不可用则使用简单估算。
+        对于OpenAI模型，使用cl100k_base编码；对于其他模型，使用简单估算。
+        
+        Args:
+            text: 要计算token数量的文本
+        
+        Returns:
+            int: token数量
+        """
+        if not text:
+            return 0
+        
+        if TIKTOKEN_AVAILABLE:
+            try:
+                # 根据模型类型选择编码器
+                # OpenAI模型（gpt-3.5, gpt-4等）使用cl100k_base
+                # 其他模型也尝试使用cl100k_base作为通用编码器
+                if 'gpt' in self.model_name.lower() or 'o1' in self.model_name.lower():
+                    encoding = tiktoken.get_encoding("cl100k_base")
+                else:
+                    # 对于其他模型，尝试使用cl100k_base，如果失败则使用简单估算
+                    try:
+                        encoding = tiktoken.get_encoding("cl100k_base")
+                    except:
+                        # 如果无法获取编码器，使用简单估算
+                        return len(text) // 4
+                
+                return len(encoding.encode(text))
+            except Exception as e:
+                logger.warning(f"Token计算失败，使用简单估算: {e}")
+                # 如果tiktoken计算失败，使用简单估算
+                return len(text) // 4
+        else:
+            # 简单估算：平均每个token约4个字符
+            return len(text) // 4
 
     def _parse_response(self, response: str) -> Tuple[Dict, Optional[str]]:
         """
