@@ -51,6 +51,7 @@ export function useTradingApp() {
   const trades = ref([])
   const conversations = ref([])
   const modelPortfolioSymbols = ref([]) // 模型持仓合约列表
+const lastPortfolioSymbolsRefreshTime = ref(null) // 持仓合约列表最后刷新时间
   
   // MySQL 涨幅榜同步状态
   const mysqlLeaderboardSyncRunning = ref(true)
@@ -379,8 +380,8 @@ let portfolioSymbolsRefreshInterval = null // 模型持仓合约列表自动刷�
     // 立即获取一次数据
     loadModelPortfolioSymbols()
 
-    // 使用配置的刷新时间（默认10秒，可配置）
-    const refreshInterval = 10000 // 10秒
+    // 使用配置的刷新时间（默认5秒，可配置）
+    const refreshInterval = 5000 // 5秒
     
     portfolioSymbolsRefreshInterval = setInterval(() => {
       console.log(`[TradingApp] 轮询刷新模型持仓合约列表数据（${refreshInterval/1000}秒间隔）`)
@@ -593,6 +594,7 @@ let portfolioSymbolsRefreshInterval = null // 模型持仓合约列表自动刷�
     try {
       const response = await modelApi.getPortfolioSymbols(currentModelId.value)
       modelPortfolioSymbols.value = response.data || []
+    lastPortfolioSymbolsRefreshTime.value = new Date()
     } catch (error) {
       console.error('[TradingApp] Error loading model portfolio symbols:', error)
       errors.value.portfolioSymbols = error.message
@@ -1477,6 +1479,7 @@ let portfolioSymbolsRefreshInterval = null // 模型持仓合约列表自动刷�
     trades,
     conversations,
     modelPortfolioSymbols,
+    lastPortfolioSymbolsRefreshTime,
     loggerEnabled,
     showSettingsModal,
     showStrategyModal,

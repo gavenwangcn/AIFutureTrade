@@ -157,7 +157,7 @@
 
       <!-- Main Content -->
       <main class="app-main">
-        <section class="hero-banner glass-panel">
+        <section v-if="!currentModelId || isAggregatedView" class="hero-banner glass-panel">
           <div class="hero-copy">
             <p class="hero-subtitle">实时 AI 交易驾驶舱</p>
             <h2>立体监控资金 · 沉浸式AI资产交易管理</h2>
@@ -330,8 +330,15 @@
         <!-- Model Portfolio Symbols -->
         <div v-show="!isAggregatedView" class="content-card">
           <div class="card-header">
-            <h3 class="card-title">{{ getModelDisplayName(currentModel) }} - 持仓合约实时行情</h3>
-            <span class="card-subtitle">展示该模型持仓合约的实时数据走势</span>
+            <h3 class="card-title" title="展示该模型持仓合约的实时数据走势">
+              {{ getModelDisplayName(currentModelId) }} - 
+              <span style="font-weight: bold;">
+                <i class="bi bi-bar-chart-line"></i> 持仓合约实时行情
+              </span>
+            </h3>
+            <span class="last-refresh-time" title="持仓合约数据最后刷新时间">
+              最后刷新: {{ formatTime(lastPortfolioSymbolsRefreshTime) }}
+            </span>
           </div>
           <div class="card-body">
             <div v-if="modelPortfolioSymbols.length > 0" class="model-portfolio-symbols-grid">
@@ -641,7 +648,8 @@ const {
   getPnlClass,
   formatVolumeChinese,
   formatTime,
-  modelPortfolioSymbols
+  modelPortfolioSymbols,
+  lastPortfolioSymbolsRefreshTime
 } = useTradingApp()
 
 const showKlineChart = ref(false)
