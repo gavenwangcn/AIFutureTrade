@@ -18,7 +18,7 @@ keepalive = int(os.getenv('GUNICORN_KEEPALIVE', '5'))
 
 # Logging
 accesslog = os.getenv('GUNICORN_ACCESSLOG', '-')  # 输出到stdout
-access_log_level = os.getenv('GUNICORN_ACCESS_LOG_LEVEL', 'info')  # 访问日志级别
+access_log_level = os.getenv('GUNICORN_ACCESS_LOG_LEVEL', 'warning')  # 访问日志级别
 errorlog = os.getenv('GUNICORN_ERRORLOG', '-')  # 输出到stderr
 loglevel = os.getenv('GUNICORN_LOGLEVEL', 'info')
 access_log_format = '%(h)s %(l)s %(u)s %(t)s "%(r)s" %(s)s %(b)s "%(f)s" "%(a)s" %(D)s'
