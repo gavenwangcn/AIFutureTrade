@@ -133,8 +133,7 @@ def init_trading_engine_for_model(model_id: int):
             provider_type=provider.get('provider_type', 'openai'),
             api_key=provider['api_key'],
             api_url=provider['api_url'],
-            model_name=model['model_name'],
-            market_fetcher=market_fetcher
+            model_name=model['model_name']
         ),
         trade_fee_rate=TRADE_FEE_RATE
     )
@@ -186,12 +185,11 @@ def init_trading_engines():
                     db=db,
                     market_fetcher=market_fetcher,
                     ai_trader=AITrader(
-                        provider_type=provider.get('provider_type', 'openai'),
-                        api_key=provider['api_key'],
-                        api_url=provider['api_url'],
-                        model_name=model['model_name'],
-                        market_fetcher=market_fetcher
-                    ),
+                    provider_type=provider.get('provider_type', 'openai'),
+                    api_key=provider['api_key'],
+                    api_url=provider['api_url'],
+                    model_name=model['model_name']
+                ),
                     trade_fee_rate=TRADE_FEE_RATE
                 )
                 logger.info(f"  OK: Model {model_id} ({model_name})")
@@ -1188,7 +1186,7 @@ def get_market_klines():
         limit: 返回的最大记录数，默认值根据interval不同：
                - 1d（1天）：默认120条，最大120条
                - 1w（1周）：默认20条，最大20条
-               - 其他interval：默认500条，最大500条
+               - 其他interval：默认499条，最大499条
         start_time: 开始时间（可选，ISO格式字符串）
         end_time: 结束时间（可选，ISO格式字符串）
     """
