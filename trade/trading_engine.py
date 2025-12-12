@@ -102,13 +102,13 @@ class TradingEngine:
             logger.info(f"[Model {self.model_id}] [卖出服务] [阶段1] 开始初始化数据准备")
             
             # 获取市场状态（包含价格和技术指标）
-            logger.debug(f"[Model {self.model_id}] [卖出服务] [阶段1.1] 获取市场状态...")
+            logger.info(f"[Model {self.model_id}] [卖出服务] [阶段1.1] 获取市场状态...")
             market_state = self._get_market_state()
             logger.info(f"[Model {self.model_id}] [卖出服务] [阶段1.1] 市场状态获取完成, 跟踪合约数: {len(market_state)}")
             
             # 提取当前价格映射（用于计算持仓价值）
             current_prices = self._extract_price_map(market_state)
-            logger.debug(f"[Model {self.model_id}] [卖出服务] [阶段1.2] 价格映射提取完成, 价格数量: {len(current_prices)}")
+            logger.info(f"[Model {self.model_id}] [卖出服务] [阶段1.2] 价格映射提取完成, 价格数量: {len(current_prices)}")
             
             # 获取当前持仓信息
             portfolio = self.db.get_portfolio(self.model_id, current_prices)
@@ -125,12 +125,12 @@ class TradingEngine:
             
             # 获取提示词模板（仅卖出约束）
             prompt_templates = self._get_prompt_templates()
-            logger.debug(f"[Model {self.model_id}] [卖出服务] [阶段1.5] 卖出提示词模板获取完成")
+            logger.info(f"[Model {self.model_id}] [卖出服务] [阶段1.5] 卖出提示词模板获取完成")
             
             # 初始化执行结果和对话记录
             executions = []
             conversation_prompts = []
-            logger.debug(f"[Model {self.model_id}] [卖出服务] [阶段1] 初始化完成")
+            logger.info(f"[Model {self.model_id}] [卖出服务] [阶段1] 初始化完成")
 
             # ========== 阶段2: 卖出/平仓决策处理 ==========
             logger.info(f"[Model {self.model_id}] [卖出服务] [阶段2] 开始处理卖出/平仓决策")
@@ -155,7 +155,7 @@ class TradingEngine:
                                 logger.debug(f"[Model {self.model_id}] [卖出服务] 更新持仓 {symbol} 实时价格: ${price_info.get('price', 0):.4f}")
                 
                 # 分批处理卖出决策，每批处理指定数量的symbol
-                logger.debug(f"[Model {self.model_id}] [卖出服务] [阶段2.2] 开始分批处理卖出决策...")
+                logger.info(f"[Model {self.model_id}] [卖出服务] [阶段2.2] 开始分批处理卖出决策...")
                 
                 # 从配置获取批次大小
                 batch_size = getattr(app_config, 'AI_DECISION_SYMBOL_BATCH_SIZE', 1)
@@ -166,7 +166,7 @@ class TradingEngine:
                 for i in range(0, len(positions), batch_size):
                     batches.append(positions[i:i + batch_size])
                 
-                logger.debug(f"[Model {self.model_id}] [卖出服务] [阶段2.2] 持仓分批完成: "
+                logger.info(f"[Model {self.model_id}] [卖出服务] [阶段2.2] 持仓分批完成: "
                             f"总持仓数={len(positions)}, "
                             f"批次数={len(batches)}, "
                             f"每批大小={batch_size}")
@@ -183,13 +183,13 @@ class TradingEngine:
                 batch_start_time = datetime.now(timezone(timedelta(hours=8)))
 
                 # 使用线程池并发处理各批次
-                logger.debug(f"[Model {self.model_id}] [卖出服务] 创建线程池，最大工作线程数: {thread_count}")
+                logger.info(f"[Model {self.model_id}] [卖出服务] 创建线程池，最大工作线程数: {thread_count}")
                 with ThreadPoolExecutor(max_workers=thread_count) as executor:
                     # 提交所有批次任务到线程池
                     futures = []
                     for batch_idx, batch_positions in enumerate(batches):
                         batch_symbols = [pos.get('future', 'N/A') for pos in batch_positions]
-                        logger.debug(f"[Model {self.model_id}] [卖出服务] 提交批次 {batch_idx + 1}/{len(batches)} 到线程池: {batch_symbols}")
+                        logger.info(f"[Model {self.model_id}] [卖出服务] 提交批次 {batch_idx + 1}/{len(batches)} 到线程池: {batch_symbols}")
                         future = executor.submit(
                             self._process_and_execute_sell_batch,
                             batch_positions,
@@ -203,7 +203,7 @@ class TradingEngine:
                             len(batches)
                         )
                         futures.append(future)
-                    logger.debug(f"[Model {self.model_id}] [卖出服务] 所有批次任务已提交，等待执行完成...")
+                    logger.info(f"[Model {self.model_id}] [卖出服务] 所有批次任务已提交，等待执行完成...")
 
                     # 等待所有批次完成并检查是否有决策
                     completed_batches = 0
@@ -213,17 +213,17 @@ class TradingEngine:
                             completed_batches += 1
                             if not payload.get('skipped') and payload.get('decisions'):
                                 has_sell_decision = True
-                            logger.debug(f"[Model {self.model_id}] [卖出服务] 批次 {future_idx + 1}/{len(futures)} 完成: "
+                            logger.info(f"[Model {self.model_id}] [卖出服务] 批次 {future_idx + 1}/{len(futures)} 完成: "
                                         f"跳过={payload.get('skipped')}, "
                                         f"决策数={len(payload.get('decisions') or {})}")
                         except Exception as exc:
                             logger.error(f"[Model {self.model_id}] [卖出服务] 批次 {future_idx + 1} 处理异常: {exc}")
                             import traceback
-                            logger.debug(f"[Model {self.model_id}] [卖出服务] 异常堆栈:{traceback.format_exc()}")
+                            logger.info(f"[Model {self.model_id}] [卖出服务] 异常堆栈:{traceback.format_exc()}")
 
                 batch_end_time = datetime.now(timezone(timedelta(hours=8)))
                 batch_duration = (batch_end_time - batch_start_time).total_seconds()
-                logger.debug(f"[Model {self.model_id}] [卖出服务] 所有批次处理完成: "
+                logger.info(f"[Model {self.model_id}] [卖出服务] 所有批次处理完成: "
                             f"完成批次数={completed_batches}/{len(batches)}, "
                             f"总耗时={batch_duration:.2f}秒, "
                             f"平均每批耗时={batch_duration/len(batches):.2f}秒")
@@ -232,21 +232,21 @@ class TradingEngine:
                 if has_sell_decision and 'sell' not in conversation_prompts:
                     conversation_prompts.append('sell')
                 else:
-                    logger.debug(f"[Model {self.model_id}] [卖出服务] [阶段2] 所有批次卖出决策被跳过或无有效决策")
+                    logger.info(f"[Model {self.model_id}] [卖出服务] [阶段2] 所有批次卖出决策被跳过或无有效决策")
             else:
-                logger.debug(f"[Model {self.model_id}] [卖出服务] [阶段2] 无持仓，跳过卖出决策处理")
+                logger.info(f"[Model {self.model_id}] [卖出服务] [阶段2] 无持仓，跳过卖出决策处理")
             
-            logger.debug(f"[Model {self.model_id}] [卖出服务] [阶段2] 卖出/平仓决策处理完成")
+            logger.info(f"[Model {self.model_id}] [卖出服务] [阶段2] 卖出/平仓决策处理完成")
 
             # ========== 阶段3: 记录账户价值快照 ==========
-            logger.debug(f"[Model {self.model_id}] [卖出服务] [阶段3] 开始记录账户价值快照")
+            logger.info(f"[Model {self.model_id}] [卖出服务] [阶段3] 开始记录账户价值快照")
             
             updated_portfolio = self.db.get_portfolio(self.model_id, current_prices)
             balance = updated_portfolio.get('total_value', 0)
             available_balance = updated_portfolio.get('cash', 0)
             cross_wallet_balance = updated_portfolio.get('positions_value', 0)
             
-            logger.debug(f"[Model {self.model_id}] [卖出服务] [阶段3.1] 账户价值: "
+            logger.info(f"[Model {self.model_id}] [卖出服务] [阶段3.1] 账户价值: "
                         f"总余额(balance)=${balance:.2f}, "
                         f"可用余额(available_balance)=${available_balance:.2f}, "
                         f"全仓余额(cross_wallet_balance)=${cross_wallet_balance:.2f}")
@@ -258,18 +258,18 @@ class TradingEngine:
                 available_balance=available_balance,
                 cross_wallet_balance=cross_wallet_balance
             )
-            logger.debug(f"[Model {self.model_id}] [卖出服务] [阶段3.2] 账户价值快照已记录到数据库")
+            logger.info(f"[Model {self.model_id}] [卖出服务] [阶段3.2] 账户价值快照已记录到数据库")
             
             # ========== 同步model_futures表数据 ==========
-            logger.debug(f"[Model {self.model_id}] [卖出服务] [阶段4] 同步model_futures表数据")
+            logger.info(f"[Model {self.model_id}] [卖出服务] [阶段4] 同步model_futures表数据")
             # 在交易完成后，从portfolios表同步最新的合约信息到model_futures表
             self.db.sync_model_futures_from_portfolio(self.model_id)
             
             # ========== 交易周期完成 ==========
             cycle_end_time = datetime.now(timezone(timedelta(hours=8)))
             cycle_duration = (cycle_end_time - cycle_start_time).total_seconds()
-            logger.debug(f"[Model {self.model_id}] [卖出服务] ========== 卖出决策周期执行完成 ==========")
-            logger.debug(f"[Model {self.model_id}] [卖出服务] 执行统计: "
+            logger.info(f"[Model {self.model_id}] [卖出服务] ========== 卖出决策周期执行完成 ==========")
+            logger.info(f"[Model {self.model_id}] [卖出服务] 执行统计: "
                         f"总耗时={cycle_duration:.2f}秒, "
                         f"执行操作数={len(executions)}, "
                         f"对话类型={conversation_prompts}")
@@ -320,13 +320,13 @@ class TradingEngine:
             logger.info(f"[Model {self.model_id}] [买入服务] [阶段1] 开始初始化数据准备")
             
             # 获取市场状态（包含价格和技术指标）
-            logger.debug(f"[Model {self.model_id}] [买入服务] [阶段1.1] 获取市场状态...")
+            logger.info(f"[Model {self.model_id}] [买入服务] [阶段1.1] 获取持仓合约model_futures持仓合约信息...")
             market_state = self._get_market_state()
-            logger.info(f"[Model {self.model_id}] [买入服务] [阶段1.1] 市场状态获取完成, 跟踪合约数: {len(market_state)}")
+            logger.info(f"[Model {self.model_id}] [买入服务] [阶段1.1] 持仓合约信息获取完成, model_futures数: {len(market_state)}")
             
             # 提取当前价格映射（用于计算持仓价值）
             current_prices = self._extract_price_map(market_state)
-            logger.debug(f"[Model {self.model_id}] [买入服务] [阶段1.2] 价格映射提取完成, 价格数量: {len(current_prices)}")
+            logger.info(f"[Model {self.model_id}] [买入服务] [阶段1.2] 价格映射提取完成, 价格数量: {len(current_prices)}")
             
             # 获取当前持仓信息
             portfolio = self.db.get_portfolio(self.model_id, current_prices)
@@ -343,22 +343,22 @@ class TradingEngine:
             
             # 获取提示词模板（仅买入约束）
             prompt_templates = self._get_prompt_templates()
-            logger.debug(f"[Model {self.model_id}] [买入服务] [阶段1.5] 买入提示词模板获取完成")
+            logger.info(f"[Model {self.model_id}] [买入服务] [阶段1.5] 买入提示词模板获取完成")
             
             # 获取市场快照（涨跌幅榜，用于AI决策参考）
             market_snapshot = self._get_prompt_market_snapshot()
-            logger.info(f"[Model {self.model_id}] [买入服务] [阶段1.6] 市场快照获取完成, 快照数量: {len(market_snapshot)}")
+            logger.info(f"[Model {self.model_id}] [买入服务] [阶段1.6] 市场信息快照获取完成, 快照数量: {len(market_snapshot)}")
             
             # 初始化执行结果和对话记录
             executions = []
             conversation_prompts = []
-            logger.debug(f"[Model {self.model_id}] [买入服务] [阶段1] 初始化完成")
+            logger.info(f"[Model {self.model_id}] [买入服务] [阶段1] 初始化完成")
 
             # ========== 阶段2: 买入决策处理（分批多线程） ==========
             logger.info(f"[Model {self.model_id}] [买入服务] [阶段2] 开始处理买入决策")
             
             # 从涨跌幅榜选择买入候选
-            logger.debug(f"[Model {self.model_id}] [买入服务] [阶段2.1] 从涨跌幅榜选择买入候选...")
+            logger.info(f"[Model {self.model_id}] [买入服务] [阶段2.1] 从涨跌幅榜选择买入候选...")
             buy_candidates = self._select_buy_candidates(portfolio)
             logger.info(f"[Model {self.model_id}] [买入服务] [阶段2.1] 买入候选选择完成, 候选数量: {len(buy_candidates)}")
             if buy_candidates:
@@ -370,10 +370,10 @@ class TradingEngine:
             
             if buy_candidates:
                 # 将候选合约添加到市场状态中
-                logger.debug(f"[Model {self.model_id}] [买入服务] [阶段2.2] 将候选合约添加到市场状态...")
+                logger.info(f"[Model {self.model_id}] [买入服务] [阶段2.2] 将候选合约添加到市场状态...")
                 market_state = self._augment_market_state_with_candidates(market_state, buy_candidates)
                 current_prices = self._extract_price_map(market_state)
-                logger.debug(f"[Model {self.model_id}] [买入服务] [阶段2.2] 市场状态更新完成, 总合约数: {len(market_state)}")
+                logger.info(f"[Model {self.model_id}] [买入服务] [阶段2.2] 市场状态更新完成, 总合约数: {len(market_state)}")
                 
                 # 构建约束条件（用于AI决策）
                 constraints = {
@@ -381,13 +381,13 @@ class TradingEngine:
                     'occupied': len(portfolio.get('positions', []) or []),
                     'available_cash': portfolio.get('cash', 0)
                 }
-                logger.debug(f"[Model {self.model_id}] [买入服务] [阶段2.3] 约束条件构建完成: "
+                logger.info(f"[Model {self.model_id}] [买入服务] [阶段2.3] 约束条件构建完成: "
                             f"最大持仓数={constraints['max_positions']}, "
                             f"已占用={constraints['occupied']}, "
                             f"可用现金=${constraints['available_cash']:.2f}")
                 
                 # 分批处理买入决策（多线程并发，每批立即执行）
-                logger.debug(f"[Model {self.model_id}] [买入服务] [阶段2.4] 开始分批处理买入决策（多线程）...")
+                logger.info(f"[Model {self.model_id}] [买入服务] [阶段2.4] 开始分批处理买入决策（多线程）...")
                 self._make_batch_buy_decisions(
                     buy_candidates,
                     portfolio,
@@ -400,21 +400,21 @@ class TradingEngine:
                     conversation_prompts,
                     current_prices
                 )
-                logger.debug(f"[Model {self.model_id}] [买入服务] [阶段2.4] 分批买入决策处理完成")
+                logger.info(f"[Model {self.model_id}] [买入服务] [阶段2.4] 分批买入决策处理完成")
             else:
-                logger.debug(f"[Model {self.model_id}] [买入服务] [阶段2] 无买入候选，跳过买入决策处理")
+                logger.info(f"[Model {self.model_id}] [买入服务] [阶段2] 无买入候选，跳过买入决策处理")
             
-            logger.debug(f"[Model {self.model_id}] [买入服务] [阶段2] 买入决策处理完成")
+            logger.info(f"[Model {self.model_id}] [买入服务] [阶段2] 买入决策处理完成")
 
             # ========== 阶段3: 记录账户价值快照 ==========
-            logger.debug(f"[Model {self.model_id}] [买入服务] [阶段3] 开始记录账户价值快照")
+            logger.info(f"[Model {self.model_id}] [买入服务] [阶段3] 开始记录账户价值快照")
             
             updated_portfolio = self.db.get_portfolio(self.model_id, current_prices)
             balance = updated_portfolio.get('total_value', 0)
             available_balance = updated_portfolio.get('cash', 0)
             cross_wallet_balance = updated_portfolio.get('positions_value', 0)
             
-            logger.debug(f"[Model {self.model_id}] [买入服务] [阶段3.1] 账户价值: "
+            logger.info(f"[Model {self.model_id}] [买入服务] [阶段3.1] 账户价值: "
                         f"总余额(balance)=${balance:.2f}, "
                         f"可用余额(available_balance)=${available_balance:.2f}, "
                         f"全仓余额(cross_wallet_balance)=${cross_wallet_balance:.2f}")
@@ -426,18 +426,18 @@ class TradingEngine:
                 available_balance=available_balance,
                 cross_wallet_balance=cross_wallet_balance
             )
-            logger.debug(f"[Model {self.model_id}] [买入服务] [阶段3.2] 账户价值快照已记录到数据库")
+            logger.info(f"[Model {self.model_id}] [买入服务] [阶段3.2] 账户价值快照已记录到数据库")
             
             # ========== 同步model_futures表数据 ==========
-            logger.debug(f"[Model {self.model_id}] [买入服务] [阶段4] 同步model_futures表数据")
+            logger.info(f"[Model {self.model_id}] [买入服务] [阶段4] 同步model_futures表数据")
             # 在交易完成后，从portfolios表同步最新的合约信息到model_futures表
             self.db.sync_model_futures_from_portfolio(self.model_id)
             
             # ========== 交易周期完成 ==========
             cycle_end_time = datetime.now(timezone(timedelta(hours=8)))
             cycle_duration = (cycle_end_time - cycle_start_time).total_seconds()
-            logger.debug(f"[Model {self.model_id}] [买入服务] ========== 买入决策周期执行完成 ==========")
-            logger.debug(f"[Model {self.model_id}] [买入服务] 执行统计: "
+            logger.info(f"[Model {self.model_id}] [买入服务] ========== 买入决策周期执行完成 ==========")
+            logger.info(f"[Model {self.model_id}] [买入服务] 执行统计: "
                         f"总耗时={cycle_duration:.2f}秒, "
                         f"执行操作数={len(executions)}, "
                         f"对话类型={conversation_prompts}")
@@ -860,6 +860,7 @@ class TradingEngine:
         # 【获取模型配置】读取模型的symbol_source字段，决定使用哪个数据源
         model = self.db.get_model(self.model_id)
         symbol_source = model.get('symbol_source', 'leaderboard') if model else 'leaderboard'
+        logger.info(f"[Model {self.model_id}] 模型交易市场信息来源symbol_source配置: {symbol_source}")
         
         limit = getattr(app_config, 'PROMPT_MARKET_SYMBOL_LIMIT', 5)
         limit = max(1, int(limit))
@@ -883,7 +884,7 @@ class TradingEngine:
             try:
                 leaderboard = self.market_fetcher.get_leaderboard(limit=limit)
             except Exception as exc:
-                logger.warning(f"[Model {self.model_id}] 获取提示词市场快照失败: {exc}")
+                logger.warning(f"[Model {self.model_id}] 获取涨跌榜市场信息快照失败: {exc}")
                 return []
 
             # 同时获取涨幅榜和跌幅榜数据，提供更全面的市场信息
@@ -894,42 +895,66 @@ class TradingEngine:
             entries = gainers[:limit] + losers[:limit]
             if not entries:
                 return []
+            
+            logger.info(f"[Model {self.model_id}] 从涨跌榜市场信息获取到 {len(entries)} 个市场快照条目")
         
-        # 提取所有符号
-        symbols = [entry.get('symbol') for entry in entries if entry.get('symbol')]
-        
-        # 实时获取这些符号的最新价格（不使用缓存）
-        realtime_prices = {}
-        if symbols:
-            realtime_prices = self.market_fetcher.get_current_prices(symbols)
-        
-        # 构建快照，优先使用实时价格
+        # 构建快照
         snapshot = []
+        
+        # 只有当数据源是future时，才获取实时价格
+        realtime_prices = {}
+        if symbol_source == 'future':
+            # 提取所有合约符号
+            contract_symbols = [entry.get('contract_symbol') for entry in entries if entry.get('contract_symbol')]
+            # 实时获取这些合约符号的最新价格（不使用缓存）
+            if contract_symbols:
+                realtime_prices = self.market_fetcher.get_current_prices_by_contract(contract_symbols)
+        
         for entry in entries:
             symbol = entry.get('symbol')
             if not symbol:
                 continue
             
-            # 获取实时价格信息
-            realtime_info = realtime_prices.get(symbol, {})
-            
-            # 优先使用实时价格，如果没有则使用entry中的价格作为降级方案
-            if realtime_info and realtime_info.get('price', 0) > 0:
-                price = realtime_info.get('price', 0)
-                quote_volume = realtime_info.get('daily_volume', entry.get('quote_volume', 0))
+            if symbol_source == 'future':
+                # 获取实时价格信息
+                # 使用contract_symbol来查找实时价格
+                contract_symbol = entry.get('contract_symbol')
+                realtime_info = realtime_prices.get(contract_symbol, {})
+                
+                # 优先使用实时价格，如果没有则使用entry中的价格作为降级方案
+                if realtime_info and realtime_info.get('price', 0) > 0:
+                    price = realtime_info.get('price', 0)
+                    quote_volume = realtime_info.get('daily_volume', entry.get('quote_volume', 0))
+                else:
+                    price = entry.get('price', 0)
+                    quote_volume = entry.get('quote_volume', 0)
+                    logger.warning(f"[Model {self.model_id}] 市场快照中 {contract_symbol} 无法获取实时价格，使用futures表价格")
             else:
-                price = entry.get('price', 0)
+                # 涨跌榜来源的symbol直接使用数据库中的价格（已基本实时）
+                price = entry.get('last_price', 0)
                 quote_volume = entry.get('quote_volume', 0)
-                source_type = "futures表" if symbol_source == 'future' else "榜单"
-                logger.warning(f"[Model {self.model_id}] 市场快照中 {symbol} 无法获取实时价格，使用{source_type}价格")
             
             # 实时计算技术指标（无缓存）
-            merged_data = self._merge_timeframe_data(symbol)
-            timeframes = merged_data.get(symbol, {}) if merged_data else {}
+            # 当symbol_source为'future'时，使用contract_symbol作为参数
+            # 当symbol_source为'leaderboard'时，使用symbol作为参数
+            if symbol_source == 'future':
+                merged_data = self._merge_timeframe_data(entry.get('contract_symbol', symbol))
+                timeframes = merged_data.get(entry.get('contract_symbol', symbol), {}) if merged_data else {}
+            else:
+                merged_data = self._merge_timeframe_data(symbol)
+                timeframes = merged_data.get(symbol, {}) if merged_data else {}
             
+            # 根据数据源类型设置正确的symbol字段
+            # 从futures表获取的数据使用contract_symbol作为symbol字段
+            # 从涨跌榜获取的数据使用原始symbol字段
+            if symbol_source == 'future':
+                snapshot_symbol = entry.get('contract_symbol', symbol)
+            else:
+                snapshot_symbol = symbol
+                
             snapshot.append({
-                'symbol': symbol,
-                'contract_symbol': entry.get('contract_symbol') or f"{symbol}USDT",
+                'symbol': snapshot_symbol,
+                'contract_symbol': entry.get('contract_symbol') or f"{symbol}",
                 'price': price,  # 使用实时价格
                 'quote_volume': quote_volume,
                 'timeframes': timeframes  # 使用实时计算的技术指标
@@ -1612,6 +1637,7 @@ class TradingEngine:
 
             # 过滤掉已持仓的交易对
             filtered = [item for item in gainers if item.get('symbol') not in held]
+            logger.debug(f"[Model {self.model_id}] 从涨跌榜获取到 {len(filtered)} 个候选交易对")
             return filtered[:available_slots]
 
     # ============ 决策执行方法 ============

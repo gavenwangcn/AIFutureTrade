@@ -98,6 +98,22 @@ class BinanceFuturesClient:
 
     # ============ 工具方法：数据格式转换 ============
 
+    def format_symbol(self, base_symbol: str) -> str:
+        """
+        格式化交易对符号，添加计价资产后缀
+        
+        Args:
+            base_symbol: 基础交易对符号，如 'BTC'
+            
+        Returns:
+            完整交易对符号，如 'BTCUSDT'
+        """
+        base_symbol = base_symbol.upper()
+        # 检查base_symbol是否已经以quote_asset结尾，避免重复添加
+        if not base_symbol.endswith(self.quote_asset):
+            return f"{base_symbol}{self.quote_asset}"
+        return base_symbol
+
     @staticmethod
     def _normalize_list(payload: Any) -> List[Any]:
         """

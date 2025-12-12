@@ -56,7 +56,7 @@ BINANCE_TRADE_MODE = os.getenv('BINANCE_TRADE_MODE', 'test').lower()  # 交易�
 BINANCE_TESTNET = os.getenv('BINANCE_TESTNET', '0').lower() in {'1', 'true', 'yes'}  # 是否使用测试网络
 
 # 币安市场数据配置
-FUTURES_TOP_GAINERS_LIMIT = 10  # 涨幅榜返回的交易对数量限制
+FUTURES_TOP_GAINERS_LIMIT = 5  # 涨幅榜返回的交易对数量限制
 FUTURES_TOP_GAINERS_REFRESH = 30  # 涨幅榜刷新间隔（秒），可根据部署需求调整
 FUTURES_KLINE_LIMIT = 300  # K线数据获取的最大数量限制
 FUTURES_LEADERBOARD_REFRESH = 5  # 涨跌幅榜前端轮询刷新间隔（秒）

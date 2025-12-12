@@ -286,6 +286,56 @@ class MarketDataFetcher:
 
         # 直接从SDK获取价格，如果获取不到则返回空（不包含在prices字典中）
         return prices
+    
+    def get_current_prices_by_contract(self, contract_symbols: List[str]) -> Dict[str, Dict]:
+        """
+        通过合约符号获取当前期货价格（实时获取，无缓存）
+        
+        此方法与get_current_prices类似，但接受合约符号列表而不是基础符号列表，
+        并以合约符号为键返回价格数据。
+        
+        Args:
+            contract_symbols: 合约符号列表（如['BTCUSDT', 'ETHUSDT']）
+            
+        Returns:
+            价格数据字典，key为合约符号，value为价格信息
+        """
+        if not contract_symbols:
+            return {}
+            
+        # 实时获取价格数据（不使用缓存）
+        prices = {}
+        if self._futures_client:
+            # 直接使用合约符号获取24小时行情数据
+            tickers = self._futures_client.get_24h_ticker(contract_symbols)
+            spot_prices = self._futures_client.get_symbol_prices(contract_symbols)
+            
+            for contract_symbol in contract_symbols:
+                payload = tickers.get(contract_symbol)
+                if not payload:
+                    continue
+                    
+                try:
+                    last_price = round(float(
+                        payload.get('lastPrice')
+                        or spot_prices.get(contract_symbol, {}).get('price', 0)
+                    ), 6)  # 价格保留6位小数
+                    
+                    change_percent = float(payload.get('priceChangePercent', 0))
+                    quote_volume = float(payload.get('quoteVolume', payload.get('volume', 0)))
+                    
+                    # 构建价格数据
+                    prices[contract_symbol] = {
+                        'price': last_price,
+                        'last_price': last_price,  # 同时提供last_price字段以便兼容
+                        'change_percent': change_percent,
+                        'quote_volume': quote_volume,
+                        'daily_volume': quote_volume  # 同时提供daily_volume字段以便兼容
+                    }
+                except (ValueError, TypeError):
+                    continue
+        
+        return prices
 
     def _fetch_from_binance_futures(self, futures: List[Dict]) -> Dict[str, Dict]:
         """
