@@ -143,7 +143,8 @@ class MySQLConnectionPool:
                     database=self._database,
                     charset=self._charset,
                     cursorclass=cursors.DictCursor,
-                    autocommit=False
+                    autocommit=False,
+                    allow_public_key_retrieval=True  # 允许公钥检索，解决 MySQL 8.0+ 的认证问题
                 )
                 self._pool.put(connection)
                 self._current_connections += 1

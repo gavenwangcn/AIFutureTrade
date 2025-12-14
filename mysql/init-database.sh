@@ -19,12 +19,15 @@ until mysqladmin ping -h localhost -u root -paifuturetrade_root123 --silent 2>/d
     echo "   等待中..."
     sleep 1
 done
+# 额外等待几秒，确保 MySQL 完全初始化（避免 Public Key Retrieval 错误）
+echo "⏳ 等待 MySQL 完全初始化..."
+sleep 3
 echo "✅ MySQL 已就绪"
 echo ""
 
 # 执行 SQL 命令修改认证插件
 echo "🔧 配置用户认证插件..."
-mysql -u root -paifuturetrade_root123 <<EOF
+mysql -u root -paifuturetrade_root123 --allow-public-key-retrieval <<EOF
 -- ==============================================================================
 -- 修改 root 用户的认证插件
 -- ==============================================================================
@@ -55,7 +58,7 @@ if [ $? -eq 0 ]; then
     echo "✅ 认证插件配置完成！"
     echo ""
     echo "📝 验证连接..."
-    if mysql -u aifuturetrade -paifuturetrade123 -e "SELECT 1" > /dev/null 2>&1; then
+    if mysql -u aifuturetrade -paifuturetrade123 --allow-public-key-retrieval -e "SELECT 1" > /dev/null 2>&1; then
         echo "✅ 连接测试成功！"
     else
         echo "⚠️  连接测试失败"
