@@ -452,14 +452,6 @@ class Database:
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
         """
         self.command(ddl)
-        # 直接添加tokens字段（如果字段已存在会报错，但按用户要求不进行判断）
-        try:
-            alter_ddl = f"ALTER TABLE `{self.conversations_table}` ADD COLUMN `tokens` INT DEFAULT 0"
-            self.command(alter_ddl)
-            logger.debug(f"[Database] Added tokens column to {self.conversations_table}")
-        except Exception as e:
-            # 如果字段已存在，忽略错误（按用户要求不进行判断）
-            logger.debug(f"[Database] Tokens column may already exist in {self.conversations_table}: {e}")
         logger.debug(f"[Database] Ensured table {self.conversations_table} exists with index for efficient timestamp DESC sorting")
     
     def _ensure_account_values_table(self):
