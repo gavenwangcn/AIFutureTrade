@@ -97,16 +97,17 @@
               <div class="model-header">
                 <div class="model-name">{{ model.name || `模型 #${model.id}` }}</div>
                 <div class="model-actions" @click.stop>
-                  <button class="model-action-btn" @click="handleOpenLeverageModal(model.id, model.name || `模型 #${model.id}`)" title="设置杠杆">
-                    <i class="bi bi-sliders"></i>
+                  <button class="model-action-btn" @click="handleOpenModelSettingsModal(model.id, model.name || `模型 #${model.id}`)" title="模型设置">
+                    <i class="bi bi-gear"></i>
                   </button>
-                  <button class="model-action-btn" @click="deleteModel(model.id)" title="删除模型">
+                  <button class="model-action-btn" @click="handleDeleteModel(model.id, model.name || `模型 #${model.id}`)" title="删除模型">
                     <i class="bi bi-trash"></i>
                   </button>
                 </div>
               </div>
               <div class="model-meta">
                 <span class="model-leverage">杠杆: {{ getLeverageText(model.id) }}</span>
+                <span class="model-max-positions">最大持仓: {{ model.max_positions || 3 }}</span>
                 <span class="model-provider">{{ getProviderName(model.provider_id) }}</span>
               </div>
             </div>
@@ -470,7 +471,7 @@
           <div v-show="!isAggregatedView && activeTab === 'conversations'" class="tab-content active">
             <div class="conversations-list">
               <div v-for="conv in conversations" :key="conv.id" class="conversation-item">
-                <div class="conversation-time">{{ formatTime(conv.time || conv.timestamp) }}</div>
+                <div class="conversation-time">{{ formatTime(conv.timestamp || conv.time) }}</div>
                 <div v-if="conv.user_prompt" class="conversation-bubble">
                   <div class="bubble-label">
                     <i class="bi bi-person"></i>
@@ -551,32 +552,77 @@
       @refresh="handleRefresh"
     />
     
-    <!-- 杠杆设置模态框 -->
-    <div v-if="showLeverageModal" class="modal show" @click.self="showLeverageModal = false">
+    <!-- 模型设置模态框（合并杠杆和最大持仓数量） -->
+    <div v-if="showModelSettingsModal" class="modal show" @click.self="showModelSettingsModal = false">
       <div class="modal-content">
         <div class="modal-header">
-          <h3>设置杠杆 - {{ leverageModelName }}</h3>
-          <button class="btn-close" @click="showLeverageModal = false">
+          <h3>模型设置 - {{ modelSettingsName }}</h3>
+          <button class="btn-close" @click="showModelSettingsModal = false">
             <i class="bi bi-x-lg"></i>
           </button>
         </div>
         <div class="modal-body">
-          <div class="form-group">
-            <label for="leverageInput">杠杆倍数 (0-125)</label>
-            <input 
-              type="number" 
-              id="leverageInput" 
-              class="form-input" 
-              min="0" 
-              max="125" 
-              v-model.number="tempLeverage"
-            >
-            <small class="form-help">输入0表示由AI自行决定杠杆。</small>
+          <div v-if="loadingModelSettings" class="loading-message">
+            正在加载模型配置...
+          </div>
+          <div v-else>
+            <div class="form-group">
+              <label for="settingsLeverageInput">杠杆倍数 (0-125)</label>
+              <input 
+                type="number" 
+                id="settingsLeverageInput" 
+                class="form-input" 
+                min="0" 
+                max="125" 
+                v-model.number="tempModelSettings.leverage"
+              >
+              <small class="form-help">输入0表示由AI自行决定杠杆。</small>
+            </div>
+            <div class="form-group">
+              <label for="settingsMaxPositionsInput">最大持仓数量 (>= 1)</label>
+              <input 
+                type="number" 
+                id="settingsMaxPositionsInput" 
+                class="form-input" 
+                min="1" 
+                v-model.number="tempModelSettings.max_positions"
+              >
+              <small class="form-help">设置该模型最多可以同时持有的合约数量，默认为3。</small>
+            </div>
           </div>
         </div>
         <div class="modal-footer">
-          <button class="btn-secondary" @click="showLeverageModal = false">取消</button>
-          <button class="btn-primary" @click="handleSaveLeverage">保存</button>
+          <button class="btn-secondary" @click="showModelSettingsModal = false">取消</button>
+          <button class="btn-primary" @click="handleSaveModelSettings" :disabled="loadingModelSettings || savingModelSettings">
+            {{ savingModelSettings ? '保存中...' : '保存' }}
+          </button>
+        </div>
+      </div>
+    </div>
+    
+    <!-- 删除模型确认弹框 -->
+    <div v-if="showDeleteModelConfirmModal" class="modal show" @click.self="cancelDeleteModel">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h3>确认删除模型</h3>
+          <button class="btn-close" @click="cancelDeleteModel">
+            <i class="bi bi-x-lg"></i>
+          </button>
+        </div>
+        <div class="modal-body">
+          <div class="delete-confirm-message">
+            <p>你确认删除当前 <strong>{{ pendingDeleteModelName }}</strong> 模型吗？</p>
+            <p style="color: #dc3545; margin-top: 15px; font-weight: bold;">
+              <i class="bi bi-exclamation-triangle"></i>
+              将会删除当前模型相关的所有数据，此操作不可恢复，请谨慎操作！
+            </p>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn-secondary" @click="cancelDeleteModel" :disabled="deletingModel">取消</button>
+          <button class="btn-danger" @click="confirmDeleteModel" :disabled="deletingModel">
+            {{ deletingModel ? '删除中...' : '确认删除' }}
+          </button>
         </div>
       </div>
     </div>
@@ -625,6 +671,27 @@ const {
   showLeverageModal,
   pendingLeverageModelId,
   leverageModelName,
+  showMaxPositionsModal,
+  pendingMaxPositionsModelId,
+  maxPositionsModelName,
+  tempMaxPositions,
+  openMaxPositionsModal,
+  saveModelMaxPositions,
+  showModelSettingsModal,
+  pendingModelSettingsId,
+  modelSettingsName,
+  tempModelSettings,
+  loadingModelSettings,
+  savingModelSettings,
+  openModelSettingsModal,
+  saveModelSettings,
+  showDeleteModelConfirmModal,
+  pendingDeleteModelId,
+  pendingDeleteModelName,
+  deletingModel,
+  openDeleteModelConfirm,
+  confirmDeleteModel,
+  cancelDeleteModel,
   initApp,
   handleRefresh,
   toggleLogger,
@@ -678,6 +745,26 @@ const handleSaveLeverage = async () => {
     return
   }
   await saveModelLeverage(tempLeverage.value)
+}
+
+const handleOpenMaxPositionsModal = (modelId, modelName) => {
+  openMaxPositionsModal(modelId, modelName)
+}
+
+const handleSaveMaxPositions = async () => {
+  await saveModelMaxPositions()
+}
+
+const handleOpenModelSettingsModal = (modelId, modelName) => {
+  openModelSettingsModal(modelId, modelName)
+}
+
+const handleSaveModelSettings = async () => {
+  await saveModelSettings()
+}
+
+const handleDeleteModel = (modelId, modelName) => {
+  openDeleteModelConfirm(modelId, modelName)
 }
 
 const openKlineChartFromMarket = (symbol, contractSymbol) => {

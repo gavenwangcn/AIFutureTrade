@@ -548,6 +548,34 @@ body {
     transform: none;
 }
 
+.btn-danger {
+    background: var(--danger);
+    color: #ffffff;
+    border: none;
+    padding: 10px 20px;
+    border-radius: var(--radius);
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.btn-danger:hover:not(:disabled) {
+    background: #d32f2f;
+    transform: translateY(-1px);
+    box-shadow: var(--shadow-2);
+}
+
+.btn-danger:active:not(:disabled) {
+    transform: translateY(0);
+    box-shadow: var(--shadow-1);
+}
+
+.btn-danger:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
 .btn-secondary.refreshing {
     position: relative;
     pointer-events: none;

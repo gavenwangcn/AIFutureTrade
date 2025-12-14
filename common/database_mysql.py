@@ -2312,12 +2312,7 @@ class MySQLDatabase:
             `assigned_symbol_count` = VALUES(`assigned_symbol_count`),
             `last_heartbeat` = CURRENT_TIMESTAMP
             """
-            self.command(sql, {
-                'ip': ip,
-                'port': port,
-                'connection_count': connection_count,
-                'assigned_symbol_count': assigned_symbol_count
-            })
+            self.command(sql, (ip, port, connection_count, assigned_symbol_count))
         except Exception as e:
             logger.error("[MySQL] Failed to update agent connection info: %s", e)
 

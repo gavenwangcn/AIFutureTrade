@@ -171,7 +171,7 @@ class Database:
                         if self._pool._current_connections > 0:
                             self._pool._current_connections -= 1
     
-    def command(self, sql: str, params: Dict[str, Any] = None) -> None:
+    def command(self, sql: str, params: tuple = None) -> None:
         """Execute a raw SQL command."""
         def _execute_command(conn):
             cursor = conn.cursor()
@@ -301,6 +301,7 @@ class Database:
             `initial_capital` DOUBLE DEFAULT 10000,
             `leverage` TINYINT UNSIGNED DEFAULT 10,
             `auto_trading_enabled` TINYINT UNSIGNED DEFAULT 1,
+            `max_positions` TINYINT UNSIGNED DEFAULT 3,
             `api_key` VARCHAR(500),
             `api_secret` VARCHAR(500),
             `account_alias` VARCHAR(100),
@@ -312,6 +313,29 @@ class Database:
             INDEX `idx_created_at` (`created_at`)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
         """
+        
+        # 如果表已存在但缺少 max_positions 字段，则添加该字段
+        try:
+            # 检查字段是否存在
+            check_column_sql = f"""
+                SELECT COUNT(*) as cnt
+                FROM information_schema.COLUMNS
+                WHERE TABLE_SCHEMA = DATABASE()
+                AND TABLE_NAME = '{self.models_table}'
+                AND COLUMN_NAME = 'max_positions'
+            """
+            result = self.query(check_column_sql)
+            if result and result[0][0] == 0:
+                # 字段不存在，添加字段
+                alter_sql = f"""
+                    ALTER TABLE `{self.models_table}`
+                    ADD COLUMN `max_positions` TINYINT UNSIGNED DEFAULT 3
+                    AFTER `auto_trading_enabled`
+                """
+                self.command(alter_sql)
+                logger.info(f"[Database] Added max_positions column to {self.models_table} table")
+        except Exception as e:
+            logger.warning(f"[Database] Failed to check/add max_positions column: {e}")
         self.command(ddl)
         logger.debug(f"[Database] Ensured table {self.models_table} exists")
     
@@ -373,7 +397,7 @@ class Database:
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
         """
         self.command(ddl)
-        logger.debug(f"[Database] Ensured table {self.conversations_table} exists")
+        logger.debug(f"[Database] Ensured table {self.conversations_table} exists with index for efficient timestamp DESC sorting")
     
     def _ensure_account_values_table(self):
         """Create account_values table if not exists"""
@@ -526,11 +550,15 @@ class Database:
             # 检查是否有设置记录
             result = self.query(f"SELECT COUNT(*) as cnt FROM `{self.settings_table}`")
             if result and result[0][0] == 0:
+                # 使用 UTC+8 时区时间（北京时间），转换为 naive datetime 存储
+                beijing_tz = timezone(timedelta(hours=8))
+                current_time = datetime.now(beijing_tz).replace(tzinfo=None)
+                
                 # 插入默认设置
                 settings_id = str(uuid.uuid4())
                 self.insert_rows(
                     self.settings_table,
-                    [[settings_id, 60, 0.001, 0, datetime.now(timezone.utc), datetime.now(timezone.utc)]],
+                    [[settings_id, 60, 0.001, 0, current_time, current_time]],
                     ["id", "trading_frequency_minutes", "trading_fee_rate", "show_system_prompt", "created_at", "updated_at"]
                 )
                 logger.info("[Database] Default settings initialized")
@@ -635,8 +663,8 @@ class Database:
                 return
             
             actual_id = provider['id']
-            # ClickHouse 使用 DELETE + INSERT 来实现 UPDATE
-            self.command(f"ALTER TABLE {self.providers_table} DELETE WHERE id = '{actual_id}'")
+            # MySQL 使用 DELETE + INSERT 来实现 UPDATE
+            self.command(f"DELETE FROM {self.providers_table} WHERE id = '{actual_id}'")
             self.insert_rows(
                 self.providers_table,
                 [[actual_id, name, api_url, api_key, models or '', provider_type.lower(), provider.get('created_at', datetime.now(timezone.utc))]],
@@ -655,7 +683,7 @@ class Database:
                 return
             
             actual_id = provider['id']
-            self.command(f"ALTER TABLE {self.providers_table} DELETE WHERE id = '{actual_id}'")
+            self.command(f"DELETE FROM {self.providers_table} WHERE id = '{actual_id}'")
         except Exception as e:
             logger.error(f"[Database] Failed to delete provider {provider_id}: {e}")
             raise
@@ -758,8 +786,8 @@ class Database:
         try:
             self.insert_rows(
                 self.models_table,
-                [[model_id, name, provider_uuid, model_name, initial_capital, leverage, 1, final_api_key, final_api_secret, account_alias, 1 if is_virtual else 0, symbol_source, datetime.now(timezone.utc)]],
-                ["id", "name", "provider_id", "model_name", "initial_capital", "leverage", "auto_trading_enabled", "api_key", "api_secret", "account_alias", "is_virtual", "symbol_source", "created_at"]
+                [[model_id, name, provider_uuid, model_name, initial_capital, leverage, 1, 3, final_api_key, final_api_secret, account_alias, 1 if is_virtual else 0, symbol_source, datetime.now(timezone.utc)]],
+                ["id", "name", "provider_id", "model_name", "initial_capital", "leverage", "auto_trading_enabled", "max_positions", "api_key", "api_secret", "account_alias", "is_virtual", "symbol_source", "created_at"]
             )
             
             # 初始化account_values表的一条记录（确保account_alias插入到account_values表中）
@@ -792,7 +820,7 @@ class Database:
             # 查询 model 和关联的 provider
             rows = self.query(f"""
                 SELECT m.id, m.name, m.provider_id, m.model_name, m.initial_capital, 
-                       m.leverage, m.auto_trading_enabled, m.account_alias, m.is_virtual, m.symbol_source, m.created_at,
+                       m.leverage, m.auto_trading_enabled, m.max_positions, m.account_alias, m.is_virtual, m.symbol_source, m.created_at,
                        p.api_key, p.api_url, p.provider_type
                 FROM {self.models_table} m
                 LEFT JOIN {self.providers_table} p ON m.provider_id = p.id
@@ -803,7 +831,7 @@ class Database:
                 return None
             
             columns = ["id", "name", "provider_id", "model_name", "initial_capital", 
-                      "leverage", "auto_trading_enabled", "account_alias", "is_virtual", "symbol_source", "created_at",
+                      "leverage", "auto_trading_enabled", "max_positions", "account_alias", "is_virtual", "symbol_source", "created_at",
                       "api_key", "api_url", "provider_type"]
             result = self._row_to_dict(rows[0], columns)
             # 转换 ID 为 int 以保持兼容性
@@ -833,14 +861,14 @@ class Database:
         try:
             rows = self.query(f"""
                 SELECT m.id, m.name, m.provider_id, m.model_name, m.initial_capital,
-                       m.leverage, m.auto_trading_enabled, m.account_alias, m.is_virtual, m.symbol_source, m.created_at,
+                       m.leverage, m.auto_trading_enabled, m.max_positions, m.account_alias, m.is_virtual, m.symbol_source, m.created_at,
                        p.name as provider_name
                 FROM {self.models_table} m
                 LEFT JOIN {self.providers_table} p ON m.provider_id = p.id
                 ORDER BY m.created_at DESC
             """)
             columns = ["id", "name", "provider_id", "model_name", "initial_capital",
-                      "leverage", "auto_trading_enabled", "account_alias", "is_virtual", "symbol_source", "created_at", "provider_name"]
+                      "leverage", "auto_trading_enabled", "max_positions", "account_alias", "is_virtual", "symbol_source", "created_at", "provider_name"]
             results = self._rows_to_dicts(rows, columns)
             
             # 转换 ID 为 int 以保持兼容性
@@ -858,6 +886,9 @@ class Database:
                 # 【兼容性处理】确保is_virtual有默认值
                 if result.get('is_virtual') is None:
                     result['is_virtual'] = False
+                # 【兼容性处理】确保max_positions有默认值
+                if result.get('max_positions') is None:
+                    result['max_positions'] = 3
                 else:
                     result['is_virtual'] = bool(result.get('is_virtual', 0))
             return results
@@ -866,7 +897,21 @@ class Database:
             return []
     
     def delete_model(self, model_id: int):
-        """Delete model and related data"""
+        """
+        删除模型及其所有相关数据
+        
+        删除顺序（先删除依赖表，再删除主表）：
+        1. portfolios - 持仓数据
+        2. trades - 交易记录
+        3. conversations - 对话记录
+        4. account_values - 账户价值历史
+        5. model_futures - 模型关联的期货合约
+        6. model_prompts - 模型提示词配置
+        7. models - 模型主表
+        
+        Args:
+            model_id: 模型ID（整数ID）
+        """
         try:
             model_mapping = self._get_model_id_mapping()
             model_uuid = model_mapping.get(model_id)
@@ -874,13 +919,37 @@ class Database:
                 logger.warning(f"[Database] Model {model_id} not found for deletion")
                 return
             
-            # 删除相关数据
+            logger.info(f"[Database] Starting deletion of model {model_id} (UUID: {model_uuid}) and all related data")
+            
+            # 删除相关数据（按依赖顺序删除）
+            # 1. 删除持仓数据
             self.command(f"DELETE FROM `{self.portfolios_table}` WHERE model_id = %s", (model_uuid,))
+            logger.debug(f"[Database] Deleted portfolios for model {model_id}")
+            
+            # 2. 删除交易记录
             self.command(f"DELETE FROM `{self.trades_table}` WHERE model_id = %s", (model_uuid,))
+            logger.debug(f"[Database] Deleted trades for model {model_id}")
+            
+            # 3. 删除对话记录
             self.command(f"DELETE FROM `{self.conversations_table}` WHERE model_id = %s", (model_uuid,))
+            logger.debug(f"[Database] Deleted conversations for model {model_id}")
+            
+            # 4. 删除账户价值历史
             self.command(f"DELETE FROM `{self.account_values_table}` WHERE model_id = %s", (model_uuid,))
+            logger.debug(f"[Database] Deleted account_values for model {model_id}")
+            
+            # 5. 删除模型关联的期货合约
             self.command(f"DELETE FROM `{self.model_futures_table}` WHERE model_id = %s", (model_uuid,))
+            logger.debug(f"[Database] Deleted model_futures for model {model_id}")
+            
+            # 6. 删除模型提示词配置
+            self.command(f"DELETE FROM `{self.model_prompts_table}` WHERE model_id = %s", (model_uuid,))
+            logger.debug(f"[Database] Deleted model_prompts for model {model_id}")
+            
+            # 7. 最后删除模型主表
             self.command(f"DELETE FROM `{self.models_table}` WHERE id = %s", (model_uuid,))
+            logger.info(f"[Database] Successfully deleted model {model_id} and all related data")
+            
         except Exception as e:
             logger.error(f"[Database] Failed to delete model {model_id}: {e}")
             raise
@@ -946,6 +1015,31 @@ class Database:
             logger.error(f"[Database] Failed to update leverage for model {model_id}: {e}")
             return False
     
+    def set_model_max_positions(self, model_id: int, max_positions: int) -> bool:
+        """Update model max_positions (最大持仓数量)"""
+        try:
+            model_mapping = self._get_model_id_mapping()
+            model_uuid = model_mapping.get(model_id)
+            if not model_uuid:
+                return False
+            
+            # 验证 max_positions 值
+            if not isinstance(max_positions, int) or max_positions < 1:
+                logger.error(f"[Database] Invalid max_positions value: {max_positions}, must be >= 1")
+                return False
+            
+            # 使用 UPDATE 语句更新（MySQL支持UPDATE）
+            self.command(f"""
+                UPDATE `{self.models_table}` 
+                SET `max_positions` = %s
+                WHERE `id` = %s
+            """, (max_positions, model_uuid))
+            logger.info(f"[Database] Updated max_positions to {max_positions} for model {model_id}")
+            return True
+        except Exception as e:
+            logger.error(f"[Database] Failed to update max_positions for model {model_id}: {e}")
+            return False
+    
     # ============ Portfolio（投资组合）管理方法 ============
     
     def update_position(self, model_id: int, symbol: str, position_amt: float,
@@ -976,12 +1070,16 @@ class Database:
             if position_side_upper not in ['LONG', 'SHORT']:
                 raise ValueError(f"position_side must be 'LONG' or 'SHORT', got: {position_side}")
             
-            # 使用 ReplacingMergeTree，直接插入即可（会自动去重）
+            # MySQL 使用唯一索引 (uk_model_symbol_side) 和 INSERT 实现去重
+            # 使用 UTC+8 时区时间（北京时间），转换为 naive datetime 存储
+            beijing_tz = timezone(timedelta(hours=8))
+            current_time = datetime.now(beijing_tz).replace(tzinfo=None)
+            
             position_id = self._generate_id()
             self.insert_rows(
                 self.portfolios_table,
                 [[position_id, model_uuid, symbol.upper(), position_amt, avg_price, leverage, 
-                  position_side_upper, initial_margin, unrealized_profit, datetime.now(timezone.utc)]],
+                  position_side_upper, initial_margin, unrealized_profit, current_time]],
                 ["id", "model_id", "symbol", "position_amt", "avg_price", "leverage", 
                  "position_side", "initial_margin", "unrealized_profit", "updated_at"]
             )
@@ -995,11 +1093,23 @@ class Database:
             model_mapping = self._get_model_id_mapping()
             model_uuid = model_mapping.get(model_id)
             if not model_uuid:
-                raise ValueError(f"Model {model_id} not found")
+                logger.warning(f"[Database] Model {model_id} not found in mapping, returning empty portfolio")
+                # 返回默认的空持仓信息，避免抛出异常导致交易周期失败
+                return {
+                    'model_id': model_id,
+                    'initial_capital': 0,
+                    'cash': 0,
+                    'positions': [],
+                    'positions_value': 0,
+                    'margin_used': 0,
+                    'total_value': 0,
+                    'realized_pnl': 0,
+                    'unrealized_pnl': 0
+                }
             
-            # 获取持仓（使用 FINAL 确保 ReplacingMergeTree 去重）
+            # 获取持仓
             rows = self.query(f"""
-                SELECT * FROM {self.portfolios_table} FINAL
+                SELECT * FROM {self.portfolios_table}
                 WHERE model_id = '{model_uuid}' AND position_amt != 0
             """)
             columns = ["id", "model_id", "symbol", "position_amt", "avg_price", "leverage", 
@@ -1009,7 +1119,19 @@ class Database:
             # 获取初始资金
             model = self.get_model(model_id)
             if not model:
-                raise ValueError(f"Model {model_id} not found")
+                logger.warning(f"[Database] Model {model_id} not found when getting model info, returning empty portfolio")
+                # 返回默认的空持仓信息，避免抛出异常导致交易周期失败
+                return {
+                    'model_id': model_id,
+                    'initial_capital': 0,
+                    'cash': 0,
+                    'positions': [],
+                    'positions_value': 0,
+                    'margin_used': 0,
+                    'total_value': 0,
+                    'realized_pnl': 0,
+                    'unrealized_pnl': 0
+                }
             initial_capital = model['initial_capital']
             
             # 计算已实现盈亏
@@ -1097,16 +1219,21 @@ class Database:
             if position_side_upper not in ['LONG', 'SHORT']:
                 raise ValueError(f"position_side must be 'LONG' or 'SHORT', got: {position_side}")
             
-            self.command(f"ALTER TABLE {self.portfolios_table} DELETE WHERE model_id = '{model_uuid}' AND symbol = '{normalized_symbol}' AND position_side = '{position_side_upper}'")
+            # 使用 MySQL 的 DELETE FROM 语法
+            delete_sql = f"DELETE FROM {self.portfolios_table} WHERE model_id = '{model_uuid}' AND symbol = '{normalized_symbol}' AND position_side = '{position_side_upper}'"
+            logger.debug(f"[Database] Executing SQL: {delete_sql}")
+            self.command(delete_sql)
             
             # 检查是否还有其他持仓
             remaining_rows = self.query(f"""
-                SELECT count() as cnt FROM {self.portfolios_table} FINAL
+                SELECT COUNT(*) as cnt FROM {self.portfolios_table}
                 WHERE symbol = '{normalized_symbol}' AND position_amt != 0
             """)
             if remaining_rows and remaining_rows[0][0] == 0:
-                # 删除 futures 表中的记录
-                self.command(f"ALTER TABLE {self.futures_table} DELETE WHERE symbol = '{normalized_symbol}'")
+                # 删除 futures 表中的记录（使用 MySQL 的 DELETE FROM 语法）
+                delete_futures_sql = f"DELETE FROM {self.futures_table} WHERE symbol = '{normalized_symbol}'"
+                logger.debug(f"[Database] Executing SQL: {delete_futures_sql}")
+                self.command(delete_futures_sql)
         except Exception as e:
             logger.error(f"[Database] Failed to close position: {e}")
             raise
@@ -1123,10 +1250,14 @@ class Database:
                 logger.warning(f"[Database] Model {model_id} not found for trade record")
                 return
             
+            # 使用 UTC+8 时区时间（北京时间），转换为 naive datetime 存储
+            beijing_tz = timezone(timedelta(hours=8))
+            current_time = datetime.now(beijing_tz).replace(tzinfo=None)
+            
             trade_id = self._generate_id()
             self.insert_rows(
                 self.trades_table,
-                [[trade_id, model_uuid, future.upper(), signal, quantity, price, leverage, side, pnl, fee, datetime.now(timezone.utc)]],
+                [[trade_id, model_uuid, future.upper(), signal, quantity, price, leverage, side, pnl, fee, current_time]],
                 ["id", "model_id", "future", "signal", "quantity", "price", "leverage", "side", "pnl", "fee", "timestamp"]
             )
         except Exception as e:
@@ -1165,10 +1296,14 @@ class Database:
                 logger.warning(f"[Database] Model {model_id} not found for conversation record")
                 return
             
+            # 使用 UTC+8 时区时间（北京时间），转换为 naive datetime 存储
+            beijing_tz = timezone(timedelta(hours=8))
+            current_time = datetime.now(beijing_tz).replace(tzinfo=None)
+            
             conv_id = self._generate_id()
             self.insert_rows(
                 self.conversations_table,
-                [[conv_id, model_uuid, user_prompt, ai_response, cot_trace or '', datetime.now(timezone.utc)]],
+                [[conv_id, model_uuid, user_prompt, ai_response, cot_trace or '', current_time]],
                 ["id", "model_id", "user_prompt", "ai_response", "cot_trace", "timestamp"]
             )
         except Exception as e:
@@ -1176,21 +1311,47 @@ class Database:
             raise
     
     def get_conversations(self, model_id: int, limit: int = 20) -> List[Dict]:
-        """Get conversation history"""
+        """Get conversation history for a specific model
+        
+        Args:
+            model_id: 模型ID（整数）
+            limit: 返回记录数限制，默认20
+            
+        Returns:
+            对话记录列表，只包含指定 model_id 的记录
+        """
         try:
             model_mapping = self._get_model_id_mapping()
             model_uuid = model_mapping.get(model_id)
             if not model_uuid:
+                logger.warning(f"[Database] Model {model_id} not found in mapping, returning empty conversations list")
                 return []
             
+            # 使用参数化查询，确保只查询指定 model_id 的对话记录
+            # 按 timestamp DESC 排序，确保返回最新的对话记录
             rows = self.query(f"""
                 SELECT * FROM `{self.conversations_table}`
                 WHERE model_id = %s
                 ORDER BY timestamp DESC
                 LIMIT %s
             """, (model_uuid, limit))
+            
             columns = ["id", "model_id", "user_prompt", "ai_response", "cot_trace", "timestamp"]
-            return self._rows_to_dicts(rows, columns)
+            results = self._rows_to_dicts(rows, columns)
+            
+            # 额外验证：确保返回的所有记录都属于指定的 model_id（双重保险）
+            filtered_results = []
+            for result in results:
+                if result.get('model_id') == model_uuid:
+                    filtered_results.append(result)
+                else:
+                    logger.warning(f"[Database] Found conversation with mismatched model_id: expected {model_uuid}, got {result.get('model_id')}")
+            
+            # 再次按 timestamp 降序排序，确保即使数据库返回顺序有问题，也能正确排序（双重保险）
+            filtered_results.sort(key=lambda x: x.get('timestamp') or '', reverse=True)
+            
+            logger.debug(f"[Database] Retrieved {len(filtered_results)} conversations for model {model_id} (limit={limit}), sorted by timestamp DESC")
+            return filtered_results
         except Exception as e:
             logger.error(f"[Database] Failed to get conversations for model {model_id}: {e}")
             return []
@@ -1288,7 +1449,7 @@ class Database:
             - crossUnPnl: 全仓持仓未实现盈亏（聚合）
         """
         try:
-            # ClickHouse 的日期函数略有不同
+            # MySQL 日期函数：DATE() 和 HOUR()
             rows = self.query(f"""
                 SELECT 
                     timestamp,
@@ -1305,11 +1466,11 @@ class Database:
                         cross_wallet_balance,
                         cross_un_pnl,
                         model_id,
-                        ROW_NUMBER() OVER (PARTITION BY model_id, toDate(timestamp) ORDER BY timestamp DESC) as rn
+                        ROW_NUMBER() OVER (PARTITION BY model_id, DATE(timestamp) ORDER BY timestamp DESC) as rn
                     FROM {self.account_values_table}
                 ) grouped
                 WHERE rn <= 10
-                GROUP BY toDate(timestamp), toHour(timestamp), timestamp
+                GROUP BY DATE(timestamp), HOUR(timestamp), timestamp
                 ORDER BY timestamp DESC
                 LIMIT {limit}
             """)
@@ -1437,7 +1598,7 @@ class Database:
         """Get all futures configurations"""
         try:
             rows = self.query(f"""
-                SELECT * FROM {self.futures_table} FINAL
+                SELECT * FROM {self.futures_table}
                 ORDER BY sort_order DESC, created_at DESC, symbol ASC
             """)
             columns = ["id", "symbol", "contract_symbol", "name", "exchange", "link", "sort_order", "created_at"]
@@ -1470,7 +1631,7 @@ class Database:
                      exchange: str = 'BINANCE_FUTURES', link: Optional[str] = None, sort_order: int = 0):
         """Insert or update a futures configuration identified by symbol"""
         try:
-            # 使用 ReplacingMergeTree，直接插入即可
+            # MySQL 使用唯一索引 (uk_symbol) 和 INSERT 实现去重
             future_id = self._generate_id()
             self.insert_rows(
                 self.futures_table,
@@ -1489,7 +1650,7 @@ class Database:
             for future in futures:
                 if self._uuid_to_int(future['id']) == future_id:
                     actual_id = future['id']
-                    self.command(f"ALTER TABLE {self.futures_table} DELETE WHERE id = '{actual_id}'")
+                    self.command(f"DELETE FROM {self.futures_table} WHERE id = '{actual_id}'")
                     return
             logger.warning(f"[Database] Future {future_id} not found for deletion")
         except Exception as e:
@@ -1503,7 +1664,7 @@ class Database:
         try:
             rows = self.query(f"""
                 SELECT symbol, contract_symbol, name, exchange, link, sort_order
-                FROM {self.futures_table} FINAL
+                FROM {self.futures_table}
                 ORDER BY sort_order DESC, symbol ASC
             """)
             columns = ["symbol", "contract_symbol", "name", "exchange", "link", "sort_order"]
@@ -1547,7 +1708,7 @@ class Database:
             if not model_uuid:
                 return
             
-            self.command(f"ALTER TABLE {self.model_futures_table} DELETE WHERE model_id = '{model_uuid}' AND symbol = '{symbol.upper()}'")
+            self.command(f"DELETE FROM {self.model_futures_table} WHERE model_id = '{model_uuid}' AND symbol = '{symbol.upper()}'")
         except Exception as e:
             logger.error(f"[Database] Failed to delete model future: {e}")
             raise
@@ -1591,8 +1752,8 @@ class Database:
         从portfolios表同步去重的future信息到model_future表
         
         此方法会：
-        1. 从portfolios表获取当前模型所有交易过的去重future合约
-        2. 将这些合约信息同步到model_futures表
+        1. 从portfolios表获取当前模型所有交易过的去重future合约（包括已平仓的）
+        2. 将这些合约信息同步到model_futures表（包括增、删对比操作）
         3. 对于新增的合约，从全局futures表获取完整信息
         4. 对于不再在portfolios表中出现的合约，从model_futures表移除
         
@@ -1603,60 +1764,88 @@ class Database:
             bool: 是否同步成功
         """
         try:
+            logger.info(f"[Database] Starting sync_model_futures_from_portfolio for model {model_id}")
+            
             model_mapping = self._get_model_id_mapping()
             model_uuid = model_mapping.get(model_id)
             if not model_uuid:
                 logger.error(f"[Database] Model {model_id} not found in mapping")
                 return False
             
-            # 1. 从portfolios表获取当前模型所有交易过的去重symbol合约
+            # 1. 从portfolios表获取当前模型所有交易过的去重symbol合约（包括已平仓的）
+            # 使用参数化查询，避免SQL注入
             rows = self.query(f"""
                 SELECT DISTINCT symbol
-                FROM {self.portfolios_table} FINAL
-                WHERE model_id = '{model_uuid}'
+                FROM `{self.portfolios_table}`
+                WHERE model_id = %s
                 ORDER BY symbol ASC
-            """)
-            portfolio_symbols = [row[0] for row in rows]
+            """, (model_uuid,))
             
-            # 2. 获取当前model_futures表中的合约列表（直接查询，不调用get_model_futures）
+            portfolio_symbols = [row[0] for row in rows] if rows else []
+            logger.info(f"[Database] Found {len(portfolio_symbols)} distinct symbols in portfolios table for model {model_id}: {portfolio_symbols}")
+            
+            # 2. 获取当前model_futures表中的合约列表
             rows = self.query(f"""
                 SELECT id, model_id, symbol
-                FROM {self.model_futures_table} FINAL
-                WHERE model_id = '{model_uuid}'
+                FROM `{self.model_futures_table}`
+                WHERE model_id = %s
                 ORDER BY symbol ASC
-            """)
+            """, (model_uuid,))
+            
             current_model_futures = []
             for row in rows:
                 current_model_futures.append({
                     'id': row[0],
-                    'model_id': model_id,
+                    'model_id': row[1],
                     'symbol': row[2]
                 })
             current_symbols = {future['symbol']: future for future in current_model_futures}
+            logger.info(f"[Database] Found {len(current_symbols)} symbols in model_futures table for model {model_id}: {list(current_symbols.keys())}")
             
-            # 3. 确定需要添加和删除的合约
+            # 3. 确定需要添加和删除的合约（对比操作）
             symbols_to_add = set(portfolio_symbols) - set(current_symbols.keys())
             symbols_to_delete = set(current_symbols.keys()) - set(portfolio_symbols)
             
+            logger.info(f"[Database] Sync comparison for model {model_id}: "
+                       f"to_add={len(symbols_to_add)} {list(symbols_to_add)}, "
+                       f"to_delete={len(symbols_to_delete)} {list(symbols_to_delete)}")
+            
             # 4. 添加新合约到model_futures表
             if symbols_to_add:
-                # 从全局futures表获取合约的完整信息
-                futures_info = self.query(f"""
-                    SELECT symbol, contract_symbol, name, exchange, link
-                    FROM {self.futures_table} FINAL
-                    WHERE symbol IN {tuple(symbols_to_add)}
-                """)
+                logger.info(f"[Database] Adding {len(symbols_to_add)} new futures to model_futures table for model {model_id}")
                 
-                # 如果某些合约在全局表中不存在，创建默认信息
-                futures_dict = {row[0]: {
-                    'symbol': row[0],
-                    'contract_symbol': row[1] or row[0],
-                    'name': row[2] or row[0],
-                    'exchange': row[3] or 'BINANCE_FUTURES',
-                    'link': row[4] or ''
-                } for row in futures_info}
+                # 从全局futures表获取合约的完整信息
+                # 使用参数化查询，处理单个和多个元素的情况
+                symbols_list = list(symbols_to_add)
+                if len(symbols_list) == 1:
+                    # 单个元素时使用 = 而不是 IN
+                    futures_info = self.query(f"""
+                        SELECT symbol, contract_symbol, name, exchange, link
+                        FROM `{self.futures_table}`
+                        WHERE symbol = %s
+                    """, (symbols_list[0],))
+                else:
+                    # 多个元素时使用 IN，使用参数化查询
+                    placeholders = ', '.join(['%s'] * len(symbols_list))
+                    futures_info = self.query(f"""
+                        SELECT symbol, contract_symbol, name, exchange, link
+                        FROM `{self.futures_table}`
+                        WHERE symbol IN ({placeholders})
+                    """, tuple(symbols_list))
+                
+                # 构建futures字典
+                futures_dict = {}
+                for row in futures_info:
+                    futures_dict[row[0]] = {
+                        'symbol': row[0],
+                        'contract_symbol': row[1] or row[0],
+                        'name': row[2] or row[0],
+                        'exchange': row[3] or 'BINANCE_FUTURES',
+                        'link': row[4] or ''
+                    }
                 
                 # 为每个需要添加的合约生成记录
+                added_count = 0
                 for symbol in symbols_to_add:
                     # 如果全局表中没有该合约信息，创建默认信息
                     if symbol not in futures_dict:
@@ -1667,30 +1856,51 @@ class Database:
                             'exchange': 'BINANCE_FUTURES',
                             'link': ''
                         }
+                        logger.warning(f"[Database] Future {symbol} not found in global futures table, using default values")
                     
                     # 生成唯一ID
-                    future_id = str(uuid.uuid4())
+                    future_id = self._generate_id()
                     
                     # 插入到model_futures表
-                    self.insert_rows(
-                        self.model_futures_table,
-                        [future_id, model_uuid, futures_dict[symbol]['symbol'], 
-                         futures_dict[symbol]['contract_symbol'], futures_dict[symbol]['name'],
-                         futures_dict[symbol]['exchange'], futures_dict[symbol]['link'], 0]
-                    )
-                    logger.debug(f"[Database] Added future {symbol} to model {model_id} in model_futures table")
-            
-            # 5. 从model_futures表删除不再交易的合约
-            if symbols_to_delete:
-                # 构建删除条件
-                delete_conditions = " OR ".join([f"symbol = '{symbol}'" for symbol in symbols_to_delete])
+                    try:
+                        self.insert_rows(
+                            self.model_futures_table,
+                            [[future_id, model_uuid, futures_dict[symbol]['symbol'], 
+                              futures_dict[symbol]['contract_symbol'], futures_dict[symbol]['name'],
+                              futures_dict[symbol]['exchange'], futures_dict[symbol]['link'], 0]],
+                            ["id", "model_id", "symbol", "contract_symbol", "name", "exchange", "link", "sort_order"]
+                        )
+                        added_count += 1
+                        logger.debug(f"[Database] Added future {symbol} to model {model_id} in model_futures table")
+                    except Exception as insert_error:
+                        logger.error(f"[Database] Failed to insert future {symbol} for model {model_id}: {insert_error}")
+                        # 继续处理其他合约，不中断整个流程
+                        continue
                 
-                # 执行删除操作
-                self.command(f"""
-                    ALTER TABLE {self.model_futures_table}
-                    DELETE WHERE model_id = '{model_uuid}' AND ({delete_conditions})
-                """)
-                logger.debug(f"[Database] Deleted {len(symbols_to_delete)} futures from model {model_id} in model_futures table")
+                logger.info(f"[Database] Successfully added {added_count}/{len(symbols_to_add)} futures to model_futures table for model {model_id}")
+            else:
+                logger.info(f"[Database] No new futures to add for model {model_id}")
+            
+            # 5. 从model_futures表删除不再在portfolios表中出现的合约
+            if symbols_to_delete:
+                logger.info(f"[Database] Deleting {len(symbols_to_delete)} futures from model_futures table for model {model_id}")
+                
+                # 使用参数化查询删除
+                for symbol in symbols_to_delete:
+                    try:
+                        self.command(f"""
+                            DELETE FROM `{self.model_futures_table}`
+                            WHERE model_id = %s AND symbol = %s
+                        """, (model_uuid, symbol))
+                        logger.debug(f"[Database] Deleted future {symbol} from model {model_id} in model_futures table")
+                    except Exception as delete_error:
+                        logger.error(f"[Database] Failed to delete future {symbol} for model {model_id}: {delete_error}")
+                        # 继续处理其他合约，不中断整个流程
+                        continue
+                
+                logger.info(f"[Database] Successfully deleted {len(symbols_to_delete)} futures from model_futures table for model {model_id}")
+            else:
+                logger.info(f"[Database] No futures to delete for model {model_id}")
             
             logger.info(f"[Database] Successfully synced model_futures for model {model_id}: "
                         f"added {len(symbols_to_add)}, deleted {len(symbols_to_delete)}")
@@ -1710,7 +1920,7 @@ class Database:
             if not model_uuid:
                 return
             
-            self.command(f"ALTER TABLE {self.model_futures_table} DELETE WHERE model_id = '{model_uuid}'")
+            self.command(f"DELETE FROM {self.model_futures_table} WHERE model_id = '{model_uuid}'")
         except Exception as e:
             logger.error(f"[Database] Failed to clear model futures for model {model_id}: {e}")
             raise
@@ -1722,7 +1932,7 @@ class Database:
         try:
             rows = self.query(f"""
                 SELECT trading_frequency_minutes, trading_fee_rate, show_system_prompt
-                FROM {self.settings_table} FINAL
+                FROM {self.settings_table}
                 ORDER BY updated_at DESC
                 LIMIT 1
             """)
@@ -1754,13 +1964,36 @@ class Database:
                         show_system_prompt: int) -> bool:
         """Update system settings"""
         try:
-            # 使用 ReplacingMergeTree，直接插入新记录即可
-            settings_id = self._generate_id()
-            self.insert_rows(
-                self.settings_table,
-                [[settings_id, trading_frequency_minutes, trading_fee_rate, show_system_prompt, datetime.now(timezone.utc), datetime.now(timezone.utc)]],
-                ["id", "trading_frequency_minutes", "trading_fee_rate", "show_system_prompt", "created_at", "updated_at"]
-            )
+            # 使用 UTC+8 时区时间（北京时间），转换为 naive datetime 存储
+            beijing_tz = timezone(timedelta(hours=8))
+            current_time = datetime.now(beijing_tz).replace(tzinfo=None)
+            
+            # 先检查是否存在记录
+            existing_rows = self.query(f"""
+                SELECT id FROM {self.settings_table}
+                ORDER BY updated_at DESC
+                LIMIT 1
+            """)
+            
+            if existing_rows and len(existing_rows) > 0:
+                # 如果存在记录，使用 UPDATE 更新
+                settings_id = existing_rows[0][0]
+                self.command(f"""
+                    UPDATE {self.settings_table}
+                    SET trading_frequency_minutes = %s,
+                        trading_fee_rate = %s,
+                        show_system_prompt = %s,
+                        updated_at = %s
+                    WHERE id = %s
+                """, (trading_frequency_minutes, trading_fee_rate, show_system_prompt, current_time, settings_id))
+            else:
+                # 如果不存在记录，使用 INSERT 插入
+                settings_id = self._generate_id()
+                self.insert_rows(
+                    self.settings_table,
+                    [[settings_id, trading_frequency_minutes, trading_fee_rate, show_system_prompt, current_time, current_time]],
+                    ["id", "trading_frequency_minutes", "trading_fee_rate", "show_system_prompt", "created_at", "updated_at"]
+                )
             return True
         except Exception as e:
             logger.error(f"[Database] Failed to update settings: {e}")
@@ -1939,7 +2172,7 @@ class Database:
                            total_unrealized_profit, total_margin_balance, total_position_initial_margin,
                            total_open_order_initial_margin, total_cross_wallet_balance, total_cross_un_pnl,
                            available_balance, max_withdraw_amount, update_time, created_at
-                    FROM {self.account_asset_table} FINAL
+                    FROM {self.account_asset_table}
                     WHERE account_alias = '{account_alias}'
                     ORDER BY update_time DESC
                 """)
@@ -1949,7 +2182,7 @@ class Database:
                            total_unrealized_profit, total_margin_balance, total_position_initial_margin,
                            total_open_order_initial_margin, total_cross_wallet_balance, total_cross_un_pnl,
                            available_balance, max_withdraw_amount, update_time, created_at
-                    FROM {self.account_asset_table} FINAL
+                    FROM {self.account_asset_table}
                     ORDER BY account_alias ASC, update_time DESC
                 """)
             
@@ -2038,7 +2271,7 @@ class Database:
             final_max_withdraw_amount = max_withdraw_amount if max_withdraw_amount is not None else float(existing["maxWithdrawAmount"])
             final_update_time = update_time if update_time is not None else existing["updateTime"]
             
-            # 使用 add_account_asset 方法（ReplacingMergeTree会自动去重）
+            # 使用 add_account_asset 方法（MySQL 使用 INSERT ... ON DUPLICATE KEY UPDATE 实现去重）
             return self.add_account_asset(
                 account_alias=account_alias,
                 total_initial_margin=final_total_initial_margin,
@@ -2069,7 +2302,7 @@ class Database:
             操作是否成功
         """
         try:
-            self.command(f"ALTER TABLE {self.account_asset_table} DELETE WHERE account_alias = '{account_alias}'")
+            self.command(f"DELETE FROM {self.account_asset_table} WHERE account_alias = '{account_alias}'")
             logger.debug(f"[Database] Deleted account asset: {account_alias}")
             return True
         except Exception as e:
@@ -2152,7 +2385,7 @@ class Database:
                        maint_margin, initial_margin, position_initial_margin, open_order_initial_margin,
                        cross_wallet_balance, cross_un_pnl, available_balance, max_withdraw_amount,
                        update_time, created_at
-                FROM {self.asset_table} FINAL
+                FROM {self.asset_table}
                 WHERE account_alias = '{account_alias}' AND asset = '{asset}'
                 ORDER BY update_time DESC
                 LIMIT 1
@@ -2205,7 +2438,7 @@ class Database:
                            maint_margin, initial_margin, position_initial_margin, open_order_initial_margin,
                            cross_wallet_balance, cross_un_pnl, available_balance, max_withdraw_amount,
                            update_time, created_at
-                    FROM {self.asset_table} FINAL
+                    FROM {self.asset_table}
                     WHERE account_alias = '{account_alias}'
                     ORDER BY asset ASC, update_time DESC
                 """)
@@ -2215,7 +2448,7 @@ class Database:
                            maint_margin, initial_margin, position_initial_margin, open_order_initial_margin,
                            cross_wallet_balance, cross_un_pnl, available_balance, max_withdraw_amount,
                            update_time, created_at
-                    FROM {self.asset_table} FINAL
+                    FROM {self.asset_table}
                     ORDER BY account_alias ASC, asset ASC, update_time DESC
                 """)
             
@@ -2306,7 +2539,7 @@ class Database:
             final_max_withdraw_amount = max_withdraw_amount if max_withdraw_amount is not None else float(existing["maxWithdrawAmount"])
             final_update_time = update_time if update_time is not None else existing["updateTime"]
             
-            # 使用 add_asset 方法（ReplacingMergeTree会自动去重）
+            # 使用 add_asset 方法（MySQL 使用主键 (account_alias, asset) 和 INSERT 实现去重）
             return self.add_asset(
                 account_alias=account_alias,
                 asset=asset,
@@ -2340,10 +2573,10 @@ class Database:
         """
         try:
             if asset:
-                self.command(f"ALTER TABLE {self.asset_table} DELETE WHERE account_alias = '{account_alias}' AND asset = '{asset}'")
+                self.command(f"DELETE FROM {self.asset_table} WHERE account_alias = '{account_alias}' AND asset = '{asset}'")
                 logger.debug(f"[Database] Deleted asset: {account_alias}, {asset}")
             else:
-                self.command(f"ALTER TABLE {self.asset_table} DELETE WHERE account_alias = '{account_alias}'")
+                self.command(f"DELETE FROM {self.asset_table} WHERE account_alias = '{account_alias}'")
                 logger.debug(f"[Database] Deleted all assets for: {account_alias}")
             return True
         except Exception as e:

@@ -15,6 +15,11 @@ export const modelApi = {
   getAll: () => apiGet('/api/models'),
 
   /**
+   * 获取单个模型信息
+   */
+  getById: (modelId) => apiGet(`/api/models/${modelId}`),
+
+  /**
    * 添加模型
    */
   create: (data) => apiPost('/api/models', data),
@@ -63,6 +68,11 @@ export const modelApi = {
    * 设置杠杆
    */
   setLeverage: (modelId, leverage) => apiPost(`/api/models/${modelId}/leverage`, { leverage }),
+
+  /**
+   * 设置最大持仓数量
+   */
+  setMaxPositions: (modelId, maxPositions) => apiPost(`/api/models/${modelId}/max_positions`, { max_positions: maxPositions }),
 
   /**
    * 获取聚合投资组合数据

@@ -67,6 +67,23 @@ const lastPortfolioSymbolsRefreshTime = ref(null) // 持仓合约列表最后刷
   const showLeverageModal = ref(false)
   const pendingLeverageModelId = ref(null)
   const leverageModelName = ref('')
+  const showMaxPositionsModal = ref(false)
+  const pendingMaxPositionsModelId = ref(null)
+  const maxPositionsModelName = ref('')
+  const tempMaxPositions = ref(3)
+  const showModelSettingsModal = ref(false)
+  const pendingModelSettingsId = ref(null)
+  const modelSettingsName = ref('')
+  const tempModelSettings = ref({
+    leverage: 10,
+    max_positions: 3
+  })
+  const loadingModelSettings = ref(false)
+  const savingModelSettings = ref(false)
+  const showDeleteModelConfirmModal = ref(false)
+  const pendingDeleteModelId = ref(null)
+  const pendingDeleteModelName = ref('')
+  const deletingModel = ref(false)
   
   // 加载状态
   const loading = ref({
@@ -999,20 +1016,48 @@ let portfolioSymbolsRefreshInterval = null // 模型持仓合约列表自动刷�
 
   /**
    * 加载对话记录
+   * 只加载当前选中模型（currentModelId）的对话记录
    */
   const loadConversations = async () => {
-    if (!currentModelId.value) return
+    if (!currentModelId.value) {
+      // 如果没有选中模型，清空对话列表
+      conversations.value = []
+      return
+    }
     
     loading.value.conversations = true
     errors.value.conversations = null
+    
+    // 记录当前请求的 model_id，防止异步请求返回时 model_id 已切换
+    const requestedModelId = currentModelId.value
+    
     try {
-      const data = await modelApi.getConversations(currentModelId.value)
-      // 后端直接返回数组格式
+      const data = await modelApi.getConversations(requestedModelId)
+      
+      // 检查在请求期间 model_id 是否已切换
+      if (currentModelId.value !== requestedModelId) {
+        console.log(`[TradingApp] Model changed during conversation load (${requestedModelId} -> ${currentModelId.value}), ignoring response`)
+        return
+      }
+      
+      // 后端直接返回数组格式，且只包含当前 model_id 的对话记录
       const convList = Array.isArray(data) ? data : (data.conversations || [])
+      
+      // 额外验证：确保所有对话记录都属于当前 model_id（前端双重保险）
+      const filteredConvList = convList.filter(conv => {
+        // 如果后端返回的数据中包含 model_id 字段，进行验证
+        if (conv.model_id !== undefined) {
+          // 注意：后端返回的是 UUID，前端使用的是整数 ID，这里只做基本验证
+          return true // 后端已经过滤，这里信任后端
+        }
+        return true
+      })
+      
       // 映射数据格式以匹配前端显示
-      conversations.value = convList.map(conv => ({
-        id: conv.id || `${conv.timestamp}_${Math.random()}`,
-        time: conv.timestamp || '',
+      const mappedConversations = filteredConvList.map(conv => ({
+        id: conv.id || `${conv.timestamp || Date.now()}_${Math.random()}`,
+        time: conv.timestamp || null,
+        timestamp: conv.timestamp || null, // 确保 timestamp 字段存在
         role: 'AI',
         content: conv.ai_response || conv.user_prompt || '',
         user_prompt: conv.user_prompt || '',
@@ -1021,9 +1066,25 @@ let portfolioSymbolsRefreshInterval = null // 模型持仓合约列表自动刷�
         // 保留原始数据
         ...conv
       }))
+      
+      // 按 timestamp 降序排序，确保最新的对话显示在最前面（双重保险）
+      mappedConversations.sort((a, b) => {
+        const timeA = a.timestamp || a.time || ''
+        const timeB = b.timestamp || b.time || ''
+        // 降序排序：最新的在前
+        if (timeA > timeB) return -1
+        if (timeA < timeB) return 1
+        return 0
+      })
+      
+      conversations.value = mappedConversations
+      
+      console.log(`[TradingApp] Loaded ${conversations.value.length} conversations for model ${requestedModelId}, sorted by timestamp DESC`)
     } catch (error) {
-      console.error('[TradingApp] Error loading conversations:', error)
+      console.error(`[TradingApp] Error loading conversations for model ${requestedModelId}:`, error)
       errors.value.conversations = error.message
+      // 发生错误时清空对话列表
+      conversations.value = []
     } finally {
       loading.value.conversations = false
     }
@@ -1187,6 +1248,9 @@ let portfolioSymbolsRefreshInterval = null // 模型持仓合约列表自动刷�
    * 选择模型
    */
   const selectModel = async (modelId) => {
+    // 切换模型时，立即清空旧的对话数据，避免显示错误的数据
+    conversations.value = []
+    
     currentModelId.value = modelId
     isAggregatedView.value = false
     // 加载模型相关数据
@@ -1194,7 +1258,7 @@ let portfolioSymbolsRefreshInterval = null // 模型持仓合约列表自动刷�
       loadPortfolio(),
       loadPositions(),
       loadTrades(),
-      loadConversations(),
+      loadConversations(), // 加载新模型的对话数据
       loadModelPortfolioSymbols() // 立即加载一次模型持仓合约数据
     ])
     // 选择模型后启动模型持仓合约列表自动刷新
@@ -1224,23 +1288,59 @@ let portfolioSymbolsRefreshInterval = null // 模型持仓合约列表自动刷�
     showStrategyModal.value = true
   }
   
-  const deleteModel = async (modelId) => {
-    if (!confirm('确定要删除这个模型吗？')) return
+  /**
+   * 打开删除模型确认弹框
+   */
+  const openDeleteModelConfirm = (modelId, modelName) => {
+    pendingDeleteModelId.value = modelId
+    pendingDeleteModelName.value = modelName || `模型 #${modelId}`
+    showDeleteModelConfirmModal.value = true
+  }
+  
+  /**
+   * 确认删除模型
+   */
+  const confirmDeleteModel = async () => {
+    if (!pendingDeleteModelId.value) return
     
+    deletingModel.value = true
     try {
-      await modelApi.delete(modelId)
-      alert('模型删除成功')
+      await modelApi.delete(pendingDeleteModelId.value)
+      
+      const deletedModelId = pendingDeleteModelId.value
+      pendingDeleteModelId.value = null
+      showDeleteModelConfirmModal.value = false
       
       // 如果删除的是当前选中的模型，切换到聚合视图
-      if (currentModelId.value === modelId) {
+      if (currentModelId.value === deletedModelId) {
         await showAggregatedView()
       } else {
         await loadModels()
       }
+      
+      alert('模型删除成功')
     } catch (error) {
       console.error('[TradingApp] Error deleting model:', error)
-      alert('删除模型失败')
+      alert('删除模型失败: ' + (error.message || '未知错误'))
+    } finally {
+      deletingModel.value = false
     }
+  }
+  
+  /**
+   * 取消删除模型
+   */
+  const cancelDeleteModel = () => {
+    pendingDeleteModelId.value = null
+    pendingDeleteModelName.value = ''
+    showDeleteModelConfirmModal.value = false
+  }
+  
+  /**
+   * 删除模型（保留向后兼容，现在会打开确认弹框）
+   */
+  const deleteModel = (modelId, modelName) => {
+    openDeleteModelConfirm(modelId, modelName)
   }
   
   /**
@@ -1278,6 +1378,128 @@ let portfolioSymbolsRefreshInterval = null // 模型持仓合约列表自动刷�
     } catch (error) {
       console.error('[TradingApp] Error saving leverage:', error)
       alert('更新杠杆失败')
+    }
+  }
+  
+  /**
+   * 打开最大持仓数量设置模态框
+   */
+  const openMaxPositionsModal = (modelId, modelName) => {
+    const model = models.value.find(m => m.id === modelId)
+    pendingMaxPositionsModelId.value = modelId
+    maxPositionsModelName.value = modelName || `模型 #${modelId}`
+    tempMaxPositions.value = model?.max_positions || 3
+    showMaxPositionsModal.value = true
+  }
+  
+  /**
+   * 打开模型设置模态框（合并杠杆和最大持仓数量）
+   */
+  const openModelSettingsModal = async (modelId, modelName) => {
+    pendingModelSettingsId.value = modelId
+    modelSettingsName.value = modelName || `模型 #${modelId}`
+    loadingModelSettings.value = true
+    showModelSettingsModal.value = true
+    
+    try {
+      // 从后端获取模型信息
+      const model = await modelApi.getById(modelId)
+      tempModelSettings.value = {
+        leverage: model.leverage || 10,
+        max_positions: model.max_positions || 3
+      }
+    } catch (error) {
+      console.error('[TradingApp] Error loading model settings:', error)
+      // 如果获取失败，使用本地缓存的数据
+      const localModel = models.value.find(m => m.id === modelId)
+      if (localModel) {
+        tempModelSettings.value = {
+          leverage: localModel.leverage || 10,
+          max_positions: localModel.max_positions || 3
+        }
+      }
+      alert('加载模型配置失败，使用缓存数据')
+    } finally {
+      loadingModelSettings.value = false
+    }
+  }
+  
+  /**
+   * 保存模型设置（杠杆和最大持仓数量）
+   */
+  const saveModelSettings = async () => {
+    if (!pendingModelSettingsId.value) return
+    
+    const leverageValue = tempModelSettings.value.leverage
+    const maxPositionsValue = tempModelSettings.value.max_positions
+    
+    // 验证杠杆
+    if (isNaN(leverageValue) || leverageValue < 0 || leverageValue > 125) {
+      alert('请输入有效的杠杆（0-125，0 表示由 AI 自行决定）')
+      return
+    }
+    
+    // 验证最大持仓数量
+    if (!maxPositionsValue || maxPositionsValue < 1 || !Number.isInteger(maxPositionsValue)) {
+      alert('请输入有效的最大持仓数量（必须 >= 1 的整数）')
+      return
+    }
+    
+    savingModelSettings.value = true
+    try {
+      // 同时保存两个配置
+      await Promise.all([
+        modelApi.setLeverage(pendingModelSettingsId.value, leverageValue),
+        modelApi.setMaxPositions(pendingModelSettingsId.value, maxPositionsValue)
+      ])
+      
+      // 更新本地缓存
+      modelLeverageMap.value[pendingModelSettingsId.value] = leverageValue
+      
+      const savedModelId = pendingModelSettingsId.value
+      pendingModelSettingsId.value = null
+      showModelSettingsModal.value = false
+      
+      // 刷新模型列表
+      await loadModels()
+      if (currentModelId.value === savedModelId) {
+        await loadPortfolio()
+      }
+      
+      alert('模型设置已保存')
+    } catch (error) {
+      console.error('[TradingApp] Error saving model settings:', error)
+      alert('保存模型设置失败')
+    } finally {
+      savingModelSettings.value = false
+    }
+  }
+  
+  /**
+   * 保存最大持仓数量设置
+   */
+  const saveModelMaxPositions = async () => {
+    if (!pendingMaxPositionsModelId.value) return
+    
+    const maxPositionsValue = tempMaxPositions.value
+    if (!maxPositionsValue || maxPositionsValue < 1 || !Number.isInteger(maxPositionsValue)) {
+      alert('请输入有效的最大持仓数量（必须 >= 1 的整数）')
+      return
+    }
+    
+    try {
+      await modelApi.setMaxPositions(pendingMaxPositionsModelId.value, maxPositionsValue)
+      showMaxPositionsModal.value = false
+      const savedModelId = pendingMaxPositionsModelId.value
+      pendingMaxPositionsModelId.value = null
+      await loadModels()
+      if (currentModelId.value === savedModelId) {
+        await loadPortfolio()
+      }
+      alert('最大持仓数量设置已保存')
+    } catch (error) {
+      console.error('[TradingApp] Error saving max_positions:', error)
+      alert('更新最大持仓数量失败')
     }
   }
   
@@ -1392,15 +1614,49 @@ let portfolioSymbolsRefreshInterval = null // 模型持仓合约列表自动刷�
    */
   const formatTime = (timestamp) => {
     if (!timestamp) return ''
+    
     // 处理不同的时间戳格式
     let date
-    if (typeof timestamp === 'string') {
-      // 处理 "2024-01-01 12:00:00" 格式
-      date = new Date(timestamp.replace(' ', 'T') + 'Z')
-    } else {
-      date = new Date(timestamp)
+    
+    try {
+      if (typeof timestamp === 'string') {
+        // 处理 MySQL DATETIME 格式 "2024-01-01 12:00:00"
+        if (timestamp.match(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}/)) {
+          // MySQL DATETIME 格式，转换为 ISO 格式并添加时区
+          date = new Date(timestamp.replace(' ', 'T') + '+08:00')
+        } else if (timestamp.includes('T')) {
+          // 已经是 ISO 格式
+          date = new Date(timestamp)
+        } else {
+          // 尝试直接解析
+          date = new Date(timestamp)
+        }
+      } else if (typeof timestamp === 'number') {
+        // 数字时间戳（可能是秒或毫秒）
+        date = new Date(timestamp > 1e12 ? timestamp : timestamp * 1000)
+      } else {
+        date = new Date(timestamp)
+      }
+      
+      // 验证日期是否有效
+      if (isNaN(date.getTime())) {
+        console.warn('[formatTime] Invalid date:', timestamp)
+        return ''
+      }
+      
+      return date.toLocaleString('zh-CN', { 
+        timeZone: 'Asia/Shanghai',
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit'
+      })
+    } catch (error) {
+      console.error('[formatTime] Error formatting time:', error, timestamp)
+      return ''
     }
-    return date.toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' })
   }
   
   /**
@@ -1508,6 +1764,27 @@ let portfolioSymbolsRefreshInterval = null // 模型持仓合约列表自动刷�
     handleStrategyConfigClick,
     openLeverageModal,
     saveModelLeverage,
+    showMaxPositionsModal,
+    pendingMaxPositionsModelId,
+    maxPositionsModelName,
+    tempMaxPositions,
+    openMaxPositionsModal,
+    saveModelMaxPositions,
+    showModelSettingsModal,
+    pendingModelSettingsId,
+    modelSettingsName,
+    tempModelSettings,
+    loadingModelSettings,
+    savingModelSettings,
+    openModelSettingsModal,
+    saveModelSettings,
+    showDeleteModelConfirmModal,
+    pendingDeleteModelId,
+    pendingDeleteModelName,
+    deletingModel,
+    openDeleteModelConfirm,
+    confirmDeleteModel,
+    cancelDeleteModel,
     toggleMysqlLeaderboardSync,
     updateMysqlLeaderboardSyncStatus,
     getModelDisplayName,

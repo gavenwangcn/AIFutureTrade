@@ -589,6 +589,18 @@ def get_models():
     models = db.get_all_models()
     return jsonify(models)
 
+@app.route('/api/models/<int:model_id>', methods=['GET'])
+def get_model_by_id(model_id):
+    """Get a single model by ID"""
+    try:
+        model = db.get_model(model_id)
+        if not model:
+            return jsonify({'error': 'Model not found'}), 404
+        return jsonify(model)
+    except Exception as e:
+        logger.error(f"Failed to get model {model_id}: {e}")
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/api/models', methods=['POST'])
 def add_model():
     """
@@ -873,6 +885,37 @@ def update_model_prompts(model_id):
         return jsonify({'error': 'Failed to update prompts'}), 500
 
     return jsonify({'success': True, 'message': 'Prompts updated successfully'})
+
+@app.route('/api/models/<int:model_id>/max_positions', methods=['POST'])
+def update_model_max_positions(model_id):
+    """
+    更新模型的最大持仓数量
+    
+    Args:
+        model_id (int): 模型ID
+    
+    Request Body:
+        max_positions (int): 最大持仓数量，必须 >= 1
+    
+    Returns:
+        JSON: 更新结果
+    """
+    try:
+        data = request.get_json()
+        if not data or 'max_positions' not in data:
+            return jsonify({'error': 'max_positions is required'}), 400
+        
+        max_positions = data.get('max_positions')
+        if not isinstance(max_positions, int) or max_positions < 1:
+            return jsonify({'error': 'max_positions must be an integer >= 1'}), 400
+        
+        if not db.set_model_max_positions(model_id, max_positions):
+            return jsonify({'error': 'Failed to update max_positions'}), 500
+        
+        return jsonify({'success': True, 'max_positions': max_positions})
+    except Exception as e:
+        logger.error(f"Failed to update max_positions for model {model_id}: {e}")
+        return jsonify({'error': str(e)}), 500
 
 @app.route('/api/models/<int:model_id>/leverage', methods=['POST'])
 def update_model_leverage(model_id):
