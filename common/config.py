@@ -124,12 +124,12 @@ DATA_AGENT_SELF_UPDATE_INTERVAL = int(os.getenv('DATA_AGENT_SELF_UPDATE_INTERVAL
 
 AUTO_TRADING = True  # 是否启用自动交易（默认启用）
 TRADING_INTERVAL = 5  # 交易执行间隔（秒）
-TRADE_FEE_RATE = 0.001  # 交易费率：0.1%（双向收费）
+TRADE_FEE_RATE = 0.002 # 交易费率：0.1%（双向收费）
 # 注意：MARKET_REFRESH 和 PORTFOLIO_REFRESH 已移除，前端刷新配置在前端代码中管理
 
 # 交易记录显示配置
 TRADES_DISPLAY_COUNT = int(os.getenv('TRADES_DISPLAY_COUNT', '5'))  # 前端显示的交易记录数量，默认5条
-TRADES_QUERY_LIMIT = int(os.getenv('TRADES_QUERY_LIMIT', '10'))  # 后端查询的交易记录数量，默认10条
+TRADES_QUERY_LIMIT = int(os.getenv('TRADES_QUERY_LIMIT', '5'))  # 后端查询的交易记录数量，默认5条
 
 
 # ============ AI交易决策配置 ============
