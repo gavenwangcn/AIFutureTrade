@@ -1046,7 +1046,7 @@ class BinanceFuturesOrderClient:
         return self._flatten_to_dicts(data, response_context)[0] if data else {}
 
     # ============ 交易订单方法 ============
-    # 提供各种类型的交易订单功能：止损、止盈、跟踪止损、平仓等
+    # 提供各种类型的交易订单功能：止损、止盈、跟踪买入、平仓等
     
     def stop_loss_trade(self, symbol: str, side: str, order_type: str = "STOP", quantity: Optional[float] = None, price: Optional[float] = None, stop_price: Optional[float] = None, position_side: Optional[str] = None, **kwargs) -> Dict[str, Any]:
         """
@@ -1274,7 +1274,7 @@ class BinanceFuturesOrderClient:
             order_params.update(kwargs)
             
             # 【统一订单执行】使用辅助方法处理测试/真实交易切换
-            return self._execute_order(order_params, context="跟踪止损交易")
+            return self._execute_order(order_params, context="跟踪买入交易")
             
         except Exception as exc:
             logger.error(f"[Binance Futures] 跟踪止损交易失败: {exc}", exc_info=True)

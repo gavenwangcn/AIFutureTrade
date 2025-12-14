@@ -1949,19 +1949,28 @@ class TradingEngine:
                 callback_rate = float(decision.get('callback_rate', 1.0))
                 callback_rate = max(0.1, min(10.0, callback_rate))  # 限制在0.1-10范围内
                 
-                logger.info(f"TRADE: Calling SDK - trailing_stop_market_trade for {symbol}, side={trailing_stop_side} (protect {position_side}), callback_rate={callback_rate}%")
+                # 【调用前日志】记录调用参数
+                logger.info(f"@API@ [Model {self.model_id}] [trailing_stop_market_trade] === 准备调用接口 ==="
+                          f" | symbol={symbol} | side={trailing_stop_side} | position_side={position_side} | "
+                          f"callback_rate={callback_rate}% | quantity={quantity} | price={price}")
+                
                 sdk_response = binance_client.trailing_stop_market_trade(
                     symbol=symbol,
                     side=trailing_stop_side,  # 根据position_side动态决定保护方向
                     callback_rate=callback_rate,
                     position_side=position_side  # 使用根据signal自动确定的position_side
                 )
-                logger.info(f"TRADE: SDK response received for {symbol}: {sdk_response}")
+                
+                # 【调用后日志】记录接口返回内容
+                logger.info(f"@API@ [Model {self.model_id}] [trailing_stop_market_trade] === 接口调用成功 ==="
+                          f" | symbol={symbol} | response={sdk_response}")
             except Exception as sdk_err:
-                logger.error(f"TRADE: SDK call failed ({trade_signal.upper()}/trailing_stop) model={self.model_id} symbol={symbol}: {sdk_err}")
+                logger.error(f"@API@ [Model {self.model_id}] [trailing_stop_market_trade] === 接口调用失败 ==="
+                           f" | symbol={symbol} | error={sdk_err}", exc_info=True)
                 # SDK调用失败不影响数据库记录，继续执行
         else:
-            logger.warning(f"TRADE: Failed to create Binance order client for model {self.model_id}, skipping SDK call for {symbol}")
+            logger.warning(f"@API@ [Model {self.model_id}] [trailing_stop_market_trade] === 无法创建Binance订单客户端 ==="
+                          f" | symbol={symbol} | 跳过SDK调用")
 
         # 【更新持仓】使用根据signal自动确定的position_side
         try:
@@ -2076,8 +2085,12 @@ class TradingEngine:
         binance_client = self._create_binance_order_client()
         if binance_client:
             try:
-                # 使用STOP_MARKET订单类型，以当前价格作为触发价格（立即触发）
-                logger.info(f"TRADE: Calling SDK - close_position_trade for {symbol}, side={side_for_trade}, order_type=STOP_MARKET, stop_price={current_price}")
+                # 【调用前日志】记录调用参数
+                logger.info(f"@API@ [Model {self.model_id}] [close_position_trade] === 准备调用接口 ==="
+                          f" | symbol={symbol} | side={side_for_trade} | order_type=STOP_MARKET | "
+                          f"stop_price={current_price} | position_side={position_side} | "
+                          f"position_amt={position_amt} | entry_price={entry_price}")
+                
                 sdk_response = binance_client.close_position_trade(
                     symbol=symbol,
                     side=side_for_trade,
@@ -2085,12 +2098,17 @@ class TradingEngine:
                     stop_price=current_price,  # 使用当前价格作为触发价格，实现立即平仓
                     position_side=position_side
                 )
-                logger.info(f"TRADE: SDK response received for {symbol}: {sdk_response}")
+                
+                # 【调用后日志】记录接口返回内容
+                logger.info(f"@API@ [Model {self.model_id}] [close_position_trade] === 接口调用成功 ==="
+                          f" | symbol={symbol} | response={sdk_response}")
             except Exception as sdk_err:
-                logger.error(f"TRADE: SDK call failed (CLOSE) model={self.model_id} symbol={symbol}: {sdk_err}")
+                logger.error(f"@API@ [Model {self.model_id}] [close_position_trade] === 接口调用失败 ==="
+                           f" | symbol={symbol} | error={sdk_err}", exc_info=True)
                 # SDK调用失败不影响数据库记录，继续执行
         else:
-            logger.warning(f"TRADE: Failed to create Binance order client for model {self.model_id}, skipping SDK call for {symbol}")
+            logger.warning(f"@API@ [Model {self.model_id}] [close_position_trade] === 无法创建Binance订单客户端 ==="
+                          f" | symbol={symbol} | 跳过SDK调用")
 
         # Close position in database
         try:
@@ -2179,8 +2197,12 @@ class TradingEngine:
         binance_client = self._create_binance_order_client()
         if binance_client:
             try:
-                # 使用STOP_MARKET订单类型（只需要stop_price，不需要quantity和price）
-                logger.info(f"TRADE: Calling SDK - stop_loss_trade for {symbol}, side={side_for_trade}, stop_price={stop_price}")
+                # 【调用前日志】记录调用参数
+                logger.info(f"@API@ [Model {self.model_id}] [stop_loss_trade] === 准备调用接口 ==="
+                          f" | symbol={symbol} | side={side_for_trade} | order_type=STOP_MARKET | "
+                          f"stop_price={stop_price} | position_side={position_side} | "
+                          f"position_amt={position_amt} | current_price={current_price}")
+                
                 sdk_response = binance_client.stop_loss_trade(
                     symbol=symbol,
                     side=side_for_trade,
@@ -2188,12 +2210,17 @@ class TradingEngine:
                     stop_price=stop_price,
                     position_side=position_side
                 )
-                logger.info(f"TRADE: SDK response received for {symbol}: {sdk_response}")
+                
+                # 【调用后日志】记录接口返回内容
+                logger.info(f"@API@ [Model {self.model_id}] [stop_loss_trade] === 接口调用成功 ==="
+                          f" | symbol={symbol} | response={sdk_response}")
             except Exception as sdk_err:
-                logger.error(f"TRADE: SDK call failed (STOP_LOSS) model={self.model_id} symbol={symbol}: {sdk_err}")
+                logger.error(f"@API@ [Model {self.model_id}] [stop_loss_trade] === 接口调用失败 ==="
+                           f" | symbol={symbol} | error={sdk_err}", exc_info=True)
                 # SDK调用失败不影响数据库记录，继续执行
         else:
-            logger.warning(f"TRADE: Failed to create Binance order client for model {self.model_id}, skipping SDK call for {symbol}")
+            logger.warning(f"@API@ [Model {self.model_id}] [stop_loss_trade] === 无法创建Binance订单客户端 ==="
+                          f" | symbol={symbol} | 跳过SDK调用")
         
         # 计算预估手续费（止损单可能不会立即成交，这里只是预估）
         trade_amount = position_amt * stop_price
@@ -2280,8 +2307,12 @@ class TradingEngine:
         binance_client = self._create_binance_order_client()
         if binance_client:
             try:
-                # 使用TAKE_PROFIT_MARKET订单类型（只需要stop_price，不需要quantity和price）
-                logger.info(f"TRADE: Calling SDK - take_profit_trade for {symbol}, side={side_for_trade}, stop_price={stop_price}")
+                # 【调用前日志】记录调用参数
+                logger.info(f"@API@ [Model {self.model_id}] [take_profit_trade] === 准备调用接口 ==="
+                          f" | symbol={symbol} | side={side_for_trade} | order_type=TAKE_PROFIT_MARKET | "
+                          f"stop_price={stop_price} | position_side={position_side} | "
+                          f"position_amt={position_amt} | current_price={current_price}")
+                
                 sdk_response = binance_client.take_profit_trade(
                     symbol=symbol,
                     side=side_for_trade,
@@ -2289,12 +2320,17 @@ class TradingEngine:
                     stop_price=stop_price,
                     position_side=position_side
                 )
-                logger.info(f"TRADE: SDK response received for {symbol}: {sdk_response}")
+                
+                # 【调用后日志】记录接口返回内容
+                logger.info(f"@API@ [Model {self.model_id}] [take_profit_trade] === 接口调用成功 ==="
+                          f" | symbol={symbol} | response={sdk_response}")
             except Exception as sdk_err:
-                logger.error(f"TRADE: SDK call failed (TAKE_PROFIT) model={self.model_id} symbol={symbol}: {sdk_err}")
+                logger.error(f"@API@ [Model {self.model_id}] [take_profit_trade] === 接口调用失败 ==="
+                           f" | symbol={symbol} | error={sdk_err}", exc_info=True)
                 # SDK调用失败不影响数据库记录，继续执行
         else:
-            logger.warning(f"TRADE: Failed to create Binance order client for model {self.model_id}, skipping SDK call for {symbol}")
+            logger.warning(f"@API@ [Model {self.model_id}] [take_profit_trade] === 无法创建Binance订单客户端 ==="
+                          f" | symbol={symbol} | 跳过SDK调用")
         
         # 计算预估手续费（止盈单可能不会立即成交，这里只是预估）
         trade_amount = position_amt * stop_price
