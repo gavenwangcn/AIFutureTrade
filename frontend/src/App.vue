@@ -148,7 +148,7 @@
                     <div class="price-contract-name">{{ price.name || `${price.symbol}永续合约` }}</div>
                   </div>
                   <div class="price-right">
-                    <div class="price-value-large">${{ formatPrice(price.price) }}</div>
+                    <div class="price-value-large">${{ formatPrice5(price.price) }}</div>
                     <div class="price-change-with-arrow" :class="price.change_24h >= 0 ? 'positive' : 'negative'">
                       <span class="change-arrow">{{ price.change_24h >= 0 ? '▲' : '▼' }}</span>
                       <span class="change-value">{{ (Math.abs(price.change_24h) || 0).toFixed(2) }}%</span>
@@ -303,28 +303,28 @@
               <span class="stat-label">账户总值</span>
               <i class="bi bi-wallet2 text-primary"></i>
             </div>
-            <div class="stat-value">${{ formatCurrency(portfolio.totalValue) }}</div>
+            <div class="stat-value">${{ formatCurrency5(portfolio.totalValue) }}</div>
           </div>
           <div class="stat-card">
             <div class="stat-header">
               <span class="stat-label">可用现金</span>
               <i class="bi bi-cash text-success"></i>
             </div>
-            <div class="stat-value">${{ formatCurrency(portfolio.availableCash) }}</div>
+            <div class="stat-value">${{ formatCurrency5(portfolio.availableCash) }}</div>
           </div>
           <div class="stat-card">
             <div class="stat-header">
               <span class="stat-label">已实现盈亏</span>
               <i class="bi bi-graph-up text-info"></i>
             </div>
-            <div class="stat-value" :class="getPnlClass(portfolio.realizedPnl, true)">{{ formatPnl(portfolio.realizedPnl, true) }}</div>
+            <div class="stat-value" :class="getPnlClass(portfolio.realizedPnl, true)">{{ formatPnl5(portfolio.realizedPnl, true) }}</div>
           </div>
           <div class="stat-card">
             <div class="stat-header">
               <span class="stat-label">未实现盈亏</span>
               <i class="bi bi-graph-down text-warning"></i>
             </div>
-            <div class="stat-value" :class="getPnlClass(portfolio.unrealizedPnl, true)">{{ formatPnl(portfolio.unrealizedPnl, true) }}</div>
+            <div class="stat-value" :class="getPnlClass(portfolio.unrealizedPnl, true)">{{ formatPnl5(portfolio.unrealizedPnl, true) }}</div>
           </div>
         </div>
 
@@ -365,7 +365,7 @@
                       <div class="price-contract-name">{{ item.symbol }}永续合约</div>
                     </div>
                     <div class="price-right">
-                      <div class="price-value-large">${{ formatPrice(item.price) }}</div>
+                      <div class="price-value-large">${{ formatPrice6(item.price) }}</div>
                       <div class="price-change-with-arrow" :class="getSymbolChangeClass(item.symbol)">
                         <span class="change-arrow">{{ getSymbolChangeArrow(item.symbol) }}</span>
                         <span class="change-value">{{ item.changePercent.toFixed(2) }}%</span>
@@ -415,8 +415,8 @@
                       {{ (position.position_side || '').toLowerCase() === 'long' ? '做多' : '做空' }}
                     </span></td>
                     <td>{{ Math.abs(position.position_amt || 0).toFixed(4) }}</td>
-                    <td>${{ formatPrice(position.openPrice || position.avg_price) }}</td>
-                    <td>${{ formatPrice(position.currentPrice || position.current_price) }}</td>
+                    <td>${{ formatPrice6(position.openPrice || position.avg_price) }}</td>
+                    <td>${{ formatPrice6(position.currentPrice || position.current_price) }}</td>
                     <td>{{ position.leverage }}x</td>
                     <td :class="getPnlClass(position.pnl || 0, true)">
                       <strong>{{ formatPnl(position.pnl || 0, true) }}</strong>
@@ -454,7 +454,7 @@
                       </span>
                     </td>
                     <td>{{ (trade.quantity || 0).toFixed(4) }}</td>
-                    <td>${{ formatPrice(trade.price) }}</td>
+                    <td>${{ formatPrice6(trade.price) }}</td>
                     <td :class="getPnlClass(trade.pnl || 0, true)">{{ formatPnl(trade.pnl || 0, true) }}</td>
                     <td>${{ formatCurrency(trade.fee || 0) }}</td>
                   </tr>
@@ -717,9 +717,13 @@ const {
   getProviderName,
   getLeverageText,
   formatPrice,
+  formatPrice5,
+  formatPrice6,
   formatLeaderboardPrice,
   formatCurrency,
+  formatCurrency5,
   formatPnl,
+  formatPnl5,
   getPnlClass,
   formatVolumeChinese,
   formatTime,

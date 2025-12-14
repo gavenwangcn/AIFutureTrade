@@ -1362,6 +1362,7 @@ let portfolioSymbolsRefreshInterval = null // 模型持仓合约列表自动刷�
    * 2. 持仓模块 - loadPositions()
    * 3. 交易记录模块 - loadTrades()
    * 4. AI对话模块 - loadConversations()
+   * 5. 账户价值走势模块 - loadPortfolio() (包含账户价值历史数据，无定时刷新)
    */
   const handleRefresh = async () => {
     isRefreshingAll.value = true
@@ -1376,7 +1377,7 @@ let portfolioSymbolsRefreshInterval = null // 模型持仓合约列表自动刷�
       // 如果选中了模型，刷新该模型的所有模块数据
       if (currentModelId.value) {
         await Promise.all([
-          loadPortfolio(), // 投资组合数据
+          loadPortfolio(), // 投资组合数据 + 账户价值走势模块（包含账户价值历史数据，无定时刷新）
           loadModelPortfolioSymbols(), // 持仓合约实时行情模块
           loadPositions(), // 持仓模块
           loadTrades(), // 交易记录模块
@@ -1690,11 +1691,27 @@ let portfolioSymbolsRefreshInterval = null // 模型持仓合约列表自动刷�
   // ============ 工具方法 ============
   
   /**
-   * 格式化价格
+   * 格式化价格（保留2位小数，用于通用场景）
    */
   const formatPrice = (price) => {
     if (price === null || price === undefined) return '0.00'
     return parseFloat(price).toFixed(2)
+  }
+
+  /**
+   * 格式化价格（保留5位小数，用于市场行情模块）
+   */
+  const formatPrice5 = (price) => {
+    if (price === null || price === undefined) return '0.00000'
+    return parseFloat(price).toFixed(5)
+  }
+
+  /**
+   * 格式化价格（保留6位小数，用于持仓合约实时行情、持仓模块、交易记录等）
+   */
+  const formatPrice6 = (price) => {
+    if (price === null || price === undefined) return '0.000000'
+    return parseFloat(price).toFixed(6)
   }
 
   /**
@@ -1706,15 +1723,23 @@ let portfolioSymbolsRefreshInterval = null // 模型持仓合约列表自动刷�
   }
 
   /**
-   * 格式化货币
+   * 格式化货币（保留2位小数，用于通用场景）
    */
   const formatCurrency = (value) => {
     if (value === null || value === undefined) return '0.00'
     return parseFloat(value).toFixed(2)
   }
+
+  /**
+   * 格式化货币（保留5位小数，用于账户总值、可用现金等）
+   */
+  const formatCurrency5 = (value) => {
+    if (value === null || value === undefined) return '0.00000'
+    return parseFloat(value).toFixed(5)
+  }
   
   /**
-   * 格式化盈亏（带符号）
+   * 格式化盈亏（带符号，保留2位小数）
    */
   const formatPnl = (value, isPnl = false) => {
     if (value === null || value === undefined) return '$0.00'
@@ -1722,6 +1747,17 @@ let portfolioSymbolsRefreshInterval = null // 模型持仓合约列表自动刷�
     if (isNaN(num)) return '$0.00'
     const sign = isPnl && num >= 0 ? '+' : ''
     return `${sign}$${num.toFixed(2)}`
+  }
+
+  /**
+   * 格式化盈亏（带符号，保留5位小数，用于账户已实现盈亏、未实现盈亏等）
+   */
+  const formatPnl5 = (value, isPnl = false) => {
+    if (value === null || value === undefined) return '$0.00000'
+    const num = parseFloat(value)
+    if (isNaN(num)) return '$0.00000'
+    const sign = isPnl && num >= 0 ? '+' : ''
+    return `${sign}$${num.toFixed(5)}`
   }
   
   /**
@@ -1986,9 +2022,13 @@ let portfolioSymbolsRefreshInterval = null // 模型持仓合约列表自动刷�
     getProviderName,
     getLeverageText,
     formatPrice,
+    formatPrice5,
+    formatPrice6,
     formatLeaderboardPrice,
     formatCurrency,
+    formatCurrency5,
     formatPnl,
+    formatPnl5,
     getPnlClass,
     formatVolumeChinese,
     formatTime,
