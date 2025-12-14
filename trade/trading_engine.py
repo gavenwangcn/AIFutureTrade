@@ -22,7 +22,7 @@ import logging
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import common.config as app_config
-from trade.prompt_defaults import DEFAULT_BUY_CONSTRAINTS, DEFAULT_SELL_CONSTRAINTS
+from trade.prompt_defaults import DEFAULT_BUY_CONSTRAINTS, DEFAULT_SELL_CONSTRAINTS, PROMPT_JSON_OUTPUT_SUFFIX
 from common.binance_futures import BinanceFuturesOrderClient
 
 logger = logging.getLogger(__name__)
@@ -990,17 +990,38 @@ class TradingEngine:
         
         Returns:
             Dict[str, str]: {
-                'buy': str,  # 买入决策提示词
-                'sell': str  # 卖出决策提示词
+                'buy': str,  # 买入决策提示词（已拼接JSON输出要求结尾句）
+                'sell': str  # 卖出决策提示词（已拼接JSON输出要求结尾句）
             }
         
         Note:
-            如果模型没有自定义提示词，则使用默认提示词（DEFAULT_BUY_CONSTRAINTS, DEFAULT_SELL_CONSTRAINTS）
+            - 如果模型没有自定义提示词，则使用默认提示词（DEFAULT_BUY_CONSTRAINTS, DEFAULT_SELL_CONSTRAINTS）
+            - 从数据库获取的prompt不包含JSON输出要求结尾句，这里会自动拼接上PROMPT_JSON_OUTPUT_SUFFIX
+            - 结尾句永远作为传入给AI Prompt策略的结尾输入
         """
         prompt_config = self.db.get_model_prompt(self.model_id) or {}
         buy_prompt = prompt_config.get('buy_prompt') or DEFAULT_BUY_CONSTRAINTS
         sell_prompt = prompt_config.get('sell_prompt') or DEFAULT_SELL_CONSTRAINTS
-        return {'buy': buy_prompt, 'sell': sell_prompt}
+        
+        # 拼接JSON输出要求结尾句（确保数据库中的prompt不包含结尾句，这里统一拼接）
+        # 移除可能已存在的结尾句，避免重复
+        def _remove_suffix_if_exists(text: str) -> str:
+            """移除结尾句（如果存在）"""
+            if not text:
+                return text
+            text_stripped = text.rstrip()
+            suffix = PROMPT_JSON_OUTPUT_SUFFIX.strip()
+            if text_stripped.endswith(suffix):
+                return text_stripped[:-len(suffix)].rstrip()
+            return text_stripped
+        
+        buy_prompt_clean = _remove_suffix_if_exists(buy_prompt)
+        sell_prompt_clean = _remove_suffix_if_exists(sell_prompt)
+        
+        buy_prompt_final = buy_prompt_clean + "\n" + PROMPT_JSON_OUTPUT_SUFFIX
+        sell_prompt_final = sell_prompt_clean + "\n" + PROMPT_JSON_OUTPUT_SUFFIX
+        
+        return {'buy': buy_prompt_final, 'sell': sell_prompt_final}
 
     def _record_ai_conversation(self, payload: Dict):
         """

@@ -20,7 +20,7 @@ from common.database_basic import Database
 from common.database_account import AccountDatabase
 from common.binance_futures import BinanceFuturesAccountClient
 from common.version import __version__
-from trade.prompt_defaults import DEFAULT_BUY_CONSTRAINTS, DEFAULT_SELL_CONSTRAINTS
+from trade.prompt_defaults import DEFAULT_BUY_CONSTRAINTS, DEFAULT_SELL_CONSTRAINTS, PROMPT_JSON_OUTPUT_SUFFIX
 
 import common.config as app_config
 import logging
@@ -835,6 +835,32 @@ def get_conversations(model_id):
     conversations = db.get_conversations(model_id, limit=limit)
     return jsonify(conversations)
 
+def _remove_json_output_suffix(prompt_text: str) -> str:
+    """
+    移除prompt中的JSON输出要求结尾句（用于前端编辑和数据库存储）
+    
+    Args:
+        prompt_text: 原始prompt文本
+    
+    Returns:
+        str: 清理后的prompt文本（不包含结尾句）
+    """
+    if not prompt_text:
+        return prompt_text
+    
+    # 移除结尾句（支持中英文句号）
+    text = prompt_text.rstrip()
+    suffix = PROMPT_JSON_OUTPUT_SUFFIX.strip()
+    
+    # 如果文本以结尾句结尾，则移除它
+    if text.endswith(suffix):
+        text = text[:-len(suffix)].rstrip()
+    
+    # 移除可能的句号
+    text = text.rstrip('。').rstrip('.')
+    
+    return text
+
 @app.route('/api/models/<int:model_id>/prompts', methods=['GET'])
 def get_model_prompts(model_id):
     """
@@ -844,15 +870,19 @@ def get_model_prompts(model_id):
         model_id (int): 模型ID
     
     Returns:
-        JSON: 包含买入和卖出提示词配置
+        JSON: 包含买入和卖出提示词配置（不包含JSON输出要求结尾句，用于前端编辑）
     """
     model = db.get_model(model_id)
     if not model:
         return jsonify({'error': 'Model not found'}), 404
 
     prompt_config = db.get_model_prompt(model_id) or {}
-    buy_prompt = prompt_config.get('buy_prompt') or DEFAULT_BUY_CONSTRAINTS
-    sell_prompt = prompt_config.get('sell_prompt') or DEFAULT_SELL_CONSTRAINTS
+    buy_prompt_raw = prompt_config.get('buy_prompt') or DEFAULT_BUY_CONSTRAINTS
+    sell_prompt_raw = prompt_config.get('sell_prompt') or DEFAULT_SELL_CONSTRAINTS
+    
+    # 移除结尾句，确保前端编辑时看不到结尾句（数据库存储的prompt不包含结尾句）
+    buy_prompt = _remove_json_output_suffix(buy_prompt_raw)
+    sell_prompt = _remove_json_output_suffix(sell_prompt_raw)
 
     return jsonify({
         'model_id': model_id,
@@ -877,14 +907,21 @@ def update_model_prompts(model_id):
     
     Returns:
         JSON: 更新操作结果
+    
+    Note:
+        保存到数据库的prompt不包含JSON输出要求结尾句，结尾句会在使用时自动拼接
     """
     model = db.get_model(model_id)
     if not model:
         return jsonify({'error': 'Model not found'}), 404
 
     data = request.json or {}
-    buy_prompt = data.get('buy_prompt')
-    sell_prompt = data.get('sell_prompt')
+    buy_prompt_raw = data.get('buy_prompt')
+    sell_prompt_raw = data.get('sell_prompt')
+    
+    # 移除结尾句，确保数据库存储的prompt不包含结尾句
+    buy_prompt = _remove_json_output_suffix(buy_prompt_raw) if buy_prompt_raw else None
+    sell_prompt = _remove_json_output_suffix(sell_prompt_raw) if sell_prompt_raw else None
 
     success = db.upsert_model_prompt(model_id, buy_prompt, sell_prompt)
     if not success:
