@@ -135,8 +135,8 @@ TRADES_QUERY_LIMIT = int(os.getenv('TRADES_QUERY_LIMIT', '5'))  # 后端查询�
 # ============ AI交易决策配置 ============
 
 PROMPT_MARKET_SYMBOL_LIMIT = 5  # 每次调用AI模型时处理的合约数量
-BUY_DECISION_THREAD_COUNT = 2  # 买入决策API调用的并发线程数
-SELL_DECISION_THREAD_COUNT = 2  # 卖出决策API调用的并发线程数
+BUY_DECISION_THREAD_COUNT = 1  # 买入决策API调用的并发线程数
+SELL_DECISION_THREAD_COUNT = 1  # 卖出决策API调用的并发线程数
 AI_DECISION_SYMBOL_BATCH_SIZE = int(os.getenv('AI_DECISION_SYMBOL_BATCH_SIZE', '1'))  # 每次提交给AI模型的symbol数量，默认为1
 
 

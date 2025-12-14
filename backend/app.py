@@ -333,6 +333,33 @@ def trading_loop():
 
 # 后台服务初始化标志（延迟初始化，确保所有函数都已定义）
 _background_services_initialized = False
+_trading_loop_started = False
+_trading_thread = None
+
+def _start_trading_loop_if_needed():
+    """启动交易循环（如果尚未启动）"""
+    global _trading_loop_started, _trading_thread, auto_trading
+    
+    if _trading_loop_started:
+        return
+    
+    if not auto_trading:
+        logger.info("Auto-trading is disabled, skipping trading loop startup")
+        return
+    
+    # 确保数据库和交易引擎已初始化
+    with app.app_context():
+        if not trading_engines:
+            logger.info("No trading engines found, initializing...")
+            init_trading_engines()
+    
+    if trading_engines:
+        _trading_thread = threading.Thread(target=trading_loop, daemon=True, name="TradingLoop")
+        _trading_thread.start()
+        _trading_loop_started = True
+        logger.info("✅ Auto-trading loop started")
+    else:
+        logger.warning("⚠️ No trading engines available, trading loop not started")
 
 @app.before_request
 def _ensure_background_services():
@@ -341,6 +368,9 @@ def _ensure_background_services():
     if not _background_services_initialized:
         _init_background_services()
         _background_services_initialized = True
+    
+    # 确保交易循环已启动
+    _start_trading_loop_if_needed()
 
 @app.after_request
 def after_request(response):
@@ -866,13 +896,31 @@ def get_trades(model_id):
         prices_data = market_fetcher.get_current_prices(symbols)
         current_prices = {symbol: data.get('price', 0) for symbol, data in prices_data.items() if data.get('price')}
     
-    # 为每条交易记录计算实时盈亏
+    # 为每条交易记录计算实时盈亏并格式化时间字段
     for trade in trades:
         symbol = trade.get('future') or trade.get('symbol', '')
         signal = trade.get('signal', '')
         trade_price = trade.get('price', 0)
         quantity = abs(trade.get('quantity', 0))
         stored_pnl = trade.get('pnl', 0) or 0
+        
+        # 格式化timestamp字段为字符串（北京时间，格式：YYYY-MM-DD HH:MM:SS）
+        timestamp = trade.get('timestamp')
+        if timestamp:
+            if isinstance(timestamp, datetime):
+                # 如果是datetime对象，直接格式化为字符串（数据库存储的是北京时间）
+                trade['timestamp'] = timestamp.strftime('%Y-%m-%d %H:%M:%S')
+            elif isinstance(timestamp, str):
+                # 如果已经是字符串，确保格式正确（移除微秒部分）
+                if '.' in timestamp:
+                    trade['timestamp'] = timestamp.split('.')[0]
+                else:
+                    trade['timestamp'] = timestamp
+            else:
+                # 其他类型，转换为字符串
+                trade['timestamp'] = str(timestamp)
+        else:
+            trade['timestamp'] = ''
         
         # 如果是开仓交易（buy_to_enter或sell_to_enter）
         if signal in ('buy_to_enter', 'sell_to_enter'):
@@ -931,6 +979,26 @@ def get_conversations(model_id):
     # 确保不超过settings中的限制
     limit = min(limit, default_limit)
     conversations = db.get_conversations(model_id, limit=limit)
+    
+    # 格式化每条对话记录的timestamp字段为字符串（北京时间，格式：YYYY-MM-DD HH:MM:SS）
+    for conv in conversations:
+        timestamp = conv.get('timestamp')
+        if timestamp:
+            if isinstance(timestamp, datetime):
+                # 如果是datetime对象，直接格式化为字符串（数据库存储的是北京时间）
+                conv['timestamp'] = timestamp.strftime('%Y-%m-%d %H:%M:%S')
+            elif isinstance(timestamp, str):
+                # 如果已经是字符串，确保格式正确（移除微秒部分）
+                if '.' in timestamp:
+                    conv['timestamp'] = timestamp.split('.')[0]
+                else:
+                    conv['timestamp'] = timestamp
+            else:
+                # 其他类型，转换为字符串
+                conv['timestamp'] = str(timestamp)
+        else:
+            conv['timestamp'] = ''
+    
     return jsonify(conversations)
 
 def _remove_json_output_suffix(prompt_text: str) -> str:
@@ -2058,12 +2126,9 @@ if __name__ == '__main__':
         logger.info("Initializing trading engines...")
         init_trading_engines()
         logger.info("Trading engines initialized")
-
-    # Start background threads
-    if auto_trading:
-        trading_thread = threading.Thread(target=trading_loop, daemon=True)
-        trading_thread.start()
-        logger.info("Auto-trading enabled")
+    
+    # Start trading loop (will also be started on first request if using gunicorn)
+    _start_trading_loop_if_needed()
 
     # Start leaderboard workers
     logger.info("🚀 准备启动涨跌幅榜相关工作线程...")

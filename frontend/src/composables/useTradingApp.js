@@ -1012,7 +1012,8 @@ let portfolioSymbolsRefreshInterval = null // 模型持仓合约列表自动刷�
       // 注意：trades表仍使用future和quantity字段，这里需要兼容
       allTrades.value = tradesList.map(trade => ({
         id: trade.id || `${trade.timestamp}_${trade.future || trade.symbol || ''}`,
-        time: trade.timestamp || '',
+        time: trade.timestamp || '',  // 后端已转换为字符串，直接使用
+        timestamp: trade.timestamp || '',  // 确保timestamp字段存在
         symbol: trade.future || trade.symbol || '',  // trades表使用future字段
         signal: trade.signal || '',  // 使用signal字段
         side: trade.signal || '',  // 兼容旧代码，保留side字段
@@ -1109,8 +1110,8 @@ let portfolioSymbolsRefreshInterval = null // 模型持仓合约列表自动刷�
       // 映射数据格式以匹配前端显示
       const mappedConversations = filteredConvList.map(conv => ({
         id: conv.id || `${conv.timestamp || Date.now()}_${Math.random()}`,
-        time: conv.timestamp || null,
-        timestamp: conv.timestamp || null, // 确保 timestamp 字段存在
+        time: conv.timestamp || '',  // 后端已转换为字符串，直接使用
+        timestamp: conv.timestamp || '', // 确保 timestamp 字段存在，后端已转换为字符串
         role: 'AI',
         content: conv.ai_response || conv.user_prompt || '',
         user_prompt: conv.user_prompt || '',
@@ -1216,14 +1217,61 @@ let portfolioSymbolsRefreshInterval = null // 模型持仓合约列表自动刷�
     localStorage.setItem('frontendLoggingEnabled', loggerEnabled.value.toString())
   }
 
+  // 执行交易状态
+  const isExecuting = ref(false)
+  
+  /**
+   * 显示消息提示
+   */
+  const showMessage = (message, type = 'info') => {
+    // 创建消息元素
+    const messageEl = document.createElement('div')
+    messageEl.className = `message-toast message-${type}`
+    messageEl.textContent = message
+    
+    // 添加到页面
+    document.body.appendChild(messageEl)
+    
+    // 显示动画
+    setTimeout(() => {
+      messageEl.classList.add('show')
+    }, 10)
+    
+    // 3秒后自动移除
+    setTimeout(() => {
+      messageEl.classList.remove('show')
+      setTimeout(() => {
+        document.body.removeChild(messageEl)
+      }, 300)
+    }, 3000)
+  }
+  
   /**
    * 执行交易
    */
   const handleExecute = async () => {
-    if (!currentModelId.value) return
+    if (!currentModelId.value) {
+      showMessage('请先选择模型', 'error')
+      return
+    }
+    
+    if (isExecuting.value) {
+      return // 防止重复点击
+    }
+    
+    isExecuting.value = true
     try {
       const result = await modelApi.execute(currentModelId.value)
       console.log('[TradingApp] Execute success:', result)
+      
+      // 检查返回结果
+      if (result && (result.success !== false)) {
+        showMessage('执行成功', 'success')
+      } else {
+        const errorMsg = result?.error || '执行失败'
+        showMessage(`执行失败: ${errorMsg}`, 'error')
+      }
+      
       // 执行后刷新数据
       await Promise.all([
         loadPortfolio(),
@@ -1233,22 +1281,50 @@ let portfolioSymbolsRefreshInterval = null // 模型持仓合约列表自动刷�
       return result
     } catch (error) {
       console.error('[TradingApp] Error executing:', error)
+      const errorMsg = error.message || '执行失败，请检查网络连接'
+      showMessage(`执行失败: ${errorMsg}`, 'error')
       throw error
+    } finally {
+      isExecuting.value = false
     }
   }
 
+  // 关闭交易状态
+  const isClosingTrading = ref(false)
+  
   /**
-   * 暂停/恢复自动交易
+   * 暂停/恢复自动交易（关闭交易）
    */
   const handlePauseAuto = async () => {
-    if (!currentModelId.value) return
+    if (!currentModelId.value) {
+      showMessage('请先选择模型', 'error')
+      return
+    }
+    
+    if (isClosingTrading.value) {
+      return // 防止重复点击
+    }
+    
+    isClosingTrading.value = true
     try {
-      // 获取当前状态并切换
+      // 获取当前状态并切换（关闭交易就是禁用自动交易）
       const currentModel = models.value.find(m => m.id === currentModelId.value)
       const enabled = !currentModel?.auto_trading_enabled
       
       const result = await modelApi.setAutoTrading(currentModelId.value, enabled)
       console.log('[TradingApp] Auto trading', enabled ? 'enabled' : 'disabled', result)
+      
+      // 检查返回结果
+      if (result && !result.error) {
+        if (enabled) {
+          showMessage('自动交易已开启', 'success')
+        } else {
+          showMessage('关闭交易成功', 'success')
+        }
+      } else {
+        const errorMsg = result?.error || '操作失败'
+        showMessage(`关闭交易失败: ${errorMsg}`, 'error')
+      }
       
       // 刷新模型列表和投资组合
       await Promise.all([
@@ -1258,7 +1334,11 @@ let portfolioSymbolsRefreshInterval = null // 模型持仓合约列表自动刷�
       return result
     } catch (error) {
       console.error('[TradingApp] Error toggling auto trading:', error)
+      const errorMsg = error.message || '关闭交易失败，请检查网络连接'
+      showMessage(`关闭交易失败: ${errorMsg}`, 'error')
       throw error
+    } finally {
+      isClosingTrading.value = false
     }
   }
 
@@ -1858,6 +1938,8 @@ let portfolioSymbolsRefreshInterval = null // 模型持仓合约列表自动刷�
     initApp,
     handleRefresh,
     toggleLogger,
+    isExecuting,
+    isClosingTrading,
     handleExecute,
     handlePauseAuto,
     refreshLeaderboard,

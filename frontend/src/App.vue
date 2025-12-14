@@ -29,13 +29,23 @@
           <button class="btn-icon" :class="{ active: loggerEnabled }" @click="toggleLogger" title="开启/关闭日志输出">
             <i class="bi" :class="loggerEnabled ? 'bi-play-fill' : 'bi-pause-fill'"></i>
           </button>
-          <button class="btn-secondary" @click="handleExecute" title="执行当前模型" :disabled="!currentModelId">
-            <i class="bi bi-play-circle"></i>
-            执行交易
+          <button 
+            class="btn-secondary" 
+            @click="handleExecute" 
+            title="执行当前模型" 
+            :disabled="!currentModelId || isExecuting"
+          >
+            <i class="bi bi-play-circle" :class="{ spin: isExecuting }"></i>
+            {{ isExecuting ? '执行中...' : '执行交易' }}
           </button>
-          <button class="btn-secondary" @click="handlePauseAuto" title="关闭当前模型的自动化交易">
-            <i class="bi bi-pause-circle"></i>
-            关闭交易
+          <button 
+            class="btn-secondary" 
+            @click="handlePauseAuto" 
+            title="关闭当前模型的自动化交易"
+            :disabled="!currentModelId || isClosingTrading"
+          >
+            <i class="bi bi-pause-circle" :class="{ spin: isClosingTrading }"></i>
+            {{ isClosingTrading ? '处理中...' : '关闭交易' }}
           </button>
           <button class="btn-secondary" @click="showSettingsModal = true">
             <i class="bi bi-gear"></i>
@@ -436,7 +446,7 @@
                 </thead>
                 <tbody>
                   <tr v-for="trade in trades" :key="trade.id">
-                    <td>{{ formatTime(trade.time || trade.timestamp) }}</td>
+                    <td>{{ trade.timestamp || trade.time || '' }}</td>
                     <td><strong>{{ trade.future || trade.symbol }}</strong></td>
                     <td>
                       <span :class="['badge', getSignalBadgeClass(trade.signal || trade.side)]">
@@ -459,7 +469,7 @@
           <div v-show="!isAggregatedView && activeTab === 'conversations'" class="tab-content active">
             <div class="conversations-list">
               <div v-for="conv in conversations" :key="conv.id" class="conversation-item">
-                <div class="conversation-time">{{ formatTime(conv.timestamp || conv.time) }}</div>
+                <div class="conversation-time">{{ conv.timestamp || conv.time || '' }}</div>
                 <div v-if="conv.user_prompt && settings.show_system_prompt" class="conversation-bubble">
                   <div class="bubble-label">
                     <i class="bi bi-person"></i>
@@ -684,6 +694,8 @@ const {
   initApp,
   handleRefresh,
   toggleLogger,
+  isExecuting,
+  isClosingTrading,
   handleExecute,
   handlePauseAuto,
   loadGainers,

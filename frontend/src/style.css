@@ -2590,6 +2590,49 @@ body {
     }
 }
 
+/* 消息提示样式 */
+.message-toast {
+  position: fixed;
+  top: 20px;
+  right: 20px;
+  padding: 16px 24px;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 500;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  z-index: 10000;
+  opacity: 0;
+  transform: translateX(100%);
+  transition: all 0.3s ease;
+  min-width: 200px;
+  max-width: 400px;
+}
+
+.message-toast.show {
+  opacity: 1;
+  transform: translateX(0);
+}
+
+.message-toast.message-success {
+  background: var(--success);
+  color: white;
+}
+
+.message-toast.message-error {
+  background: var(--danger);
+  color: white;
+}
+
+.message-toast.message-info {
+  background: var(--info);
+  color: white;
+}
+
+.message-toast.message-warning {
+  background: var(--warning);
+  color: white;
+}
+
 @keyframes statusFlash {
     0% {
         opacity: 1;
