@@ -20,6 +20,7 @@ from typing import Dict, List, Optional
 import json
 import logging
 import threading
+import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import common.config as app_config
 from trade.prompt_defaults import DEFAULT_BUY_CONSTRAINTS, DEFAULT_SELL_CONSTRAINTS, PROMPT_JSON_OUTPUT_SUFFIX
@@ -823,36 +824,124 @@ class TradingEngine:
         """
         market_state = {}
         symbols = self._get_held_symbols()
-        # 使用 get_current_prices 确保实时价格，不使用缓存
-        prices = self.market_fetcher.get_current_prices(symbols)
-
+        
+        # 确保所有symbol都以USDT结尾，防止重复添加
+        formatted_symbols = []
+        symbol_mapping = {}  # formatted -> original
         for symbol in symbols:
-            price_info = prices.get(symbol)
+            symbol_upper = symbol.upper()
+            if not symbol_upper.endswith('USDT'):
+                formatted_symbol = f"{symbol_upper}USDT"
+            else:
+                formatted_symbol = symbol_upper
+            formatted_symbols.append(formatted_symbol)
+            symbol_mapping[formatted_symbol] = symbol
+        
+        # 使用 get_current_prices 确保实时价格，不使用缓存
+        prices = self.market_fetcher.get_current_prices(formatted_symbols)
+
+        for original_symbol in symbols:
+            # 尝试用原始symbol和格式化后的symbol查询价格
+            price_info = prices.get(original_symbol) or prices.get(symbol_mapping.get(original_symbol.upper(), original_symbol.upper()))
             if price_info:
-                market_state[symbol] = price_info.copy()
+                market_state[original_symbol] = price_info.copy()
                 # 根据参数决定是否获取技术指标
                 if include_indicators:
                     # 使用新方法获取所有时间周期的技术指标（无缓存）
-                    merged_data = self._merge_timeframe_data(symbol)
+                    # 确保传入的symbol以USDT结尾
+                    query_symbol = original_symbol.upper()
+                    if not query_symbol.endswith('USDT'):
+                        query_symbol = f"{query_symbol}USDT"
+                    merged_data = self._merge_timeframe_data(query_symbol)
                     # 将合并后的数据格式调整为与原有格式兼容
-                    if symbol in merged_data:
-                        market_state[symbol]['indicators'] = {'timeframes': merged_data[symbol]}
+                    if query_symbol in merged_data:
+                        market_state[original_symbol]['indicators'] = {'timeframes': merged_data[query_symbol]}
                     else:
-                        market_state[symbol]['indicators'] = {'timeframes': {}}
+                        market_state[original_symbol]['indicators'] = {'timeframes': {}}
                 # 如果 include_indicators=False，则不获取指标，只保留价格信息
 
         return market_state
 
+    def _validate_symbol_market_data(
+        self,
+        symbol: str,
+        market_state: Dict,
+        query_symbol: str = None,
+        error_context: str = ""
+    ) -> tuple[bool, str]:
+        """
+        验证symbol的市场数据是否有效
+        
+        Args:
+            symbol: 交易对符号（如 'BTC'）
+            market_state: 市场状态字典
+            query_symbol: 查询用的symbol（用于技术指标）
+            error_context: 错误上下文信息（用于日志）
+            
+        Returns:
+            tuple[bool, str]: (是否有效, 错误信息)
+        """
+        symbol_upper = symbol.upper()
+        market_info = market_state.get(symbol_upper, {})
+        
+        # 检查价格数据
+        price = market_info.get('price') or market_info.get('last_price', 0)
+        if not price or price == 0:
+            error_msg = f"价格数据无效: price={price}, symbol={symbol_upper}"
+            if error_context:
+                error_msg += f", context={error_context}"
+            return False, error_msg
+        
+        # 检查技术指标数据
+        indicators = market_info.get('indicators', {})
+        timeframes = indicators.get('timeframes', {}) if isinstance(indicators, dict) else {}
+        
+        # 检查是否有至少一个时间周期的数据
+        if not timeframes or len(timeframes) == 0:
+            error_msg = f"技术指标数据为空: symbol={symbol_upper}, query_symbol={query_symbol or symbol_upper}"
+            if error_context:
+                error_msg += f", context={error_context}"
+            return False, error_msg
+        
+        # 检查每个时间周期的数据是否有效
+        valid_timeframes = []
+        invalid_timeframes = []
+        for timeframe, data in timeframes.items():
+            if data and isinstance(data, dict):
+                # 检查是否有K线数据
+                klines = data.get('klines', [])
+                if klines and len(klines) > 0:
+                    valid_timeframes.append(timeframe)
+                else:
+                    invalid_timeframes.append(timeframe)
+            else:
+                invalid_timeframes.append(timeframe)
+        
+        if not valid_timeframes:
+            error_msg = f"所有时间周期的技术指标数据无效: symbol={symbol_upper}, query_symbol={query_symbol or symbol_upper}, invalid_timeframes={invalid_timeframes}"
+            if error_context:
+                error_msg += f", context={error_context}"
+            return False, error_msg
+        
+        return True, ""
+    
     def _merge_timeframe_data(self, symbol: str) -> Dict:
         """
         合并7个时间周期的市场数据和技术指标
         
         Args:
-            symbol: 交易对符号（如 'BTC'）
+            symbol: 交易对符号（如 'BTC' 或 'BTCUSDT'）
             
         Returns:
             Dict: 合并后的数据格式 {symbol: {1m: {get_market_data_1m返回格式}, 5m: {get_market_data_5m返回格式}, ...}}
         """
+        # 确保symbol以USDT结尾，防止重复添加
+        symbol_upper = symbol.upper()
+        if not symbol_upper.endswith('USDT'):
+            formatted_symbol = f"{symbol_upper}USDT"
+        else:
+            formatted_symbol = symbol_upper
+        
         # 获取7个时间周期的数据
         timeframe_methods = {
             '1m': self.market_fetcher.get_market_data_1m,
@@ -864,17 +953,26 @@ class TradingEngine:
             '1w': self.market_fetcher.get_market_data_1w
         }
         
-        merged_data = {symbol: {}}
+        merged_data = {formatted_symbol: {}}
+        errors = []
         
         for timeframe, method in timeframe_methods.items():
             try:
-                data = method(symbol)
+                data = method(formatted_symbol)  # 使用格式化后的symbol
                 if data:
                     # 直接使用get_market_data_*方法返回的完整数据格式
-                    merged_data[symbol][timeframe] = data
+                    merged_data[formatted_symbol][timeframe] = data
+                else:
+                    errors.append(f"{timeframe}: 返回数据为空")
             except Exception as e:
-                logger.warning(f"[Model {self.model_id}] 获取 {symbol} {timeframe} 数据失败: {e}")
+                error_msg = str(e)
+                errors.append(f"{timeframe}: {error_msg}")
+                logger.warning(f"[Model {self.model_id}] 获取 {formatted_symbol} {timeframe} 数据失败: {e}")
                 continue
+        
+        # 如果所有时间周期都失败，记录错误
+        if not merged_data[formatted_symbol] and errors:
+            logger.warning(f"[Model {self.model_id}] 获取 {formatted_symbol} 所有时间周期数据失败，错误详情: {errors}")
         
         return merged_data
         
@@ -1066,25 +1164,36 @@ class TradingEngine:
         symbol_source: str = 'leaderboard'
     ):
         """
-        分批处理买入决策（多线程并发，每批立即执行）
+        分批处理买入决策（支持多线程并发，按单元分组统一处理）
         
         流程：
-        1. 从配置获取批次大小和线程数
+        1. 从配置获取批次大小、批次间隔、分组大小、线程数
         2. 将候选列表分批
-        3. 使用线程池并发处理各批次
-        4. 每个批次完成后立即执行该批次的买入操作
-        5. 使用锁保证线程安全
+        3. 如果线程数>1：使用多线程并发执行，每N个批次（N=线程数）作为一个单元
+        4. 如果线程数=1：串行执行，每N个批次（N=AI_BATCH_EXECUTION_GROUP_SIZE）作为一个单元
+        5. 每个批次只获取AI决策，不立即执行
+        6. 每个单元的所有批次完成后，统一处理这些批次的决策（插入数据库和调用SDK）
+        7. 单元之间有间隔（AI_BATCH_EXECUTION_INTERVAL）
+        8. 使用锁保证线程安全
         """
         if not candidates:
             logger.debug(f"[Model {self.model_id}] [分批买入] 无候选合约，跳过处理")
             return
 
-        # 从配置获取批次大小和线程数
+        # 从配置获取批次大小、批次间隔、分组大小、线程数
         batch_size = getattr(app_config, 'AI_DECISION_SYMBOL_BATCH_SIZE', 1)
         batch_size = max(1, int(batch_size))
-        thread_count = getattr(app_config, 'BUY_DECISION_THREAD_COUNT', 2)
+        batch_interval = getattr(app_config, 'AI_BATCH_EXECUTION_INTERVAL', 5)
+        batch_interval = max(0, int(batch_interval))
+        group_size = getattr(app_config, 'AI_BATCH_EXECUTION_GROUP_SIZE', 1)
+        group_size = max(1, int(group_size))
+        thread_count = getattr(app_config, 'BUY_DECISION_THREAD_COUNT', 1)
         thread_count = max(1, int(thread_count))
-        logger.debug(f"[Model {self.model_id}] [分批买入] 配置参数: 批次大小={batch_size}, 线程数={thread_count}")
+        
+        # 确定单元大小：如果线程数>1，使用线程数作为单元大小；否则使用配置的group_size
+        unit_size = thread_count if thread_count > 1 else group_size
+        
+        logger.info(f"[Model {self.model_id}] [分批买入] 配置参数: 批次大小={batch_size}, 批次间隔={batch_interval}秒, 线程数={thread_count}, 单元大小={unit_size}")
 
         # 将候选列表分批
         batches = []
@@ -1099,102 +1208,226 @@ class TradingEngine:
             logger.debug(f"[Model {self.model_id}] [分批买入] 批次列表为空，跳过处理")
             return
 
-        logger.info(f"[Model {self.model_id}] 开始分批处理买入决策: 共 {len(candidates)} 个候选, 分为 {len(batches)} 批, 每批最多 {batch_size} 个, 使用 {thread_count} 个线程")
+        logger.info(f"[Model {self.model_id}] 开始分批处理买入决策: 共 {len(candidates)} 个候选, 分为 {len(batches)} 批, 每批最多 {batch_size} 个, 线程数={thread_count}, 单元大小={unit_size}, 单元间隔={batch_interval}秒")
 
         # 创建线程安全锁（用于保护portfolio和executions的更新）
         portfolio_lock = threading.Lock()
         has_buy_decision = False
         batch_start_time = datetime.now(timezone(timedelta(hours=8)))
-
-        # 使用线程池并发处理各批次
-        logger.info(f"[Model {self.model_id}] [分批买入] 创建线程池，最大工作线程数: {thread_count}")
-        with ThreadPoolExecutor(max_workers=thread_count) as executor:
-            # 提交所有批次任务到线程池
-            futures = []
+        
+        # 如果线程数>1，使用多线程并发执行
+        if thread_count > 1:
+            logger.info(f"[Model {self.model_id}] [分批买入] 使用多线程并发执行，线程数={thread_count}, 单元大小={unit_size}")
+            
+            # 使用线程池并发处理各批次
+            with ThreadPoolExecutor(max_workers=thread_count) as executor:
+                # 按单元处理批次
+                for unit_start in range(0, len(batches), unit_size):
+                    unit_end = min(unit_start + unit_size, len(batches))
+                    unit_batches = batches[unit_start:unit_end]
+                    unit_batch_nums = list(range(unit_start + 1, unit_end + 1))
+                    
+                    logger.info(f"[Model {self.model_id}] [分批买入] 开始处理单元 {unit_start+1}-{unit_end} (共{len(unit_batches)}个批次)...")
+                    
+                    # 准备批次任务
+                    futures = []
+                    batch_data_list = []
+                    
+                    for idx, batch in enumerate(unit_batches):
+                        batch_num = unit_start + idx + 1
+                        batch_symbols = [c.get('symbol', 'N/A') for c in batch]
+                        
+                        # 为当前批次创建只包含对应symbol的market_state子集
+                        batch_market_state = {}
+                        for symbol in batch_symbols:
+                            if symbol != 'N/A':
+                                symbol_upper = symbol.upper()
+                                if symbol_upper in market_state:
+                                    batch_market_state[symbol_upper] = market_state[symbol_upper].copy()
+                                    
+                                    market_info = market_state[symbol_upper]
+                                    symbol_source_for_batch = market_info.get('source', 'leaderboard')
+                                    
+                                    if symbol_source_for_batch == 'future':
+                                        query_symbol = market_info.get('contract_symbol') or f"{symbol}USDT"
+                                    else:
+                                        query_symbol = symbol_upper
+                                    
+                                    try:
+                                        logger.debug(f"[Model {self.model_id}] [分批买入] 批次 {batch_num} 正在获取 {symbol_upper} ({query_symbol}) 的技术指标...")
+                                        merged_data = self._merge_timeframe_data(query_symbol)
+                                        timeframes_data = merged_data.get(query_symbol, {}) if merged_data else {}
+                                        
+                                        if timeframes_data:
+                                            batch_market_state[symbol_upper]['indicators'] = {'timeframes': timeframes_data}
+                                        else:
+                                            batch_market_state[symbol_upper]['indicators'] = {'timeframes': {}}
+                                    except Exception as e:
+                                        logger.error(f"[Model {self.model_id}] [分批买入] 批次 {batch_num} 获取 {symbol_upper} 技术指标失败: {e}")
+                                        batch_market_state[symbol_upper]['indicators'] = {'timeframes': {}}
+                        
+                        # 提交批次任务到线程池
+                        future = executor.submit(
+                            self._process_batch_decision_only,
+                            batch,
+                            portfolio,
+                            account_info,
+                            constraints,
+                            constraints_text,
+                            batch_market_state,
+                            symbol_source,
+                            batch_num,
+                            len(batches)
+                        )
+                        futures.append((future, batch_num, batch_market_state, batch))
+                    
+                    # 等待当前单元的所有批次完成
+                    unit_decisions = []
+                    for future, batch_num, batch_market_state, batch in futures:
+                        try:
+                            payload = future.result()
+                            unit_decisions.append({
+                                'batch_num': batch_num,
+                                'payload': payload,
+                                'batch_market_state': batch_market_state,
+                                'batch_candidates': batch
+                            })
+                            
+                            if not payload.get('skipped') and payload.get('decisions'):
+                                has_buy_decision = True
+                                logger.info(f"[Model {self.model_id}] [分批买入] 批次 {batch_num}/{len(batches)} AI决策完成: 决策数={len(payload.get('decisions') or {})}")
+                            else:
+                                logger.info(f"[Model {self.model_id}] [分批买入] 批次 {batch_num}/{len(batches)} 跳过或无决策")
+                        except Exception as exc:
+                            logger.error(f"[Model {self.model_id}] [分批买入] 批次 {batch_num} 处理异常: {exc}")
+                            import traceback
+                            logger.debug(f"[Model {self.model_id}] [分批买入] 异常堆栈:\n{traceback.format_exc()}")
+                    
+                    logger.info(f"[Model {self.model_id}] [分批买入] 单元 {unit_start+1}-{unit_end} 所有批次完成，开始统一处理决策（插入数据库和调用SDK）...")
+                    
+                    # 统一处理当前单元的决策
+                    self._execute_batch_group_decisions(
+                        unit_decisions,
+                        portfolio,
+                        account_info,
+                        constraints,
+                        current_prices,
+                        portfolio_lock,
+                        executions
+                    )
+                    
+                    logger.info(f"[Model {self.model_id}] [分批买入] 单元 {unit_start+1}-{unit_end} 处理完成")
+                    
+                    # 如果不是最后一个单元，等待间隔时间
+                    if unit_end < len(batches) and batch_interval > 0:
+                        logger.debug(f"[Model {self.model_id}] [分批买入] 单元 {unit_start+1}-{unit_end} 完成，等待 {batch_interval} 秒后处理下一单元...")
+                        time.sleep(batch_interval)
+        else:
+            # 线程数=1，串行执行
+            logger.info(f"[Model {self.model_id}] [分批买入] 使用串行执行，单元大小={unit_size}")
+            
+            # 存储所有批次的决策结果（用于分组处理）
+            all_batch_decisions = []
+            
+            # 串行执行各批次
             for batch_idx, batch in enumerate(batches):
-                # 提取当前批次的symbol列表
+                batch_num = batch_idx + 1
                 batch_symbols = [c.get('symbol', 'N/A') for c in batch]
                 
+                logger.info(f"[Model {self.model_id}] [分批买入] 开始处理批次 {batch_num}/{len(batches)}: symbols={batch_symbols}")
+                
                 # 为当前批次创建只包含对应symbol的market_state子集
-                # 此时才获取该批次symbols的技术指标数据（按需获取，提高性能）
                 batch_market_state = {}
                 for symbol in batch_symbols:
                     if symbol != 'N/A':
                         symbol_upper = symbol.upper()
                         if symbol_upper in market_state:
-                            # 复制基础价格信息
                             batch_market_state[symbol_upper] = market_state[symbol_upper].copy()
                             
-                            # 确定用于获取技术指标的symbol（根据数据源）
-                            # 从market_state中获取source信息，如果没有则使用默认逻辑
                             market_info = market_state[symbol_upper]
                             symbol_source_for_batch = market_info.get('source', 'leaderboard')
                             
                             if symbol_source_for_batch == 'future':
-                                # 使用contract_symbol作为查询参数
                                 query_symbol = market_info.get('contract_symbol') or f"{symbol}USDT"
                             else:
-                                # 使用symbol作为查询参数
                                 query_symbol = symbol_upper
                             
-                            # 实时获取该symbol的技术指标数据
                             try:
-                                logger.debug(f"[Model {self.model_id}] [分批买入] 批次 {batch_idx + 1} 正在获取 {symbol_upper} ({query_symbol}) 的技术指标...")
+                                logger.debug(f"[Model {self.model_id}] [分批买入] 批次 {batch_num} 正在获取 {symbol_upper} ({query_symbol}) 的技术指标...")
                                 merged_data = self._merge_timeframe_data(query_symbol)
                                 timeframes_data = merged_data.get(query_symbol, {}) if merged_data else {}
                                 
                                 if timeframes_data:
                                     batch_market_state[symbol_upper]['indicators'] = {'timeframes': timeframes_data}
-                                    logger.debug(f"[Model {self.model_id}] [分批买入] 批次 {batch_idx + 1} {symbol_upper} 技术指标获取完成")
                                 else:
-                                    logger.warning(f"[Model {self.model_id}] [分批买入] 批次 {batch_idx + 1} {symbol_upper} 技术指标数据为空")
                                     batch_market_state[symbol_upper]['indicators'] = {'timeframes': {}}
                             except Exception as e:
-                                logger.error(f"[Model {self.model_id}] [分批买入] 批次 {batch_idx + 1} 获取 {symbol_upper} 技术指标失败: {e}")
-                                # 即使指标获取失败，也保留价格信息，indicators设为空
+                                logger.error(f"[Model {self.model_id}] [分批买入] 批次 {batch_num} 获取 {symbol_upper} 技术指标失败: {e}")
                                 batch_market_state[symbol_upper]['indicators'] = {'timeframes': {}}
                 
-                logger.info(f"[Model {self.model_id}] [分批买入] 提交批次 {batch_idx + 1}/{len(batches)} 到线程池: "
-                            f"symbols={batch_symbols}, market_state包含{len(batch_market_state)}个symbol（已包含技术指标）")
-                
-                future = executor.submit(
-                    self._process_and_execute_batch,
-                    batch,
-                    portfolio,
-                    account_info,
-                    constraints,
-                    constraints_text,
-                    batch_market_state,  # 只传递当前批次对应的market_state
-                    current_prices,
-                    portfolio_lock,
-                    executions,
-                    batch_idx + 1,
-                    len(batches),
-                    symbol_source
-                )
-                futures.append(future)
-            logger.info(f"[Model {self.model_id}] [分批买入] 所有批次任务已提交，等待执行完成...")
-
-            # 等待所有批次完成并检查是否有决策
-            completed_batches = 0
-            for future_idx, future in enumerate(futures):
+                # 调用AI决策（不立即执行）
                 try:
-                    payload = future.result()
-                    completed_batches += 1
+                    payload = self._process_batch_decision_only(
+                        batch,
+                        portfolio,
+                        account_info,
+                        constraints,
+                        constraints_text,
+                        batch_market_state,
+                        symbol_source,
+                        batch_num,
+                        len(batches)
+                    )
+                    
+                    # 存储决策结果
+                    all_batch_decisions.append({
+                        'batch_num': batch_num,
+                        'payload': payload,
+                        'batch_market_state': batch_market_state,
+                        'batch_candidates': batch
+                    })
+                    
                     if not payload.get('skipped') and payload.get('decisions'):
                         has_buy_decision = True
-                    logger.debug(f"[Model {self.model_id}] [分批买入] 批次 {future_idx + 1}/{len(futures)} 完成: "
-                                f"跳过={payload.get('skipped')}, "
-                                f"决策数={len(payload.get('decisions') or {})}")
+                        logger.info(f"[Model {self.model_id}] [分批买入] 批次 {batch_num}/{len(batches)} AI决策完成: 决策数={len(payload.get('decisions') or {})}")
+                    else:
+                        logger.info(f"[Model {self.model_id}] [分批买入] 批次 {batch_num}/{len(batches)} 跳过或无决策")
+                        
                 except Exception as exc:
-                    logger.error(f"[Model {self.model_id}] [分批买入] 批次 {future_idx + 1} 处理异常: {exc}")
+                    logger.error(f"[Model {self.model_id}] [分批买入] 批次 {batch_num} 处理异常: {exc}")
                     import traceback
                     logger.debug(f"[Model {self.model_id}] [分批买入] 异常堆栈:\n{traceback.format_exc()}")
+                
+                # 每N个批次完成后，统一处理这些批次的决策
+                if batch_num % unit_size == 0 or batch_num == len(batches):
+                    group_start = ((batch_num - 1) // unit_size) * unit_size
+                    group_end = batch_num
+                    group_decisions = all_batch_decisions[group_start:group_end]
+                    
+                    logger.info(f"[Model {self.model_id}] [分批买入] 批次组 {group_start+1}-{group_end} 完成，开始统一处理决策（插入数据库和调用SDK）...")
+                    
+                    # 统一处理这组批次的决策
+                    self._execute_batch_group_decisions(
+                        group_decisions,
+                        portfolio,
+                        account_info,
+                        constraints,
+                        current_prices,
+                        portfolio_lock,
+                        executions
+                    )
+                    
+                    logger.info(f"[Model {self.model_id}] [分批买入] 批次组 {group_start+1}-{group_end} 处理完成")
+                
+                # 如果不是最后一个批次，等待间隔时间
+                if batch_num < len(batches) and batch_interval > 0:
+                    logger.debug(f"[Model {self.model_id}] [分批买入] 批次 {batch_num} 完成，等待 {batch_interval} 秒后处理下一批次...")
+                    time.sleep(batch_interval)
 
         batch_end_time = datetime.now(timezone(timedelta(hours=8)))
         batch_duration = (batch_end_time - batch_start_time).total_seconds()
         logger.info(f"[Model {self.model_id}] [分批买入] 所有批次处理完成: "
-                    f"完成批次数={completed_batches}/{len(batches)}, "
+                    f"完成批次数={len(batches)}, "
                     f"总耗时={batch_duration:.2f}秒, "
                     f"平均每批耗时={batch_duration/len(batches):.2f}秒")
 
@@ -1202,6 +1435,287 @@ class TradingEngine:
         if has_buy_decision and 'buy' not in conversation_prompts:
             conversation_prompts.append('buy')
             logger.debug(f"[Model {self.model_id}] [分批买入] 已添加'buy'到对话提示列表")
+    
+    def _process_batch_decision_only(
+        self,
+        batch_candidates: List[Dict],
+        portfolio: Dict,
+        account_info: Dict,
+        constraints: Dict,
+        constraints_text: str,
+        market_state: Dict,
+        symbol_source: str,
+        batch_num: int,
+        total_batches: int
+    ) -> Dict:
+        """
+        处理单个批次：只获取AI决策，不执行
+        
+        流程：
+        1. 验证所有symbol的市场数据是否有效
+        2. 如果数据无效，记录醒目的warning日志并跳过
+        3. 调用AI模型获取买入决策
+        4. 返回决策结果（不记录对话，不执行）
+        """
+        batch_start_time = datetime.now(timezone(timedelta(hours=8)))
+        batch_symbols = [c.get('symbol', 'N/A') for c in batch_candidates]
+        
+        logger.debug(f"[Model {self.model_id}] [批次 {batch_num}/{total_batches}] "
+                    f"开始获取AI决策，候选合约: {batch_symbols}")
+        
+        try:
+            # ========== 步骤0: 验证所有symbol的市场数据 ==========
+            logger.debug(f"[Model {self.model_id}] [批次 {batch_num}/{total_batches}] "
+                        f"[步骤0] 验证symbol市场数据...")
+            
+            valid_candidates = []
+            invalid_symbols = []
+            
+            for candidate in batch_candidates:
+                symbol = candidate.get('symbol', '')
+                if not symbol or symbol == 'N/A':
+                    continue
+                
+                symbol_upper = symbol.upper()
+                market_info = market_state.get(symbol_upper, {})
+                symbol_source_for_batch = market_info.get('source', 'leaderboard')
+                
+                if symbol_source_for_batch == 'future':
+                    query_symbol = market_info.get('contract_symbol') or f"{symbol}USDT"
+                else:
+                    query_symbol = symbol_upper
+                
+                # 验证数据
+                is_valid, error_msg = self._validate_symbol_market_data(
+                    symbol,
+                    market_state,
+                    query_symbol,
+                    error_context=f"批次{batch_num}/{total_batches}"
+                )
+                
+                if is_valid:
+                    valid_candidates.append(candidate)
+                else:
+                    invalid_symbols.append((symbol, error_msg))
+                    # 打印醒目的warning日志
+                    logger.warning(
+                        f"@@@ [Model {self.model_id}] [批次 {batch_num}/{total_batches}] "
+                        f"@@@ SYMBOL数据验证失败，跳过AI决策询问: {symbol_upper} @@@\n"
+                        f"@@@ 错误信息: {error_msg} @@@\n"
+                        f"@@@ 查询symbol: {query_symbol}, 数据源: {symbol_source_for_batch} @@@"
+                    )
+            
+            # 如果所有symbol都无效，返回跳过结果
+            if not valid_candidates:
+                logger.warning(
+                    f"@@@ [Model {self.model_id}] [批次 {batch_num}/{total_batches}] "
+                    f"@@@ 批次中所有symbol数据验证失败，跳过AI决策询问 @@@\n"
+                    f"@@@ 无效symbol详情: {[f'{s}: {e}' for s, e in invalid_symbols]} @@@"
+                )
+                return {
+                    'skipped': True,
+                    'decisions': {},
+                    'error': f'所有symbol数据验证失败: {len(invalid_symbols)}个symbol无效'
+                }
+            
+            # 如果有部分symbol无效，记录警告但继续处理有效的symbol
+            if invalid_symbols:
+                logger.warning(
+                    f"@@@ [Model {self.model_id}] [批次 {batch_num}/{total_batches}] "
+                    f"@@@ 批次中部分symbol数据验证失败，将只处理有效symbol @@@\n"
+                    f"@@@ 有效symbol: {[c.get('symbol') for c in valid_candidates]} @@@\n"
+                    f"@@@ 无效symbol详情: {[f'{s}: {e}' for s, e in invalid_symbols]} @@@"
+                )
+            
+            # ========== 步骤1: 调用AI模型获取买入决策 ==========
+            logger.debug(f"[Model {self.model_id}] [批次 {batch_num}/{total_batches}] "
+                        f"[步骤1] 调用AI模型获取买入决策... (有效symbol数: {len(valid_candidates)})")
+            
+            # 将market_state转换为market_snapshot格式（用于AI决策），只包含有效的symbol
+            market_snapshot = []
+            for candidate in valid_candidates:
+                symbol = candidate.get('symbol', '').upper()
+                if symbol in market_state:
+                    state_info = market_state[symbol]
+                    snapshot_entry = {
+                        'symbol': symbol,
+                        'contract_symbol': state_info.get('contract_symbol', f"{symbol}USDT"),
+                        'price': state_info.get('price', 0),
+                        'quote_volume': state_info.get('quote_volume', state_info.get('daily_volume', 0)),
+                        'change_percent': state_info.get('change_24h', 0),
+                        'timeframes': state_info.get('indicators', {}).get('timeframes', {})
+                    }
+                    market_snapshot.append(snapshot_entry)
+            
+            ai_call_start = datetime.now(timezone(timedelta(hours=8)))
+            buy_payload = self.ai_trader.make_buy_decision(
+                valid_candidates,  # 只传递有效的candidates
+                portfolio,
+                account_info,
+                constraints,
+                constraints_text=constraints_text,
+                market_snapshot=market_snapshot if market_snapshot else None,
+                symbol_source=symbol_source,
+                model_id=self.model_id
+            )
+            ai_call_duration = (datetime.now(timezone(timedelta(hours=8))) - ai_call_start).total_seconds()
+            
+            is_skipped = buy_payload.get('skipped', False)
+            has_prompt = bool(buy_payload.get('prompt'))
+            decisions = buy_payload.get('decisions') or {}
+            logger.debug(f"[Model {self.model_id}] [批次 {batch_num}/{total_batches}] "
+                        f"[步骤1] AI调用完成: 耗时={ai_call_duration:.2f}秒, "
+                        f"跳过={is_skipped}, 有提示词={has_prompt}, 决策数={len(decisions)}")
+            
+            batch_end_time = datetime.now(timezone(timedelta(hours=8)))
+            batch_duration = (batch_end_time - batch_start_time).total_seconds()
+            logger.debug(f"[Model {self.model_id}] [批次 {batch_num}/{total_batches}] "
+                        f"AI决策获取完成: 总耗时={batch_duration:.2f}秒")
+            
+            return buy_payload
+            
+        except Exception as e:
+            logger.error(f"[Model {self.model_id}] [批次 {batch_num}/{total_batches}] 获取AI决策失败: {e}")
+            import traceback
+            logger.debug(f"[Model {self.model_id}] [批次 {batch_num}/{total_batches}] 异常堆栈:\n{traceback.format_exc()}")
+            return {'skipped': True, 'decisions': {}, 'error': str(e)}
+    
+    def _execute_batch_group_decisions(
+        self,
+        group_decisions: List[Dict],
+        portfolio: Dict,
+        account_info: Dict,
+        constraints: Dict,
+        current_prices: Dict[str, float],
+        portfolio_lock: threading.Lock,
+        executions: List
+    ):
+        """
+        统一处理一组批次的决策（插入数据库和调用SDK）
+        
+        流程：
+        1. 合并所有批次的决策
+        2. 记录所有批次的AI对话到数据库
+        3. 获取锁并执行所有决策（线程安全）
+        4. 更新portfolio和constraints
+        """
+        if not group_decisions:
+            logger.debug(f"[Model {self.model_id}] [批次组处理] 无决策数据，跳过")
+            return
+        
+        logger.info(f"[Model {self.model_id}] [批次组处理] 开始处理 {len(group_decisions)} 个批次的决策...")
+        
+        # 合并所有批次的决策和对话
+        all_decisions = {}
+        all_payloads = []
+        all_market_states = {}
+        
+        for batch_data in group_decisions:
+            payload = batch_data.get('payload', {})
+            decisions = payload.get('decisions') or {}
+            batch_market_state = batch_data.get('batch_market_state', {})
+            batch_num = batch_data.get('batch_num', 0)
+            
+            # 合并决策
+            for symbol, decision in decisions.items():
+                if symbol not in all_decisions:
+                    all_decisions[symbol] = decision
+                    logger.debug(f"[Model {self.model_id}] [批次组处理] 批次 {batch_num} 决策: {symbol} -> {decision.get('signal')}")
+            
+            # 合并market_state
+            all_market_states.update(batch_market_state)
+            
+            # 保存payload用于记录对话
+            if not payload.get('skipped') and payload.get('prompt'):
+                all_payloads.append(payload)
+        
+        if not all_decisions:
+            logger.info(f"[Model {self.model_id}] [批次组处理] 无有效决策，跳过执行")
+            return
+        
+        logger.info(f"[Model {self.model_id}] [批次组处理] 合并完成: 决策数={len(all_decisions)}, 对话数={len(all_payloads)}")
+        
+        # ========== 步骤1: 记录所有批次的AI对话到数据库 ==========
+        logger.debug(f"[Model {self.model_id}] [批次组处理] [步骤1] 记录AI对话到数据库...")
+        for payload in all_payloads:
+            try:
+                self._record_ai_conversation(payload)
+            except Exception as e:
+                logger.error(f"[Model {self.model_id}] [批次组处理] 记录AI对话失败: {e}")
+        logger.debug(f"[Model {self.model_id}] [批次组处理] [步骤1] AI对话已记录")
+        
+        # ========== 步骤2: 获取锁并执行所有决策（线程安全） ==========
+        logger.debug(f"[Model {self.model_id}] [批次组处理] [步骤2] 等待获取锁以执行决策...")
+        lock_acquire_start = datetime.now(timezone(timedelta(hours=8)))
+        
+        with portfolio_lock:
+            lock_acquire_duration = (datetime.now(timezone(timedelta(hours=8))) - lock_acquire_start).total_seconds()
+            logger.debug(f"[Model {self.model_id}] [批次组处理] [步骤2.1] 锁已获取，等待时间={lock_acquire_duration:.3f}秒")
+            
+            # 获取最新持仓状态
+            logger.debug(f"[Model {self.model_id}] [批次组处理] [步骤2.2] 获取最新持仓状态...")
+            latest_portfolio = self.db.get_portfolio(self.model_id, current_prices)
+            logger.debug(f"[Model {self.model_id}] [批次组处理] [步骤2.2] 最新持仓状态: "
+                        f"总价值=${latest_portfolio.get('total_value', 0):.2f}, "
+                        f"现金=${latest_portfolio.get('cash', 0):.2f}, "
+                        f"持仓数={len(latest_portfolio.get('positions', []) or [])}")
+            
+            # 执行所有决策
+            logger.debug(f"[Model {self.model_id}] [批次组处理] [步骤2.3] 开始执行决策...")
+            execution_start = datetime.now(timezone(timedelta(hours=8)))
+            batch_results = self._execute_decisions(
+                all_decisions,
+                all_market_states,
+                latest_portfolio
+            )
+            execution_duration = (datetime.now(timezone(timedelta(hours=8))) - execution_start).total_seconds()
+            logger.debug(f"[Model {self.model_id}] [批次组处理] [步骤2.3] 决策执行完成: 耗时={execution_duration:.2f}秒, 结果数={len(batch_results)}")
+            
+            # 记录每个执行结果
+            for idx, result in enumerate(batch_results):
+                logger.debug(f"[Model {self.model_id}] [批次组处理] [步骤2.3.{idx+1}] 执行结果: "
+                            f"合约={result.get('symbol', 'N/A')}, "
+                            f"信号={result.get('signal')}, "
+                            f"数量={result.get('position_amt', 0)}, "
+                            f"价格=${result.get('price', 0):.4f}, "
+                            f"错误={result.get('error', '无')}")
+            
+            # 添加到执行结果列表（线程安全）
+            logger.debug(f"[Model {self.model_id}] [批次组处理] [步骤2.4] 添加执行结果到列表（当前总数: {len(executions)}）...")
+            executions.extend(batch_results)
+            logger.debug(f"[Model {self.model_id}] [批次组处理] [步骤2.4] 执行结果已添加（新总数: {len(executions)}）")
+            
+            logger.info(f"[Model {self.model_id}] [批次组处理] 执行完成, 决策数: {len(all_decisions)}, 执行结果: {len(batch_results)}")
+            
+            # ========== 步骤3: 更新portfolio和constraints ==========
+            logger.debug(f"[Model {self.model_id}] [批次组处理] [步骤3] 更新portfolio和constraints...")
+            
+            # 更新portfolio引用
+            old_cash = portfolio.get('cash', 0)
+            old_positions = len(portfolio.get('positions', []) or [])
+            portfolio.update(latest_portfolio)
+            new_cash = portfolio.get('cash', 0)
+            new_positions = len(portfolio.get('positions', []) or [])
+            logger.debug(f"[Model {self.model_id}] [批次组处理] [步骤3.1] portfolio已更新: "
+                        f"现金 ${old_cash:.2f} -> ${new_cash:.2f}, "
+                        f"持仓数 {old_positions} -> {new_positions}")
+            
+            # 更新account_info
+            updated_account_info = self._build_account_info(latest_portfolio)
+            account_info.update(updated_account_info)
+            logger.debug(f"[Model {self.model_id}] [批次组处理] [步骤3.2] account_info已更新: "
+                        f"总收益率={updated_account_info.get('total_return', 0):.2f}%")
+            
+            # 更新constraints
+            old_occupied = constraints.get('occupied', 0)
+            old_available_cash = constraints.get('available_cash', 0)
+            constraints['occupied'] = len(latest_portfolio.get('positions', []) or [])
+            constraints['available_cash'] = latest_portfolio.get('cash', 0)
+            logger.debug(f"[Model {self.model_id}] [批次组处理] [步骤3.3] constraints已更新: "
+                        f"已占用 {old_occupied} -> {constraints['occupied']}, "
+                        f"可用现金 ${old_available_cash:.2f} -> ${constraints['available_cash']:.2f}")
+            
+            logger.debug(f"[Model {self.model_id}] [批次组处理] [步骤3] 状态更新完成，释放锁")
 
     def _process_and_execute_sell_batch(
         self,
@@ -1236,15 +1750,71 @@ class TradingEngine:
                     f"开始处理批次，持仓合约: {batch_symbols}")
         
         try:
+            # ========== 步骤0: 验证所有symbol的市场数据 ==========
+            logger.debug(f"[Model {self.model_id}] [线程-{thread_id}] [卖出批次 {batch_num}/{total_batches}] "
+                        f"[步骤0] 验证symbol市场数据...")
+            
+            valid_positions = []
+            invalid_symbols = []
+            
+            for position in batch_positions:
+                symbol = position.get('symbol', '')
+                if not symbol or symbol == 'N/A':
+                    continue
+                
+                symbol_upper = symbol.upper()
+                
+                # 验证数据
+                is_valid, error_msg = self._validate_symbol_market_data(
+                    symbol,
+                    market_state,
+                    query_symbol=symbol_upper,
+                    error_context=f"卖出批次{batch_num}/{total_batches}"
+                )
+                
+                if is_valid:
+                    valid_positions.append(position)
+                else:
+                    invalid_symbols.append((symbol, error_msg))
+                    # 打印醒目的warning日志
+                    logger.warning(
+                        f"@@@ [Model {self.model_id}] [线程-{thread_id}] [卖出批次 {batch_num}/{total_batches}] "
+                        f"@@@ SYMBOL数据验证失败，跳过AI决策询问: {symbol_upper} @@@\n"
+                        f"@@@ 错误信息: {error_msg} @@@\n"
+                        f"@@@ 查询symbol: {symbol_upper} @@@"
+                    )
+            
+            # 如果所有symbol都无效，返回跳过结果
+            if not valid_positions:
+                logger.warning(
+                    f"@@@ [Model {self.model_id}] [线程-{thread_id}] [卖出批次 {batch_num}/{total_batches}] "
+                    f"@@@ 批次中所有symbol数据验证失败，跳过AI决策询问 @@@\n"
+                    f"@@@ 无效symbol详情: {[f'{s}: {e}' for s, e in invalid_symbols]} @@@"
+                )
+                return {
+                    'skipped': True,
+                    'decisions': {},
+                    'error': f'所有symbol数据验证失败: {len(invalid_symbols)}个symbol无效'
+                }
+            
+            # 如果有部分symbol无效，记录警告但继续处理有效的symbol
+            if invalid_symbols:
+                logger.warning(
+                    f"@@@ [Model {self.model_id}] [线程-{thread_id}] [卖出批次 {batch_num}/{total_batches}] "
+                    f"@@@ 批次中部分symbol数据验证失败，将只处理有效symbol @@@\n"
+                    f"@@@ 有效symbol: {[p.get('symbol') for p in valid_positions]} @@@\n"
+                    f"@@@ 无效symbol详情: {[f'{s}: {e}' for s, e in invalid_symbols]} @@@"
+                )
+            
             # ========== 步骤1: 为当前批次创建临时portfolio ==========
             logger.debug(f"[Model {self.model_id}] [线程-{thread_id}] [卖出批次 {batch_num}/{total_batches}] "
-                        f"[步骤1] 创建临时portfolio，仅包含当前批次持仓...")
+                        f"[步骤1] 创建临时portfolio，仅包含当前批次持仓... (有效symbol数: {len(valid_positions)})")
             batch_portfolio = portfolio.copy()
-            batch_portfolio['positions'] = batch_positions
+            batch_portfolio['positions'] = valid_positions  # 只使用有效的positions
             
             # ========== 步骤2: 调用AI模型获取卖出决策 ==========
             logger.debug(f"[Model {self.model_id}] [线程-{thread_id}] [卖出批次 {batch_num}/{total_batches}] "
-                        f"[步骤2] 调用AI模型进行卖出决策...")
+                        f"[步骤2] 调用AI模型进行卖出决策... (有效symbol数: {len(valid_positions)})")
             
             ai_call_start = datetime.now(timezone(timedelta(hours=8)))
             sell_payload = self.ai_trader.make_sell_decision(
@@ -1700,11 +2270,19 @@ class TradingEngine:
             if symbol_source == 'future':
                 # 使用contract_symbol作为查询参数
                 contract_symbol = candidate.get('contract_symbol') or f"{symbol}USDT"
+                # 确保contract_symbol以USDT结尾，防止重复添加
+                if not contract_symbol.upper().endswith('USDT'):
+                    contract_symbol = f"{contract_symbol.upper()}USDT"
+                else:
+                    contract_symbol = contract_symbol.upper()
                 symbol_to_contract[symbol] = contract_symbol
                 symbol_list.append(contract_symbol)
             else:
-                # 使用symbol作为查询参数
-                symbol_list.append(symbol.upper())
+                # 使用symbol作为查询参数，确保以USDT结尾
+                symbol_upper = symbol.upper()
+                if not symbol_upper.endswith('USDT'):
+                    symbol_upper = f"{symbol_upper}USDT"
+                symbol_list.append(symbol_upper)
         
         if not symbol_list:
             return market_state
@@ -1726,11 +2304,20 @@ class TradingEngine:
             # 确定用于获取技术指标的symbol和价格查询的key
             if symbol_source == 'future':
                 contract_symbol = symbol_to_contract.get(symbol, candidate.get('contract_symbol') or f"{symbol}USDT")
+                # 确保contract_symbol以USDT结尾，防止重复添加
+                if not contract_symbol.upper().endswith('USDT'):
+                    contract_symbol = f"{contract_symbol.upper()}USDT"
+                else:
+                    contract_symbol = contract_symbol.upper()
                 query_symbol = contract_symbol  # 用于获取技术指标
                 price_key = contract_symbol  # 用于查询价格
             else:
-                query_symbol = symbol_upper  # 用于获取技术指标
-                price_key = symbol_upper  # 用于查询价格
+                # 确保query_symbol以USDT结尾，防止重复添加
+                if not symbol_upper.endswith('USDT'):
+                    query_symbol = f"{symbol_upper}USDT"
+                else:
+                    query_symbol = symbol_upper
+                price_key = query_symbol  # 用于查询价格（使用格式化后的symbol）
             
             # 获取价格信息
             price_info = prices.get(price_key, {})

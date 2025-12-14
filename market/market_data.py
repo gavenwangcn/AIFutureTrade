@@ -33,6 +33,29 @@ from common.database_mysql import MySQLDatabase
 logger = logging.getLogger(__name__)
 
 
+def _ensure_usdt_suffix(symbol: str, quote_asset: str = 'USDT') -> str:
+    """
+    确保symbol以USDT结尾，如果没有则添加，防止重复添加
+    
+    Args:
+        symbol: 交易对符号（如 'BTC' 或 'BTCUSDT'）
+        quote_asset: 计价资产，默认为 'USDT'
+        
+    Returns:
+        格式化后的symbol，确保以USDT结尾（如 'BTCUSDT'）
+    """
+    if not symbol:
+        return symbol
+    
+    symbol_upper = symbol.upper()
+    quote_asset_upper = quote_asset.upper()
+    
+    # 检查是否已经以quote_asset结尾，避免重复添加
+    if not symbol_upper.endswith(quote_asset_upper):
+        return f"{symbol_upper}{quote_asset_upper}"
+    return symbol_upper
+
+
 class MarketDataFetcher:
     """
     市场数据获取器
@@ -266,21 +289,22 @@ class MarketDataFetcher:
         以保证最高实时性。每次调用都直接请求交易所API获取最新数据。
         
         Args:
-            symbols: 可选的交易对符号列表，如果为None则返回所有已配置的交易对
+            symbols: 交易对符号列表，必须提供，如果为None或空列表则返回空字典
             
         Returns:
             价格数据字典，key为交易对符号，value为价格信息
         """
-        # 如果提供了symbols参数，直接构造futures列表，不需要查询数据库
-        if symbols:
-            # 直接为传入的symbols构造简单的futures列表，只包含symbol字段
-            futures = [{'symbol': symbol} for symbol in symbols]
-        else:
-            # 如果没有提供symbols参数，才从数据库获取所有配置的合约
-            futures = self._get_configured_futures()
-            if not futures:
-                return {}
+        # 如果没有提供symbols参数或为空，直接返回空字典
+        if not symbols:
+            return {}
 
+        # 确保所有symbol都以USDT结尾，防止重复添加
+        quote_asset = getattr(self, '_futures_quote_asset', 'USDT')
+        formatted_symbols = [_ensure_usdt_suffix(symbol, quote_asset) for symbol in symbols]
+        
+        # 直接为传入的symbols构造简单的futures列表，只包含symbol字段
+        futures = [{'symbol': symbol} for symbol in formatted_symbols]
+        
         if not futures:
             return {}
 
@@ -288,7 +312,19 @@ class MarketDataFetcher:
         prices = self._fetch_from_binance_futures(futures)
 
         # 直接从SDK获取价格，如果获取不到则返回空（不包含在prices字典中）
-        return prices
+        # 注意：_fetch_from_binance_futures返回的key是futures列表中的symbol字段（即formatted_symbols）
+        # 需要建立映射关系，将formatted_symbol映射回original_symbol
+        result_prices = {}
+        symbol_mapping = dict(zip(formatted_symbols, symbols))  # formatted -> original
+        for formatted_symbol, original_symbol in symbol_mapping.items():
+            if formatted_symbol in prices:
+                result_prices[original_symbol] = prices[formatted_symbol]
+            # 也尝试用original_symbol作为key（兼容某些情况下直接返回original_symbol的情况）
+            elif original_symbol in prices:
+                result_prices[original_symbol] = prices[original_symbol]
+        
+        # 如果映射结果为空但prices不为空，说明可能key格式不匹配，直接返回prices
+        return result_prices if result_prices else prices
     
     def get_current_prices_by_contract(self, contract_symbols: List[str]) -> Dict[str, Dict]:
         """
@@ -305,30 +341,37 @@ class MarketDataFetcher:
         """
         if not contract_symbols:
             return {}
+        
+        # 确保所有contract_symbol都以USDT结尾，防止重复添加
+        quote_asset = getattr(self, '_futures_quote_asset', 'USDT')
+        formatted_contract_symbols = [_ensure_usdt_suffix(symbol, quote_asset) for symbol in contract_symbols]
             
         # 实时获取价格数据（不使用缓存）
         prices = {}
         if self._futures_client:
-            # 直接使用合约符号获取24小时行情数据
-            tickers = self._futures_client.get_24h_ticker(contract_symbols)
-            spot_prices = self._futures_client.get_symbol_prices(contract_symbols)
+            # 直接使用合约符号获取24小时行情数据（使用格式化后的symbol）
+            tickers = self._futures_client.get_24h_ticker(formatted_contract_symbols)
+            spot_prices = self._futures_client.get_symbol_prices(formatted_contract_symbols)
             
-            for contract_symbol in contract_symbols:
-                payload = tickers.get(contract_symbol)
+            # 建立映射关系：formatted -> original
+            symbol_mapping = dict(zip(formatted_contract_symbols, contract_symbols))
+            
+            for formatted_symbol, original_symbol in symbol_mapping.items():
+                payload = tickers.get(formatted_symbol)
                 if not payload:
                     continue
                     
                 try:
                     last_price = round(float(
                         payload.get('lastPrice')
-                        or spot_prices.get(contract_symbol, {}).get('price', 0)
+                        or spot_prices.get(formatted_symbol, {}).get('price', 0)
                     ), 6)  # 价格保留6位小数
                     
                     change_percent = float(payload.get('priceChangePercent', 0))
                     quote_volume = float(payload.get('quoteVolume', payload.get('volume', 0)))
                     
-                    # 构建价格数据
-                    prices[contract_symbol] = {
+                    # 构建价格数据，使用原始symbol作为key
+                    prices[original_symbol] = {
                         'price': last_price,
                         'last_price': last_price,  # 同时提供last_price字段以便兼容
                         'change_percent': change_percent,
@@ -358,9 +401,18 @@ class MarketDataFetcher:
             return prices
 
         symbol_map = {}
+        quote_asset = getattr(self, '_futures_quote_asset', 'USDT')
         for future in futures:
             base_symbol = future['symbol']
-            contract_symbol = future.get('contract_symbol') or self._futures_client.format_symbol(base_symbol)
+            # 确保base_symbol以USDT结尾
+            formatted_base_symbol = _ensure_usdt_suffix(base_symbol, quote_asset)
+            contract_symbol = future.get('contract_symbol')
+            if contract_symbol:
+                # 如果提供了contract_symbol，也确保它以USDT结尾
+                contract_symbol = _ensure_usdt_suffix(contract_symbol, quote_asset)
+            else:
+                # 如果没有提供contract_symbol，使用format_symbol方法（该方法已实现防重复逻辑）
+                contract_symbol = self._futures_client.format_symbol(formatted_base_symbol)
             symbol_map[base_symbol] = contract_symbol.upper()
         tickers = self._futures_client.get_24h_ticker(list(symbol_map.values()))
         spot_prices = self._futures_client.get_symbol_prices(list(symbol_map.values()))
@@ -742,7 +794,7 @@ class MarketDataFetcher:
         通用方法：获取指定交易对和时间周期的市场数据
         
         Args:
-            symbol: 交易对符号（如 'BTC'）
+            symbol: 交易对符号（如 'BTC' 或 'BTCUSDT'）
             interval: 时间周期（如 '1m', '5m', '1h', '4h', '1d', '1w'）
             limit: 获取的K线数量
             return_count: 返回的K线数量（最新的return_count根K线）
@@ -754,8 +806,12 @@ class MarketDataFetcher:
             logger.warning(f'[MarketData] Futures client unavailable for {symbol}')
             return {}
 
-        # 格式化交易对符号（添加计价资产后缀）
-        symbol_key = self._futures_client.format_symbol(symbol)
+        # 确保symbol以USDT结尾，防止重复添加
+        quote_asset = getattr(self, '_futures_quote_asset', 'USDT')
+        formatted_symbol = _ensure_usdt_suffix(symbol, quote_asset)
+        
+        # 格式化交易对符号（format_symbol方法也有防重复逻辑，双重保险）
+        symbol_key = self._futures_client.format_symbol(formatted_symbol)
         
         try:
             # 获取K线数据（抓取limit根，用于计算指标）
