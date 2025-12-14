@@ -720,7 +720,8 @@ class Database:
     
     def add_model(self, name: str, provider_id: int, model_name: str,
                  initial_capital: float = 10000, leverage: int = 10, api_key: str = '', api_secret: str = '', 
-                 account_alias: str = '', is_virtual: bool = True, symbol_source: str = 'leaderboard') -> int:
+                 account_alias: str = '', is_virtual: bool = True, symbol_source: str = 'leaderboard', 
+                 max_positions: int = 3) -> int:
         """
         Add new trading model
         
@@ -743,6 +744,7 @@ class Database:
             account_alias: 账户别名（可选，如果提供则从account_asset表获取api_key和api_secret）
             is_virtual: 是否虚拟账户，默认False
             symbol_source: 交易对来源，'future'（合约配置信息）或'leaderboard'（涨跌榜），默认'leaderboard'
+            max_positions: 最大持仓数量，默认3
         """
         model_id = self._generate_id()
         provider_mapping = self._get_provider_id_mapping()
@@ -784,9 +786,14 @@ class Database:
             raise ValueError("api_secret is required and cannot be empty")
         
         try:
+            # 验证max_positions值
+            if not isinstance(max_positions, int) or max_positions < 1:
+                logger.warning(f"[Database] Invalid max_positions value: {max_positions}, using default 3")
+                max_positions = 3
+            
             self.insert_rows(
                 self.models_table,
-                [[model_id, name, provider_uuid, model_name, initial_capital, leverage, 1, 3, final_api_key, final_api_secret, account_alias, 1 if is_virtual else 0, symbol_source, datetime.now(timezone.utc)]],
+                [[model_id, name, provider_uuid, model_name, initial_capital, leverage, 1, max_positions, final_api_key, final_api_secret, account_alias, 1 if is_virtual else 0, symbol_source, datetime.now(timezone.utc)]],
                 ["id", "name", "provider_id", "model_name", "initial_capital", "leverage", "auto_trading_enabled", "max_positions", "api_key", "api_secret", "account_alias", "is_virtual", "symbol_source", "created_at"]
             )
             

@@ -632,6 +632,11 @@ def add_model():
         api_key = data.get('api_key', '').strip()
         api_secret = data.get('api_secret', '').strip()
         
+        # 获取max_positions参数，默认值为3
+        max_positions = int(data.get('max_positions', 3))
+        if max_positions < 1:
+            return jsonify({'error': 'max_positions must be >= 1'}), 400
+        
         model_id = db.add_model(
             name=data['name'],
             provider_id=data['provider_id'],
@@ -642,7 +647,8 @@ def add_model():
             api_secret=api_secret,
             account_alias=account_alias,
             is_virtual=bool(is_virtual),
-            symbol_source=data.get('symbol_source', 'leaderboard')  # 【新增参数】交易对数据源，默认'leaderboard'保持向后兼容
+            symbol_source=data.get('symbol_source', 'leaderboard'),  # 【新增参数】交易对数据源，默认'leaderboard'保持向后兼容
+            max_positions=max_positions  # 【新增参数】最大持仓数量，默认3
         )
 
         model = db.get_model(model_id)

@@ -33,6 +33,11 @@
       <input v-model.number="formData.initialCapital" type="number" class="form-input" />
     </div>
     <div class="form-group">
+      <label>最大持仓数量</label>
+      <input v-model.number="formData.maxPositions" type="number" class="form-input" min="1" />
+      <small class="form-help">同时持有的最大交易对数量，默认为3</small>
+    </div>
+    <div class="form-group">
       <label>选择账户 <span style="color: red;">*</span></label>
       <select v-model="formData.accountAlias" class="form-input" required>
         <option value="">请选择账户</option>
@@ -118,6 +123,7 @@ const formData = ref({
   modelName: '',
   displayName: '',
   initialCapital: 100000,
+  maxPositions: 3,  // 默认最大持仓数量为3
   accountAlias: '',
   isVirtual: true,  // 默认值为 true（虚拟账户）
   symbolSource: 'leaderboard'  // 默认使用涨跌榜
@@ -183,6 +189,11 @@ const handleSubmit = async () => {
     return
   }
   
+  if (!formData.value.maxPositions || formData.value.maxPositions < 1) {
+    alert('请输入有效的最大持仓数量（必须 >= 1）')
+    return
+  }
+  
   loading.value = true
   try {
     await modelApi.create({
@@ -190,6 +201,7 @@ const handleSubmit = async () => {
       model_name: formData.value.modelName,
       name: formData.value.displayName,
       initial_capital: formData.value.initialCapital,
+      max_positions: formData.value.maxPositions,
       account_alias: formData.value.accountAlias,
       is_virtual: formData.value.isVirtual,
       symbol_source: formData.value.symbolSource
@@ -213,6 +225,7 @@ const clearForm = () => {
     modelName: '',
     displayName: '',
     initialCapital: 100000,
+    maxPositions: 3,  // 重置为默认值3
     accountAlias: '',
     isVirtual: true,  // 重置为默认值 true（虚拟账户）
     symbolSource: 'leaderboard'  // 重置为默认值
