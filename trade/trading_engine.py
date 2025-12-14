@@ -784,7 +784,7 @@ class TradingEngine:
                 testnet=testnet
             )
             logger.info(f"[Model {self.model_id}] Created new Binance order client instance with model's API credentials")
-            logger.debug(f"[Model {self.model_id}] API key: {api_key[:8]}... (truncated for security)")
+            logger.info(f"[Model {self.model_id}] API key: {api_key[:8]}... (truncated for security)")
             return client
         except Exception as e:
             logger.error(f"[Model {self.model_id}] Failed to create Binance order client: {e}", exc_info=True)
@@ -1131,6 +1131,7 @@ class TradingEngine:
                 - raw_response: AI的原始响应
                 - cot_trace: 思维链追踪（如果有）
                 - decisions: AI的决策结果（如果raw_response不是字符串）
+                - tokens: token使用数量（如果有）
         
         Note:
             对话记录用于后续分析和审计，帮助理解AI的决策过程
@@ -1138,13 +1139,15 @@ class TradingEngine:
         prompt = payload.get('prompt')
         raw_response = payload.get('raw_response')
         cot_trace = payload.get('cot_trace') or ''
+        tokens = payload.get('tokens', 0)  # 获取tokens数量，默认为0
         if not isinstance(raw_response, str):
             raw_response = json.dumps(payload.get('decisions', {}), ensure_ascii=False)
         self.db.add_conversation(
             self.model_id,
             user_prompt=prompt,
             ai_response=raw_response,
-            cot_trace=cot_trace
+            cot_trace=cot_trace,
+            tokens=tokens
         )
 
     # ============ 批量决策处理方法 ============
@@ -2422,7 +2425,7 @@ class TradingEngine:
 
         # 获取全局交易锁，确保买入和卖出服务线程不会同时执行交易操作
         with self.trading_lock:
-            logger.debug(f"[Model {self.model_id}] [交易执行] 获取到交易锁，开始执行交易决策")
+            logger.info(f"[Model {self.model_id}] [交易执行] 获取到交易锁，=====开始执行SDK交易决策=====")
             
             for symbol, decision in decisions.items():
                 signal = decision.get('signal', '').lower()
@@ -2504,7 +2507,7 @@ class TradingEngine:
             position_side = 'LONG'
             trade_signal = 'buy_to_enter'
         
-        logger.debug(f"[Model {self.model_id}] [开仓] {symbol} signal={signal} → position_side={position_side}")
+        logger.info(f"[Model {self.model_id}] [开仓] {symbol} signal={signal} → position_side={position_side}")
 
         positions = portfolio.get('positions', [])
         existing_symbols = {pos['symbol'] for pos in positions}
@@ -2556,6 +2559,8 @@ class TradingEngine:
         # 但按照用户要求，buy操作对应trailing_stop_market_trade
         # 这里先更新数据库记录持仓，然后设置trailing stop保护
         sdk_response = None
+        sdk_call_skipped = False
+        sdk_skip_reason = None
         # 【每次创建新的Binance订单客户端】确保使用最新的model对应的api_key和api_secret
         binance_client = self._create_binance_order_client()
         if binance_client:
@@ -2587,8 +2592,28 @@ class TradingEngine:
                            f" | symbol={symbol} | error={sdk_err}", exc_info=True)
                 # SDK调用失败不影响数据库记录，继续执行
         else:
-            logger.warning(f"@API@ [Model {self.model_id}] [trailing_stop_market_trade] === 无法创建Binance订单客户端 ==="
-                          f" | symbol={symbol} | 跳过SDK调用")
+            # 【客户端创建失败】记录详细的失败原因
+            sdk_call_skipped = True
+            # 检查失败原因
+            try:
+                model = self.db.get_model(self.model_id)
+                if not model:
+                    sdk_skip_reason = "Model not found in database"
+                else:
+                    api_key = model.get('api_key', '')
+                    api_secret = model.get('api_secret', '')
+                    if not api_key or not api_key.strip():
+                        sdk_skip_reason = "API key is empty or not configured in model table"
+                    elif not api_secret or not api_secret.strip():
+                        sdk_skip_reason = "API secret is empty or not configured in model table"
+                    else:
+                        sdk_skip_reason = "Failed to create Binance order client (unknown reason)"
+            except Exception as check_err:
+                sdk_skip_reason = f"Failed to check model configuration: {check_err}"
+            
+            logger.error(f"@API@ [Model {self.model_id}] [trailing_stop_market_trade] === 无法创建Binance订单客户端，跳过SDK调用 ==="
+                      f" | symbol={symbol} | reason={sdk_skip_reason} | "
+                      f"⚠️ 警告：交易记录将保存到数据库，但实际交易未执行！请检查model表中的api_key和api_secret配置")
 
         # 【更新持仓】使用根据signal自动确定的position_side
         try:
@@ -2611,6 +2636,8 @@ class TradingEngine:
         # 【记录交易】根据signal记录到trades表（buy_to_enter 或 sell_to_enter）
         # 使用提前生成的trade_id
         logger.info(f"TRADE: PENDING - Model {self.model_id} {trade_signal.upper()} {symbol} position_side={position_side} qty={quantity} price={price} fee={trade_fee}")
+        if sdk_call_skipped:
+            logger.warning(f"TRADE: ⚠️ SDK调用被跳过，但交易记录仍将保存到数据库 | symbol={symbol} | reason={sdk_skip_reason}")
         try:
             self.db.insert_rows(
                 self.db.trades_table,
@@ -2620,7 +2647,11 @@ class TradingEngine:
         except Exception as db_err:
             logger.error(f"TRADE: Add trade failed ({trade_signal.upper()}) model={self.model_id} future={symbol}: {db_err}")
             raise
-        logger.info(f"TRADE: RECORDED - Model {self.model_id} {trade_signal.upper()} {symbol} position_side={position_side}")
+        if sdk_call_skipped:
+            logger.warning(f"TRADE: RECORDED (但SDK未执行) - Model {self.model_id} {trade_signal.upper()} {symbol} position_side={position_side} | "
+                         f"⚠️ 此交易记录已保存，但实际交易未执行，请检查API密钥配置")
+        else:
+            logger.info(f"TRADE: RECORDED - Model {self.model_id} {trade_signal.upper()} {symbol} position_side={position_side}")
 
         return {
             'symbol': symbol,
@@ -2708,6 +2739,8 @@ class TradingEngine:
         # 注意：close_position_trade只支持STOP_MARKET或TAKE_PROFIT_MARKET，不支持MARKET
         # 对于立即平仓，使用当前价格作为stop_price的STOP_MARKET订单
         sdk_response = None
+        sdk_call_skipped = False
+        sdk_skip_reason = None
         # 【每次创建新的Binance订单客户端】确保使用最新的model对应的api_key和api_secret
         binance_client = self._create_binance_order_client()
         if binance_client:
@@ -2737,8 +2770,28 @@ class TradingEngine:
                            f" | symbol={symbol} | error={sdk_err}", exc_info=True)
                 # SDK调用失败不影响数据库记录，继续执行
         else:
-            logger.warning(f"@API@ [Model {self.model_id}] [close_position_trade] === 无法创建Binance订单客户端 ==="
-                          f" | symbol={symbol} | 跳过SDK调用")
+            # 【客户端创建失败】记录详细的失败原因
+            sdk_call_skipped = True
+            # 检查失败原因
+            try:
+                model = self.db.get_model(self.model_id)
+                if not model:
+                    sdk_skip_reason = "Model not found in database"
+                else:
+                    api_key = model.get('api_key', '')
+                    api_secret = model.get('api_secret', '')
+                    if not api_key or not api_key.strip():
+                        sdk_skip_reason = "API key is empty or not configured in model table"
+                    elif not api_secret or not api_secret.strip():
+                        sdk_skip_reason = "API secret is empty or not configured in model table"
+                    else:
+                        sdk_skip_reason = "Failed to create Binance order client (unknown reason)"
+            except Exception as check_err:
+                sdk_skip_reason = f"Failed to check model configuration: {check_err}"
+            
+            logger.error(f"@API@ [Model {self.model_id}] [close_position_trade] === 无法创建Binance订单客户端，跳过SDK调用 ==="
+                      f" | symbol={symbol} | reason={sdk_skip_reason} | "
+                      f"⚠️ 警告：交易记录将保存到数据库，但实际交易未执行！请检查model表中的api_key和api_secret配置")
 
         # Close position in database
         try:
@@ -2749,6 +2802,8 @@ class TradingEngine:
         
         # Record trade（使用提前生成的trade_id）
         logger.info(f"TRADE: PENDING - Model {self.model_id} CLOSE {symbol} position_side={position_side} position_amt={position_amt} price={current_price} fee={trade_fee} net_pnl={net_pnl}")
+        if sdk_call_skipped:
+            logger.warning(f"TRADE: ⚠️ SDK调用被跳过，但交易记录仍将保存到数据库 | symbol={symbol} | reason={sdk_skip_reason}")
         try:
             # 【记录到trades表】side字段使用position_side的反向
             self.db.insert_rows(
@@ -2759,7 +2814,11 @@ class TradingEngine:
         except Exception as db_err:
             logger.error(f"TRADE: Add trade failed (CLOSE) model={self.model_id} future={symbol}: {db_err}")
             raise
-        logger.info(f"TRADE: RECORDED - Model {self.model_id} CLOSE {symbol}")
+        if sdk_call_skipped:
+            logger.warning(f"TRADE: RECORDED (但SDK未执行) - Model {self.model_id} CLOSE {symbol} | "
+                         f"⚠️ 此交易记录已保存，但实际交易未执行，请检查API密钥配置")
+        else:
+            logger.info(f"TRADE: RECORDED - Model {self.model_id} CLOSE {symbol}")
 
         return {
             'symbol': symbol,
@@ -2831,6 +2890,8 @@ class TradingEngine:
         
         # 【调用SDK执行交易】使用stop_loss_trade
         sdk_response = None
+        sdk_call_skipped = False
+        sdk_skip_reason = None
         # 【每次创建新的Binance订单客户端】确保使用最新的model对应的api_key和api_secret
         binance_client = self._create_binance_order_client()
         if binance_client:
@@ -2860,8 +2921,28 @@ class TradingEngine:
                            f" | symbol={symbol} | error={sdk_err}", exc_info=True)
                 # SDK调用失败不影响数据库记录，继续执行
         else:
-            logger.warning(f"@API@ [Model {self.model_id}] [stop_loss_trade] === 无法创建Binance订单客户端 ==="
-                          f" | symbol={symbol} | 跳过SDK调用")
+            # 【客户端创建失败】记录详细的失败原因
+            sdk_call_skipped = True
+            # 检查失败原因
+            try:
+                model = self.db.get_model(self.model_id)
+                if not model:
+                    sdk_skip_reason = "Model not found in database"
+                else:
+                    api_key = model.get('api_key', '')
+                    api_secret = model.get('api_secret', '')
+                    if not api_key or not api_key.strip():
+                        sdk_skip_reason = "API key is empty or not configured in model table"
+                    elif not api_secret or not api_secret.strip():
+                        sdk_skip_reason = "API secret is empty or not configured in model table"
+                    else:
+                        sdk_skip_reason = "Failed to create Binance order client (unknown reason)"
+            except Exception as check_err:
+                sdk_skip_reason = f"Failed to check model configuration: {check_err}"
+            
+            logger.error(f"@API@ [Model {self.model_id}] [stop_loss_trade] === 无法创建Binance订单客户端，跳过SDK调用 ==="
+                      f" | symbol={symbol} | reason={sdk_skip_reason} | "
+                      f"⚠️ 警告：交易记录将保存到数据库，但实际交易未执行！请检查model表中的api_key和api_secret配置")
         
         # 计算预估手续费（止损单可能不会立即成交，这里只是预估）
         trade_amount = position_amt * stop_price
@@ -2869,6 +2950,8 @@ class TradingEngine:
         
         # 记录止损单到trades表（使用提前生成的trade_id）
         logger.info(f"TRADE: PENDING - Model {self.model_id} STOP_LOSS {symbol} position_side={position_side} position_amt={position_amt} stop_price={stop_price}")
+        if sdk_call_skipped:
+            logger.warning(f"TRADE: ⚠️ SDK调用被跳过，但交易记录仍将保存到数据库 | symbol={symbol} | reason={sdk_skip_reason}")
         try:
             # 【记录到trades表】side字段使用position_side的反向
             # 注意：这里需要修改add_trade方法支持传入trade_id，或者使用其他方式
@@ -2880,7 +2963,11 @@ class TradingEngine:
         except Exception as db_err:
             logger.error(f"TRADE: Add trade failed (STOP_LOSS) model={self.model_id} symbol={symbol}: {db_err}")
             raise
-        logger.info(f"TRADE: RECORDED - Model {self.model_id} STOP_LOSS {symbol}")
+        if sdk_call_skipped:
+            logger.warning(f"TRADE: RECORDED (但SDK未执行) - Model {self.model_id} STOP_LOSS {symbol} | "
+                         f"⚠️ 此交易记录已保存，但实际交易未执行，请检查API密钥配置")
+        else:
+            logger.info(f"TRADE: RECORDED - Model {self.model_id} STOP_LOSS {symbol}")
 
         return {
             'symbol': symbol,
@@ -2953,6 +3040,8 @@ class TradingEngine:
         
         # 【调用SDK执行交易】使用take_profit_trade
         sdk_response = None
+        sdk_call_skipped = False
+        sdk_skip_reason = None
         # 【每次创建新的Binance订单客户端】确保使用最新的model对应的api_key和api_secret
         binance_client = self._create_binance_order_client()
         if binance_client:
@@ -2982,8 +3071,28 @@ class TradingEngine:
                            f" | symbol={symbol} | error={sdk_err}", exc_info=True)
                 # SDK调用失败不影响数据库记录，继续执行
         else:
-            logger.warning(f"@API@ [Model {self.model_id}] [take_profit_trade] === 无法创建Binance订单客户端 ==="
-                          f" | symbol={symbol} | 跳过SDK调用")
+            # 【客户端创建失败】记录详细的失败原因
+            sdk_call_skipped = True
+            # 检查失败原因
+            try:
+                model = self.db.get_model(self.model_id)
+                if not model:
+                    sdk_skip_reason = "Model not found in database"
+                else:
+                    api_key = model.get('api_key', '')
+                    api_secret = model.get('api_secret', '')
+                    if not api_key or not api_key.strip():
+                        sdk_skip_reason = "API key is empty or not configured in model table"
+                    elif not api_secret or not api_secret.strip():
+                        sdk_skip_reason = "API secret is empty or not configured in model table"
+                    else:
+                        sdk_skip_reason = "Failed to create Binance order client (unknown reason)"
+            except Exception as check_err:
+                sdk_skip_reason = f"Failed to check model configuration: {check_err}"
+            
+            logger.error(f"@API@ [Model {self.model_id}] [take_profit_trade] === 无法创建Binance订单客户端，跳过SDK调用 ==="
+                      f" | symbol={symbol} | reason={sdk_skip_reason} | "
+                      f"⚠️ 警告：交易记录将保存到数据库，但实际交易未执行！请检查model表中的api_key和api_secret配置")
         
         # 计算预估手续费（止盈单可能不会立即成交，这里只是预估）
         trade_amount = position_amt * stop_price
@@ -2991,6 +3100,8 @@ class TradingEngine:
         
         # 记录止盈单到trades表（使用提前生成的trade_id）
         logger.info(f"TRADE: PENDING - Model {self.model_id} TAKE_PROFIT {symbol} position_side={position_side} position_amt={position_amt} stop_price={stop_price}")
+        if sdk_call_skipped:
+            logger.warning(f"TRADE: ⚠️ SDK调用被跳过，但交易记录仍将保存到数据库 | symbol={symbol} | reason={sdk_skip_reason}")
         try:
             # 【记录到trades表】side字段使用position_side的反向
             self.db.insert_rows(
@@ -3001,7 +3112,11 @@ class TradingEngine:
         except Exception as db_err:
             logger.error(f"TRADE: Add trade failed (TAKE_PROFIT) model={self.model_id} symbol={symbol}: {db_err}")
             raise
-        logger.info(f"TRADE: RECORDED - Model {self.model_id} TAKE_PROFIT {symbol}")
+        if sdk_call_skipped:
+            logger.warning(f"TRADE: RECORDED (但SDK未执行) - Model {self.model_id} TAKE_PROFIT {symbol} | "
+                         f"⚠️ 此交易记录已保存，但实际交易未执行，请检查API密钥配置")
+        else:
+            logger.info(f"TRADE: RECORDED - Model {self.model_id} TAKE_PROFIT {symbol}")
 
         return {
             'symbol': symbol,

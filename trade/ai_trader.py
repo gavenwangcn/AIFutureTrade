@@ -449,7 +449,7 @@ class AITrader:
 
     # ============ LLM API调用方法 ============
     
-    def _call_llm(self, prompt: str) -> str:
+    def _call_llm(self, prompt: str) -> tuple:
         """
         根据提供商类型调用对应的LLM API
         
@@ -459,7 +459,7 @@ class AITrader:
             prompt: 发送给LLM的提示词文本
         
         Returns:
-            str: LLM返回的原始响应文本
+            tuple: (响应文本, tokens数量)
         
         Raises:
             Exception: API调用失败时抛出异常
@@ -478,7 +478,7 @@ class AITrader:
             # 默认使用OpenAI兼容的API
             return self._call_openai_api(prompt)
 
-    def _call_openai_api(self, prompt: str) -> str:
+    def _call_openai_api(self, prompt: str) -> tuple:
         """
         调用OpenAI兼容的API
         
@@ -489,7 +489,7 @@ class AITrader:
             prompt: 发送给LLM的提示词文本
         
         Returns:
-            str: LLM返回的原始响应文本
+            tuple: (响应文本, tokens数量)
         
         Raises:
             Exception: API调用失败时抛出异常，包含详细的错误信息
@@ -528,7 +528,12 @@ class AITrader:
                 max_tokens=2000
             )
 
-            return response.choices[0].message.content
+            # 返回响应内容和tokens信息
+            content = response.choices[0].message.content
+            tokens = 0
+            if hasattr(response, 'usage') and response.usage:
+                tokens = response.usage.total_tokens if hasattr(response.usage, 'total_tokens') else 0
+            return content, tokens
 
         except APIConnectionError as e:
             error_msg = f"API connection failed: {str(e)}"
@@ -545,7 +550,7 @@ class AITrader:
             logger.error(traceback.format_exc())
             raise Exception(error_msg)
 
-    def _call_anthropic_api(self, prompt: str) -> str:
+    def _call_anthropic_api(self, prompt: str) -> tuple:
         """
         调用Anthropic Claude API
         
@@ -555,7 +560,7 @@ class AITrader:
             prompt: 发送给LLM的提示词文本
         
         Returns:
-            str: LLM返回的原始响应文本
+            tuple: (响应文本, tokens数量)
         
         Raises:
             Exception: API调用失败时抛出异常，包含详细的错误信息
@@ -596,7 +601,13 @@ class AITrader:
             response.raise_for_status()
 
             result = response.json()
-            return result['content'][0]['text']
+            content = result['content'][0]['text']
+            # 提取tokens信息
+            tokens = 0
+            if 'usage' in result:
+                usage = result['usage']
+                tokens = usage.get('input_tokens', 0) + usage.get('output_tokens', 0)
+            return content, tokens
 
         except Exception as e:
             error_msg = f"Anthropic API call failed: {str(e)}"
@@ -605,7 +616,7 @@ class AITrader:
             logger.error(traceback.format_exc())
             raise Exception(error_msg)
 
-    def _call_gemini_api(self, prompt: str) -> str:
+    def _call_gemini_api(self, prompt: str) -> tuple:
         """
         调用Google Gemini API
         
@@ -615,7 +626,7 @@ class AITrader:
             prompt: 发送给LLM的提示词文本
         
         Returns:
-            str: LLM返回的原始响应文本
+            tuple: (响应文本, tokens数量)
         
         Raises:
             Exception: API调用失败时抛出异常，包含详细的错误信息
@@ -659,7 +670,13 @@ class AITrader:
             response.raise_for_status()
 
             result = response.json()
-            return result['candidates'][0]['content']['parts'][0]['text']
+            content = result['candidates'][0]['content']['parts'][0]['text']
+            # 提取tokens信息
+            tokens = 0
+            if 'usageMetadata' in result:
+                usage = result['usageMetadata']
+                tokens = usage.get('totalTokenCount', 0)
+            return content, tokens
 
         except Exception as e:
             error_msg = f"Gemini API call failed: {str(e)}"
@@ -704,14 +721,15 @@ class AITrader:
                    f"Prompt Token数量: {token_count} | 模型: {self.model_name}")
         
         logger.info(f"[{self.provider_type}] 开始调用LLM API请求决策，模型: {self.model_name}")
-        response = self._call_llm(prompt)
+        response, tokens = self._call_llm(prompt)
         decisions, cot_trace = self._parse_response(response)
-        logger.info(f"[{self.provider_type}] LLM决策生成完成，共生成 {len(decisions)} 个交易对的决策")
+        logger.info(f"[{self.provider_type}] LLM决策生成完成，共生成 {len(decisions)} 个交易对的决策，使用tokens: {tokens}")
         return {
             'decisions': decisions,
             'prompt': prompt,
             'raw_response': response,
-            'cot_trace': cot_trace
+            'cot_trace': cot_trace,
+            'tokens': tokens
         }
     
     def _count_tokens(self, text: str) -> int:

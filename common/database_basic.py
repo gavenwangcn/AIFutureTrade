@@ -446,11 +446,20 @@ class Database:
             `user_prompt` LONGTEXT,
             `ai_response` LONGTEXT,
             `cot_trace` LONGTEXT,
+            `tokens` INT DEFAULT 0,
             `timestamp` DATETIME DEFAULT CURRENT_TIMESTAMP,
             INDEX `idx_model_timestamp` (`model_id`, `timestamp`)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
         """
         self.command(ddl)
+        # 直接添加tokens字段（如果字段已存在会报错，但按用户要求不进行判断）
+        try:
+            alter_ddl = f"ALTER TABLE `{self.conversations_table}` ADD COLUMN `tokens` INT DEFAULT 0"
+            self.command(alter_ddl)
+            logger.debug(f"[Database] Added tokens column to {self.conversations_table}")
+        except Exception as e:
+            # 如果字段已存在，忽略错误（按用户要求不进行判断）
+            logger.debug(f"[Database] Tokens column may already exist in {self.conversations_table}: {e}")
         logger.debug(f"[Database] Ensured table {self.conversations_table} exists with index for efficient timestamp DESC sorting")
     
     def _ensure_account_values_table(self):
@@ -1376,7 +1385,7 @@ class Database:
     # ============ Conversation（对话记录）管理方法 ============
     
     def add_conversation(self, model_id: int, user_prompt: str,
-                        ai_response: str, cot_trace: str = ''):
+                        ai_response: str, cot_trace: str = '', tokens: int = 0):
         """Add conversation record"""
         try:
             model_mapping = self._get_model_id_mapping()
@@ -1392,8 +1401,8 @@ class Database:
             conv_id = self._generate_id()
             self.insert_rows(
                 self.conversations_table,
-                [[conv_id, model_uuid, user_prompt, ai_response, cot_trace or '', current_time]],
-                ["id", "model_id", "user_prompt", "ai_response", "cot_trace", "timestamp"]
+                [[conv_id, model_uuid, user_prompt, ai_response, cot_trace or '', tokens, current_time]],
+                ["id", "model_id", "user_prompt", "ai_response", "cot_trace", "tokens", "timestamp"]
             )
         except Exception as e:
             logger.error(f"[Database] Failed to add conversation: {e}")
