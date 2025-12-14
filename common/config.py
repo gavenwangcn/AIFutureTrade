@@ -31,7 +31,7 @@ import os
 # ============ MySQL数据库配置 ============
 
 # MySQL连接配置
-MYSQL_HOST = os.getenv('MYSQL_HOST', '193.134.209.95')  # MySQL服务器地址
+MYSQL_HOST = os.getenv('MYSQL_HOST', '127.0.0.1')  # MySQL服务器地址
 MYSQL_PORT = int(os.getenv('MYSQL_PORT', '32123'))  # MySQL服务器端口
 MYSQL_USER = os.getenv('MYSQL_USER', 'aifuturetrade')  # MySQL用户名
 MYSQL_PASSWORD = os.getenv('MYSQL_PASSWORD', 'aifuturetrade123')  # MySQL密码
