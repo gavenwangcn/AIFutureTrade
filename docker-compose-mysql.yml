@@ -39,8 +39,12 @@ services:
     image: mysql:8.0
     container_name: aifuturetrade-mysql
     ports:
-      # 绑定到0.0.0.0，允许外网访问
+      # 绑定到所有网络接口（0.0.0.0），允许从 localhost、127.0.0.1 和外部IP访问
       # 主机端口32123映射到容器端口3306
+      # 注意：此配置允许通过以下方式连接：
+      #   - localhost:32123
+      #   - 127.0.0.1:32123
+      #   - <服务器IP>:32123
       - "0.0.0.0:32123:3306"
     environment:
       - MYSQL_ROOT_PASSWORD=aifuturetrade_root123
@@ -59,11 +63,15 @@ services:
       - /mysql/scripts/init-database.sh:/docker-entrypoint-initdb.d/01-init-database.sh:ro
       # 挂载日志目录（可选，用于日志持久化）
       - mysql_logs:/var/log/mysql
-    # 配置MySQL监听所有网络接口（0.0.0.0），允许外网访问
-    # 注意：性能优化配置在 /mysql/config/my.cnf 文件中
+    # 配置MySQL监听所有网络接口（0.0.0.0），允许从 localhost、127.0.0.1 和外部IP访问
+    # 注意：
+    #   - bind-address=0.0.0.0 确保 MySQL 监听所有网络接口
+    #   - 性能优化配置在 /mysql/config/my.cnf 文件中
+    #   - my.cnf 中也会设置 bind-address=0.0.0.0（双重保险）
     command: 
       - --bind-address=0.0.0.0
       - --default-authentication-plugin=mysql_native_password
+      - --skip-name-resolve  # 跳过DNS解析，提高连接速度，允许使用IP地址连接
     # 资源限制（根据服务器配置调整）
     # 注意：如果使用 Docker Swarm，可以使用 deploy.resources
     # 对于普通 docker-compose，资源限制需要在启动时通过 docker run 参数设置
@@ -74,7 +82,7 @@ services:
         hard: 65536
     restart: unless-stopped
     networks:
-      - aifuturetrade-network
+      - mysql-network
     healthcheck:
       test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-paifuturetrade_root123"]
       interval: 10s
@@ -85,8 +93,12 @@ services:
 # ==============================================================================
 # 网络配置
 # ==============================================================================
+# 注意：使用独立的 mysql-network 网络，避免与应用服务网络冲突
+# 如果需要从应用服务访问 MySQL，可以通过以下方式：
+# 1. 使用主机端口映射（localhost:32123 或 <服务器IP>:32123）
+# 2. 在应用服务的 docker-compose.yml 中添加 external_links 或使用外部网络
 networks:
-  aifuturetrade-network:
+  mysql-network:
     driver: bridge
 
 # ==============================================================================
