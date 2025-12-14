@@ -1897,10 +1897,43 @@ body {
     border-bottom: none;
 }
 
-.conversation-time {
-    font-size: 12px;
-    color: var(--text-3);
+.conversation-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
     margin-bottom: 8px;
+    gap: 12px;
+}
+
+.conversation-tokens {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-1);
+}
+
+.conversation-tokens i {
+    color: #0fc6c2;
+    font-size: 14px;
+}
+
+.tokens-label {
+    color: var(--text-2);
+    font-weight: 500;
+}
+
+.tokens-value {
+    color: #0fc6c2;
+    font-weight: 700;
+    font-family: 'JetBrains Mono', 'Fira Code', Consolas, monospace;
+}
+
+.conversation-time {
+    font-size: 11px;
+    color: var(--text-3);
+    flex-shrink: 0;
 }
 
 .conversation-bubble {

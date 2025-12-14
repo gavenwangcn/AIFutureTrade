@@ -1112,6 +1112,7 @@ let portfolioSymbolsRefreshInterval = null // 模型持仓合约列表自动刷�
         id: conv.id || `${conv.timestamp || Date.now()}_${Math.random()}`,
         time: conv.timestamp || '',  // 后端已转换为字符串，直接使用
         timestamp: conv.timestamp || '', // 确保 timestamp 字段存在，后端已转换为字符串
+        tokens: conv.tokens || 0, // tokens数量，用于显示
         role: 'AI',
         content: conv.ai_response || conv.user_prompt || '',
         user_prompt: conv.user_prompt || '',

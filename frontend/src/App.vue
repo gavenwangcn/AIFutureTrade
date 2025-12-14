@@ -469,7 +469,14 @@
           <div v-show="!isAggregatedView && activeTab === 'conversations'" class="tab-content active">
             <div class="conversations-list">
               <div v-for="conv in conversations" :key="conv.id" class="conversation-item">
-                <div class="conversation-time">{{ conv.timestamp || conv.time || '' }}</div>
+                <div class="conversation-header">
+                  <div class="conversation-time">{{ conv.timestamp || conv.time || '' }}</div>
+                  <div class="conversation-tokens">
+                    <i class="bi bi-cpu"></i>
+                    <span class="tokens-label">Tokens:</span>
+                    <span class="tokens-value">{{ conv.tokens || 0 }}</span>
+                  </div>
+                </div>
                 <div v-if="conv.user_prompt && settings.show_system_prompt" class="conversation-bubble">
                   <div class="bubble-label">
                     <i class="bi bi-person"></i>

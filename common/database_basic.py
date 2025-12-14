@@ -1464,7 +1464,7 @@ class Database:
                 LIMIT %s
             """, (model_uuid, limit))
             
-            columns = ["id", "model_id", "user_prompt", "ai_response", "cot_trace", "timestamp"]
+            columns = ["id", "model_id", "user_prompt", "ai_response", "cot_trace", "tokens", "timestamp"]
             results = self._rows_to_dicts(rows, columns)
             
             # 额外验证：确保返回的所有记录都属于指定的 model_id（双重保险）
