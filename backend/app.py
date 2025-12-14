@@ -732,14 +732,37 @@ def get_portfolio(model_id):
     
     Returns:
         JSON: 包含投资组合、账户价值历史、自动交易状态等信息
+    
+    Note:
+        - 先获取持仓的symbol列表，然后获取这些symbol的实时价格
+        - 确保所有持仓的symbol都能获取到实时价格，即使不在配置列表中
     """
     model = db.get_model(model_id)
     if not model:
         return jsonify({'error': f'Model {model_id} not found'}), 404
 
-    symbols = get_tracked_symbols()
-    prices_data = market_fetcher.get_prices(symbols)
-    current_prices = {symbol: data['price'] for symbol, data in prices_data.items()}
+    # 先获取持仓数据（不传价格，先获取持仓列表）
+    try:
+        portfolio_temp = db.get_portfolio(model_id, None)
+        # 从持仓中提取symbol列表
+        positions = portfolio_temp.get('positions', []) if portfolio_temp else []
+        held_symbols = [pos.get('symbol') for pos in positions if pos.get('symbol')]
+        
+        # 如果持仓为空，使用配置的合约列表作为备选
+        if not held_symbols:
+            held_symbols = get_tracked_symbols()
+        else:
+            # 合并持仓symbol和配置的symbol，确保都能获取价格
+            configured_symbols = get_tracked_symbols()
+            all_symbols = list(set(held_symbols + configured_symbols))
+            held_symbols = all_symbols
+    except Exception as e:
+        logger.warning(f"Failed to get portfolio symbols for model {model_id}, using configured symbols: {e}")
+        held_symbols = get_tracked_symbols()
+    
+    # 获取实时价格数据（使用get_current_prices确保实时获取）
+    prices_data = market_fetcher.get_current_prices(held_symbols)
+    current_prices = {symbol: data.get('price', 0) for symbol, data in prices_data.items() if data.get('price')}
 
     try:
         portfolio = db.get_portfolio(model_id, current_prices)
@@ -770,30 +793,44 @@ def get_model_portfolio_symbols(model_id):
     if not model:
         return jsonify({'error': f'Model {model_id} not found'}), 404
     
-    from common.database_mysql import MySQLDatabase
-    mysql_db = MySQLDatabase(auto_init_tables=False)
+    # 使用 database_basic.py 的 Database 类获取持仓数据（正确处理 UUID 转换）
+    symbols = get_tracked_symbols()
+    prices_data = market_fetcher.get_prices(symbols)
+    current_prices = {symbol: data['price'] for symbol, data in prices_data.items()}
     
-    # 获取模型持有symbols列表
-    symbols = mysql_db.get_model_portfolio_symbols(model_id)
+    try:
+        portfolio = db.get_portfolio(model_id, current_prices)
+        # 从持仓数据中提取去重的 symbol 列表
+        positions = portfolio.get('positions', []) if portfolio else []
+        symbols_set = set()
+        for pos in positions:
+            symbol = pos.get('symbol')
+            if symbol:
+                symbols_set.add(symbol)
+        symbols = sorted(list(symbols_set))
+    except Exception as e:
+        logger.error(f"Failed to get portfolio for model {model_id}: {e}")
+        symbols = []
     
     if not symbols:
         return jsonify({'data': []}), 200
     
-    # 获取实时价格数据
-    prices_data = market_fetcher.get_prices(symbols)
+    # 获取实时价格数据（使用 get_current_prices 确保获取最新数据）
+    prices_data = market_fetcher.get_current_prices(symbols)
     
     # 构建响应数据
     result = []
     for symbol in symbols:
+        price_info = prices_data.get(symbol, {})
         symbol_data = {
             'symbol': symbol,
-            'price': prices_data.get(symbol, {}).get('price', 0),
-            'change': prices_data.get(symbol, {}).get('change', 0),
-            'changePercent': prices_data.get(symbol, {}).get('changePercent', 0),
-            'volume': prices_data.get(symbol, {}).get('volume', 0),
-            'quoteVolume': prices_data.get(symbol, {}).get('quoteVolume', 0),
-            'high': prices_data.get(symbol, {}).get('high', 0),
-            'low': prices_data.get(symbol, {}).get('low', 0)
+            'price': price_info.get('price', 0),
+            'change': price_info.get('change_24h', price_info.get('change', 0)),
+            'changePercent': price_info.get('change_24h', price_info.get('changePercent', 0)),
+            'volume': price_info.get('daily_volume', price_info.get('volume', 0)),
+            'quoteVolume': price_info.get('quote_volume', price_info.get('quoteVolume', 0)),
+            'high': price_info.get('high', 0),
+            'low': price_info.get('low', 0)
         }
         result.append(symbol_data)
     
@@ -808,13 +845,64 @@ def get_trades(model_id):
         model_id (int): 模型ID
     
     Query Parameters:
-        limit (int, optional): 返回记录数限制，默认50
+        limit (int, optional): 返回记录数限制，默认从配置读取（TRADES_QUERY_LIMIT）
     
     Returns:
-        JSON: 交易记录列表
+        JSON: 交易记录列表，包含实时价格计算的盈亏
     """
-    limit = request.args.get('limit', 50, type=int)
+    # 从配置读取查询限制，默认10条
+    default_limit = getattr(app_config, 'TRADES_QUERY_LIMIT', 10)
+    limit = request.args.get('limit', default_limit, type=int)
+    limit = min(limit, default_limit)  # 确保不超过配置的限制
+    
     trades = db.get_trades(model_id, limit=limit)
+    
+    # 获取交易记录中涉及的symbol列表
+    symbols = list(set([trade.get('future') or trade.get('symbol', '') for trade in trades if trade.get('future') or trade.get('symbol')]))
+    
+    # 获取实时价格
+    current_prices = {}
+    if symbols:
+        prices_data = market_fetcher.get_current_prices(symbols)
+        current_prices = {symbol: data.get('price', 0) for symbol, data in prices_data.items() if data.get('price')}
+    
+    # 为每条交易记录计算实时盈亏
+    for trade in trades:
+        symbol = trade.get('future') or trade.get('symbol', '')
+        signal = trade.get('signal', '')
+        trade_price = trade.get('price', 0)
+        quantity = abs(trade.get('quantity', 0))
+        stored_pnl = trade.get('pnl', 0) or 0
+        
+        # 如果是开仓交易（buy_to_enter或sell_to_enter）
+        if signal in ('buy_to_enter', 'sell_to_enter'):
+            # 如果数据库中的pnl为0或None，说明可能还没有平仓，使用实时价格计算
+            # 如果数据库中的pnl不为0，说明已经平仓，使用数据库中的pnl
+            if symbol in current_prices:
+                current_price = current_prices[symbol]
+                trade['current_price'] = current_price
+                
+                # 如果存储的pnl为0，说明可能还没有平仓，使用实时价格计算未实现盈亏
+                if stored_pnl == 0 and current_price > 0 and trade_price > 0:
+                    if signal == 'buy_to_enter':
+                        # 开多：盈亏 = (当前价 - 开仓价) * 数量
+                        trade['pnl'] = (current_price - trade_price) * quantity
+                    elif signal == 'sell_to_enter':
+                        # 开空：盈亏 = (开仓价 - 当前价) * 数量
+                        trade['pnl'] = (trade_price - current_price) * quantity
+                # 如果存储的pnl不为0，说明已经平仓，使用数据库中的pnl（已实现盈亏）
+                else:
+                    trade['pnl'] = stored_pnl
+            else:
+                # 如果无法获取实时价格，使用数据库中的pnl
+                trade['pnl'] = stored_pnl
+        # 如果是平仓交易，使用数据库中的pnl（已实现盈亏）
+        elif signal in ('close_position', 'stop_loss', 'take_profit'):
+            # 平仓交易的盈亏已经在数据库中，不需要重新计算
+            trade['pnl'] = stored_pnl
+            if symbol in current_prices:
+                trade['current_price'] = current_prices[symbol]
+    
     return jsonify(trades)
 
 @app.route('/api/models/<int:model_id>/conversations', methods=['GET'])
@@ -826,12 +914,22 @@ def get_conversations(model_id):
         model_id (int): 模型ID
     
     Query Parameters:
-        limit (int, optional): 返回记录数限制，默认20
+        limit (int, optional): 返回记录数限制，默认从settings读取（conversation_limit）
     
     Returns:
         JSON: 对话记录列表
     """
-    limit = request.args.get('limit', 20, type=int)
+    # 从settings读取conversation_limit，默认5
+    try:
+        settings = db.get_settings()
+        default_limit = settings.get('conversation_limit', 5)
+    except Exception as e:
+        logger.warning(f"[API] Failed to get conversation_limit from settings: {e}, using default 5")
+        default_limit = 5
+    
+    limit = request.args.get('limit', default_limit, type=int)
+    # 确保不超过settings中的限制
+    limit = min(limit, default_limit)
     conversations = db.get_conversations(model_id, limit=limit)
     return jsonify(conversations)
 
@@ -1095,6 +1193,8 @@ def get_aggregated_portfolio():
                 
                 key = f"{symbol}_{position_side}"
                 if key not in all_positions:
+                    # 确保 current_price 不为 None
+                    current_price = pos.get('current_price') or 0
                     all_positions[key] = {
                         'symbol': symbol,
                         'position_side': position_side,
@@ -1102,7 +1202,7 @@ def get_aggregated_portfolio():
                         'avg_price': 0,
                         'total_cost': 0,
                         'leverage': pos.get('leverage', 1),
-                        'current_price': pos.get('current_price'),
+                        'current_price': current_price,
                         'pnl': pos.get('pnl', 0)
                     }
 
@@ -1116,7 +1216,10 @@ def get_aggregated_portfolio():
                     current_pos['avg_price'] = (current_cost + new_cost) / total_position_amt
                     current_pos['position_amt'] = total_position_amt
                     current_pos['total_cost'] = current_cost + new_cost
-                    current_pos['pnl'] = (pos.get('current_price', 0) - current_pos['avg_price']) * total_position_amt
+                    # 确保 current_price 不为 None，如果为 None 则使用已存储的值或 0
+                    current_price = pos.get('current_price') or current_pos.get('current_price') or 0
+                    current_pos['current_price'] = current_price
+                    current_pos['pnl'] = (current_price - current_pos['avg_price']) * total_position_amt
 
     total_portfolio['positions'] = list(all_positions.values())
     chart_data = db.get_multi_model_chart_data(limit=100)
@@ -1757,10 +1860,13 @@ def get_settings():
     获取系统设置
     
     Returns:
-        JSON: 系统设置信息，包括交易频率、手续费率等
+        JSON: 系统设置信息，包括交易频率、手续费率、交易记录显示数量等
     """
     try:
         settings = db.get_settings()
+        # 添加config.py中的配置值
+        settings['trades_display_count'] = getattr(app_config, 'TRADES_DISPLAY_COUNT', 5)
+        settings['trades_query_limit'] = getattr(app_config, 'TRADES_QUERY_LIMIT', 10)
         return jsonify(settings)
     except Exception as e:
         return jsonify({'error': str(e)}), 500
@@ -1774,6 +1880,7 @@ def update_settings():
         trading_frequency_minutes (int, optional): 交易频率（分钟），默认60
         trading_fee_rate (float, optional): 手续费率，默认0.001
         show_system_prompt (bool, optional): 是否显示系统提示，默认False
+        conversation_limit (int, optional): AI对话显示数量限制，默认5
     
     Returns:
         JSON: 更新操作结果
@@ -1783,11 +1890,13 @@ def update_settings():
         trading_frequency_minutes = int(data.get('trading_frequency_minutes', 60))
         trading_fee_rate = float(data.get('trading_fee_rate', 0.001))
         show_system_prompt = 1 if data.get('show_system_prompt') in (True, 1, '1', 'true', 'True') else 0
+        conversation_limit = int(data.get('conversation_limit', 5))
 
         success = db.update_settings(
             trading_frequency_minutes,
             trading_fee_rate,
-            show_system_prompt
+            show_system_prompt,
+            conversation_limit
         )
 
         if success:

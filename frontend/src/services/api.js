@@ -36,8 +36,9 @@ export const modelApi = {
 
   /**
    * 获取模型交易记录
+   * 注意：后端限制查询数量为10条（从配置读取），前端只显示前5条（从配置读取）
    */
-  getTrades: (modelId, limit = 50) => apiGet(`/api/models/${modelId}/trades`, { limit }),
+  getTrades: (modelId, limit = 10) => apiGet(`/api/models/${modelId}/trades`, { limit }),
 
   /**
    * 获取模型对话记录

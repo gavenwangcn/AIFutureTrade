@@ -963,13 +963,20 @@ class BinanceFuturesOrderClient:
 
     # ============ 交易方法 ============
     
-    def _execute_order(self, order_params: Dict[str, Any], context: str = "交易") -> Dict[str, Any]:
+    def _execute_order(self, order_params: Dict[str, Any], context: str = "交易", 
+                      model_id: Optional[str] = None, conversation_id: Optional[str] = None,
+                      trade_id: Optional[str] = None, method_name: str = "", db = None) -> Dict[str, Any]:
         """
         执行订单的统一方法，根据配置选择使用测试接口或真实交易接口
         
         Args:
             order_params: 订单参数字典（包含完整的订单参数）
             context: 上下文信息，用于日志记录
+            model_id: 模型ID (UUID字符串)，用于日志记录
+            conversation_id: 对话ID (UUID字符串)，用于日志记录
+            trade_id: 交易ID (UUID字符串)，用于日志记录
+            method_name: 方法名称，用于日志记录
+            db: 数据库实例，用于记录日志
             
         Returns:
             订单响应数据
@@ -1005,50 +1012,171 @@ class BinanceFuturesOrderClient:
         # 【交易模式切换】根据配置选择使用测试接口或真实交易接口
         trade_mode = getattr(app_config, 'BINANCE_TRADE_MODE', 'test').lower()
         
-        if trade_mode == 'test':
-            # 使用测试接口（不会真实下单）
-            logger.info(f"[Binance Futures] [{context}] 使用测试接口下单（不会真实成交）")
-            # test_order接口只需要symbol、side、type三个基本参数
-            # 从order_params中提取side值（可能是枚举值或字符串）
-            side_value = order_params.get("side")
-            if side_value is None:
-                side_str = "BUY"
-            elif hasattr(side_value, 'value'):
-                # 如果是枚举值，提取其字符串值
-                side_str = str(side_value.value).upper()
-            else:
-                side_str = str(side_value).upper()
-            
-            # 使用TestOrderSideEnum转换side参数
-            if TestOrderSideEnum and side_str in TestOrderSideEnum.__members__:
-                test_side = TestOrderSideEnum[side_str].value
-            else:
-                test_side = side_str
-            
-            test_params = {
-                "symbol": order_params.get("symbol"),
-                "side": test_side,
-                "type": order_params.get("type"),
-            }
-            response = self._rest.test_order(**test_params)
-            logger.info(f"[Binance Futures] [{context}] 测试接口调用成功（未真实下单）")
-            response_context = "test_order"
-        else:
-            # 使用真实交易接口
-            logger.info(f"[Binance Futures] [{context}] 使用真实交易接口下单")
-            response = self._rest.new_order(**order_params)
-            response_context = "new_order"
+        # 初始化响应相关变量
+        response = None
+        response_dict = {}
+        response_type = "200"  # 默认成功状态码
+        error_context = None
         
-        # 处理响应
-        data = response.data()
-        logger.info(f"[Binance Futures] [{context}] 订单执行成功: {data}")
+        try:
+            if trade_mode == 'test':
+                # 使用测试接口（不会真实下单）
+                logger.info(f"[Binance Futures] [{context}] 使用测试接口下单（不会真实成交）")
+                # test_order接口只需要symbol、side、type三个基本参数
+                # 从order_params中提取side值（可能是枚举值或字符串）
+                side_value = order_params.get("side")
+                if side_value is None:
+                    side_str = "BUY"
+                elif hasattr(side_value, 'value'):
+                    # 如果是枚举值，提取其字符串值
+                    side_str = str(side_value.value).upper()
+                else:
+                    side_str = str(side_value).upper()
+                
+                # 使用TestOrderSideEnum转换side参数
+                if TestOrderSideEnum and side_str in TestOrderSideEnum.__members__:
+                    test_side = TestOrderSideEnum[side_str].value
+                else:
+                    test_side = side_str
+                
+                test_params = {
+                    "symbol": order_params.get("symbol"),
+                    "side": test_side,
+                    "type": order_params.get("type"),
+                }
+                response = self._rest.test_order(**test_params)
+                logger.info(f"[Binance Futures] [{context}] 测试接口调用成功（未真实下单）")
+                response_context = "test_order"
+            else:
+                # 使用真实交易接口
+                logger.info(f"[Binance Futures] [{context}] 使用真实交易接口下单")
+                response = self._rest.new_order(**order_params)
+                response_context = "new_order"
+            
+            # 处理响应
+            data = response.data()
+            logger.info(f"[Binance Futures] [{context}] 订单执行成功: {data}")
+            
+            # 将响应数据转换为字典
+            response_dict = self._flatten_to_dicts(data, response_context)[0] if data else {}
+            
+            # 尝试从响应对象中获取状态码
+            if response and hasattr(response, 'status_code'):
+                response_type = str(response.status_code)
+            elif response and hasattr(response, 'status'):
+                response_type = str(response.status)
+            else:
+                response_type = "200"  # 默认成功
+            
+        except Exception as e:
+            # 捕获异常，提取状态码和错误信息
+            error_context = str(e)
+            logger.error(f"[Binance Futures] [{context}] 订单执行失败: {e}", exc_info=True)
+            
+            # 尝试从异常中提取状态码
+            if hasattr(e, 'status_code'):
+                response_type = str(e.status_code)
+            elif hasattr(e, 'status'):
+                response_type = str(e.status)
+            elif hasattr(e, 'code'):
+                response_type = str(e.code)
+            else:
+                # 根据异常类型推断状态码
+                error_type = type(e).__name__
+                if '4' in error_type or 'BadRequest' in error_type or 'Unauthorized' in error_type or 'Forbidden' in error_type or 'NotFound' in error_type:
+                    response_type = "4XX"
+                elif '5' in error_type or 'Server' in error_type:
+                    response_type = "5XX"
+                else:
+                    response_type = "ERROR"
+            
+            # 记录错误响应（如果有的话）
+            try:
+                if hasattr(e, 'response') and e.response:
+                    error_response = getattr(e.response, 'data', None) or getattr(e.response, 'text', None) or str(e.response)
+                    if error_response and error_response != error_context:
+                        error_context = f"{error_context} | Response: {error_response}"
+            except:
+                pass
+            
+            # 记录日志后再重新抛出异常，让调用者处理
+            # 【记录日志到数据库】如果提供了db实例和相关参数，则记录日志
+            if db and method_name:
+                try:
+                    # 将order_params中的枚举值转换为可序列化的格式
+                    serializable_params = {}
+                    for key, value in order_params.items():
+                        if hasattr(value, 'value'):
+                            # 如果是枚举值，提取其字符串值
+                            serializable_params[key] = str(value.value)
+                        elif hasattr(value, '__dict__'):
+                            # 如果是对象，尝试转换为字典
+                            try:
+                                serializable_params[key] = str(value)
+                            except:
+                                serializable_params[key] = repr(value)
+                        else:
+                            serializable_params[key] = value
+                    
+                    # 记录日志（包括状态码和错误信息）
+                    db.add_binance_trade_log(
+                        model_id=model_id,
+                        conversation_id=conversation_id,
+                        trade_id=trade_id,
+                        type=trade_mode,  # 'test' 或 'real'
+                        method_name=method_name,
+                        param=serializable_params,
+                        response_context={},  # 异常时没有响应内容
+                        response_type=response_type,
+                        error_context=error_context
+                    )
+                except Exception as log_err:
+                    # 日志记录失败不影响主流程
+                    logger.warning(f"[Binance Futures] [{context}] 记录日志失败: {log_err}")
+            
+            # 重新抛出异常，让调用者处理
+            raise
         
-        return self._flatten_to_dicts(data, response_context)[0] if data else {}
+        # 【记录日志到数据库】如果提供了db实例和相关参数，则记录日志（成功情况）
+        if db and method_name:
+            try:
+                # 将order_params中的枚举值转换为可序列化的格式
+                serializable_params = {}
+                for key, value in order_params.items():
+                    if hasattr(value, 'value'):
+                        # 如果是枚举值，提取其字符串值
+                        serializable_params[key] = str(value.value)
+                    elif hasattr(value, '__dict__'):
+                        # 如果是对象，尝试转换为字典
+                        try:
+                            serializable_params[key] = str(value)
+                        except:
+                            serializable_params[key] = repr(value)
+                    else:
+                        serializable_params[key] = value
+                
+                # 记录日志（包括状态码和错误信息）
+                db.add_binance_trade_log(
+                    model_id=model_id,
+                    conversation_id=conversation_id,
+                    trade_id=trade_id,
+                    type=trade_mode,  # 'test' 或 'real'
+                    method_name=method_name,
+                    param=serializable_params,
+                    response_context=response_dict,
+                    response_type=response_type,
+                    error_context=error_context
+                )
+            except Exception as log_err:
+                # 日志记录失败不影响主流程
+                logger.warning(f"[Binance Futures] [{context}] 记录日志失败: {log_err}")
+        
+        return response_dict
 
     # ============ 交易订单方法 ============
     # 提供各种类型的交易订单功能：止损、止盈、跟踪买入、平仓等
     
-    def stop_loss_trade(self, symbol: str, side: str, order_type: str = "STOP", quantity: Optional[float] = None, price: Optional[float] = None, stop_price: Optional[float] = None, position_side: Optional[str] = None, **kwargs) -> Dict[str, Any]:
+    def stop_loss_trade(self, symbol: str, side: str, order_type: str = "STOP", quantity: Optional[float] = None, price: Optional[float] = None, stop_price: Optional[float] = None, position_side: Optional[str] = None, model_id: Optional[str] = None, conversation_id: Optional[str] = None, trade_id: Optional[str] = None, db = None, **kwargs) -> Dict[str, Any]:
         """
         止损交易 - 使用STOP或STOP_MARKET订单类型
         
@@ -1130,13 +1258,15 @@ class BinanceFuturesOrderClient:
             order_params.update(kwargs)
             
             # 【统一订单执行】使用辅助方法处理测试/真实交易切换
-            return self._execute_order(order_params, context="止损交易")
+            return self._execute_order(order_params, context="止损交易", 
+                                      model_id=model_id, conversation_id=conversation_id, 
+                                      trade_id=trade_id, method_name="stop_loss_trade", db=db)
             
         except Exception as exc:
             logger.error(f"[Binance Futures] 止损交易失败: {exc}", exc_info=True)
             raise
 
-    def take_profit_trade(self, symbol: str, side: str, order_type: str = "TAKE_PROFIT", quantity: Optional[float] = None, price: Optional[float] = None, stop_price: Optional[float] = None, position_side: Optional[str] = None, **kwargs) -> Dict[str, Any]:
+    def take_profit_trade(self, symbol: str, side: str, order_type: str = "TAKE_PROFIT", quantity: Optional[float] = None, price: Optional[float] = None, stop_price: Optional[float] = None, position_side: Optional[str] = None, model_id: Optional[str] = None, conversation_id: Optional[str] = None, trade_id: Optional[str] = None, db = None, **kwargs) -> Dict[str, Any]:
         """
         止盈交易 - 使用TAKE_PROFIT或TAKE_PROFIT_MARKET订单类型
         
@@ -1217,15 +1347,17 @@ class BinanceFuturesOrderClient:
             order_params.update(kwargs)
             
             # 【统一订单执行】使用辅助方法处理测试/真实交易切换
-            return self._execute_order(order_params, context="止盈交易")
+            return self._execute_order(order_params, context="止盈交易",
+                                      model_id=model_id, conversation_id=conversation_id,
+                                      trade_id=trade_id, method_name="take_profit_trade", db=db)
             
         except Exception as exc:
             logger.error(f"[Binance Futures] 止盈交易失败: {exc}", exc_info=True)
             raise
 
-    def trailing_stop_market_trade(self, symbol: str, side: str, callback_rate: float = 1.0, position_side: Optional[str] = None, **kwargs) -> Dict[str, Any]:
+    def trailing_stop_market_trade(self, symbol: str, side: str, callback_rate: float = 1.0, position_side: Optional[str] = None, model_id: Optional[str] = None, conversation_id: Optional[str] = None, trade_id: Optional[str] = None, db = None, **kwargs) -> Dict[str, Any]:
         """
-        市场价格交易- 使用TRAILING_STOP_MARKET订单类型
+        市场价格买入- 使用TRAILING_STOP_MARKET订单类型
         
         【position_side参数说明】
         在双向持仓模式下，此参数为必填项，用于指定持仓方向：
@@ -1274,13 +1406,15 @@ class BinanceFuturesOrderClient:
             order_params.update(kwargs)
             
             # 【统一订单执行】使用辅助方法处理测试/真实交易切换
-            return self._execute_order(order_params, context="跟踪买入交易")
+            return self._execute_order(order_params, context="跟踪买入交易",
+                                      model_id=model_id, conversation_id=conversation_id,
+                                      trade_id=trade_id, method_name="trailing_stop_market_trade", db=db)
             
         except Exception as exc:
             logger.error(f"[Binance Futures] 跟踪止损交易失败: {exc}", exc_info=True)
             raise
 
-    def close_position_trade(self, symbol: str, side: str, order_type: str="STOP_MARKET", stop_price: Optional[float] = None, position_side: Optional[str] = None, **kwargs) -> Dict[str, Any]:
+    def close_position_trade(self, symbol: str, side: str, order_type: str="STOP_MARKET", stop_price: Optional[float] = None, position_side: Optional[str] = None, model_id: Optional[str] = None, conversation_id: Optional[str] = None, trade_id: Optional[str] = None, db = None, **kwargs) -> Dict[str, Any]:
         """
         平仓交易 - 使用STOP_MARKET或TAKE_PROFIT_MARKET订单类型配合closePosition=true
         
@@ -1349,7 +1483,9 @@ class BinanceFuturesOrderClient:
             order_params.update(kwargs)
             
             # 【统一订单执行】使用辅助方法处理测试/真实交易切换
-            return self._execute_order(order_params, context="平仓交易")
+            return self._execute_order(order_params, context="平仓交易",
+                                      model_id=model_id, conversation_id=conversation_id,
+                                      trade_id=trade_id, method_name="close_position_trade", db=db)
             
         except Exception as exc:
             logger.error(f"[Binance Futures] 平仓交易失败: {exc}", exc_info=True)

@@ -1957,6 +1957,13 @@ class TradingEngine:
         else:  # SHORT
             trailing_stop_side = 'BUY'  # 保护SHORT持仓使用BUY方向
         
+        # 【获取model_uuid用于日志记录】
+        model_mapping = self.db._get_model_id_mapping()
+        model_uuid = model_mapping.get(self.model_id)
+        
+        # 【提前生成trade_id用于日志记录】
+        trade_id = self.db._generate_id()
+        
         # 【调用SDK执行交易】使用trailing_stop_market_trade
         # 注意：trailing_stop_market_trade是用于保护已有持仓的，不是用于开仓的
         # 但按照用户要求，buy操作对应trailing_stop_market_trade
@@ -1979,7 +1986,10 @@ class TradingEngine:
                     symbol=symbol,
                     side=trailing_stop_side,  # 根据position_side动态决定保护方向
                     callback_rate=callback_rate,
-                    position_side=position_side  # 使用根据signal自动确定的position_side
+                    position_side=position_side,  # 使用根据signal自动确定的position_side
+                    model_id=model_uuid,
+                    trade_id=trade_id,
+                    db=self.db
                 )
                 
                 # 【调用后日志】记录接口返回内容
@@ -2012,11 +2022,13 @@ class TradingEngine:
             trade_side = 'sell'  # 开空仓
         
         # 【记录交易】根据signal记录到trades表（buy_to_enter 或 sell_to_enter）
+        # 使用提前生成的trade_id
         logger.info(f"TRADE: PENDING - Model {self.model_id} {trade_signal.upper()} {symbol} position_side={position_side} qty={quantity} price={price} fee={trade_fee}")
         try:
-            self.db.add_trade(
-                self.model_id, symbol, trade_signal, quantity,  # 使用根据signal确定的trade_signal（buy_to_enter或sell_to_enter）
-                price, leverage, trade_side, pnl=0, fee=trade_fee  # 使用根据position_side确定的trade_side
+            self.db.insert_rows(
+                self.db.trades_table,
+                [[trade_id, model_uuid, symbol.upper(), trade_signal, quantity, price, leverage, trade_side, 0, trade_fee, datetime.now(timezone(timedelta(hours=8))).replace(tzinfo=None)]],
+                ["id", "model_id", "future", "signal", "quantity", "price", "leverage", "side", "pnl", "fee", "timestamp"]
             )
         except Exception as db_err:
             logger.error(f"TRADE: Add trade failed ({trade_signal.upper()}) model={self.model_id} future={symbol}: {db_err}")
@@ -2098,6 +2110,13 @@ class TradingEngine:
         else:  # SHORT
             side_for_trade = 'BUY'  # 平空仓需要买入
 
+        # 【获取model_uuid用于日志记录】
+        model_mapping = self.db._get_model_id_mapping()
+        model_uuid = model_mapping.get(self.model_id)
+        
+        # 【提前生成trade_id用于日志记录】
+        trade_id = self.db._generate_id()
+        
         # 【调用SDK执行交易】使用close_position_trade
         # 注意：close_position_trade只支持STOP_MARKET或TAKE_PROFIT_MARKET，不支持MARKET
         # 对于立即平仓，使用当前价格作为stop_price的STOP_MARKET订单
@@ -2117,7 +2136,10 @@ class TradingEngine:
                     side=side_for_trade,
                     order_type='STOP_MARKET',
                     stop_price=current_price,  # 使用当前价格作为触发价格，实现立即平仓
-                    position_side=position_side
+                    position_side=position_side,
+                    model_id=model_uuid,
+                    trade_id=trade_id,
+                    db=self.db
                 )
                 
                 # 【调用后日志】记录接口返回内容
@@ -2138,13 +2160,14 @@ class TradingEngine:
             logger.error(f"TRADE: Close position failed model={self.model_id} future={symbol}: {db_err}")
             raise
         
-        # Record trade
+        # Record trade（使用提前生成的trade_id）
         logger.info(f"TRADE: PENDING - Model {self.model_id} CLOSE {symbol} position_side={position_side} position_amt={position_amt} price={current_price} fee={trade_fee} net_pnl={net_pnl}")
         try:
             # 【记录到trades表】side字段使用position_side的反向
-            self.db.add_trade(
-                self.model_id, symbol, 'close_position', position_amt,
-                current_price, position.get('leverage', 1), side_for_trade.lower(), pnl=net_pnl, fee=trade_fee
+            self.db.insert_rows(
+                self.db.trades_table,
+                [[trade_id, model_uuid, symbol.upper(), 'close_position', position_amt, current_price, position.get('leverage', 1), side_for_trade.lower(), net_pnl, trade_fee, datetime.now(timezone(timedelta(hours=8))).replace(tzinfo=None)]],
+                ["id", "model_id", "future", "signal", "quantity", "price", "leverage", "side", "pnl", "fee", "timestamp"]
             )
         except Exception as db_err:
             logger.error(f"TRADE: Add trade failed (CLOSE) model={self.model_id} future={symbol}: {db_err}")
@@ -2212,6 +2235,13 @@ class TradingEngine:
         else:  # SHORT
             side_for_trade = 'BUY'  # 平空仓需要买入
         
+        # 【获取model_uuid用于日志记录】
+        model_mapping = self.db._get_model_id_mapping()
+        model_uuid = model_mapping.get(self.model_id)
+        
+        # 【提前生成trade_id用于日志记录】
+        trade_id = self.db._generate_id()
+        
         # 【调用SDK执行交易】使用stop_loss_trade
         sdk_response = None
         # 【每次创建新的Binance订单客户端】确保使用最新的model对应的api_key和api_secret
@@ -2229,7 +2259,10 @@ class TradingEngine:
                     side=side_for_trade,
                     order_type='STOP_MARKET',  # 使用STOP_MARKET类型，只需要stop_price
                     stop_price=stop_price,
-                    position_side=position_side
+                    position_side=position_side,
+                    model_id=model_uuid,
+                    trade_id=trade_id,
+                    db=self.db
                 )
                 
                 # 【调用后日志】记录接口返回内容
@@ -2247,13 +2280,15 @@ class TradingEngine:
         trade_amount = position_amt * stop_price
         trade_fee = trade_amount * self.trade_fee_rate
         
-        # 记录止损单到trades表
+        # 记录止损单到trades表（使用提前生成的trade_id）
         logger.info(f"TRADE: PENDING - Model {self.model_id} STOP_LOSS {symbol} position_side={position_side} position_amt={position_amt} stop_price={stop_price}")
         try:
             # 【记录到trades表】side字段使用position_side的反向
-            self.db.add_trade(
-                self.model_id, symbol, 'stop_loss', position_amt,
-                stop_price, position.get('leverage', 1), side_for_trade.lower(), pnl=0, fee=trade_fee
+            # 注意：这里需要修改add_trade方法支持传入trade_id，或者使用其他方式
+            self.db.insert_rows(
+                self.db.trades_table,
+                [[trade_id, model_uuid, symbol.upper(), 'stop_loss', position_amt, stop_price, position.get('leverage', 1), side_for_trade.lower(), 0, trade_fee, datetime.now(timezone(timedelta(hours=8))).replace(tzinfo=None)]],
+                ["id", "model_id", "future", "signal", "quantity", "price", "leverage", "side", "pnl", "fee", "timestamp"]
             )
         except Exception as db_err:
             logger.error(f"TRADE: Add trade failed (STOP_LOSS) model={self.model_id} symbol={symbol}: {db_err}")
@@ -2322,6 +2357,13 @@ class TradingEngine:
         else:  # SHORT
             side_for_trade = 'BUY'  # 平空仓需要买入
         
+        # 【获取model_uuid用于日志记录】
+        model_mapping = self.db._get_model_id_mapping()
+        model_uuid = model_mapping.get(self.model_id)
+        
+        # 【提前生成trade_id用于日志记录】
+        trade_id = self.db._generate_id()
+        
         # 【调用SDK执行交易】使用take_profit_trade
         sdk_response = None
         # 【每次创建新的Binance订单客户端】确保使用最新的model对应的api_key和api_secret
@@ -2339,7 +2381,10 @@ class TradingEngine:
                     side=side_for_trade,
                     order_type='TAKE_PROFIT_MARKET',  # 使用TAKE_PROFIT_MARKET类型，只需要stop_price
                     stop_price=stop_price,
-                    position_side=position_side
+                    position_side=position_side,
+                    model_id=model_uuid,
+                    trade_id=trade_id,
+                    db=self.db
                 )
                 
                 # 【调用后日志】记录接口返回内容
@@ -2357,13 +2402,14 @@ class TradingEngine:
         trade_amount = position_amt * stop_price
         trade_fee = trade_amount * self.trade_fee_rate
         
-        # 记录止盈单到trades表
+        # 记录止盈单到trades表（使用提前生成的trade_id）
         logger.info(f"TRADE: PENDING - Model {self.model_id} TAKE_PROFIT {symbol} position_side={position_side} position_amt={position_amt} stop_price={stop_price}")
         try:
             # 【记录到trades表】side字段使用position_side的反向
-            self.db.add_trade(
-                self.model_id, symbol, 'take_profit', position_amt,
-                stop_price, position.get('leverage', 1), side_for_trade.lower(), pnl=0, fee=trade_fee
+            self.db.insert_rows(
+                self.db.trades_table,
+                [[trade_id, model_uuid, symbol.upper(), 'take_profit', position_amt, stop_price, position.get('leverage', 1), side_for_trade.lower(), 0, trade_fee, datetime.now(timezone(timedelta(hours=8))).replace(tzinfo=None)]],
+                ["id", "model_id", "future", "signal", "quantity", "price", "leverage", "side", "pnl", "fee", "timestamp"]
             )
         except Exception as db_err:
             logger.error(f"TRADE: Add trade failed (TAKE_PROFIT) model={self.model_id} symbol={symbol}: {db_err}")

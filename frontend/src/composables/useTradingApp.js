@@ -5,7 +5,7 @@
 
 import { ref, computed, nextTick, onUnmounted } from 'vue'
 import { createSocketConnection } from '../utils/websocket.js'
-import { modelApi, marketApi } from '../services/api.js'
+import { modelApi, marketApi, settingsApi } from '../services/api.js'
 import * as echarts from 'echarts'
 
 export function useTradingApp() {
@@ -49,9 +49,16 @@ export function useTradingApp() {
   const aggregatedChartData = ref([]) // 聚合视图图表数据
   const positions = ref([])
   const trades = ref([])
+  const allTrades = ref([])  // 存储所有从后端获取的交易记录
+  const tradesDisplayCount = ref(5)  // 前端显示的交易记录数量（从配置读取，默认5条）
   const conversations = ref([])
   const modelPortfolioSymbols = ref([]) // 模型持仓合约列表
 const lastPortfolioSymbolsRefreshTime = ref(null) // 持仓合约列表最后刷新时间
+  
+  // 系统设置状态
+  const settings = ref({
+    show_system_prompt: false  // 默认不显示系统提示词
+  })
   
   // MySQL 涨幅榜同步状态
   const mysqlLeaderboardSyncRunning = ref(true)
@@ -751,14 +758,18 @@ let portfolioSymbolsRefreshInterval = null // 模型持仓合约列表自动刷�
         }
       })
       
+      // 处理时间轴：account_values表存储的是UTC时间，需要转换为本地时间
       const timeAxis = Array.from(allTimestamps).sort((a, b) => {
+        // account_values表存储的是UTC时间，添加Z表示UTC
         const timeA = new Date(a.replace(' ', 'T') + 'Z').getTime()
         const timeB = new Date(b.replace(' ', 'T') + 'Z').getTime()
         return timeA - timeB
       })
       
       const formattedTimeAxis = timeAxis.map(timestamp => {
-        return new Date(timestamp.replace(' ', 'T') + 'Z').toLocaleTimeString('zh-CN', {
+        // account_values表存储的是UTC时间，转换为本地时间（北京时间）
+        const utcDate = new Date(timestamp.replace(' ', 'T') + 'Z')
+        return utcDate.toLocaleTimeString('zh-CN', {
           timeZone: 'Asia/Shanghai',
           hour: '2-digit',
           minute: '2-digit'
@@ -859,14 +870,18 @@ let portfolioSymbolsRefreshInterval = null // 模型持仓合约列表自动刷�
         return
       }
       
-      const data = history.reverse().map(h => ({
-        time: new Date(h.timestamp.replace(' ', 'T') + 'Z').toLocaleTimeString('zh-CN', {
-          timeZone: 'Asia/Shanghai',
-          hour: '2-digit',
-          minute: '2-digit'
-        }),
-        value: h.balance || h.total_value || 0  // 使用新字段名balance，兼容旧字段名total_value
-      }))
+      // account_values表存储的是UTC时间，需要转换为本地时间（北京时间）
+      const data = history.reverse().map(h => {
+        const utcDate = new Date(h.timestamp.replace(' ', 'T') + 'Z')
+        return {
+          time: utcDate.toLocaleTimeString('zh-CN', {
+            timeZone: 'Asia/Shanghai',
+            hour: '2-digit',
+            minute: '2-digit'
+          }),
+          value: h.balance || h.total_value || 0  // 使用新字段名balance，兼容旧字段名total_value
+        }
+      })
       
       if (currentValue !== undefined && currentValue !== null) {
         const now = new Date()
@@ -982,6 +997,7 @@ let portfolioSymbolsRefreshInterval = null // 模型持仓合约列表自动刷�
 
   /**
    * 加载交易记录
+   * 后端查询10条，前端只显示前5条（可配置）
    */
   const loadTrades = async () => {
     if (!currentModelId.value) return
@@ -994,29 +1010,63 @@ let portfolioSymbolsRefreshInterval = null // 模型持仓合约列表自动刷�
       const tradesList = Array.isArray(data) ? data : (data.trades || [])
       // 映射数据格式以匹配前端显示
       // 注意：trades表仍使用future和quantity字段，这里需要兼容
-      trades.value = tradesList.map(trade => ({
+      allTrades.value = tradesList.map(trade => ({
         id: trade.id || `${trade.timestamp}_${trade.future || trade.symbol || ''}`,
         time: trade.timestamp || '',
         symbol: trade.future || trade.symbol || '',  // trades表使用future字段
-        side: trade.signal || '',
+        signal: trade.signal || '',  // 使用signal字段
+        side: trade.signal || '',  // 兼容旧代码，保留side字段
         quantity: trade.quantity || 0,  // trades表使用quantity字段
         price: trade.price || 0,
-        pnl: trade.pnl || 0,
+        current_price: trade.current_price || 0,  // 实时价格（如果有）
+        pnl: trade.pnl || 0,  // 盈亏（已根据实时价格计算）
         fee: trade.fee || 0,
         // 保留原始数据
         ...trade
       }))
+      
+      // 只显示前N条（从配置读取，默认5条）
+      trades.value = allTrades.value.slice(0, tradesDisplayCount.value)
     } catch (error) {
       console.error('[TradingApp] Error loading trades:', error)
       errors.value.trades = error.message
+      trades.value = []
+      allTrades.value = []
     } finally {
       loading.value.trades = false
     }
   }
 
   /**
+   * 加载系统设置
+   */
+  const loadSettings = async () => {
+    try {
+      const data = await settingsApi.get()
+      settings.value = {
+        show_system_prompt: Boolean(data.show_system_prompt || false),
+        conversation_limit: parseInt(data.conversation_limit || 5)
+      }
+      // 从配置读取交易记录显示数量
+      if (data.trades_display_count !== undefined) {
+        tradesDisplayCount.value = parseInt(data.trades_display_count) || 5
+      }
+      console.log('[TradingApp] Settings loaded:', settings.value, 'tradesDisplayCount:', tradesDisplayCount.value)
+    } catch (error) {
+      console.error('[TradingApp] Error loading settings:', error)
+      // 使用默认值
+      settings.value = {
+        show_system_prompt: false,
+        conversation_limit: 5
+      }
+      tradesDisplayCount.value = 5
+    }
+  }
+
+  /**
    * 加载对话记录
    * 只加载当前选中模型（currentModelId）的对话记录
+   * 使用settings中的conversation_limit作为查询限制
    */
   const loadConversations = async () => {
     if (!currentModelId.value) {
@@ -1032,7 +1082,10 @@ let portfolioSymbolsRefreshInterval = null // 模型持仓合约列表自动刷�
     const requestedModelId = currentModelId.value
     
     try {
-      const data = await modelApi.getConversations(requestedModelId)
+      // 从已加载的settings获取conversation_limit，如果没有则使用默认值5
+      const conversationLimit = settings.value.conversation_limit || 5
+      
+      const data = await modelApi.getConversations(requestedModelId, conversationLimit)
       
       // 检查在请求期间 model_id 是否已切换
       if (currentModelId.value !== requestedModelId) {
@@ -1098,6 +1151,10 @@ let portfolioSymbolsRefreshInterval = null // 模型持仓合约列表自动刷�
   const initApp = async () => {
     try {
       console.log('[TradingApp] 🚀 开始初始化应用...')
+      
+      // 先加载系统设置
+      console.log('[TradingApp] 加载系统设置...')
+      await loadSettings()
       
       // 先初始化 WebSocket（确保连接建立）
       console.log('[TradingApp] 初始化 WebSocket 连接...')
@@ -1610,7 +1667,39 @@ let portfolioSymbolsRefreshInterval = null // 模型持仓合约列表自动刷�
   }
 
   /**
+   * 格式化交易信号（翻译成中文）
+   */
+  const formatSignal = (signal) => {
+    if (!signal) return '未知'
+    const signalMap = {
+      'buy_to_enter': '开多',
+      'sell_to_enter': '开空',
+      'close_position': '平仓',
+      'stop_loss': '止损',
+      'take_profit': '止盈'
+    }
+    return signalMap[signal] || signal
+  }
+  
+  /**
+   * 获取交易信号的样式类
+   */
+  const getSignalBadgeClass = (signal) => {
+    if (!signal) return 'badge-close'
+    const classMap = {
+      'buy_to_enter': 'badge-buy',
+      'sell_to_enter': 'badge-sell',
+      'close_position': 'badge-close',
+      'stop_loss': 'badge-stop',
+      'take_profit': 'badge-profit'
+    }
+    return classMap[signal] || 'badge-close'
+  }
+
+  /**
    * 格式化时间
+   * 注意：数据库存储的是UTC+8时区（北京时间）的naive datetime
+   * 前端应该将其当作本地时间（北京时间）处理，不需要再进行时区转换
    */
   const formatTime = (timestamp) => {
     if (!timestamp) return ''
@@ -1621,12 +1710,24 @@ let portfolioSymbolsRefreshInterval = null // 模型持仓合约列表自动刷�
     try {
       if (typeof timestamp === 'string') {
         // 处理 MySQL DATETIME 格式 "2024-01-01 12:00:00"
+        // 数据库存储的是UTC+8时区的naive datetime，应该当作本地时间处理
         if (timestamp.match(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}/)) {
-          // MySQL DATETIME 格式，转换为 ISO 格式并添加时区
-          date = new Date(timestamp.replace(' ', 'T') + '+08:00')
+          // MySQL DATETIME 格式，数据库存储的是北京时间（UTC+8），直接解析为本地时间
+          // 不添加时区偏移，因为数据库已经存储的是北京时间
+          const [datePart, timePart] = timestamp.split(' ')
+          const [year, month, day] = datePart.split('-').map(Number)
+          const [hour, minute, second] = timePart.split(':').map(Number)
+          // 使用本地时间创建Date对象（不进行UTC转换）
+          date = new Date(year, month - 1, day, hour, minute, second || 0)
         } else if (timestamp.includes('T')) {
-          // 已经是 ISO 格式
-          date = new Date(timestamp)
+          // ISO 格式，检查是否包含时区信息
+          if (timestamp.includes('+') || timestamp.includes('Z') || timestamp.match(/[+-]\d{2}:\d{2}$/)) {
+            // 包含时区信息，直接解析
+            date = new Date(timestamp)
+          } else {
+            // 不包含时区信息，当作本地时间处理
+            date = new Date(timestamp)
+          }
         } else {
           // 尝试直接解析
           date = new Date(timestamp)
@@ -1644,8 +1745,9 @@ let portfolioSymbolsRefreshInterval = null // 模型持仓合约列表自动刷�
         return ''
       }
       
+      // 直接格式化为本地时间字符串，不进行时区转换
+      // 因为数据库存储的就是北京时间，前端显示也应该显示为北京时间
       return date.toLocaleString('zh-CN', { 
-        timeZone: 'Asia/Shanghai',
         year: 'numeric',
         month: '2-digit',
         day: '2-digit',
@@ -1734,6 +1836,7 @@ let portfolioSymbolsRefreshInterval = null // 模型持仓合约列表自动刷�
     positions,
     trades,
     conversations,
+    settings,
     modelPortfolioSymbols,
     lastPortfolioSymbolsRefreshTime,
     loggerEnabled,
@@ -1797,6 +1900,8 @@ let portfolioSymbolsRefreshInterval = null // 模型持仓合约列表自动刷�
     getPnlClass,
     formatVolumeChinese,
     formatTime,
+    formatSignal,
+    getSignalBadgeClass,
     
     // 数据加载方法（供外部调用）
     loadModels,
@@ -1811,6 +1916,7 @@ let portfolioSymbolsRefreshInterval = null // 模型持仓合约列表自动刷�
     loadTrades,
     loadConversations,
     loadModelPortfolioSymbols,
+    loadSettings,
     
     // 市场行情价格自动刷新方法
     startMarketPricesAutoRefresh,

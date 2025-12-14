@@ -439,20 +439,8 @@
                     <td>{{ formatTime(trade.time || trade.timestamp) }}</td>
                     <td><strong>{{ trade.future || trade.symbol }}</strong></td>
                     <td>
-                      <span :class="['badge', 
-                        trade.side === 'buy_to_enter' ? 'badge-buy' : 
-                        trade.side === 'sell_to_enter' ? 'badge-sell' : 
-                        trade.side === 'close_position' ? 'badge-close' :
-                        trade.side === 'stop_loss' ? 'badge-stop' :
-                        trade.side === 'take_profit' ? 'badge-profit' :
-                        'badge-close'
-                      ]">
-                        {{ trade.side === 'buy_to_enter' ? '开多' : 
-                           trade.side === 'sell_to_enter' ? '开空' : 
-                           trade.side === 'close_position' ? '平仓' :
-                           trade.side === 'stop_loss' ? '止损' :
-                           trade.side === 'take_profit' ? '止盈' : 
-                           trade.side || '未知' }}
+                      <span :class="['badge', getSignalBadgeClass(trade.signal || trade.side)]">
+                        {{ formatSignal(trade.signal || trade.side) }}
                       </span>
                     </td>
                     <td>{{ (trade.quantity || 0).toFixed(4) }}</td>
@@ -472,10 +460,10 @@
             <div class="conversations-list">
               <div v-for="conv in conversations" :key="conv.id" class="conversation-item">
                 <div class="conversation-time">{{ formatTime(conv.timestamp || conv.time) }}</div>
-                <div v-if="conv.user_prompt" class="conversation-bubble">
+                <div v-if="conv.user_prompt && settings.show_system_prompt" class="conversation-bubble">
                   <div class="bubble-label">
                     <i class="bi bi-person"></i>
-                    用户
+                    系统提示词
                   </div>
                   <div class="conversation-text">{{ conv.user_prompt }}</div>
                 </div>
@@ -514,7 +502,7 @@
     <SettingsModal
       :visible="showSettingsModal"
       @update:visible="showSettingsModal = $event"
-      @close="showSettingsModal = false"
+      @close="handleSettingsModalClose"
     />
     
     <StrategyModal
@@ -661,6 +649,7 @@ const {
   positions,
   trades,
   conversations,
+  settings,
   loggerEnabled,
   showSettingsModal,
   showStrategyModal,
@@ -715,9 +704,19 @@ const {
   getPnlClass,
   formatVolumeChinese,
   formatTime,
+  formatSignal,
+  getSignalBadgeClass,
   modelPortfolioSymbols,
-  lastPortfolioSymbolsRefreshTime
+  lastPortfolioSymbolsRefreshTime,
+  loadSettings
 } = useTradingApp()
+
+// 处理设置模态框关闭事件
+const handleSettingsModalClose = () => {
+  showSettingsModal.value = false
+  // 重新加载设置，确保显示状态更新
+  loadSettings()
+}
 
 const showKlineChart = ref(false)
 const klineChartSymbol = ref('BTCUSDT')

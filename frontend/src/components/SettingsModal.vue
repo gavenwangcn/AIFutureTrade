@@ -42,6 +42,18 @@
       </div>
       <small class="form-help">开启后，AI对话列表会展示系统提交给模型的提示词。</small>
     </div>
+    <div class="form-group">
+      <label>AI对话显示数量</label>
+      <input
+        v-model.number="formData.conversationLimit"
+        type="number"
+        min="1"
+        max="100"
+        class="form-input"
+        placeholder="5"
+      />
+      <small class="form-help">设置AI对话模块显示的最大对话记录数量（1-100，默认5条）</small>
+    </div>
     <template #footer>
       <button class="btn-secondary" @click="handleCancel">取消</button>
       <button class="btn-primary" @click="handleSave">保存设置</button>
@@ -66,7 +78,8 @@ const emit = defineEmits(['update:visible', 'close'])
 const formData = ref({
   tradingFrequency: 60,
   tradingFeeRate: 0.001,
-  showSystemPrompt: false
+  showSystemPrompt: false,
+  conversationLimit: 5
 })
 
 const loading = ref(false)
@@ -78,7 +91,8 @@ const loadSettings = async () => {
     formData.value = {
       tradingFrequency: data.trading_frequency_minutes || 60,
       tradingFeeRate: data.trading_fee_rate || 0.001,
-      showSystemPrompt: Boolean(data.show_system_prompt)
+      showSystemPrompt: Boolean(data.show_system_prompt),
+      conversationLimit: data.conversation_limit || 5
     }
   } catch (error) {
     console.error('[SettingsModal] Error loading settings:', error)
@@ -93,7 +107,8 @@ const handleSave = async () => {
     await settingsApi.update({
       trading_frequency_minutes: formData.value.tradingFrequency,
       trading_fee_rate: formData.value.tradingFeeRate,
-      show_system_prompt: formData.value.showSystemPrompt
+      show_system_prompt: formData.value.showSystemPrompt,
+      conversation_limit: formData.value.conversationLimit
     })
     alert('设置保存成功')
     emit('update:visible', false)

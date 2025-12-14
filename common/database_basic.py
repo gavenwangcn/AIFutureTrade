@@ -102,6 +102,7 @@ class Database:
         self.futures_table = "futures"
         self.account_asset_table = "account_asset"
         self.asset_table = "asset"
+        self.binance_trade_logs_table = "binance_trade_logs"
     
     def _with_connection(self, func: Callable, *args, **kwargs) -> Any:
         """Execute a function with a MySQL connection from the pool.
@@ -341,6 +342,9 @@ class Database:
         # Asset table
         self._ensure_asset_table()
         
+        # Binance trade logs table
+        self._ensure_binance_trade_logs_table()
+        
         # Insert default settings if no settings exist
         self._init_default_settings()
         
@@ -386,29 +390,6 @@ class Database:
             INDEX `idx_created_at` (`created_at`)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
         """
-        
-        # 如果表已存在但缺少 max_positions 字段，则添加该字段
-        try:
-            # 检查字段是否存在
-            check_column_sql = f"""
-                SELECT COUNT(*) as cnt
-                FROM information_schema.COLUMNS
-                WHERE TABLE_SCHEMA = DATABASE()
-                AND TABLE_NAME = '{self.models_table}'
-                AND COLUMN_NAME = 'max_positions'
-            """
-            result = self.query(check_column_sql)
-            if result and result[0][0] == 0:
-                # 字段不存在，添加字段
-                alter_sql = f"""
-                    ALTER TABLE `{self.models_table}`
-                    ADD COLUMN `max_positions` TINYINT UNSIGNED DEFAULT 3
-                    AFTER `auto_trading_enabled`
-                """
-                self.command(alter_sql)
-                logger.info(f"[Database] Added max_positions column to {self.models_table} table")
-        except Exception as e:
-            logger.warning(f"[Database] Failed to check/add max_positions column: {e}")
         self.command(ddl)
         logger.debug(f"[Database] Ensured table {self.models_table} exists")
     
@@ -495,9 +476,10 @@ class Database:
         ddl = f"""
         CREATE TABLE IF NOT EXISTS `{self.settings_table}` (
             `id` VARCHAR(36) PRIMARY KEY,
-            `trading_frequency_minutes` INT UNSIGNED DEFAULT 60,
-            `trading_fee_rate` DOUBLE DEFAULT 0.001,
+            `trading_frequency_minutes` INT UNSIGNED DEFAULT 5,
+            `trading_fee_rate` DOUBLE DEFAULT 0.002,
             `show_system_prompt` TINYINT UNSIGNED DEFAULT 0,
+            `conversation_limit` INT UNSIGNED DEFAULT 5,
             `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP,
             `updated_at` DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
@@ -617,6 +599,33 @@ class Database:
         self.command(ddl)
         logger.debug(f"[Database] Ensured table {self.asset_table} exists")
     
+    def _ensure_binance_trade_logs_table(self):
+        """Create binance_trade_logs table if not exists"""
+        ddl = f"""
+        CREATE TABLE IF NOT EXISTS `{self.binance_trade_logs_table}` (
+            `id` VARCHAR(36) PRIMARY KEY,
+            `model_id` VARCHAR(36),
+            `conversation_id` VARCHAR(36),
+            `trade_id` VARCHAR(36),
+            `type` VARCHAR(10) NOT NULL COMMENT 'test or real',
+            `method_name` VARCHAR(50) NOT NULL COMMENT 'stop_loss_trade, take_profit_trade, trailing_stop_market_trade, close_position_trade',
+            `param` JSON COMMENT '所有调用接口的入参数，JSON格式存储',
+            `response_context` JSON COMMENT '接口返回的内容，JSON格式',
+            `response_type` VARCHAR(10) COMMENT '接口返回状态码：200, 4XX, 5XX等',
+            `error_context` TEXT COMMENT '接口返回状态不为200时记录相关的返回错误信息',
+            `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP,
+            INDEX `idx_model_id` (`model_id`),
+            INDEX `idx_conversation_id` (`conversation_id`),
+            INDEX `idx_trade_id` (`trade_id`),
+            INDEX `idx_type` (`type`),
+            INDEX `idx_method_name` (`method_name`),
+            INDEX `idx_response_type` (`response_type`),
+            INDEX `idx_created_at` (`created_at`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+        """
+        self.command(ddl)
+        logger.debug(f"[Database] Ensured table {self.binance_trade_logs_table} exists")
+    
     def _init_default_settings(self):
         """Initialize default settings if none exist"""
         try:
@@ -631,7 +640,7 @@ class Database:
                 settings_id = str(uuid.uuid4())
                 self.insert_rows(
                     self.settings_table,
-                    [[settings_id, 60, 0.001, 0, current_time, current_time]],
+                    [[settings_id, 5, 0.002, 0, current_time, current_time]],
                     ["id", "trading_frequency_minutes", "trading_fee_rate", "show_system_prompt", "created_at", "updated_at"]
                 )
                 logger.info("[Database] Default settings initialized")
@@ -1390,6 +1399,44 @@ class Database:
             logger.error(f"[Database] Failed to add conversation: {e}")
             raise
     
+    def add_binance_trade_log(self, model_id: Optional[str] = None, conversation_id: Optional[str] = None, 
+                              trade_id: Optional[str] = None, type: str = "test", method_name: str = "",
+                              param: Optional[Dict[str, Any]] = None, response_context: Optional[Dict[str, Any]] = None,
+                              response_type: Optional[str] = None, error_context: Optional[str] = None):
+        """
+        添加币安交易日志记录
+        
+        Args:
+            model_id: 模型ID (UUID字符串)
+            conversation_id: 对话ID (UUID字符串)
+            trade_id: 交易ID (UUID字符串)
+            type: 接口类型，'test' 或 'real'
+            method_name: 方法名称，如 'stop_loss_trade', 'take_profit_trade' 等
+            param: 调用接口的入参，字典格式
+            response_context: 接口返回的内容，字典格式
+            response_type: 接口返回状态码，如 '200', '4XX', '5XX' 等
+            error_context: 接口返回状态不为200时记录相关的返回错误信息
+        """
+        try:
+            log_id = self._generate_id()
+            
+            # 将字典转换为JSON字符串
+            param_json = json.dumps(param) if param else None
+            response_json = json.dumps(response_context) if response_context else None
+            
+            # 使用 UTC+8 时区时间（北京时间），转换为 naive datetime 存储
+            beijing_tz = timezone(timedelta(hours=8))
+            current_time = datetime.now(beijing_tz).replace(tzinfo=None)
+            
+            self.insert_rows(
+                self.binance_trade_logs_table,
+                [[log_id, model_id, conversation_id, trade_id, type, method_name, param_json, response_json, response_type, error_context, current_time]],
+                ["id", "model_id", "conversation_id", "trade_id", "type", "method_name", "param", "response_context", "response_type", "error_context", "created_at"]
+            )
+        except Exception as e:
+            logger.error(f"[Database] Failed to add binance trade log: {e}")
+            # 不抛出异常，避免影响主流程
+    
     def get_conversations(self, model_id: int, limit: int = 20) -> List[Dict]:
         """Get conversation history for a specific model
         
@@ -2011,42 +2058,50 @@ class Database:
         """Get system settings"""
         try:
             rows = self.query(f"""
-                SELECT trading_frequency_minutes, trading_fee_rate, show_system_prompt
+                SELECT trading_frequency_minutes, trading_fee_rate, show_system_prompt, conversation_limit
                 FROM {self.settings_table}
                 ORDER BY updated_at DESC
                 LIMIT 1
             """)
             
             if rows:
-                columns = ["trading_frequency_minutes", "trading_fee_rate", "show_system_prompt"]
+                columns = ["trading_frequency_minutes", "trading_fee_rate", "show_system_prompt", "conversation_limit"]
                 result = self._row_to_dict(rows[0], columns)
                 return {
                     'trading_frequency_minutes': int(result['trading_frequency_minutes']),
                     'trading_fee_rate': float(result['trading_fee_rate']),
-                    'show_system_prompt': int(result.get('show_system_prompt', 0))
+                    'show_system_prompt': int(result.get('show_system_prompt', 0)),
+                    'conversation_limit': int(result.get('conversation_limit', 5))
                 }
             else:
                 # 返回默认设置
                 return {
-                    'trading_frequency_minutes': 60,
+                    'trading_frequency_minutes': 5,
                     'trading_fee_rate': 0.001,
-                    'show_system_prompt': 1
+                    'show_system_prompt': 0,
+                    'conversation_limit': 5
                 }
         except Exception as e:
             logger.error(f"[Database] Failed to get settings: {e}")
             return {
-                'trading_frequency_minutes': 60,
+                'trading_frequency_minutes': 5,
                 'trading_fee_rate': 0.001,
-                'show_system_prompt': 1
+                'show_system_prompt': 0,
+                'conversation_limit': 5
             }
     
     def update_settings(self, trading_frequency_minutes: int, trading_fee_rate: float,
-                        show_system_prompt: int) -> bool:
+                        show_system_prompt: int, conversation_limit: int = 5) -> bool:
         """Update system settings"""
         try:
             # 使用 UTC+8 时区时间（北京时间），转换为 naive datetime 存储
             beijing_tz = timezone(timedelta(hours=8))
             current_time = datetime.now(beijing_tz).replace(tzinfo=None)
+            
+            # 验证conversation_limit值
+            if not isinstance(conversation_limit, int) or conversation_limit < 1:
+                logger.warning(f"[Database] Invalid conversation_limit value: {conversation_limit}, using default 5")
+                conversation_limit = 5
             
             # 先检查是否存在记录
             existing_rows = self.query(f"""
@@ -2063,16 +2118,17 @@ class Database:
                     SET trading_frequency_minutes = %s,
                         trading_fee_rate = %s,
                         show_system_prompt = %s,
+                        conversation_limit = %s,
                         updated_at = %s
                     WHERE id = %s
-                """, (trading_frequency_minutes, trading_fee_rate, show_system_prompt, current_time, settings_id))
+                """, (trading_frequency_minutes, trading_fee_rate, show_system_prompt, conversation_limit, current_time, settings_id))
             else:
                 # 如果不存在记录，使用 INSERT 插入
                 settings_id = self._generate_id()
                 self.insert_rows(
                     self.settings_table,
-                    [[settings_id, trading_frequency_minutes, trading_fee_rate, show_system_prompt, current_time, current_time]],
-                    ["id", "trading_frequency_minutes", "trading_fee_rate", "show_system_prompt", "created_at", "updated_at"]
+                    [[settings_id, trading_frequency_minutes, trading_fee_rate, show_system_prompt, conversation_limit, current_time, current_time]],
+                    ["id", "trading_frequency_minutes", "trading_fee_rate", "show_system_prompt", "conversation_limit", "created_at", "updated_at"]
                 )
             return True
         except Exception as e:
