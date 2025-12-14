@@ -1831,8 +1831,8 @@ class MySQLDatabase:
                 `symbol`, `price_change_percent`, `last_price`, `quote_volume`,
                 `event_time`, `side`
             FROM `{self.market_ticker_table}`
-            WHERE `side` = 'gainer'
-            AND `price_change_percent` IS NOT NULL
+            WHERE `price_change_percent` IS NOT NULL
+            AND `price_change_percent` > 0
             ORDER BY `price_change_percent` DESC
             LIMIT %s
             """
@@ -1897,8 +1897,8 @@ class MySQLDatabase:
                 `symbol`, `price_change_percent`, `last_price`, `quote_volume`,
                 `event_time`, `side`
             FROM `{self.market_ticker_table}`
-            WHERE `side` = 'loser'
-            AND `price_change_percent` IS NOT NULL
+            WHERE `price_change_percent` IS NOT NULL
+            AND `price_change_percent` < 0
             ORDER BY ABS(`price_change_percent`) DESC
             LIMIT %s
             """
@@ -1966,16 +1966,16 @@ class MySQLDatabase:
             (SELECT 
                 'gainer' as type, `symbol`, `price_change_percent`, `last_price`, `quote_volume`, `event_time`
             FROM `{self.market_ticker_table}`
-            WHERE `side` = 'gainer'
-            AND `price_change_percent` IS NOT NULL
+            WHERE `price_change_percent` IS NOT NULL
+            AND `price_change_percent` > 0
             ORDER BY `price_change_percent` DESC
             LIMIT %s)
             UNION ALL
             (SELECT 
                 'loser' as type, `symbol`, `price_change_percent`, `last_price`, `quote_volume`, `event_time`
             FROM `{self.market_ticker_table}`
-            WHERE `side` = 'loser'
-            AND `price_change_percent` IS NOT NULL
+            WHERE `price_change_percent` IS NOT NULL
+            AND `price_change_percent` < 0
             ORDER BY ABS(`price_change_percent`) DESC
             LIMIT %s)
             """
