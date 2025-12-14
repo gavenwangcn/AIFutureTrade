@@ -1357,24 +1357,33 @@ let portfolioSymbolsRefreshInterval = null // 模型持仓合约列表自动刷�
   
   /**
    * 刷新所有数据
+   * 刷新当前模块的数据：
+   * 1. 持仓合约实时行情模块 - loadModelPortfolioSymbols()
+   * 2. 持仓模块 - loadPositions()
+   * 3. 交易记录模块 - loadTrades()
+   * 4. AI对话模块 - loadConversations()
    */
   const handleRefresh = async () => {
     isRefreshingAll.value = true
     try {
+      // 刷新基础数据（模型列表、市场行情、涨跌幅榜）
       await Promise.all([
         loadModels(),
         loadMarketPrices(),
         loadLeaderboard(true) // 强制刷新涨跌幅榜
       ])
       
+      // 如果选中了模型，刷新该模型的所有模块数据
       if (currentModelId.value) {
         await Promise.all([
-          loadPortfolio(),
-          loadPositions(),
-          loadTrades(),
-          loadConversations()
+          loadPortfolio(), // 投资组合数据
+          loadModelPortfolioSymbols(), // 持仓合约实时行情模块
+          loadPositions(), // 持仓模块
+          loadTrades(), // 交易记录模块
+          loadConversations() // AI对话模块
         ])
       } else if (isAggregatedView.value) {
+        // 聚合视图模式，刷新聚合数据
         await loadAggregatedData()
       }
     } finally {
