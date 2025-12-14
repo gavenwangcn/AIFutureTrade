@@ -26,6 +26,7 @@
 """
 import json
 import logging
+import time
 import uuid
 import common.config as app_config
 from datetime import datetime, timezone, timedelta
@@ -83,8 +84,8 @@ class Database:
             password=app_config.MYSQL_PASSWORD,
             database=app_config.MYSQL_DATABASE,
             charset='utf8mb4',
-            min_connections=5,
-            max_connections=50,
+            min_connections=15,
+            max_connections=100,
             connection_timeout=30
         )
         
@@ -105,71 +106,143 @@ class Database:
     def _with_connection(self, func: Callable, *args, **kwargs) -> Any:
         """Execute a function with a MySQL connection from the pool.
         
-        注意：此方法使用 try-finally 确保连接总是被释放。
-        如果发生网络错误，连接会被正确关闭。
-        """
-        conn = self._pool.acquire()
-        if not conn:
-            raise Exception("Failed to acquire MySQL connection")
+        支持自动重试机制，当遇到网络错误时会自动重试（最多3次）。
         
-        connection_handled = False  # 标记连接是否已被处理
-        try:
-            return func(conn, *args, **kwargs)
-        except Exception as e:
-            # 检查是否为网络/协议错误
-            error_type = type(e).__name__
-            error_msg = str(e)
-            is_network_error = any(keyword in error_msg.lower() for keyword in [
-                'connection', 'broken', 'lost', 'timeout', 'reset', 'gone away',
-                'operationalerror', 'interfaceerror'
-            ]) or any(keyword in error_type.lower() for keyword in [
-                'connection', 'timeout', 'operationalerror', 'interfaceerror'
-            ])
-            
-            if is_network_error:
-                # 对于网络错误，连接可能已损坏，应该关闭而不是放回池中
-                logger.warning(
-                    f"[Database] Network error detected, closing damaged connection: "
-                    f"{error_type}: {error_msg}"
-                )
-                try:
-                    conn.rollback()
-                    conn.close()
-                except Exception as close_error:
-                    logger.debug(f"[Database] Error closing failed connection: {close_error}")
-                # 减少连接计数
-                with self._pool._lock:
-                    if self._pool._current_connections > 0:
-                        self._pool._current_connections -= 1
-                connection_handled = True  # 标记连接已处理
-                # 重新抛出异常
-                raise
-            else:
-                # 对于非网络错误，回滚事务并正常释放连接（在 finally 中处理）
-                try:
-                    conn.rollback()
-                except Exception:
-                    pass
-                raise
-        finally:
-            # 只有在连接未被处理的情况下才释放连接
-            if conn and not connection_handled:
-                try:
-                    conn.commit()
-                    self._pool.release(conn)
-                except Exception as release_error:
-                    # 如果释放失败，尝试关闭连接
-                    logger.warning(
-                        f"[Database] Failed to release connection, closing it: {release_error}"
-                    )
+        Args:
+            func: 要执行的函数
+            *args: 传递给函数的位置参数
+            **kwargs: 传递给函数的关键字参数
+        
+        Returns:
+            函数执行结果
+        
+        Raises:
+            Exception: 如果重试3次后仍然失败，抛出最后一个异常
+        """
+        max_retries = 3
+        retry_delay = 0.5  # 初始重试延迟（秒）
+        
+        for attempt in range(max_retries):
+            conn = None
+            connection_acquired = False
+            try:
+                conn = self._pool.acquire()
+                if not conn:
+                    raise Exception("Failed to acquire MySQL connection")
+                connection_acquired = True
+                
+                # 执行函数
+                result = func(conn, *args, **kwargs)
+                
+                # 成功执行，提交事务并释放连接
+                conn.commit()
+                self._pool.release(conn)
+                conn = None  # 标记已释放，避免 finally 中重复处理
+                return result
+                
+            except Exception as e:
+                # 记录错误信息
+                error_type = type(e).__name__
+                error_msg = str(e)
+                
+                # 判断是否为网络/协议错误或死锁错误，需要重试
+                # 包括 "Packet sequence number wrong" 错误，这通常表示连接状态不一致
+                # 包括 MySQL 死锁错误 (1213)，这是一种需要重试的资源竞争错误
+                # 包括 "read of closed file" 错误，这通常表示底层连接已关闭
+                is_network_error = any(keyword in error_msg.lower() for keyword in [
+                    'connection', 'broken', 'lost', 'timeout', 'reset', 'gone away',
+                    'operationalerror', 'interfaceerror', 'packet sequence', 'internalerror',
+                    'deadlock found', 'read of closed file'
+                ]) or any(keyword in error_type.lower() for keyword in [
+                    'connection', 'timeout', 'operationalerror', 'interfaceerror', 'internalerror',
+                    'valueerror'
+                ]) or (isinstance(e, pymysql.err.MySQLError) and e.args[0] == 1213)
+                
+                # 如果已获取连接，需要处理连接（关闭或释放）
+                if connection_acquired and conn:
                     try:
-                        conn.rollback()
-                        conn.close()
-                    except Exception:
-                        pass
-                    with self._pool._lock:
-                        if self._pool._current_connections > 0:
-                            self._pool._current_connections -= 1
+                        # 回滚事务
+                        try:
+                            conn.rollback()
+                        except Exception:
+                            pass
+                        
+                        # 对于网络错误，连接很可能已损坏，应该关闭而不是放回池中
+                        if is_network_error:
+                            logger.warning(
+                                f"[Database] Network error detected, closing damaged connection: "
+                                f"{error_type}: {error_msg}"
+                            )
+                            try:
+                                conn.close()
+                            except Exception:
+                                pass
+                            # 减少连接计数（因为连接已损坏，不能放回池中）
+                            with self._pool._lock:
+                                if self._pool._current_connections > 0:
+                                    self._pool._current_connections -= 1
+                            conn = None  # 标记已处理，避免 finally 中重复处理
+                        else:
+                            # 对于非网络错误，尝试释放连接回池中
+                            try:
+                                self._pool.release(conn)
+                                conn = None  # 标记已释放
+                            except Exception as release_error:
+                                # 如果释放失败，关闭连接
+                                logger.warning(
+                                    f"[Database] Failed to release connection, closing it: {release_error}"
+                                )
+                                try:
+                                    conn.close()
+                                except Exception:
+                                    pass
+                                with self._pool._lock:
+                                    if self._pool._current_connections > 0:
+                                        self._pool._current_connections -= 1
+                                conn = None  # 标记已处理
+                    except Exception as close_error:
+                        logger.debug(f"[Database] Error closing failed connection: {close_error}")
+                        # 确保连接计数被减少
+                        with self._pool._lock:
+                            if self._pool._current_connections > 0:
+                                self._pool._current_connections -= 1
+                        conn = None  # 标记已处理
+                
+                # 判断是否需要重试
+                if attempt < max_retries - 1:
+                    # 只有网络错误才重试
+                    if not is_network_error:
+                        # 非网络错误不重试，直接抛出
+                        raise
+                    
+                    # 计算等待时间
+                    # 为死锁错误使用特殊的重试策略（更长的初始延迟和更慢的增长）
+                    is_deadlock = (isinstance(e, pymysql.err.MySQLError) and e.args[0] == 1213) or 'deadlock' in error_msg.lower()
+                    if is_deadlock:
+                        # 死锁错误：初始延迟1秒，增长因子1.5（更慢的增长）
+                        wait_time = 1.0 * (1.5 ** attempt)
+                        logger.warning(
+                            f"[Database] Deadlock error on attempt {attempt + 1}/{max_retries}: "
+                            f"{error_type}: {error_msg}. Retrying in {wait_time:.2f} seconds..."
+                        )
+                    else:
+                        # 其他网络错误使用指数退避策略
+                        wait_time = retry_delay * (2 ** attempt)
+                        logger.warning(
+                            f"[Database] Network error on attempt {attempt + 1}/{max_retries}: "
+                            f"{error_type}: {error_msg}. Retrying in {wait_time:.2f} seconds..."
+                        )
+                    
+                    # 等待后重试
+                    time.sleep(wait_time)
+                    continue
+                else:
+                    # 已达到最大重试次数，抛出异常
+                    logger.error(
+                        f"[Database] Failed after {max_retries} attempts: "
+                        f"{error_type}: {error_msg}"
+                    )
+                    raise
     
     def command(self, sql: str, params: tuple = None) -> None:
         """Execute a raw SQL command."""
