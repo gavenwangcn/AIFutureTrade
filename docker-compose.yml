@@ -104,7 +104,7 @@ services:
       # 设置PYTHONPATH，确保可以找到所有模块
       - PYTHONPATH=${PYTHONPATH:-/app}
       # MySQL配置
-      - MYSQL_HOST=${MYSQL_HOST:-193.134.209.95}
+      - MYSQL_HOST=${MYSQL_HOST:-127.0.0.1}
       - MYSQL_PORT=${MYSQL_PORT:-32123}
       - MYSQL_USER=${MYSQL_USER:-aifuturetrade}
       - MYSQL_PASSWORD=${MYSQL_PASSWORD:-aifuturetrade123}
