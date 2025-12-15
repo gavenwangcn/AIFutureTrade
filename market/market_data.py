@@ -439,6 +439,7 @@ class MarketDataFetcher:
                 'exchange': future_meta.get('exchange', 'BINANCE_FUTURES'),
                 'change_24h': change_percent,
                 'daily_volume': quote_volume,
+                'quote_volume': quote_volume,  # 同时提供quote_volume字段以便兼容
                 'timeframes': {}  # 不再实时生成，只在 AI 交易时计算
             }
 

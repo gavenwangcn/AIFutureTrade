@@ -858,7 +858,7 @@ def get_model_portfolio_symbols(model_id):
             'change': price_info.get('change_24h', price_info.get('change', 0)),
             'changePercent': price_info.get('change_24h', price_info.get('changePercent', 0)),
             'volume': price_info.get('daily_volume', price_info.get('volume', 0)),
-            'quoteVolume': price_info.get('quote_volume', price_info.get('quoteVolume', 0)),
+            'quoteVolume': price_info.get('daily_volume', price_info.get('quote_volume', price_info.get('quoteVolume', 0))),
             'high': price_info.get('high', 0),
             'low': price_info.get('low', 0)
         }
