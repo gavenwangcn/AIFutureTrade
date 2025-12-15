@@ -937,7 +937,7 @@ class MarketDataFetcher:
             
             # 计算MA值（基于所有K线计算，但只返回最后return_count个值）
             ma_values = {}
-            for length in [5, 20, 50, 99]:
+            for length in [5, 20, 60, 99]:  # 与前端和calculate_technical_indicators保持一致（MA60而非MA50）
                 try:
                     ma_series = ta.SMA(df_all, period=length)
                     if ma_series is not None and not ma_series.empty:
