@@ -292,34 +292,37 @@ class MarketTickerStream:
         """
         logger.debug("[MarketStreams] Starting to handle message")
         
-        # 为整个消息处理设置超时
+        # 为整个消息处理设置超时（Python 3.10兼容版本）
+        async def process_message():
+            tickers = _extract_tickers(message)
+            logger.debug("[MarketStreams] Extracted %d tickers from message", len(tickers))
+            
+            if not tickers:
+                logger.info("[MarketStreams] No tickers to process")
+                return
+                
+            normalized = [_normalize_ticker(ticker) for ticker in tickers]
+            logger.debug("[MarketStreams] Normalized %d tickers for database upsert", len(normalized))
+            
+            # 记录部分关键数据用于调试
+            if normalized:
+                sample = normalized[:3]  # 只记录前3个作为样本
+                logger.debug("[MarketStreams] Normalized data sample: %s", sample)
+            
+            try:
+                # 使用优化后的增量插入逻辑（在线程池中执行，避免阻塞），设置20秒超时
+                logger.debug("[MarketStreams] Calling upsert_market_tickers for %d symbols", len(normalized))
+                db_task = asyncio.create_task(asyncio.to_thread(self._db.upsert_market_tickers, normalized))
+                await asyncio.wait_for(db_task, timeout=20)  # 数据库操作最多20秒
+                logger.debug("[MarketStreams] Successfully completed upsert_market_tickers")
+            except asyncio.TimeoutError:
+                logger.error("[MarketStreams] Database operation timed out after 20 seconds")
+            except Exception as e:
+                logger.error("[MarketStreams] Error during upsert_market_tickers: %s", e, exc_info=True)
+        
         try:
-            async with asyncio.timeout(30):  # 整个消息处理最多30秒
-                tickers = _extract_tickers(message)
-                logger.debug("[MarketStreams] Extracted %d tickers from message", len(tickers))
-                
-                if not tickers:
-                    logger.info("[MarketStreams] No tickers to process")
-                    return
-                    
-                normalized = [_normalize_ticker(ticker) for ticker in tickers]
-                logger.debug("[MarketStreams] Normalized %d tickers for database upsert", len(normalized))
-                
-                # 记录部分关键数据用于调试
-                if normalized:
-                    sample = normalized[:3]  # 只记录前3个作为样本
-                    logger.debug("[MarketStreams] Normalized data sample: %s", sample)
-                
-                try:
-                    # 使用优化后的增量插入逻辑（在线程池中执行，避免阻塞），设置20秒超时
-                    logger.debug("[MarketStreams] Calling upsert_market_tickers for %d symbols", len(normalized))
-                    db_task = asyncio.create_task(asyncio.to_thread(self._db.upsert_market_tickers, normalized))
-                    await asyncio.wait_for(db_task, timeout=20)  # 数据库操作最多20秒
-                    logger.debug("[MarketStreams] Successfully completed upsert_market_tickers")
-                except asyncio.TimeoutError:
-                    logger.error("[MarketStreams] Database operation timed out after 20 seconds")
-                except Exception as e:
-                    logger.error("[MarketStreams] Error during upsert_market_tickers: %s", e, exc_info=True)
+            # 使用asyncio.wait_for实现Python 3.10兼容的超时控制
+            await asyncio.wait_for(process_message(), timeout=30)  # 整个消息处理最多30秒
         except asyncio.TimeoutError:
             logger.error("[MarketStreams] Message processing timed out after 30 seconds")
         except Exception as e:
