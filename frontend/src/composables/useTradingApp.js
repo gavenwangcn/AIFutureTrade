@@ -38,6 +38,12 @@ export function useTradingApp() {
   const isRefreshingLeaderboard = ref(false)
   const isRefreshingAll = ref(false)
   
+  // 模块刷新状态（用于刷新按钮）
+  const isRefreshingPortfolioSymbols = ref(false)  // 持仓合约实时行情刷新状态
+  const isRefreshingPositions = ref(false)          // 持仓模块刷新状态
+  const isRefreshingTrades = ref(false)             // 交易记录模块刷新状态
+  const isRefreshingConversations = ref(false)      // AI对话模块刷新状态
+  
   // 投资组合状态
   const portfolio = ref({
     totalValue: 0,
@@ -1273,8 +1279,9 @@ let portfolioSymbolsRefreshInterval = null // 模型持仓合约列表自动刷�
         showMessage(`执行失败: ${errorMsg}`, 'error')
       }
       
-      // 执行后刷新数据
+      // 执行后刷新数据（包括模型列表以更新 auto_trading_enabled 状态）
       await Promise.all([
+        loadModels(),  // 刷新模型列表以更新 auto_trading_enabled 状态
         loadPortfolio(),
         loadPositions(),
         loadTrades()
@@ -1376,13 +1383,56 @@ let portfolioSymbolsRefreshInterval = null // 模型持仓合约列表自动刷�
       
       // 如果选中了模型，刷新该模型的所有模块数据
       if (currentModelId.value) {
-        await Promise.all([
-          loadPortfolio(), // 投资组合数据 + 账户价值走势模块（包含账户价值历史数据，无定时刷新）
-          loadModelPortfolioSymbols(), // 持仓合约实时行情模块
-          loadPositions(), // 持仓模块
-          loadTrades(), // 交易记录模块
-          loadConversations() // AI对话模块
-        ])
+        // 设置各模块的刷新状态
+        isRefreshingPortfolioSymbols.value = true
+        isRefreshingPositions.value = true
+        isRefreshingTrades.value = true
+        isRefreshingConversations.value = true
+        
+        try {
+          await Promise.all([
+            loadPortfolio(), // 投资组合数据 + 账户价值走势模块（包含账户价值历史数据，无定时刷新）
+            (async () => {
+              // 持仓合约实时行情模块
+              try {
+                await loadModelPortfolioSymbols()
+              } finally {
+                isRefreshingPortfolioSymbols.value = false
+              }
+            })(),
+            (async () => {
+              // 持仓模块
+              try {
+                await loadPositions()
+              } finally {
+                isRefreshingPositions.value = false
+              }
+            })(),
+            (async () => {
+              // 交易记录模块
+              try {
+                await loadTrades()
+              } finally {
+                isRefreshingTrades.value = false
+              }
+            })(),
+            (async () => {
+              // AI对话模块
+              try {
+                await loadConversations()
+              } finally {
+                isRefreshingConversations.value = false
+              }
+            })()
+          ])
+        } catch (error) {
+          // 确保即使出错也清除刷新状态
+          isRefreshingPortfolioSymbols.value = false
+          isRefreshingPositions.value = false
+          isRefreshingTrades.value = false
+          isRefreshingConversations.value = false
+          throw error
+        }
       } else if (isAggregatedView.value) {
         // 聚合视图模式，刷新聚合数据
         await loadAggregatedData()
@@ -1956,6 +2006,11 @@ let portfolioSymbolsRefreshInterval = null // 模型持仓合约列表自动刷�
     leaderboardStatusType,
     isRefreshingLeaderboard,
     isRefreshingAll,
+    // 模块刷新状态
+    isRefreshingPortfolioSymbols,
+    isRefreshingPositions,
+    isRefreshingTrades,
+    isRefreshingConversations,
     portfolio,
     accountValueHistory,
     aggregatedChartData,

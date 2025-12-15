@@ -41,9 +41,10 @@ const macd: IndicatorTemplate = {
     ],
     bars: [
       { 
-        upColor: '#2196F3', 
-        downColor: '#2196F3',
-        noChangeColor: '#2196F3',
+        // MACD柱状图颜色：正数为红色（涨），负数为绿色（跌）
+        upColor: '#F53F3F',   // 红色（MACD值为正数时）
+        downColor: '#00B42A', // 绿色（MACD值为负数时）
+        noChangeColor: '#F53F3F',
         style: PolygonType.Fill,
         borderSize: 1,
         borderStyle: LineType.Solid,

@@ -1176,8 +1176,11 @@ def execute_trading(model_id):
     else:
         engine = trading_engines[model_id]
 
-    # Manual execution enables auto trading
+    # Manual execution enables auto trading and ensures trading loop is running
     db.set_model_auto_trading(model_id, True)
+    
+    # Ensure trading loop is started if not already running
+    _start_trading_loop_if_needed()
 
     try:
         result = engine.execute_trading_cycle()
@@ -1213,8 +1216,21 @@ def set_model_auto_trading(model_id):
     if not success:
         return jsonify({'error': 'Failed to update model status'}), 500
 
-    if enabled and model_id not in trading_engines:
-        init_trading_engine_for_model(model_id)
+    if enabled:
+        # Enable auto trading: ensure trading engine exists and trading loop is running
+        if model_id not in trading_engines:
+            init_trading_engine_for_model(model_id)
+        # Ensure trading loop is started if not already running
+        _start_trading_loop_if_needed()
+        logger.info(f"Auto trading enabled for model {model_id}")
+    else:
+        # Disable auto trading: remove engine from trading_engines to stop execution
+        # Note: The trading loop already checks auto_trading_enabled, but removing the engine
+        # ensures it won't be executed even if the check fails
+        if model_id in trading_engines:
+            del trading_engines[model_id]
+            logger.info(f"Trading engine removed for model {model_id} (auto trading disabled)")
+        logger.info(f"Auto trading disabled for model {model_id}")
 
     return jsonify({'model_id': model_id, 'auto_trading_enabled': enabled})
 

@@ -297,7 +297,7 @@
         </section>
 
         <!-- Stats Cards -->
-        <div class="stats-grid">
+        <div v-if="currentModelId || isAggregatedView" class="stats-grid">
           <div class="stat-card">
             <div class="stat-header">
               <span class="stat-label">账户总值</span>
@@ -329,7 +329,7 @@
         </div>
 
         <!-- Chart -->
-        <div class="content-card">
+        <div v-if="currentModelId || isAggregatedView" class="content-card">
           <div class="card-header">
             <h3 class="card-title">{{ isAggregatedView ? '聚合账户总览' : '账户价值走势' }}</h3>
           </div>
@@ -339,15 +339,17 @@
         </div>
 
         <!-- Model Portfolio Symbols -->
-        <div v-show="!isAggregatedView" class="content-card">
+        <div v-show="currentModelId && !isAggregatedView" class="content-card">
           <div class="card-header">
             <h3 class="card-title" title="展示该模型持仓合约的实时数据走势">
               {{ getModelDisplayName(currentModelId) }} - 
               <span style="font-weight: bold;">
-                <i class="bi bi-bar-chart-line"></i> 持仓合约实时行情
+                <i class="bi bi-bar-chart-line" :class="{ spin: isRefreshingPortfolioSymbols }"></i> 持仓合约实时行情
+                <i v-if="isRefreshingPortfolioSymbols" class="bi bi-arrow-repeat spin" style="margin-left: 8px; color: var(--primary-color);"></i>
               </span>
             </h3>
             <span class="last-refresh-time" title="持仓合约数据最后刷新时间">
+              <i v-if="isRefreshingPortfolioSymbols" class="bi bi-arrow-repeat spin" style="margin-right: 4px;"></i>
               最后刷新: {{ formatTime(lastPortfolioSymbolsRefreshTime) }}
             </span>
           </div>
@@ -387,15 +389,28 @@
         </div>
 
         <!-- Tabs -->
-        <div v-show="!isAggregatedView" class="content-card">
+        <div v-show="currentModelId && !isAggregatedView" class="content-card">
           <div class="card-tabs">
-            <button :class="['tab-btn', { active: activeTab === 'positions' }]" @click="activeTab = 'positions'">持仓</button>
-            <button :class="['tab-btn', { active: activeTab === 'trades' }]" @click="activeTab = 'trades'">交易记录</button>
-            <button :class="['tab-btn', { active: activeTab === 'conversations' }]" @click="activeTab = 'conversations'">AI对话</button>
+            <button :class="['tab-btn', { active: activeTab === 'positions' }]" @click="activeTab = 'positions'">
+              <i v-if="isRefreshingPositions" class="bi bi-arrow-repeat spin" style="margin-right: 4px;"></i>
+              持仓
+            </button>
+            <button :class="['tab-btn', { active: activeTab === 'trades' }]" @click="activeTab = 'trades'">
+              <i v-if="isRefreshingTrades" class="bi bi-arrow-repeat spin" style="margin-right: 4px;"></i>
+              交易记录
+            </button>
+            <button :class="['tab-btn', { active: activeTab === 'conversations' }]" @click="activeTab = 'conversations'">
+              <i v-if="isRefreshingConversations" class="bi bi-arrow-repeat spin" style="margin-right: 4px;"></i>
+              AI对话
+            </button>
           </div>
 
           <div v-show="!isAggregatedView && activeTab === 'positions'" class="tab-content active">
-            <div class="table-container">
+            <div v-if="loading.positions" class="loading-container">
+              <i class="bi bi-arrow-repeat spin" style="font-size: 24px; color: var(--primary-color);"></i>
+              <p style="margin-top: 12px; color: var(--text-secondary);">加载持仓数据中...</p>
+            </div>
+            <div v-else class="table-container">
               <table class="data-table">
                 <thead>
                   <tr>
@@ -431,7 +446,11 @@
           </div>
 
           <div v-show="!isAggregatedView && activeTab === 'trades'" class="tab-content active">
-            <div class="table-container">
+            <div v-if="loading.trades" class="loading-container">
+              <i class="bi bi-arrow-repeat spin" style="font-size: 24px; color: var(--primary-color);"></i>
+              <p style="margin-top: 12px; color: var(--text-secondary);">加载交易记录中...</p>
+            </div>
+            <div v-else class="table-container">
               <table class="data-table">
                 <thead>
                   <tr>
@@ -467,7 +486,11 @@
           </div>
 
           <div v-show="!isAggregatedView && activeTab === 'conversations'" class="tab-content active">
-            <div class="conversations-list">
+            <div v-if="loading.conversations" class="loading-container">
+              <i class="bi bi-arrow-repeat spin" style="font-size: 24px; color: var(--primary-color);"></i>
+              <p style="margin-top: 12px; color: var(--text-secondary);">加载AI对话数据中...</p>
+            </div>
+            <div v-else class="conversations-list">
               <div v-for="conv in conversations" :key="conv.id" class="conversation-item">
                 <div class="conversation-header">
                   <div class="conversation-time">{{ conv.timestamp || conv.time || '' }}</div>
@@ -635,7 +658,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, watch } from 'vue'
 import KLineChart from './components/KLineChart.vue'
 import SettingsModal from './components/SettingsModal.vue'
 import StrategyModal from './components/StrategyModal.vue'
@@ -660,12 +683,21 @@ const {
   losersStatus,
   losersStatusType,
   isRefreshingLosers,
+  // 模块刷新状态
+  isRefreshingPortfolioSymbols,
+  isRefreshingPositions,
+  isRefreshingTrades,
+  isRefreshingConversations,
   portfolio,
   accountValueHistory,
   aggregatedChartData,
   positions,
   trades,
   conversations,
+  loading,
+  loadPositions,
+  loadTrades,
+  loadConversations,
   settings,
   loggerEnabled,
   showSettingsModal,
@@ -746,6 +778,32 @@ const klineChartSymbol = ref('BTCUSDT')
 const klineChartInterval = ref('5m')
 const activeTab = ref('positions')
 const tempLeverage = ref(10) // 临时杠杆值
+
+// 监听标签切换，动态重新加载数据
+watch(activeTab, async (newTab, oldTab) => {
+  // 只在选中模型且非聚合视图时加载数据
+  if (!currentModelId.value || isAggregatedView.value) {
+    return
+  }
+  
+  // 避免初始化时触发（oldTab 为 undefined 时是初始化）
+  if (oldTab === undefined) {
+    return
+  }
+  
+  // 根据切换到的标签加载对应的数据
+  try {
+    if (newTab === 'positions') {
+      await loadPositions()
+    } else if (newTab === 'trades') {
+      await loadTrades()
+    } else if (newTab === 'conversations') {
+      await loadConversations()
+    }
+  } catch (error) {
+    console.error(`[App] Error loading ${newTab} data:`, error)
+  }
+})
 
 const openKlineChart = (symbol) => {
   console.log('[App] Opening KLineChart for symbol:', symbol)

@@ -24,7 +24,7 @@ const vol: IndicatorTemplate = {
   series: IndicatorSeries.Volume,
   calcParams: [5, 10], // MAVOL5、MAVOL10
   precision: 0,
-  shouldOhlc: false,
+  shouldOhlc: true,  // 设置为true，使VOL柱状图颜色根据K线涨跌判断
   shouldFormatBigNumber: true,
   visible: true,
   zLevel: 0,
@@ -37,9 +37,10 @@ const vol: IndicatorTemplate = {
   styles: {
     bars: [
       { 
-        upColor: '#2196F3', 
-        downColor: '#2196F3',
-        noChangeColor: '#2196F3',
+        // VOL柱状图颜色：与K线颜色一致（K线涨为红色，跌为绿色）
+        upColor: '#F53F3F',   // 红色（K线涨时）
+        downColor: '#00B42A', // 绿色（K线跌时）
+        noChangeColor: '#F53F3F',
         style: PolygonType.Fill,
         borderSize: 1,
         borderStyle: LineType.Solid,

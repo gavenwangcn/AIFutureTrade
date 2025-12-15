@@ -140,7 +140,7 @@ SELL_DECISION_THREAD_COUNT = 1  # 卖出决策API调用的并发线程数
 AI_DECISION_SYMBOL_BATCH_SIZE = int(os.getenv('AI_DECISION_SYMBOL_BATCH_SIZE', '1'))  # 每次提交给AI模型的symbol数量，默认为1
 
 # AI批次执行间隔配置
-AI_BATCH_EXECUTION_INTERVAL = int(os.getenv('AI_BATCH_EXECUTION_INTERVAL', '5'))  # 批次执行间隔（秒），默认5秒
+AI_BATCH_EXECUTION_INTERVAL = int(os.getenv('AI_BATCH_EXECUTION_INTERVAL', '30'))  # 批次执行间隔（秒），默认5秒
 AI_BATCH_EXECUTION_GROUP_SIZE = int(os.getenv('AI_BATCH_EXECUTION_GROUP_SIZE', '1'))  # 每N个批次执行完成后统一处理（插入数据库和调用SDK），默认1
 
 
