@@ -181,7 +181,7 @@ def main():
     buy_to_enter_decisions = {
         'BTCUSDT': {
             'signal': 'buy_to_enter',
-            'quantity': 0.001,
+            'quantity': 100,
             'leverage': 10,
             'callback_rate': 1.0
         }
@@ -191,7 +191,7 @@ def main():
     sell_to_enter_decisions = {
         'BTCUSDT': {
             'signal': 'sell_to_enter',
-            'quantity': 0.001,
+            'quantity': 100,
             'leverage': 10,
             'callback_rate': 1.0
         }
@@ -239,7 +239,7 @@ def main():
         'positions': [
             {
                 'symbol': 'BTCUSDT',
-                'position_amt': 0.001,
+                'position_amt': 100,
                 'position_side': 'LONG',
                 'entry_price': 44000.0
             }
