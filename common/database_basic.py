@@ -950,7 +950,7 @@ class Database:
             rows = self.query(f"""
                 SELECT m.id, m.name, m.provider_id, m.model_name, m.initial_capital, 
                        m.leverage, m.auto_trading_enabled, m.max_positions, m.account_alias, m.is_virtual, m.symbol_source, m.created_at,
-                       p.api_key, p.api_secret, p.api_url, p.provider_type
+                       m.api_key, m.api_secret, p.api_url, p.provider_type
                 FROM {self.models_table} m
                 LEFT JOIN {self.providers_table} p ON m.provider_id = p.id
                 WHERE m.id = '{model_uuid}'
