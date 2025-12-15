@@ -2579,6 +2579,7 @@ class TradingEngine:
                     side=trailing_stop_side,  # 根据position_side动态决定保护方向
                     callback_rate=callback_rate,
                     position_side=position_side,  # 使用根据signal自动确定的position_side
+                    quantity=quantity,  # 添加quantity参数
                     model_id=model_uuid,
                     trade_id=trade_id,
                     db=self.db
@@ -2757,6 +2758,7 @@ class TradingEngine:
                     order_type='STOP_MARKET',
                     stop_price=current_price,  # 使用当前价格作为触发价格，实现立即平仓
                     position_side=position_side,
+                    quantity=position_amt,  # 传递持仓数量
                     model_id=model_uuid,
                     trade_id=trade_id,
                     db=self.db
@@ -2908,6 +2910,7 @@ class TradingEngine:
                     order_type='STOP_MARKET',  # 使用STOP_MARKET类型，只需要stop_price
                     stop_price=stop_price,
                     position_side=position_side,
+                    quantity=position_amt,  # 添加quantity参数
                     model_id=model_uuid,
                     trade_id=trade_id,
                     db=self.db
@@ -3058,6 +3061,7 @@ class TradingEngine:
                     order_type='TAKE_PROFIT_MARKET',  # 使用TAKE_PROFIT_MARKET类型，只需要stop_price
                     stop_price=stop_price,
                     position_side=position_side,
+                    quantity=position_amt,  # 添加quantity参数
                     model_id=model_uuid,
                     trade_id=trade_id,
                     db=self.db
