@@ -1059,9 +1059,6 @@ class BinanceFuturesOrderClient:
                 if "position_side" in order_params:
                     test_params["position_side"] = order_params["position_side"]
                 
-                # 测试订单统一使用new_order_resp_type=RESULT
-                test_params["newOrderRespType"] = "RESULT"
-                
                 response = self._rest.test_order(**test_params)
                 logger.info(f"[Binance Futures] [{context}] 测试接口调用成功（未真实下单）")
                 response_context = "test_order"
