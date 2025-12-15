@@ -3,6 +3,7 @@ import os
 import logging
 from datetime import datetime
 from typing import Dict, List, Optional
+from unittest.mock import MagicMock, patch
 
 # 设置日志级别以便查看详细信息
 logging.basicConfig(level=logging.INFO)
@@ -12,9 +13,7 @@ logger = logging.getLogger(__name__)
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from trade.trading_engine import TradingEngine
-from common.database_mysql import Database
-from market.market_data import MarketDataFetcher
-from trade.ai_trader import AITrader
+from common.binance_futures import BinanceFuturesOrderClient
 
 def test_buy_to_enter(engine, decisions, market_state, portfolio):
     """测试buy_to_enter信号是否调用_execute_buy"""
@@ -100,27 +99,17 @@ def test_binance_client_creation(engine, decisions, market_state, portfolio):
     """测试每次调用_execute_decisions时是否创建新的BinanceFuturesOrderClient"""
     logger.info("开始测试Binance客户端创建场景...")
     
-    # 使用patch模拟BinanceFuturesOrderClient的创建，但不模拟其方法
-    from unittest.mock import patch, MagicMock
-    
+    # 模拟BinanceFuturesOrderClient类
     with patch('trade.trading_engine.BinanceFuturesOrderClient') as mock_client_class:
-        # 导入真实的BinanceFuturesOrderClient类
-        from common.binance_futures import BinanceFuturesOrderClient
-        
-        # 创建一个真实的实例但使用模拟的api_key和api_secret
-        mock_client = BinanceFuturesOrderClient(
-            api_key='test_api_key',
-            api_secret='test_api_secret',
-            quote_asset='USDT',
-            testnet=True  # 使用测试网络
-        )
+        # 创建模拟客户端
+        mock_client = MagicMock()
         
         # 模拟trailing_stop_market_trade方法返回一个模拟结果
-        mock_client.trailing_stop_market_trade = MagicMock(return_value={
+        mock_client.trailing_stop_market_trade.return_value = {
             'orderId': 12345,
             'symbol': 'BTCUSDT',
             'status': 'NEW'
-        })
+        }
         
         # 设置模拟类返回我们的模拟客户端
         mock_client_class.return_value = mock_client
@@ -149,16 +138,39 @@ def main():
     
     # 创建实例
     logger.info("创建必要的实例...")
-    db = Database()
-    market_fetcher = MarketDataFetcher()
-    ai_trader = AITrader(db, market_fetcher)
+    
+    # 创建模拟数据库
+    mock_db = MagicMock()
+    
+    # 模拟模型配置
+    mock_model = {
+        'max_positions': 5,
+        'api_key': 'test_api_key',
+        'api_secret': 'test_api_secret'
+    }
+    mock_db.get_model.return_value = mock_model
+    
+    # 模拟模型ID映射
+    mock_db._get_model_id_mapping.return_value = {1: 'model_1_uuid'}
+    
+    # 模拟生成ID
+    mock_db._generate_id.return_value = 'test_trade_id'
+    
+    # 模拟数据库表名
+    mock_db.trades_table = 'trades'
+    
+    # 创建模拟市场数据获取器
+    mock_market_fetcher = MagicMock()
+    
+    # 创建模拟AI交易者
+    mock_ai_trader = MagicMock()
     
     # 创建TradingEngine实例
     engine = TradingEngine(
         model_id=1,
-        db=db,
-        market_fetcher=market_fetcher,
-        ai_trader=ai_trader,
+        db=mock_db,
+        market_fetcher=mock_market_fetcher,
+        ai_trader=mock_ai_trader,
         trade_fee_rate=0.001
     )
     
