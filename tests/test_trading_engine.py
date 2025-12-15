@@ -183,7 +183,6 @@ def main():
             'signal': 'buy_to_enter',
             'quantity': 100,
             'leverage': 10,
-            'callback_rate': 1.0
         }
     }
     
@@ -193,7 +192,6 @@ def main():
             'signal': 'sell_to_enter',
             'quantity': 100,
             'leverage': 10,
-            'callback_rate': 1.0
         }
     }
     
