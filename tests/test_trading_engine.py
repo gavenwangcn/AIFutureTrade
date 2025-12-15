@@ -145,8 +145,8 @@ def main():
     # 模拟模型配置
     mock_model = {
         'max_positions': 5,
-        'api_key': 'test_api_key',
-        'api_secret': 'test_api_secret'
+        'api_key': 'LBtjhBgX1RCksNJDdOoJPeDD30Z70YIGHHH9DrqjIDDkK7xcPRQcgydPxGRr6MN1',
+        'api_secret': '55arJnwlytDflHv151UpHN1s32ACnJZEs86mbc79wGyeuSUJNHTDPN7jEgBbqO6I'
     }
     mock_db.get_model.return_value = mock_model
     
