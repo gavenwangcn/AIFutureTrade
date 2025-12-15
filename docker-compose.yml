@@ -63,11 +63,11 @@ services:
       - aifuturetrade-network
 
   # ============================================================================
-  # 前端服务（Node.js Express + klinecharts-pro）
+  # 前端服务（Vue 3 + KLineChart 10.0.0）
   # ============================================================================
-  # 注意：此服务会在构建时先构建 klinecharts-pro 基础库，然后构建前端应用
-  # klinecharts-pro 的构建产物会自动复制到 public/klinecharts-pro/ 目录
-  # 前端页面通过 /klinecharts-pro/ 路径访问这些文件
+  # 注意：此服务会在构建时先构建 KLineChart 10.0.0 基础库，然后构建前端应用
+  # KLineChart 的构建产物会自动复制到 public/klinecharts/ 目录
+  # 前端页面通过 /klinecharts/ 路径访问这些文件
   frontend:
     build:
       context: .

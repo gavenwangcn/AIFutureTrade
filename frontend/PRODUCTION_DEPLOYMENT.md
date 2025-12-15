@@ -23,20 +23,9 @@ docker compose build frontend
 docker compose up -d frontend
 ```
 
-### 方案2：Node.js + serve（备选）
+### 方案2：Node.js + serve（已移除）
 
-**优势**：
-- ✅ 继续使用 Node.js 环境
-- ✅ 比 vite preview 性能更好
-- ✅ 支持 SPA 路由
-- ✅ 轻量级
-
-**使用方式**：
-```bash
-# 使用 Node.js 版本的 Dockerfile
-docker build -f frontend/Dockerfile.nodejs -t frontend:nodejs .
-docker run -p 3000:3000 frontend:nodejs
-```
+**注意**：此方案已移除，生产环境统一使用 Nginx 方案。
 
 ## 性能对比
 
@@ -84,11 +73,9 @@ Nginx 配置是静态的，如需动态配置，可以使用环境变量替换�
 RUN envsubst < /etc/nginx/templates/default.conf.template > /etc/nginx/conf.d/default.conf
 ```
 
-### Node.js + serve 版本
+### Node.js + serve 版本（已移除）
 
-支持环境变量：
-- `PORT`: 监听端口（默认 3000）
-- `SERVE_SINGLE`: SPA 模式（默认 true）
+**注意**：此方案已移除，生产环境统一使用 Nginx 方案。
 
 ## 监控和日志
 
@@ -102,12 +89,6 @@ docker logs frontend
 docker exec frontend cat /var/log/nginx/access.log
 ```
 
-### serve
-
-```bash
-# 查看日志
-docker logs frontend
-```
 
 ## 健康检查
 
@@ -144,15 +125,6 @@ docker exec frontend nginx -t
 docker logs frontend
 ```
 
-### serve 启动失败
-
-```bash
-# 检查端口占用
-docker exec frontend netstat -tuln | grep 3000
-
-# 查看日志
-docker logs frontend
-```
 
 ## 迁移说明
 
@@ -162,9 +134,6 @@ docker logs frontend
    - 无需修改，直接使用新的 Dockerfile
    - 构建和运行方式不变
 
-2. **使用 serve**：
-   - 使用 `Dockerfile.nodejs`
-   - 或修改 `docker-compose.yml` 指定 Dockerfile
 
 ### 验证部署
 
@@ -184,7 +153,7 @@ curl http://localhost:3000
 
 ## 推荐配置
 
-**生产环境**：使用 Nginx（默认 Dockerfile）
+**生产环境**：使用 Nginx（默认 Dockerfile，推荐）
 
-**开发/测试环境**：可以使用 serve（Dockerfile.nodejs）
+**开发环境**：使用 `npm run dev` 启动 Vite 开发服务器
 
