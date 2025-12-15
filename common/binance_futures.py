@@ -1022,7 +1022,7 @@ class BinanceFuturesOrderClient:
             if trade_mode == 'test':
                 # 使用测试接口（不会真实下单）
                 logger.info(f"[Binance Futures] [{context}] 使用测试接口下单（不会真实成交）")
-                # test_order接口只需要symbol、side、type三个基本参数
+                
                 # 从order_params中提取side值（可能是枚举值或字符串）
                 side_value = order_params.get("side")
                 if side_value is None:
@@ -1043,7 +1043,7 @@ class BinanceFuturesOrderClient:
                 test_params = {
                     "symbol": order_params.get("symbol"),
                     "side": test_side,
-                    "type": order_params.get("type"),
+                    "type": order_params.get("type", ""),
                 }
                 
                 # 添加quantity参数（如果提供，否则使用默认值1）
