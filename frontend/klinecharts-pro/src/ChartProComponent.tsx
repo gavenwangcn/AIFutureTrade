@@ -58,7 +58,7 @@ function createIndicator (widget: Nullable<Chart>, indicatorName: string, isStac
     paneOptions = { gap: { bottom: 2 }, ...paneOptions }
   }
   // MACD和VOL指标需要设置柱状图颜色（红涨绿跌）
-  // 尝试在创建指标时传入styles配置
+  // 注意：createIndicator不支持直接传入styles，需要在创建后通过setStyles设置
   const createIndicatorOptions: any = {
     name: indicatorName,
     // @ts-expect-error
@@ -74,16 +74,6 @@ function createIndicator (widget: Nullable<Chart>, indicatorName: string, isStac
         icons.push(defaultStyles.tooltip.icons[3])
       }
       return { icons }
-    }
-  }
-  
-  // 如果是MACD或VOL指标，尝试传入styles配置
-  if (indicatorName === 'MACD' || indicatorName === 'VOL') {
-    createIndicatorOptions.styles = {
-      bar: {
-        upColor: '#F53F3F',   // 红色（涨）
-        downColor: '#00B42A'  // 绿色（跌）
-      }
     }
   }
   
