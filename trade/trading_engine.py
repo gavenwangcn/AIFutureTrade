@@ -304,10 +304,13 @@ class TradingEngine:
             
             logger.info(f"[Model {self.model_id}] [卖出服务] [阶段2] 卖出/平仓决策处理完成")
 
-            # ========== 阶段3: 记录账户价值快照 ==========
-            logger.debug(f"[Model {self.model_id}] [卖出服务] [阶段3] 开始记录账户价值快照")
-            self._record_account_snapshot(current_prices)
-            logger.debug(f"[Model {self.model_id}] [卖出服务] [阶段3] 账户价值快照已记录到数据库")
+            # ========== 阶段3: 记录账户价值快照（仅在有实际交易时） ==========
+            if self._has_actual_trades(executions):
+                logger.info(f"[Model {self.model_id}] [卖出服务] [阶段3] 检测到实际交易，开始记录账户价值快照")
+                self._record_account_snapshot(current_prices)
+                logger.info(f"[Model {self.model_id}] [卖出服务] [阶段3] 账户价值快照已记录到数据库")
+            else:
+                logger.debug(f"[Model {self.model_id}] [卖出服务] [阶段3] 无实际交易，跳过账户价值快照记录")
             
             # ========== 同步model_futures表数据 ==========
             logger.debug(f"[Model {self.model_id}] [卖出服务] [阶段4] 同步model_futures表数据")
@@ -490,10 +493,13 @@ class TradingEngine:
             
             logger.info(f"[Model {self.model_id}] [买入服务] [阶段2] 买入决策处理完成")
 
-            # ========== 阶段3: 记录账户价值快照 ==========
-            logger.info(f"[Model {self.model_id}] [买入服务] [阶段3] 开始记录账户价值快照")
-            self._record_account_snapshot(current_prices)
-            logger.info(f"[Model {self.model_id}] [买入服务] [阶段3] 账户价值快照已记录到数据库")
+            # ========== 阶段3: 记录账户价值快照（仅在有实际交易时） ==========
+            if self._has_actual_trades(executions):
+                logger.info(f"[Model {self.model_id}] [买入服务] [阶段3] 检测到实际交易，开始记录账户价值快照")
+                self._record_account_snapshot(current_prices)
+                logger.info(f"[Model {self.model_id}] [买入服务] [阶段3] 账户价值快照已记录到数据库")
+            else:
+                logger.debug(f"[Model {self.model_id}] [买入服务] [阶段3] 无实际交易，跳过账户价值快照记录")
             
             # ========== 同步model_futures表数据 ==========
             logger.info(f"[Model {self.model_id}] [买入服务] [阶段4] 同步model_futures表数据")
@@ -691,6 +697,39 @@ class TradingEngine:
         except Exception as e:
             logger.error(f"[Model {self.model_id}] 检查模型失败: {e}")
             return None
+    
+    def _has_actual_trades(self, executions: List[Dict]) -> bool:
+        """
+        检查executions列表中是否有实际交易记录
+        
+        实际交易的定义：
+        1. 没有error字段
+        2. signal不是'hold'
+        3. signal是有效的交易信号（buy_to_enter, sell_to_enter, close_position, stop_loss, take_profit）
+        
+        Args:
+            executions: 执行结果列表
+            
+        Returns:
+            bool: 如果有实际交易返回True，否则返回False
+        """
+        if not executions:
+            return False
+        
+        valid_signals = {'buy_to_enter', 'sell_to_enter', 'close_position', 'stop_loss', 'take_profit'}
+        
+        for result in executions:
+            # 跳过有错误的执行结果
+            if result.get('error'):
+                continue
+            
+            # 检查是否有有效的signal
+            signal = result.get('signal', '').lower()
+            if signal in valid_signals:
+                logger.debug(f"[Model {self.model_id}] 检测到实际交易: signal={signal}, symbol={result.get('symbol', 'N/A')}")
+                return True
+        
+        return False
     
     def _record_account_snapshot(self, current_prices: Dict) -> None:
         """

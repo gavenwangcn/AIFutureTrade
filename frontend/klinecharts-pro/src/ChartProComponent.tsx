@@ -93,24 +93,9 @@ function createIndicator (widget: Nullable<Chart>, indicatorName: string, isStac
           }
         } as any)
       } catch (error) {
-        console.warn(`[ChartProComponent] Failed to set ${indicatorName} bar colors:`, error)
-        // 如果setStyles方式不生效，尝试通过updateIndicator设置
-        try {
-          const indicator = widget.getIndicatorByPaneId(paneId)
-          if (indicator) {
-            widget.updateIndicator({
-              id: indicator.id,
-              styles: {
-                bar: {
-                  upColor: '#F53F3F',
-                  downColor: '#00B42A'
-                }
-              }
-            } as any)
-          }
-        } catch (updateError) {
-          console.warn(`[ChartProComponent] Failed to update ${indicatorName} indicator colors:`, updateError)
-        }
+        // setStyles失败时记录警告，但不影响指标创建
+        console.warn(`[ChartProComponent] Failed to set ${indicatorName} bar colors via setStyles:`, error)
+        // 注意：klinecharts库可能不支持动态设置指标颜色，颜色配置应在指标模板中定义
       }
     }
   }
