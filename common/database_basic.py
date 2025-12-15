@@ -61,6 +61,7 @@ class Database:
         model = db.get_model(model_id)
         portfolio = db.get_portfolio(model_id, current_prices)
         db.add_trade(model_id, symbol, signal, quantity, price)
+        db.close()  # 显式关闭连接池，释放资源
     
     注意：
         - 已从ClickHouse迁移到MySQL，保持方法签名和返回值格式兼容
@@ -88,6 +89,26 @@ class Database:
             max_connections=100,
             connection_timeout=30
         )
+    
+    def close(self) -> None:
+        """
+        关闭数据库连接池，释放所有资源
+        
+        调用此方法将关闭连接池中的所有活跃连接，确保资源被正确释放。
+        在不再需要数据库连接时，应显式调用此方法。
+        """
+        if hasattr(self, '_pool') and self._pool:
+            self._pool.close_all()
+            logger.info("[Database] Connection pool closed successfully")
+    
+    def __del__(self) -> None:
+        """
+        析构方法，确保连接池资源被释放
+        
+        当Database实例被垃圾回收时，会自动调用此方法关闭连接池。
+        为了确保资源被及时释放，建议显式调用close()方法。
+        """
+        self.close()
         
         # 表名定义
         self.providers_table = "providers"
@@ -244,6 +265,24 @@ class Database:
                         f"{error_type}: {error_msg}"
                     )
                     raise
+            finally:
+                # 确保连接被正确处理（双重保险）
+                if connection_acquired and conn:
+                    try:
+                        # 如果连接还没有被释放，尝试关闭它
+                        logger.warning(
+                            f"[Database] Connection not released in finally block, closing it"
+                        )
+                        try:
+                            conn.rollback()
+                            conn.close()
+                        except Exception:
+                            pass
+                        with self._pool._lock:
+                            if self._pool._current_connections > 0:
+                                self._pool._current_connections -= 1
+                    except Exception as final_error:
+                        logger.debug(f"[Database] Error in finally block: {final_error}")
     
     def command(self, sql: str, params: tuple = None) -> None:
         """Execute a raw SQL command."""

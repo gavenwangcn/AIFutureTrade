@@ -668,6 +668,26 @@ class MySQLDatabase:
 
     # ============ 基础数据库操作方法 ============
     
+    def close(self) -> None:
+        """
+        关闭数据库连接池，释放所有资源
+        
+        调用此方法将关闭连接池中的所有活跃连接，确保资源被正确释放。
+        在不再需要数据库连接时，应显式调用此方法。
+        """
+        if hasattr(self, '_pool') and self._pool:
+            self._pool.close_all()
+            logger.info("[MySQL] Connection pool closed successfully")
+    
+    def __del__(self) -> None:
+        """
+        析构方法，确保连接池资源被释放
+        
+        当MySQLDatabase实例被垃圾回收时，会自动调用此方法关闭连接池。
+        为了确保资源被及时释放，建议显式调用close()方法。
+        """
+        self.close()
+    
     def _with_connection(self, func: Callable, *args, **kwargs) -> Any:
         """Execute a function with a MySQL connection from the pool.
         

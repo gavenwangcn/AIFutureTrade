@@ -53,14 +53,14 @@ services:
       - MYSQL_PASSWORD=aifuturetrade123
     volumes:
       - mysql_data:/var/lib/mysql
-      # 挂载高性能配置文件（从Linux固定目录 /mysql/config/）
-      # 注意：需要确保 /mysql/config/my.cnf 文件存在
-      - /mysql/config/my.cnf:/etc/mysql/conf.d/my.cnf:ro
+      # 挂载高性能配置文件（Windows环境相对路径）
+      # 注意：指向当前项目目录下的mysql/my.cnf文件
+      - ./mysql/my.cnf:/etc/mysql/conf.d/my.cnf:ro
       # 挂载初始化脚本（首次启动时自动执行）
       # 注意：MySQL 官方镜像会按字母顺序执行 /docker-entrypoint-initdb.d/ 目录下的所有脚本
       # 使用 shell 脚本确保在 MySQL 完全启动后执行，更可靠
-      # 需要确保 /mysql/scripts/init-database.sh 文件存在且具有执行权限
-      - /mysql/scripts/init-database.sh:/docker-entrypoint-initdb.d/01-init-database.sh:ro
+      # 指向当前项目目录下的mysql/init-database.sh文件
+      - ./mysql/init-database.sh:/docker-entrypoint-initdb.d/01-init-database.sh:ro
       # 挂载日志目录（可选，用于日志持久化）
       - mysql_logs:/var/log/mysql
     # 配置MySQL监听所有网络接口（0.0.0.0），允许从 localhost、127.0.0.1 和外部IP访问
