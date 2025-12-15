@@ -36,7 +36,7 @@ function getVolumeFigure (): IndicatorFigure<Vol> {
     title: 'VOLUME: ',
     type: 'bar',
     baseValue: 0,
-    styles: ({ data, indicator, defaultStyles }) => {
+    styles: ({ data, indicator }) => {
       const current = data.current
       // VOL颜色规则：与K线颜色对齐（K线涨→红色，跌→绿色）
       let color = formatValue(indicator.styles, 'bars[0].noChangeColor', hexToRgb(COLOR_RED, 0.7)) as string

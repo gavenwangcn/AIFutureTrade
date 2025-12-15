@@ -25,6 +25,7 @@ RUN npm install -g pnpm@10.4.1
 # 复制 KLineChart 的依赖文件和源代码
 COPY frontend/KLineChart/package.json frontend/KLineChart/pnpm-lock.yaml* ./KLineChart/
 COPY frontend/KLineChart/tsconfig.json ./KLineChart/
+COPY frontend/KLineChart/eslint.config.js ./KLineChart/
 COPY frontend/KLineChart/scripts/ ./KLineChart/scripts/
 COPY frontend/KLineChart/src/ ./KLineChart/src/
 COPY frontend/KLineChart/indicators/ ./KLineChart/indicators/

@@ -31,7 +31,8 @@ function createInputConfig ({ input, replaceValues }) {
     plugins: [
       typescript(),
       eslint({
-        throwOnError: true
+        throwOnError: true,
+        configFile: resolvePath('eslint.config.js')
       }),
       nodeResolve(),
       replace({
