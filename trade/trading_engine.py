@@ -111,9 +111,8 @@ class TradingEngine:
         
         try:
             # 检查模型是否存在
-            model = self.db.get_model(self.model_id)
+            model = self._check_model_exists()
             if not model:
-                logger.warning(f"[Model {self.model_id}] [卖出服务] 模型不存在，跳过卖出决策周期")
                 return {
                     'success': False,
                     'executions': [],
@@ -307,39 +306,12 @@ class TradingEngine:
 
             # ========== 阶段3: 记录账户价值快照 ==========
             logger.debug(f"[Model {self.model_id}] [卖出服务] [阶段3] 开始记录账户价值快照")
-            
-            updated_portfolio = self.db.get_portfolio(self.model_id, current_prices)
-            balance = updated_portfolio.get('total_value', 0)
-            available_balance = updated_portfolio.get('cash', 0)
-            cross_wallet_balance = updated_portfolio.get('positions_value', 0)
-            
-            logger.info(f"[Model {self.model_id}] [卖出服务] [阶段3.1] 账户价值: "
-                        f"总余额(balance)=${balance:.2f}, "
-                        f"可用余额(available_balance)=${available_balance:.2f}, "
-                        f"全仓余额(cross_wallet_balance)=${cross_wallet_balance:.2f}")
-            
-            # 获取account_alias（从models表获取，确保account_values表的account_alias不为空）
-            model = self.db.get_model(self.model_id)
-            account_alias = model.get('account_alias', '') if model else ''
-            
-            # 【记录账户价值快照】使用新字段名，提高代码可读性
-            self.db.record_account_value(
-                self.model_id,
-                balance=balance,
-                available_balance=available_balance,
-                cross_wallet_balance=cross_wallet_balance,
-                account_alias=account_alias
-            )
-            logger.debug(f"[Model {self.model_id}] [卖出服务] [阶段3.2] 账户价值快照已记录到数据库")
+            self._record_account_snapshot(current_prices)
+            logger.debug(f"[Model {self.model_id}] [卖出服务] [阶段3] 账户价值快照已记录到数据库")
             
             # ========== 同步model_futures表数据 ==========
             logger.debug(f"[Model {self.model_id}] [卖出服务] [阶段4] 同步model_futures表数据")
-            # 在交易完成后，从portfolios表同步最新的合约信息到model_futures表
-            sync_success = self.db.sync_model_futures_from_portfolio(self.model_id)
-            if not sync_success:
-                logger.debug(f"[Model {self.model_id}] [卖出服务] [阶段4] model_futures表同步失败，但不影响交易流程")
-            else:
-                logger.debug(f"[Model {self.model_id}] [卖出服务] [阶段4] model_futures表同步成功")
+            self._sync_model_futures()
             
             # ========== 交易周期完成 ==========
             cycle_end_time = datetime.now(timezone(timedelta(hours=8)))
@@ -350,6 +322,8 @@ class TradingEngine:
                         f"执行操作数={len(executions)}, "
                         f"对话类型={conversation_prompts}")
             
+            # 获取最终持仓信息
+            updated_portfolio = self.db.get_portfolio(self.model_id, current_prices)
             return {
                 'success': True,
                 'executions': executions,
@@ -518,39 +492,12 @@ class TradingEngine:
 
             # ========== 阶段3: 记录账户价值快照 ==========
             logger.info(f"[Model {self.model_id}] [买入服务] [阶段3] 开始记录账户价值快照")
-            
-            updated_portfolio = self.db.get_portfolio(self.model_id, current_prices)
-            balance = updated_portfolio.get('total_value', 0)
-            available_balance = updated_portfolio.get('cash', 0)
-            cross_wallet_balance = updated_portfolio.get('positions_value', 0)
-            
-            logger.info(f"[Model {self.model_id}] [买入服务] [阶段3.1] 账户价值: "
-                        f"总余额(balance)=${balance:.2f}, "
-                        f"可用余额(available_balance)=${available_balance:.2f}, "
-                        f"全仓余额(cross_wallet_balance)=${cross_wallet_balance:.2f}")
-            
-            # 获取account_alias（从models表获取，确保account_values表的account_alias不为空）
-            model = self.db.get_model(self.model_id)
-            account_alias = model.get('account_alias', '') if model else ''
-            
-            # 【记录账户价值快照】使用新字段名，提高代码可读性
-            self.db.record_account_value(
-                self.model_id,
-                balance=balance,
-                available_balance=available_balance,
-                cross_wallet_balance=cross_wallet_balance,
-                account_alias=account_alias
-            )
-            logger.info(f"[Model {self.model_id}] [买入服务] [阶段3.2] 账户价值快照已记录到数据库")
+            self._record_account_snapshot(current_prices)
+            logger.info(f"[Model {self.model_id}] [买入服务] [阶段3] 账户价值快照已记录到数据库")
             
             # ========== 同步model_futures表数据 ==========
             logger.info(f"[Model {self.model_id}] [买入服务] [阶段4] 同步model_futures表数据")
-            # 在交易完成后，从portfolios表同步最新的合约信息到model_futures表
-            sync_success = self.db.sync_model_futures_from_portfolio(self.model_id)
-            if not sync_success:
-                logger.warning(f"[Model {self.model_id}] [买入服务] [阶段4] model_futures表同步失败，但不影响交易流程")
-            else:
-                logger.info(f"[Model {self.model_id}] [买入服务] [阶段4] model_futures表同步成功")
+            self._sync_model_futures()
             
             # ========== 交易周期完成 ==========
             cycle_end_time = datetime.now(timezone(timedelta(hours=8)))
@@ -561,6 +508,8 @@ class TradingEngine:
                         f"执行操作数={len(executions)}, "
                         f"对话类型={conversation_prompts}")
             
+            # 获取最终持仓信息
+            updated_portfolio = self.db.get_portfolio(self.model_id, current_prices)
             return {
                 'success': True,
                 'executions': executions,
@@ -584,51 +533,41 @@ class TradingEngine:
     # ============ 服务线程管理方法 ============
     # 管理买入和卖出服务的后台线程，实现周期性自动交易
     
-    def _run_buy_service(self):
+    def _run_trading_service(self, service_name: str, cycle_method, cycle_interval: int):
         """
-        运行买入服务的后台循环线程
+        运行交易服务的后台循环线程（通用方法）
         
-        此方法在独立线程中运行，按照buy_cycle_interval周期执行买入决策。
+        此方法在独立线程中运行，按照指定周期执行交易决策。
         当running标志为False时，循环退出。
+        
+        Args:
+            service_name: 服务名称（用于日志），如 '买入服务' 或 '卖出服务'
+            cycle_method: 周期执行的方法，如 self.execute_buy_cycle
+            cycle_interval: 执行周期间隔（秒）
         """
-        logger.info(f"[Model {self.model_id}] [买入服务] 启动，执行周期: {self.buy_cycle_interval}秒")
+        logger.info(f"[Model {self.model_id}] [{service_name}] 启动，执行周期: {cycle_interval}秒")
         import time
+        import traceback
         while self.running:
             try:
-                self.execute_buy_cycle()
+                cycle_method()
             except Exception as e:
-                logger.error(f"[Model {self.model_id}] [买入服务] 循环执行出错: {e}")
-                import traceback
-                logger.error(f"[Model {self.model_id}] [买入服务] 错误堆栈:\n{traceback.format_exc()}")
+                logger.error(f"[Model {self.model_id}] [{service_name}] 循环执行出错: {e}")
+                logger.error(f"[Model {self.model_id}] [{service_name}] 错误堆栈:\n{traceback.format_exc()}")
             
             # 等待下一个周期
             if self.running:
-                logger.debug(f"[Model {self.model_id}] [买入服务] 等待下一个周期，{self.buy_cycle_interval}秒后继续")
-                time.sleep(self.buy_cycle_interval)
-        logger.info(f"[Model {self.model_id}] [买入服务] 已停止")
+                logger.debug(f"[Model {self.model_id}] [{service_name}] 等待下一个周期，{cycle_interval}秒后继续")
+                time.sleep(cycle_interval)
+        logger.info(f"[Model {self.model_id}] [{service_name}] 已停止")
+    
+    def _run_buy_service(self):
+        """运行买入服务的后台循环线程"""
+        self._run_trading_service('买入服务', self.execute_buy_cycle, self.buy_cycle_interval)
         
     def _run_sell_service(self):
-        """
-        运行卖出服务的后台循环线程
-        
-        此方法在独立线程中运行，按照sell_cycle_interval周期执行卖出决策。
-        当running标志为False时，循环退出。
-        """
-        logger.info(f"[Model {self.model_id}] [卖出服务] 启动，执行周期: {self.sell_cycle_interval}秒")
-        import time
-        while self.running:
-            try:
-                self.execute_sell_cycle()
-            except Exception as e:
-                logger.error(f"[Model {self.model_id}] [卖出服务] 循环执行出错: {e}")
-                import traceback
-                logger.error(f"[Model {self.model_id}] [卖出服务] 错误堆栈:\n{traceback.format_exc()}")
-            
-            # 等待下一个周期
-            if self.running:
-                logger.debug(f"[Model {self.model_id}] [卖出服务] 等待下一个周期，{self.sell_cycle_interval}秒后继续")
-                time.sleep(self.sell_cycle_interval)
-        logger.info(f"[Model {self.model_id}] [卖出服务] 已停止")
+        """运行卖出服务的后台循环线程"""
+        self._run_trading_service('卖出服务', self.execute_sell_cycle, self.sell_cycle_interval)
     
     def execute_trading_cycle(self):
         """
@@ -663,12 +602,10 @@ class TradingEngine:
         # 启动新的服务
         self.running = True
         
-        # 创建并启动买入服务线程
+        # 创建并启动买入和卖出服务线程
         self.buy_thread = threading.Thread(target=self._run_buy_service, daemon=True)
-        self.buy_thread.start()
-        
-        # 创建并启动卖出服务线程
         self.sell_thread = threading.Thread(target=self._run_sell_service, daemon=True)
+        self.buy_thread.start()
         self.sell_thread.start()
         
         logger.info(f"[Model {self.model_id}] 交易服务已启动: "
@@ -737,7 +674,159 @@ class TradingEngine:
             'message': '交易服务已停止'
         }
 
-    # ============ Binance Order Client Initialization ============
+    # ============ 工具方法：公共逻辑提取 ============
+    
+    def _check_model_exists(self) -> Optional[Dict]:
+        """
+        检查模型是否存在
+        
+        Returns:
+            模型字典，如果不存在则返回None
+        """
+        try:
+            model = self.db.get_model(self.model_id)
+            if not model:
+                logger.warning(f"[Model {self.model_id}] 模型不存在")
+            return model
+        except Exception as e:
+            logger.error(f"[Model {self.model_id}] 检查模型失败: {e}")
+            return None
+    
+    def _record_account_snapshot(self, current_prices: Dict) -> None:
+        """
+        记录账户价值快照（公共方法）
+        
+        Args:
+            current_prices: 当前价格映射
+        """
+        updated_portfolio = self.db.get_portfolio(self.model_id, current_prices)
+        balance = updated_portfolio.get('total_value', 0)
+        available_balance = updated_portfolio.get('cash', 0)
+        cross_wallet_balance = updated_portfolio.get('positions_value', 0)
+        
+        logger.info(f"[Model {self.model_id}] 账户价值: "
+                   f"总余额(balance)=${balance:.2f}, "
+                   f"可用余额(available_balance)=${available_balance:.2f}, "
+                   f"全仓余额(cross_wallet_balance)=${cross_wallet_balance:.2f}")
+        
+        model = self.db.get_model(self.model_id)
+        account_alias = model.get('account_alias', '') if model else ''
+        
+        self.db.record_account_value(
+            self.model_id,
+            balance=balance,
+            available_balance=available_balance,
+            cross_wallet_balance=cross_wallet_balance,
+            account_alias=account_alias
+        )
+    
+    def _sync_model_futures(self) -> None:
+        """同步model_futures表数据"""
+        sync_success = self.db.sync_model_futures_from_portfolio(self.model_id)
+        if sync_success:
+            logger.debug(f"[Model {self.model_id}] model_futures表同步成功")
+        else:
+            logger.debug(f"[Model {self.model_id}] model_futures表同步失败，但不影响交易流程")
+    
+    def _find_position(self, portfolio: Dict, symbol: str) -> Optional[Dict]:
+        """
+        查找持仓信息（公共方法）
+        
+        Args:
+            portfolio: 持仓组合信息
+            symbol: 交易对符号
+            
+        Returns:
+            持仓信息字典，如果不存在则返回None
+        """
+        positions = portfolio.get('positions', []) or []
+        for pos in positions:
+            if pos.get('symbol') == symbol:
+                return pos
+        return None
+    
+    def _get_side_for_trade(self, position_side: str) -> str:
+        """
+        根据持仓方向确定交易方向（公共方法）
+        
+        Args:
+            position_side: 持仓方向 ('LONG' 或 'SHORT')
+            
+        Returns:
+            交易方向 ('SELL' 或 'BUY')
+        """
+        return 'SELL' if position_side == 'LONG' else 'BUY'
+    
+    def _get_trade_context(self) -> tuple[str, str]:
+        """
+        获取交易上下文信息（model_uuid和trade_id）
+        
+        Returns:
+            (model_uuid, trade_id) 元组
+        """
+        model_mapping = self.db._get_model_id_mapping()
+        model_uuid = model_mapping.get(self.model_id)
+        trade_id = self.db._generate_id()
+        return model_uuid, trade_id
+    
+    def _get_conversation_id(self) -> Optional[str]:
+        """
+        获取当前的conversation_id（线程安全）
+        
+        Returns:
+            conversation_id字符串或None
+        """
+        with self.current_conversation_id_lock:
+            return self.current_conversation_id
+    
+    def _handle_sdk_client_error(self, symbol: str, operation: str) -> tuple[bool, Optional[str]]:
+        """
+        处理SDK客户端创建失败的情况（公共方法）
+        
+        Args:
+            symbol: 交易对符号
+            operation: 操作名称（用于日志）
+            
+        Returns:
+            (sdk_call_skipped, sdk_skip_reason) 元组
+        """
+        try:
+            model = self.db.get_model(self.model_id)
+            if not model:
+                reason = "Model not found in database"
+            else:
+                api_key = model.get('api_key', '')
+                api_secret = model.get('api_secret', '')
+                if not api_key or not api_key.strip():
+                    reason = "API key is empty or not configured in model table"
+                elif not api_secret or not api_secret.strip():
+                    reason = "API secret is empty or not configured in model table"
+                else:
+                    reason = "Failed to create Binance order client (unknown reason)"
+        except Exception as check_err:
+            reason = f"Failed to check model configuration: {check_err}"
+        
+        logger.error(f"@API@ [Model {self.model_id}] [{operation}] === 无法创建Binance订单客户端，跳过SDK调用 ==="
+                   f" | symbol={symbol} | reason={reason} | "
+                   f"⚠️ 警告：交易记录将保存到数据库，但实际交易未执行！请检查model表中的api_key和api_secret配置")
+        return True, reason
+    
+    def _log_trade_record(self, signal: str, symbol: str, position_side: str, 
+                         sdk_call_skipped: bool, sdk_skip_reason: Optional[str] = None) -> None:
+        """
+        记录交易日志（公共方法）
+        
+        Args:
+            signal: 交易信号（如 'buy_to_enter', 'close_position'）
+            symbol: 交易对符号
+            position_side: 持仓方向
+            sdk_call_skipped: SDK调用是否被跳过
+            sdk_skip_reason: SDK跳过原因（可选）
+        """
+        if sdk_call_skipped:
+            logger.warning(f"TRADE: ⚠️ SDK调用被跳过，但交易记录仍将保存到数据库 | symbol={symbol} | reason={sdk_skip_reason}")
+        else:
+            logger.info(f"TRADE: RECORDED - Model {self.model_id} {signal.upper()} {symbol}")
     
     # ============ Binance客户端管理方法 ============
     # 管理Binance订单客户端的创建，确保使用最新的API凭证
@@ -2570,74 +2659,41 @@ class TradingEngine:
         else:  # SHORT
             trailing_stop_side = 'BUY'  # 保护SHORT持仓使用BUY方向
         
-        # 【获取model_uuid用于日志记录】
-        model_mapping = self.db._get_model_id_mapping()
-        model_uuid = model_mapping.get(self.model_id)
+        # 获取交易上下文
+        model_uuid, trade_id = self._get_trade_context()
         
-        # 【提前生成trade_id用于日志记录】
-        trade_id = self.db._generate_id()
-        
-        # 【调用SDK执行交易】使用market_trade
-        # 注意：market_trade是用于市场价格交易的方法
-        # 这里先更新数据库记录持仓，然后设置trailing stop保护
+        # 调用SDK执行交易
         sdk_response = None
         sdk_call_skipped = False
         sdk_skip_reason = None
-        # 【每次创建新的Binance订单客户端】确保使用最新的model对应的api_key和api_secret
         binance_client = self._create_binance_order_client()
         if binance_client:
             try:
-                # 【调用前日志】记录调用参数
                 logger.info(f"@API@ [Model {self.model_id}] [market_trade] === 准备调用接口 ===" 
                           f" | symbol={symbol} | side={trailing_stop_side} | position_side={position_side} | "
                           f"quantity={quantity} | price={price}")
                 
-                # 获取当前的 conversation_id（线程安全）
-                with self.current_conversation_id_lock:
-                    conversation_id = self.current_conversation_id
+                conversation_id = self._get_conversation_id()
                 
                 sdk_response = binance_client.market_trade(
                     symbol=symbol,
-                    side=trailing_stop_side,  # 根据position_side动态决定保护方向
-                    order_type='MARKET',  # 添加order_type参数
-                    position_side=position_side,  # 使用根据signal自动确定的position_side
-                    quantity=quantity,  # 添加quantity参数
+                    side=trailing_stop_side,
+                    order_type='MARKET',
+                    position_side=position_side,
+                    quantity=quantity,
                     model_id=model_uuid,
                     conversation_id=conversation_id,
                     trade_id=trade_id,
                     db=self.db
                 )
                 
-                # 【调用后日志】记录接口返回内容
                 logger.info(f"@API@ [Model {self.model_id}] [market_trade] === 接口调用成功 ==="
                           f" | symbol={symbol} | response={sdk_response}")
             except Exception as sdk_err:
                 logger.error(f"@API@ [Model {self.model_id}] [market_trade] === 接口调用失败 ==="
                            f" | symbol={symbol} | error={sdk_err}", exc_info=True)
-                # SDK调用失败不影响数据库记录，继续执行
         else:
-            # 【客户端创建失败】记录详细的失败原因
-            sdk_call_skipped = True
-            # 检查失败原因
-            try:
-                model = self.db.get_model(self.model_id)
-                if not model:
-                    sdk_skip_reason = "Model not found in database"
-                else:
-                    api_key = model.get('api_key', '')
-                    api_secret = model.get('api_secret', '')
-                    if not api_key or not api_key.strip():
-                        sdk_skip_reason = "API key is empty or not configured in model table"
-                    elif not api_secret or not api_secret.strip():
-                        sdk_skip_reason = "API secret is empty or not configured in model table"
-                    else:
-                        sdk_skip_reason = "Failed to create Binance order client (unknown reason)"
-            except Exception as check_err:
-                sdk_skip_reason = f"Failed to check model configuration: {check_err}"
-            
-            logger.error(f"@API@ [Model {self.model_id}] [market_trade] === 无法创建Binance订单客户端，跳过SDK调用 ==="
-                      f" | symbol={symbol} | reason={sdk_skip_reason} | "
-                      f"⚠️ 警告：交易记录将保存到数据库，但实际交易未执行！请检查model表中的api_key和api_secret配置")
+            sdk_call_skipped, sdk_skip_reason = self._handle_sdk_client_error(symbol, 'market_trade')
 
         # 【更新持仓】使用根据signal自动确定的position_side
         try:
@@ -2657,11 +2713,8 @@ class TradingEngine:
         else:  # SHORT
             trade_side = 'sell'  # 开空仓
         
-        # 【记录交易】根据signal记录到trades表（buy_to_enter 或 sell_to_enter）
-        # 使用提前生成的trade_id
+        # 记录交易
         logger.info(f"TRADE: PENDING - Model {self.model_id} {trade_signal.upper()} {symbol} position_side={position_side} qty={quantity} price={price} fee={trade_fee}")
-        if sdk_call_skipped:
-            logger.warning(f"TRADE: ⚠️ SDK调用被跳过，但交易记录仍将保存到数据库 | symbol={symbol} | reason={sdk_skip_reason}")
         try:
             self.db.insert_rows(
                 self.db.trades_table,
@@ -2671,11 +2724,7 @@ class TradingEngine:
         except Exception as db_err:
             logger.error(f"TRADE: Add trade failed ({trade_signal.upper()}) model={self.model_id} future={symbol}: {db_err}")
             raise
-        if sdk_call_skipped:
-            logger.warning(f"TRADE: RECORDED (但SDK未执行) - Model {self.model_id} {trade_signal.upper()} {symbol} position_side={position_side} | "
-                         f"⚠️ 此交易记录已保存，但实际交易未执行，请检查API密钥配置")
-        else:
-            logger.info(f"TRADE: RECORDED - Model {self.model_id} {trade_signal.upper()} {symbol} position_side={position_side}")
+        self._log_trade_record(trade_signal, symbol, position_side, sdk_call_skipped, sdk_skip_reason)
 
         return {
             'symbol': symbol,
@@ -2717,47 +2766,31 @@ class TradingEngine:
             - 计算毛盈亏和净盈亏（扣除手续费）
             - 平仓后更新数据库持仓记录
         """
-        # 【安全访问】使用.get()方法避免KeyError
-        positions = portfolio.get('positions', []) or []
-        position = None
-        for pos in positions:
-            if pos.get('symbol') == symbol:
-                position = pos
-                break
-
+        # 查找持仓信息
+        position = self._find_position(portfolio, symbol)
         if not position:
             return {'symbol': symbol, 'error': 'Position not found'}
 
         current_price = market_state[symbol]['price']
-        # 【安全访问】使用.get()方法避免KeyError
         entry_price = position.get('avg_price', 0)
-        position_amt = abs(position.get('position_amt', 0))  # 使用绝对值
-        position_side = position.get('position_side', 'LONG')  # LONG 或 SHORT，默认LONG
+        position_amt = abs(position.get('position_amt', 0))
+        position_side = position.get('position_side', 'LONG')
 
-        # Calculate gross P&L (before fees)
+        # 计算毛盈亏和净盈亏
         if position_side == 'LONG':
             gross_pnl = (current_price - entry_price) * position_amt
         else:  # SHORT
             gross_pnl = (entry_price - current_price) * position_amt
 
-        # Calculate closing trade fee
         trade_amount = position_amt * current_price
         trade_fee = trade_amount * self.trade_fee_rate
         net_pnl = gross_pnl - trade_fee
 
-        # 【确定side字段】trades表的side字段是position_side的反向
-        # LONG持仓需要SELL来平仓，SHORT持仓需要BUY来平仓
-        if position_side == 'LONG':
-            side_for_trade = 'SELL'  # 平多仓需要卖出
-        else:  # SHORT
-            side_for_trade = 'BUY'  # 平空仓需要买入
+        # 确定交易方向
+        side_for_trade = self._get_side_for_trade(position_side)
 
-        # 【获取model_uuid用于日志记录】
-        model_mapping = self.db._get_model_id_mapping()
-        model_uuid = model_mapping.get(self.model_id)
-        
-        # 【提前生成trade_id用于日志记录】
-        trade_id = self.db._generate_id()
+        # 获取交易上下文
+        model_uuid, trade_id = self._get_trade_context()
         
         # 【调用SDK执行交易】使用close_position_trade
         # 注意：close_position_trade只支持STOP_MARKET或TAKE_PROFIT_MARKET，不支持MARKET
@@ -2775,9 +2808,7 @@ class TradingEngine:
                           f"stop_price={current_price} | position_side={position_side} | "
                           f"position_amt={position_amt} | entry_price={entry_price}")
                 
-                # 获取当前的 conversation_id（线程安全）
-                with self.current_conversation_id_lock:
-                    conversation_id = self.current_conversation_id
+                conversation_id = self._get_conversation_id()
                 
                 sdk_response = binance_client.close_position_trade(
                     symbol=symbol,
@@ -2800,28 +2831,7 @@ class TradingEngine:
                            f" | symbol={symbol} | error={sdk_err}", exc_info=True)
                 # SDK调用失败不影响数据库记录，继续执行
         else:
-            # 【客户端创建失败】记录详细的失败原因
-            sdk_call_skipped = True
-            # 检查失败原因
-            try:
-                model = self.db.get_model(self.model_id)
-                if not model:
-                    sdk_skip_reason = "Model not found in database"
-                else:
-                    api_key = model.get('api_key', '')
-                    api_secret = model.get('api_secret', '')
-                    if not api_key or not api_key.strip():
-                        sdk_skip_reason = "API key is empty or not configured in model table"
-                    elif not api_secret or not api_secret.strip():
-                        sdk_skip_reason = "API secret is empty or not configured in model table"
-                    else:
-                        sdk_skip_reason = "Failed to create Binance order client (unknown reason)"
-            except Exception as check_err:
-                sdk_skip_reason = f"Failed to check model configuration: {check_err}"
-            
-            logger.error(f"@API@ [Model {self.model_id}] [close_position_trade] === 无法创建Binance订单客户端，跳过SDK调用 ==="
-                      f" | symbol={symbol} | reason={sdk_skip_reason} | "
-                      f"⚠️ 警告：交易记录将保存到数据库，但实际交易未执行！请检查model表中的api_key和api_secret配置")
+            sdk_call_skipped, sdk_skip_reason = self._handle_sdk_client_error(symbol, 'close_position_trade')
 
         # Close position in database
         try:
@@ -2830,12 +2840,9 @@ class TradingEngine:
             logger.error(f"TRADE: Close position failed model={self.model_id} future={symbol}: {db_err}")
             raise
         
-        # Record trade（使用提前生成的trade_id）
+        # 记录交易
         logger.info(f"TRADE: PENDING - Model {self.model_id} CLOSE {symbol} position_side={position_side} position_amt={position_amt} price={current_price} fee={trade_fee} net_pnl={net_pnl}")
-        if sdk_call_skipped:
-            logger.warning(f"TRADE: ⚠️ SDK调用被跳过，但交易记录仍将保存到数据库 | symbol={symbol} | reason={sdk_skip_reason}")
         try:
-            # 【记录到trades表】side字段使用position_side的反向
             self.db.insert_rows(
                 self.db.trades_table,
                 [[trade_id, model_uuid, symbol.upper(), 'close_position', position_amt, current_price, position.get('leverage', 1), side_for_trade.lower(), net_pnl, trade_fee, datetime.now(timezone(timedelta(hours=8))).replace(tzinfo=None)]],
@@ -2844,11 +2851,7 @@ class TradingEngine:
         except Exception as db_err:
             logger.error(f"TRADE: Add trade failed (CLOSE) model={self.model_id} future={symbol}: {db_err}")
             raise
-        if sdk_call_skipped:
-            logger.warning(f"TRADE: RECORDED (但SDK未执行) - Model {self.model_id} CLOSE {symbol} | "
-                         f"⚠️ 此交易记录已保存，但实际交易未执行，请检查API密钥配置")
-        else:
-            logger.info(f"TRADE: RECORDED - Model {self.model_id} CLOSE {symbol}")
+        self._log_trade_record('close_position', symbol, position_side, sdk_call_skipped, sdk_skip_reason)
 
         return {
             'symbol': symbol,
@@ -2881,42 +2884,26 @@ class TradingEngine:
             - 使用STOP_MARKET订单类型，只需要stop_price参数
             - 止损单可能不会立即成交，这里只是下单记录
         """
-        # 【安全访问】使用.get()方法避免KeyError
-        positions = portfolio.get('positions', []) or []
-        position = None
-        for pos in positions:
-            if pos.get('symbol') == symbol:
-                position = pos
-                break
-
+        # 查找持仓信息
+        position = self._find_position(portfolio, symbol)
         if not position:
             return {'symbol': symbol, 'error': 'Position not found'}
 
         current_price = market_state[symbol]['price']
-        # 【安全访问】使用.get()方法避免KeyError
         position_amt = abs(position.get('position_amt', 0))
-        position_side = position.get('position_side', 'LONG')  # LONG 或 SHORT，默认LONG
+        position_side = position.get('position_side', 'LONG')
         
-        # 获取止损价格（从AI决策中获取）
+        # 获取止损价格
         stop_price = decision.get('stop_price')
         if not stop_price:
             return {'symbol': symbol, 'error': 'Stop price not provided'}
-        
         stop_price = float(stop_price)
         
-        # 【确定side字段】trades表的side字段是position_side的反向
-        # LONG持仓需要SELL来止损，SHORT持仓需要BUY来止损
-        if position_side == 'LONG':
-            side_for_trade = 'SELL'  # 平多仓需要卖出
-        else:  # SHORT
-            side_for_trade = 'BUY'  # 平空仓需要买入
-        
-        # 【获取model_uuid用于日志记录】
-        model_mapping = self.db._get_model_id_mapping()
-        model_uuid = model_mapping.get(self.model_id)
-        
-        # 【提前生成trade_id用于日志记录】
-        trade_id = self.db._generate_id()
+        # 确定交易方向
+        side_for_trade = self._get_side_for_trade(position_side)
+
+        # 获取交易上下文
+        model_uuid, trade_id = self._get_trade_context()
         
         # 【调用SDK执行交易】使用stop_loss_trade
         sdk_response = None
@@ -2932,9 +2919,7 @@ class TradingEngine:
                           f"stop_price={stop_price} | position_side={position_side} | "
                           f"position_amt={position_amt} | current_price={current_price}")
                 
-                # 获取当前的 conversation_id（线程安全）
-                with self.current_conversation_id_lock:
-                    conversation_id = self.current_conversation_id
+                conversation_id = self._get_conversation_id()
                 
                 sdk_response = binance_client.stop_loss_trade(
                     symbol=symbol,
@@ -2957,28 +2942,7 @@ class TradingEngine:
                            f" | symbol={symbol} | error={sdk_err}", exc_info=True)
                 # SDK调用失败不影响数据库记录，继续执行
         else:
-            # 【客户端创建失败】记录详细的失败原因
-            sdk_call_skipped = True
-            # 检查失败原因
-            try:
-                model = self.db.get_model(self.model_id)
-                if not model:
-                    sdk_skip_reason = "Model not found in database"
-                else:
-                    api_key = model.get('api_key', '')
-                    api_secret = model.get('api_secret', '')
-                    if not api_key or not api_key.strip():
-                        sdk_skip_reason = "API key is empty or not configured in model table"
-                    elif not api_secret or not api_secret.strip():
-                        sdk_skip_reason = "API secret is empty or not configured in model table"
-                    else:
-                        sdk_skip_reason = "Failed to create Binance order client (unknown reason)"
-            except Exception as check_err:
-                sdk_skip_reason = f"Failed to check model configuration: {check_err}"
-            
-            logger.error(f"@API@ [Model {self.model_id}] [stop_loss_trade] === 无法创建Binance订单客户端，跳过SDK调用 ==="
-                      f" | symbol={symbol} | reason={sdk_skip_reason} | "
-                      f"⚠️ 警告：交易记录将保存到数据库，但实际交易未执行！请检查model表中的api_key和api_secret配置")
+            sdk_call_skipped, sdk_skip_reason = self._handle_sdk_client_error(symbol, 'stop_loss_trade')
         
         # 计算预估手续费（止损单可能不会立即成交，这里只是预估）
         trade_amount = position_amt * stop_price
@@ -3037,42 +3001,26 @@ class TradingEngine:
             - 使用TAKE_PROFIT_MARKET订单类型，只需要stop_price参数
             - 止盈单可能不会立即成交，这里只是下单记录
         """
-        # 【安全访问】使用.get()方法避免KeyError
-        positions = portfolio.get('positions', []) or []
-        position = None
-        for pos in positions:
-            if pos.get('symbol') == symbol:
-                position = pos
-                break
-
+        # 查找持仓信息
+        position = self._find_position(portfolio, symbol)
         if not position:
             return {'symbol': symbol, 'error': 'Position not found'}
 
         current_price = market_state[symbol]['price']
-        # 【安全访问】使用.get()方法避免KeyError
         position_amt = abs(position.get('position_amt', 0))
-        position_side = position.get('position_side', 'LONG')  # LONG 或 SHORT，默认LONG
+        position_side = position.get('position_side', 'LONG')
         
-        # 获取止盈价格（从AI决策中获取）
-        stop_price = decision.get('stop_price')  # AI返回的stop_price在止盈场景下就是止盈价格
+        # 获取止盈价格
+        stop_price = decision.get('stop_price')
         if not stop_price:
             return {'symbol': symbol, 'error': 'Take profit price not provided'}
-        
         stop_price = float(stop_price)
         
-        # 【确定side字段】trades表的side字段是position_side的反向
-        # LONG持仓需要SELL来止盈，SHORT持仓需要BUY来止盈
-        if position_side == 'LONG':
-            side_for_trade = 'SELL'  # 平多仓需要卖出
-        else:  # SHORT
-            side_for_trade = 'BUY'  # 平空仓需要买入
-        
-        # 【获取model_uuid用于日志记录】
-        model_mapping = self.db._get_model_id_mapping()
-        model_uuid = model_mapping.get(self.model_id)
-        
-        # 【提前生成trade_id用于日志记录】
-        trade_id = self.db._generate_id()
+        # 确定交易方向
+        side_for_trade = self._get_side_for_trade(position_side)
+
+        # 获取交易上下文
+        model_uuid, trade_id = self._get_trade_context()
         
         # 【调用SDK执行交易】使用take_profit_trade
         sdk_response = None
@@ -3088,9 +3036,7 @@ class TradingEngine:
                           f"stop_price={stop_price} | position_side={position_side} | "
                           f"position_amt={position_amt} | current_price={current_price}")
                 
-                # 获取当前的 conversation_id（线程安全）
-                with self.current_conversation_id_lock:
-                    conversation_id = self.current_conversation_id
+                conversation_id = self._get_conversation_id()
                 
                 sdk_response = binance_client.take_profit_trade(
                     symbol=symbol,
@@ -3113,39 +3059,15 @@ class TradingEngine:
                            f" | symbol={symbol} | error={sdk_err}", exc_info=True)
                 # SDK调用失败不影响数据库记录，继续执行
         else:
-            # 【客户端创建失败】记录详细的失败原因
-            sdk_call_skipped = True
-            # 检查失败原因
-            try:
-                model = self.db.get_model(self.model_id)
-                if not model:
-                    sdk_skip_reason = "Model not found in database"
-                else:
-                    api_key = model.get('api_key', '')
-                    api_secret = model.get('api_secret', '')
-                    if not api_key or not api_key.strip():
-                        sdk_skip_reason = "API key is empty or not configured in model table"
-                    elif not api_secret or not api_secret.strip():
-                        sdk_skip_reason = "API secret is empty or not configured in model table"
-                    else:
-                        sdk_skip_reason = "Failed to create Binance order client (unknown reason)"
-            except Exception as check_err:
-                sdk_skip_reason = f"Failed to check model configuration: {check_err}"
-            
-            logger.error(f"@API@ [Model {self.model_id}] [take_profit_trade] === 无法创建Binance订单客户端，跳过SDK调用 ==="
-                      f" | symbol={symbol} | reason={sdk_skip_reason} | "
-                      f"⚠️ 警告：交易记录将保存到数据库，但实际交易未执行！请检查model表中的api_key和api_secret配置")
+            sdk_call_skipped, sdk_skip_reason = self._handle_sdk_client_error(symbol, 'take_profit_trade')
         
         # 计算预估手续费（止盈单可能不会立即成交，这里只是预估）
         trade_amount = position_amt * stop_price
         trade_fee = trade_amount * self.trade_fee_rate
         
-        # 记录止盈单到trades表（使用提前生成的trade_id）
+        # 记录止盈单
         logger.info(f"TRADE: PENDING - Model {self.model_id} TAKE_PROFIT {symbol} position_side={position_side} position_amt={position_amt} stop_price={stop_price}")
-        if sdk_call_skipped:
-            logger.warning(f"TRADE: ⚠️ SDK调用被跳过，但交易记录仍将保存到数据库 | symbol={symbol} | reason={sdk_skip_reason}")
         try:
-            # 【记录到trades表】side字段使用position_side的反向
             self.db.insert_rows(
                 self.db.trades_table,
                 [[trade_id, model_uuid, symbol.upper(), 'take_profit', position_amt, stop_price, position.get('leverage', 1), side_for_trade.lower(), 0, trade_fee, datetime.now(timezone(timedelta(hours=8))).replace(tzinfo=None)]],
@@ -3154,11 +3076,7 @@ class TradingEngine:
         except Exception as db_err:
             logger.error(f"TRADE: Add trade failed (TAKE_PROFIT) model={self.model_id} symbol={symbol}: {db_err}")
             raise
-        if sdk_call_skipped:
-            logger.warning(f"TRADE: RECORDED (但SDK未执行) - Model {self.model_id} TAKE_PROFIT {symbol} | "
-                         f"⚠️ 此交易记录已保存，但实际交易未执行，请检查API密钥配置")
-        else:
-            logger.info(f"TRADE: RECORDED - Model {self.model_id} TAKE_PROFIT {symbol}")
+        self._log_trade_record('take_profit', symbol, position_side, sdk_call_skipped, sdk_skip_reason)
 
         return {
             'symbol': symbol,

@@ -47,7 +47,132 @@ except ImportError as exc:  # pragma: no cover - handled at runtime
 logger = logging.getLogger(__name__)
 
 
-class BinanceFuturesClient:
+# ============ 基类：共享公共方法 ============
+
+class _BinanceFuturesBase:
+    """
+    币安期货客户端基类 - 提供公共的工具方法
+    
+    所有币安期货客户端类都继承此基类，共享数据格式转换等工具方法。
+    """
+    
+    def format_symbol(self, base_symbol: str) -> str:
+        """
+        格式化交易对符号，添加计价资产后缀
+        
+        Args:
+            base_symbol: 基础交易对符号，如 'BTC'
+            
+        Returns:
+            完整交易对符号，如 'BTCUSDT'
+        """
+        base_symbol = base_symbol.upper()
+        if not base_symbol.endswith(self.quote_asset):
+            return f"{base_symbol}{self.quote_asset}"
+        return base_symbol
+
+    @staticmethod
+    def _ensure_dict(item: Any) -> Dict[str, Any]:
+        """
+        将SDK模型对象转换为普通字典
+        
+        Args:
+            item: SDK模型对象或字典
+            
+        Returns:
+            普通字典
+        """
+        if isinstance(item, dict):
+            return item
+
+        if hasattr(item, "model_dump"):
+            try:
+                dumped = item.model_dump()
+                if isinstance(dumped, dict):
+                    return dumped
+            except Exception:  # pragma: no cover - defensive
+                pass
+
+        if hasattr(item, "dict"):
+            try:
+                dumped = item.dict()
+                if isinstance(dumped, dict):
+                    return dumped
+            except Exception:
+                pass
+
+        if hasattr(item, "__dict__"):
+            data = {
+                key: value
+                for key, value in vars(item).items()
+                if not key.startswith("_")
+            }
+            if data:
+                return data
+
+        return {}
+
+    def _flatten_to_dicts(self, payload: Any, context: str) -> List[Dict[str, Any]]:
+        """
+        将SDK响应扁平化为字典列表
+        
+        递归处理嵌套的列表、字典和模型对象，最终返回字典列表。
+        
+        Args:
+            payload: SDK响应数据
+            context: 上下文信息，用于日志记录
+            
+        Returns:
+            字典列表
+        """
+        flattened: List[Dict[str, Any]] = []
+        queue: List[Any] = [payload]
+
+        while queue:
+            current = queue.pop(0)
+            if current is None:
+                continue
+
+            if isinstance(current, list):
+                queue.extend(current)
+                continue
+
+            if isinstance(current, dict):
+                flattened.append(current)
+                continue
+
+            to_dict_method = getattr(current, "to_dict", None)
+            if callable(to_dict_method):
+                try:
+                    queue.append(to_dict_method())
+                    continue
+                except Exception:
+                    logger.debug(
+                        "[Binance Futures] %s to_dict() 失败, 尝试 fallback",
+                        context,
+                        exc_info=True,
+                    )
+
+            model_dump_method = getattr(current, "model_dump", None)
+            if callable(model_dump_method):
+                try:
+                    queue.append(model_dump_method())
+                    continue
+                except Exception:
+                    logger.debug(
+                        "[Binance Futures] %s model_dump() 失败, 尝试 fallback",
+                        context,
+                        exc_info=True,
+                    )
+
+            normalized = self._ensure_dict(current)
+            if normalized:
+                flattened.append(normalized)
+
+        return flattened
+
+
+class BinanceFuturesClient(_BinanceFuturesBase):
     """
     币安期货客户端 - 封装币安官方衍生品SDK的高级接口
     
@@ -97,22 +222,6 @@ class BinanceFuturesClient:
         self._rest = self._client.rest_api
 
     # ============ 工具方法：数据格式转换 ============
-
-    def format_symbol(self, base_symbol: str) -> str:
-        """
-        格式化交易对符号，添加计价资产后缀
-        
-        Args:
-            base_symbol: 基础交易对符号，如 'BTC'
-            
-        Returns:
-            完整交易对符号，如 'BTCUSDT'
-        """
-        base_symbol = base_symbol.upper()
-        # 检查base_symbol是否已经以quote_asset结尾，避免重复添加
-        if not base_symbol.endswith(self.quote_asset):
-            return f"{base_symbol}{self.quote_asset}"
-        return base_symbol
 
     @staticmethod
     def _normalize_list(payload: Any) -> List[Any]:
@@ -229,8 +338,6 @@ class BinanceFuturesClient:
                 pass
         return None
 
-
-
     def get_order_book_ticker(self, symbol: Optional[str] = None) -> List[Dict[str, Any]]:
         """
         获取最优挂单价格（Order Book Ticker）
@@ -278,70 +385,6 @@ class BinanceFuturesClient:
         except Exception as e:
             logger.error(f"[Binance Futures] 获取最优挂单价格失败: {e}")
             raise
-
-    def _flatten_to_dicts(self, payload: Any, context: str) -> List[Dict[str, Any]]:
-        """
-        将SDK响应扁平化为字典列表
-        
-        递归处理嵌套的列表、字典和模型对象，最终返回字典列表。
-        
-        Args:
-            payload: SDK响应数据
-            context: 上下文信息，用于日志记录
-            
-        Returns:
-            字典列表
-        """
-        flattened: List[Dict[str, Any]] = []
-        queue: List[Any] = [payload]
-
-        while queue:
-            current = queue.pop(0)
-            if current is None:
-                continue
-
-            # 如果是列表，展开添加到队列
-            if isinstance(current, list):
-                queue.extend(current)
-                continue
-
-            # 如果是字典，直接添加
-            if isinstance(current, dict):
-                flattened.append(current)
-                continue
-
-            # 尝试使用to_dict方法
-            to_dict_method = getattr(current, "to_dict", None)
-            if callable(to_dict_method):
-                try:
-                    queue.append(to_dict_method())
-                    continue
-                except Exception:
-                    logger.debug(
-                        "[Binance Futures] %s to_dict() 失败, 尝试 fallback",
-                        context,
-                        exc_info=True,
-                    )
-
-            # 尝试使用model_dump方法
-            model_dump_method = getattr(current, "model_dump", None)
-            if callable(model_dump_method):
-                try:
-                    queue.append(model_dump_method())
-                    continue
-                except Exception:
-                    logger.debug(
-                        "[Binance Futures] %s model_dump() 失败, 尝试 fallback",
-                        context,
-                        exc_info=True,
-                    )
-
-            # 使用_ensure_dict作为最后手段
-            normalized = self._ensure_dict(current)
-            if normalized:
-                flattened.append(normalized)
-
-        return flattened
 
     # ============ 市场数据获取方法 ============
     
@@ -655,7 +698,7 @@ class BinanceFuturesClient:
             return []
 
 
-class BinanceFuturesAccountClient:
+class BinanceFuturesAccountClient(_BinanceFuturesBase):
     """
     币安期货账户客户端 - 专注于账户功能的客户端
     
@@ -725,7 +768,7 @@ class BinanceFuturesAccountClient:
             logger.error(f"[BinanceFuturesAccountClient] Failed to get account information: {e}")
             raise
     
-class BinanceFuturesOrderClient:
+class BinanceFuturesOrderClient(_BinanceFuturesBase):
     """
     币安期货订单客户端 - 专注于交易功能的客户端
     
@@ -779,132 +822,6 @@ class BinanceFuturesOrderClient:
         self.quote_asset = quote_asset.upper()
         self._client = DerivativesTradingUsdsFutures(config_rest_api=configuration)
         self._rest = self._client.rest_api
-
-    # ============ 工具方法：数据格式转换 ============
-    
-    def format_symbol(self, base_symbol: str) -> str:
-        """
-        格式化交易对符号，添加计价资产后缀
-        
-        Args:
-            base_symbol: 基础交易对符号，如 'BTC'
-            
-        Returns:
-            完整交易对符号，如 'BTCUSDT'
-        """
-        base_symbol = base_symbol.upper()
-        # 检查base_symbol是否已经以quote_asset结尾，避免重复添加
-        if not base_symbol.endswith(self.quote_asset):
-            return f"{base_symbol}{self.quote_asset}"
-        return base_symbol
-
-    @staticmethod
-    def _ensure_dict(item: Any) -> Dict[str, Any]:
-        """
-        将SDK模型对象转换为普通字典
-        
-        Args:
-            item: SDK模型对象或字典
-            
-        Returns:
-            普通字典
-        """
-        if isinstance(item, dict):
-            return item
-
-        # 尝试使用model_dump方法
-        if hasattr(item, "model_dump"):
-            try:
-                dumped = item.model_dump()
-                if isinstance(dumped, dict):
-                    return dumped
-            except Exception:  # pragma: no cover - defensive
-                pass
-
-        # 尝试使用dict方法
-        if hasattr(item, "dict"):
-            try:
-                dumped = item.dict()
-                if isinstance(dumped, dict):
-                    return dumped
-            except Exception:
-                pass
-
-        # 尝试使用__dict__属性
-        if hasattr(item, "__dict__"):
-            data = {
-                key: value
-                for key, value in vars(item).items()
-                if not key.startswith("_")
-            }
-            if data:
-                return data
-
-        return {}
-
-    def _flatten_to_dicts(self, payload: Any, context: str) -> List[Dict[str, Any]]:
-        """
-        将SDK响应扁平化为字典列表
-        
-        递归处理嵌套的列表、字典和模型对象，最终返回字典列表。
-        
-        Args:
-            payload: SDK响应数据
-            context: 上下文信息，用于日志记录
-            
-        Returns:
-            字典列表
-        """
-        flattened: List[Dict[str, Any]] = []
-        queue: List[Any] = [payload]
-
-        while queue:
-            current = queue.pop(0)
-            if current is None:
-                continue
-
-            # 如果是列表，展开添加到队列
-            if isinstance(current, list):
-                queue.extend(current)
-                continue
-
-            # 如果是字典，直接添加
-            if isinstance(current, dict):
-                flattened.append(current)
-                continue
-
-            # 尝试使用to_dict方法
-            to_dict_method = getattr(current, "to_dict", None)
-            if callable(to_dict_method):
-                try:
-                    queue.append(to_dict_method())
-                    continue
-                except Exception:
-                    logger.debug(
-                        "[Binance Futures] %s to_dict() 失败, 尝试 fallback",
-                        context,
-                        exc_info=True,
-                    )
-
-            # 尝试使用model_dump方法
-            model_dump_method = getattr(current, "model_dump", None)
-            if callable(model_dump_method):
-                try:
-                    queue.append(model_dump_method())
-                    continue
-                except Exception:
-                    logger.debug(
-                        "[Binance Futures] %s model_dump() 失败, 尝试 fallback",
-                        context,
-                        exc_info=True,
-                    )
-
-            # 使用_ensure_dict作为最后手段
-            normalized = self._ensure_dict(current)
-            if normalized:
-                flattened.append(normalized)
-
-        return flattened
 
     def get_order_book_ticker(self, symbol: Optional[str] = None) -> List[Dict[str, Any]]:
         """
@@ -962,6 +879,93 @@ class BinanceFuturesOrderClient:
             raise
 
     # ============ 交易方法 ============
+    
+    @staticmethod
+    def _serialize_params(params: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        将参数字典中的枚举值转换为可序列化的格式
+        
+        Args:
+            params: 参数字典
+            
+        Returns:
+            序列化后的参数字典
+        """
+        serializable_params = {}
+        for key, value in params.items():
+            if hasattr(value, 'value'):
+                serializable_params[key] = str(value.value)
+            elif hasattr(value, '__dict__'):
+                try:
+                    serializable_params[key] = str(value)
+                except:
+                    serializable_params[key] = repr(value)
+            else:
+                serializable_params[key] = value
+        return serializable_params
+    
+    @staticmethod
+    def _extract_response_type(response_or_exception: Any) -> str:
+        """
+        从响应对象或异常中提取状态码
+        
+        Args:
+            response_or_exception: 响应对象或异常对象
+            
+        Returns:
+            状态码字符串
+        """
+        if hasattr(response_or_exception, 'status_code'):
+            return str(response_or_exception.status_code)
+        elif hasattr(response_or_exception, 'status'):
+            return str(response_or_exception.status)
+        elif hasattr(response_or_exception, 'code'):
+            return str(response_or_exception.code)
+        else:
+            error_type = type(response_or_exception).__name__
+            if any(keyword in error_type for keyword in ['4', 'BadRequest', 'Unauthorized', 'Forbidden', 'NotFound']):
+                return "4XX"
+            elif any(keyword in error_type for keyword in ['5', 'Server']):
+                return "5XX"
+            return "ERROR"
+    
+    def _log_trade(self, db, method_name: str, trade_mode: str, order_params: Dict[str, Any],
+                   response_dict: Dict[str, Any], response_type: str, error_context: Optional[str],
+                   model_id: Optional[str] = None, conversation_id: Optional[str] = None,
+                   trade_id: Optional[str] = None) -> None:
+        """
+        记录交易日志到数据库
+        
+        Args:
+            db: 数据库实例
+            method_name: 方法名称
+            trade_mode: 交易模式 ('test' 或 'real')
+            order_params: 订单参数字典
+            response_dict: 响应数据字典
+            response_type: 响应状态码
+            error_context: 错误上下文信息
+            model_id: 模型ID
+            conversation_id: 对话ID
+            trade_id: 交易ID
+        """
+        if not (db and method_name):
+            return
+        
+        try:
+            serializable_params = self._serialize_params(order_params)
+            db.add_binance_trade_log(
+                model_id=model_id,
+                conversation_id=conversation_id,
+                trade_id=trade_id,
+                type=trade_mode,
+                method_name=method_name,
+                param=serializable_params,
+                response_context=response_dict,
+                response_type=response_type,
+                error_context=error_context
+            )
+        except Exception as log_err:
+            logger.warning(f"[Binance Futures] 记录日志失败: {log_err}")
     
     def _execute_order(self, order_params: Dict[str, Any], context: str = "交易", 
                       model_id: Optional[str] = None, conversation_id: Optional[str] = None,
@@ -1115,77 +1119,14 @@ class BinanceFuturesOrderClient:
             except:
                 pass
             
-            # 记录日志后再重新抛出异常，让调用者处理
-            # 【记录日志到数据库】如果提供了db实例和相关参数，则记录日志
-            if db and method_name:
-                try:
-                    # 将order_params中的枚举值转换为可序列化的格式
-                    serializable_params = {}
-                    for key, value in order_params.items():
-                        if hasattr(value, 'value'):
-                            # 如果是枚举值，提取其字符串值
-                            serializable_params[key] = str(value.value)
-                        elif hasattr(value, '__dict__'):
-                            # 如果是对象，尝试转换为字典
-                            try:
-                                serializable_params[key] = str(value)
-                            except:
-                                serializable_params[key] = repr(value)
-                        else:
-                            serializable_params[key] = value
-                    
-                    # 记录日志（包括状态码和错误信息）
-                    db.add_binance_trade_log(
-                        model_id=model_id,
-                        conversation_id=conversation_id,
-                        trade_id=trade_id,
-                        type=trade_mode,  # 'test' 或 'real'
-                        method_name=method_name,
-                        param=serializable_params,
-                        response_context={},  # 异常时没有响应内容
-                        response_type=response_type,
-                        error_context=error_context
-                    )
-                except Exception as log_err:
-                    # 日志记录失败不影响主流程
-                    logger.warning(f"[Binance Futures] [{context}] 记录日志失败: {log_err}")
-            
-            # 重新抛出异常，让调用者处理
+            # 记录日志后再重新抛出异常
+            self._log_trade(db, method_name, trade_mode, order_params, {}, response_type,
+                          error_context, model_id, conversation_id, trade_id)
             raise
         
-        # 【记录日志到数据库】如果提供了db实例和相关参数，则记录日志（成功情况）
-        if db and method_name:
-            try:
-                # 将order_params中的枚举值转换为可序列化的格式
-                serializable_params = {}
-                for key, value in order_params.items():
-                    if hasattr(value, 'value'):
-                        # 如果是枚举值，提取其字符串值
-                        serializable_params[key] = str(value.value)
-                    elif hasattr(value, '__dict__'):
-                        # 如果是对象，尝试转换为字典
-                        try:
-                            serializable_params[key] = str(value)
-                        except:
-                            serializable_params[key] = repr(value)
-                    else:
-                        serializable_params[key] = value
-                
-                # 记录日志（包括状态码和错误信息）
-                db.add_binance_trade_log(
-                    model_id=model_id,
-                    conversation_id=conversation_id,
-                    trade_id=trade_id,
-                    type=trade_mode,  # 'test' 或 'real'
-                    method_name=method_name,
-                    param=serializable_params,
-                    response_context=response_dict,
-                    response_type=response_type,
-                    error_context=error_context
-                )
-            except Exception as log_err:
-                # 日志记录失败不影响主流程
-                logger.warning(f"[Binance Futures] [{context}] 记录日志失败: {log_err}")
+        # 记录成功日志
+        self._log_trade(db, method_name, trade_mode, order_params, response_dict, response_type,
+                      error_context, model_id, conversation_id, trade_id)
         
         return response_dict
 
@@ -1226,87 +1167,161 @@ class BinanceFuturesOrderClient:
             logger.info(f"[Binance Futures] {context}成功: {data}")
             response_dict = self._flatten_to_dicts(data, "new_algo_order")[0] if data else {}
             
-            # 【记录日志到数据库】如果提供了db实例和相关参数，则记录日志
-            if db:
-                try:
-                    # 将algo_params中的枚举值转换为可序列化的格式
-                    serializable_params = {}
-                    for key, value in algo_params.items():
-                        if hasattr(value, 'value'):
-                            serializable_params[key] = str(value.value)
-                        elif hasattr(value, '__dict__'):
-                            try:
-                                serializable_params[key] = str(value)
-                            except:
-                                serializable_params[key] = repr(value)
-                        else:
-                            serializable_params[key] = value
-                    
-                    # 记录日志
-                    db.add_binance_trade_log(
-                        model_id=model_id,
-                        conversation_id=conversation_id,
-                        trade_id=trade_id,
-                        type='real',
-                        method_name=method_name,
-                        param=serializable_params,
-                        response_context=response_dict,
-                        response_type=str(response.status_code) if hasattr(response, 'status_code') else "200",
-                        error_context=None
-                    )
-                except Exception as log_err:
-                    logger.warning(f"[Binance Futures] 记录日志失败: {log_err}")
+            # 记录成功日志
+            response_type = self._extract_response_type(response)
+            self._log_trade(db, method_name, 'real', algo_params, response_dict, response_type,
+                          None, model_id, conversation_id, trade_id)
             
             return response_dict
         except Exception as exc:
             logger.error(f"[Binance Futures] {context}失败: {exc}", exc_info=True)
             
-            # 【记录日志到数据库】如果提供了db实例和相关参数，则记录日志
-            if db:
-                try:
-                    # 将algo_params中的枚举值转换为可序列化的格式
-                    serializable_params = {}
-                    for key, value in algo_params.items():
-                        if hasattr(value, 'value'):
-                            serializable_params[key] = str(value.value)
-                        elif hasattr(value, '__dict__'):
-                            try:
-                                serializable_params[key] = str(value)
-                            except:
-                                serializable_params[key] = repr(value)
-                        else:
-                            serializable_params[key] = value
-                    
-                    # 记录日志（包括状态码和错误信息）
-                    error_context = str(exc)
-                    response_type = "ERROR"
-                    
-                    # 尝试从异常中提取状态码
-                    if hasattr(exc, 'status_code'):
-                        response_type = str(exc.status_code)
-                    elif hasattr(exc, 'status'):
-                        response_type = str(exc.status)
-                    elif hasattr(exc, 'code'):
-                        response_type = str(exc.code)
-                    
-                    db.add_binance_trade_log(
-                        model_id=model_id,
-                        conversation_id=conversation_id,
-                        trade_id=trade_id,
-                        type='real',
-                        method_name=method_name,
-                        param=serializable_params,
-                        response_context={},
-                        response_type=response_type,
-                        error_context=error_context
-                    )
-                except Exception as log_err:
-                    logger.warning(f"[Binance Futures] 记录日志失败: {log_err}")
+            # 记录错误日志
+            error_context = str(exc)
+            response_type = self._extract_response_type(exc)
+            self._log_trade(db, method_name, 'real', algo_params, {}, response_type,
+                          error_context, model_id, conversation_id, trade_id)
             
             raise
 
     # ============ 交易订单方法 ============
     # 提供各种类型的交易订单功能：止损、止盈、跟踪买入、平仓等
+    
+    def _validate_quantity(self, quantity: float) -> None:
+        """验证订单数量必须大于0"""
+        if quantity <= 0:
+            raise ValueError(f"quantity参数必须大于0，当前值: {quantity}")
+    
+    def _validate_position_side(self, position_side: Optional[str]) -> Optional[str]:
+        """
+        验证并规范化position_side参数
+        
+        Args:
+            position_side: 持仓方向
+            
+        Returns:
+            规范化后的持仓方向（大写）或None
+            
+        Raises:
+            ValueError: 如果position_side值不合法
+        """
+        if position_side is not None:
+            position_side_upper = position_side.upper()
+            if position_side_upper not in ["LONG", "SHORT"]:
+                raise ValueError(f"position_side参数值必须是'LONG'或'SHORT'，当前值: {position_side}")
+            return position_side_upper
+        return None
+    
+    def _validate_conditional_order_params(self, order_type: str, price: Optional[float], 
+                                          stop_price: Optional[float], 
+                                          require_price: bool = True) -> None:
+        """
+        验证条件订单参数（止损/止盈订单）
+        
+        Args:
+            order_type: 订单类型
+            price: 订单价格
+            stop_price: 触发价格
+            require_price: 是否需要price参数
+            
+        Raises:
+            ValueError: 如果参数验证失败
+        """
+        order_type_upper = order_type.upper()
+        if order_type_upper in ["STOP", "TAKE_PROFIT"]:
+            if require_price and price is None:
+                raise ValueError(f"{order_type_upper}订单必须提供price参数")
+            if stop_price is None:
+                raise ValueError(f"{order_type_upper}订单必须提供stop_price参数")
+        elif order_type_upper in ["STOP_MARKET", "TAKE_PROFIT_MARKET"]:
+            if stop_price is None:
+                raise ValueError(f"{order_type_upper}订单必须提供stop_price参数")
+        else:
+            raise ValueError(f"不支持的订单类型: {order_type}")
+    
+    def _build_order_params(self, formatted_symbol: str, side: str, order_type: str,
+                           quantity: Optional[float] = None, price: Optional[float] = None,
+                           stop_price: Optional[float] = None, position_side: Optional[str] = None,
+                           close_position: bool = False, **kwargs) -> Dict[str, Any]:
+        """
+        构建订单参数字典
+        
+        Args:
+            formatted_symbol: 格式化后的交易对
+            side: 交易方向
+            order_type: 订单类型
+            quantity: 订单数量
+            price: 订单价格
+            stop_price: 触发价格
+            position_side: 持仓方向
+            close_position: 是否平仓
+            **kwargs: 其他可选参数
+            
+        Returns:
+            订单参数字典
+        """
+        order_params = {
+            "symbol": formatted_symbol,
+            "side": NewOrderSideEnum[side.upper()].value if NewOrderSideEnum else side.upper(),
+            "type": order_type.upper(),
+        }
+        
+        if quantity is not None:
+            order_params["quantity"] = quantity
+        
+        if close_position:
+            order_params["close_position"] = True
+        
+        if position_side:
+            order_params["position_side"] = position_side
+        
+        if stop_price is not None:
+            order_params["stop_price"] = stop_price
+        
+        if price is not None:
+            order_params["price"] = price
+            order_params["time_in_force"] = kwargs.get("time_in_force", "GTC")
+        
+        order_params.update(kwargs)
+        return order_params
+    
+    def _build_algo_params(self, quantity: Optional[float] = None, price: Optional[float] = None,
+                          stop_price: Optional[float] = None, position_side: Optional[str] = None,
+                          close_position: bool = False, **kwargs) -> Dict[str, Any]:
+        """
+        构建算法订单参数字典
+        
+        Args:
+            quantity: 订单数量
+            price: 订单价格
+            stop_price: 触发价格
+            position_side: 持仓方向
+            close_position: 是否平仓
+            **kwargs: 其他可选参数
+            
+        Returns:
+            算法订单参数字典
+        """
+        algo_params = {}
+        
+        if quantity is not None:
+            algo_params["quantity"] = quantity
+        
+        if stop_price is not None:
+            algo_params["trigger_price"] = stop_price
+        
+        if position_side:
+            algo_params["position_side"] = position_side
+        
+        if price is not None:
+            algo_params["price"] = price
+            algo_params["time_in_force"] = kwargs.get("time_in_force", "GTC")
+        
+        if close_position:
+            algo_params["close_position"] = True
+        
+        algo_params.update(kwargs)
+        return algo_params
     
     def stop_loss_trade(self, symbol: str, side: str, quantity: float, order_type: str = "STOP", price: Optional[float] = None, stop_price: Optional[float] = None, position_side: Optional[str] = None, model_id: Optional[str] = None, conversation_id: Optional[str] = None, trade_id: Optional[str] = None, db = None, **kwargs) -> Dict[str, Any]:
         """
@@ -1340,89 +1355,30 @@ class BinanceFuturesOrderClient:
         Raises:
             ValueError: 当STOP订单缺少必填参数（quantity、price、stop_price）时
         """
-        # 【参数验证】验证必填参数
-        # 验证quantity必须大于0
-        if quantity <= 0:
-            raise ValueError(f"quantity参数必须大于0，当前值: {quantity}")
-        
+        self._validate_quantity(quantity)
         order_type_upper = order_type.upper()
-        if order_type_upper == "STOP":
-            if price is None:
-                raise ValueError("STOP订单必须提供price参数")
-            if stop_price is None:
-                raise ValueError("STOP订单必须提供stop_price参数")
-        elif order_type_upper == "STOP_MARKET":
-            if stop_price is None:
-                raise ValueError("STOP_MARKET订单必须提供stop_price参数")
-        else:
-            raise ValueError(f"不支持的订单类型: {order_type}，仅支持'STOP'或'STOP_MARKET'")
+        self._validate_conditional_order_params(order_type_upper, price, stop_price, 
+                                                require_price=(order_type_upper == "STOP"))
         
         logger.info(f"[Binance Futures] 开始止损交易，交易对: {symbol}, 方向: {side}, 类型: {order_type_upper}, 持仓方向: {position_side}")
         
         try:
-            # 格式化交易对
             formatted_symbol = self.format_symbol(symbol)
-            
-            # 【参数验证】验证position_side参数值
-            if position_side is not None:
-                position_side_upper = position_side.upper()
-                if position_side_upper not in ["LONG", "SHORT"]:
-                    raise ValueError(f"position_side参数值必须是'LONG'或'SHORT'，当前值: {position_side}")
-                position_side = position_side_upper
-            
-            # 交易模式切换
+            position_side = self._validate_position_side(position_side)
             trade_mode = getattr(app_config, 'BINANCE_TRADE_MODE', 'test').lower()
             
             if trade_mode == 'test':
-                # 测试模式下使用原来的_execute_order方法
-                # 准备订单参数
-                order_params = {
-                    "symbol": formatted_symbol,
-                    "side": NewOrderSideEnum[side.upper()].value if NewOrderSideEnum else side.upper(),
-                    "type": order_type_upper,
-                    "stop_price": stop_price,
-                }
-                
-                # 【添加position_side参数】在双向持仓模式下，此参数为必填项
-                if position_side:
-                    order_params["position_side"] = position_side
-                
-                # 添加quantity参数（必填）
-                order_params["quantity"] = quantity
-                
-                # 【添加STOP订单所需的参数】当order_type为STOP时，price已通过前置验证确保存在
-                if order_type_upper == "STOP":
-                    order_params["price"] = price
-                    order_params["time_in_force"] = kwargs.get("time_in_force", "GTC")
-                
-                # 添加可选参数
-                order_params.update(kwargs)
-                
-                # 【统一订单执行】使用辅助方法处理测试/真实交易切换
-                return self._execute_order(order_params, context="止损交易", 
-                                          model_id=model_id, conversation_id=conversation_id, 
-                                          trade_id=trade_id, method_name="stop_loss_trade", db=db)
+                order_params = self._build_order_params(
+                    formatted_symbol, side, order_type_upper, quantity, price, stop_price,
+                    position_side, **kwargs
+                )
+                return self._execute_order(order_params, context="止损交易",
+                                         model_id=model_id, conversation_id=conversation_id,
+                                         trade_id=trade_id, method_name="stop_loss_trade", db=db)
             else:
-                # 真实交易模式下使用_execute_algo_order辅助方法
-                # 准备algo_params参数
-                algo_params = {
-                    "trigger_price": stop_price,
-                    "quantity": quantity,
-                }
-                
-                # 【添加position_side参数】在双向持仓模式下，此参数为必填项
-                if position_side:
-                    algo_params["position_side"] = position_side
-                
-                # 【添加STOP订单所需的参数】当order_type为STOP时，price已通过前置验证确保存在
-                if order_type_upper == "STOP":
-                    algo_params["price"] = price
-                    algo_params["time_in_force"] = kwargs.get("time_in_force", "GTC")
-                
-                # 添加可选参数
-                algo_params.update(kwargs)
-                
-                # 调用辅助方法执行算法订单
+                algo_params = self._build_algo_params(
+                    quantity, price, stop_price, position_side, **kwargs
+                )
                 return self._execute_algo_order(
                     method_name="stop_loss_trade",
                     context="止损交易",
@@ -1435,7 +1391,6 @@ class BinanceFuturesOrderClient:
                     trade_id=trade_id,
                     db=db
                 )
-            
         except Exception as exc:
             logger.error(f"[Binance Futures] 止损交易失败: {exc}", exc_info=True)
             raise
@@ -1471,89 +1426,30 @@ class BinanceFuturesOrderClient:
         Raises:
             ValueError: 当TAKE_PROFIT订单缺少必填参数（quantity、price、stop_price）时
         """
-        # 【参数验证】验证必填参数
-        # 验证quantity必须大于0
-        if quantity <= 0:
-            raise ValueError(f"quantity参数必须大于0，当前值: {quantity}")
-        
+        self._validate_quantity(quantity)
         order_type_upper = order_type.upper()
-        if order_type_upper == "TAKE_PROFIT":
-            if price is None:
-                raise ValueError("TAKE_PROFIT订单必须提供price参数")
-            if stop_price is None:
-                raise ValueError("TAKE_PROFIT订单必须提供stop_price参数")
-        elif order_type_upper == "TAKE_PROFIT_MARKET":
-            if stop_price is None:
-                raise ValueError("TAKE_PROFIT_MARKET订单必须提供stop_price参数")
-        else:
-            raise ValueError(f"不支持的订单类型: {order_type}，仅支持'TAKE_PROFIT'或'TAKE_PROFIT_MARKET'")
+        self._validate_conditional_order_params(order_type_upper, price, stop_price,
+                                                require_price=(order_type_upper == "TAKE_PROFIT"))
         
         logger.info(f"[Binance Futures] 开始止盈交易，交易对: {symbol}, 方向: {side}, 类型: {order_type_upper}, 持仓方向: {position_side}")
         
         try:
-            # 格式化交易对
             formatted_symbol = self.format_symbol(symbol)
-            
-            # 【参数验证】验证position_side参数值
-            if position_side is not None:
-                position_side_upper = position_side.upper()
-                if position_side_upper not in ["LONG", "SHORT"]:
-                    raise ValueError(f"position_side参数值必须是'LONG'或'SHORT'，当前值: {position_side}")
-                position_side = position_side_upper
-            
-            # 交易模式切换
+            position_side = self._validate_position_side(position_side)
             trade_mode = getattr(app_config, 'BINANCE_TRADE_MODE', 'test').lower()
             
             if trade_mode == 'test':
-                # 测试模式下使用原来的_execute_order方法
-                # 准备订单参数
-                order_params = {
-                    "symbol": formatted_symbol,
-                    "side": NewOrderSideEnum[side.upper()].value if NewOrderSideEnum else side.upper(),
-                    "type": order_type_upper,
-                    "stop_price": stop_price,
-                }
-                
-                # 【添加position_side参数】在双向持仓模式下，此参数为必填项
-                if position_side:
-                    order_params["position_side"] = position_side
-                
-                # 添加quantity参数（必填）
-                order_params["quantity"] = quantity
-                
-                # 【添加TAKE_PROFIT订单所需的参数】当order_type为TAKE_PROFIT时，price已通过前置验证确保存在
-                if order_type_upper == "TAKE_PROFIT":
-                    order_params["price"] = price
-                    order_params["time_in_force"] = kwargs.get("time_in_force", "GTC")
-                
-                # 添加可选参数
-                order_params.update(kwargs)
-                
-                # 【统一订单执行】使用辅助方法处理测试/真实交易切换
+                order_params = self._build_order_params(
+                    formatted_symbol, side, order_type_upper, quantity, price, stop_price,
+                    position_side, **kwargs
+                )
                 return self._execute_order(order_params, context="止盈交易",
-                                          model_id=model_id, conversation_id=conversation_id,
-                                          trade_id=trade_id, method_name="take_profit_trade", db=db)
+                                         model_id=model_id, conversation_id=conversation_id,
+                                         trade_id=trade_id, method_name="take_profit_trade", db=db)
             else:
-                # 真实交易模式下使用_execute_algo_order辅助方法
-                # 准备algo_params参数
-                algo_params = {
-                    "trigger_price": stop_price,
-                    "quantity": quantity,
-                }
-                
-                # 【添加position_side参数】在双向持仓模式下，此参数为必填项
-                if position_side:
-                    algo_params["position_side"] = position_side
-                
-                # 【添加TAKE_PROFIT订单所需的参数】当order_type为TAKE_PROFIT时，price已通过前置验证确保存在
-                if order_type_upper == "TAKE_PROFIT":
-                    algo_params["price"] = price
-                    algo_params["time_in_force"] = kwargs.get("time_in_force", "GTC")
-                
-                # 添加可选参数
-                algo_params.update(kwargs)
-                
-                # 调用辅助方法执行算法订单
+                algo_params = self._build_algo_params(
+                    quantity, price, stop_price, position_side, **kwargs
+                )
                 return self._execute_algo_order(
                     method_name="take_profit_trade",
                     context="止盈交易",
@@ -1566,7 +1462,6 @@ class BinanceFuturesOrderClient:
                     trade_id=trade_id,
                     db=db
                 )
-            
         except Exception as exc:
             logger.error(f"[Binance Futures] 止盈交易失败: {exc}", exc_info=True)
             raise
@@ -1594,46 +1489,22 @@ class BinanceFuturesOrderClient:
         Returns:
             订单响应数据
         """
-        # 验证quantity必须大于0
-        if quantity <= 0:
-            raise ValueError(f"quantity参数必须大于0，当前值: {quantity}")
+        self._validate_quantity(quantity)
         
         logger.info(f"[Binance Futures] 开始市场交易，交易对: {symbol}, 方向: {side}, 数量: {quantity}, 订单类型: {order_type}, 持仓方向: {position_side}")
         
         try:
-            # 格式化交易对
             formatted_symbol = self.format_symbol(symbol)
+            position_side = self._validate_position_side(position_side)
             
-            # 【参数验证】验证position_side参数值
-            if position_side is not None:
-                position_side_upper = position_side.upper()
-                if position_side_upper not in ["LONG", "SHORT"]:
-                    raise ValueError(f"position_side参数值必须是'LONG'或'SHORT'，当前值: {position_side}")
-                position_side = position_side_upper
+            order_params = self._build_order_params(
+                formatted_symbol, side, order_type, quantity, position_side=position_side, **kwargs
+            )
+            order_params["newOrderRespType"] = new_order_resp_type
             
-            # 准备订单参数
-            order_params = {
-                "symbol": formatted_symbol,
-                "side": NewOrderSideEnum[side.upper()].value if NewOrderSideEnum else side.upper(),
-                "type": order_type,
-                "newOrderRespType": new_order_resp_type,
-            }
-            
-            # 添加quantity参数（必填）
-            order_params["quantity"] = quantity
-            
-            # 【添加position_side参数】在双向持仓模式下，此参数为必填项
-            if position_side:
-                order_params["position_side"] = position_side
-            
-            # 添加可选参数
-            order_params.update(kwargs)
-            
-            # 【统一订单执行】使用辅助方法处理测试/真实交易切换
             return self._execute_order(order_params, context="市场交易",
-                                      model_id=model_id, conversation_id=conversation_id,
-                                      trade_id=trade_id, method_name="market_trade", db=db)
-            
+                                     model_id=model_id, conversation_id=conversation_id,
+                                     trade_id=trade_id, method_name="market_trade", db=db)
         except Exception as exc:
             logger.error(f"[Binance Futures] 市场交易失败: {exc}", exc_info=True)
             raise
@@ -1666,222 +1537,50 @@ class BinanceFuturesOrderClient:
         Returns:
             订单响应数据
         """
-        # 验证quantity必须大于0
-        if quantity <= 0:
-            raise ValueError(f"quantity参数必须大于0，当前值: {quantity}")
+        self._validate_quantity(quantity)
         
         logger.info(f"[Binance Futures] 开始平仓交易，交易对: {symbol}, 方向: {side}, 类型: {order_type}, 持仓方向: {position_side}")
         
         try:
-            # 格式化交易对
             formatted_symbol = self.format_symbol(symbol)
+            position_side = self._validate_position_side(position_side)
             
-            # 【参数验证】验证position_side参数值
-            if position_side is not None:
-                position_side_upper = position_side.upper()
-                if position_side_upper not in ["LONG", "SHORT"]:
-                    raise ValueError(f"position_side参数值必须是'LONG'或'SHORT'，当前值: {position_side}")
-                position_side = position_side_upper
-                
-                # 【双开模式校验】验证side和position_side的组合是否合法
-                # LONG方向上不支持BUY（平多仓应该用SELL）
-                # SHORT方向上不支持SELL（平空仓应该用BUY）
+            # 【双开模式校验】验证side和position_side的组合是否合法
+            if position_side:
                 side_upper = side.upper()
                 if position_side == "LONG" and side_upper == "BUY":
                     raise ValueError(f"双开模式下，LONG方向上不支持BUY操作。平多仓应使用SELL，当前side={side}, position_side={position_side}")
                 if position_side == "SHORT" and side_upper == "SELL":
                     raise ValueError(f"双开模式下，SHORT方向上不支持SELL操作。平空仓应使用BUY，当前side={side}, position_side={position_side}")
             
-            # 交易模式切换
             trade_mode = getattr(app_config, 'BINANCE_TRADE_MODE', 'test').lower()
+            order_type_upper = order_type.upper()
             
             if trade_mode == 'test':
-                # 测试模式下使用原来的_execute_order方法
-                # 准备订单参数
-                order_params = {
-                    "symbol": formatted_symbol,
-                    "side": NewOrderSideEnum[side.upper()].value if NewOrderSideEnum else side.upper(),
-                    "type": order_type.upper(),
-                    "close_position": True,
-                }
-                
-                # 平仓处理不支持quantity参数
-                # order_params["quantity"] = quantity
-                
-                # 【添加position_side参数】在双向持仓模式下，此参数为必填项
-                if position_side:
-                    order_params["position_side"] = position_side
-                
-                # 添加触发价格参数（如果需要）
-                if order_type.upper() in ["STOP_MARKET", "TAKE_PROFIT_MARKET"] and stop_price is not None:
-                    order_params["stop_price"] = stop_price
-                
-                # 添加可选参数
-                order_params.update(kwargs)
-                
-                # 【统一订单执行】使用辅助方法处理测试/真实交易切换
+                order_params = self._build_order_params(
+                    formatted_symbol, side, order_type_upper, position_side=position_side,
+                    stop_price=stop_price, close_position=True, **kwargs
+                )
                 return self._execute_order(order_params, context="平仓交易",
                                           model_id=model_id, conversation_id=conversation_id,
                                           trade_id=trade_id, method_name="close_position_trade", db=db)
             else:
-                # 真实交易模式下使用_execute_algo_order辅助方法
-                
-                # 准备new_algo_order参数
-                algo_params = {
-                    "symbol": formatted_symbol,
-                    "side": side.upper(),
-                    "type": order_type.upper(),
-                    "close_position": True,
-                }
-                
-                # 【添加position_side参数】在双向持仓模式下，此参数为必填项
-                if position_side:
-                    algo_params["position_side"] = position_side
-                
-                # 添加触发价格参数（如果需要）
-                if order_type.upper() in ["STOP_MARKET", "TAKE_PROFIT_MARKET"] and stop_price is not None:
-                    algo_params["trigger_price"] = stop_price
-                
-                # 添加可选参数
-                algo_params.update(kwargs)
-                
-                # 调用_execute_algo_order辅助方法
+                algo_params = self._build_algo_params(
+                    position_side=position_side, stop_price=stop_price,
+                    close_position=True, **kwargs
+                )
                 return self._execute_algo_order(
-                    algo_params=algo_params,
+                    method_name="close_position_trade",
                     context="平仓交易",
+                    formatted_symbol=formatted_symbol,
+                    side=side,
+                    order_type=order_type_upper,
+                    algo_params=algo_params,
                     model_id=model_id,
                     conversation_id=conversation_id,
                     trade_id=trade_id,
-                    method_name="close_position_trade",
                     db=db
                 )
-            
         except Exception as exc:
             logger.error(f"[Binance Futures] 平仓交易失败: {exc}", exc_info=True)
             raise
-
-    # ============ 工具方法：数据格式转换 ============
-    
-    def format_symbol(self, base_symbol: str) -> str:
-        """
-        格式化交易对符号，添加计价资产后缀
-        
-        Args:
-            base_symbol: 基础交易对符号，如 'BTC'
-            
-        Returns:
-            完整交易对符号，如 'BTCUSDT'
-        """
-        base_symbol = base_symbol.upper()
-        # 检查base_symbol是否已经以quote_asset结尾，避免重复添加
-        if not base_symbol.endswith(self.quote_asset):
-            return f"{base_symbol}{self.quote_asset}"
-        return base_symbol
-
-    @staticmethod
-    def _ensure_dict(item: Any) -> Dict[str, Any]:
-        """
-        将SDK模型对象转换为普通字典
-        
-        Args:
-            item: SDK模型对象或字典
-            
-        Returns:
-            普通字典
-        """
-        if isinstance(item, dict):
-            return item
-
-        # 尝试使用model_dump方法
-        if hasattr(item, "model_dump"):
-            try:
-                dumped = item.model_dump()
-                if isinstance(dumped, dict):
-                    return dumped
-            except Exception:  # pragma: no cover - defensive
-                pass
-
-        # 尝试使用dict方法
-        if hasattr(item, "dict"):
-            try:
-                dumped = item.dict()
-                if isinstance(dumped, dict):
-                    return dumped
-            except Exception:
-                pass
-
-        # 尝试使用__dict__属性
-        if hasattr(item, "__dict__"):
-            data = {
-                key: value
-                for key, value in vars(item).items()
-                if not key.startswith("_")
-            }
-            if data:
-                return data
-
-        return {}
-
-    def _flatten_to_dicts(self, payload: Any, context: str) -> List[Dict[str, Any]]:
-        """
-        将SDK响应扁平化为字典列表
-        
-        递归处理嵌套的列表、字典和模型对象，最终返回字典列表。
-        
-        Args:
-            payload: SDK响应数据
-            context: 上下文信息，用于日志记录
-            
-        Returns:
-            字典列表
-        """
-        flattened: List[Dict[str, Any]] = []
-        queue: List[Any] = [payload]
-
-        while queue:
-            current = queue.pop(0)
-            if current is None:
-                continue
-
-            # 如果是列表，展开添加到队列
-            if isinstance(current, list):
-                queue.extend(current)
-                continue
-
-            # 如果是字典，直接添加
-            if isinstance(current, dict):
-                flattened.append(current)
-                continue
-
-            # 尝试使用to_dict方法
-            to_dict_method = getattr(current, "to_dict", None)
-            if callable(to_dict_method):
-                try:
-                    queue.append(to_dict_method())
-                    continue
-                except Exception:
-                    logger.debug(
-                        "[Binance Futures] %s to_dict() 失败, 尝试 fallback",
-                        context,
-                        exc_info=True,
-                    )
-
-            # 尝试使用model_dump方法
-            model_dump_method = getattr(current, "model_dump", None)
-            if callable(model_dump_method):
-                try:
-                    queue.append(model_dump_method())
-                    continue
-                except Exception:
-                    logger.debug(
-                        "[Binance Futures] %s model_dump() 失败, 尝试 fallback",
-                        context,
-                        exc_info=True,
-                    )
-
-            # 使用_ensure_dict作为最后手段
-            normalized = self._ensure_dict(current)
-            if normalized:
-                flattened.append(normalized)
-
-        return flattened

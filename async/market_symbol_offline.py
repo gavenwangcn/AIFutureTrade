@@ -11,7 +11,7 @@
 数据清理逻辑：
 - 使用ingestion_time字段作为判断标准
 - 删除ingestion_time早于（当前时间 - 保留分钟数）的所有记录
-- 默认保留15分钟数据（可通过MARKET_SYMBOL_RETENTION_MINUTES配置）
+- 默认保留30分钟数据（可通过MARKET_SYMBOL_RETENTION_MINUTES配置）
 
 使用场景：
 - 后台服务：通过async_agent启动定时清理任务
@@ -107,7 +107,7 @@ async def delete_old_symbols() -> None:
         retention_minutes = getattr(
             app_config,
             'MARKET_SYMBOL_RETENTION_MINUTES',
-            15  # 默认保留15分钟
+            30  # 默认保留30分钟
         )
         
         # 初始化数据库
@@ -215,7 +215,7 @@ async def run_market_symbol_offline_scheduler() -> None:
     cron_expr = getattr(
         app_config,
         'MARKET_SYMBOL_OFFLINE_CRON',
-        '*/20 * * * *'  # 默认每20分钟执行一次
+        '*/30 * * * *'  # 默认每30分钟执行一次
     )
     retention_minutes = getattr(
         app_config,
