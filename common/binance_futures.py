@@ -1326,7 +1326,7 @@ class BinanceFuturesOrderClient:
         Args:
             symbol: 交易对符号，如 'BTCUSDT'
             side: 交易方向，'BUY'或'SELL'
-            quantity: 订单数量（必填，必须大于100）
+            quantity: 订单数量（必填，必须大于等于100）
             order_type: 订单类型，'STOP_MARKET'或'STOP'（默认）
             price: 订单价格（STOP订单必填，STOP_MARKET订单不需要）
             stop_price: 止损触发价格（STOP和STOP_MARKET订单均必填）
@@ -1585,7 +1585,7 @@ class BinanceFuturesOrderClient:
         Args:
             symbol: 交易对符号，如 'BTCUSDT'
             side: 交易方向，'BUY'或'SELL'
-            quantity: 订单数量（必填，必须大于100）
+            quantity: 订单数量（必填，必须大于等于100）
             order_type: 订单类型，默认"MARKET"
             position_side: 持仓方向，'LONG'（多）或'SHORT'（空），双向持仓模式下必填
             new_order_resp_type: 订单响应类型，默认"RESULT"
