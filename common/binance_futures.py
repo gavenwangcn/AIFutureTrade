@@ -1341,9 +1341,9 @@ class BinanceFuturesOrderClient:
             ValueError: 当STOP订单缺少必填参数（quantity、price、stop_price）时
         """
         # 【参数验证】验证必填参数
-        # 验证quantity必须大于100
-        if quantity <= 100:
-            raise ValueError(f"quantity参数必须大于100，当前值: {quantity}")
+        # 验证quantity必须大于等于100
+        if quantity < 100:
+            raise ValueError(f"quantity参数必须大于等于100，当前值: {quantity}")
         
         order_type_upper = order_type.upper()
         if order_type_upper == "STOP":
@@ -1472,9 +1472,9 @@ class BinanceFuturesOrderClient:
             ValueError: 当TAKE_PROFIT订单缺少必填参数（quantity、price、stop_price）时
         """
         # 【参数验证】验证必填参数
-        # 验证quantity必须大于100
-        if quantity <= 100:
-            raise ValueError(f"quantity参数必须大于100，当前值: {quantity}")
+        # 验证quantity必须大于等于100
+        if quantity < 100:
+            raise ValueError(f"quantity参数必须大于等于100，当前值: {quantity}")
         
         order_type_upper = order_type.upper()
         if order_type_upper == "TAKE_PROFIT":
@@ -1594,9 +1594,9 @@ class BinanceFuturesOrderClient:
         Returns:
             订单响应数据
         """
-        # 验证quantity必须大于100
-        if quantity <= 100:
-            raise ValueError(f"quantity参数必须大于100，当前值: {quantity}")
+        # 验证quantity必须大于等于100
+        if quantity < 100:
+            raise ValueError(f"quantity参数必须大于等于100，当前值: {quantity}")
         
         logger.info(f"[Binance Futures] 开始市场交易，交易对: {symbol}, 方向: {side}, 数量: {quantity}, 订单类型: {order_type}, 持仓方向: {position_side}")
         
@@ -1666,9 +1666,9 @@ class BinanceFuturesOrderClient:
         Returns:
             订单响应数据
         """
-        # 验证quantity必须大于100
-        if quantity <= 100:
-            raise ValueError(f"quantity参数必须大于100，当前值: {quantity}")
+        # 验证quantity必须大于等于100
+        if quantity < 100:
+            raise ValueError(f"quantity参数必须大于等于100，当前值: {quantity}")
         
         logger.info(f"[Binance Futures] 开始平仓交易，交易对: {symbol}, 方向: {side}, 类型: {order_type}, 持仓方向: {position_side}")
         
