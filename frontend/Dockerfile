@@ -10,7 +10,7 @@
 # 阶段1：构建 KLineChart 10.0.0 基础库
 # ==============================================================================
 
-FROM node:20-slim AS klinecharts-builder
+FROM node:22-slim AS klinecharts-builder
 WORKDIR /app
 
 # 安装系统依赖
@@ -32,10 +32,11 @@ COPY frontend/KLineChart/indicators/ ./KLineChart/indicators/
 WORKDIR /app/KLineChart
 
 # 安装 KLineChart 依赖（优先使用 pnpm，如果失败则使用 npm）
+# 注意：跳过 prepare 脚本（husky 在 Docker 构建中不需要）
 RUN if [ -f pnpm-lock.yaml ]; then \
-        pnpm install --no-frozen-lockfile || npm install --no-fund --no-audit; \
+        pnpm install --no-frozen-lockfile --ignore-scripts || npm install --no-fund --no-audit --ignore-scripts; \
     else \
-        npm install --no-fund --no-audit; \
+        npm install --no-fund --no-audit --ignore-scripts; \
     fi
 
 # 构建 KLineChart（构建 UMD 版本用于浏览器）
@@ -56,7 +57,7 @@ RUN if [ ! -d dist ] || [ ! -f dist/umd/klinecharts.min.js ]; then \
 # 阶段2：构建前端应用
 # ==============================================================================
 
-FROM node:20-slim AS frontend-builder
+FROM node:22-slim AS frontend-builder
 WORKDIR /app/frontend
 
 # 安装系统依赖
