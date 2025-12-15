@@ -306,8 +306,8 @@ class AITrader:
   "decisions": {
     "SYMBOL": {
       "signal": "buy_to_enter|sell_to_enter|hold",
-      "quantity": 0.1,
-      "leverage": 1,
+      "quantity": 100,
+      "leverage": 10,
       "confidence": 0.8,
       "risk_budget_pct": 3,
       "profit_target": 12345.0,
@@ -431,7 +431,7 @@ class AITrader:
   "decisions": {
     "SYMBOL": {
       "signal": "close_position|stop_loss|take_profit|hold",
-      "quantity": 1,
+      "quantity": 100,
       "price": 0.0345,
       "stop_price": 0.0325,
       "confidence": 0.8,
