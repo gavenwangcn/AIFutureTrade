@@ -70,6 +70,11 @@ import { registerOverlay, getOverlayClass, getSupportedOverlays } from './extens
 import { registerStyles } from './extension/styles/index'
 import { registerXAxis } from './extension/x-axis'
 import { registerYAxis } from './extension/y-axis'
+// 注册自定义指标（在导出之前注册，确保构建时包含）
+// 注意：由于 indicators/index.ts 中使用了 import { registerIndicator } from 'klinecharts'
+// 会造成循环依赖，所以我们需要在这里导入并注册
+// 使用相对路径导入，确保构建时包含这些文件
+import '../indicators/index'
 
 const charts = new Map<string, ChartImp>()
 let chartBaseId = 1
@@ -163,12 +168,6 @@ const utils = {
   checkCoordinateOnRect,
   checkCoordinateOnText
 }
-
-// 注册自定义指标（在导出之前注册，确保构建时包含）
-// 注意：由于 indicators/index.ts 中使用了 import { registerIndicator } from 'klinecharts'
-// 会造成循环依赖，所以我们需要在这里导入并注册
-// 使用相对路径导入，确保构建时包含这些文件
-import '../indicators/index'
 
 export {
   version, init, dispose,
