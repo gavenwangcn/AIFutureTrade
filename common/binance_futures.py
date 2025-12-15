@@ -1326,7 +1326,7 @@ class BinanceFuturesOrderClient:
         Args:
             symbol: 交易对符号，如 'BTCUSDT'
             side: 交易方向，'BUY'或'SELL'
-            quantity: 订单数量（必填，必须大于等于100）
+            quantity: 订单数量（必填，必须大于0）
             order_type: 订单类型，'STOP_MARKET'或'STOP'（默认）
             price: 订单价格（STOP订单必填，STOP_MARKET订单不需要）
             stop_price: 止损触发价格（STOP和STOP_MARKET订单均必填）
@@ -1341,9 +1341,9 @@ class BinanceFuturesOrderClient:
             ValueError: 当STOP订单缺少必填参数（quantity、price、stop_price）时
         """
         # 【参数验证】验证必填参数
-        # 验证quantity必须大于等于100
-        if quantity < 100:
-            raise ValueError(f"quantity参数必须大于等于100，当前值: {quantity}")
+        # 验证quantity必须大于0
+        if quantity <= 0:
+            raise ValueError(f"quantity参数必须大于0，当前值: {quantity}")
         
         order_type_upper = order_type.upper()
         if order_type_upper == "STOP":
@@ -1472,9 +1472,9 @@ class BinanceFuturesOrderClient:
             ValueError: 当TAKE_PROFIT订单缺少必填参数（quantity、price、stop_price）时
         """
         # 【参数验证】验证必填参数
-        # 验证quantity必须大于等于100
-        if quantity < 100:
-            raise ValueError(f"quantity参数必须大于等于100，当前值: {quantity}")
+        # 验证quantity必须大于0
+        if quantity <= 0:
+            raise ValueError(f"quantity参数必须大于0，当前值: {quantity}")
         
         order_type_upper = order_type.upper()
         if order_type_upper == "TAKE_PROFIT":
@@ -1585,7 +1585,7 @@ class BinanceFuturesOrderClient:
         Args:
             symbol: 交易对符号，如 'BTCUSDT'
             side: 交易方向，'BUY'或'SELL'
-            quantity: 订单数量（必填，必须大于等于100）
+            quantity: 订单数量（必填，必须大于0）
             order_type: 订单类型，默认"MARKET"
             position_side: 持仓方向，'LONG'（多）或'SHORT'（空），双向持仓模式下必填
             new_order_resp_type: 订单响应类型，默认"RESULT"
@@ -1594,9 +1594,9 @@ class BinanceFuturesOrderClient:
         Returns:
             订单响应数据
         """
-        # 验证quantity必须大于等于100
-        if quantity < 100:
-            raise ValueError(f"quantity参数必须大于等于100，当前值: {quantity}")
+        # 验证quantity必须大于0
+        if quantity <= 0:
+            raise ValueError(f"quantity参数必须大于0，当前值: {quantity}")
         
         logger.info(f"[Binance Futures] 开始市场交易，交易对: {symbol}, 方向: {side}, 数量: {quantity}, 订单类型: {order_type}, 持仓方向: {position_side}")
         
@@ -1666,9 +1666,9 @@ class BinanceFuturesOrderClient:
         Returns:
             订单响应数据
         """
-        # 验证quantity必须大于等于100
-        if quantity < 100:
-            raise ValueError(f"quantity参数必须大于等于100，当前值: {quantity}")
+        # 验证quantity必须大于0
+        if quantity <= 0:
+            raise ValueError(f"quantity参数必须大于0，当前值: {quantity}")
         
         logger.info(f"[Binance Futures] 开始平仓交易，交易对: {symbol}, 方向: {side}, 类型: {order_type}, 持仓方向: {position_side}")
         

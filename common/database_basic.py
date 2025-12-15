@@ -950,7 +950,7 @@ class Database:
             rows = self.query(f"""
                 SELECT m.id, m.name, m.provider_id, m.model_name, m.initial_capital, 
                        m.leverage, m.auto_trading_enabled, m.max_positions, m.account_alias, m.is_virtual, m.symbol_source, m.created_at,
-                       p.api_key, p.api_url, p.provider_type
+                       p.api_key, p.api_secret, p.api_url, p.provider_type
                 FROM {self.models_table} m
                 LEFT JOIN {self.providers_table} p ON m.provider_id = p.id
                 WHERE m.id = '{model_uuid}'
@@ -961,7 +961,7 @@ class Database:
             
             columns = ["id", "name", "provider_id", "model_name", "initial_capital", 
                       "leverage", "auto_trading_enabled", "max_positions", "account_alias", "is_virtual", "symbol_source", "created_at",
-                      "api_key", "api_url", "provider_type"]
+                      "api_key", "api_secret", "api_url", "provider_type"]
             result = self._row_to_dict(rows[0], columns)
             # 转换 ID 为 int 以保持兼容性
             result['id'] = model_id
