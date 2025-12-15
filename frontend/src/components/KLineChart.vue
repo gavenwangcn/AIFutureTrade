@@ -135,14 +135,8 @@ const initChart = async () => {
     const period = intervalToPeriod(currentInterval.value)
     
     // Initialize chart using KLineChart 10.0.0 API
-    chartInstance.value = init(chartContainerRef.value, {
-      layout: {
-        type: 'normal',
-        header: {
-          show: false
-        }
-      }
-    })
+    // layout 必须是数组，如果不提供则使用默认值 [{ type: 'candle' }]
+    chartInstance.value = init(chartContainerRef.value, {})
     
     // Set symbol and period
     chartInstance.value.setSymbol(symbolInfo)
