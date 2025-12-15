@@ -57,8 +57,6 @@ function createIndicator (widget: Nullable<Chart>, indicatorName: string, isStac
   if (indicatorName === 'VOL') {
     paneOptions = { gap: { bottom: 2 }, ...paneOptions }
   }
-  // MACD和VOL指标需要设置柱状图颜色（红涨绿跌）
-  // 注意：createIndicator不支持直接传入styles，需要在创建后通过setStyles设置
   const createIndicatorOptions: any = {
     name: indicatorName,
     // @ts-expect-error
@@ -78,61 +76,6 @@ function createIndicator (widget: Nullable<Chart>, indicatorName: string, isStac
   }
   
   const paneId = widget?.createIndicator(createIndicatorOptions, isStack, paneOptions) ?? null
-  
-  // 创建指标后，如果创建时传入styles不生效，尝试通过setStyles动态设置（备用方案）
-  if (paneId && widget && (indicatorName === 'MACD' || indicatorName === 'VOL')) {
-    // 延迟设置，确保指标已完全创建
-    setTimeout(() => {
-      try {
-        // 尝试通过setStyles设置颜色（多种路径结构）
-        const stylesConfigs = [
-          // 方案1：indicator.paneId.bar（最可能的路径）
-          {
-            indicator: {
-              [paneId]: {
-                bar: {
-                  upColor: '#F53F3F',
-                  downColor: '#00B42A'
-                }
-              }
-            }
-          },
-          // 方案2：indicator.paneId.indicatorName.bar
-          {
-            indicator: {
-              [paneId]: {
-                [indicatorName]: {
-                  bar: {
-                    upColor: '#F53F3F',
-                    downColor: '#00B42A'
-                  }
-                }
-              }
-            }
-          }
-        ]
-        
-        let success = false
-        for (const config of stylesConfigs) {
-          try {
-            widget.setStyles(config as any)
-            console.log(`[ChartProComponent] Successfully set ${indicatorName} bar colors via setStyles, paneId=${paneId}`)
-            success = true
-            break
-          } catch (e) {
-            // 继续尝试下一个配置
-          }
-        }
-        
-        if (!success) {
-          console.warn(`[ChartProComponent] All setStyles attempts failed for ${indicatorName}`)
-          console.warn(`[ChartProComponent] Please check if indicators/${indicatorName.toLowerCase()}.ts template colors are applied`)
-        }
-      } catch (error) {
-        console.warn(`[ChartProComponent] Failed to set ${indicatorName} bar colors:`, error)
-      }
-    }, 100)
-  }
   
   return paneId
 }
