@@ -104,8 +104,8 @@ def test_binance_client_creation(engine, decisions, market_state, portfolio):
         # 创建模拟客户端
         mock_client = MagicMock()
         
-        # 模拟trailing_stop_market_trade方法返回一个模拟结果
-        mock_client.trailing_stop_market_trade.return_value = {
+        # 模拟market_trade方法返回一个模拟结果
+        mock_client.market_trade.return_value = {
             'orderId': 12345,
             'symbol': 'BTCUSDT',
             'status': 'NEW'
@@ -127,8 +127,8 @@ def test_binance_client_creation(engine, decisions, market_state, portfolio):
         # 验证BinanceFuturesOrderClient被创建
         logger.info(f"BinanceFuturesOrderClient创建次数: {mock_client_class.call_count}")
         
-        # 验证trailing_stop_market_trade方法被调用
-        logger.info(f"trailing_stop_market_trade调用次数: {mock_client.trailing_stop_market_trade.call_count}")
+        # 验证market_trade方法被调用
+        logger.info(f"market_trade调用次数: {mock_client.market_trade.call_count}")
     
     return results
 

@@ -33,6 +33,7 @@ def test_order():
             symbol="BTCUSDT",
             side=TestOrderSideEnum["BUY"].value,
             type="MARKET",
+            new_order_resp_type="RESULT",
             quantity=100,
         )
 

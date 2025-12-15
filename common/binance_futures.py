@@ -1373,9 +1373,9 @@ class BinanceFuturesOrderClient:
             logger.error(f"[Binance Futures] 止盈交易失败: {exc}", exc_info=True)
             raise
 
-    def trailing_stop_market_trade(self, symbol: str, side: str, quantity: float, callback_rate: float = 1.0, position_side: Optional[str] = None, model_id: Optional[str] = None, conversation_id: Optional[str] = None, trade_id: Optional[str] = None, db = None, **kwargs) -> Dict[str, Any]:
+    def market_trade(self, symbol: str, side: str, quantity: float, order_type: str = "MARKET", position_side: Optional[str] = None, new_order_resp_type: str = "RESULT", model_id: Optional[str] = None, conversation_id: Optional[str] = None, trade_id: Optional[str] = None, db = None, **kwargs) -> Dict[str, Any]:
         """
-        市场价格买入- 使用TRAILING_STOP_MARKET订单类型
+        市场价格交易- 使用指定订单类型
         
         【position_side参数说明】
         在双向持仓模式下，此参数为必填项，用于指定持仓方向：
@@ -1387,15 +1387,20 @@ class BinanceFuturesOrderClient:
         Args:
             symbol: 交易对符号，如 'BTCUSDT'
             side: 交易方向，'BUY'或'SELL'
-            quantity: 订单数量（必填）
-            callback_rate: 回调幅度百分比，默认1.0（即1%），范围[0.1-10]
-            position_side: 【新增参数】持仓方向，'LONG'（多）或'SHORT'（空），双向持仓模式下必填
+            quantity: 订单数量（必填，必须大于100）
+            order_type: 订单类型，默认"MARKET"
+            position_side: 持仓方向，'LONG'（多）或'SHORT'（空），双向持仓模式下必填
+            new_order_resp_type: 订单响应类型，默认"RESULT"
             **kwargs: 其他可选参数
             
         Returns:
             订单响应数据
         """
-        logger.info(f"[Binance Futures] 开始跟踪止损交易，交易对: {symbol}, 方向: {side}, 回调幅度: {callback_rate}%, 持仓方向: {position_side}")
+        # 验证quantity必须大于100
+        if quantity <= 100:
+            raise ValueError(f"quantity参数必须大于100，当前值: {quantity}")
+        
+        logger.info(f"[Binance Futures] 开始市场交易，交易对: {symbol}, 方向: {side}, 数量: {quantity}, 订单类型: {order_type}, 持仓方向: {position_side}")
         
         try:
             # 格式化交易对
@@ -1412,9 +1417,8 @@ class BinanceFuturesOrderClient:
             order_params = {
                 "symbol": formatted_symbol,
                 "side": NewOrderSideEnum[side.upper()].value if NewOrderSideEnum else side.upper(),
-                "type": "TRAILING_STOP_MARKET",
-                "callback_rate": callback_rate,
-                # 不设置activationPrice参数
+                "type": order_type,
+                "newOrderRespType": new_order_resp_type,
             }
             
             # 添加quantity参数（必填）
@@ -1428,12 +1432,12 @@ class BinanceFuturesOrderClient:
             order_params.update(kwargs)
             
             # 【统一订单执行】使用辅助方法处理测试/真实交易切换
-            return self._execute_order(order_params, context="跟踪买入交易",
+            return self._execute_order(order_params, context="市场交易",
                                       model_id=model_id, conversation_id=conversation_id,
-                                      trade_id=trade_id, method_name="trailing_stop_market_trade", db=db)
+                                      trade_id=trade_id, method_name="market_trade", db=db)
             
         except Exception as exc:
-            logger.error(f"[Binance Futures] 跟踪止损交易失败: {exc}", exc_info=True)
+            logger.error(f"[Binance Futures] 市场交易失败: {exc}", exc_info=True)
             raise
 
     def close_position_trade(self, symbol: str, side: str, quantity: float, order_type: str="STOP_MARKET", stop_price: Optional[float] = None, position_side: Optional[str] = None, model_id: Optional[str] = None, conversation_id: Optional[str] = None, trade_id: Optional[str] = None, db = None, **kwargs) -> Dict[str, Any]:
@@ -1494,8 +1498,8 @@ class BinanceFuturesOrderClient:
                 "close_position": True,
             }
             
-            # 添加quantity参数（必填）
-            order_params["quantity"] = quantity
+            # 平仓处理不支持quantity参数
+            # order_params["quantity"] = quantity
             
             # 【添加position_side参数】在双向持仓模式下，此参数为必填项
             if position_side:

@@ -742,7 +742,7 @@ class TradingEngine:
         4. 如果创建失败，返回None，交易操作将跳过SDK调用（仅记录到数据库）
         
         【使用场景】
-        - _execute_buy: 调用trailing_stop_market_trade（跟踪止损开仓）
+        - _execute_buy: 调用market_trade（市场价格交易）
         - _execute_close: 调用close_position_trade（平仓）
         - _execute_stop_loss: 调用stop_loss_trade（止损）
         - _execute_take_profit: 调用take_profit_trade（止盈）
@@ -2554,9 +2554,8 @@ class TradingEngine:
         # 【提前生成trade_id用于日志记录】
         trade_id = self.db._generate_id()
         
-        # 【调用SDK执行交易】使用trailing_stop_market_trade
-        # 注意：trailing_stop_market_trade是用于保护已有持仓的，不是用于开仓的
-        # 但按照用户要求，buy操作对应trailing_stop_market_trade
+        # 【调用SDK执行交易】使用market_trade
+        # 注意：market_trade是用于市场价格交易的方法
         # 这里先更新数据库记录持仓，然后设置trailing stop保护
         sdk_response = None
         sdk_call_skipped = False
@@ -2565,19 +2564,15 @@ class TradingEngine:
         binance_client = self._create_binance_order_client()
         if binance_client:
             try:
-                # 获取回调幅度（从决策中获取，默认1.0）
-                callback_rate = float(decision.get('callback_rate', 1.0))
-                callback_rate = max(0.1, min(10.0, callback_rate))  # 限制在0.1-10范围内
-                
                 # 【调用前日志】记录调用参数
-                logger.info(f"@API@ [Model {self.model_id}] [trailing_stop_market_trade] === 准备调用接口 ==="
+                logger.info(f"@API@ [Model {self.model_id}] [market_trade] === 准备调用接口 ===" 
                           f" | symbol={symbol} | side={trailing_stop_side} | position_side={position_side} | "
-                          f"callback_rate={callback_rate}% | quantity={quantity} | price={price}")
+                          f"quantity={quantity} | price={price}")
                 
-                sdk_response = binance_client.trailing_stop_market_trade(
+                sdk_response = binance_client.market_trade(
                     symbol=symbol,
                     side=trailing_stop_side,  # 根据position_side动态决定保护方向
-                    callback_rate=callback_rate,
+                    order_type='MARKET',  # 添加order_type参数
                     position_side=position_side,  # 使用根据signal自动确定的position_side
                     quantity=quantity,  # 添加quantity参数
                     model_id=model_uuid,
@@ -2586,10 +2581,10 @@ class TradingEngine:
                 )
                 
                 # 【调用后日志】记录接口返回内容
-                logger.info(f"@API@ [Model {self.model_id}] [trailing_stop_market_trade] === 接口调用成功 ==="
+                logger.info(f"@API@ [Model {self.model_id}] [market_trade] === 接口调用成功 ==="
                           f" | symbol={symbol} | response={sdk_response}")
             except Exception as sdk_err:
-                logger.error(f"@API@ [Model {self.model_id}] [trailing_stop_market_trade] === 接口调用失败 ==="
+                logger.error(f"@API@ [Model {self.model_id}] [market_trade] === 接口调用失败 ==="
                            f" | symbol={symbol} | error={sdk_err}", exc_info=True)
                 # SDK调用失败不影响数据库记录，继续执行
         else:
@@ -2612,7 +2607,7 @@ class TradingEngine:
             except Exception as check_err:
                 sdk_skip_reason = f"Failed to check model configuration: {check_err}"
             
-            logger.error(f"@API@ [Model {self.model_id}] [trailing_stop_market_trade] === 无法创建Binance订单客户端，跳过SDK调用 ==="
+            logger.error(f"@API@ [Model {self.model_id}] [market_trade] === 无法创建Binance订单客户端，跳过SDK调用 ==="
                       f" | symbol={symbol} | reason={sdk_skip_reason} | "
                       f"⚠️ 警告：交易记录将保存到数据库，但实际交易未执行！请检查model表中的api_key和api_secret配置")
 

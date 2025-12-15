@@ -648,7 +648,7 @@ class Database:
             `conversation_id` VARCHAR(36),
             `trade_id` VARCHAR(36),
             `type` VARCHAR(10) NOT NULL COMMENT 'test or real',
-            `method_name` VARCHAR(50) NOT NULL COMMENT 'stop_loss_trade, take_profit_trade, trailing_stop_market_trade, close_position_trade',
+            `method_name` VARCHAR(50) NOT NULL COMMENT 'stop_loss_trade, take_profit_trade, market_trade, close_position_trade',
             `param` JSON COMMENT '所有调用接口的入参数，JSON格式存储',
             `response_context` JSON COMMENT '接口返回的内容，JSON格式',
             `response_type` VARCHAR(10) COMMENT '接口返回状态码：200, 4XX, 5XX等',
