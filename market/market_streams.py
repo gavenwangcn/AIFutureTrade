@@ -286,33 +286,44 @@ class MarketTickerStream:
         
         Note:
             - 如果消息中没有ticker数据，直接返回
-            - 使用asyncio.to_thread在线程池中执行数据库操作，避免阻塞事件循环
+            - 使用asyncio.to_thread在线程池中执行数据库操作，并设置超时限制
             - 异常会被记录但不会中断流处理
+            - 消息处理有严格的超时限制，避免长时间卡住
         """
         logger.debug("[MarketStreams] Starting to handle message")
         
-        tickers = _extract_tickers(message)
-        logger.debug("[MarketStreams] Extracted %d tickers from message", len(tickers))
-        
-        if not tickers:
-            logger.info("[MarketStreams] No tickers to process")
-            return
-            
-        normalized = [_normalize_ticker(ticker) for ticker in tickers]
-        logger.debug("[MarketStreams] Normalized %d tickers for database upsert", len(normalized))
-        
-        # 记录部分关键数据用于调试
-        if normalized:
-            sample = normalized[:3]  # 只记录前3个作为样本
-            logger.debug("[MarketStreams] Normalized data sample: %s", sample)
-        
+        # 为整个消息处理设置超时
         try:
-            # 使用优化后的增量插入逻辑（在线程池中执行，避免阻塞）
-            logger.debug("[MarketStreams] Calling upsert_market_tickers for %d symbols", len(normalized))
-            await asyncio.to_thread(self._db.upsert_market_tickers, normalized)
-            logger.debug("[MarketStreams] Successfully completed upsert_market_tickers")
+            async with asyncio.timeout(30):  # 整个消息处理最多30秒
+                tickers = _extract_tickers(message)
+                logger.debug("[MarketStreams] Extracted %d tickers from message", len(tickers))
+                
+                if not tickers:
+                    logger.info("[MarketStreams] No tickers to process")
+                    return
+                    
+                normalized = [_normalize_ticker(ticker) for ticker in tickers]
+                logger.debug("[MarketStreams] Normalized %d tickers for database upsert", len(normalized))
+                
+                # 记录部分关键数据用于调试
+                if normalized:
+                    sample = normalized[:3]  # 只记录前3个作为样本
+                    logger.debug("[MarketStreams] Normalized data sample: %s", sample)
+                
+                try:
+                    # 使用优化后的增量插入逻辑（在线程池中执行，避免阻塞），设置20秒超时
+                    logger.debug("[MarketStreams] Calling upsert_market_tickers for %d symbols", len(normalized))
+                    db_task = asyncio.create_task(asyncio.to_thread(self._db.upsert_market_tickers, normalized))
+                    await asyncio.wait_for(db_task, timeout=20)  # 数据库操作最多20秒
+                    logger.debug("[MarketStreams] Successfully completed upsert_market_tickers")
+                except asyncio.TimeoutError:
+                    logger.error("[MarketStreams] Database operation timed out after 20 seconds")
+                except Exception as e:
+                    logger.error("[MarketStreams] Error during upsert_market_tickers: %s", e, exc_info=True)
+        except asyncio.TimeoutError:
+            logger.error("[MarketStreams] Message processing timed out after 30 seconds")
         except Exception as e:
-            logger.error("[MarketStreams] Error during upsert_market_tickers: %s", e, exc_info=True)
+            logger.error("[MarketStreams] Unexpected error in message handling: %s", e, exc_info=True)
         
         logger.debug("[MarketStreams] Finished handling message")
 
@@ -362,8 +373,18 @@ class MarketTickerStream:
             self._connection_creation_time = datetime.now(timezone.utc)
             logger.debug("[MarketStreams] Creating new WebSocket connection")
             
-            connection = await self._client.websocket_streams.create_connection()
-            stream = await connection.all_market_tickers_streams()
+            # 为连接创建添加超时保护
+            connection = await asyncio.wait_for(
+                self._client.websocket_streams.create_connection(),
+                timeout=15.0  # 最多等待15秒建立连接
+            )
+            
+            # 为流订阅添加超时保护
+            stream = await asyncio.wait_for(
+                connection.all_market_tickers_streams(),
+                timeout=10.0  # 最多等待10秒订阅成功
+            )
+            
             stream.on(
                 "message",
                 lambda data: asyncio.create_task(self._handle_message(data)),
@@ -384,13 +405,23 @@ class MarketTickerStream:
         except Exception as exc:
             logger.exception("[MarketStreams] Streaming error: %s", exc)
         finally:
+            # 使用超时处理确保关闭操作不会卡住
             if stream:
                 try:
-                    await stream.unsubscribe()
+                    close_task = asyncio.create_task(stream.unsubscribe())
+                    await asyncio.wait_for(close_task, timeout=5)
+                except asyncio.TimeoutError:
+                    logger.error("[MarketStreams] Stream unsubscribe timed out")
                 except Exception:
-                    logger.debug("[MarketStreams] Stream already unsubscribed")
+                    logger.debug("[MarketStreams] Stream already unsubscribed or unsubscribe failed")
             if connection:
-                await connection.close_connection(close_session=True)
+                try:
+                    close_task = asyncio.create_task(connection.close_connection(close_session=True))
+                    await asyncio.wait_for(close_task, timeout=5)
+                except asyncio.TimeoutError:
+                    logger.error("[MarketStreams] Connection close timed out")
+                except Exception as e:
+                    logger.debug("[MarketStreams] Error closing connection: %s", e)
 
 
 # ============ Ticker流主入口函数 ============
@@ -415,33 +446,42 @@ async def run_market_ticker_stream(run_seconds: Optional[int] = None) -> None:
         - 如果未指定run_seconds，会无限循环运行，每次连接30分钟后自动重连
         - 异常会被捕获并记录，然后等待5秒后重连（避免快速重连循环）
         - 可以通过asyncio.CancelledError取消任务
+        - 所有资源都有严格的超时管理，避免长时间卡住
     """
     db = MySQLDatabase()
     
-    if run_seconds is not None:
-        # If a specific runtime is provided, run once
-        streamer = MarketTickerStream(db)
-        await streamer.stream(run_seconds=run_seconds)
-    else:
-        # Run indefinitely with automatic reconnection every 30 minutes
-        start_time = datetime.now(timezone.utc)
-        while True:
+    try:
+        if run_seconds is not None:
+            # If a specific runtime is provided, run once
             streamer = MarketTickerStream(db)
-            try:
-                # Stream until connection needs to be refreshed (30 minutes)
-                await streamer.stream()
-            except asyncio.CancelledError:
-                raise
-            except Exception as exc:
-                logger.exception("[MarketStreams] Stream error, reconnecting...")
-                # Wait a short time before reconnecting to avoid rapid reconnection loops
-                await asyncio.sleep(5)
-            
-            # Check if we've been running for the requested duration
-            if run_seconds and (datetime.now(timezone.utc) - start_time).total_seconds() >= run_seconds:
-                break
-            
-            logger.debug("[MarketStreams] Reconnecting to WebSocket...")
+            await streamer.stream(run_seconds=run_seconds)
+        else:
+            # Run indefinitely with automatic reconnection every 30 minutes
+            start_time = datetime.now(timezone.utc)
+            while True:
+                streamer = MarketTickerStream(db)
+                try:
+                    # Stream until connection needs to be refreshed (30 minutes)
+                    await streamer.stream()
+                except asyncio.CancelledError:
+                    raise
+                except Exception as exc:
+                    logger.exception("[MarketStreams] Stream error, reconnecting...")
+                    # Wait a short time before reconnecting to avoid rapid reconnection loops
+                    await asyncio.sleep(5)
+                
+                # Check if we've been running for the requested duration
+                if run_seconds and (datetime.now(timezone.utc) - start_time).total_seconds() >= run_seconds:
+                    break
+                
+                logger.debug("[MarketStreams] Reconnecting to WebSocket...")
+    finally:
+        # 显式关闭数据库连接池
+        try:
+            db.close()
+            logger.debug("[MarketStreams] Database connection pool closed")
+        except Exception as e:
+            logger.error("[MarketStreams] Error closing database: %s", e)
 
 
 # ============ K线数据处理函数 ============

@@ -35,4 +35,5 @@ Thank you for considering contributing to this project!
 ## Questions?
 
 Open an issue for discussion.
+docker run --rm -it --net=container:aifuturetrade-async-agent alpine sh -c "apk add iproute2 && watch -n 1 'ss -tunp | grep :443'"
 
