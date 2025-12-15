@@ -33,7 +33,7 @@ def test_order():
             symbol="BTCUSDT",
             side=TestOrderSideEnum["BUY"].value,
             type="MARKET",
-            quantity=200,
+            quantity=100,
         )
 
         rate_limits = response.rate_limits
