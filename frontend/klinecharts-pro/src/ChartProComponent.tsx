@@ -57,7 +57,7 @@ function createIndicator (widget: Nullable<Chart>, indicatorName: string, isStac
   if (indicatorName === 'VOL') {
     paneOptions = { gap: { bottom: 2 }, ...paneOptions }
   }
-  return widget?.createIndicator({
+  const paneId = widget?.createIndicator({
     name: indicatorName,
     // @ts-expect-error
     createTooltipDataSource: ({ indicator, defaultStyles }) => {
@@ -74,6 +74,48 @@ function createIndicator (widget: Nullable<Chart>, indicatorName: string, isStac
       return { icons }
     }
   }, isStack, paneOptions) ?? null
+  
+  // 创建指标后，设置柱状图颜色（红涨绿跌）
+  if (paneId && widget) {
+    // MACD和VOL指标需要设置柱状图颜色
+    if (indicatorName === 'MACD' || indicatorName === 'VOL') {
+      try {
+        // 通过setStyles设置指标颜色
+        // 注意：klinecharts库的样式结构可能需要根据实际API调整
+        widget.setStyles({
+          indicator: {
+            [paneId]: {
+              bar: {
+                upColor: '#F53F3F',   // 红色（涨）
+                downColor: '#00B42A'  // 绿色（跌）
+              }
+            }
+          }
+        } as any)
+      } catch (error) {
+        console.warn(`[ChartProComponent] Failed to set ${indicatorName} bar colors:`, error)
+        // 如果setStyles方式不生效，尝试通过updateIndicator设置
+        try {
+          const indicator = widget.getIndicatorByPaneId(paneId)
+          if (indicator) {
+            widget.updateIndicator({
+              id: indicator.id,
+              styles: {
+                bar: {
+                  upColor: '#F53F3F',
+                  downColor: '#00B42A'
+                }
+              }
+            } as any)
+          }
+        } catch (updateError) {
+          console.warn(`[ChartProComponent] Failed to update ${indicatorName} indicator colors:`, updateError)
+        }
+      }
+    }
+  }
+  
+  return paneId
 }
 
 const ChartProComponent: Component<ChartProComponentProps> = props => {

@@ -534,6 +534,42 @@ class Database:
         self.command(ddl)
         logger.debug(f"[Database] Ensured table {self.account_value_historys_table} exists")
     
+    @staticmethod
+    def _format_timestamp_to_string(timestamp) -> Optional[str]:
+        """
+        将timestamp转换为ISO格式字符串（UTC+8时区）
+        
+        Args:
+            timestamp: datetime对象或字符串
+            
+        Returns:
+            ISO格式字符串（如 '2024-01-01T12:00:00+08:00'），如果timestamp为None则返回None
+        """
+        if not timestamp:
+            return None
+        
+        if isinstance(timestamp, datetime):
+            # 如果已经是UTC+8时区，直接格式化；否则转换为UTC+8
+            if timestamp.tzinfo is None:
+                # 如果数据库返回的是naive datetime，假设是UTC+8时间
+                beijing_tz = timezone(timedelta(hours=8))
+                timestamp = timestamp.replace(tzinfo=beijing_tz)
+            elif timestamp.tzinfo != timezone(timedelta(hours=8)):
+                # 转换为UTC+8时区
+                beijing_tz = timezone(timedelta(hours=8))
+                timestamp = timestamp.astimezone(beijing_tz)
+            # 格式化为ISO格式字符串（包含时区信息）
+            timestamp_str = timestamp.strftime('%Y-%m-%dT%H:%M:%S%z')
+            # 格式化时区偏移量为 +08:00 格式
+            if timestamp_str.endswith('+0800'):
+                timestamp_str = timestamp_str[:-5] + '+08:00'
+            elif timestamp_str.endswith('-0800'):
+                timestamp_str = timestamp_str[:-5] + '-08:00'
+            return timestamp_str
+        else:
+            # 如果已经是字符串，直接返回
+            return str(timestamp)
+    
     def _ensure_settings_table(self):
         """Create settings table if not exists"""
         ddl = f"""
@@ -1615,6 +1651,9 @@ class Database:
                 final_account_alias = account_alias if account_alias else existing_account_alias
                 final_account_alias_for_history = final_account_alias
                 
+                # 使用UTC+8时区时间
+                beijing_tz = timezone(timedelta(hours=8))
+                current_time = datetime.now(beijing_tz)
                 self.command(f"""
                     UPDATE {self.account_values_table}
                     SET account_alias = %s,
@@ -1624,14 +1663,17 @@ class Database:
                         cross_un_pnl = %s,
                         timestamp = %s
                     WHERE id = %s
-                """, (final_account_alias, balance, available_balance, cross_wallet_balance, cross_un_pnl, datetime.now(timezone.utc), existing_id))
+                """, (final_account_alias, balance, available_balance, cross_wallet_balance, cross_un_pnl, current_time, existing_id))
                 logger.debug(f"[Database] Updated account_values record for model {model_id} (id={existing_id}), account_alias={final_account_alias}")
             else:
                 # 不存在记录，执行INSERT
+                # 使用UTC+8时区时间
+                beijing_tz = timezone(timedelta(hours=8))
+                current_time = datetime.now(beijing_tz)
                 av_id = self._generate_id()
                 self.insert_rows(
                     self.account_values_table,
-                    [[av_id, model_uuid, account_alias, balance, available_balance, cross_wallet_balance, cross_un_pnl, datetime.now(timezone.utc)]],
+                    [[av_id, model_uuid, account_alias, balance, available_balance, cross_wallet_balance, cross_un_pnl, current_time]],
                     ["id", "model_id", "account_alias", "balance", "available_balance", "cross_wallet_balance", "cross_un_pnl", "timestamp"]
                 )
                 logger.debug(f"[Database] Inserted account_values record for model {model_id} (id={av_id}), account_alias={account_alias}")
@@ -1639,15 +1681,18 @@ class Database:
             
             # 【新增】同时写入 account_value_historys 表（用于历史图表，只INSERT，不UPDATE）
             # 每次记录都插入一条新记录，保留完整历史
+            # 使用UTC+8时间（北京时间）
             try:
                 history_id = self._generate_id()
-                current_time = datetime.now(timezone.utc)
+                # 使用UTC+8时区时间
+                beijing_tz = timezone(timedelta(hours=8))
+                current_time = datetime.now(beijing_tz)
                 self.insert_rows(
                     self.account_value_historys_table,
                     [[history_id, model_uuid, final_account_alias_for_history, balance, available_balance, cross_wallet_balance, cross_un_pnl, current_time]],
                     ["id", "model_id", "account_alias", "balance", "available_balance", "cross_wallet_balance", "cross_un_pnl", "timestamp"]
                 )
-                logger.debug(f"[Database] Inserted account_value_historys record for model {model_id} (id={history_id}), account_alias={final_account_alias_for_history}")
+                logger.debug(f"[Database] Inserted account_value_historys record for model {model_id} (id={history_id}), account_alias={final_account_alias_for_history}, timestamp={current_time}")
             except Exception as history_err:
                 # 历史记录插入失败不影响主流程
                 logger.warning(f"[Database] Failed to insert account_value_historys record for model {model_id}: {history_err}")
@@ -1686,9 +1731,11 @@ class Database:
                       "cross_wallet_balance", "cross_un_pnl", "timestamp"]
             results = self._rows_to_dicts(rows, columns)
             
-            # 转换为驼峰命名格式
+            # 转换为驼峰命名格式，并将timestamp转换为字符串格式（UTC+8时间）
             formatted_results = []
             for result in results:
+                timestamp_str = self._format_timestamp_to_string(result.get("timestamp"))
+                
                 formatted_results.append({
                     "id": result.get("id"),
                     "model_id": result.get("model_id"),
@@ -1697,7 +1744,7 @@ class Database:
                     "availableBalance": result.get("available_balance", 0.0),
                     "crossWalletBalance": result.get("cross_wallet_balance", 0.0),
                     "crossUnPnl": result.get("cross_un_pnl", 0.0),
-                    "timestamp": result.get("timestamp")
+                    "timestamp": timestamp_str
                 })
             return formatted_results
         except Exception as e:
@@ -1745,11 +1792,13 @@ class Database:
             columns = ["timestamp", "balance", "available_balance", "cross_wallet_balance", "cross_un_pnl", "model_count"]
             results = self._rows_to_dicts(rows, columns)
             
-            # 转换为驼峰命名格式
+            # 转换为驼峰命名格式，并将timestamp转换为字符串格式（UTC+8时间）
             formatted_results = []
             for result in results:
+                timestamp_str = self._format_timestamp_to_string(result.get("timestamp"))
+                
                 formatted_results.append({
-                    "timestamp": result.get("timestamp"),
+                    "timestamp": timestamp_str,
                     "balance": result.get("balance", 0.0),
                     "availableBalance": result.get("available_balance", 0.0),
                     "crossWalletBalance": result.get("cross_wallet_balance", 0.0),
@@ -1779,6 +1828,7 @@ class Database:
                 history = self.get_account_value_history(model_id, limit)
                 
                 if history:
+                    # history中的timestamp已经是字符串格式（由get_account_value_history转换）
                     model_data = {
                         'model_id': model_id,
                         'model_name': model_name,

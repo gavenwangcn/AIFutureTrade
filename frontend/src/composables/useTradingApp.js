@@ -764,19 +764,27 @@ let portfolioSymbolsRefreshInterval = null // 模型持仓合约列表自动刷�
         }
       })
       
-      // 处理时间轴：account_values表存储的是UTC时间，需要转换为本地时间
+      // 处理时间轴：后端已返回UTC+8时区的ISO格式字符串（如 '2024-01-01T12:00:00+08:00'）
       const timeAxis = Array.from(allTimestamps).sort((a, b) => {
-        // account_values表存储的是UTC时间，添加Z表示UTC
-        const timeA = new Date(a.replace(' ', 'T') + 'Z').getTime()
-        const timeB = new Date(b.replace(' ', 'T') + 'Z').getTime()
+        // 直接解析ISO格式字符串（包含时区信息）
+        const timeA = new Date(a).getTime()
+        const timeB = new Date(b).getTime()
+        if (isNaN(timeA) || isNaN(timeB)) {
+          console.warn('[TradingApp] Invalid timestamp format:', a, b)
+          return 0
+        }
         return timeA - timeB
       })
       
       const formattedTimeAxis = timeAxis.map(timestamp => {
-        // account_values表存储的是UTC时间，转换为本地时间（北京时间）
-        const utcDate = new Date(timestamp.replace(' ', 'T') + 'Z')
-        return utcDate.toLocaleTimeString('zh-CN', {
-          timeZone: 'Asia/Shanghai',
+        // 后端返回的是UTC+8时区的ISO格式字符串，直接解析并格式化显示
+        const date = new Date(timestamp)
+        if (isNaN(date.getTime())) {
+          console.warn('[TradingApp] Invalid timestamp:', timestamp)
+          return timestamp // 如果解析失败，返回原始字符串
+        }
+        // 格式化为本地时间显示（后端已经是UTC+8，所以直接显示即可）
+        return date.toLocaleTimeString('zh-CN', {
           hour: '2-digit',
           minute: '2-digit'
         })
@@ -876,15 +884,23 @@ let portfolioSymbolsRefreshInterval = null // 模型持仓合约列表自动刷�
         return
       }
       
-      // account_values表存储的是UTC时间，需要转换为本地时间（北京时间）
+      // 后端已返回UTC+8时区的ISO格式字符串，直接解析并格式化显示
       const data = history.reverse().map(h => {
-        const utcDate = new Date(h.timestamp.replace(' ', 'T') + 'Z')
-        return {
-          time: utcDate.toLocaleTimeString('zh-CN', {
-            timeZone: 'Asia/Shanghai',
+        // 后端返回的是ISO格式字符串（如 '2024-01-01T12:00:00+08:00'），直接解析
+        const date = new Date(h.timestamp)
+        let timeStr = ''
+        if (isNaN(date.getTime())) {
+          console.warn('[TradingApp] Invalid timestamp:', h.timestamp)
+          timeStr = h.timestamp || '' // 如果解析失败，使用原始字符串
+        } else {
+          // 格式化为本地时间显示（后端已经是UTC+8，所以直接显示即可）
+          timeStr = date.toLocaleTimeString('zh-CN', {
             hour: '2-digit',
             minute: '2-digit'
-          }),
+          })
+        }
+        return {
+          time: timeStr,
           value: h.balance || h.total_value || 0  // 使用新字段名balance，兼容旧字段名total_value
         }
       })
