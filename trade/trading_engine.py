@@ -776,12 +776,7 @@ class TradingEngine:
             
             # 【步骤3】使用model的API密钥创建新的Binance订单客户端实例
             # 每次调用都创建新实例，确保使用最新的凭证
-            # 当交易模式为测试模式时，自动使用testnet网络
-            trade_mode = getattr(app_config, 'BINANCE_TRADE_MODE', 'test').lower()
-            testnet_config = getattr(app_config, 'BINANCE_TESTNET', False)
-            # 如果是测试模式，强制使用testnet网络
-            testnet = True if trade_mode == 'test' else testnet_config
-            
+            testnet = getattr(app_config, 'BINANCE_TESTNET', False)
             client = BinanceFuturesOrderClient(
                 api_key=api_key.strip(),
                 api_secret=api_secret.strip(),
