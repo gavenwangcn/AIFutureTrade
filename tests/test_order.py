@@ -34,7 +34,7 @@ def test_order():
             side=TestOrderSideEnum["BUY"].value,
             type="MARKET",
             new_order_resp_type="RESULT",
-            quantity=100,
+            quantity=101,
         )
 
         rate_limits = response.rate_limits
