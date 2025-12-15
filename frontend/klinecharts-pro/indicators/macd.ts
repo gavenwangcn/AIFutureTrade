@@ -113,6 +113,73 @@ const macd: IndicatorTemplate = {
     }
     
     return result
+  },
+  draw: (ctx: CanvasRenderingContext2D, chart: any, indicator: any, bounding: any, xAxis: any) => {
+    // 获取可见范围
+    const [realFrom, realTo] = chart.getVisibleRange()
+    const { gapBar, halfGapBar } = chart.getBarSpace()
+    const result = indicator.result || []
+    
+    if (result.length === 0) return true
+    
+    // 获取 Rect 图形类
+    const Rect = chart.getFigureClass?.('rect') || chart.getFigureClass?.('bar')
+    if (!Rect) return true
+    
+    // 计算 bar 的最大绝对值，用于归一化高度
+    let maxBar = 0
+    for (let i = realFrom; i <= realTo; i++) {
+      const data = result[i]
+      if (data && data.bar !== undefined) {
+        const absBar = Math.abs(data.bar)
+        if (absBar > maxBar) {
+          maxBar = absBar
+        }
+      }
+    }
+    
+    if (maxBar === 0) return true
+    
+    // 设置柱状图高度（使用 bounding 高度的 40%）
+    const totalHeight = bounding.height * 0.4
+    const zeroY = bounding.height * 0.5 // 零轴位置（MACD 中间）
+    
+    // 定义颜色：红涨绿跌
+    const COLOR_UP = '#F53F3F'   // 红色（MACD bar 值为正数时）
+    const COLOR_DOWN = '#00B42A' // 绿色（MACD bar 值为负数时）
+    
+    // 绘制每个 bar
+    for (let i = realFrom; i <= realTo; i++) {
+      const data = result[i]
+      if (!data || data.bar === undefined) continue
+      
+      const bar = data.bar
+      const height = Math.round(Math.abs(bar) / maxBar * totalHeight)
+      
+      if (height === 0) continue
+      
+      // 根据 bar 值的正负确定颜色
+      const color = bar >= 0 ? COLOR_UP : COLOR_DOWN
+      
+      // 计算 y 坐标：正数向上，负数向下
+      const y = bar >= 0 ? zeroY - height : zeroY
+      
+      // 创建并绘制矩形
+      new Rect({
+        name: 'rect',
+        attrs: {
+          x: xAxis.convertToPixel(i) - halfGapBar,
+          y: y,
+          width: gapBar,
+          height: height
+        },
+        styles: {
+          color: color
+        }
+      }).draw(ctx)
+    }
+    
+    return true
   }
 }
 
