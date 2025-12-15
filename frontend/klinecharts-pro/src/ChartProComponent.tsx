@@ -57,7 +57,9 @@ function createIndicator (widget: Nullable<Chart>, indicatorName: string, isStac
   if (indicatorName === 'VOL') {
     paneOptions = { gap: { bottom: 2 }, ...paneOptions }
   }
-  const paneId = widget?.createIndicator({
+  // MACD和VOL指标需要设置柱状图颜色（红涨绿跌）
+  // 尝试在创建指标时传入styles配置
+  const createIndicatorOptions: any = {
     name: indicatorName,
     // @ts-expect-error
     createTooltipDataSource: ({ indicator, defaultStyles }) => {
@@ -73,31 +75,73 @@ function createIndicator (widget: Nullable<Chart>, indicatorName: string, isStac
       }
       return { icons }
     }
-  }, isStack, paneOptions) ?? null
+  }
   
-  // 创建指标后，设置柱状图颜色（红涨绿跌）
-  if (paneId && widget) {
-    // MACD和VOL指标需要设置柱状图颜色
-    if (indicatorName === 'MACD' || indicatorName === 'VOL') {
+  // 如果是MACD或VOL指标，尝试传入styles配置
+  if (indicatorName === 'MACD' || indicatorName === 'VOL') {
+    createIndicatorOptions.styles = {
+      bar: {
+        upColor: '#F53F3F',   // 红色（涨）
+        downColor: '#00B42A'  // 绿色（跌）
+      }
+    }
+  }
+  
+  const paneId = widget?.createIndicator(createIndicatorOptions, isStack, paneOptions) ?? null
+  
+  // 创建指标后，如果创建时传入styles不生效，尝试通过setStyles动态设置（备用方案）
+  if (paneId && widget && (indicatorName === 'MACD' || indicatorName === 'VOL')) {
+    // 延迟设置，确保指标已完全创建
+    setTimeout(() => {
       try {
-        // 通过setStyles设置指标颜色
-        // 注意：klinecharts库的样式结构可能需要根据实际API调整
-        widget.setStyles({
-          indicator: {
-            [paneId]: {
-              bar: {
-                upColor: '#F53F3F',   // 红色（涨）
-                downColor: '#00B42A'  // 绿色（跌）
+        // 尝试通过setStyles设置颜色（多种路径结构）
+        const stylesConfigs = [
+          // 方案1：indicator.paneId.bar（最可能的路径）
+          {
+            indicator: {
+              [paneId]: {
+                bar: {
+                  upColor: '#F53F3F',
+                  downColor: '#00B42A'
+                }
+              }
+            }
+          },
+          // 方案2：indicator.paneId.indicatorName.bar
+          {
+            indicator: {
+              [paneId]: {
+                [indicatorName]: {
+                  bar: {
+                    upColor: '#F53F3F',
+                    downColor: '#00B42A'
+                  }
+                }
               }
             }
           }
-        } as any)
+        ]
+        
+        let success = false
+        for (const config of stylesConfigs) {
+          try {
+            widget.setStyles(config as any)
+            console.log(`[ChartProComponent] Successfully set ${indicatorName} bar colors via setStyles, paneId=${paneId}`)
+            success = true
+            break
+          } catch (e) {
+            // 继续尝试下一个配置
+          }
+        }
+        
+        if (!success) {
+          console.warn(`[ChartProComponent] All setStyles attempts failed for ${indicatorName}`)
+          console.warn(`[ChartProComponent] Please check if indicators/${indicatorName.toLowerCase()}.ts template colors are applied`)
+        }
       } catch (error) {
-        // setStyles失败时记录警告，但不影响指标创建
-        console.warn(`[ChartProComponent] Failed to set ${indicatorName} bar colors via setStyles:`, error)
-        // 注意：klinecharts库可能不支持动态设置指标颜色，颜色配置应在指标模板中定义
+        console.warn(`[ChartProComponent] Failed to set ${indicatorName} bar colors:`, error)
       }
-    }
+    }, 100)
   }
   
   return paneId
