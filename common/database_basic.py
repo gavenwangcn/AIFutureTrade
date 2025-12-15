@@ -89,6 +89,21 @@ class Database:
             max_connections=100,
             connection_timeout=30
         )
+        
+        # 表名定义
+        self.providers_table = "providers"
+        self.models_table = "models"
+        self.portfolios_table = "portfolios"
+        self.trades_table = "trades"
+        self.conversations_table = "conversations"
+        self.account_values_table = "account_values"
+        self.settings_table = "settings"
+        self.model_prompts_table = "model_prompts"
+        self.model_futures_table = "model_futures"
+        self.futures_table = "futures"
+        self.account_asset_table = "account_asset"
+        self.asset_table = "asset"
+        self.binance_trade_logs_table = "binance_trade_logs"
     
     def close(self) -> None:
         """
@@ -109,21 +124,6 @@ class Database:
         为了确保资源被及时释放，建议显式调用close()方法。
         """
         self.close()
-        
-        # 表名定义
-        self.providers_table = "providers"
-        self.models_table = "models"
-        self.portfolios_table = "portfolios"
-        self.trades_table = "trades"
-        self.conversations_table = "conversations"
-        self.account_values_table = "account_values"
-        self.settings_table = "settings"
-        self.model_prompts_table = "model_prompts"
-        self.model_futures_table = "model_futures"
-        self.futures_table = "futures"
-        self.account_asset_table = "account_asset"
-        self.asset_table = "asset"
-        self.binance_trade_logs_table = "binance_trade_logs"
     
     def _with_connection(self, func: Callable, *args, **kwargs) -> Any:
         """Execute a function with a MySQL connection from the pool.
