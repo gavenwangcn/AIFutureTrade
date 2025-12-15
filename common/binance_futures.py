@@ -1049,8 +1049,8 @@ class BinanceFuturesOrderClient:
                 # 添加quantity参数（必填，默认100）
                 if "quantity" in order_params:
                     test_params["quantity"] = order_params["quantity"]
-                elif not order_params.get("close_position", False):
-                    # 如果不是平仓操作，添加默认quantity=101
+                else:
+                    # 无论是否是平仓操作，都添加默认quantity=100
                     test_params["quantity"] = 100
                 
                 # 添加其他可能需要的参数
