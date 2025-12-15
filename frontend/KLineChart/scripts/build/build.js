@@ -19,7 +19,12 @@ async function build ({ index, replaceValues, fileName, format, parentDir, name 
     console.log(styleText('green', `\n✔ Compiled ${text} successfully.\n`))
     console.log(`${styleText('green', '✔')} Done in ${((new Date().getTime() - startTime) / 1000 / 60).toFixed(2)}s.\n`)
   } catch (err) {
-    console.log(`\n\n${styleText('red', err)}\n`)
+    const errorMessage = err instanceof Error ? err.message : String(err)
+    const errorStack = err instanceof Error ? err.stack : ''
+    console.log(`\n\n${styleText('red', errorMessage)}\n`)
+    if (errorStack) {
+      console.log(`${styleText('red', errorStack)}\n`)
+    }
     console.log(styleText('red', `✖️ Failed to compile ${text}.\n`))
     process.exit(1)
   }

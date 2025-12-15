@@ -12,65 +12,48 @@
  * limitations under the License.
  */
 
-import { IndicatorTemplate, IndicatorSeries, LineType } from 'klinecharts'
+import type { IndicatorTemplate } from '../src/component/Indicator'
+
+interface Ma {
+  ma1?: number
+  ma2?: number
+  ma3?: number
+  ma4?: number
+}
 
 /**
  * MA（移动平均线）指标
  * 支持 MA5、MA20、MA60、MA99
  */
-const ma: IndicatorTemplate = {
+const ma: IndicatorTemplate<Ma, number> = {
   name: 'MA',
   shortName: 'MA',
-  series: IndicatorSeries.Price,
+  series: 'price',
   calcParams: [5, 20, 60, 99],
   precision: 6,
   shouldOhlc: true,
-  shouldFormatBigNumber: false,
-  visible: true,
-  zLevel: 0,
-  extendData: undefined,
   figures: [
-    { key: 'ma1', title: 'MA5', type: 'line' },
-    { key: 'ma2', title: 'MA20', type: 'line' },
-    { key: 'ma3', title: 'MA60', type: 'line' },
-    { key: 'ma4', title: 'MA99', type: 'line' }
+    { key: 'ma1', title: 'MA5: ', type: 'line' },
+    { key: 'ma2', title: 'MA20: ', type: 'line' },
+    { key: 'ma3', title: 'MA60: ', type: 'line' },
+    { key: 'ma4', title: 'MA99: ', type: 'line' }
   ],
-  styles: {
-    lines: [
-      { color: '#FF9600', smooth: false, style: LineType.Solid, size: 1, dashedValue: [2, 2] },
-      { color: '#9D65C9', smooth: false, style: LineType.Solid, size: 1, dashedValue: [2, 2] },
-      { color: '#2196F3', smooth: false, style: LineType.Solid, size: 1, dashedValue: [2, 2] },
-      { color: '#F23645', smooth: false, style: LineType.Solid, size: 1, dashedValue: [2, 2] }
-    ]
-  },
+  regenerateFigures: (params) => params.map((p, i) => ({ key: `ma${i + 1}`, title: `MA${p}: `, type: 'line' })),
   calc: (dataList, indicator) => {
-    const { calcParams } = indicator
-    const result: Array<Record<string, number>> = []
-    
-    for (let i = 0; i < dataList.length; i++) {
-      const maValues: Record<string, number> = {}
-      
-      for (let j = 0; j < calcParams.length; j++) {
-        const period = calcParams[j]
-        const key = `ma${j + 1}`
-        
-        if (i < period - 1) {
-          maValues[key] = 0
-          continue
+    const { calcParams: params, figures } = indicator
+    const closeSums: number[] = []
+    return dataList.map((kLineData, i) => {
+      const ma: Ma = {}
+      const close = kLineData.close
+      params.forEach((p, index) => {
+        closeSums[index] = (closeSums[index] ?? 0) + close
+        if (i >= p - 1) {
+          ma[figures[index].key] = closeSums[index] / p
+          closeSums[index] -= dataList[i - (p - 1)].close
         }
-        
-        // 计算移动平均：使用收盘价
-        let sum = 0
-        for (let k = i - period + 1; k <= i; k++) {
-          sum += dataList[k].close
-        }
-        maValues[key] = sum / period
-      }
-      
-      result.push(maValues)
-    }
-    
-    return result
+      })
+      return ma
+    })
   }
 }
 

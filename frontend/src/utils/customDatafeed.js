@@ -51,7 +51,7 @@ export function createDataLoader() {
         type,
         timestamp: timestamp ? new Date(timestamp).toISOString() : null,
         ticker: symbol?.ticker || symbol,
-        period: period?.text || period
+        period: period?.span && period?.type ? `${period.span}${period.type}` : (period?.text || period)
       })
 
       // 将 period 转换为后端支持的 interval
@@ -82,13 +82,15 @@ export function createDataLoader() {
       })
 
       // 根据加载类型设置时间范围
+      // backward: 加载更早的数据（timestamp 之前的数据）
+      // forward: 加载更新的数据（timestamp 之后的数据）
       if (timestamp) {
         const timeISO = new Date(timestamp).toISOString()
         if (type === 'backward') {
-          // 向后加载：使用 timestamp 作为结束时间
+          // 向后加载：加载 timestamp 之前的数据，使用 end_time
           urlParams.append('end_time', timeISO)
         } else if (type === 'forward') {
-          // 向前加载：使用 timestamp 作为开始时间
+          // 向前加载：加载 timestamp 之后的数据，使用 start_time
           urlParams.append('start_time', timeISO)
         }
       }
@@ -142,6 +144,17 @@ export function createDataLoader() {
             ts = ts * 1000
           }
 
+          // 根据加载类型过滤数据（确保返回的数据在正确的时间范围内）
+          if (timestamp) {
+            if (type === 'backward' && ts >= timestamp) {
+              // 向后加载：只返回时间戳小于 timestamp 的数据
+              return null
+            } else if (type === 'forward' && ts <= timestamp) {
+              // 向前加载：只返回时间戳大于 timestamp 的数据
+              return null
+            }
+          }
+
           // 转换价格和成交量数据
           const open = parseFloat(kline.open)
           const high = parseFloat(kline.high)
@@ -180,8 +193,24 @@ export function createDataLoader() {
       })
 
       // 根据加载类型决定是否还有更多数据
-      const hasMore = klines.length >= limit
-      callback(klines, hasMore)
+      // more 参数可以是 boolean 或 { backward?: boolean, forward?: boolean }
+      // 如果返回 true，表示两个方向都有更多数据
+      // 如果返回 false，表示没有更多数据
+      // 如果返回对象，可以精确控制每个方向是否有更多数据
+      let more = false
+      if (klines.length > 0) {
+        if (type === 'init') {
+          // 初始化时，如果返回的数据量达到限制，可能还有更多数据
+          more = klines.length >= limit
+        } else if (type === 'backward') {
+          // 向后加载：如果返回的数据量达到限制，可能还有更早的数据
+          more = klines.length >= limit
+        } else if (type === 'forward') {
+          // 向前加载：如果返回的数据量达到限制，可能还有更新的数据
+          more = klines.length >= limit
+        }
+      }
+      callback(klines, more)
     } catch (error) {
       console.error('[DataLoader] Error getting K-line data:', error)
       callback([])

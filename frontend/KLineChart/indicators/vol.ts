@@ -12,78 +12,86 @@
  * limitations under the License.
  */
 
-import { IndicatorTemplate, IndicatorSeries, LineType, PolygonType } from 'klinecharts'
+import { formatValue } from '../src/common/utils/format'
+import { isValid } from '../src/common/utils/typeChecks'
+import { hexToRgb } from '../src/common/utils/color'
+
+import type { IndicatorTemplate, IndicatorFigure } from '../src/component/Indicator'
+
+// 颜色常量：红涨绿跌（与K线颜色对齐）
+const COLOR_RED = '#F92855'   // 红色（K线涨时）
+const COLOR_GREEN = '#2DC08E' // 绿色（K线跌时）
+
+interface Vol {
+  open: number
+  close: number
+  volume?: number
+  ma1?: number
+  ma2?: number
+}
+
+function getVolumeFigure (): IndicatorFigure<Vol> {
+  return {
+    key: 'volume',
+    title: 'VOLUME: ',
+    type: 'bar',
+    baseValue: 0,
+    styles: ({ data, indicator, defaultStyles }) => {
+      const current = data.current
+      // VOL颜色规则：与K线颜色对齐（K线涨→红色，跌→绿色）
+      let color = formatValue(indicator.styles, 'bars[0].noChangeColor', hexToRgb(COLOR_RED, 0.7)) as string
+      if (isValid(current)) {
+        if (current.close > current.open) {
+          // K线涨，使用红色
+          color = formatValue(indicator.styles, 'bars[0].upColor', hexToRgb(COLOR_RED, 0.7)) as string
+        } else if (current.close < current.open) {
+          // K线跌，使用绿色
+          color = formatValue(indicator.styles, 'bars[0].downColor', hexToRgb(COLOR_GREEN, 0.7)) as string
+        }
+      }
+      return { color }
+    }
+  }
+}
 
 /**
  * VOL（成交量）指标
  * 包含 VOL（成交量）、MAVOL5（5周期成交量均线）、MAVOL10（10周期成交量均线）
+ * 参考官方实现：volume
  */
-const vol: IndicatorTemplate = {
+const vol: IndicatorTemplate<Vol, number> = {
   name: 'VOL',
   shortName: 'VOL',
-  series: IndicatorSeries.Volume,
-  calcParams: [5, 10], // MAVOL5、MAVOL10
-  precision: 0,
-  shouldOhlc: true,  // 设置为true，使VOL柱状图颜色根据K线涨跌判断
+  series: 'volume',
+  calcParams: [5, 10],
   shouldFormatBigNumber: true,
-  visible: true,
-  zLevel: 0,
-  extendData: undefined,
+  precision: 0,
+  minValue: 0,
   figures: [
-    { key: 'vol', title: 'VOL', type: 'bar' },
-    { key: 'mavol1', title: 'MAVOL5', type: 'line' },
-    { key: 'mavol2', title: 'MAVOL10', type: 'line' }
+    { key: 'ma1', title: 'MA5: ', type: 'line' },
+    { key: 'ma2', title: 'MA10: ', type: 'line' },
+    getVolumeFigure()
   ],
-  styles: {
-    bars: [
-      { 
-        // VOL柱状图颜色：与K线颜色一致（K线涨为红色，跌为绿色）
-        upColor: '#F53F3F',   // 红色（K线涨时）
-        downColor: '#00B42A', // 绿色（K线跌时）
-        noChangeColor: '#F53F3F',
-        style: PolygonType.Fill,
-        borderSize: 1,
-        borderStyle: LineType.Solid,
-        borderDashedValue: [2, 2]
-      }
-    ],
-    lines: [
-      { color: '#FF9600', smooth: false, style: LineType.Solid, size: 1, dashedValue: [2, 2] },
-      { color: '#9D65C9', smooth: false, style: LineType.Solid, size: 1, dashedValue: [2, 2] }
-    ]
+  regenerateFigures: (params) => {
+    const figures: Array<IndicatorFigure<Vol>> = params.map((p, i) => ({ key: `ma${i + 1}`, title: `MA${p}: `, type: 'line' }))
+    figures.push(getVolumeFigure())
+    return figures
   },
   calc: (dataList, indicator) => {
-    const { calcParams } = indicator
-    const result: Array<Record<string, number>> = []
-    
-    for (let i = 0; i < dataList.length; i++) {
-      const volValues: Record<string, number> = {}
-      
-      // VOL：当前K线的成交量
-      volValues.vol = dataList[i].volume || 0
-      
-      // 计算成交量均线
-      for (let j = 0; j < calcParams.length; j++) {
-        const period = calcParams[j]
-        const key = `mavol${j + 1}`
-        
-        if (i < period - 1) {
-          volValues[key] = 0
-          continue
+    const { calcParams: params, figures } = indicator
+    const volSums: number[] = []
+    return dataList.map((kLineData, i) => {
+      const volume = kLineData.volume ?? 0
+      const vol: Vol = { volume, open: kLineData.open, close: kLineData.close }
+      params.forEach((p, index) => {
+        volSums[index] = (volSums[index] ?? 0) + volume
+        if (i >= p - 1) {
+          vol[figures[index].key] = volSums[index] / p
+          volSums[index] -= (dataList[i - (p - 1)].volume ?? 0)
         }
-        
-        // 计算移动平均
-        let sum = 0
-        for (let k = i - period + 1; k <= i; k++) {
-          sum += dataList[k].volume || 0
-        }
-        volValues[key] = sum / period
-      }
-      
-      result.push(volValues)
-    }
-    
-    return result
+      })
+      return vol
+    })
   }
 }
 
