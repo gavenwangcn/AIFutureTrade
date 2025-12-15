@@ -76,6 +76,11 @@ class TradingEngine:
         # 全局交易锁，用于协调买入和卖出服务线程之间的并发操作
         self.trading_lock = threading.Lock()
         
+        # 【当前对话ID】用于关联交易日志和AI对话记录
+        # 使用线程锁保护，确保多线程环境下的数据安全
+        self.current_conversation_id_lock = threading.Lock()
+        self.current_conversation_id = None
+        
         # 【Binance订单客户端】不再在初始化时创建，改为每次使用时新建实例
         # 确保每次交易都使用最新的 model 表中的 api_key 和 api_secret
         # 这样每个model可以使用不同的API账户进行交易，且每次都是最新的凭证
@@ -313,12 +318,17 @@ class TradingEngine:
                         f"可用余额(available_balance)=${available_balance:.2f}, "
                         f"全仓余额(cross_wallet_balance)=${cross_wallet_balance:.2f}")
             
+            # 获取account_alias（从models表获取，确保account_values表的account_alias不为空）
+            model = self.db.get_model(self.model_id)
+            account_alias = model.get('account_alias', '') if model else ''
+            
             # 【记录账户价值快照】使用新字段名，提高代码可读性
             self.db.record_account_value(
                 self.model_id,
                 balance=balance,
                 available_balance=available_balance,
-                cross_wallet_balance=cross_wallet_balance
+                cross_wallet_balance=cross_wallet_balance,
+                account_alias=account_alias
             )
             logger.debug(f"[Model {self.model_id}] [卖出服务] [阶段3.2] 账户价值快照已记录到数据库")
             
@@ -519,12 +529,17 @@ class TradingEngine:
                         f"可用余额(available_balance)=${available_balance:.2f}, "
                         f"全仓余额(cross_wallet_balance)=${cross_wallet_balance:.2f}")
             
+            # 获取account_alias（从models表获取，确保account_values表的account_alias不为空）
+            model = self.db.get_model(self.model_id)
+            account_alias = model.get('account_alias', '') if model else ''
+            
             # 【记录账户价值快照】使用新字段名，提高代码可读性
             self.db.record_account_value(
                 self.model_id,
                 balance=balance,
                 available_balance=available_balance,
-                cross_wallet_balance=cross_wallet_balance
+                cross_wallet_balance=cross_wallet_balance,
+                account_alias=account_alias
             )
             logger.info(f"[Model {self.model_id}] [买入服务] [阶段3.2] 账户价值快照已记录到数据库")
             
@@ -1121,7 +1136,7 @@ class TradingEngine:
         
         return {'buy': buy_prompt_final, 'sell': sell_prompt_final}
 
-    def _record_ai_conversation(self, payload: Dict):
+    def _record_ai_conversation(self, payload: Dict) -> Optional[str]:
         """
         记录AI对话到数据库
         
@@ -1133,6 +1148,9 @@ class TradingEngine:
                 - decisions: AI的决策结果（如果raw_response不是字符串）
                 - tokens: token使用数量（如果有）
         
+        Returns:
+            conversation_id (str): 对话记录的ID（UUID字符串），如果失败则返回None
+        
         Note:
             对话记录用于后续分析和审计，帮助理解AI的决策过程
         """
@@ -1142,13 +1160,18 @@ class TradingEngine:
         tokens = payload.get('tokens', 0)  # 获取tokens数量，默认为0
         if not isinstance(raw_response, str):
             raw_response = json.dumps(payload.get('decisions', {}), ensure_ascii=False)
-        self.db.add_conversation(
+        conversation_id = self.db.add_conversation(
             self.model_id,
             user_prompt=prompt,
             ai_response=raw_response,
             cot_trace=cot_trace,
             tokens=tokens
         )
+        # 保存 conversation_id 到实例变量（线程安全）
+        if conversation_id:
+            with self.current_conversation_id_lock:
+                self.current_conversation_id = conversation_id
+        return conversation_id
 
     # ============ 批量决策处理方法 ============
     # 使用多线程批量处理AI决策，提高执行效率
@@ -2569,6 +2592,10 @@ class TradingEngine:
                           f" | symbol={symbol} | side={trailing_stop_side} | position_side={position_side} | "
                           f"quantity={quantity} | price={price}")
                 
+                # 获取当前的 conversation_id（线程安全）
+                with self.current_conversation_id_lock:
+                    conversation_id = self.current_conversation_id
+                
                 sdk_response = binance_client.market_trade(
                     symbol=symbol,
                     side=trailing_stop_side,  # 根据position_side动态决定保护方向
@@ -2576,6 +2603,7 @@ class TradingEngine:
                     position_side=position_side,  # 使用根据signal自动确定的position_side
                     quantity=quantity,  # 添加quantity参数
                     model_id=model_uuid,
+                    conversation_id=conversation_id,
                     trade_id=trade_id,
                     db=self.db
                 )
@@ -2747,6 +2775,10 @@ class TradingEngine:
                           f"stop_price={current_price} | position_side={position_side} | "
                           f"position_amt={position_amt} | entry_price={entry_price}")
                 
+                # 获取当前的 conversation_id（线程安全）
+                with self.current_conversation_id_lock:
+                    conversation_id = self.current_conversation_id
+                
                 sdk_response = binance_client.close_position_trade(
                     symbol=symbol,
                     side=side_for_trade,
@@ -2755,6 +2787,7 @@ class TradingEngine:
                     position_side=position_side,
                     quantity=position_amt,  # 传递持仓数量
                     model_id=model_uuid,
+                    conversation_id=conversation_id,
                     trade_id=trade_id,
                     db=self.db
                 )
@@ -2899,6 +2932,10 @@ class TradingEngine:
                           f"stop_price={stop_price} | position_side={position_side} | "
                           f"position_amt={position_amt} | current_price={current_price}")
                 
+                # 获取当前的 conversation_id（线程安全）
+                with self.current_conversation_id_lock:
+                    conversation_id = self.current_conversation_id
+                
                 sdk_response = binance_client.stop_loss_trade(
                     symbol=symbol,
                     side=side_for_trade,
@@ -2907,6 +2944,7 @@ class TradingEngine:
                     position_side=position_side,
                     quantity=position_amt,  # 添加quantity参数
                     model_id=model_uuid,
+                    conversation_id=conversation_id,
                     trade_id=trade_id,
                     db=self.db
                 )
@@ -3050,6 +3088,10 @@ class TradingEngine:
                           f"stop_price={stop_price} | position_side={position_side} | "
                           f"position_amt={position_amt} | current_price={current_price}")
                 
+                # 获取当前的 conversation_id（线程安全）
+                with self.current_conversation_id_lock:
+                    conversation_id = self.current_conversation_id
+                
                 sdk_response = binance_client.take_profit_trade(
                     symbol=symbol,
                     side=side_for_trade,
@@ -3058,6 +3100,7 @@ class TradingEngine:
                     position_side=position_side,
                     quantity=position_amt,  # 添加quantity参数
                     model_id=model_uuid,
+                    conversation_id=conversation_id,
                     trade_id=trade_id,
                     db=self.db
                 )

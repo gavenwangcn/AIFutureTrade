@@ -641,7 +641,7 @@ let portfolioSymbolsRefreshInterval = null // 模型持仓合约列表自动刷�
       if (data.portfolio) {
         portfolio.value = {
           totalValue: data.portfolio.total_value || 0,
-          availableCash: data.portfolio.available_cash || 0,
+          availableCash: data.portfolio.cash || data.portfolio.available_cash || 0,  // 兼容两种字段名
           realizedPnl: data.portfolio.realized_pnl || 0,
           unrealizedPnl: data.portfolio.unrealized_pnl || 0
         }

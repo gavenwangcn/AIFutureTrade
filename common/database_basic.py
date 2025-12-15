@@ -97,6 +97,7 @@ class Database:
         self.trades_table = "trades"
         self.conversations_table = "conversations"
         self.account_values_table = "account_values"
+        self.account_value_historys_table = "account_value_historys"  # 新增：用于账户价值历史图表
         self.settings_table = "settings"
         self.model_prompts_table = "model_prompts"
         self.model_futures_table = "model_futures"
@@ -359,8 +360,11 @@ class Database:
         # Conversations table
         self._ensure_conversations_table()
         
-        # Account values history table
+        # Account values table (用于当前值，支持UPDATE/INSERT)
         self._ensure_account_values_table()
+        
+        # Account value historys table (用于历史记录，只INSERT)
+        self._ensure_account_value_historys_table()
         
         # Settings table
         self._ensure_settings_table()
@@ -510,6 +514,25 @@ class Database:
         """
         self.command(ddl)
         logger.debug(f"[Database] Ensured table {self.account_values_table} exists")
+    
+    def _ensure_account_value_historys_table(self):
+        """Create account_value_historys table if not exists (用于账户价值历史图表)"""
+        ddl = f"""
+        CREATE TABLE IF NOT EXISTS `{self.account_value_historys_table}` (
+            `id` VARCHAR(36) PRIMARY KEY,
+            `model_id` VARCHAR(36) NOT NULL,
+            `account_alias` VARCHAR(100) DEFAULT '',
+            `balance` DOUBLE DEFAULT 0.0,
+            `available_balance` DOUBLE DEFAULT 0.0,
+            `cross_wallet_balance` DOUBLE DEFAULT 0.0,
+            `cross_un_pnl` DOUBLE DEFAULT 0.0,
+            `timestamp` DATETIME DEFAULT CURRENT_TIMESTAMP,
+            INDEX `idx_model_timestamp` (`model_id`, `timestamp`),
+            INDEX `idx_timestamp` (`timestamp`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+        """
+        self.command(ddl)
+        logger.debug(f"[Database] Ensured table {self.account_value_historys_table} exists")
     
     def _ensure_settings_table(self):
         """Create settings table if not exists"""
@@ -1063,9 +1086,13 @@ class Database:
             self.command(f"DELETE FROM `{self.conversations_table}` WHERE model_id = %s", (model_uuid,))
             logger.debug(f"[Database] Deleted conversations for model {model_id}")
             
-            # 4. 删除账户价值历史
+            # 4. 删除账户价值记录（account_values表，用于当前值）
             self.command(f"DELETE FROM `{self.account_values_table}` WHERE model_id = %s", (model_uuid,))
             logger.debug(f"[Database] Deleted account_values for model {model_id}")
+            
+            # 4.1. 删除账户价值历史记录（account_value_historys表，用于历史图表）
+            self.command(f"DELETE FROM `{self.account_value_historys_table}` WHERE model_id = %s", (model_uuid,))
+            logger.debug(f"[Database] Deleted account_value_historys for model {model_id}")
             
             # 5. 删除模型关联的期货合约
             self.command(f"DELETE FROM `{self.model_futures_table}` WHERE model_id = %s", (model_uuid,))
@@ -1416,14 +1443,19 @@ class Database:
     # ============ Conversation（对话记录）管理方法 ============
     
     def add_conversation(self, model_id: int, user_prompt: str,
-                        ai_response: str, cot_trace: str = '', tokens: int = 0):
-        """Add conversation record"""
+                        ai_response: str, cot_trace: str = '', tokens: int = 0) -> Optional[str]:
+        """
+        Add conversation record
+        
+        Returns:
+            conversation_id (str): 对话记录的ID（UUID字符串），如果失败则返回None
+        """
         try:
             model_mapping = self._get_model_id_mapping()
             model_uuid = model_mapping.get(model_id)
             if not model_uuid:
                 logger.warning(f"[Database] Model {model_id} not found for conversation record")
-                return
+                return None
             
             # 使用 UTC+8 时区时间（北京时间），转换为 naive datetime 存储
             beijing_tz = timezone(timedelta(hours=8))
@@ -1435,6 +1467,7 @@ class Database:
                 [[conv_id, model_uuid, user_prompt, ai_response, cot_trace or '', tokens, current_time]],
                 ["id", "model_id", "user_prompt", "ai_response", "cot_trace", "tokens", "timestamp"]
             )
+            return conv_id
         except Exception as e:
             logger.error(f"[Database] Failed to add conversation: {e}")
             raise
@@ -1531,6 +1564,9 @@ class Database:
         """
         Record account value snapshot
         
+        注意：每个model_id应该只有一条记录，如果已存在则UPDATE，不存在则INSERT。
+        如果传入的account_alias为空，则从models表获取或保留原有值。
+        
         Args:
             model_id: 模型ID
             balance: 总余额
@@ -1546,12 +1582,75 @@ class Database:
                 logger.warning(f"[Database] Model {model_id} not found for account value record")
                 return
             
-            av_id = self._generate_id()
-            self.insert_rows(
-                self.account_values_table,
-                [[av_id, model_uuid, account_alias, balance, available_balance, cross_wallet_balance, cross_un_pnl, datetime.now(timezone.utc)]],
-                ["id", "model_id", "account_alias", "balance", "available_balance", "cross_wallet_balance", "cross_un_pnl", "timestamp"]
-            )
+            # 检查是否已存在记录
+            existing_rows = self.query(f"""
+                SELECT id, account_alias 
+                FROM {self.account_values_table}
+                WHERE model_id = %s
+                ORDER BY timestamp DESC
+                LIMIT 1
+            """, (model_uuid,))
+            
+            # 如果account_alias为空，尝试从models表获取
+            if not account_alias:
+                if existing_rows:
+                    # 如果已存在记录，保留原有的account_alias
+                    account_alias = existing_rows[0][1] or ''
+                else:
+                    # 如果不存在记录，从models表获取account_alias
+                    model = self.get_model(model_id)
+                    if model and model.get('account_alias'):
+                        account_alias = model['account_alias']
+                    else:
+                        account_alias = ''
+                        logger.warning(f"[Database] account_alias is empty for model {model_id}, using empty string")
+            
+            # 确定最终使用的 account_alias（用于后续的 INSERT 操作）
+            final_account_alias_for_history = account_alias
+            if existing_rows:
+                # 已存在记录，执行UPDATE（保留原有的account_alias如果传入的为空）
+                existing_id = existing_rows[0][0]
+                existing_account_alias = existing_rows[0][1] or ''
+                # 如果传入的account_alias为空，使用原有的account_alias
+                final_account_alias = account_alias if account_alias else existing_account_alias
+                final_account_alias_for_history = final_account_alias
+                
+                self.command(f"""
+                    UPDATE {self.account_values_table}
+                    SET account_alias = %s,
+                        balance = %s,
+                        available_balance = %s,
+                        cross_wallet_balance = %s,
+                        cross_un_pnl = %s,
+                        timestamp = %s
+                    WHERE id = %s
+                """, (final_account_alias, balance, available_balance, cross_wallet_balance, cross_un_pnl, datetime.now(timezone.utc), existing_id))
+                logger.debug(f"[Database] Updated account_values record for model {model_id} (id={existing_id}), account_alias={final_account_alias}")
+            else:
+                # 不存在记录，执行INSERT
+                av_id = self._generate_id()
+                self.insert_rows(
+                    self.account_values_table,
+                    [[av_id, model_uuid, account_alias, balance, available_balance, cross_wallet_balance, cross_un_pnl, datetime.now(timezone.utc)]],
+                    ["id", "model_id", "account_alias", "balance", "available_balance", "cross_wallet_balance", "cross_un_pnl", "timestamp"]
+                )
+                logger.debug(f"[Database] Inserted account_values record for model {model_id} (id={av_id}), account_alias={account_alias}")
+                final_account_alias_for_history = account_alias
+            
+            # 【新增】同时写入 account_value_historys 表（用于历史图表，只INSERT，不UPDATE）
+            # 每次记录都插入一条新记录，保留完整历史
+            try:
+                history_id = self._generate_id()
+                current_time = datetime.now(timezone.utc)
+                self.insert_rows(
+                    self.account_value_historys_table,
+                    [[history_id, model_uuid, final_account_alias_for_history, balance, available_balance, cross_wallet_balance, cross_un_pnl, current_time]],
+                    ["id", "model_id", "account_alias", "balance", "available_balance", "cross_wallet_balance", "cross_un_pnl", "timestamp"]
+                )
+                logger.debug(f"[Database] Inserted account_value_historys record for model {model_id} (id={history_id}), account_alias={final_account_alias_for_history}")
+            except Exception as history_err:
+                # 历史记录插入失败不影响主流程
+                logger.warning(f"[Database] Failed to insert account_value_historys record for model {model_id}: {history_err}")
         except Exception as e:
             logger.error(f"[Database] Failed to record account value: {e}")
             raise
@@ -1574,10 +1673,11 @@ class Database:
             if not model_uuid:
                 return []
             
+            # 【修改】从 account_value_historys 表查询历史记录（用于图表显示）
             rows = self.query(f"""
                 SELECT id, model_id, account_alias, balance, available_balance, 
                        cross_wallet_balance, cross_un_pnl, timestamp
-                FROM {self.account_values_table}
+                FROM {self.account_value_historys_table}
                 WHERE model_id = '{model_uuid}'
                 ORDER BY timestamp DESC
                 LIMIT {limit}
@@ -1616,6 +1716,7 @@ class Database:
             - crossUnPnl: 全仓持仓未实现盈亏（聚合）
         """
         try:
+            # 【修改】从 account_value_historys 表查询聚合历史记录（用于图表显示）
             # MySQL 日期函数：DATE() 和 HOUR()
             rows = self.query(f"""
                 SELECT 
@@ -1634,7 +1735,7 @@ class Database:
                         cross_un_pnl,
                         model_id,
                         ROW_NUMBER() OVER (PARTITION BY model_id, DATE(timestamp) ORDER BY timestamp DESC) as rn
-                    FROM {self.account_values_table}
+                    FROM {self.account_value_historys_table}
                 ) grouped
                 WHERE rn <= 10
                 GROUP BY DATE(timestamp), HOUR(timestamp), timestamp
