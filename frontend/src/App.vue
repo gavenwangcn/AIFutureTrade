@@ -870,8 +870,6 @@ const {
   isExecutingSell,
   isDisablingBuy,
   isDisablingSell,
-  isDisablingBuy,
-  isDisablingSell,
   loadGainers,
   loadLosers,
   selectModel,
