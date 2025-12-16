@@ -246,8 +246,8 @@
                   <div class="leaderboard-price">${{ formatLeaderboardPrice(item.price) }}</div>
                   <div class="leaderboard-change positive">+{{ (item.change_percent || item.change || 0).toFixed(2) }}%</div>
                   <div v-if="item.quote_volume" class="leaderboard-volume">
-                    <span class="volume-label">成交额</span>
-                    <span class="volume-value">${{ formatVolumeChinese(item.quote_volume) }}</span>
+                    <span class="volume-label">当日成交额</span>
+                    <span class="volume-value">{{ formatVolumeChinese(item.quote_volume) }}</span>
                   </div>
                 </div>
                 <div v-if="leaderboardGainers.length === 0" class="empty-state">正在等待实时涨幅数据...</div>
@@ -286,8 +286,8 @@
                   <div class="leaderboard-price">${{ formatLeaderboardPrice(item.price) }}</div>
                   <div class="leaderboard-change negative">{{ (item.change_percent || item.change || 0).toFixed(2) }}%</div>
                   <div v-if="item.quote_volume" class="leaderboard-volume">
-                    <span class="volume-label">成交额</span>
-                    <span class="volume-value">${{ formatVolumeChinese(item.quote_volume) }}</span>
+                    <span class="volume-label">当日成交额</span>
+                    <span class="volume-value">{{ formatVolumeChinese(item.quote_volume) }}</span>
                   </div>
                 </div>
                 <div v-if="leaderboardLosers.length === 0" class="empty-state">正在等待实时跌幅数据...</div>
