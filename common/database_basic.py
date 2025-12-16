@@ -1178,14 +1178,43 @@ class Database:
             return False
     
     def is_model_auto_trading_enabled(self, model_id: int) -> bool:
-        """Check auto trading flag for a model"""
+        """
+        Check auto trading flag for a model
+        
+        Args:
+            model_id: 模型ID（整数）
+        
+        Returns:
+            bool: True if auto_trading_enabled is 1, False if 0 or model not found
+        
+        Note:
+            - 数据库字段 auto_trading_enabled 存储为 TINYINT(1)，值为 0 或 1
+            - 0 表示禁用自动交易，1 表示启用自动交易
+            - 如果模型不存在或字段值为 0，返回 False
+        """
         try:
             model = self.get_model(model_id)
             if not model:
+                logger.debug(f"[Database] Model {model_id} not found, auto trading disabled")
                 return False
-            return bool(model.get('auto_trading_enabled', 0))
+            
+            # 获取 auto_trading_enabled 字段值（可能是 0, 1, None）
+            auto_trading_enabled = model.get('auto_trading_enabled', 0)
+            
+            # 确保正确处理各种可能的值类型
+            # MySQL 可能返回整数 0/1，也可能是 None
+            if auto_trading_enabled is None:
+                logger.debug(f"[Database] Model {model_id} auto_trading_enabled is None, defaulting to False")
+                return False
+            
+            # 转换为布尔值：0 -> False, 1 -> True, 其他值也转换为布尔值
+            enabled = bool(auto_trading_enabled)
+            logger.debug(f"[Database] Model {model_id} auto_trading_enabled={auto_trading_enabled} -> {enabled}")
+            return enabled
+            
         except Exception as e:
             logger.error(f"[Database] Failed to check auto trading flag for model {model_id}: {e}")
+            # 出错时默认返回 False，确保安全（不执行交易）
             return False
     
     def set_model_leverage(self, model_id: int, leverage: int) -> bool:

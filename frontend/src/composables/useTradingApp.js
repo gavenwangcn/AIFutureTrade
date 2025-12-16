@@ -2207,5 +2207,3 @@ let portfolioSymbolsRefreshInterval = null // 模型持仓合约列表自动刷�
     updateAccountChart
   }
 }
-
-}

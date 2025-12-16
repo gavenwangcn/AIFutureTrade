@@ -286,11 +286,14 @@ def trading_loop():
 
             for model_id, engine in list(trading_engines.items()):
                 try:
+                    # 检查模型的 auto_trading_enabled 字段
+                    # 如果为 0（False），则跳过该模型的 AI 决策交易
                     if not db.is_model_auto_trading_enabled(model_id):
-                        logger.info(f"SKIP: Model {model_id} auto trading paused")
+                        logger.info(f"SKIP: Model {model_id} - auto_trading_enabled=0, skipping AI trading decision")
                         continue
 
-                    logger.info(f"\nEXEC: Model {model_id}")
+                    # 只有 auto_trading_enabled=1 的模型才会执行 AI 决策交易
+                    logger.info(f"\nEXEC: Model {model_id} - auto_trading_enabled=1, executing AI trading decision")
                     result = engine.execute_trading_cycle()
 
                     if result.get('success'):
