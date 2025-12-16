@@ -337,55 +337,7 @@ class BinanceFuturesClient(_BinanceFuturesBase):
             except Exception:  # pragma: no cover - defensive
                 pass
         return None
-
-    def get_order_book_ticker(self, symbol: Optional[str] = None) -> List[Dict[str, Any]]:
-        """
-        获取最优挂单价格（Order Book Ticker）
         
-        该接口返回指定交易对或所有交易对的最优买卖挂单价格信息，
-        包括当前的买一价、买一量、卖一价、卖一量等数据。
-        
-        Args:
-            symbol: 交易对符号，如 'BTC' 或 'BTCUSDT'（可选）。
-                   如果不提供，则返回所有交易对的最优挂单价格。
-            
-        Returns:
-            最优挂单价格信息列表，每个元素包含交易对的最优买卖价格和数量。
-        
-        Raises:
-            RuntimeError: 如果SDK不可用
-            Exception: 如果API调用失败
-        """
-        try:
-            # 如果提供了symbol参数，格式化交易对
-            formatted_symbol = None
-            if symbol:
-                formatted_symbol = self.format_symbol(symbol)
-                logger.info(f"[Binance Futures] 获取最优挂单价格，交易对: {formatted_symbol}")
-            else:
-                logger.info("[Binance Futures] 获取所有交易对的最优挂单价格")
-            
-            # 调用REST API接口
-            response = self._rest.symbol_order_book_ticker(symbol=formatted_symbol)
-            
-            # 获取响应数据
-            data = response.data()
-            
-            # 处理响应数据
-            if isinstance(data, list):
-                # 如果返回的是列表，直接转换每个元素为字典
-                tickers = [self._ensure_dict(item) for item in data]
-            else:
-                # 如果返回的是单个对象，转换为字典并包装为列表
-                tickers = [self._ensure_dict(data)]
-            
-            logger.info(f"[Binance Futures] 成功获取最优挂单价格，返回 {len(tickers)} 条数据")
-            return tickers
-            
-        except Exception as e:
-            logger.error(f"[Binance Futures] 获取最优挂单价格失败: {e}")
-            raise
-
     # ============ 市场数据获取方法 ============
     
     def get_24h_ticker(self, symbols: List[str]) -> Dict[str, Dict]:
@@ -876,6 +828,56 @@ class BinanceFuturesOrderClient(_BinanceFuturesBase):
             
         except Exception as e:
             logger.error(f"[Binance Futures] 获取最优挂单价格失败: {e}")
+            raise
+
+    def change_initial_leverage(self, symbol: str, leverage: int) -> Dict[str, Any]:
+        """
+        修改初始杠杆倍数
+        
+        该接口用于修改指定交易对的初始杠杆倍数。
+        
+        Args:
+            symbol: 交易对符号，如 'BTC' 或 'BTCUSDT'
+            leverage: 新的杠杆倍数（1-125）
+            
+        Returns:
+            修改后的杠杆信息
+        {
+            "symbol": "BTCUSDT", // 交易对
+            "leverage": 10, // 新的杠杆倍数
+            "maxNotionalValue": "1000000" // 最大名义价值
+        }
+        Raises:
+            RuntimeError: 如果SDK不可用
+            ValueError: 如果参数不符合要求
+            Exception: 如果API调用失败
+        """
+        try:
+            # 验证参数
+            if not symbol:
+                raise ValueError("交易对不能为空")
+            
+            if not isinstance(leverage, int) or leverage < 1 or leverage > 125:
+                raise ValueError("杠杆倍数必须是1-125之间的整数")
+            
+            # 格式化交易对
+            formatted_symbol = self.format_symbol(symbol)
+            logger.info(f"[Binance Futures] 修改初始杠杆，交易对: {formatted_symbol}，杠杆倍数: {leverage}")
+            
+            # 调用REST API接口
+            response = self._rest.change_initial_leverage(symbol=formatted_symbol, leverage=leverage)
+            
+            # 获取响应数据并转换为字典
+            data = self._ensure_dict(response.data())
+            
+            logger.info(f"[Binance Futures] 成功修改初始杠杆，交易对: {formatted_symbol}，新杠杆: {data.get('leverage')}")
+            return data
+            
+        except ValueError as ve:
+            logger.error(f"[Binance Futures] 修改初始杠杆参数错误: {ve}")
+            raise
+        except Exception as e:
+            logger.error(f"[Binance Futures] 修改初始杠杆失败: {e}")
             raise
 
     # ============ 交易方法 ============
