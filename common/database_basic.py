@@ -1678,6 +1678,41 @@ class Database:
             logger.error(f"[Database] Failed to record LLM API error: {e}")
             # 不抛出异常，避免影响主流程
     
+    def get_llm_api_errors(self, model_id: int, limit: int = 10) -> List[Dict]:
+        """
+        获取模型的LLM API错误记录
+        
+        Args:
+            model_id: 模型ID（整数）
+            limit: 返回记录数限制，默认10
+            
+        Returns:
+            LLM API错误记录列表，按created_at降序排序（最新的在前）
+        """
+        try:
+            model_mapping = self._get_model_id_mapping()
+            model_uuid = model_mapping.get(model_id)
+            if not model_uuid:
+                logger.warning(f"[Database] Model {model_id} not found in mapping, returning empty LLM API errors list")
+                return []
+            
+            # 使用参数化查询，确保只查询指定 model_id 的错误记录
+            # 按 created_at DESC 排序，确保返回最新的错误记录
+            rows = self.query(f"""
+                SELECT * FROM `{self.llm_api_error_table}`
+                WHERE model_id = %s
+                ORDER BY created_at DESC
+                LIMIT %s
+            """, (model_uuid, limit))
+            
+            columns = ["id", "model_id", "provider_name", "model", "prompt", "error_msg", "created_at"]
+            results = self._rows_to_dicts(rows, columns)
+            
+            return results
+        except Exception as e:
+            logger.error(f"[Database] Failed to get LLM API errors for model {model_id}: {e}")
+            return []
+    
     def get_conversations(self, model_id: int, limit: int = 20) -> List[Dict]:
         """Get conversation history for a specific model
         

@@ -403,6 +403,10 @@
               <i v-if="isRefreshingConversations" class="bi bi-arrow-repeat spin" style="margin-right: 4px;"></i>
               AI对话
             </button>
+            <button :class="['tab-btn', { active: activeTab === 'llmApiErrors' }]" @click="activeTab = 'llmApiErrors'">
+              <i v-if="isRefreshingLlmApiErrors" class="bi bi-arrow-repeat spin" style="margin-right: 4px;"></i>
+              AI接口报错
+            </button>
           </div>
 
           <div v-show="!isAggregatedView && activeTab === 'positions'" class="tab-content active">
@@ -523,6 +527,45 @@
                 </div>
               </div>
               <div v-if="conversations.length === 0" class="empty-state">暂无对话记录</div>
+            </div>
+          </div>
+
+          <div v-show="!isAggregatedView && activeTab === 'llmApiErrors'" class="tab-content active">
+            <div v-if="loading.llmApiErrors" class="loading-container">
+              <i class="bi bi-arrow-repeat spin" style="font-size: 24px; color: var(--primary-color);"></i>
+              <p style="margin-top: 12px; color: var(--text-secondary);">加载AI接口报错信息中...</p>
+            </div>
+            <div v-else class="llm-api-errors-list">
+              <div v-for="error in llmApiErrors" :key="error.id" class="llm-api-error-item">
+                <div class="error-header">
+                  <div class="error-time">{{ error.created_at || '' }}</div>
+                  <div class="error-meta">
+                    <span class="error-provider">{{ error.provider_name || '未知API' }}</span>
+                    <span class="error-separator">|</span>
+                    <span class="error-model">{{ error.model || '未知模型' }}</span>
+                  </div>
+                </div>
+                <div v-if="error.prompt" class="error-section">
+                  <div class="error-label">
+                    <i class="bi bi-chat-left-text"></i>
+                    提示词
+                  </div>
+                  <div class="error-text">{{ error.prompt }}</div>
+                </div>
+                <div v-if="error.error_msg" class="error-section error-message">
+                  <div class="error-label">
+                    <i class="bi bi-exclamation-triangle"></i>
+                    报错信息
+                  </div>
+                  <div 
+                    class="error-text error-text-danger" 
+                    :title="error.error_msg.length > 300 ? error.error_msg : ''"
+                  >
+                    {{ error.error_msg.length > 300 ? error.error_msg.substring(0, 300) + '...' : error.error_msg }}
+                  </div>
+                </div>
+              </div>
+              <div v-if="llmApiErrors.length === 0" class="empty-state">暂无API报错记录</div>
             </div>
           </div>
         </div>
@@ -723,10 +766,13 @@ const {
   positions,
   trades,
   conversations,
+  llmApiErrors,
+  isRefreshingLlmApiErrors,
   loading,
   loadPositions,
   loadTrades,
   loadConversations,
+  loadLlmApiErrors,
   settings,
   loggerEnabled,
   showSettingsModal,
@@ -831,6 +877,8 @@ watch(activeTab, async (newTab, oldTab) => {
       await loadTrades()
     } else if (newTab === 'conversations') {
       await loadConversations()
+    } else if (newTab === 'llmApiErrors') {
+      await loadLlmApiErrors()
     }
   } catch (error) {
     console.error(`[App] Error loading ${newTab} data:`, error)

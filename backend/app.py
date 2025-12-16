@@ -1051,6 +1051,59 @@ def get_conversations(model_id):
     
     return jsonify(conversations)
 
+@app.route('/api/models/<int:model_id>/llm-api-errors', methods=['GET'])
+def get_llm_api_errors(model_id):
+    """
+    获取模型的LLM API错误记录
+    
+    Args:
+        model_id (int): 模型ID
+    
+    Query Parameters:
+        limit (int, optional): 返回记录数限制，默认10
+    
+    Returns:
+        JSON: LLM API错误记录列表，包含：
+            - provider_name: API提供方名称
+            - model: 模型名称
+            - prompt: 提示词（截取后加...）
+            - error_msg: 错误信息（截取后加...）
+            - created_at: 创建时间（UTC+8时间，已转换为字符串格式）
+    """
+    limit = request.args.get('limit', 10, type=int)
+    limit = min(limit, 50)  # 最大限制50条
+    
+    errors = db.get_llm_api_errors(model_id, limit=limit)
+    
+    # 格式化每条错误记录
+    for error in errors:
+        # 格式化created_at字段为字符串（UTC+8时间，格式：YYYY-MM-DD HH:MM:SS）
+        created_at = error.get('created_at')
+        if created_at:
+            if isinstance(created_at, datetime):
+                # 如果是datetime对象，直接格式化为字符串（数据库存储的是UTC+8时间）
+                error['created_at'] = created_at.strftime('%Y-%m-%d %H:%M:%S')
+            elif isinstance(created_at, str):
+                # 如果已经是字符串，确保格式正确（移除微秒部分）
+                if '.' in created_at:
+                    error['created_at'] = created_at.split('.')[0]
+                else:
+                    error['created_at'] = created_at
+            else:
+                # 其他类型，转换为字符串
+                error['created_at'] = str(created_at)
+        else:
+            error['created_at'] = ''
+        
+        # 截取prompt（如果过长），但保留完整的error_msg用于前端tooltip显示
+        prompt = error.get('prompt', '')
+        if prompt and len(prompt) > 200:
+            error['prompt'] = prompt[:200] + '...'
+        
+        # error_msg不截取，保留完整内容，前端负责显示时的截取和tooltip
+    
+    return jsonify(errors)
+
 def _remove_json_output_suffix(prompt_text: str) -> str:
     """
     移除prompt中的JSON输出要求结尾句（用于前端编辑和数据库存储）
