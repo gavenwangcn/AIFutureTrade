@@ -651,11 +651,19 @@ let portfolioSymbolsRefreshInterval = null // 模型持仓合约列表自动刷�
           realizedPnl: data.portfolio.realized_pnl || 0,
           unrealizedPnl: data.portfolio.unrealized_pnl || 0
         }
-        // 保存账户价值历史数据
+        // 保存账户价值历史数据（只显示当前模型的数据）
+        // 清空聚合图表数据，确保只显示当前模型的数据
+        aggregatedChartData.value = []
         if (data.account_value_history) {
           accountValueHistory.value = data.account_value_history
           await nextTick()
+          // 明确传递 false 表示单模型视图，只显示当前模型的数据
           updateAccountChart(data.account_value_history, portfolio.value.totalValue, false)
+        } else {
+          // 如果没有数据，清空图表显示
+          accountValueHistory.value = []
+          await nextTick()
+          updateAccountChart([], portfolio.value.totalValue, false)
         }
       }
       // 加载模型持仓合约列表
@@ -703,6 +711,8 @@ let portfolioSymbolsRefreshInterval = null // 模型持仓合约列表自动刷�
    * 显示聚合视图
    */
   const showAggregatedView = async () => {
+    // 切换到聚合视图时，清空单个模型的数据，确保只显示聚合数据
+    accountValueHistory.value = []
     currentModelId.value = null
     isAggregatedView.value = true
     await loadAggregatedData()
@@ -722,30 +732,54 @@ let portfolioSymbolsRefreshInterval = null // 模型持仓合约列表自动刷�
     
     // 初始化或重用图表实例
     if (!accountChart.value) {
-      accountChart.value = echarts.init(chartDom)
-      
-      // 监听窗口大小变化
-      window.addEventListener('resize', () => {
-        if (accountChart.value) {
-          accountChart.value.resize()
-        }
-      })
+      try {
+        accountChart.value = echarts.init(chartDom)
+        
+        // 监听窗口大小变化
+        window.addEventListener('resize', () => {
+          if (accountChart.value) {
+            try {
+              accountChart.value.resize()
+            } catch (error) {
+              console.warn('[TradingApp] Error resizing chart:', error)
+            }
+          }
+        })
+      } catch (error) {
+        console.error('[TradingApp] Error initializing chart:', error)
+        return
+      }
+    }
+    
+    // 确保图表实例有效
+    if (!accountChart.value || typeof accountChart.value.setOption !== 'function') {
+      console.warn('[TradingApp] Chart instance is invalid, reinitializing...')
+      try {
+        accountChart.value = echarts.init(chartDom)
+      } catch (error) {
+        console.error('[TradingApp] Error reinitializing chart:', error)
+        return
+      }
     }
     
     if (isMultiModel) {
       // 多模型图表
       if (!history || history.length === 0) {
-        accountChart.value.setOption({
-          title: {
-            text: '暂无模型数据',
-            left: 'center',
-            top: 'center',
-            textStyle: { color: '#86909c', fontSize: 14 }
-          },
-          xAxis: { show: false },
-          yAxis: { show: false },
-          series: []
-        })
+        try {
+          accountChart.value.setOption({
+            title: {
+              text: '暂无模型数据',
+              left: 'center',
+              top: 'center',
+              textStyle: { color: '#86909c', fontSize: 14 }
+            },
+            xAxis: { show: false },
+            yAxis: { show: false },
+            series: []
+          }, true) // 第二个参数 true 表示不合并，完全替换
+        } catch (error) {
+          console.error('[TradingApp] Error setting chart option (multi-model empty):', error)
+        }
         return
       }
       
@@ -797,10 +831,11 @@ let portfolioSymbolsRefreshInterval = null // 模型持仓合约列表自动刷�
           return point ? point.value : null
         })
         
+        // 确保 series 对象包含所有必需的属性
         return {
           name: model.model_name || `模型 ${index + 1}`,
-          type: 'line',
-          data: dataPoints,
+          type: 'line', // 确保 type 属性存在
+          data: dataPoints || [],
           smooth: true,
           symbol: 'circle',
           symbolSize: 4,
@@ -808,7 +843,13 @@ let portfolioSymbolsRefreshInterval = null // 模型持仓合约列表自动刷�
           itemStyle: { color: color },
           connectNulls: true
         }
-      })
+      }).filter(s => s && s.type) // 过滤掉无效的 series
+      
+      // 确保 series 数组有效且不为空
+      if (!series || series.length === 0) {
+        console.warn('[TradingApp] No valid series data for multi-model chart')
+        return
+      }
       
       const option = {
         title: {
@@ -827,7 +868,7 @@ let portfolioSymbolsRefreshInterval = null // 模型持仓合约列表自动刷�
         xAxis: {
           type: 'category',
           boundaryGap: false,
-          data: formattedTimeAxis,
+          data: formattedTimeAxis || [],
           axisLine: { lineStyle: { color: '#e5e6eb' } },
           axisLabel: { color: '#86909c', fontSize: 11, rotate: 45 }
         },
@@ -843,7 +884,7 @@ let portfolioSymbolsRefreshInterval = null // 模型持仓合约列表自动刷�
           splitLine: { lineStyle: { color: '#f2f3f5' } }
         },
         legend: {
-          data: history.map(model => model.model_name || '模型'),
+          data: history.map(model => model.model_name || '模型').filter(Boolean),
           bottom: 10,
           itemGap: 20,
           textStyle: { color: '#1d2129', fontSize: 12 }
@@ -856,31 +897,42 @@ let portfolioSymbolsRefreshInterval = null // 模型持仓合约列表自动刷�
           borderWidth: 1,
           textStyle: { color: '#1d2129' },
           formatter: (params) => {
-            let result = `${params[0].axisValue}<br/>`
+            if (!params || !params[0]) return ''
+            let result = `${params[0].axisValue || ''}<br/>`
             params.forEach(param => {
-              if (param.value !== null) {
-                result += `${param.marker}${param.seriesName}: $${param.value.toFixed(2)}<br/>`
+              if (param && param.value !== null && param.value !== undefined) {
+                result += `${param.marker || ''}${param.seriesName || ''}: $${param.value.toFixed(2)}<br/>`
               }
             })
             return result
           }
         }
       }
-      accountChart.value.setOption(option)
+      try {
+        if (accountChart.value && typeof accountChart.value.setOption === 'function') {
+          accountChart.value.setOption(option, true) // 第二个参数 true 表示不合并，完全替换
+        }
+      } catch (error) {
+        console.error('[TradingApp] Error setting chart option (multi-model):', error)
+      }
     } else {
       // 单模型图表
       if (!history || history.length === 0) {
-        accountChart.value.setOption({
-          title: {
-            text: '暂无数据',
-            left: 'center',
-            top: 'center',
-            textStyle: { color: '#86909c', fontSize: 14 }
-          },
-          xAxis: { show: false },
-          yAxis: { show: false },
-          series: []
-        })
+        try {
+          accountChart.value.setOption({
+            title: {
+              text: '暂无数据',
+              left: 'center',
+              top: 'center',
+              textStyle: { color: '#86909c', fontSize: 14 }
+            },
+            xAxis: { show: false },
+            yAxis: { show: false },
+            series: []
+          }, true) // 第二个参数 true 表示不合并，完全替换
+        } catch (error) {
+          console.error('[TradingApp] Error setting chart option (single-model empty):', error)
+        }
         return
       }
       
@@ -918,6 +970,12 @@ let portfolioSymbolsRefreshInterval = null // 模型持仓合约列表自动刷�
         })
       }
       
+      // 确保数据有效
+      if (!data || data.length === 0) {
+        console.warn('[TradingApp] No data for single-model chart')
+        return
+      }
+      
       const option = {
         grid: {
           left: '60',
@@ -929,7 +987,7 @@ let portfolioSymbolsRefreshInterval = null // 模型持仓合约列表自动刷�
         xAxis: {
           type: 'category',
           boundaryGap: false,
-          data: data.map(d => d.time),
+          data: data.map(d => d.time).filter(Boolean),
           axisLine: { lineStyle: { color: '#e5e6eb' } },
           axisLabel: { color: '#86909c', fontSize: 11 }
         },
@@ -946,7 +1004,7 @@ let portfolioSymbolsRefreshInterval = null // 模型持仓合约列表自动刷�
         },
         series: [{
           type: 'line',
-          data: data.map(d => d.value),
+          data: data.map(d => d.value).filter(v => v !== null && v !== undefined),
           smooth: true,
           symbol: 'none',
           lineStyle: { color: '#3370ff', width: 2 },
@@ -968,18 +1026,30 @@ let portfolioSymbolsRefreshInterval = null // 模型持仓合约列表自动刷�
           borderWidth: 1,
           textStyle: { color: '#1d2129' },
           formatter: (params) => {
+            if (!params || !params[0]) return ''
             const value = params[0].value
-            return `${params[0].axisValue}<br/>账户价值: $${value.toFixed(2)}`
+            if (value === null || value === undefined) return ''
+            return `${params[0].axisValue || ''}<br/>账户价值: $${value.toFixed(2)}`
           }
         }
       }
-      accountChart.value.setOption(option)
+      try {
+        if (accountChart.value && typeof accountChart.value.setOption === 'function') {
+          accountChart.value.setOption(option, true) // 第二个参数 true 表示不合并，完全替换
+        }
+      } catch (error) {
+        console.error('[TradingApp] Error setting chart option (single-model):', error)
+      }
     }
     
     // 延迟调整大小以确保渲染完成
     setTimeout(() => {
-      if (accountChart.value) {
-        accountChart.value.resize()
+      if (accountChart.value && typeof accountChart.value.resize === 'function') {
+        try {
+          accountChart.value.resize()
+        } catch (error) {
+          console.warn('[TradingApp] Error resizing chart:', error)
+        }
       }
     }, 100)
   }
@@ -1462,8 +1532,9 @@ let portfolioSymbolsRefreshInterval = null // 模型持仓合约列表自动刷�
    * 选择模型
    */
   const selectModel = async (modelId) => {
-    // 切换模型时，立即清空旧的对话数据，避免显示错误的数据
+    // 切换模型时，立即清空旧的对话数据和聚合图表数据，避免显示错误的数据
     conversations.value = []
+    aggregatedChartData.value = [] // 清空聚合图表数据，确保只显示当前模型的数据
     
     currentModelId.value = modelId
     isAggregatedView.value = false
@@ -2135,4 +2206,6 @@ let portfolioSymbolsRefreshInterval = null // 模型持仓合约列表自动刷�
     // 图表更新方法
     updateAccountChart
   }
+}
+
 }

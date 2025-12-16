@@ -1702,7 +1702,11 @@ class Database:
     
     def get_account_value_history(self, model_id: int, limit: int = 100) -> List[Dict]:
         """
-        Get account value history
+        Get account value history for a specific model
+        
+        Args:
+            model_id: 模型ID（整数）
+            limit: 返回记录数限制
         
         Returns:
             账户价值历史记录列表，包含新字段名：
@@ -1716,17 +1720,19 @@ class Database:
             model_mapping = self._get_model_id_mapping()
             model_uuid = model_mapping.get(model_id)
             if not model_uuid:
+                logger.warning(f"[Database] Model {model_id} UUID not found in mapping")
                 return []
             
             # 【修改】从 account_value_historys 表查询历史记录（用于图表显示）
+            # 使用参数化查询确保只查询当前模型的数据
             rows = self.query(f"""
                 SELECT id, model_id, account_alias, balance, available_balance, 
                        cross_wallet_balance, cross_un_pnl, timestamp
                 FROM {self.account_value_historys_table}
-                WHERE model_id = '{model_uuid}'
+                WHERE model_id = %s
                 ORDER BY timestamp DESC
-                LIMIT {limit}
-            """)
+                LIMIT %s
+            """, (model_uuid, limit))
             columns = ["id", "model_id", "account_alias", "balance", "available_balance", 
                       "cross_wallet_balance", "cross_un_pnl", "timestamp"]
             results = self._rows_to_dicts(rows, columns)
