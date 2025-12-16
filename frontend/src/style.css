@@ -994,12 +994,13 @@ body {
     font-weight: 600;
 }
 
+/* 持仓合约实时行情模块：红涨绿跌（与中国股市习惯一致） */
 .model-portfolio-symbol-item .price-change-with-arrow.positive {
-    color: var(--success);
+    color: var(--danger);  /* 红色表示涨 */
 }
 
 .model-portfolio-symbol-item .price-change-with-arrow.negative {
-    color: var(--danger);
+    color: var(--success);  /* 绿色表示跌 */
 }
 
 .model-portfolio-symbol-item .change-arrow {
