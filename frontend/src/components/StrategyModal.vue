@@ -3,29 +3,29 @@
     :visible="visible"
     title="模型策略配置"
     :subtitle="subtitle"
-    large
+    extraLarge
     @update:visible="$emit('update:visible', $event)"
     @close="$emit('close')"
   >
-    <div class="form-group">
-      <label>买入提示词</label>
-      <textarea
-        v-model="formData.buyPrompt"
-        class="form-textarea"
-        rows="8"
-        placeholder="输入买入策略提示词"
-      ></textarea>
-      <small class="form-help">留空将使用系统默认买入策略提示词。</small>
-    </div>
-    <div class="form-group">
-      <label>卖出提示词</label>
-      <textarea
-        v-model="formData.sellPrompt"
-        class="form-textarea"
-        rows="8"
-        placeholder="输入卖出/风控策略提示词"
-      ></textarea>
-      <small class="form-help">留空将使用系统默认卖出策略提示词。</small>
+    <div class="strategy-config-container">
+      <div class="form-group">
+        <label class="form-label-large">买入提示词</label>
+        <textarea
+          v-model="formData.buyPrompt"
+          class="form-textarea-large"
+          placeholder="输入买入策略提示词"
+        ></textarea>
+        <small class="form-help">留空将使用系统默认买入策略提示词。</small>
+      </div>
+      <div class="form-group">
+        <label class="form-label-large">卖出提示词</label>
+        <textarea
+          v-model="formData.sellPrompt"
+          class="form-textarea-large"
+          placeholder="输入卖出/风控策略提示词"
+        ></textarea>
+        <small class="form-help">留空将使用系统默认卖出策略提示词。</small>
+      </div>
     </div>
     <template #footer>
       <button class="btn-secondary" @click="handleCancel">取消</button>
@@ -123,21 +123,52 @@ watch(() => props.visible, (newVal) => {
 </script>
 
 <style scoped>
-.form-textarea {
+.strategy-config-container {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  height: 100%;
+}
+
+.form-group {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
+.form-label-large {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text-1);
+  margin-bottom: 12px;
+}
+
+.form-textarea-large {
   width: 100%;
-  padding: 8px 12px;
+  padding: 12px 16px;
   border: 1px solid var(--border-1);
   border-radius: var(--radius);
   font-size: 14px;
   font-family: 'JetBrains Mono', 'Fira Code', Consolas, monospace;
-  resize: vertical;
-  min-height: 150px;
+  resize: none;
+  flex: 1;
+  min-height: 200px;
+  line-height: 1.6;
+  background: var(--bg-1);
+  color: var(--text-1);
 }
 
-.form-textarea:focus {
+.form-textarea-large:focus {
   outline: none;
   border-color: var(--primary);
   box-shadow: 0 0 0 3px rgba(51, 112, 255, 0.1);
+}
+
+.form-help {
+  margin-top: 8px;
+  font-size: 13px;
+  color: var(--text-3);
 }
 </style>
 

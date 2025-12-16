@@ -1202,6 +1202,80 @@ def update_model_leverage(model_id):
 
     return jsonify({'model_id': model_id, 'leverage': leverage})
 
+@app.route('/api/models/<int:model_id>/provider', methods=['PUT'])
+def update_model_provider(model_id):
+    """
+    更新模型的API提供方和模型名称
+    
+    Args:
+        model_id (int): 模型ID
+    
+    Request Body:
+        provider_id (int): 新的API提供方ID
+        model_name (str): 新的模型名称
+    
+    Returns:
+        JSON: 更新结果
+    """
+    data = request.json or {}
+    
+    if 'provider_id' not in data:
+        return jsonify({'error': 'provider_id is required'}), 400
+    
+    if 'model_name' not in data:
+        return jsonify({'error': 'model_name is required'}), 400
+    
+    model = db.get_model(model_id)
+    if not model:
+        return jsonify({'error': 'Model not found'}), 404
+    
+    provider_id = int(data['provider_id'])
+    model_name = str(data['model_name']).strip()
+    
+    if not model_name:
+        return jsonify({'error': 'model_name cannot be empty'}), 400
+    
+    # 验证提供方是否存在
+    provider = db.get_provider(provider_id)
+    if not provider:
+        return jsonify({'error': 'Provider not found'}), 404
+    
+    # 更新数据库
+    if not db.set_model_provider_and_model_name(model_id, provider_id, model_name):
+        return jsonify({'error': 'Failed to update provider and model_name'}), 500
+    
+    # 如果模型有交易引擎，需要重新初始化
+    if model_id in trading_engines:
+        try:
+            # 获取更新后的模型信息
+            updated_model = db.get_model(model_id)
+            updated_provider = db.get_provider(provider_id)
+            
+            # 重新初始化交易引擎
+            trading_engines[model_id] = TradingEngine(
+                model_id=model_id,
+                db=db,
+                market_fetcher=market_fetcher,
+                ai_trader=AITrader(
+                    provider_type=updated_provider.get('provider_type', 'openai'),
+                    api_key=updated_provider['api_key'],
+                    api_url=updated_provider['api_url'],
+                    model_name=model_name
+                ),
+                trade_fee_rate=TRADE_FEE_RATE
+            )
+            logger.info(f"Trading engine reinitialized for model {model_id} with new provider and model")
+        except Exception as e:
+            logger.error(f"Failed to reinitialize trading engine for model {model_id}: {e}")
+            # 即使重新初始化失败，也返回成功（因为数据库已更新）
+    
+    return jsonify({
+        'success': True,
+        'model_id': model_id,
+        'provider_id': provider_id,
+        'model_name': model_name
+    })
+
 @app.route('/api/models/<int:model_id>/execute', methods=['POST'])
 def execute_trading(model_id):
     """

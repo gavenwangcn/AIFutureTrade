@@ -88,9 +88,12 @@ const lastPortfolioSymbolsRefreshTime = ref(null) // 持仓合约列表最后刷
   const pendingModelSettingsId = ref(null)
   const modelSettingsName = ref('')
   const tempModelSettings = ref({
+    provider_id: null,
+    model_name: '',
     leverage: 10,
     max_positions: 3
   })
+  const availableModelsInSettings = ref([]) // 模型设置中可用的模型列表
   const loadingModelSettings = ref(false)
   const savingModelSettings = ref(false)
   const showDeleteModelConfirmModal = ref(false)
@@ -1686,12 +1689,24 @@ let portfolioSymbolsRefreshInterval = null // 模型持仓合约列表自动刷�
     loadingModelSettings.value = true
     showModelSettingsModal.value = true
     
+    // 确保提供方列表已加载
+    if (providers.value.length === 0) {
+      await loadProviders()
+    }
+    
     try {
       // 从后端获取模型信息
       const model = await modelApi.getById(modelId)
       tempModelSettings.value = {
+        provider_id: model.provider_id || null,
+        model_name: model.model_name || '',
         leverage: model.leverage || 10,
         max_positions: model.max_positions || 3
+      }
+      
+      // 加载当前提供方的可用模型列表
+      if (model.provider_id) {
+        handleProviderChangeInSettings()
       }
     } catch (error) {
       console.error('[TradingApp] Error loading model settings:', error)
@@ -1699,8 +1714,15 @@ let portfolioSymbolsRefreshInterval = null // 模型持仓合约列表自动刷�
       const localModel = models.value.find(m => m.id === modelId)
       if (localModel) {
         tempModelSettings.value = {
+          provider_id: localModel.provider_id || null,
+          model_name: localModel.model_name || '',
           leverage: localModel.leverage || 10,
           max_positions: localModel.max_positions || 3
+        }
+        
+        // 加载当前提供方的可用模型列表
+        if (localModel.provider_id) {
+          handleProviderChangeInSettings()
         }
       }
       alert('加载模型配置失败，使用缓存数据')
@@ -1710,13 +1732,50 @@ let portfolioSymbolsRefreshInterval = null // 模型持仓合约列表自动刷�
   }
   
   /**
-   * 保存模型设置（杠杆和最大持仓数量）
+   * 处理模型设置中提供方变化
+   */
+  const handleProviderChangeInSettings = () => {
+    const providerId = tempModelSettings.value.provider_id
+    if (!providerId) {
+      availableModelsInSettings.value = []
+      tempModelSettings.value.model_name = ''
+      return
+    }
+    
+    const provider = providers.value.find(p => p.id == providerId)
+    if (provider && provider.models) {
+      availableModelsInSettings.value = provider.models.split(',').map(m => m.trim()).filter(m => m)
+    } else {
+      availableModelsInSettings.value = []
+    }
+    
+    // 如果当前选择的模型不在新提供方的模型列表中，清空选择
+    if (tempModelSettings.value.model_name && !availableModelsInSettings.value.includes(tempModelSettings.value.model_name)) {
+      tempModelSettings.value.model_name = ''
+    }
+  }
+  
+  /**
+   * 保存模型设置（API提供方、模型名称、杠杆和最大持仓数量）
    */
   const saveModelSettings = async () => {
     if (!pendingModelSettingsId.value) return
     
+    const providerId = tempModelSettings.value.provider_id
+    const modelName = tempModelSettings.value.model_name
     const leverageValue = tempModelSettings.value.leverage
     const maxPositionsValue = tempModelSettings.value.max_positions
+    
+    // 验证API提供方和模型名称
+    if (!providerId) {
+      alert('请选择API提供方')
+      return
+    }
+    
+    if (!modelName || !modelName.trim()) {
+      alert('请选择模型')
+      return
+    }
     
     // 验证杠杆
     if (isNaN(leverageValue) || leverageValue < 0 || leverageValue > 125) {
@@ -1732,14 +1791,33 @@ let portfolioSymbolsRefreshInterval = null // 模型持仓合约列表自动刷�
     
     savingModelSettings.value = true
     try {
-      // 同时保存两个配置
-      await Promise.all([
+      // 获取当前模型信息，检查是否需要更新提供方和模型名称
+      const currentModel = models.value.find(m => m.id === pendingModelSettingsId.value)
+      const needUpdateProvider = !currentModel || currentModel.provider_id !== providerId || currentModel.model_name !== modelName
+      
+      // 保存所有配置
+      const promises = []
+      
+      // 如果需要更新提供方和模型名称
+      if (needUpdateProvider) {
+        promises.push(modelApi.updateProvider(pendingModelSettingsId.value, providerId, modelName))
+      }
+      
+      // 更新杠杆和最大持仓数量
+      promises.push(
         modelApi.setLeverage(pendingModelSettingsId.value, leverageValue),
         modelApi.setMaxPositions(pendingModelSettingsId.value, maxPositionsValue)
-      ])
+      )
+      
+      await Promise.all(promises)
       
       // 更新本地缓存
       modelLeverageMap.value[pendingModelSettingsId.value] = leverageValue
+      
+      // 如果更新了提供方和模型名称，刷新模型列表
+      if (needUpdateProvider) {
+        await loadModels()
+      }
       
       const savedModelId = pendingModelSettingsId.value
       pendingModelSettingsId.value = null
@@ -2151,6 +2229,8 @@ let portfolioSymbolsRefreshInterval = null // 模型持仓合约列表自动刷�
     savingModelSettings,
     openModelSettingsModal,
     saveModelSettings,
+    handleProviderChangeInSettings,
+    availableModelsInSettings,
     showDeleteModelConfirmModal,
     pendingDeleteModelId,
     pendingDeleteModelName,

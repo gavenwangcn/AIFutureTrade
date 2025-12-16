@@ -595,6 +595,35 @@
           </div>
           <div v-else>
             <div class="form-group">
+              <label for="settingsProviderInput">选择API提供方</label>
+              <select 
+                id="settingsProviderInput" 
+                class="form-input" 
+                v-model.number="tempModelSettings.provider_id"
+                @change="handleProviderChangeInSettings"
+              >
+                <option value="">请选择API提供方</option>
+                <option v-for="provider in providers" :key="provider.id" :value="provider.id">
+                  {{ provider.name }}
+                </option>
+              </select>
+              <small class="form-help">选择模型使用的API提供方。</small>
+            </div>
+            <div class="form-group">
+              <label for="settingsModelNameInput">模型</label>
+              <select 
+                id="settingsModelNameInput" 
+                class="form-input" 
+                v-model="tempModelSettings.model_name"
+              >
+                <option value="">请先选择API提供方</option>
+                <option v-for="model in availableModelsInSettings" :key="model" :value="model">
+                  {{ model }}
+                </option>
+              </select>
+              <small class="form-help">选择模型使用的AI模型名称。</small>
+            </div>
+            <div class="form-group">
               <label for="settingsLeverageInput">杠杆倍数 (0-125)</label>
               <input 
                 type="number" 
@@ -723,6 +752,9 @@ const {
   savingModelSettings,
   openModelSettingsModal,
   saveModelSettings,
+  handleProviderChangeInSettings,
+  availableModelsInSettings,
+  providers,
   showDeleteModelConfirmModal,
   pendingDeleteModelId,
   pendingDeleteModelName,

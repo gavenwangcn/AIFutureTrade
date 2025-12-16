@@ -1261,6 +1261,45 @@ class Database:
             logger.error(f"[Database] Failed to update max_positions for model {model_id}: {e}")
             return False
     
+    def set_model_provider_and_model_name(self, model_id: int, provider_id: int, model_name: str) -> bool:
+        """
+        Update model provider_id and model_name
+        
+        Args:
+            model_id: 模型ID（整数）
+            provider_id: 新的API提供方ID（整数）
+            model_name: 新的模型名称（字符串）
+        
+        Returns:
+            bool: 更新是否成功
+        """
+        try:
+            model_mapping = self._get_model_id_mapping()
+            model_uuid = model_mapping.get(model_id)
+            if not model_uuid:
+                logger.warning(f"[Database] Model {model_id} UUID not found")
+                return False
+            
+            # 获取 provider UUID
+            provider_mapping = self._get_provider_id_mapping()
+            provider_uuid = provider_mapping.get(provider_id)
+            if not provider_uuid:
+                logger.warning(f"[Database] Provider {provider_id} UUID not found")
+                return False
+            
+            # 使用 UPDATE 语句更新 provider_id 和 model_name
+            self.command(f"""
+                UPDATE `{self.models_table}` 
+                SET `provider_id` = %s, `model_name` = %s
+                WHERE `id` = %s
+            """, (provider_uuid, model_name, model_uuid))
+            
+            logger.info(f"[Database] Updated model {model_id}: provider_id={provider_id}, model_name={model_name}")
+            return True
+        except Exception as e:
+            logger.error(f"[Database] Failed to update provider and model_name for model {model_id}: {e}")
+            return False
+    
     # ============ Portfolio（投资组合）管理方法 ============
     
     def update_position(self, model_id: int, symbol: str, position_amt: float,

@@ -76,6 +76,11 @@ export const modelApi = {
   setMaxPositions: (modelId, maxPositions) => apiPost(`/api/models/${modelId}/max_positions`, { max_positions: maxPositions }),
 
   /**
+   * 更新模型的API提供方和模型名称
+   */
+  updateProvider: (modelId, providerId, modelName) => apiPut(`/api/models/${modelId}/provider`, { provider_id: providerId, model_name: modelName }),
+
+  /**
    * 获取聚合投资组合数据
    */
   getAggregatedPortfolio: () => apiGet('/api/aggregated/portfolio'),
