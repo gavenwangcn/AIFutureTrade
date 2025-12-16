@@ -1368,15 +1368,64 @@ def get_market_prices():
     Returns:
         JSON: 价格数据字典，key为交易对符号，value包含价格和来源信息
     """
-    # 获取配置的合约
-    configured_symbols = get_tracked_symbols()
-    configured_prices = market_fetcher.get_prices(configured_symbols)
-    
-    # 为配置的合约添加来源标记
-    for symbol in configured_prices:
-        configured_prices[symbol]['source'] = 'configured'
-    
-    return jsonify(configured_prices)
+    try:
+        # 获取配置的合约（包含symbol和contract_symbol）
+        future_configs = db.get_future_configs()
+        if not future_configs:
+            logger.warning('[API] No futures configured, returning empty prices')
+            return jsonify({})
+        
+        # 构建symbol到contract_symbol的映射
+        # futures表中的symbol是基础符号（如'BTC'），contract_symbol是完整格式（如'BTCUSDT'）
+        # 而24_market_tickers表中的symbol是完整格式（如'BTCUSDT'）
+        symbol_to_contract = {}
+        contract_symbols = []
+        for future in future_configs:
+            symbol = future.get('symbol', '').upper()
+            contract_symbol = future.get('contract_symbol', '').upper()
+            if not contract_symbol:
+                # 如果没有contract_symbol，使用symbol+USDT作为默认值
+                contract_symbol = f"{symbol}USDT"
+            symbol_to_contract[symbol] = contract_symbol
+            contract_symbols.append(contract_symbol)
+        
+        # 使用contract_symbol查询24_market_tickers表
+        configured_prices = market_fetcher.get_prices(contract_symbols)
+        
+        # 将返回结果中的key从contract_symbol转换为symbol
+        # 因为前端期望使用symbol作为key
+        result = {}
+        for contract_symbol, price_info in configured_prices.items():
+            # 找到对应的symbol
+            symbol = None
+            for sym, contract in symbol_to_contract.items():
+                if contract == contract_symbol:
+                    symbol = sym
+                    break
+            
+            # 如果找不到对应的symbol，使用contract_symbol作为key
+            if not symbol:
+                symbol = contract_symbol
+            
+            # 更新price_info，确保包含正确的symbol和contract_symbol
+            price_info['symbol'] = symbol
+            price_info['contract_symbol'] = contract_symbol
+            price_info['source'] = 'configured'
+            
+            # 如果future_configs中有对应的name，添加到price_info中
+            for future in future_configs:
+                if future.get('symbol', '').upper() == symbol:
+                    if future.get('name'):
+                        price_info['name'] = future.get('name')
+                    break
+            
+            result[symbol] = price_info
+        
+        logger.debug(f'[API] Market prices returned: {len(result)} symbols')
+        return jsonify(result)
+    except Exception as e:
+        logger.error(f'[API] Failed to get market prices: {e}', exc_info=True)
+        return jsonify({'error': str(e)}), 500
 
 @app.route('/api/market/indicators/<symbol>', methods=['GET'])
 def get_market_indicators(symbol):

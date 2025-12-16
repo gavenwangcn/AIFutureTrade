@@ -2413,7 +2413,10 @@ class TradingEngine:
         if not candidates:
             return market_state
         
-        # 提取symbol列表（根据数据源决定使用symbol还是contract_symbol）
+        # 提取symbol列表（统一使用contract_symbol查询24_market_tickers表）
+        # 注意：24_market_tickers表中的symbol字段是完整格式（如'BTCUSDT'），
+        # 而futures表中的symbol是基础符号（如'BTC'），contract_symbol是完整格式（如'BTCUSDT'）
+        # leaderboard返回的数据中，symbol字段已经是完整格式（如'BTCUSDT'）
         symbol_list = []
         symbol_to_contract = {}
         for candidate in candidates:
@@ -2421,22 +2424,23 @@ class TradingEngine:
             if not symbol:
                 continue
             
-            if symbol_source == 'future':
-                # 使用contract_symbol作为查询参数
-                contract_symbol = candidate.get('contract_symbol') or f"{symbol}USDT"
-                # 确保contract_symbol以USDT结尾，防止重复添加
-                if not contract_symbol.upper().endswith('USDT'):
-                    contract_symbol = f"{contract_symbol.upper()}USDT"
-                else:
-                    contract_symbol = contract_symbol.upper()
-                symbol_to_contract[symbol] = contract_symbol
-                symbol_list.append(contract_symbol)
+            # 优先使用contract_symbol字段（如果存在），确保与24_market_tickers表的格式一致
+            # 如果不存在contract_symbol，则使用symbol并确保以USDT结尾
+            contract_symbol = candidate.get('contract_symbol')
+            if contract_symbol:
+                # 如果提供了contract_symbol，直接使用（确保大写）
+                contract_symbol = contract_symbol.upper()
             else:
-                # 使用symbol作为查询参数，确保以USDT结尾
+                # 如果没有contract_symbol，使用symbol并确保以USDT结尾
                 symbol_upper = symbol.upper()
                 if not symbol_upper.endswith('USDT'):
-                    symbol_upper = f"{symbol_upper}USDT"
-                symbol_list.append(symbol_upper)
+                    contract_symbol = f"{symbol_upper}USDT"
+                else:
+                    contract_symbol = symbol_upper
+            
+            # 保存symbol到contract_symbol的映射
+            symbol_to_contract[symbol] = contract_symbol
+            symbol_list.append(contract_symbol)
         
         if not symbol_list:
             return market_state
@@ -2452,23 +2456,24 @@ class TradingEngine:
             
             symbol_upper = symbol.upper()
             
-            # 确定用于获取技术指标的symbol和价格查询的key
-            if symbol_source == 'future':
-                contract_symbol = symbol_to_contract.get(symbol, candidate.get('contract_symbol') or f"{symbol}USDT")
-                # 确保contract_symbol以USDT结尾，防止重复添加
-                if not contract_symbol.upper().endswith('USDT'):
-                    contract_symbol = f"{contract_symbol.upper()}USDT"
-                else:
+            # 统一使用contract_symbol作为查询key（确保与24_market_tickers表的格式一致）
+            # 从symbol_to_contract映射中获取contract_symbol，如果不存在则从candidate中获取或生成
+            contract_symbol = symbol_to_contract.get(symbol)
+            if not contract_symbol:
+                # 如果映射中不存在，尝试从candidate中获取contract_symbol
+                contract_symbol = candidate.get('contract_symbol')
+                if contract_symbol:
                     contract_symbol = contract_symbol.upper()
-                query_symbol = contract_symbol  # 用于获取技术指标
-                price_key = contract_symbol  # 用于查询价格
-            else:
-                # 确保query_symbol以USDT结尾，防止重复添加
-                if not symbol_upper.endswith('USDT'):
-                    query_symbol = f"{symbol_upper}USDT"
                 else:
-                    query_symbol = symbol_upper
-                price_key = query_symbol  # 用于查询价格（使用格式化后的symbol）
+                    # 如果candidate中也没有contract_symbol，使用symbol并确保以USDT结尾
+                    if not symbol_upper.endswith('USDT'):
+                        contract_symbol = f"{symbol_upper}USDT"
+                    else:
+                        contract_symbol = symbol_upper
+            
+            # 统一使用contract_symbol作为查询key和技术指标查询的symbol
+            query_symbol = contract_symbol  # 用于获取技术指标
+            price_key = contract_symbol  # 用于查询价格（与24_market_tickers表的symbol字段格式一致）
             
             # 获取价格信息
             price_info = prices.get(price_key, {})
