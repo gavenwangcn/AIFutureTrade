@@ -10,6 +10,7 @@ it correctly modifies the initial leverage for a specified trading symbol.
 """
 
 import logging
+from math import fabs
 import os
 import sys
 from pathlib import Path
@@ -22,10 +23,6 @@ if str(project_root) not in sys.path:
 import common.config as config
 from common.binance_futures import BinanceFuturesOrderClient
 
-# 加载API密钥
-BINANCE_API_KEY = getattr(config, 'BINANCE_API_KEY', 'LBtjhBgX1RCksNJDdOoJPeDD30Z70YIGHHH9DrqjIDDkK7xcPRQcgydPxGRr6MN1')
-BINANCE_API_SECRET = getattr(config, 'BINANCE_API_SECRET', '55arJnwlytDflHv151UpHN1s32ACnJZEs86mbc79wGyeuSUJNHTDPN7jEgBbqO6I')
-
 # 配置日志记录
 logging.basicConfig(
     level=logging.INFO,
@@ -33,18 +30,6 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-
-def _load_credentials() -> tuple[str, str]:
-    """加载API密钥和密钥"""
-    api_key = BINANCE_API_KEY or os.getenv("BINANCE_API_KEY")
-    api_secret = BINANCE_API_SECRET or os.getenv("BINANCE_API_SECRET")
-    
-    if not api_key or not api_secret:
-        raise RuntimeError(
-            "请在config.py中配置BINANCE_API_KEY和BINANCE_API_SECRET，或在运行前设置环境变量。"
-        )
-    
-    return api_key, api_secret
 
 
 def test_change_initial_leverage(api_key: str, api_secret: str, symbol: str = "BTCUSDT", leverage: int = 10) -> None:
@@ -58,9 +43,9 @@ def test_change_initial_leverage(api_key: str, api_secret: str, symbol: str = "B
     """
     # 创建客户端实例（使用测试网络）
     client = BinanceFuturesOrderClient(
-        api_key=api_key,
-        api_secret=api_secret,
-        testnet=True
+        api_key='LBtjhBgX1RCksNJDdOoJPeDD30Z70YIGHHH9DrqjIDDkK7xcPRQcgydPxGRr6MN1',
+        api_secret='55arJnwlytDflHv151UpHN1s32ACnJZEs86mbc79wGyeuSUJNHTDPN7jEgBbqO6I',
+        testnet=False
     )
     
     logger.info(f"尝试修改 {symbol} 的初始杠杆为 {leverage} 倍...")
@@ -91,12 +76,10 @@ if __name__ == "__main__":
     
     try:
         # 加载API密钥
-        api_key, api_secret = _load_credentials()
+        #api_key, api_secret = _load_credentials()
         
         # 运行测试
         test_change_initial_leverage(
-            api_key=api_key,
-            api_secret=api_secret,
             symbol=args.symbol,
             leverage=args.leverage
         )
