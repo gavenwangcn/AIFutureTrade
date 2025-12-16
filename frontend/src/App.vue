@@ -563,13 +563,6 @@
                     <span class="error-model">{{ error.model || '未知模型' }}</span>
                   </div>
                 </div>
-                <div v-if="error.prompt" class="error-section">
-                  <div class="error-label">
-                    <i class="bi bi-chat-left-text"></i>
-                    提示词
-                  </div>
-                  <div class="error-text">{{ error.prompt }}</div>
-                </div>
                 <div v-if="error.error_msg" class="error-section error-message">
                   <div class="error-label">
                     <i class="bi bi-exclamation-triangle"></i>

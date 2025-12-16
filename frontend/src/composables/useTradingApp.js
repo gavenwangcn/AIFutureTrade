@@ -1283,7 +1283,6 @@ let portfolioSymbolsRefreshInterval = null // 模型持仓合约列表自动刷�
         id: error.id || `${error.created_at || Date.now()}_${Math.random()}`,
         provider_name: error.provider_name || '',
         model: error.model || '',
-        prompt: error.prompt || '',
         error_msg: error.error_msg || '',
         created_at: error.created_at || '',
         // 保留原始数据

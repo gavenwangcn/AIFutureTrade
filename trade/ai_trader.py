@@ -155,12 +155,11 @@ class AITrader:
                             if provider:
                                 provider_name = provider.get('name', '')
                                 model_name = model.get('model_name', self.model_name)
-                                # 记录错误到数据库
+                                # 记录错误到数据库（不记录prompt字段）
                                 self.db.record_llm_api_error(
                                     model_id=model_id,
                                     provider_name=provider_name,
                                     model=model_name,
-                                    prompt=prompt,
                                     error_msg=error_msg
                                 )
                                 logger.info(f"[{self.provider_type}] [买入决策] 已记录API错误到数据库: model_id={model_id}, provider={provider_name}, model={model_name}")
@@ -241,12 +240,11 @@ class AITrader:
                             if provider:
                                 provider_name = provider.get('name', '')
                                 model_name = model.get('model_name', self.model_name)
-                                # 记录错误到数据库
+                                # 记录错误到数据库（不记录prompt字段）
                                 self.db.record_llm_api_error(
                                     model_id=model_id,
                                     provider_name=provider_name,
                                     model=model_name,
-                                    prompt=prompt,
                                     error_msg=error_msg
                                 )
                                 logger.info(f"[{self.provider_type}] [卖出决策] 已记录API错误到数据库: model_id={model_id}, provider={provider_name}, model={model_name}")

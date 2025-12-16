@@ -744,6 +744,8 @@ class Database:
         
         注意：created_at 字段不使用 DEFAULT CURRENT_TIMESTAMP，必须显式提供 UTC+8 时间值
         以确保时间一致性，避免因服务器时区设置不同而导致的时间不一致问题
+        
+        注意：不记录prompt字段，以减少存储空间和提高性能
         """
         ddl = f"""
         CREATE TABLE IF NOT EXISTS `{self.llm_api_error_table}` (
@@ -751,7 +753,6 @@ class Database:
             `model_id` VARCHAR(36) NOT NULL,
             `provider_name` VARCHAR(200),
             `model` VARCHAR(200),
-            `prompt` LONGTEXT,
             `error_msg` TEXT,
             `created_at` DATETIME NOT NULL COMMENT 'UTC+8时区时间（北京时间），必须显式提供',
             INDEX `idx_model_id` (`model_id`),
@@ -1854,18 +1855,19 @@ class Database:
             logger.error(f"[Database] Failed to add binance trade log: {e}")
             # 不抛出异常，避免影响主流程
     
-    def record_llm_api_error(self, model_id: int, provider_name: str, model: str, prompt: str, error_msg: str):
+    def record_llm_api_error(self, model_id: int, provider_name: str, model: str, error_msg: str):
         """
         记录LLM API调用错误
         
         注意：created_at 字段必须使用 UTC+8 时区时间（北京时间），以确保时间一致性。
         不使用数据库的 DEFAULT CURRENT_TIMESTAMP，因为服务器时区可能不同。
         
+        注意：不记录prompt字段，以减少存储空间和提高性能
+        
         Args:
             model_id: 模型ID（整数）
             provider_name: 提供商名称（从providers表获取）
             model: 模型名称（从providers表获取）
-            prompt: 发送给LLM的提示词
             error_msg: 错误信息
         """
         try:
@@ -1884,8 +1886,8 @@ class Database:
             
             self.insert_rows(
                 self.llm_api_error_table,
-                [[error_id, model_uuid, provider_name, model, prompt, error_msg, current_time]],
-                ["id", "model_id", "provider_name", "model", "prompt", "error_msg", "created_at"]
+                [[error_id, model_uuid, provider_name, model, error_msg, current_time]],
+                ["id", "model_id", "provider_name", "model", "error_msg", "created_at"]
             )
             logger.info(f"[Database] Recorded LLM API error for model {model_id}, provider: {provider_name}, model: {model}")
         except Exception as e:
@@ -1919,7 +1921,7 @@ class Database:
                 LIMIT %s
             """, (model_uuid, limit))
             
-            columns = ["id", "model_id", "provider_name", "model", "prompt", "error_msg", "created_at"]
+            columns = ["id", "model_id", "provider_name", "model", "error_msg", "created_at"]
             results = self._rows_to_dicts(rows, columns)
             
             return results

@@ -1158,7 +1158,6 @@ def get_llm_api_errors(model_id):
         JSON: LLM API错误记录列表，包含：
             - provider_name: API提供方名称
             - model: 模型名称
-            - prompt: 提示词（截取后加...）
             - error_msg: 错误信息（截取后加...）
             - created_at: 创建时间（UTC+8时间，已转换为字符串格式）
     """
@@ -1186,11 +1185,6 @@ def get_llm_api_errors(model_id):
                 error['created_at'] = str(created_at)
         else:
             error['created_at'] = ''
-        
-        # 截取prompt（如果过长），但保留完整的error_msg用于前端tooltip显示
-        prompt = error.get('prompt', '')
-        if prompt and len(prompt) > 200:
-            error['prompt'] = prompt[:200] + '...'
         
         # error_msg不截取，保留完整内容，前端负责显示时的截取和tooltip
     
