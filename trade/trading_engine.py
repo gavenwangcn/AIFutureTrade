@@ -2913,9 +2913,15 @@ class TradingEngine:
         # 记录交易
         logger.info(f"TRADE: PENDING - Model {self.model_id} CLOSE {symbol} position_side={position_side} position_amt={position_amt} price={current_price} fee={trade_fee} net_pnl={net_pnl}")
         try:
+            # 使用与开仓时一致的逻辑获取杠杆值
+            leverage = self._resolve_leverage(decision)
+            # 如果AI没有返回杠杆值，使用持仓中存储的杠杆值
+            if not decision.get('leverage'):
+                leverage = position.get('leverage', leverage)
+                
             self.db.insert_rows(
                 self.db.trades_table,
-                [[trade_id, model_uuid, symbol.upper(), 'close_position', position_amt, current_price, position.get('leverage', 1), side_for_trade.lower(), net_pnl, trade_fee, datetime.now(timezone(timedelta(hours=8))).replace(tzinfo=None)]],
+                [[trade_id, model_uuid, symbol.upper(), 'close_position', position_amt, current_price, leverage, side_for_trade.lower(), net_pnl, trade_fee, datetime.now(timezone(timedelta(hours=8))).replace(tzinfo=None)]],
                 ["id", "model_id", "future", "signal", "quantity", "price", "leverage", "side", "pnl", "fee", "timestamp"]
             )
         except Exception as db_err:
