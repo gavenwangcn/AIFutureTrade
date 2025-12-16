@@ -143,9 +143,72 @@ const initChart = async () => {
     const symbolInfo = symbolToSymbolInfo(props.symbol)
     const period = intervalToPeriod(currentInterval.value)
     
+    // 定义K线样式：红涨绿跌（中国股市习惯）
+    // 参考文档：https://klinecharts.com/guide/styles
+    const chartStyles = {
+      candle: {
+        type: 'candle_solid',
+        bar: {
+          // 'current_open' | 'previous_close'
+          compareRule: 'current_open',
+          // 上涨用红色（红涨）
+          upColor: '#F92855',
+          upBorderColor: '#F92855',
+          upWickColor: '#F92855',
+          // 下跌用绿色（绿跌）
+          downColor: '#2DC08E',
+          downBorderColor: '#2DC08E',
+          downWickColor: '#2DC08E',
+          // 无变化用灰色
+          noChangeColor: '#888888',
+          noChangeBorderColor: '#888888',
+          noChangeWickColor: '#888888'
+        },
+        priceMark: {
+          show: true,
+          last: {
+            show: true,
+            compareRule: 'current_open',
+            // 上涨用红色
+            upColor: '#F92855',
+            // 下跌用绿色
+            downColor: '#2DC08E',
+            // 无变化用灰色
+            noChangeColor: '#888888',
+            line: {
+              show: true,
+              style: 'dashed',
+              dashedValue: [4, 4],
+              size: 1
+            },
+            text: {
+              show: true,
+              style: 'fill',
+              size: 12,
+              paddingLeft: 4,
+              paddingTop: 4,
+              paddingRight: 4,
+              paddingBottom: 4,
+              borderStyle: 'solid',
+              borderSize: 0,
+              borderColor: 'transparent',
+              borderDashedValue: [2, 2],
+              color: '#FFFFFF',
+              family: 'Helvetica Neue',
+              weight: 'normal',
+              borderRadius: 2
+            }
+          }
+        }
+      }
+    }
+    
     // Initialize chart using KLineChart 10.0.0 API
-    // layout 必须是数组，如果不提供则使用默认值 [{ type: 'candle' }]
-    chartInstance.value = init(chartContainerRef.value, {})
+    // 参考文档：https://klinecharts.com/api/chart/init
+    // 在初始化时通过 options.styles 设置样式
+    chartInstance.value = init(chartContainerRef.value, {
+      styles: chartStyles
+    })
     
     // Set symbol and period
     chartInstance.value.setSymbol(symbolInfo)
@@ -153,6 +216,12 @@ const initChart = async () => {
     
     // Set data loader
     chartInstance.value.setDataLoader(dataLoader.value)
+    
+    // 确保样式正确应用（使用 setStyles 方法再次设置，确保样式生效）
+    // 参考文档：https://klinecharts.com/api/instance/setStyles
+    if (typeof chartInstance.value.setStyles === 'function') {
+      chartInstance.value.setStyles(chartStyles)
+    }
     
     // Create default indicators
     // 主指标（叠加在K线上）：MA
@@ -162,7 +231,7 @@ const initChart = async () => {
     chartInstance.value.createIndicator('MACD', false)
     chartInstance.value.createIndicator('RSI', false)
     
-    console.log('[KLineChart] Chart initialized successfully')
+    console.log('[KLineChart] Chart initialized successfully with red-up-green-down style')
   } catch (error) {
     console.error('[KLineChart] Failed to initialize chart:', error)
   }
