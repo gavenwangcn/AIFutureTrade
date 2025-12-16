@@ -31,15 +31,12 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-
-def test_change_initial_leverage(symbol: str = "LUNAUSDT", leverage: int = 20) -> None:
+def test_change_initial_leverage(symbol: str = "MUSDT", leverage: int = 20) -> None:
     """测试修改初始杠杆方法
     
     Args:
-        api_key: Binance API密钥
-        api_secret: Binance API密钥
-        symbol: 要测试的交易对，默认BTCUSDT
-        leverage: 要设置的杠杆倍数，默认10
+        symbol: 要测试的交易对，默认MUSDT
+        leverage: 要设置的杠杆倍数，默认20
     """
     # 创建客户端实例（使用测试网络）
     client = BinanceFuturesOrderClient(
@@ -70,7 +67,7 @@ if __name__ == "__main__":
     
     # 解析命令行参数
     parser = argparse.ArgumentParser(description="测试修改Binance期货初始杠杆")
-    parser.add_argument("-s", "--symbol", type=str, default="LUNAUSDT", help="交易对，默认LUNAUSDT")
+    parser.add_argument("-s", "--symbol", type=str, default="MUSDT", help="交易对，默认MUSDT")
     parser.add_argument("-l", "--leverage", type=int, default=20, help="杠杆倍数，默认20")
     args = parser.parse_args()
     
