@@ -29,9 +29,13 @@ function getApiBaseUrl() {
  * 实现 KLineChart 10.0.0 的 DataLoader 接口
  * @returns {DataLoader} 数据加载器对象
  */
-export function createDataLoader() {
+export function createDataLoader(onLoadingStart, onLoadingEnd) {
   const subscriptions = new Map() // 存储订阅信息: key = `${symbol.ticker}:${period.text}`, value = { callback, symbol, period }
   const marketPrices = [] // 缓存市场行情数据
+  const loadingCallbacks = {
+    start: onLoadingStart || (() => {}),
+    end: onLoadingEnd || (() => {})
+  }
 
   /**
    * 获取历史K线数据
@@ -46,6 +50,7 @@ export function createDataLoader() {
   async function getBars(params) {
     try {
       const { type, timestamp, symbol, period, callback } = params
+      loadingCallbacks.start()
       
       console.log('[DataLoader] Getting K-line data:', {
         type,
@@ -59,6 +64,7 @@ export function createDataLoader() {
       if (!interval) {
         console.warn('[DataLoader] Unsupported period:', period)
         callback([])
+        loadingCallbacks.end()
         return
       }
 
@@ -67,6 +73,7 @@ export function createDataLoader() {
       if (!ticker) {
         console.warn('[DataLoader] Invalid symbol:', symbol)
         callback([])
+        loadingCallbacks.end()
         return
       }
 
@@ -109,6 +116,7 @@ export function createDataLoader() {
       if (!result || !result.data || !Array.isArray(result.data)) {
         console.warn('[DataLoader] Invalid response format:', result)
         callback([])
+        loadingCallbacks.end()
         return
       }
 
@@ -211,9 +219,11 @@ export function createDataLoader() {
         }
       }
       callback(klines, more)
+      loadingCallbacks.end()
     } catch (error) {
       console.error('[DataLoader] Error getting K-line data:', error)
       callback([])
+      loadingCallbacks.end()
     }
   }
 

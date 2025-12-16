@@ -21,7 +21,12 @@
           </div>
         </div>
         <div class="kline-modal-body">
-          <div ref="chartContainerRef" class="kline-chart-container"></div>
+          <div ref="chartContainerRef" class="kline-chart-container">
+            <div class="loading-overlay" v-if="isLoading">
+              <div class="loader"></div>
+              <div class="loading-text">加载中...</div>
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -72,6 +77,7 @@ const chartInstance = ref(null)
 const dataLoader = ref(null)
 const currentInterval = ref(props.interval)
 const title = ref(`${props.symbol} - K线图`)
+const isLoading = ref(false)
 
 // Timeframes configuration
 // KLineChart 10.0.0 使用 { span: number, type: string } 格式
@@ -127,8 +133,11 @@ const initChart = async () => {
     // Clear container
     chartContainerRef.value.innerHTML = ''
     
-    // Create data loader
-    dataLoader.value = createDataLoader()
+    // Create data loader with loading callbacks
+    dataLoader.value = createDataLoader(
+      () => { isLoading.value = true },
+      () => { isLoading.value = false }
+    )
     
     // Convert symbol and period
     const symbolInfo = symbolToSymbolInfo(props.symbol)
@@ -366,5 +375,42 @@ onUnmounted(() => {
 .kline-chart-container {
   width: 100%;
   height: 100%;
+  position: relative;
+}
+
+/* Loading styles */
+.loading-overlay {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background-color: rgba(255, 255, 255, 0.7);
+  z-index: 100;
+}
+
+.loader {
+  width: 48px;
+  height: 48px;
+  border: 5px solid #f3f3f3;
+  border-top: 5px solid #1677ff;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+  margin-bottom: 16px;
+}
+
+@keyframes spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+.loading-text {
+  font-size: 16px;
+  color: #666;
+  font-weight: 500;
 }
 </style>
