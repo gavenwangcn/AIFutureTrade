@@ -364,6 +364,7 @@ class TradingEngine:
         - 合并了market_snapshot和market_state，统一使用market_state
         - 根据symbol_source统一获取候选symbol，避免重复筛选
         - 基于候选symbol列表统一获取市场数据，逻辑更清晰
+        - 优化了杠杆信息获取，避免重复查询数据库
         
         返回：
             Dict: {
@@ -389,6 +390,17 @@ class TradingEngine:
                     'conversations': [],
                     'error': f"Model {self.model_id} not found"
                 }
+            
+            # 缓存模型的杠杆配置，避免后续重复查询数据库
+            model_leverage = model.get('leverage', 10)
+            try:
+                model_leverage = int(model_leverage)
+            except (TypeError, ValueError):
+                model_leverage = 10
+            # 确保缓存的杠杆值至少为1
+            self.current_model_leverage = max(1, model_leverage)
+            logger.debug(f"[Model {self.model_id}] [买入服务] 已缓存模型杠杆配置: {self.current_model_leverage}")
+            
             # ========== 阶段1: 初始化数据准备 ==========
             logger.info(f"[Model {self.model_id}] [买入服务] [阶段1] 开始初始化数据准备")
             
@@ -513,6 +525,10 @@ class TradingEngine:
                         f"总耗时={cycle_duration:.2f}秒, "
                         f"执行操作数={len(executions)}, "
                         f"对话类型={conversation_prompts}")
+            
+            # 清理缓存的杠杆配置
+            if hasattr(self, 'current_model_leverage'):
+                delattr(self, 'current_model_leverage')
             
             # 获取最终持仓信息
             updated_portfolio = self.db.get_portfolio(self.model_id, current_prices)
@@ -2710,9 +2726,22 @@ class TradingEngine:
         binance_client = self._create_binance_order_client()
         if binance_client:
             try:
+                # 首先设置杠杆
+                logger.info(f"@API@ [Model {self.model_id}] [change_initial_leverage] === 准备设置杠杆 ===" 
+                          f" | symbol={symbol} | leverage={leverage}")
+                
+                binance_client.change_initial_leverage(
+                    symbol=symbol,
+                    leverage=leverage
+                )
+                
+                logger.info(f"@API@ [Model {self.model_id}] [change_initial_leverage] === 杠杆设置成功 ===" 
+                          f" | symbol={symbol} | leverage={leverage}")
+                
+                # 然后执行交易
                 logger.info(f"@API@ [Model {self.model_id}] [market_trade] === 准备调用接口 ===" 
                           f" | symbol={symbol} | side={trailing_stop_side} | position_side={position_side} | "
-                          f"quantity={quantity} | price={price}")
+                          f"quantity={quantity} | price={price} | leverage={leverage}")
                 
                 conversation_id = self._get_conversation_id()
                 
@@ -3134,6 +3163,12 @@ class TradingEngine:
 
     def _get_model_leverage(self) -> int:
         """Get model leverage configuration"""
+        # 优先使用实例变量中缓存的杠杆值
+        if hasattr(self, 'current_model_leverage') and self.current_model_leverage is not None:
+            logger.debug(f"[Model {self.model_id}] 使用缓存的模型杠杆配置: {self.current_model_leverage}")
+            return self.current_model_leverage
+        
+        # 如果没有缓存，则查询数据库
         try:
             model = self.db.get_model(self.model_id)
         except Exception as exc:
@@ -3148,7 +3183,8 @@ class TradingEngine:
             leverage = int(leverage)
         except (TypeError, ValueError):
             leverage = 10
-        return max(0, leverage)
+        # 确保返回的杠杆值至少为1
+        return max(1, leverage)
 
     def _resolve_leverage(self, decision: Dict) -> int:
         """
@@ -3161,8 +3197,8 @@ class TradingEngine:
             int: 最终使用的杠杆倍数
         
         优先级：
-        1. 如果模型配置的杠杆为0，则使用AI决策中的杠杆
-        2. 否则使用模型配置的杠杆（忽略AI决策中的杠杆）
+        1. 如果AI决策中包含有效的杠杆值，则使用该值
+        2. 否则使用模型配置的杠杆值
         
         Note:
             此方法确保杠杆倍数至少为1，避免无效配置
@@ -3172,14 +3208,20 @@ class TradingEngine:
             configured = self._get_model_leverage()
 
         ai_leverage = decision.get('leverage')
-        try:
-            ai_leverage = int(ai_leverage)
-        except (TypeError, ValueError):
-            ai_leverage = 1
+        leverage_valid = False
+        
+        # 检查AI决策中的杠杆是否有效
+        if ai_leverage is not None:
+            try:
+                ai_leverage = int(ai_leverage)
+                if ai_leverage >= 1:
+                    leverage_valid = True
+            except (TypeError, ValueError):
+                leverage_valid = False
 
-        ai_leverage = max(1, ai_leverage)
-
-        if configured == 0:
+        # 如果AI决策中的杠杆有效，则使用该值
+        if leverage_valid:
             return ai_leverage
-
+        
+        # 否则使用模型配置的杠杆值，确保至少为1
         return max(1, configured)
