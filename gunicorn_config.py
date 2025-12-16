@@ -12,7 +12,7 @@ backlog = int(os.getenv('GUNICORN_BACKLOG', '2048'))
 workers = int(os.getenv('GUNICORN_WORKERS', multiprocessing.cpu_count() * 2 + 1))
 worker_class = os.getenv('GUNICORN_WORKER_CLASS', 'eventlet')
 worker_connections = int(os.getenv('GUNICORN_WORKER_CONNECTIONS', '1000'))
-threads = int(os.getenv('GUNICORN_THREADS', '40'))
+threads = int(os.getenv('GUNICORN_THREADS', '60'))
 timeout = int(os.getenv('GUNICORN_TIMEOUT', '120'))
 keepalive = int(os.getenv('GUNICORN_KEEPALIVE', '30'))
 
