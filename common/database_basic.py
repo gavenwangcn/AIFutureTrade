@@ -105,6 +105,7 @@ class Database:
         self.account_asset_table = "account_asset"
         self.asset_table = "asset"
         self.binance_trade_logs_table = "binance_trade_logs"
+        self.llm_api_error_table = "llm_api_error"
     
     def close(self) -> None:
         """
@@ -387,6 +388,9 @@ class Database:
         
         # Binance trade logs table
         self._ensure_binance_trade_logs_table()
+        
+        # LLM API error table
+        self._ensure_llm_api_error_table()
         
         # Insert default settings if no settings exist
         self._init_default_settings()
@@ -724,6 +728,28 @@ class Database:
         """
         self.command(ddl)
         logger.debug(f"[Database] Ensured table {self.binance_trade_logs_table} exists")
+    
+    def _ensure_llm_api_error_table(self):
+        """Create llm_api_error table if not exists
+        
+        注意：created_at 字段不使用 DEFAULT CURRENT_TIMESTAMP，必须显式提供 UTC+8 时间值
+        以确保时间一致性，避免因服务器时区设置不同而导致的时间不一致问题
+        """
+        ddl = f"""
+        CREATE TABLE IF NOT EXISTS `{self.llm_api_error_table}` (
+            `id` VARCHAR(36) PRIMARY KEY,
+            `model_id` VARCHAR(36) NOT NULL,
+            `provider_name` VARCHAR(200),
+            `model` VARCHAR(200),
+            `prompt` LONGTEXT,
+            `error_msg` TEXT,
+            `created_at` DATETIME NOT NULL COMMENT 'UTC+8时区时间（北京时间），必须显式提供',
+            INDEX `idx_model_id` (`model_id`),
+            INDEX `idx_created_at` (`created_at`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+        """
+        self.command(ddl)
+        logger.debug(f"[Database] Ensured table {self.llm_api_error_table} exists")
     
     def _init_default_settings(self):
         """Initialize default settings if none exist"""
@@ -1612,6 +1638,44 @@ class Database:
             )
         except Exception as e:
             logger.error(f"[Database] Failed to add binance trade log: {e}")
+            # 不抛出异常，避免影响主流程
+    
+    def record_llm_api_error(self, model_id: int, provider_name: str, model: str, prompt: str, error_msg: str):
+        """
+        记录LLM API调用错误
+        
+        注意：created_at 字段必须使用 UTC+8 时区时间（北京时间），以确保时间一致性。
+        不使用数据库的 DEFAULT CURRENT_TIMESTAMP，因为服务器时区可能不同。
+        
+        Args:
+            model_id: 模型ID（整数）
+            provider_name: 提供商名称（从providers表获取）
+            model: 模型名称（从providers表获取）
+            prompt: 发送给LLM的提示词
+            error_msg: 错误信息
+        """
+        try:
+            model_mapping = self._get_model_id_mapping()
+            model_uuid = model_mapping.get(model_id)
+            if not model_uuid:
+                logger.warning(f"[Database] Model {model_id} not found for LLM API error record")
+                return
+            
+            error_id = self._generate_id()
+            
+            # 【重要】使用 UTC+8 时区时间（北京时间），转换为 naive datetime 存储
+            # 确保时间一致性，避免因服务器时区设置不同而导致的时间不一致问题
+            beijing_tz = timezone(timedelta(hours=8))
+            current_time = datetime.now(beijing_tz).replace(tzinfo=None)
+            
+            self.insert_rows(
+                self.llm_api_error_table,
+                [[error_id, model_uuid, provider_name, model, prompt, error_msg, current_time]],
+                ["id", "model_id", "provider_name", "model", "prompt", "error_msg", "created_at"]
+            )
+            logger.info(f"[Database] Recorded LLM API error for model {model_id}, provider: {provider_name}, model: {model}")
+        except Exception as e:
+            logger.error(f"[Database] Failed to record LLM API error: {e}")
             # 不抛出异常，避免影响主流程
     
     def get_conversations(self, model_id: int, limit: int = 20) -> List[Dict]:
