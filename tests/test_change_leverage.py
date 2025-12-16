@@ -58,7 +58,7 @@ def test_change_initial_leverage(symbol: str = "MUSDT", leverage: int = 20) -> N
     logger.info("\n验证通过：返回的交易对和杠杆倍数正确")
     logger.info(f"交易对: {result['symbol']}")
     logger.info(f"新杠杆: {result['leverage']}")
-    logger.info(f"最大名义价值: {result.get('maxNotionalValue', 'N/A')}")
+    logger.info(f"最大名义价值: {result.get('max_notional_value', 'N/A')}")
 
 
 
