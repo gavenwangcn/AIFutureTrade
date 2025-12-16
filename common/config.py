@@ -134,14 +134,11 @@ TRADES_QUERY_LIMIT = int(os.getenv('TRADES_QUERY_LIMIT', '5'))  # 后端查询�
 
 # ============ AI交易决策配置 ============
 
-PROMPT_MARKET_SYMBOL_LIMIT = 3  # 每次调用AI模型时处理的合约数量
+PROMPT_MARKET_SYMBOL_LIMIT = 3  # 每次调用AI模型时处理的市场合约数量
 BUY_DECISION_THREAD_COUNT = 1  # 买入决策API调用的并发线程数
 SELL_DECISION_THREAD_COUNT = 1  # 卖出决策API调用的并发线程数
-AI_DECISION_SYMBOL_BATCH_SIZE = int(os.getenv('AI_DECISION_SYMBOL_BATCH_SIZE', '1'))  # 每次提交给AI模型的symbol数量，默认为1
-
-# AI批次执行间隔配置
-AI_BATCH_EXECUTION_INTERVAL = int(os.getenv('AI_BATCH_EXECUTION_INTERVAL', '60'))  # 批次执行间隔（秒），默认5秒
-AI_BATCH_EXECUTION_GROUP_SIZE = int(os.getenv('AI_BATCH_EXECUTION_GROUP_SIZE', '1'))  # 每N个批次执行完成后统一处理（插入数据库和调用SDK），默认1
+# 注意：批次配置（batch_size、batch_execution_interval、batch_execution_group_size）已移至models表，
+# 每个模型可以独立配置买入和卖出的批次参数，不再使用全局配置
 
 
 # ============ 日志配置 ============

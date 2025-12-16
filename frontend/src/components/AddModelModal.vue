@@ -95,7 +95,46 @@
           <span>合约配置信息</span>
         </label>
       </div>
-
+    </div>
+    <div class="form-group">
+      <label style="font-weight: 600; margin-bottom: 12px; display: block;">买入批次配置</label>
+      <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px;">
+        <div>
+          <label style="font-size: 13px; color: var(--text-2);">批次大小</label>
+          <input v-model.number="formData.buyBatchSize" type="number" class="form-input" min="1" />
+          <small class="form-help">每次提交给AI的symbol数量，默认1</small>
+        </div>
+        <div>
+          <label style="font-size: 13px; color: var(--text-2);">执行间隔（秒）</label>
+          <input v-model.number="formData.buyBatchExecutionInterval" type="number" class="form-input" min="0" />
+          <small class="form-help">批次执行间隔，默认60</small>
+        </div>
+        <div>
+          <label style="font-size: 13px; color: var(--text-2);">分组大小</label>
+          <input v-model.number="formData.buyBatchExecutionGroupSize" type="number" class="form-input" min="1" />
+          <small class="form-help">每N个批次统一处理，默认1</small>
+        </div>
+      </div>
+    </div>
+    <div class="form-group">
+      <label style="font-weight: 600; margin-bottom: 12px; display: block;">卖出批次配置</label>
+      <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px;">
+        <div>
+          <label style="font-size: 13px; color: var(--text-2);">批次大小</label>
+          <input v-model.number="formData.sellBatchSize" type="number" class="form-input" min="1" />
+          <small class="form-help">每次提交给AI的symbol数量，默认1</small>
+        </div>
+        <div>
+          <label style="font-size: 13px; color: var(--text-2);">执行间隔（秒）</label>
+          <input v-model.number="formData.sellBatchExecutionInterval" type="number" class="form-input" min="0" />
+          <small class="form-help">批次执行间隔，默认60</small>
+        </div>
+        <div>
+          <label style="font-size: 13px; color: var(--text-2);">分组大小</label>
+          <input v-model.number="formData.sellBatchExecutionGroupSize" type="number" class="form-input" min="1" />
+          <small class="form-help">每N个批次统一处理，默认1</small>
+        </div>
+      </div>
     </div>
     <template #footer>
       <button class="btn-secondary" @click="handleClose">取消</button>
@@ -126,7 +165,13 @@ const formData = ref({
   maxPositions: 3,  // 默认最大持仓数量为3
   accountAlias: '',
   isVirtual: true,  // 默认值为 true（虚拟账户）
-  symbolSource: 'leaderboard'  // 默认使用涨跌榜
+  symbolSource: 'leaderboard',  // 默认使用涨跌榜
+  buyBatchSize: 1,
+  buyBatchExecutionInterval: 60,
+  buyBatchExecutionGroupSize: 1,
+  sellBatchSize: 1,
+  sellBatchExecutionInterval: 60,
+  sellBatchExecutionGroupSize: 1
 })
 
 const providers = ref([])
@@ -204,7 +249,13 @@ const handleSubmit = async () => {
       max_positions: formData.value.maxPositions,
       account_alias: formData.value.accountAlias,
       is_virtual: formData.value.isVirtual,
-      symbol_source: formData.value.symbolSource
+      symbol_source: formData.value.symbolSource,
+      buy_batch_size: formData.value.buyBatchSize || 1,
+      buy_batch_execution_interval: formData.value.buyBatchExecutionInterval || 60,
+      buy_batch_execution_group_size: formData.value.buyBatchExecutionGroupSize || 1,
+      sell_batch_size: formData.value.sellBatchSize || 1,
+      sell_batch_execution_interval: formData.value.sellBatchExecutionInterval || 60,
+      sell_batch_execution_group_size: formData.value.sellBatchExecutionGroupSize || 1
     })
     alert('模型添加成功')
     clearForm()
@@ -228,7 +279,13 @@ const clearForm = () => {
     maxPositions: 3,  // 重置为默认值3
     accountAlias: '',
     isVirtual: true,  // 重置为默认值 true（虚拟账户）
-    symbolSource: 'leaderboard'  // 重置为默认值
+    symbolSource: 'leaderboard',  // 重置为默认值
+    buyBatchSize: 1,
+    buyBatchExecutionInterval: 60,
+    buyBatchExecutionGroupSize: 1,
+    sellBatchSize: 1,
+    sellBatchExecutionInterval: 60,
+    sellBatchExecutionGroupSize: 1
   }
   availableModels.value = []
 }

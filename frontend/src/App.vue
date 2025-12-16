@@ -31,21 +31,39 @@
           </button>
           <button 
             class="btn-secondary" 
-            @click="handleExecute" 
-            title="执行当前模型" 
-            :disabled="!currentModelId || isExecuting"
+            @click="handleExecuteBuy" 
+            title="执行买入交易" 
+            :disabled="!currentModelId || isExecutingBuy"
           >
-            <i class="bi bi-play-circle" :class="{ spin: isExecuting }"></i>
-            {{ isExecuting ? '执行中...' : '执行交易' }}
+            <i class="bi bi-arrow-up-circle" :class="{ spin: isExecutingBuy }"></i>
+            {{ isExecutingBuy ? '执行中...' : '执行买入' }}
           </button>
           <button 
             class="btn-secondary" 
-            @click="handlePauseAuto" 
-            title="关闭当前模型的自动化交易"
-            :disabled="!currentModelId || isClosingTrading"
+            @click="handleExecuteSell" 
+            title="执行卖出交易" 
+            :disabled="!currentModelId || isExecutingSell"
           >
-            <i class="bi bi-pause-circle" :class="{ spin: isClosingTrading }"></i>
-            {{ isClosingTrading ? '处理中...' : '关闭交易' }}
+            <i class="bi bi-arrow-down-circle" :class="{ spin: isExecutingSell }"></i>
+            {{ isExecutingSell ? '执行中...' : '执行卖出' }}
+          </button>
+          <button 
+            class="btn-secondary" 
+            @click="handleDisableBuy" 
+            title="关闭买入交易"
+            :disabled="!currentModelId || isDisablingBuy"
+          >
+            <i class="bi bi-pause-circle-fill" :class="{ spin: isDisablingBuy }"></i>
+            {{ isDisablingBuy ? '处理中...' : '关闭买入' }}
+          </button>
+          <button 
+            class="btn-secondary" 
+            @click="handleDisableSell" 
+            title="关闭卖出交易"
+            :disabled="!currentModelId || isDisablingSell"
+          >
+            <i class="bi bi-pause-circle-fill" :class="{ spin: isDisablingSell }"></i>
+            {{ isDisablingSell ? '处理中...' : '关闭卖出' }}
           </button>
           <button class="btn-secondary" @click="showSettingsModal = true">
             <i class="bi bi-gear"></i>
@@ -689,6 +707,46 @@
               >
               <small class="form-help">设置该模型最多可以同时持有的合约数量，默认为3。</small>
             </div>
+            <div class="form-group">
+              <label style="font-weight: 600; margin-bottom: 12px; display: block;">买入批次配置</label>
+              <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px;">
+                <div>
+                  <label style="font-size: 13px; color: var(--text-2);">批次大小</label>
+                  <input v-model.number="tempModelSettings.buy_batch_size" type="number" class="form-input" min="1" />
+                  <small class="form-help">每次提交给AI的symbol数量，默认1</small>
+                </div>
+                <div>
+                  <label style="font-size: 13px; color: var(--text-2);">执行间隔（秒）</label>
+                  <input v-model.number="tempModelSettings.buy_batch_execution_interval" type="number" class="form-input" min="0" />
+                  <small class="form-help">批次执行间隔，默认60</small>
+                </div>
+                <div>
+                  <label style="font-size: 13px; color: var(--text-2);">分组大小</label>
+                  <input v-model.number="tempModelSettings.buy_batch_execution_group_size" type="number" class="form-input" min="1" />
+                  <small class="form-help">每N个批次统一处理，默认1</small>
+                </div>
+              </div>
+            </div>
+            <div class="form-group">
+              <label style="font-weight: 600; margin-bottom: 12px; display: block;">卖出批次配置</label>
+              <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px;">
+                <div>
+                  <label style="font-size: 13px; color: var(--text-2);">批次大小</label>
+                  <input v-model.number="tempModelSettings.sell_batch_size" type="number" class="form-input" min="1" />
+                  <small class="form-help">每次提交给AI的symbol数量，默认1</small>
+                </div>
+                <div>
+                  <label style="font-size: 13px; color: var(--text-2);">执行间隔（秒）</label>
+                  <input v-model.number="tempModelSettings.sell_batch_execution_interval" type="number" class="form-input" min="0" />
+                  <small class="form-help">批次执行间隔，默认60</small>
+                </div>
+                <div>
+                  <label style="font-size: 13px; color: var(--text-2);">分组大小</label>
+                  <input v-model.number="tempModelSettings.sell_batch_execution_group_size" type="number" class="form-input" min="1" />
+                  <small class="form-help">每N个批次统一处理，默认1</small>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
         <div class="modal-footer">
@@ -811,10 +869,16 @@ const {
   initApp,
   handleRefresh,
   toggleLogger,
-  isExecuting,
-  isClosingTrading,
-  handleExecute,
-  handlePauseAuto,
+  handleExecuteBuy,
+  handleExecuteSell,
+  handleDisableBuy,
+  handleDisableSell,
+  isExecutingBuy,
+  isExecutingSell,
+  isDisablingBuy,
+  isDisablingSell,
+  isDisablingBuy,
+  isDisablingSell,
   loadGainers,
   loadLosers,
   selectModel,

@@ -151,15 +151,29 @@ def get_tracked_symbols():
         logger.warning('No futures configured. Please add futures via /api/futures.')
     return symbols
 
-def get_trading_interval_seconds() -> int:
-    """Read trading frequency from settings (minutes) and return seconds."""
+def get_buy_interval_seconds() -> int:
+    """Read buy trading frequency from settings (minutes) and return seconds."""
     default_interval_seconds = getattr(app_config, 'TRADING_INTERVAL', 3600)
     default_minutes = max(1, int(default_interval_seconds / 60))
     try:
         settings = db.get_settings()
-        minutes = int(settings.get('trading_frequency_minutes', default_minutes))
+        minutes = int(settings.get('buy_frequency_minutes', default_minutes))
     except Exception as e:
-        logger.warning(f"Unable to load trading frequency setting: {e}")
+        logger.warning(f"Unable to load buy trading frequency setting: {e}")
+        minutes = default_minutes
+
+    minutes = max(1, min(1440, minutes))
+    return minutes * 60
+
+def get_sell_interval_seconds() -> int:
+    """Read sell trading frequency from settings (minutes) and return seconds."""
+    default_interval_seconds = getattr(app_config, 'TRADING_INTERVAL', 3600)
+    default_minutes = max(1, int(default_interval_seconds / 60))
+    try:
+        settings = db.get_settings()
+        minutes = int(settings.get('sell_frequency_minutes', default_minutes))
+    except Exception as e:
+        logger.warning(f"Unable to load sell trading frequency setting: {e}")
         minutes = default_minutes
 
     minutes = max(1, min(1440, minutes))
@@ -271,9 +285,9 @@ def start_leaderboard_worker():
     leaderboard_thread = threading.Thread(target=_leaderboard_loop, daemon=True)
     leaderboard_thread.start()
 
-def trading_loop():
-    """Main trading loop for automatic trading"""
-    logger.info("Trading loop started")
+def trading_buy_loop():
+    """买入交易循环 - 只执行买入决策"""
+    logger.info("Trading buy loop started")
 
     while auto_trading:
         try:
@@ -282,74 +296,138 @@ def trading_loop():
                 continue
 
             logger.info(f"\n{'='*60}")
-            logger.info(f"CYCLE: {datetime.now(timezone(timedelta(hours=8))).strftime('%Y-%m-%d %H:%M:%S')}")
+            logger.info(f"BUY CYCLE: {datetime.now(timezone(timedelta(hours=8))).strftime('%Y-%m-%d %H:%M:%S')}")
             logger.info(f"Active models: {len(trading_engines)}")
             logger.info(f"{'='*60}")
 
             for model_id, engine in list(trading_engines.items()):
                 try:
-                    # 检查模型的 auto_trading_enabled 字段
-                    # 如果为 0（False），则跳过该模型的 AI 决策交易
-                    if not db.is_model_auto_trading_enabled(model_id):
-                        logger.info(f"SKIP: Model {model_id} - auto_trading_enabled=0, skipping AI trading decision")
+                    # 检查模型的 auto_buy_enabled 字段
+                    # 如果为 0（False），则跳过该模型的 AI 买入决策
+                    if not db.is_model_auto_buy_enabled(model_id):
+                        logger.info(f"SKIP: Model {model_id} - auto_buy_enabled=0, skipping AI buy decision")
                         continue
 
-                    # 只有 auto_trading_enabled=1 的模型才会执行 AI 决策交易
-                    logger.info(f"\nEXEC: Model {model_id} - auto_trading_enabled=1, executing AI trading decision")
-                    result = engine.execute_trading_cycle()
+                    # 只有 auto_buy_enabled=1 的模型才会执行 AI 买入决策
+                    logger.info(f"\nEXEC BUY: Model {model_id} - auto_buy_enabled=1, executing AI buy decision")
+                    result = engine.execute_buy_cycle()
 
                     if result.get('success'):
-                        logger.info(f"OK: Model {model_id} completed")
+                        logger.info(f"OK: Model {model_id} buy cycle completed")
                         if result.get('executions'):
                             for exec_result in result['executions']:
                                 signal = exec_result.get('signal', 'unknown')
                                 symbol = exec_result.get('future', exec_result.get('symbol', 'unknown'))
                                 msg = exec_result.get('message', '')
-                                if signal != 'hold':
-                                    logger.info(f"  TRADE: {symbol}: {msg}")
+                                if signal not in ['hold', 'close_position', 'stop_loss', 'take_profit']:
+                                    logger.info(f"  BUY TRADE: {symbol}: {msg}")
                     else:
                         error = result.get('error', 'Unknown error')
-                        logger.warning(f"Model {model_id} failed: {error}")
+                        logger.warning(f"Model {model_id} buy cycle failed: {error}")
 
                 except Exception as e:
-                    logger.error(f"Model {model_id} exception: {e}")
+                    logger.error(f"Model {model_id} buy cycle exception: {e}")
                     import traceback
                     logger.error(traceback.format_exc())
                     continue
 
-            interval_seconds = get_trading_interval_seconds()
+            interval_seconds = get_buy_interval_seconds()
             interval_minutes = interval_seconds / 60
             logger.info(f"\n{'='*60}")
-            logger.info(f"SLEEP: Waiting {interval_minutes:.1f} minute(s) for next cycle")
+            logger.info(f"BUY SLEEP: Waiting {interval_minutes:.1f} minute(s) for next buy cycle")
             logger.info(f"{'='*60}\n")
 
             time.sleep(interval_seconds)
 
         except Exception as e:
-            logger.critical(f"\nTrading loop error: {e}")
+            logger.critical(f"\nBuy trading loop error: {e}")
             import traceback
             logger.critical(traceback.format_exc())
             logger.info("RETRY: Retrying in 60 seconds\n")
             time.sleep(60)
 
-    logger.info("Trading loop stopped")
+    logger.info("Trading buy loop stopped")
+
+def trading_sell_loop():
+    """卖出交易循环 - 只执行卖出决策"""
+    logger.info("Trading sell loop started")
+
+    while auto_trading:
+        try:
+            if not trading_engines:
+                time.sleep(10)
+                continue
+
+            logger.info(f"\n{'='*60}")
+            logger.info(f"SELL CYCLE: {datetime.now(timezone(timedelta(hours=8))).strftime('%Y-%m-%d %H:%M:%S')}")
+            logger.info(f"Active models: {len(trading_engines)}")
+            logger.info(f"{'='*60}")
+
+            for model_id, engine in list(trading_engines.items()):
+                try:
+                    # 检查模型的 auto_sell_enabled 字段
+                    # 如果为 0（False），则跳过该模型的 AI 卖出决策
+                    if not db.is_model_auto_sell_enabled(model_id):
+                        logger.info(f"SKIP: Model {model_id} - auto_sell_enabled=0, skipping AI sell decision")
+                        continue
+
+                    # 只有 auto_sell_enabled=1 的模型才会执行 AI 卖出决策
+                    logger.info(f"\nEXEC SELL: Model {model_id} - auto_sell_enabled=1, executing AI sell decision")
+                    result = engine.execute_sell_cycle()
+
+                    if result.get('success'):
+                        logger.info(f"OK: Model {model_id} sell cycle completed")
+                        if result.get('executions'):
+                            for exec_result in result['executions']:
+                                signal = exec_result.get('signal', 'unknown')
+                                symbol = exec_result.get('future', exec_result.get('symbol', 'unknown'))
+                                msg = exec_result.get('message', '')
+                                if signal in ['close_position', 'stop_loss', 'take_profit']:
+                                    logger.info(f"  SELL TRADE: {symbol}: {msg}")
+                    else:
+                        error = result.get('error', 'Unknown error')
+                        logger.warning(f"Model {model_id} sell cycle failed: {error}")
+
+                except Exception as e:
+                    logger.error(f"Model {model_id} sell cycle exception: {e}")
+                    import traceback
+                    logger.error(traceback.format_exc())
+                    continue
+
+            interval_seconds = get_sell_interval_seconds()
+            interval_minutes = interval_seconds / 60
+            logger.info(f"\n{'='*60}")
+            logger.info(f"SELL SLEEP: Waiting {interval_minutes:.1f} minute(s) for next sell cycle")
+            logger.info(f"{'='*60}\n")
+
+            time.sleep(interval_seconds)
+
+        except Exception as e:
+            logger.critical(f"\nSell trading loop error: {e}")
+            import traceback
+            logger.critical(traceback.format_exc())
+            logger.info("RETRY: Retrying in 60 seconds\n")
+            time.sleep(60)
+
+    logger.info("Trading sell loop stopped")
 
 # ============ Page Routes ============
 
 # 后台服务初始化标志（延迟初始化，确保所有函数都已定义）
 _background_services_initialized = False
-_trading_loop_started = False
-_trading_thread = None
+_trading_loops_started = False
+_trading_buy_thread = None
+_trading_sell_thread = None
 
-def _start_trading_loop_if_needed():
-    """启动交易循环（如果尚未启动）"""
-    global _trading_loop_started, _trading_thread, auto_trading
+def _start_trading_loops_if_needed():
+    """启动买入和卖出交易循环（如果尚未启动）"""
+    global _trading_loops_started, _trading_buy_thread, _trading_sell_thread, auto_trading
     
-    if _trading_loop_started:
+    if _trading_loops_started:
         return
     
     if not auto_trading:
-        logger.info("Auto-trading is disabled, skipping trading loop startup")
+        logger.info("Auto-trading is disabled, skipping trading loops startup")
         return
     
     # 确保数据库和交易引擎已初始化
@@ -359,12 +437,19 @@ def _start_trading_loop_if_needed():
             init_trading_engines()
     
     if trading_engines:
-        _trading_thread = threading.Thread(target=trading_loop, daemon=True, name="TradingLoop")
-        _trading_thread.start()
-        _trading_loop_started = True
-        logger.info("✅ Auto-trading loop started")
+        # 启动买入循环线程
+        _trading_buy_thread = threading.Thread(target=trading_buy_loop, daemon=True, name="TradingBuyLoop")
+        _trading_buy_thread.start()
+        logger.info("✅ Auto-trading buy loop started")
+        
+        # 启动卖出循环线程
+        _trading_sell_thread = threading.Thread(target=trading_sell_loop, daemon=True, name="TradingSellLoop")
+        _trading_sell_thread.start()
+        logger.info("✅ Auto-trading sell loop started")
+        
+        _trading_loops_started = True
     else:
-        logger.warning("⚠️ No trading engines available, trading loop not started")
+        logger.warning("⚠️ No trading engines available, trading loops not started")
 
 @app.before_request
 def _ensure_background_services():
@@ -375,7 +460,7 @@ def _ensure_background_services():
         _background_services_initialized = True
     
     # 确保交易循环已启动
-    _start_trading_loop_if_needed()
+    _start_trading_loops_if_needed()
 
 @app.after_request
 def after_request(response):
@@ -683,7 +768,13 @@ def add_model():
             account_alias=account_alias,
             is_virtual=bool(is_virtual),
             symbol_source=data.get('symbol_source', 'leaderboard'),  # 【新增参数】交易对数据源，默认'leaderboard'保持向后兼容
-            max_positions=max_positions  # 【新增参数】最大持仓数量，默认3
+            max_positions=max_positions,  # 【新增参数】最大持仓数量，默认3
+            buy_batch_size=int(data.get('buy_batch_size', 1)),
+            buy_batch_execution_interval=int(data.get('buy_batch_execution_interval', 60)),
+            buy_batch_execution_group_size=int(data.get('buy_batch_execution_group_size', 1)),
+            sell_batch_size=int(data.get('sell_batch_size', 1)),
+            sell_batch_execution_interval=int(data.get('sell_batch_execution_interval', 60)),
+            sell_batch_execution_group_size=int(data.get('sell_batch_execution_group_size', 1))
         )
 
         model = db.get_model(model_id)
@@ -850,7 +941,8 @@ def get_portfolio(model_id):
     return jsonify({
         'portfolio': portfolio,
         'account_value_history': account_value,
-        'auto_trading_enabled': bool(model.get('auto_trading_enabled', 1)),
+        'auto_buy_enabled': bool(model.get('auto_buy_enabled', 1)),
+        'auto_sell_enabled': bool(model.get('auto_sell_enabled', 1)),
         'leverage': model.get('leverage', 10)
     })
 
@@ -1198,6 +1290,52 @@ def update_model_prompts(model_id):
 
     return jsonify({'success': True, 'message': 'Prompts updated successfully'})
 
+@app.route('/api/models/<int:model_id>/batch-config', methods=['POST'])
+def update_model_batch_config(model_id):
+    """
+    更新模型的批次配置
+    
+    Args:
+        model_id (int): 模型ID
+    
+    Request Body:
+        buy_batch_size (int, optional): 买入批次大小，默认1
+        buy_batch_execution_interval (int, optional): 买入批次执行间隔（秒），默认60
+        buy_batch_execution_group_size (int, optional): 买入批次分组大小，默认1
+        sell_batch_size (int, optional): 卖出批次大小，默认1
+        sell_batch_execution_interval (int, optional): 卖出批次执行间隔（秒），默认60
+        sell_batch_execution_group_size (int, optional): 卖出批次分组大小，默认1
+    
+    Returns:
+        JSON: 更新结果
+    """
+    try:
+        data = request.get_json() or {}
+        buy_batch_size = data.get('buy_batch_size')
+        buy_batch_execution_interval = data.get('buy_batch_execution_interval')
+        buy_batch_execution_group_size = data.get('buy_batch_execution_group_size')
+        sell_batch_size = data.get('sell_batch_size')
+        sell_batch_execution_interval = data.get('sell_batch_execution_interval')
+        sell_batch_execution_group_size = data.get('sell_batch_execution_group_size')
+        
+        success = db.set_model_batch_config(
+            model_id,
+            buy_batch_size=buy_batch_size,
+            buy_batch_execution_interval=buy_batch_execution_interval,
+            buy_batch_execution_group_size=buy_batch_execution_group_size,
+            sell_batch_size=sell_batch_size,
+            sell_batch_execution_interval=sell_batch_execution_interval,
+            sell_batch_execution_group_size=sell_batch_execution_group_size
+        )
+        
+        if success:
+            return jsonify({'success': True, 'message': '批次配置更新成功'})
+        else:
+            return jsonify({'success': False, 'error': '批次配置更新失败'}), 500
+    except Exception as e:
+        logger.error(f"Failed to update batch config for model {model_id}: {e}")
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/api/models/<int:model_id>/max_positions', methods=['POST'])
 def update_model_max_positions(model_id):
     """
@@ -1357,12 +1495,23 @@ def execute_trading(model_id):
     # Manual execution enables auto trading and ensures trading loop is running
     db.set_model_auto_trading(model_id, True)
     
-    # Ensure trading loop is started if not already running
-    _start_trading_loop_if_needed()
+    # Ensure trading loops are started if not already running
+    _start_trading_loops_if_needed()
 
     try:
-        result = engine.execute_trading_cycle()
-        result['auto_trading_enabled'] = True
+        # 手动执行时，同时执行买入和卖出周期
+        buy_result = engine.execute_buy_cycle()
+        sell_result = engine.execute_sell_cycle()
+        
+        # 合并结果
+        result = {
+            'success': buy_result.get('success', False) and sell_result.get('success', False),
+            'executions': (buy_result.get('executions', []) or []) + (sell_result.get('executions', []) or []),
+            'portfolio': sell_result.get('portfolio', buy_result.get('portfolio', {})),
+            'conversations': ['buy', 'sell']
+        }
+        result['auto_buy_enabled'] = True
+        result['auto_sell_enabled'] = True
         return jsonify(result)
     except Exception as e:
         return jsonify({'error': str(e)}), 500
@@ -1370,16 +1519,19 @@ def execute_trading(model_id):
 @app.route('/api/models/<int:model_id>/auto-trading', methods=['POST'])
 def set_model_auto_trading(model_id):
     """
-    启用或禁用模型的自动交易功能
+    启用或禁用模型的自动交易功能（同时设置买入和卖出）
+    
+    注意：此方法同时设置 auto_buy_enabled 和 auto_sell_enabled。
+    如需单独控制买入或卖出，请使用 /api/models/<id>/disable-buy 或 /api/models/<id>/disable-sell
     
     Args:
         model_id (int): 模型ID
     
     Request Body:
-        enabled (bool): 是否启用自动交易
+        enabled (bool): 是否启用自动交易（同时启用/禁用买入和卖出）
     
     Returns:
-        JSON: 更新后的自动交易状态
+        JSON: 更新后的自动交易状态（包含 auto_buy_enabled 和 auto_sell_enabled）
     """
     data = request.json or {}
     if 'enabled' not in data:
@@ -1398,19 +1550,129 @@ def set_model_auto_trading(model_id):
         # Enable auto trading: ensure trading engine exists and trading loop is running
         if model_id not in trading_engines:
             init_trading_engine_for_model(model_id)
-        # Ensure trading loop is started if not already running
-        _start_trading_loop_if_needed()
+        # Ensure trading loops are started if not already running
+        _start_trading_loops_if_needed()
         logger.info(f"Auto trading enabled for model {model_id}")
     else:
         # Disable auto trading: remove engine from trading_engines to stop execution
-        # Note: The trading loop already checks auto_trading_enabled, but removing the engine
+        # Note: The trading loop already checks auto_buy_enabled and auto_sell_enabled, but removing the engine
         # ensures it won't be executed even if the check fails
         if model_id in trading_engines:
             del trading_engines[model_id]
             logger.info(f"Trading engine removed for model {model_id} (auto trading disabled)")
         logger.info(f"Auto trading disabled for model {model_id}")
 
-    return jsonify({'model_id': model_id, 'auto_trading_enabled': enabled})
+    return jsonify({
+        'model_id': model_id, 
+        'auto_buy_enabled': enabled,
+        'auto_sell_enabled': enabled
+    })
+
+@app.route('/api/models/<int:model_id>/execute-buy', methods=['POST'])
+def execute_buy_trading(model_id):
+    """
+    手动执行一次买入交易周期
+    
+    Args:
+        model_id (int): 模型ID
+    
+    Returns:
+        JSON: 买入交易执行结果
+    """
+    if model_id not in trading_engines:
+        engine, error = init_trading_engine_for_model(model_id)
+        if error:
+            return jsonify({'error': error}), 404
+    else:
+        engine = trading_engines[model_id]
+
+    # 启用自动买入
+    db.set_model_auto_buy_enabled(model_id, True)
+    
+    # 确保交易循环已启动
+    _start_trading_loops_if_needed()
+
+    try:
+        result = engine.execute_buy_cycle()
+        result['auto_buy_enabled'] = True
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/models/<int:model_id>/execute-sell', methods=['POST'])
+def execute_sell_trading(model_id):
+    """
+    手动执行一次卖出交易周期
+    
+    Args:
+        model_id (int): 模型ID
+    
+    Returns:
+        JSON: 卖出交易执行结果
+    """
+    if model_id not in trading_engines:
+        engine, error = init_trading_engine_for_model(model_id)
+        if error:
+            return jsonify({'error': error}), 404
+    else:
+        engine = trading_engines[model_id]
+
+    # 启用自动卖出
+    db.set_model_auto_sell_enabled(model_id, True)
+    
+    # 确保交易循环已启动
+    _start_trading_loops_if_needed()
+
+    try:
+        result = engine.execute_sell_cycle()
+        result['auto_sell_enabled'] = True
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/models/<int:model_id>/disable-buy', methods=['POST'])
+def disable_buy_trading(model_id):
+    """
+    禁用模型的自动买入功能
+    
+    Args:
+        model_id (int): 模型ID
+    
+    Returns:
+        JSON: 更新后的自动买入状态
+    """
+    model = db.get_model(model_id)
+    if not model:
+        return jsonify({'error': 'Model not found'}), 404
+
+    success = db.set_model_auto_buy_enabled(model_id, False)
+    if not success:
+        return jsonify({'error': 'Failed to update auto buy status'}), 500
+
+    logger.info(f"Auto buy disabled for model {model_id}")
+    return jsonify({'model_id': model_id, 'auto_buy_enabled': False})
+
+@app.route('/api/models/<int:model_id>/disable-sell', methods=['POST'])
+def disable_sell_trading(model_id):
+    """
+    禁用模型的自动卖出功能
+    
+    Args:
+        model_id (int): 模型ID
+    
+    Returns:
+        JSON: 更新后的自动卖出状态
+    """
+    model = db.get_model(model_id)
+    if not model:
+        return jsonify({'error': 'Model not found'}), 404
+
+    success = db.set_model_auto_sell_enabled(model_id, False)
+    if not success:
+        return jsonify({'error': 'Failed to update auto sell status'}), 500
+
+    logger.info(f"Auto sell disabled for model {model_id}")
+    return jsonify({'model_id': model_id, 'auto_sell_enabled': False})
 
 @app.route('/api/aggregated/portfolio', methods=['GET'])
 def get_aggregated_portfolio():
@@ -2188,7 +2450,8 @@ def update_settings():
     更新系统设置
     
     Request Body:
-        trading_frequency_minutes (int, optional): 交易频率（分钟），默认60
+        buy_frequency_minutes (int, optional): 买入交易频率（分钟），默认5
+        sell_frequency_minutes (int, optional): 卖出交易频率（分钟），默认5
         trading_fee_rate (float, optional): 手续费率，默认0.001
         show_system_prompt (bool, optional): 是否显示系统提示，默认False
         conversation_limit (int, optional): AI对话显示数量限制，默认5
@@ -2198,13 +2461,15 @@ def update_settings():
     """
     try:
         data = request.json or {}
-        trading_frequency_minutes = int(data.get('trading_frequency_minutes', 60))
+        buy_frequency_minutes = int(data.get('buy_frequency_minutes', 5))
+        sell_frequency_minutes = int(data.get('sell_frequency_minutes', 5))
         trading_fee_rate = float(data.get('trading_fee_rate', 0.001))
         show_system_prompt = 1 if data.get('show_system_prompt') in (True, 1, '1', 'true', 'True') else 0
         conversation_limit = int(data.get('conversation_limit', 5))
 
         success = db.update_settings(
-            trading_frequency_minutes,
+            buy_frequency_minutes,
+            sell_frequency_minutes,
             trading_fee_rate,
             show_system_prompt,
             conversation_limit
@@ -2371,7 +2636,7 @@ if __name__ == '__main__':
         logger.info("Trading engines initialized")
     
     # Start trading loop (will also be started on first request if using gunicorn)
-    _start_trading_loop_if_needed()
+    _start_trading_loops_if_needed()
 
     # Start leaderboard workers
     logger.info("🚀 准备启动涨跌幅榜相关工作线程...")

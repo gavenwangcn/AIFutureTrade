@@ -93,7 +93,13 @@ const lastPortfolioSymbolsRefreshTime = ref(null) // 持仓合约列表最后刷
     provider_id: null,
     model_name: '',
     leverage: 10,
-    max_positions: 3
+    max_positions: 3,
+    buy_batch_size: 1,
+    buy_batch_execution_interval: 60,
+    buy_batch_execution_group_size: 1,
+    sell_batch_size: 1,
+    sell_batch_execution_interval: 60,
+    sell_batch_execution_group_size: 1
   })
   const availableModelsInSettings = ref([]) // 模型设置中可用的模型列表
   const loadingModelSettings = ref(false)
@@ -1371,7 +1377,11 @@ let portfolioSymbolsRefreshInterval = null // 模型持仓合约列表自动刷�
   }
 
   // 执行交易状态
-  const isExecuting = ref(false)
+  // 执行交易状态
+  const isExecutingBuy = ref(false)
+  const isExecutingSell = ref(false)
+  const isDisablingBuy = ref(false)
+  const isDisablingSell = ref(false)
   
   /**
    * 显示消息提示
@@ -1400,99 +1410,166 @@ let portfolioSymbolsRefreshInterval = null // 模型持仓合约列表自动刷�
   }
   
   /**
-   * 执行交易
+   * 执行买入交易
    */
-  const handleExecute = async () => {
+  const handleExecuteBuy = async () => {
     if (!currentModelId.value) {
       showMessage('请先选择模型', 'error')
       return
     }
     
-    if (isExecuting.value) {
+    if (isExecutingBuy.value) {
       return // 防止重复点击
     }
     
-    isExecuting.value = true
+    isExecutingBuy.value = true
     try {
-      const result = await modelApi.execute(currentModelId.value)
-      console.log('[TradingApp] Execute success:', result)
+      const result = await modelApi.executeBuy(currentModelId.value)
+      console.log('[TradingApp] Execute buy success:', result)
       
-      // 检查返回结果
       if (result && (result.success !== false)) {
-        showMessage('执行成功', 'success')
+        showMessage('买入交易执行成功', 'success')
       } else {
         const errorMsg = result?.error || '执行失败'
-        showMessage(`执行失败: ${errorMsg}`, 'error')
+        showMessage(`买入交易执行失败: ${errorMsg}`, 'error')
       }
       
-      // 执行后刷新数据（包括模型列表以更新 auto_trading_enabled 状态）
       await Promise.all([
-        loadModels(),  // 刷新模型列表以更新 auto_trading_enabled 状态
+        loadModels(),
         loadPortfolio(),
         loadPositions(),
         loadTrades()
       ])
       return result
     } catch (error) {
-      console.error('[TradingApp] Error executing:', error)
+      console.error('[TradingApp] Error executing buy:', error)
       const errorMsg = error.message || '执行失败，请检查网络连接'
-      showMessage(`执行失败: ${errorMsg}`, 'error')
+      showMessage(`买入交易执行失败: ${errorMsg}`, 'error')
       throw error
     } finally {
-      isExecuting.value = false
+      isExecutingBuy.value = false
     }
   }
 
-  // 关闭交易状态
-  const isClosingTrading = ref(false)
-  
   /**
-   * 暂停/恢复自动交易（关闭交易）
+   * 执行卖出交易
    */
-  const handlePauseAuto = async () => {
+  const handleExecuteSell = async () => {
     if (!currentModelId.value) {
       showMessage('请先选择模型', 'error')
       return
     }
     
-    if (isClosingTrading.value) {
+    if (isExecutingSell.value) {
       return // 防止重复点击
     }
     
-    isClosingTrading.value = true
+    isExecutingSell.value = true
     try {
-      // 获取当前状态并切换（关闭交易就是禁用自动交易）
-      const currentModel = models.value.find(m => m.id === currentModelId.value)
-      const enabled = !currentModel?.auto_trading_enabled
+      const result = await modelApi.executeSell(currentModelId.value)
+      console.log('[TradingApp] Execute sell success:', result)
       
-      const result = await modelApi.setAutoTrading(currentModelId.value, enabled)
-      console.log('[TradingApp] Auto trading', enabled ? 'enabled' : 'disabled', result)
-      
-      // 检查返回结果
-      if (result && !result.error) {
-        if (enabled) {
-          showMessage('自动交易已开启', 'success')
-        } else {
-          showMessage('关闭交易成功', 'success')
-        }
+      if (result && (result.success !== false)) {
+        showMessage('卖出交易执行成功', 'success')
       } else {
-        const errorMsg = result?.error || '操作失败'
-        showMessage(`关闭交易失败: ${errorMsg}`, 'error')
+        const errorMsg = result?.error || '执行失败'
+        showMessage(`卖出交易执行失败: ${errorMsg}`, 'error')
       }
       
-      // 刷新模型列表和投资组合
+      await Promise.all([
+        loadModels(),
+        loadPortfolio(),
+        loadPositions(),
+        loadTrades()
+      ])
+      return result
+    } catch (error) {
+      console.error('[TradingApp] Error executing sell:', error)
+      const errorMsg = error.message || '执行失败，请检查网络连接'
+      showMessage(`卖出交易执行失败: ${errorMsg}`, 'error')
+      throw error
+    } finally {
+      isExecutingSell.value = false
+    }
+  }
+
+  /**
+   * 关闭买入交易
+   */
+  const handleDisableBuy = async () => {
+    if (!currentModelId.value) {
+      showMessage('请先选择模型', 'error')
+      return
+    }
+    
+    if (isDisablingBuy.value) {
+      return // 防止重复点击
+    }
+    
+    isDisablingBuy.value = true
+    try {
+      const result = await modelApi.disableBuy(currentModelId.value)
+      console.log('[TradingApp] Disable buy success:', result)
+      
+      if (result && !result.error) {
+        showMessage('买入交易已关闭', 'success')
+      } else {
+        const errorMsg = result?.error || '操作失败'
+        showMessage(`关闭买入交易失败: ${errorMsg}`, 'error')
+      }
+      
       await Promise.all([
         loadModels(),
         loadPortfolio()
       ])
       return result
     } catch (error) {
-      console.error('[TradingApp] Error toggling auto trading:', error)
-      const errorMsg = error.message || '关闭交易失败，请检查网络连接'
-      showMessage(`关闭交易失败: ${errorMsg}`, 'error')
+      console.error('[TradingApp] Error disabling buy:', error)
+      const errorMsg = error.message || '关闭失败，请检查网络连接'
+      showMessage(`关闭买入交易失败: ${errorMsg}`, 'error')
       throw error
     } finally {
-      isClosingTrading.value = false
+      isDisablingBuy.value = false
+    }
+  }
+
+  /**
+   * 关闭卖出交易
+   */
+  const handleDisableSell = async () => {
+    if (!currentModelId.value) {
+      showMessage('请先选择模型', 'error')
+      return
+    }
+    
+    if (isDisablingSell.value) {
+      return // 防止重复点击
+    }
+    
+    isDisablingSell.value = true
+    try {
+      const result = await modelApi.disableSell(currentModelId.value)
+      console.log('[TradingApp] Disable sell success:', result)
+      
+      if (result && !result.error) {
+        showMessage('卖出交易已关闭', 'success')
+      } else {
+        const errorMsg = result?.error || '操作失败'
+        showMessage(`关闭卖出交易失败: ${errorMsg}`, 'error')
+      }
+      
+      await Promise.all([
+        loadModels(),
+        loadPortfolio()
+      ])
+      return result
+    } catch (error) {
+      console.error('[TradingApp] Error disabling sell:', error)
+      const errorMsg = error.message || '关闭失败，请检查网络连接'
+      showMessage(`关闭卖出交易失败: ${errorMsg}`, 'error')
+      throw error
+    } finally {
+      isDisablingSell.value = false
     }
   }
 
@@ -1770,7 +1847,13 @@ let portfolioSymbolsRefreshInterval = null // 模型持仓合约列表自动刷�
         provider_id: model.provider_id || null,
         model_name: model.model_name || '',
         leverage: model.leverage || 10,
-        max_positions: model.max_positions || 3
+        max_positions: model.max_positions || 3,
+        buy_batch_size: model.buy_batch_size || 1,
+        buy_batch_execution_interval: model.buy_batch_execution_interval || 60,
+        buy_batch_execution_group_size: model.buy_batch_execution_group_size || 1,
+        sell_batch_size: model.sell_batch_size || 1,
+        sell_batch_execution_interval: model.sell_batch_execution_interval || 60,
+        sell_batch_execution_group_size: model.sell_batch_execution_group_size || 1
       }
       
       // 加载当前提供方的可用模型列表
@@ -1786,7 +1869,13 @@ let portfolioSymbolsRefreshInterval = null // 模型持仓合约列表自动刷�
           provider_id: localModel.provider_id || null,
           model_name: localModel.model_name || '',
           leverage: localModel.leverage || 10,
-          max_positions: localModel.max_positions || 3
+          max_positions: localModel.max_positions || 3,
+          buy_batch_size: localModel.buy_batch_size || 1,
+          buy_batch_execution_interval: localModel.buy_batch_execution_interval || 60,
+          buy_batch_execution_group_size: localModel.buy_batch_execution_group_size || 1,
+          sell_batch_size: localModel.sell_batch_size || 1,
+          sell_batch_execution_interval: localModel.sell_batch_execution_interval || 60,
+          sell_batch_execution_group_size: localModel.sell_batch_execution_group_size || 1
         }
         
         // 加载当前提供方的可用模型列表
@@ -1876,6 +1965,19 @@ let portfolioSymbolsRefreshInterval = null // 模型持仓合约列表自动刷�
       promises.push(
         modelApi.setLeverage(pendingModelSettingsId.value, leverageValue),
         modelApi.setMaxPositions(pendingModelSettingsId.value, maxPositionsValue)
+      )
+      
+      // 更新批次配置
+      promises.push(
+        modelApi.setBatchConfig(
+          pendingModelSettingsId.value,
+          tempModelSettings.value.buy_batch_size,
+          tempModelSettings.value.buy_batch_execution_interval,
+          tempModelSettings.value.buy_batch_execution_group_size,
+          tempModelSettings.value.sell_batch_size,
+          tempModelSettings.value.sell_batch_execution_interval,
+          tempModelSettings.value.sell_batch_execution_group_size
+        )
       )
       
       await Promise.all(promises)
@@ -2275,10 +2377,14 @@ let portfolioSymbolsRefreshInterval = null // 模型持仓合约列表自动刷�
     initApp,
     handleRefresh,
     toggleLogger,
-    isExecuting,
-    isClosingTrading,
-    handleExecute,
-    handlePauseAuto,
+    isExecutingBuy,
+    isExecutingSell,
+    isDisablingBuy,
+    isDisablingSell,
+    handleExecuteBuy,
+    handleExecuteSell,
+    handleDisableBuy,
+    handleDisableSell,
     refreshLeaderboard,
     selectModel,
     showAggregatedView,

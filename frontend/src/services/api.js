@@ -61,9 +61,29 @@ export const modelApi = {
   updatePrompts: (modelId, data) => apiPut(`/api/models/${modelId}/prompts`, data),
 
   /**
-   * 执行交易
+   * 执行交易（同时执行买入和卖出）
    */
   execute: (modelId) => apiPost(`/api/models/${modelId}/execute`),
+
+  /**
+   * 执行买入交易
+   */
+  executeBuy: (modelId) => apiPost(`/api/models/${modelId}/execute-buy`),
+
+  /**
+   * 执行卖出交易
+   */
+  executeSell: (modelId) => apiPost(`/api/models/${modelId}/execute-sell`),
+
+  /**
+   * 禁用自动买入
+   */
+  disableBuy: (modelId) => apiPost(`/api/models/${modelId}/disable-buy`),
+
+  /**
+   * 禁用自动卖出
+   */
+  disableSell: (modelId) => apiPost(`/api/models/${modelId}/disable-sell`),
 
   /**
    * 设置自动交易
@@ -84,6 +104,19 @@ export const modelApi = {
    * 更新模型的API提供方和模型名称
    */
   updateProvider: (modelId, providerId, modelName) => apiPut(`/api/models/${modelId}/provider`, { provider_id: providerId, model_name: modelName }),
+
+  /**
+   * 设置模型批次配置
+   */
+  setBatchConfig: (modelId, buyBatchSize, buyBatchExecutionInterval, buyBatchExecutionGroupSize, sellBatchSize, sellBatchExecutionInterval, sellBatchExecutionGroupSize) => 
+    apiPost(`/api/models/${modelId}/batch-config`, {
+      buy_batch_size: buyBatchSize,
+      buy_batch_execution_interval: buyBatchExecutionInterval,
+      buy_batch_execution_group_size: buyBatchExecutionGroupSize,
+      sell_batch_size: sellBatchSize,
+      sell_batch_execution_interval: sellBatchExecutionInterval,
+      sell_batch_execution_group_size: sellBatchExecutionGroupSize
+    }),
 
   /**
    * 获取聚合投资组合数据

@@ -6,16 +6,28 @@
     @close="$emit('close')"
   >
     <div class="form-group">
-      <label>交易频率（分钟）</label>
+      <label>买入执行频率（分钟）</label>
       <input
-        v-model.number="formData.tradingFrequency"
+        v-model.number="formData.buyFrequency"
         type="number"
         min="1"
         max="1440"
         class="form-input"
-        placeholder="60"
+        placeholder="5"
       />
-      <small class="form-help">设置AI交易决策的时间间隔（1-1440分钟）</small>
+      <small class="form-help">设置AI买入决策的时间间隔（1-1440分钟）</small>
+    </div>
+    <div class="form-group">
+      <label>卖出执行频率（分钟）</label>
+      <input
+        v-model.number="formData.sellFrequency"
+        type="number"
+        min="1"
+        max="1440"
+        class="form-input"
+        placeholder="5"
+      />
+      <small class="form-help">设置AI卖出决策的时间间隔（1-1440分钟）</small>
     </div>
     <div class="form-group">
       <label>交易费率</label>
@@ -76,7 +88,8 @@ const props = defineProps({
 const emit = defineEmits(['update:visible', 'close'])
 
 const formData = ref({
-  tradingFrequency: 60,
+  buyFrequency: 5,
+  sellFrequency: 5,
   tradingFeeRate: 0.001,
   showSystemPrompt: false,
   conversationLimit: 5
@@ -89,7 +102,8 @@ const loadSettings = async () => {
   try {
     const data = await settingsApi.get()
     formData.value = {
-      tradingFrequency: data.trading_frequency_minutes || 60,
+      buyFrequency: data.buy_frequency_minutes || 5,
+      sellFrequency: data.sell_frequency_minutes || 5,
       tradingFeeRate: data.trading_fee_rate || 0.001,
       showSystemPrompt: Boolean(data.show_system_prompt),
       conversationLimit: data.conversation_limit || 5
@@ -105,7 +119,8 @@ const handleSave = async () => {
   loading.value = true
   try {
     await settingsApi.update({
-      trading_frequency_minutes: formData.value.tradingFrequency,
+      buy_frequency_minutes: formData.value.buyFrequency,
+      sell_frequency_minutes: formData.value.sellFrequency,
       trading_fee_rate: formData.value.tradingFeeRate,
       show_system_prompt: formData.value.showSystemPrompt,
       conversation_limit: formData.value.conversationLimit

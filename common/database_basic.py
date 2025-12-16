@@ -424,8 +424,15 @@ class Database:
             `model_name` VARCHAR(200) NOT NULL,
             `initial_capital` DOUBLE DEFAULT 10000,
             `leverage` TINYINT UNSIGNED DEFAULT 10,
-            `auto_trading_enabled` TINYINT UNSIGNED DEFAULT 1,
+            `auto_buy_enabled` TINYINT UNSIGNED DEFAULT 1,
+            `auto_sell_enabled` TINYINT UNSIGNED DEFAULT 1,
             `max_positions` TINYINT UNSIGNED DEFAULT 3,
+            `buy_batch_size` INT UNSIGNED DEFAULT 1,
+            `buy_batch_execution_interval` INT UNSIGNED DEFAULT 60,
+            `buy_batch_execution_group_size` INT UNSIGNED DEFAULT 1,
+            `sell_batch_size` INT UNSIGNED DEFAULT 1,
+            `sell_batch_execution_interval` INT UNSIGNED DEFAULT 60,
+            `sell_batch_execution_group_size` INT UNSIGNED DEFAULT 1,
             `api_key` VARCHAR(500),
             `api_secret` VARCHAR(500),
             `account_alias` VARCHAR(100),
@@ -439,7 +446,7 @@ class Database:
         """
         self.command(ddl)
         logger.debug(f"[Database] Ensured table {self.models_table} exists")
-    
+  
     def _ensure_portfolios_table(self):
         """Create portfolios table if not exists"""
         ddl = f"""
@@ -494,8 +501,10 @@ class Database:
             `ai_response` LONGTEXT,
             `cot_trace` LONGTEXT,
             `tokens` INT DEFAULT 0,
+            `type` VARCHAR(10) DEFAULT NULL,
             `timestamp` DATETIME DEFAULT CURRENT_TIMESTAMP,
-            INDEX `idx_model_timestamp` (`model_id`, `timestamp`)
+            INDEX `idx_model_timestamp` (`model_id`, `timestamp`),
+            INDEX `idx_type` (`type`)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
         """
         self.command(ddl)
@@ -579,7 +588,8 @@ class Database:
         ddl = f"""
         CREATE TABLE IF NOT EXISTS `{self.settings_table}` (
             `id` VARCHAR(36) PRIMARY KEY,
-            `trading_frequency_minutes` INT UNSIGNED DEFAULT 5,
+            `buy_frequency_minutes` INT UNSIGNED DEFAULT 5,
+            `sell_frequency_minutes` INT UNSIGNED DEFAULT 5,
             `trading_fee_rate` DOUBLE DEFAULT 0.002,
             `show_system_prompt` TINYINT UNSIGNED DEFAULT 0,
             `conversation_limit` INT UNSIGNED DEFAULT 5,
@@ -589,7 +599,7 @@ class Database:
         """
         self.command(ddl)
         logger.debug(f"[Database] Ensured table {self.settings_table} exists")
-    
+         
     def _ensure_model_prompts_table(self):
         """Create model_prompts table if not exists"""
         ddl = f"""
@@ -765,8 +775,8 @@ class Database:
                 settings_id = str(uuid.uuid4())
                 self.insert_rows(
                     self.settings_table,
-                    [[settings_id, 5, 0.002, 0, current_time, current_time]],
-                    ["id", "trading_frequency_minutes", "trading_fee_rate", "show_system_prompt", "created_at", "updated_at"]
+                    [[settings_id, 5, 5, 0.002, 0, 5, current_time, current_time]],
+                    ["id", "buy_frequency_minutes", "sell_frequency_minutes", "trading_fee_rate", "show_system_prompt", "conversation_limit", "created_at", "updated_at"]
                 )
                 logger.info("[Database] Default settings initialized")
         except Exception as e:
@@ -928,7 +938,9 @@ class Database:
     def add_model(self, name: str, provider_id: int, model_name: str,
                  initial_capital: float = 10000, leverage: int = 10, api_key: str = '', api_secret: str = '', 
                  account_alias: str = '', is_virtual: bool = True, symbol_source: str = 'leaderboard', 
-                 max_positions: int = 3) -> int:
+                 max_positions: int = 3,
+                 buy_batch_size: int = 1, buy_batch_execution_interval: int = 60, buy_batch_execution_group_size: int = 1,
+                 sell_batch_size: int = 1, sell_batch_execution_interval: int = 60, sell_batch_execution_group_size: int = 1) -> int:
         """
         Add new trading model
         
@@ -998,10 +1010,24 @@ class Database:
                 logger.warning(f"[Database] Invalid max_positions value: {max_positions}, using default 3")
                 max_positions = 3
             
+            # 验证批次配置值
+            buy_batch_size = max(1, int(buy_batch_size)) if buy_batch_size is not None else 1
+            buy_batch_execution_interval = max(0, int(buy_batch_execution_interval)) if buy_batch_execution_interval is not None else 60
+            buy_batch_execution_group_size = max(1, int(buy_batch_execution_group_size)) if buy_batch_execution_group_size is not None else 1
+            sell_batch_size = max(1, int(sell_batch_size)) if sell_batch_size is not None else 1
+            sell_batch_execution_interval = max(0, int(sell_batch_execution_interval)) if sell_batch_execution_interval is not None else 60
+            sell_batch_execution_group_size = max(1, int(sell_batch_execution_group_size)) if sell_batch_execution_group_size is not None else 1
+            
             self.insert_rows(
                 self.models_table,
-                [[model_id, name, provider_uuid, model_name, initial_capital, leverage, 1, max_positions, final_api_key, final_api_secret, account_alias, 1 if is_virtual else 0, symbol_source, datetime.now(timezone.utc)]],
-                ["id", "name", "provider_id", "model_name", "initial_capital", "leverage", "auto_trading_enabled", "max_positions", "api_key", "api_secret", "account_alias", "is_virtual", "symbol_source", "created_at"]
+                [[model_id, name, provider_uuid, model_name, initial_capital, leverage, 1, 1, max_positions, 
+                  buy_batch_size, buy_batch_execution_interval, buy_batch_execution_group_size,
+                  sell_batch_size, sell_batch_execution_interval, sell_batch_execution_group_size,
+                  final_api_key, final_api_secret, account_alias, 1 if is_virtual else 0, symbol_source, datetime.now(timezone.utc)]],
+                ["id", "name", "provider_id", "model_name", "initial_capital", "leverage", "auto_buy_enabled", "auto_sell_enabled", "max_positions",
+                 "buy_batch_size", "buy_batch_execution_interval", "buy_batch_execution_group_size",
+                 "sell_batch_size", "sell_batch_execution_interval", "sell_batch_execution_group_size",
+                 "api_key", "api_secret", "account_alias", "is_virtual", "symbol_source", "created_at"]
             )
             
             # 初始化account_values表的一条记录（确保account_alias插入到account_values表中）
@@ -1034,7 +1060,10 @@ class Database:
             # 查询 model 和关联的 provider
             rows = self.query(f"""
                 SELECT m.id, m.name, m.provider_id, m.model_name, m.initial_capital, 
-                       m.leverage, m.auto_trading_enabled, m.max_positions, m.account_alias, m.is_virtual, m.symbol_source, m.created_at,
+                       m.leverage, m.auto_buy_enabled, m.auto_sell_enabled, m.max_positions, 
+                       m.buy_batch_size, m.buy_batch_execution_interval, m.buy_batch_execution_group_size,
+                       m.sell_batch_size, m.sell_batch_execution_interval, m.sell_batch_execution_group_size,
+                       m.account_alias, m.is_virtual, m.symbol_source, m.created_at,
                        m.api_key, m.api_secret, p.api_url, p.provider_type
                 FROM {self.models_table} m
                 LEFT JOIN {self.providers_table} p ON m.provider_id = p.id
@@ -1045,7 +1074,10 @@ class Database:
                 return None
             
             columns = ["id", "name", "provider_id", "model_name", "initial_capital", 
-                      "leverage", "auto_trading_enabled", "max_positions", "account_alias", "is_virtual", "symbol_source", "created_at",
+                      "leverage", "auto_buy_enabled", "auto_sell_enabled", "max_positions",
+                      "buy_batch_size", "buy_batch_execution_interval", "buy_batch_execution_group_size",
+                      "sell_batch_size", "sell_batch_execution_interval", "sell_batch_execution_group_size",
+                      "account_alias", "is_virtual", "symbol_source", "created_at",
                       "api_key", "api_secret", "api_url", "provider_type"]
             result = self._row_to_dict(rows[0], columns)
             # 转换 ID 为 int 以保持兼容性
@@ -1065,6 +1097,24 @@ class Database:
                 result['is_virtual'] = False
             else:
                 result['is_virtual'] = bool(result.get('is_virtual', 0))
+            # 【兼容性处理】确保auto_buy_enabled和auto_sell_enabled有默认值
+            if result.get('auto_buy_enabled') is None:
+                result['auto_buy_enabled'] = 1
+            if result.get('auto_sell_enabled') is None:
+                result['auto_sell_enabled'] = 1
+            # 【兼容性处理】确保批次配置字段有默认值
+            if result.get('buy_batch_size') is None:
+                result['buy_batch_size'] = 1
+            if result.get('buy_batch_execution_interval') is None:
+                result['buy_batch_execution_interval'] = 60
+            if result.get('buy_batch_execution_group_size') is None:
+                result['buy_batch_execution_group_size'] = 1
+            if result.get('sell_batch_size') is None:
+                result['sell_batch_size'] = 1
+            if result.get('sell_batch_execution_interval') is None:
+                result['sell_batch_execution_interval'] = 60
+            if result.get('sell_batch_execution_group_size') is None:
+                result['sell_batch_execution_group_size'] = 1
             return result
         except Exception as e:
             logger.error(f"[Database] Failed to get model {model_id}: {e}")
@@ -1075,14 +1125,20 @@ class Database:
         try:
             rows = self.query(f"""
                 SELECT m.id, m.name, m.provider_id, m.model_name, m.initial_capital,
-                       m.leverage, m.auto_trading_enabled, m.max_positions, m.account_alias, m.is_virtual, m.symbol_source, m.created_at,
+                       m.leverage, m.auto_buy_enabled, m.auto_sell_enabled, m.max_positions,
+                       m.buy_batch_size, m.buy_batch_execution_interval, m.buy_batch_execution_group_size,
+                       m.sell_batch_size, m.sell_batch_execution_interval, m.sell_batch_execution_group_size,
+                       m.account_alias, m.is_virtual, m.symbol_source, m.created_at,
                        p.name as provider_name
                 FROM {self.models_table} m
                 LEFT JOIN {self.providers_table} p ON m.provider_id = p.id
                 ORDER BY m.created_at DESC
             """)
             columns = ["id", "name", "provider_id", "model_name", "initial_capital",
-                      "leverage", "auto_trading_enabled", "max_positions", "account_alias", "is_virtual", "symbol_source", "created_at", "provider_name"]
+                      "leverage", "auto_buy_enabled", "auto_sell_enabled", "max_positions",
+                      "buy_batch_size", "buy_batch_execution_interval", "buy_batch_execution_group_size",
+                      "sell_batch_size", "sell_batch_execution_interval", "sell_batch_execution_group_size",
+                      "account_alias", "is_virtual", "symbol_source", "created_at", "provider_name"]
             results = self._rows_to_dicts(rows, columns)
             
             # 转换 ID 为 int 以保持兼容性
@@ -1103,6 +1159,24 @@ class Database:
                 # 【兼容性处理】确保max_positions有默认值
                 if result.get('max_positions') is None:
                     result['max_positions'] = 3
+                # 【兼容性处理】确保auto_buy_enabled和auto_sell_enabled有默认值
+                if result.get('auto_buy_enabled') is None:
+                    result['auto_buy_enabled'] = 1
+                if result.get('auto_sell_enabled') is None:
+                    result['auto_sell_enabled'] = 1
+                # 【兼容性处理】确保批次配置字段有默认值
+                if result.get('buy_batch_size') is None:
+                    result['buy_batch_size'] = 1
+                if result.get('buy_batch_execution_interval') is None:
+                    result['buy_batch_execution_interval'] = 60
+                if result.get('buy_batch_execution_group_size') is None:
+                    result['buy_batch_execution_group_size'] = 1
+                if result.get('sell_batch_size') is None:
+                    result['sell_batch_size'] = 1
+                if result.get('sell_batch_execution_interval') is None:
+                    result['sell_batch_execution_interval'] = 60
+                if result.get('sell_batch_execution_group_size') is None:
+                    result['sell_batch_execution_group_size'] = 1
                 else:
                     result['is_virtual'] = bool(result.get('is_virtual', 0))
             return results
@@ -1173,74 +1247,138 @@ class Database:
             raise
     
     def set_model_auto_trading(self, model_id: int, enabled: bool) -> bool:
-        """Enable or disable auto trading for a model"""
+        """
+        Enable or disable auto trading for a model (deprecated)
+        
+        此方法已废弃，保留用于向后兼容。
+        新代码应使用 set_model_auto_buy_enabled() 和 set_model_auto_sell_enabled()
+        """
         try:
-            model_mapping = self._get_model_id_mapping()
-            model_uuid = model_mapping.get(model_id)
-            if not model_uuid:
-                return False
-            
-            # 获取当前 model 数据
-            model = self.get_model(model_id)
-            if not model:
-                return False
-            
-            # 获取 provider UUID
-            provider_id_int = model.get('provider_id')
-            provider_uuid = ''
-            if provider_id_int:
-                provider_mapping = self._get_provider_id_mapping()
-                provider_uuid = provider_mapping.get(provider_id_int, '')
-            
-            # 使用 UPDATE 语句更新（MySQL支持UPDATE）
-            self.command(f"""
-                UPDATE `{self.models_table}` 
-                SET `auto_trading_enabled` = %s
-                WHERE `id` = %s
-            """, (1 if enabled else 0, model_uuid))
-            return True
+            # 同时设置买入和卖出
+            buy_success = self.set_model_auto_buy_enabled(model_id, enabled)
+            sell_success = self.set_model_auto_sell_enabled(model_id, enabled)
+            return buy_success and sell_success
         except Exception as e:
             logger.error(f"[Database] Failed to update auto trading flag for model {model_id}: {e}")
             return False
     
     def is_model_auto_trading_enabled(self, model_id: int) -> bool:
         """
-        Check auto trading flag for a model
+        Check auto trading flag for a model (deprecated)
+        
+        此方法已废弃，保留用于向后兼容。
+        返回 auto_buy_enabled 和 auto_sell_enabled 的逻辑与结果（两者都为True时返回True）
         
         Args:
             model_id: 模型ID（整数）
         
         Returns:
-            bool: True if auto_trading_enabled is 1, False if 0 or model not found
+            bool: True if both auto_buy_enabled and auto_sell_enabled are 1, False otherwise
+        """
+        try:
+            buy_enabled = self.is_model_auto_buy_enabled(model_id)
+            sell_enabled = self.is_model_auto_sell_enabled(model_id)
+            return buy_enabled and sell_enabled
+        except Exception as e:
+            logger.error(f"[Database] Failed to check auto trading flag for model {model_id}: {e}")
+            return False
+    
+    def is_model_auto_buy_enabled(self, model_id: int) -> bool:
+        """
+        Check auto buy flag for a model
         
-        Note:
-            - 数据库字段 auto_trading_enabled 存储为 TINYINT(1)，值为 0 或 1
-            - 0 表示禁用自动交易，1 表示启用自动交易
-            - 如果模型不存在或字段值为 0，返回 False
+        Args:
+            model_id: 模型ID（整数）
+        
+        Returns:
+            bool: True if auto_buy_enabled is 1, False if 0 or model not found
         """
         try:
             model = self.get_model(model_id)
             if not model:
-                logger.debug(f"[Database] Model {model_id} not found, auto trading disabled")
+                logger.debug(f"[Database] Model {model_id} not found, auto buy disabled")
                 return False
             
-            # 获取 auto_trading_enabled 字段值（可能是 0, 1, None）
-            auto_trading_enabled = model.get('auto_trading_enabled', 0)
+            auto_buy_enabled = model.get('auto_buy_enabled')
+            if auto_buy_enabled is None:
+                # 兼容性处理：如果字段不存在，默认启用
+                auto_buy_enabled = 1
+                logger.debug(f"[Database] Model {model_id} auto_buy_enabled is None, defaulting to 1")
             
-            # 确保正确处理各种可能的值类型
-            # MySQL 可能返回整数 0/1，也可能是 None
-            if auto_trading_enabled is None:
-                logger.debug(f"[Database] Model {model_id} auto_trading_enabled is None, defaulting to False")
-                return False
-            
-            # 转换为布尔值：0 -> False, 1 -> True, 其他值也转换为布尔值
-            enabled = bool(auto_trading_enabled)
-            logger.debug(f"[Database] Model {model_id} auto_trading_enabled={auto_trading_enabled} -> {enabled}")
+            enabled = bool(auto_buy_enabled)
+            logger.debug(f"[Database] Model {model_id} auto_buy_enabled={auto_buy_enabled} -> {enabled}")
             return enabled
             
         except Exception as e:
-            logger.error(f"[Database] Failed to check auto trading flag for model {model_id}: {e}")
-            # 出错时默认返回 False，确保安全（不执行交易）
+            logger.error(f"[Database] Failed to check auto buy flag for model {model_id}: {e}")
+            return False
+    
+    def is_model_auto_sell_enabled(self, model_id: int) -> bool:
+        """
+        Check auto sell flag for a model
+        
+        Args:
+            model_id: 模型ID（整数）
+        
+        Returns:
+            bool: True if auto_sell_enabled is 1, False if 0 or model not found
+        """
+        try:
+            model = self.get_model(model_id)
+            if not model:
+                logger.debug(f"[Database] Model {model_id} not found, auto sell disabled")
+                return False
+            
+            auto_sell_enabled = model.get('auto_sell_enabled')
+            if auto_sell_enabled is None:
+                # 兼容性处理：如果字段不存在，默认启用
+                auto_sell_enabled = 1
+                logger.debug(f"[Database] Model {model_id} auto_sell_enabled is None, defaulting to 1")
+            
+            enabled = bool(auto_sell_enabled)
+            logger.debug(f"[Database] Model {model_id} auto_sell_enabled={auto_sell_enabled} -> {enabled}")
+            return enabled
+            
+        except Exception as e:
+            logger.error(f"[Database] Failed to check auto sell flag for model {model_id}: {e}")
+            return False
+    
+    def set_model_auto_buy_enabled(self, model_id: int, enabled: bool) -> bool:
+        """Enable or disable auto buy for a model"""
+        try:
+            model_mapping = self._get_model_id_mapping()
+            model_uuid = model_mapping.get(model_id)
+            if not model_uuid:
+                return False
+            
+            self.command(f"""
+                UPDATE `{self.models_table}` 
+                SET `auto_buy_enabled` = %s
+                WHERE `id` = %s
+            """, (1 if enabled else 0, model_uuid))
+            logger.info(f"[Database] Updated auto_buy_enabled to {enabled} for model {model_id}")
+            return True
+        except Exception as e:
+            logger.error(f"[Database] Failed to update auto buy flag for model {model_id}: {e}")
+            return False
+    
+    def set_model_auto_sell_enabled(self, model_id: int, enabled: bool) -> bool:
+        """Enable or disable auto sell for a model"""
+        try:
+            model_mapping = self._get_model_id_mapping()
+            model_uuid = model_mapping.get(model_id)
+            if not model_uuid:
+                return False
+            
+            self.command(f"""
+                UPDATE `{self.models_table}` 
+                SET `auto_sell_enabled` = %s
+                WHERE `id` = %s
+            """, (1 if enabled else 0, model_uuid))
+            logger.info(f"[Database] Updated auto_sell_enabled to {enabled} for model {model_id}")
+            return True
+        except Exception as e:
+            logger.error(f"[Database] Failed to update auto sell flag for model {model_id}: {e}")
             return False
     
     def set_model_leverage(self, model_id: int, leverage: int) -> bool:
@@ -1260,6 +1398,66 @@ class Database:
             return True
         except Exception as e:
             logger.error(f"[Database] Failed to update leverage for model {model_id}: {e}")
+            return False
+    
+    def set_model_batch_config(self, model_id: int, 
+                               buy_batch_size: int = None, buy_batch_execution_interval: int = None, buy_batch_execution_group_size: int = None,
+                               sell_batch_size: int = None, sell_batch_execution_interval: int = None, sell_batch_execution_group_size: int = None) -> bool:
+        """Update model batch configuration (批次配置)"""
+        try:
+            model_mapping = self._get_model_id_mapping()
+            model_uuid = model_mapping.get(model_id)
+            if not model_uuid:
+                return False
+            
+            # 构建更新字段列表
+            updates = []
+            params = []
+            
+            if buy_batch_size is not None:
+                buy_batch_size = max(1, int(buy_batch_size))
+                updates.append("`buy_batch_size` = %s")
+                params.append(buy_batch_size)
+            
+            if buy_batch_execution_interval is not None:
+                buy_batch_execution_interval = max(0, int(buy_batch_execution_interval))
+                updates.append("`buy_batch_execution_interval` = %s")
+                params.append(buy_batch_execution_interval)
+            
+            if buy_batch_execution_group_size is not None:
+                buy_batch_execution_group_size = max(1, int(buy_batch_execution_group_size))
+                updates.append("`buy_batch_execution_group_size` = %s")
+                params.append(buy_batch_execution_group_size)
+            
+            if sell_batch_size is not None:
+                sell_batch_size = max(1, int(sell_batch_size))
+                updates.append("`sell_batch_size` = %s")
+                params.append(sell_batch_size)
+            
+            if sell_batch_execution_interval is not None:
+                sell_batch_execution_interval = max(0, int(sell_batch_execution_interval))
+                updates.append("`sell_batch_execution_interval` = %s")
+                params.append(sell_batch_execution_interval)
+            
+            if sell_batch_execution_group_size is not None:
+                sell_batch_execution_group_size = max(1, int(sell_batch_execution_group_size))
+                updates.append("`sell_batch_execution_group_size` = %s")
+                params.append(sell_batch_execution_group_size)
+            
+            if not updates:
+                return True  # 没有需要更新的字段
+            
+            params.append(model_uuid)
+            sql = f"""
+                UPDATE `{self.models_table}` 
+                SET {', '.join(updates)}
+                WHERE `id` = %s
+            """
+            self.command(sql, tuple(params))
+            logger.info(f"[Database] Updated batch config for model {model_id}")
+            return True
+        except Exception as e:
+            logger.error(f"[Database] Failed to update batch config for model {model_id}: {e}")
             return False
     
     def set_model_max_positions(self, model_id: int, max_positions: int) -> bool:
@@ -1573,9 +1771,18 @@ class Database:
     # ============ Conversation（对话记录）管理方法 ============
     
     def add_conversation(self, model_id: int, user_prompt: str,
-                        ai_response: str, cot_trace: str = '', tokens: int = 0) -> Optional[str]:
+                        ai_response: str, cot_trace: str = '', tokens: int = 0, 
+                        conversation_type: Optional[str] = None) -> Optional[str]:
         """
         Add conversation record
+        
+        Args:
+            model_id: 模型ID（整数）
+            user_prompt: 用户提示词
+            ai_response: AI响应
+            cot_trace: 思维链追踪（可选）
+            tokens: token使用数量（可选，默认0）
+            conversation_type: 对话类型，'buy'（买入决策）或 'sell'（卖出决策），可选
         
         Returns:
             conversation_id (str): 对话记录的ID（UUID字符串），如果失败则返回None
@@ -1587,15 +1794,22 @@ class Database:
                 logger.warning(f"[Database] Model {model_id} not found for conversation record")
                 return None
             
+            # 验证conversation_type值
+            if conversation_type and conversation_type not in ['buy', 'sell']:
+                logger.warning(f"[Database] Invalid conversation_type '{conversation_type}', must be 'buy' or 'sell'. Setting to None.")
+                conversation_type = None
+            
             # 使用 UTC+8 时区时间（北京时间），转换为 naive datetime 存储
             beijing_tz = timezone(timedelta(hours=8))
             current_time = datetime.now(beijing_tz).replace(tzinfo=None)
             
             conv_id = self._generate_id()
+            # 如果conversation_type为None，插入NULL而不是空字符串
+            type_value = conversation_type if conversation_type else None
             self.insert_rows(
                 self.conversations_table,
-                [[conv_id, model_uuid, user_prompt, ai_response, cot_trace or '', tokens, current_time]],
-                ["id", "model_id", "user_prompt", "ai_response", "cot_trace", "tokens", "timestamp"]
+                [[conv_id, model_uuid, user_prompt, ai_response, cot_trace or '', tokens, type_value, current_time]],
+                ["id", "model_id", "user_prompt", "ai_response", "cot_trace", "tokens", "type", "timestamp"]
             )
             return conv_id
         except Exception as e:
@@ -1739,7 +1953,7 @@ class Database:
                 LIMIT %s
             """, (model_uuid, limit))
             
-            columns = ["id", "model_id", "user_prompt", "ai_response", "cot_trace", "tokens", "timestamp"]
+            columns = ["id", "model_id", "user_prompt", "ai_response", "cot_trace", "tokens", "type", "timestamp"]
             results = self._rows_to_dicts(rows, columns)
             
             # 额外验证：确保返回的所有记录都属于指定的 model_id（双重保险）
@@ -2422,17 +2636,18 @@ class Database:
         """Get system settings"""
         try:
             rows = self.query(f"""
-                SELECT trading_frequency_minutes, trading_fee_rate, show_system_prompt, conversation_limit
+                SELECT buy_frequency_minutes, sell_frequency_minutes, trading_fee_rate, show_system_prompt, conversation_limit
                 FROM {self.settings_table}
                 ORDER BY updated_at DESC
                 LIMIT 1
             """)
             
             if rows:
-                columns = ["trading_frequency_minutes", "trading_fee_rate", "show_system_prompt", "conversation_limit"]
+                columns = ["buy_frequency_minutes", "sell_frequency_minutes", "trading_fee_rate", "show_system_prompt", "conversation_limit"]
                 result = self._row_to_dict(rows[0], columns)
                 return {
-                    'trading_frequency_minutes': int(result['trading_frequency_minutes']),
+                    'buy_frequency_minutes': int(result.get('buy_frequency_minutes', 5)),
+                    'sell_frequency_minutes': int(result.get('sell_frequency_minutes', 5)),
                     'trading_fee_rate': float(result['trading_fee_rate']),
                     'show_system_prompt': int(result.get('show_system_prompt', 0)),
                     'conversation_limit': int(result.get('conversation_limit', 5))
@@ -2440,7 +2655,8 @@ class Database:
             else:
                 # 返回默认设置
                 return {
-                    'trading_frequency_minutes': 5,
+                    'buy_frequency_minutes': 5,
+                    'sell_frequency_minutes': 5,
                     'trading_fee_rate': 0.001,
                     'show_system_prompt': 0,
                     'conversation_limit': 5
@@ -2448,19 +2664,28 @@ class Database:
         except Exception as e:
             logger.error(f"[Database] Failed to get settings: {e}")
             return {
-                'trading_frequency_minutes': 5,
+                'buy_frequency_minutes': 5,
+                'sell_frequency_minutes': 5,
                 'trading_fee_rate': 0.001,
                 'show_system_prompt': 0,
                 'conversation_limit': 5
             }
     
-    def update_settings(self, trading_frequency_minutes: int, trading_fee_rate: float,
+    def update_settings(self, buy_frequency_minutes: int, sell_frequency_minutes: int, trading_fee_rate: float,
                         show_system_prompt: int, conversation_limit: int = 5) -> bool:
         """Update system settings"""
         try:
             # 使用 UTC+8 时区时间（北京时间），转换为 naive datetime 存储
             beijing_tz = timezone(timedelta(hours=8))
             current_time = datetime.now(beijing_tz).replace(tzinfo=None)
+            
+            # 验证频率值
+            if not isinstance(buy_frequency_minutes, int) or buy_frequency_minutes < 1:
+                logger.warning(f"[Database] Invalid buy_frequency_minutes value: {buy_frequency_minutes}, using default 5")
+                buy_frequency_minutes = 5
+            if not isinstance(sell_frequency_minutes, int) or sell_frequency_minutes < 1:
+                logger.warning(f"[Database] Invalid sell_frequency_minutes value: {sell_frequency_minutes}, using default 5")
+                sell_frequency_minutes = 5
             
             # 验证conversation_limit值
             if not isinstance(conversation_limit, int) or conversation_limit < 1:
@@ -2479,20 +2704,21 @@ class Database:
                 settings_id = existing_rows[0][0]
                 self.command(f"""
                     UPDATE {self.settings_table}
-                    SET trading_frequency_minutes = %s,
+                    SET buy_frequency_minutes = %s,
+                        sell_frequency_minutes = %s,
                         trading_fee_rate = %s,
                         show_system_prompt = %s,
                         conversation_limit = %s,
                         updated_at = %s
                     WHERE id = %s
-                """, (trading_frequency_minutes, trading_fee_rate, show_system_prompt, conversation_limit, current_time, settings_id))
+                """, (buy_frequency_minutes, sell_frequency_minutes, trading_fee_rate, show_system_prompt, conversation_limit, current_time, settings_id))
             else:
                 # 如果不存在记录，使用 INSERT 插入
                 settings_id = self._generate_id()
                 self.insert_rows(
                     self.settings_table,
-                    [[settings_id, trading_frequency_minutes, trading_fee_rate, show_system_prompt, conversation_limit, current_time, current_time]],
-                    ["id", "trading_frequency_minutes", "trading_fee_rate", "show_system_prompt", "conversation_limit", "created_at", "updated_at"]
+                    [[settings_id, buy_frequency_minutes, sell_frequency_minutes, trading_fee_rate, show_system_prompt, conversation_limit, current_time, current_time]],
+                    ["id", "buy_frequency_minutes", "sell_frequency_minutes", "trading_fee_rate", "show_system_prompt", "conversation_limit", "created_at", "updated_at"]
                 )
             return True
         except Exception as e:
