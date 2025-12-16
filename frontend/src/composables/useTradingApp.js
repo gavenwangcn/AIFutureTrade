@@ -1505,6 +1505,11 @@ let portfolioSymbolsRefreshInterval = null // 模型持仓合约列表自动刷�
       return // 防止重复点击
     }
     
+    // 如果正在执行买入，重置执行状态
+    if (isExecutingBuy.value) {
+      isExecutingBuy.value = false
+    }
+    
     isDisablingBuy.value = true
     try {
       const result = await modelApi.disableBuy(currentModelId.value)
@@ -1543,6 +1548,11 @@ let portfolioSymbolsRefreshInterval = null // 模型持仓合约列表自动刷�
     
     if (isDisablingSell.value) {
       return // 防止重复点击
+    }
+    
+    // 如果正在执行卖出，重置执行状态
+    if (isExecutingSell.value) {
+      isExecutingSell.value = false
     }
     
     isDisablingSell.value = true

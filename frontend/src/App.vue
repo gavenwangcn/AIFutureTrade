@@ -515,7 +515,12 @@
             <div v-else class="conversations-list">
               <div v-for="conv in conversations" :key="conv.id" class="conversation-item">
                 <div class="conversation-header">
-                  <div class="conversation-time">{{ conv.timestamp || conv.time || '' }}</div>
+                  <div class="conversation-time-wrapper">
+                    <span class="conversation-time">{{ conv.timestamp || conv.time || '' }}</span>
+                    <span v-if="conv.type" :class="['conversation-type-badge', `badge-${conv.type}`]">
+                      {{ conv.type === 'buy' ? '买入' : conv.type === 'sell' ? '卖出' : conv.type }}
+                    </span>
+                  </div>
                   <div class="conversation-tokens">
                     <i class="bi bi-cpu"></i>
                     <span class="tokens-label">Tokens:</span>
