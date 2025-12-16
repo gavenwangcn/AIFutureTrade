@@ -255,38 +255,78 @@ class MarketDataFetcher:
 
     def get_prices(self, symbols: Optional[List[str]] = None) -> Dict[str, Dict]:
         """
-        获取最新价格数据（实时获取，无缓存）
+        获取最新价格数据（从24_market_tickers表获取）
         
-        实时从交易所获取最新价格数据，不使用任何缓存机制。
-        如果无法从SDK获取价格，则返回空字典。
+        从数据库的24_market_tickers表中获取最新价格数据，包括价格、涨跌百分比和当日成交额。
+        如果无法获取数据库数据，则返回空字典。
         
         Args:
             symbols: 可选的交易对符号列表，如果为None则返回所有已配置的交易对
             
         Returns:
-            价格数据字典，key为交易对符号，value为价格信息。如果SDK获取失败，返回空字典。
+            价格数据字典，key为交易对符号，value为价格信息。如果数据库获取失败，返回空字典。
         """
         now = datetime.now(timezone(timedelta(hours=8)))
         
-        # 实时获取价格数据（不使用缓存）
-        live_prices = self.get_current_prices(symbols)
-        if live_prices:
-            # 标记为实时数据
-            for payload in live_prices.values():
-                payload['source'] = 'live'
-                payload['price_date'] = now.strftime('%Y-%m-%d')
-            return live_prices
-
-        # 如果无法获取实时数据，返回空字典
-        logger.warning('[Prices] No price data available from SDK')
+        # 从数据库24_market_tickers表获取价格数据
+        if self._mysql_db:
+            try:
+                # 构建查询SQL
+                query = """
+                SELECT 
+                    `symbol`, `last_price`, `change_percent_text`, `quote_volume`,
+                    `event_time`
+                FROM `24_market_tickers`
+                WHERE 1=1
+                """
+                
+                params = []
+                if symbols and len(symbols) > 0:
+                    placeholders = ', '.join(['%s'] * len(symbols))
+                    query += f" AND `symbol` IN ({placeholders})"
+                    params.extend(symbols)
+                
+                # 执行查询
+                rows = self._mysql_db.query(query, tuple(params))
+                
+                # 处理查询结果
+                result = {}
+                for row in rows:
+                    if len(row) >= 5:
+                        symbol = row[0]
+                        result[symbol] = {
+                            'symbol': symbol,
+                            'price': float(row[1]) if row[1] is not None else 0.0,
+                            'last_price': float(row[1]) if row[1] is not None else 0.0,
+                            'change_percent_text': row[2] if row[2] is not None else '0.00%',
+                            'change_percent': float(row[2].rstrip('%')) if row[2] and row[2] != 'N/A' else 0.0,
+                            'change_24h': float(row[2].rstrip('%')) if row[2] and row[2] != 'N/A' else 0.0,
+                            'quote_volume': float(row[3]) if row[3] is not None else 0.0,
+                            'daily_volume': float(row[3]) if row[3] is not None else 0.0,
+                            'event_time': row[4] if row[4] is not None else now,
+                            'source': 'database',
+                            'price_date': now.strftime('%Y-%m-%d'),
+                            # 保留原有结构的兼容字段
+                            'name': symbol.replace('USDT', '') if symbol.endswith('USDT') else symbol,
+                            'exchange': 'BINANCE_FUTURES',
+                            'contract_symbol': symbol
+                        }
+                
+                logger.info(f'[Prices] Retrieved {len(result)} price records from database')
+                return result
+                
+            except Exception as e:
+                logger.error(f'[Prices] Failed to retrieve prices from database: {e}')
+        
+        # 如果数据库不可用或查询失败，返回空字典
+        logger.warning('[Prices] No price data available from database')
         return {}
 
     def get_current_prices(self, symbols: List[str] = None) -> Dict[str, Dict]:
         """
-        获取当前期货价格（实时获取，无缓存）
+        获取当前期货价格（从API获取实时价格）
         
-        此方法实时从交易所获取最新价格数据，不使用任何缓存机制，
-        以保证最高实时性。每次调用都直接请求交易所API获取最新数据。
+        此方法从币安API获取实时价格数据，确保数据的最高实时性。
         
         Args:
             symbols: 交易对符号列表，必须提供，如果为None或空列表则返回空字典
@@ -298,37 +338,59 @@ class MarketDataFetcher:
         if not symbols:
             return {}
 
-        # 确保所有symbol都以USDT结尾，防止重复添加
+        # 确保所有symbol都以USDT结尾
         quote_asset = getattr(self, '_futures_quote_asset', 'USDT')
         formatted_symbols = [_ensure_usdt_suffix(symbol, quote_asset) for symbol in symbols]
         
-        # 直接为传入的symbols构造简单的futures列表，只包含symbol字段
-        futures = [{'symbol': symbol} for symbol in formatted_symbols]
+        # 从API获取实时价格数据
+        if self._futures_client:
+            try:
+                # 调用get_symbol_prices方法获取实时价格
+                api_prices = self._futures_client.get_symbol_prices(formatted_symbols)
+                
+                # 处理查询结果，确保返回格式与原来一致
+                result = {}
+                symbol_mapping = dict(zip(formatted_symbols, symbols))  # formatted -> original
+                now = datetime.now(timezone(timedelta(hours=8)))
+                
+                for formatted_symbol, price_data in api_prices.items():
+                    original_symbol = symbol_mapping.get(formatted_symbol, formatted_symbol)
+                    
+                    # 从API返回的数据中提取价格
+                    price = float(price_data.get('price', 0.0)) if price_data.get('price') else 0.0
+                    
+                    # 由于API只返回价格，没有涨跌幅和成交量，我们需要使用默认值
+                    # 这些字段将在get_prices方法中从数据库获取
+                    result[original_symbol] = {
+                        'symbol': original_symbol,
+                        'price': price,
+                        'last_price': price,
+                        'change_percent_text': '0.00%',
+                        'change_percent': 0.0,
+                        'change_24h': 0.0,  # 兼容前端使用的字段名
+                        'quote_volume': 0.0,
+                        'daily_volume': 0.0,  # 兼容前端使用的字段名
+                        'event_time': now,
+                        'source': 'api',
+                        'price_date': now.strftime('%Y-%m-%d'),
+                        'name': original_symbol.replace('USDT', '') if original_symbol.endswith('USDT') else original_symbol,
+                        'exchange': 'BINANCE_FUTURES',
+                        'contract_symbol': formatted_symbol
+                    }
+                
+                logger.info(f'[Current Prices] Retrieved {len(result)} price records from API')
+                return result
+                
+            except Exception as e:
+                logger.error(f'[Current Prices] Failed to retrieve prices from API: {e}')
         
-        if not futures:
-            return {}
-
-        # 实时获取价格数据（不使用缓存）
-        prices = self._fetch_from_binance_futures(futures)
-
-        # 直接从SDK获取价格，如果获取不到则返回空（不包含在prices字典中）
-        # 注意：_fetch_from_binance_futures返回的key是futures列表中的symbol字段（即formatted_symbols）
-        # 需要建立映射关系，将formatted_symbol映射回original_symbol
-        result_prices = {}
-        symbol_mapping = dict(zip(formatted_symbols, symbols))  # formatted -> original
-        for formatted_symbol, original_symbol in symbol_mapping.items():
-            if formatted_symbol in prices:
-                result_prices[original_symbol] = prices[formatted_symbol]
-            # 也尝试用original_symbol作为key（兼容某些情况下直接返回original_symbol的情况）
-            elif original_symbol in prices:
-                result_prices[original_symbol] = prices[original_symbol]
-        
-        # 如果映射结果为空但prices不为空，说明可能key格式不匹配，直接返回prices
-        return result_prices if result_prices else prices
+        # 如果API不可用或查询失败，返回空字典
+        logger.warning('[Current Prices] No price data available from API')
+        return {}
     
     def get_current_prices_by_contract(self, contract_symbols: List[str]) -> Dict[str, Dict]:
         """
-        通过合约符号获取当前期货价格（实时获取，无缓存）
+        通过合约符号获取当前期货价格（从API获取实时价格）
         
         此方法与get_current_prices类似，但接受合约符号列表而不是基础符号列表，
         并以合约符号为键返回价格数据。
@@ -342,46 +404,49 @@ class MarketDataFetcher:
         if not contract_symbols:
             return {}
         
-        # 确保所有contract_symbol都以USDT结尾，防止重复添加
+        # 确保所有contract_symbol都以USDT结尾
         quote_asset = getattr(self, '_futures_quote_asset', 'USDT')
         formatted_contract_symbols = [_ensure_usdt_suffix(symbol, quote_asset) for symbol in contract_symbols]
-            
-        # 实时获取价格数据（不使用缓存）
-        prices = {}
-        if self._futures_client:
-            # 直接使用合约符号获取24小时行情数据（使用格式化后的symbol）
-            tickers = self._futures_client.get_24h_ticker(formatted_contract_symbols)
-            spot_prices = self._futures_client.get_symbol_prices(formatted_contract_symbols)
-            
-            # 建立映射关系：formatted -> original
-            symbol_mapping = dict(zip(formatted_contract_symbols, contract_symbols))
-            
-            for formatted_symbol, original_symbol in symbol_mapping.items():
-                payload = tickers.get(formatted_symbol)
-                if not payload:
-                    continue
-                    
-                try:
-                    last_price = round(float(
-                        payload.get('lastPrice')
-                        or spot_prices.get(formatted_symbol, {}).get('price', 0)
-                    ), 6)  # 价格保留6位小数
-                    
-                    change_percent = float(payload.get('priceChangePercent', 0))
-                    quote_volume = float(payload.get('quoteVolume', payload.get('volume', 0)))
-                    
-                    # 构建价格数据，使用原始symbol作为key
-                    prices[original_symbol] = {
-                        'price': last_price,
-                        'last_price': last_price,  # 同时提供last_price字段以便兼容
-                        'change_percent': change_percent,
-                        'quote_volume': quote_volume,
-                        'daily_volume': quote_volume  # 同时提供daily_volume字段以便兼容
-                    }
-                except (ValueError, TypeError):
-                    continue
         
-        return prices
+        # 从API获取实时价格数据
+        if self._futures_client:
+            try:
+                # 调用get_symbol_prices方法获取实时价格
+                api_prices = self._futures_client.get_symbol_prices(formatted_contract_symbols)
+                
+                # 处理查询结果，确保返回格式与原来一致
+                prices = {}
+                symbol_mapping = dict(zip(formatted_contract_symbols, contract_symbols))  # formatted -> original
+                now = datetime.now(timezone(timedelta(hours=8)))
+                
+                for formatted_symbol, price_data in api_prices.items():
+                    original_symbol = symbol_mapping.get(formatted_symbol, formatted_symbol)
+                    
+                    # 从API返回的数据中提取价格
+                    price = float(price_data.get('price', 0.0)) if price_data.get('price') else 0.0
+                    
+                    # 由于API只返回价格，没有涨跌幅和成交量，我们需要使用默认值
+                    # 这些字段将在get_prices方法中从数据库获取
+                    prices[original_symbol] = {
+                        'price': price,
+                        'last_price': price,  # 同时提供last_price字段以便兼容
+                        'change_percent': 0.0,
+                        'change_percent_text': '0.00%',
+                        'quote_volume': 0.0,
+                        'daily_volume': 0.0,  # 同时提供daily_volume字段以便兼容
+                        'event_time': now,
+                        'source': 'api'
+                    }
+                
+                logger.info(f'[Current Prices By Contract] Retrieved {len(prices)} price records from API')
+                return prices
+                
+            except Exception as e:
+                logger.error(f'[Current Prices By Contract] Failed to retrieve prices from API: {e}')
+        
+        # 如果API不可用或查询失败，返回空字典
+        logger.warning('[Current Prices By Contract] No price data available from API')
+        return {}
 
     def _fetch_from_binance_futures(self, futures: List[Dict]) -> Dict[str, Dict]:
         """

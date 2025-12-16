@@ -980,7 +980,7 @@ class TradingEngine:
             formatted_symbols.append(formatted_symbol)
             symbol_mapping[formatted_symbol] = symbol
         
-        # 使用 get_current_prices 确保实时价格，不使用缓存
+        # 使用 get_current_prices 从API获取实时价格数据
         prices = self.market_fetcher.get_current_prices(formatted_symbols)
 
         for original_symbol in symbols:
@@ -2441,11 +2441,8 @@ class TradingEngine:
         if not symbol_list:
             return market_state
         
-        # 获取实时价格
-        if symbol_source == 'future':
-            prices = self.market_fetcher.get_current_prices_by_contract(symbol_list)
-        else:
-            prices = self.market_fetcher.get_current_prices(symbol_list)
+        # 获取价格数据
+        prices = self.market_fetcher.get_prices(symbol_list)
         
         # 为每个候选symbol构建市场状态
         for candidate in candidates:

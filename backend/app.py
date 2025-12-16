@@ -766,16 +766,17 @@ def get_portfolio(model_id):
     Note:
         - 先获取持仓的symbol列表，然后获取这些symbol的实时价格
         - 确保所有持仓的symbol都能获取到实时价格，即使不在配置列表中
+        - 优化：只查询一次数据库，在内存中更新实时价格和盈亏信息
     """
     model = db.get_model(model_id)
     if not model:
         return jsonify({'error': f'Model {model_id} not found'}), 404
 
-    # 先获取持仓数据（不传价格，先获取持仓列表）
+    # 获取持仓数据（不传价格）
     try:
-        portfolio_temp = db.get_portfolio(model_id, None)
+        portfolio = db.get_portfolio(model_id, None)
         # 从持仓中提取symbol列表
-        positions = portfolio_temp.get('positions', []) if portfolio_temp else []
+        positions = portfolio.get('positions', []) if portfolio else []
         held_symbols = [pos.get('symbol') for pos in positions if pos.get('symbol')]
         
         # 如果持仓为空，使用配置的合约列表作为备选
@@ -789,15 +790,54 @@ def get_portfolio(model_id):
     except Exception as e:
         logger.warning(f"Failed to get portfolio symbols for model {model_id}, using configured symbols: {e}")
         held_symbols = get_tracked_symbols()
+        portfolio = {
+            'model_id': model_id,
+            'initial_capital': model.get('initial_capital', 10000),
+            'cash': 0,
+            'positions': [],
+            'positions_value': 0,
+            'margin_used': 0,
+            'total_value': 0,
+            'realized_pnl': 0,
+            'unrealized_pnl': 0
+        }
     
-    # 获取实时价格数据（使用get_current_prices确保实时获取）
-    prices_data = market_fetcher.get_current_prices(held_symbols)
+    # 获取实时价格数据（使用get_prices从数据库获取）
+    prices_data = market_fetcher.get_prices(held_symbols)
     current_prices = {symbol: data.get('price', 0) for symbol, data in prices_data.items() if data.get('price')}
 
-    try:
-        portfolio = db.get_portfolio(model_id, current_prices)
-    except ValueError as exc:
-        return jsonify({'error': str(exc)}), 404
+    # 在内存中更新持仓的当前价格和盈亏信息，避免再次查询数据库
+    if positions and current_prices:
+        unrealized_pnl = 0
+        for pos in positions:
+            symbol = pos['symbol']
+            if symbol in current_prices:
+                current_price = current_prices[symbol]
+                entry_price = pos['avg_price']
+                position_amt = abs(pos['position_amt'])  # 使用绝对值
+                pos['current_price'] = current_price
+                
+                # 优先使用数据库中的unrealized_profit字段
+                if pos.get('unrealized_profit') is not None and pos['unrealized_profit'] != 0:
+                    pos_pnl = pos['unrealized_profit']
+                else:
+                    # 如果没有，则计算
+                    if pos['position_side'] == 'LONG':
+                        pos_pnl = (current_price - entry_price) * position_amt
+                    else:  # SHORT
+                        pos_pnl = (entry_price - current_price) * position_amt
+                
+                pos['pnl'] = pos_pnl
+                unrealized_pnl += pos_pnl
+            else:
+                pos['current_price'] = None
+                # 使用数据库中的unrealized_profit字段
+                pos['pnl'] = pos.get('unrealized_profit', 0)
+                unrealized_pnl += pos.get('unrealized_profit', 0)
+        
+        # 更新组合的未实现盈亏和总价值
+        portfolio['unrealized_pnl'] = unrealized_pnl
+        portfolio['total_value'] = portfolio['initial_capital'] + portfolio['realized_pnl'] + unrealized_pnl
 
     account_value = db.get_account_value_history(model_id, limit=100)
 
@@ -823,13 +863,10 @@ def get_model_portfolio_symbols(model_id):
     if not model:
         return jsonify({'error': f'Model {model_id} not found'}), 404
     
-    # 使用 database_basic.py 的 Database 类获取持仓数据（正确处理 UUID 转换）
-    symbols = get_tracked_symbols()
-    prices_data = market_fetcher.get_prices(symbols)
-    current_prices = {symbol: data['price'] for symbol, data in prices_data.items()}
-    
+    symbols = []
     try:
-        portfolio = db.get_portfolio(model_id, current_prices)
+        # 先获取持仓数据（不传递价格参数）
+        portfolio = db.get_portfolio(model_id, None)
         # 从持仓数据中提取去重的 symbol 列表
         positions = portfolio.get('positions', []) if portfolio else []
         symbols_set = set()
@@ -845,22 +882,29 @@ def get_model_portfolio_symbols(model_id):
     if not symbols:
         return jsonify({'data': []}), 200
     
-    # 获取实时价格数据（使用 get_current_prices 确保获取最新数据）
-    prices_data = market_fetcher.get_current_prices(symbols)
+    # 从API获取实时价格
+    current_prices = market_fetcher.get_current_prices(symbols)
+    # 从数据库获取完整的市场数据（包括涨跌幅和成交量）
+    market_data = market_fetcher.get_prices(symbols)
     
-    # 构建响应数据
+    # 构建响应数据：合并实时价格和完整市场数据
     result = []
     for symbol in symbols:
-        price_info = prices_data.get(symbol, {})
+        # 从数据库获取的完整市场数据
+        db_info = market_data.get(symbol, {})
+        # 从API获取的实时价格
+        api_info = current_prices.get(symbol, {})
+        
+        # 使用API的实时价格，其他数据使用数据库的数据
         symbol_data = {
             'symbol': symbol,
-            'price': price_info.get('price', 0),
-            'change': price_info.get('change_24h', price_info.get('change', 0)),
-            'changePercent': price_info.get('change_24h', price_info.get('changePercent', 0)),
-            'volume': price_info.get('daily_volume', price_info.get('volume', 0)),
-            'quoteVolume': price_info.get('daily_volume', price_info.get('quote_volume', price_info.get('quoteVolume', 0))),
-            'high': price_info.get('high', 0),
-            'low': price_info.get('low', 0)
+            'price': api_info.get('price', db_info.get('price', 0)),  # 使用API的实时价格
+            'change': db_info.get('change_24h', db_info.get('change', 0)),  # 使用数据库的涨跌幅
+            'changePercent': db_info.get('change_24h', db_info.get('changePercent', 0)),  # 使用数据库的涨跌幅百分比
+            'volume': db_info.get('daily_volume', db_info.get('volume', 0)),  # 使用数据库的成交量
+            'quoteVolume': db_info.get('daily_volume', db_info.get('quote_volume', db_info.get('quoteVolume', 0))),  # 使用数据库的成交额
+            'high': db_info.get('high', 0),
+            'low': db_info.get('low', 0)
         }
         result.append(symbol_data)
     
@@ -893,7 +937,7 @@ def get_trades(model_id):
     # 获取实时价格
     current_prices = {}
     if symbols:
-        prices_data = market_fetcher.get_current_prices(symbols)
+        prices_data = market_fetcher.get_prices(symbols)
         current_prices = {symbol: data.get('price', 0) for symbol, data in prices_data.items() if data.get('price')}
     
     # 为每条交易记录计算实时盈亏并格式化时间字段
@@ -1243,7 +1287,7 @@ def get_aggregated_portfolio():
         JSON: 包含所有模型的汇总投资组合、图表数据等信息
     """
     symbols = get_tracked_symbols()
-    prices_data = market_fetcher.get_current_prices(symbols)
+    prices_data = market_fetcher.get_prices(symbols)
     current_prices = {symbol: data['price'] for symbol, data in prices_data.items()}
 
     models = db.get_all_models()
