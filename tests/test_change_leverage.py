@@ -32,7 +32,7 @@ logger = logging.getLogger(__name__)
 
 
 
-def test_change_initial_leverage(api_key: str, api_secret: str, symbol: str = "BTCUSDT", leverage: int = 10) -> None:
+def test_change_initial_leverage(symbol: str = "LUNAUSDT", leverage: int = 20) -> None:
     """测试修改初始杠杆方法
     
     Args:
