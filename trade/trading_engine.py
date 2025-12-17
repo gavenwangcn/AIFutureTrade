@@ -1068,7 +1068,7 @@ class TradingEngine:
             raw_response = json.dumps(payload.get('decisions', {}), ensure_ascii=False)
         conversation_id = self.db.add_conversation(
             self.model_id,
-            user_prompt=prompt,
+            user_prompt='',
             ai_response=raw_response,
             cot_trace=cot_trace,
             tokens=tokens,
