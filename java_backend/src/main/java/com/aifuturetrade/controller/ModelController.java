@@ -2,8 +2,6 @@ package com.aifuturetrade.controller;
 
 import com.aifuturetrade.service.ModelService;
 import com.aifuturetrade.service.dto.ModelDTO;
-import com.aifuturetrade.common.util.PageResult;
-import com.aifuturetrade.common.util.PageRequest;
 import io.swagger.annotations.Api;
 import io.swagger.annotations.ApiOperation;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -11,6 +9,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -58,10 +57,10 @@ public class ModelController {
     @ApiOperation("添加新的交易模型")
     public ResponseEntity<Map<String, Object>> addModel(@RequestBody ModelDTO modelDTO) {
         ModelDTO addedModel = modelService.addModel(modelDTO);
-        return new ResponseEntity<>(Map.of(
-                "id", addedModel.getId(),
-                "message", "Model added successfully"
-        ), HttpStatus.CREATED);
+        Map<String, Object> response = new HashMap<>();
+        response.put("id", addedModel.getId());
+        response.put("message", "Model added successfully");
+        return new ResponseEntity<>(response, HttpStatus.CREATED);
     }
 
     /**
@@ -73,16 +72,15 @@ public class ModelController {
     @ApiOperation("删除交易模型")
     public ResponseEntity<Map<String, Object>> deleteModel(@PathVariable Integer modelId) {
         Boolean deleted = modelService.deleteModel(modelId);
+        Map<String, Object> response = new HashMap<>();
         if (deleted) {
-            return new ResponseEntity<>(Map.of(
-                    "success", true,
-                    "message", "Model deleted successfully"
-            ), HttpStatus.OK);
+            response.put("success", true);
+            response.put("message", "Model deleted successfully");
+            return new ResponseEntity<>(response, HttpStatus.OK);
         } else {
-            return new ResponseEntity<>(Map.of(
-                    "success", false,
-                    "error", "Failed to delete model"
-            ), HttpStatus.INTERNAL_SERVER_ERROR);
+            response.put("success", false);
+            response.put("error", "Failed to delete model");
+            return new ResponseEntity<>(response, HttpStatus.INTERNAL_SERVER_ERROR);
         }
     }
 
@@ -173,6 +171,92 @@ public class ModelController {
         String buyPrompt = prompts.get("buy_prompt");
         String sellPrompt = prompts.get("sell_prompt");
         Map<String, Object> result = modelService.updateModelPrompts(modelId, buyPrompt, sellPrompt);
+        return new ResponseEntity<>(result, HttpStatus.OK);
+    }
+
+    /**
+     * 更新模型的批次配置
+     * @param modelId 模型ID
+     * @param batchConfig 批次配置
+     * @return 更新操作结果
+     */
+    @PostMapping("/{modelId}/batch-config")
+    @ApiOperation("更新模型的批次配置")
+    public ResponseEntity<Map<String, Object>> updateModelBatchConfig(@PathVariable Integer modelId, @RequestBody Map<String, Object> batchConfig) {
+        Map<String, Object> result = modelService.updateModelBatchConfig(modelId, batchConfig);
+        return new ResponseEntity<>(result, HttpStatus.OK);
+    }
+
+    /**
+     * 更新模型的最大持仓数量
+     * @param modelId 模型ID
+     * @param requestBody 请求体，包含max_positions
+     * @return 更新操作结果
+     */
+    @PostMapping("/{modelId}/max_positions")
+    @ApiOperation("更新模型的最大持仓数量")
+    public ResponseEntity<Map<String, Object>> updateModelMaxPositions(@PathVariable Integer modelId, @RequestBody Map<String, Object> requestBody) {
+        Integer maxPositions = ((Number) requestBody.get("max_positions")).intValue();
+        Map<String, Object> result = modelService.updateModelMaxPositions(modelId, maxPositions);
+        return new ResponseEntity<>(result, HttpStatus.OK);
+    }
+
+    /**
+     * 更新模型的杠杆倍数
+     * @param modelId 模型ID
+     * @param requestBody 请求体，包含leverage
+     * @return 更新操作结果
+     */
+    @PostMapping("/{modelId}/leverage")
+    @ApiOperation("更新模型的杠杆倍数")
+    public ResponseEntity<Map<String, Object>> updateModelLeverage(@PathVariable Integer modelId, @RequestBody Map<String, Object> requestBody) {
+        Integer leverage = ((Number) requestBody.get("leverage")).intValue();
+        Map<String, Object> result = modelService.updateModelLeverage(modelId, leverage);
+        return new ResponseEntity<>(result, HttpStatus.OK);
+    }
+
+    /**
+     * 更新模型的API提供方和模型名称
+     * @param modelId 模型ID
+     * @param requestBody 请求体，包含provider_id和model_name
+     * @return 更新操作结果
+     */
+    @PutMapping("/{modelId}/provider")
+    @ApiOperation("更新模型的API提供方和模型名称")
+    public ResponseEntity<Map<String, Object>> updateModelProvider(@PathVariable Integer modelId, @RequestBody Map<String, Object> requestBody) {
+        Integer providerId = ((Number) requestBody.get("provider_id")).intValue();
+        String modelName = (String) requestBody.get("model_name");
+        Map<String, Object> result = modelService.updateModelProvider(modelId, providerId, modelName);
+        return new ResponseEntity<>(result, HttpStatus.OK);
+    }
+
+    /**
+     * 设置模型的自动交易开关
+     * @param modelId 模型ID
+     * @param requestBody 请求体，包含auto_buy_enabled和auto_sell_enabled
+     * @return 更新操作结果
+     */
+    @PostMapping("/{modelId}/auto-trading")
+    @ApiOperation("设置模型的自动交易开关")
+    public ResponseEntity<Map<String, Object>> setModelAutoTrading(@PathVariable Integer modelId, @RequestBody Map<String, Object> requestBody) {
+        Boolean autoBuyEnabled = requestBody.get("auto_buy_enabled") instanceof Boolean ? 
+                (Boolean) requestBody.get("auto_buy_enabled") : 
+                ((Number) requestBody.get("auto_buy_enabled")).intValue() == 1;
+        Boolean autoSellEnabled = requestBody.get("auto_sell_enabled") instanceof Boolean ? 
+                (Boolean) requestBody.get("auto_sell_enabled") : 
+                ((Number) requestBody.get("auto_sell_enabled")).intValue() == 1;
+        Map<String, Object> result = modelService.setModelAutoTrading(modelId, autoBuyEnabled, autoSellEnabled);
+        return new ResponseEntity<>(result, HttpStatus.OK);
+    }
+
+    /**
+     * 获取聚合投资组合数据（所有模型）
+     * @return 聚合投资组合数据
+     */
+    @GetMapping("/aggregated/portfolio")
+    @ApiOperation("获取聚合投资组合数据")
+    public ResponseEntity<Map<String, Object>> getAggregatedPortfolio() {
+        Map<String, Object> result = modelService.getAggregatedPortfolio();
         return new ResponseEntity<>(result, HttpStatus.OK);
     }
 

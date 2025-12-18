@@ -1,7 +1,7 @@
 package com.aifuturetrade.service.impl;
 
-import com.aifuturetrade.dal.entity.ProviderDO;
-import com.aifuturetrade.dal.mapper.ProviderMapper;
+import com.aifuturetrade.dao.entity.ProviderDO;
+import com.aifuturetrade.dao.mapper.ProviderMapper;
 import com.aifuturetrade.service.ProviderService;
 import com.aifuturetrade.service.dto.ProviderDTO;
 import com.aifuturetrade.common.util.PageResult;
@@ -13,6 +13,8 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.stream.Collectors;
 
@@ -80,7 +82,7 @@ public class ProviderServiceImpl implements ProviderService {
     public List<String> fetchProviderModels(String apiUrl, String apiKey) {
         // TODO: 实现从API获取可用模型列表的逻辑
         // 示例代码，实际需要调用具体的API
-        return List.of("gpt-3.5-turbo", "gpt-4", "gpt-4-turbo");
+        return new ArrayList<>(Arrays.asList("gpt-3.5-turbo", "gpt-4", "gpt-4-turbo"));
     }
 
     /**

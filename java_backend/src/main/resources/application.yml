@@ -53,7 +53,7 @@ spring:
   # MyBatis配置
   mybatis-plus:
     mapper-locations: classpath:mybatis/*.xml
-    type-aliases-package: com.aifuturetrade.dal.entity
+    type-aliases-package: com.aifuturetrade.dao.entity
     configuration:
       map-underscore-to-camel-case: true
       cache-enabled: false
@@ -118,9 +118,26 @@ binance:
 app:
   auto-trading: true
   trade-fee-rate: 0.001
-  leaderboard-refresh: 10
-  trading-interval: 3600
-  trades-query-limit: 10
+  leaderboard-refresh: 10  # 涨跌幅榜刷新间隔（秒）
+  trading-interval: 3600  # 交易执行间隔（秒）
+  trades-query-limit: 10  # 后端查询的交易记录数量
+  trades-display-count: 5  # 前端显示的交易记录数量
+  # 市场数据配置
+  market-prices-refresh: 10  # 市场行情价格前端轮询刷新间隔（秒）
+  futures-top-gainers-limit: 5  # 涨幅榜返回的交易对数量限制
+  futures-kline-limit: 300  # K线数据获取的最大数量限制
+  # AI交易决策配置
+  prompt-market-symbol-limit: 3  # 每次调用AI模型时处理的市场合约数量
+  buy-decision-thread-count: 1  # 买入决策API调用的并发线程数
+  sell-decision-thread-count: 1  # 卖出决策API调用的并发线程数
+  # 异步服务配置
+  kline-sync-check-interval: 10  # K线WebSocket巡检间隔（秒）
+  kline-cleanup-cron: "0 */1 * * *"  # K线清理Cron表达式，默认每1小时执行一次
+  kline-cleanup-retention-days: 14  # K线数据保留天数，默认14天
+  price-refresh-cron: "*/5 * * * *"  # 价格刷新Cron表达式，默认每5分钟执行一次
+  price-refresh-max-per-minute: 1000  # 每分钟最多刷新的symbol数量
+  market-symbol-offline-cron: "*/30 * * * *"  # 市场Symbol下线Cron表达式，默认每30分钟执行一次
+  market-symbol-retention-minutes: 30  # Ticker数据保留分钟数，默认30分钟
 
 # Swagger配置
 swagger:

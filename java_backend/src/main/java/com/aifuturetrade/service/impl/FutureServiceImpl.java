@@ -1,7 +1,7 @@
 package com.aifuturetrade.service.impl;
 
-import com.aifuturetrade.dal.entity.FutureDO;
-import com.aifuturetrade.dal.mapper.FutureMapper;
+import com.aifuturetrade.dao.entity.FutureDO;
+import com.aifuturetrade.dao.mapper.FutureMapper;
 import com.aifuturetrade.service.FutureService;
 import com.aifuturetrade.service.dto.FutureDTO;
 import com.aifuturetrade.common.util.PageResult;

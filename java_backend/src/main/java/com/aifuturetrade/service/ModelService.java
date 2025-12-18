@@ -121,4 +121,52 @@ public interface ModelService {
      */
     Map<String, Object> updateModelPrompts(Integer modelId, String buyPrompt, String sellPrompt);
 
+    /**
+     * 更新模型的批次配置
+     * @param modelId 模型ID
+     * @param batchConfig 批次配置
+     * @return 更新结果
+     */
+    Map<String, Object> updateModelBatchConfig(Integer modelId, Map<String, Object> batchConfig);
+
+    /**
+     * 更新模型的最大持仓数量
+     * @param modelId 模型ID
+     * @param maxPositions 最大持仓数量
+     * @return 更新结果
+     */
+    Map<String, Object> updateModelMaxPositions(Integer modelId, Integer maxPositions);
+
+    /**
+     * 更新模型的杠杆倍数
+     * @param modelId 模型ID
+     * @param leverage 杠杆倍数
+     * @return 更新结果
+     */
+    Map<String, Object> updateModelLeverage(Integer modelId, Integer leverage);
+
+    /**
+     * 更新模型的API提供方和模型名称
+     * @param modelId 模型ID
+     * @param providerId 新的API提供方ID
+     * @param modelName 新的模型名称
+     * @return 更新结果
+     */
+    Map<String, Object> updateModelProvider(Integer modelId, Integer providerId, String modelName);
+
+    /**
+     * 设置模型的自动交易开关
+     * @param modelId 模型ID
+     * @param autoBuyEnabled 是否启用自动买入
+     * @param autoSellEnabled 是否启用自动卖出
+     * @return 更新结果
+     */
+    Map<String, Object> setModelAutoTrading(Integer modelId, Boolean autoBuyEnabled, Boolean autoSellEnabled);
+
+    /**
+     * 获取聚合投资组合数据（所有模型）
+     * @return 聚合投资组合数据
+     */
+    Map<String, Object> getAggregatedPortfolio();
+
 }
