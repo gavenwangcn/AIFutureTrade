@@ -3,20 +3,16 @@
 
 本模块提供以下功能：
 1. Ticker流：实时接收所有交易对的24小时ticker数据，存储到24_market_tickers表
-2. K线数据规范化：提供K线数据的规范化函数，供其他模块使用
 
 主要组件：
 - MarketTickerStream: 管理全市场ticker的WebSocket流
 - run_market_ticker_stream: 运行ticker流的主入口函数（支持自动重连）
-- _normalize_kline: K线数据规范化函数（供data_agent模块使用）
 
 使用场景：
 - 后台服务：通过async_agent启动ticker流服务
-- 数据规范化：data_agent模块使用_normalize_kline函数处理K线数据
 
 注意：
 - Ticker流每30分钟自动重连（币安WebSocket连接限制）
-- K线流管理已迁移到data_agent模块，本模块不再提供KlineStreamManager
 """
 from __future__ import annotations
 
@@ -35,7 +31,7 @@ from binance_sdk_derivatives_trading_usds_futures.derivatives_trading_usds_futur
 from binance_common.constants import WebsocketMode
 
 import common.config as app_config
-from common.database_mysql import MySQLDatabase
+from common.database_market_tickers import MarketTickersDatabase
 
 logger = logging.getLogger(__name__)
 
@@ -247,7 +243,7 @@ class MarketTickerStream:
         await streamer.stream(run_seconds=60)  # 运行60秒后停止
     """
 
-    def __init__(self, db: MySQLDatabase) -> None:
+    def __init__(self, db: MarketTickersDatabase) -> None:
         """
         初始化Ticker流管理器
         
@@ -451,7 +447,7 @@ async def run_market_ticker_stream(run_seconds: Optional[int] = None) -> None:
         - 可以通过asyncio.CancelledError取消任务
         - 所有资源都有严格的超时管理，避免长时间卡住
     """
-    db = MySQLDatabase()
+    db = MarketTickersDatabase()
     
     try:
         if run_seconds is not None:
@@ -488,165 +484,7 @@ async def run_market_ticker_stream(run_seconds: Optional[int] = None) -> None:
 
 
 # ============ K线数据处理函数 ============
-
-def _normalize_kline(message_data: Any) -> Optional[Dict[str, Any]]:
-    """
-    规范化K线数据（供data_agent模块使用）
-    
-    将币安WebSocket返回的原始K线数据转换为标准格式，
-    用于存储到market_klines表。
-    
-    预期格式：
-        e='kline' E=1764148546845 s='BTCUSDT' k=KlineCandlestickStreamsResponseK(...)
-    
-    注意：
-    - 此函数只负责规范化数据格式，不进行业务逻辑判断（如是否完结）
-    - 是否完结的判断应该在调用此函数后进行
-    - is_closed字段会被设置，但调用方需要检查该字段来决定是否插入数据库
-    
-    Args:
-        message_data: 币安WebSocket返回的原始K线消息，可能是：
-            - SDK响应对象（具有model_dump()或__dict__属性）
-            - 字典对象
-            - None或空数据
-    
-    Returns:
-        Optional[Dict[str, Any]]: 规范化后的K线数据字典，包含以下字段：
-            - event_time: 事件时间（datetime对象）
-            - symbol: 交易对符号（大写）
-            - contract_type: 合约类型（默认PERPETUAL）
-            - kline_start_time: K线开始时间（datetime对象）
-            - kline_end_time: K线结束时间（datetime对象）
-            - interval: 时间间隔（如'1m', '5m', '1h'等）
-            - first_trade_id: 首笔交易ID
-            - last_trade_id: 末笔交易ID
-            - open_price: 开盘价
-            - close_price: 收盘价
-            - high_price: 最高价
-            - low_price: 最低价
-            - base_volume: 基础资产成交量
-            - quote_volume: 计价资产成交量
-            - trade_count: 交易笔数
-            - is_closed: 是否完结（1=完结，0=未完结）
-            - taker_buy_base_volume: 主动买入基础资产成交量
-            - taker_buy_quote_volume: 主动买入计价资产成交量
-        
-        如果消息无效或缺少必需字段，返回None。
-    
-    Note:
-        - 时间戳从毫秒转换为datetime对象（UTC时区）
-        - 如果时间戳转换失败，使用默认时间（1970-01-01）
-        - 异常会被捕获并记录，返回None
-    """
-    try:
-        # Check for empty or None message
-        if message_data is None:
-            logger.debug("[MarketStreams] Received empty message (None)")
-            return None
-        
-        # Extract data from message
-        if hasattr(message_data, "model_dump"):
-            data = message_data.model_dump()
-        elif hasattr(message_data, "__dict__"):
-            data = message_data.__dict__
-        elif isinstance(message_data, dict):
-            data = message_data
-        else:
-            logger.warning("[MarketStreams] Unknown kline message format: %s", type(message_data))
-            return None
-        
-        # Check if data is empty
-        if not data:
-            logger.debug("[MarketStreams] Received empty message (empty dict)")
-            return None
-        
-        # Extract event time, symbol, and kline data
-        event_time = data.get("E") or data.get("event_time", 0)
-        symbol = data.get("s") or data.get("symbol", "")
-        kline_obj = data.get("k")
-        
-        # Check if kline object exists
-        if kline_obj is None:
-            logger.debug("[MarketStreams] Kline object is None in message")
-            return None
-        
-        # Extract kline data
-        if hasattr(kline_obj, "model_dump"):
-            k = kline_obj.model_dump()
-        elif hasattr(kline_obj, "__dict__"):
-            k = kline_obj.__dict__
-        elif isinstance(kline_obj, dict):
-            k = kline_obj
-        else:
-            logger.warning("[MarketStreams] Unknown kline object format: %s", type(kline_obj))
-            return None
-        
-        # 提取是否完结的标记（不在这里过滤，只用于设置 is_closed 字段）
-        is_closed = k.get("x") or k.get("is_closed", False)
-        
-        # Extract contract type (may be in parent data)
-        contract_type = data.get("ps") or data.get("contract_type", "PERPETUAL")
-        
-        # Convert timestamps from milliseconds to datetime
-        def ms_to_datetime(ms: Any) -> datetime:
-            try:
-                if isinstance(ms, datetime):
-                    return ms
-                return datetime.fromtimestamp(float(ms) / 1000.0, tz=timezone.utc)
-            except (TypeError, ValueError):
-                # Return a default datetime instead of None to prevent NULL values
-                return datetime.fromtimestamp(0, tz=timezone.utc)
-        
-        return {
-            "event_time": ms_to_datetime(event_time),
-            "symbol": symbol.upper() if symbol else "",
-            "contract_type": contract_type or "PERPETUAL",
-            "kline_start_time": ms_to_datetime(k.get("t") or k.get("kline_start_time", 0)),
-            "kline_end_time": ms_to_datetime(k.get("T") or k.get("kline_end_time", 0)),
-            "interval": k.get("i") or k.get("interval", ""),
-            "first_trade_id": _to_int(k.get("f") or k.get("first_trade_id", 0)),
-            "last_trade_id": _to_int(k.get("L") or k.get("last_trade_id", 0)),
-            "open_price": _to_float(k.get("o") or k.get("open_price", 0)),
-            "close_price": _to_float(k.get("c") or k.get("close_price", 0)),
-            "high_price": _to_float(k.get("h") or k.get("high_price", 0)),
-            "low_price": _to_float(k.get("l") or k.get("low_price", 0)),
-            "base_volume": _to_float(k.get("v") or k.get("base_volume", 0)),
-            "trade_count": _to_int(k.get("n") or k.get("trade_count", 0)),
-            "is_closed": 1 if is_closed else 0,
-            "quote_volume": _to_float(k.get("q") or k.get("quote_volume", 0)),
-            "taker_buy_base_volume": _to_float(k.get("V") or k.get("taker_buy_base_volume", 0)),
-            "taker_buy_quote_volume": _to_float(k.get("Q") or k.get("taker_buy_quote_volume", 0)),
-        }
-    except Exception as e:
-        logger.warning("[MarketStreams] Failed to normalize kline: %s", e, exc_info=True)
-        return None
-
-
-# ============ 废弃的K线流管理类（已迁移到data_agent模块） ============
-# 
-# 注意：KlineStreamManager类已被废弃，K线流管理功能已迁移到data_agent模块。
-# 保留run_kline_sync_agent函数仅用于兼容旧代码，实际不再执行任何操作。
-
-async def run_kline_sync_agent(check_interval: int = 10) -> None:
-    """
-    运行K线同步代理（已废弃）
-    
-    注意：此方法已废弃，不再执行任何操作。
-    K线流管理现在由data_agent模块的DataAgentKlineManager处理。
-    
-    保留此函数仅用于兼容旧代码（async_agent.py中可能仍有调用）。
-    
-    Args:
-        check_interval: 检查间隔（秒），已不再使用
-    
-    Deprecated:
-        此函数已被废弃，请使用data_agent模块的K线流管理功能。
-    """
-    logger.warning("[KlineSyncAgent] run_kline_sync_agent 已废弃，K线流管理现在由data_agent模块处理")
-    # 此方法保留以兼容旧代码，但不再执行任何操作
-    while True:
-        await asyncio.sleep(check_interval)
-        # 不再执行同步操作
+# _normalize_kline 和 run_kline_sync_agent 函数已删除，K线相关功能不再使用
 
 
 if __name__ == "__main__":
@@ -662,30 +500,16 @@ if __name__ == "__main__":
         description="Stream Binance market data into MySQL"
     )
     parser.add_argument(
-        "--mode",
-        choices=["ticker", "kline-sync"],
-        default="ticker",
-        help="Stream mode: ticker or kline-sync"
-    )
-    parser.add_argument(
         "--duration",
         type=int,
         default=None,
         help="Optional runtime in seconds before shutting down (runs forever when omitted)",
     )
-    parser.add_argument(
-        "--check-interval",
-        type=int,
-        default=10,
-        help="Kline sync check interval in seconds (default: 10)"
-    )
 
     args = parser.parse_args()
 
     try:
-        if args.mode == "kline-sync":
-            asyncio.run(run_kline_sync_agent(check_interval=args.check_interval))
-        else:
-            asyncio.run(run_market_ticker_stream(run_seconds=args.duration))
+        # kline-sync 模式已删除，K线同步功能不再使用
+        asyncio.run(run_market_ticker_stream(run_seconds=args.duration))
     except KeyboardInterrupt:
         logger.debug("[MarketStreams] Interrupted by user")

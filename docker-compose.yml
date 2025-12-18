@@ -13,8 +13,6 @@
 # 使用说明：
 # 1. 启动MySQL服务：docker-compose -f docker-compose-mysql.yml up -d（必须先启动）
 # 2. 默认启动：docker-compose up -d（启动backend、frontend和async-agent服务）
-# 3. 启动数据服务：docker-compose -f docker-compose-data.yml up -d（启动data-manager和data-agent服务）
-# 4. 启动所有服务：docker-compose -f docker-compose-mysql.yml up -d && docker-compose up -d && docker-compose -f docker-compose-data.yml up -d
 # ==============================================================================
 # 注意：
 # - MySQL服务已拆分到 docker-compose-mysql.yml，需要先启动
@@ -33,8 +31,6 @@ services:
     container_name: ${BACKEND_CONTAINER_NAME:-aifuturetrade-backend}
     ports:
       - "${BACKEND_PORT:-5002}:5002"  # 后端API端口
-    volumes:
-      - ./data:/app/data
     environment:
       # 基础配置
       - USE_GUNICORN=${USE_GUNICORN:-true}
@@ -98,8 +94,6 @@ services:
     container_name: ${ASYNC_AGENT_CONTAINER_NAME:-aifuturetrade-async-agent}
     command: ["python", "async/async_agent.py", "--task", "all"]
     # 注意：async-agent 是后台数据同步服务，不需要暴露端口
-    volumes:
-      - ./data:/app/data
     environment:
       # 设置PYTHONPATH，确保可以找到所有模块
       - PYTHONPATH=${PYTHONPATH:-/app}
@@ -109,18 +103,6 @@ services:
       - MYSQL_USER=${MYSQL_USER:-aifuturetrade}
       - MYSQL_PASSWORD=${MYSQL_PASSWORD:-aifuturetrade123}
       - MYSQL_DATABASE=${MYSQL_DATABASE:-aifuturetrade}
-      # K线同步配置
-      - KLINE_SYNC_CHECK_INTERVAL=${KLINE_SYNC_CHECK_INTERVAL:-10}
-      - KLINE_CLEANUP_CRON=${KLINE_CLEANUP_CRON:-0 */1 * * *}
-      - KLINE_CLEANUP_RETENTION_DAYS=${KLINE_CLEANUP_RETENTION_DAYS:-14}
-      # Data Agent配置
-      - DATA_AGENT_MAX_SYMBOL=${DATA_AGENT_MAX_SYMBOL:-150}
-      - DATA_AGENT_PORT=${DATA_AGENT_PORT:-9999}
-      - DATA_AGENT_REGISTER_IP=${DATA_AGENT_REGISTER_IP:-data-manager}
-      - DATA_AGENT_REGISTER_PORT=${DATA_AGENT_REGISTER_PORT:-8888}
-      - DATA_AGENT_BATCH_SYMBOL_SIZE=${DATA_AGENT_BATCH_SYMBOL_SIZE:-20}
-      - DATA_AGENT_HEARTBEAT_TIMEOUT=${DATA_AGENT_HEARTBEAT_TIMEOUT:-60}
-      - DATA_AGENT_STATUS_CHECK_INTERVAL=${DATA_AGENT_STATUS_CHECK_INTERVAL:-60}
       # Binance配置
       - BINANCE_API_KEY=${BINANCE_API_KEY}
       - BINANCE_API_SECRET=${BINANCE_API_SECRET}

@@ -11,7 +11,9 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
  * 控制器：API提供方
@@ -55,9 +57,18 @@ public class ProviderController {
      */
     @DeleteMapping("/{providerId}")
     @ApiOperation("删除API提供方")
-    public ResponseEntity<Boolean> deleteProvider(@PathVariable Integer providerId) {
+    public ResponseEntity<Map<String, Object>> deleteProvider(@PathVariable Integer providerId) {
         Boolean deleted = providerService.deleteProvider(providerId);
-        return new ResponseEntity<>(deleted, HttpStatus.OK);
+        Map<String, Object> response = new HashMap<>();
+        if (deleted) {
+            response.put("success", true);
+            response.put("message", "Provider deleted successfully");
+            return new ResponseEntity<>(response, HttpStatus.OK);
+        } else {
+            response.put("success", false);
+            response.put("error", "Failed to delete provider");
+            return new ResponseEntity<>(response, HttpStatus.INTERNAL_SERVER_ERROR);
+        }
     }
 
     /**

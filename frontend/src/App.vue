@@ -85,6 +85,10 @@
             <i class="bi bi-file-earmark-plus"></i>
             添加合约
           </button>
+          <button class="btn-secondary" @click="showStrategyManagementModal = true">
+            <i class="bi bi-diagram-3"></i>
+            策略管理
+          </button>
           <button class="btn-primary" @click="showAddModelModal = true">
             <i class="bi bi-plus-lg"></i>
             添加模型
@@ -611,6 +615,12 @@
       @close="showStrategyModal = false"
     />
     
+    <StrategyManagementModal
+      :visible="showStrategyManagementModal"
+      @update:visible="showStrategyManagementModal = $event"
+      @close="showStrategyManagementModal = false"
+    />
+    
     <FutureConfigModal
       :visible="showFutureConfigModal"
       @update:visible="showFutureConfigModal = $event"
@@ -790,6 +800,7 @@ import { ref, onMounted, watch } from 'vue'
 import KLineChart from './components/KLineChart.vue'
 import SettingsModal from './components/SettingsModal.vue'
 import StrategyModal from './components/StrategyModal.vue'
+import StrategyManagementModal from './components/StrategyManagementModal.vue'
 import FutureConfigModal from './components/FutureConfigModal.vue'
 import ApiProviderModal from './components/ApiProviderModal.vue'
 import AccountModal from './components/AccountModal.vue'
@@ -833,6 +844,7 @@ const {
   loggerEnabled,
   showSettingsModal,
   showStrategyModal,
+  showStrategyManagementModal,
   showFutureConfigModal,
   showApiProviderModal,
   showAccountModal,

@@ -87,6 +87,7 @@ public class MarketController {
 
     /**
      * 获取K线历史数据
+     * 支持两种参数命名方式：start_time/end_time（下划线）和startTime/endTime（驼峰）
      */
     @GetMapping("/klines")
     @ApiOperation("获取K线历史数据")
@@ -94,9 +95,14 @@ public class MarketController {
             @RequestParam String symbol,
             @RequestParam(required = false, defaultValue = "5m") String interval,
             @RequestParam(required = false) Integer limit,
+            @RequestParam(required = false) String start_time,
+            @RequestParam(required = false) String end_time,
             @RequestParam(required = false) String startTime,
             @RequestParam(required = false) String endTime) {
-        List<Map<String, Object>> klines = marketService.getMarketKlines(symbol, interval, limit, startTime, endTime);
+        // 优先使用下划线命名（前端使用），如果没有则使用驼峰命名
+        String startTimeParam = start_time != null ? start_time : startTime;
+        String endTimeParam = end_time != null ? end_time : endTime;
+        List<Map<String, Object>> klines = marketService.getMarketKlines(symbol, interval, limit, startTimeParam, endTimeParam);
         return new ResponseEntity<>(klines, HttpStatus.OK);
     }
 }

@@ -2,7 +2,7 @@
 
 包含支撑业务的基础服务：
 - config: 配置管理
-- database: 数据库操作（database_basic, database_mysql）
+- database: 数据库操作（database_basic, database_market_tickers）
 - binance_futures: 币安期货客户端
 - version: 版本信息
 

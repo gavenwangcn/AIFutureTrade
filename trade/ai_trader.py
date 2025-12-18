@@ -19,8 +19,17 @@ import json
 import logging
 from typing import Dict, Optional, Tuple, List
 from openai import OpenAI, APIConnectionError, APIError
+from trade.trader import Trader
 
 logger = logging.getLogger(__name__)
+
+# 导入market_data模块用于计算指标
+try:
+    from market.market_data import MarketDataFetcher
+    MARKET_DATA_AVAILABLE = True
+except ImportError:
+    MARKET_DATA_AVAILABLE = False
+    logger.warning("market_data module not available, indicators calculation will be skipped")
 
 # 尝试导入tiktoken用于token计算，如果不可用则使用简单估算
 try:
@@ -31,7 +40,7 @@ except ImportError:
     logger.warning("tiktoken not available, will use simple token estimation")
 
 
-class AITrader:
+class AITrader(Trader):
     """
     AI交易决策生成器
     
@@ -50,7 +59,7 @@ class AITrader:
     
     # ============ 初始化方法 ============
     
-    def __init__(self, provider_type: str, api_key: str, api_url: str, model_name: str, db=None):
+    def __init__(self, provider_type: str, api_key: str, api_url: str, model_name: str, db=None, market_fetcher=None):
         """
         初始化AI交易决策生成器
         
@@ -65,12 +74,14 @@ class AITrader:
             api_url: LLM API基础URL
             model_name: 使用的模型名称（如 'gpt-4', 'claude-3-opus' 等）
             db: 数据库实例（可选），用于记录API调用错误
+            market_fetcher: MarketDataFetcher实例（可选），用于计算技术指标
         """
         self.provider_type = provider_type.lower()
         self.api_key = api_key
         self.api_url = api_url
         self.model_name = model_name
         self.db = db
+        self.market_fetcher = market_fetcher
 
     # ============ 公共决策方法 ============
     
@@ -79,9 +90,7 @@ class AITrader:
         candidates: List[Dict],
         portfolio: Dict,
         account_info: Dict,
-        constraints: Optional[Dict] = None,
-        constraints_text: Optional[str] = None,
-        market_snapshot: Optional[List[Dict]] = None,
+        market_state: Dict,
         symbol_source: str = 'leaderboard',
         model_id: Optional[int] = None
     ) -> Dict:
@@ -105,17 +114,14 @@ class AITrader:
                 - balance: 账户余额
                 - available_balance: 可用余额
                 - total_return: 累计收益率
-            constraints: 约束条件字典，包含：
-                - max_positions: 最大持仓数量
-                - occupied: 已占用持仓数
-                - available_cash: 可用现金
-            constraints_text: 策略约束文本（从model_prompts表获取的buy_prompt）
-            market_snapshot: 市场快照数据列表，每个元素包含：
-                - symbol: 交易对符号
-                - timeframes: 多时间周期的技术指标数据
+            market_state: 市场状态字典，key为交易对符号，value包含：
+                - price: 当前价格
+                - indicators: 技术指标数据
+                    - timeframes: 多时间周期的技术指标
             symbol_source: 数据源类型，影响prompt构建：
                 - 'leaderboard'（默认）：候选来自涨跌榜，说明"来自实时涨跌幅榜"
                 - 'future'：候选来自合约配置信息表，说明"来自合约配置信息表"
+            model_id: 模型ID（用于从数据库获取buy_prompt）
         
         Returns:
             Dict: 包含以下字段的字典：
@@ -129,13 +135,69 @@ class AITrader:
             - 如果candidates为空，返回skipped=True的结果
             - 决策格式：{"SYMBOL": {"signal": "buy_to_enter|sell_to_enter|hold", ...}}
             - 系统会根据signal自动设置position_side（LONG或SHORT）
+            - constraints和constraints_text在内部从数据库获取和处理
+            - market_snapshot在内部从market_state构建
         """
         logger.info(f"[{self.provider_type}] 开始生成买入决策, 候选交易对数量: {len(candidates)}, 模型: {self.model_name}")
         if not candidates:
             return {'decisions': {}, 'prompt': None, 'raw_response': None, 'cot_trace': None, 'skipped': True}
 
-        # 【传递symbol_source】将数据源类型传递给prompt构建方法，用于调整prompt文本
-        prompt = self._build_buy_prompt(candidates, portfolio, account_info, constraints or {}, constraints_text, market_snapshot, symbol_source)
+        # 内部处理：从数据库获取constraints_text（buy_prompt）
+        constraints_text = None
+        if self.db and model_id:
+            try:
+                model_prompt = self.db.get_model_prompt(model_id)
+                if model_prompt:
+                    constraints_text = model_prompt.get('buy_prompt')
+            except Exception as e:
+                logger.warning(f"[{self.provider_type}] [买入决策] 获取buy_prompt失败: {e}")
+        
+        # 内部处理：从market_state构建market_snapshot，并计算技术指标
+        market_snapshot = []
+        for candidate in candidates:
+            symbol = candidate.get('symbol', '').upper()
+            if symbol in market_state:
+                state_info = market_state[symbol]
+                timeframes_data = state_info.get('indicators', {}).get('timeframes', {})
+                
+                # 如果timeframes_data只包含klines，需要计算指标
+                # 检查第一个时间框架是否有指标数据
+                has_indicators = False
+                if timeframes_data:
+                    first_timeframe = next(iter(timeframes_data.values()), {})
+                    if isinstance(first_timeframe, dict):
+                        # 检查是否有ma、macd等指标字段
+                        has_indicators = any(key in first_timeframe for key in ['ma', 'macd', 'rsi', 'vol'])
+                
+                # 如果没有指标且有market_fetcher，计算指标
+                if not has_indicators and timeframes_data and self.market_fetcher:
+                    try:
+                        # 使用market_fetcher计算指标
+                        timeframes_data = self.market_fetcher.calculate_indicators_for_timeframes(timeframes_data)
+                        logger.debug(f"[{self.provider_type}] [买入决策] 为 {symbol} 计算了技术指标")
+                    except Exception as e:
+                        logger.warning(f"[{self.provider_type}] [买入决策] 计算指标失败: {e}")
+                
+                snapshot_entry = {
+                    'symbol': symbol,
+                    'contract_symbol': state_info.get('contract_symbol', f"{symbol}USDT"),
+                    'price': state_info.get('price', 0),
+                    'quote_volume': state_info.get('quote_volume', state_info.get('daily_volume', 0)),
+                    'change_percent': state_info.get('change_24h', 0),
+                    'timeframes': timeframes_data
+                }
+                market_snapshot.append(snapshot_entry)
+        
+        # 内部处理：构建constraints
+        positions = portfolio.get('positions', []) or []
+        constraints = {
+            'max_positions': None,  # 可以从数据库获取，这里先设为None
+            'occupied': len(positions),
+            'available_cash': portfolio.get('cash', 0)
+        }
+        
+        # 构建prompt
+        prompt = self._build_buy_prompt(candidates, portfolio, account_info, constraints, constraints_text, market_snapshot, symbol_source)
         try:
             return self._request_decisions(prompt, decision_type='buy', model_id=model_id)
         except Exception as e:
@@ -174,7 +236,6 @@ class AITrader:
         portfolio: Dict,
         market_state: Dict,
         account_info: Dict,
-        constraints_text: Optional[str] = None,
         model_id: Optional[int] = None
     ) -> Dict:
         """
@@ -202,7 +263,7 @@ class AITrader:
                     - timeframes: 多时间周期的技术指标
             account_info: 账户信息，包含：
                 - total_return: 累计收益率
-            constraints_text: 策略约束文本（从model_prompts表获取的sell_prompt）
+            model_id: 模型ID（用于从数据库获取sell_prompt）
         
         Returns:
             Dict: 包含以下字段的字典：
@@ -215,10 +276,21 @@ class AITrader:
         Note:
             - 如果portfolio中没有持仓，返回skipped=True的结果
             - 决策格式：{"SYMBOL": {"signal": "close_position|stop_loss|take_profit|hold", ...}}
+            - constraints_text在内部从数据库获取和处理
         """
         logger.info(f"[{self.provider_type}] 开始生成卖出决策, 持仓数量: {len(portfolio.get('positions') or [])}, 模型: {self.model_name}")
         if not portfolio.get('positions'):
             return {'decisions': {}, 'prompt': None, 'raw_response': None, 'cot_trace': None, 'skipped': True}
+
+        # 内部处理：从数据库获取constraints_text（sell_prompt）
+        constraints_text = None
+        if self.db and model_id:
+            try:
+                model_prompt = self.db.get_model_prompt(model_id)
+                if model_prompt:
+                    constraints_text = model_prompt.get('sell_prompt')
+            except Exception as e:
+                logger.warning(f"[{self.provider_type}] [卖出决策] 获取sell_prompt失败: {e}")
 
         prompt = self._build_sell_prompt(portfolio, market_state, account_info, constraints_text)
         try:
@@ -463,9 +535,23 @@ class AITrader:
             )
             prompt += "\n\n当前持仓的市场历史指标数据：\n"
             
-            # 添加市场历史指标数据
+            # 添加市场历史指标数据（如果只有klines，需要计算指标）
             timeframes = market_info.get('indicators', {}).get('timeframes', {})
             if timeframes:
+                # 检查是否有指标数据
+                has_indicators = False
+                first_timeframe = next(iter(timeframes.values()), {})
+                if isinstance(first_timeframe, dict):
+                    has_indicators = any(key in first_timeframe for key in ['ma', 'macd', 'rsi', 'vol'])
+                
+                # 如果没有指标且有market_fetcher，计算指标
+                if not has_indicators and self.market_fetcher:
+                    try:
+                        timeframes = self.market_fetcher.calculate_indicators_for_timeframes(timeframes)
+                        logger.debug(f"[{self.provider_type}] [卖出决策] 为 {symbol} 计算了技术指标")
+                    except Exception as e:
+                        logger.warning(f"[{self.provider_type}] [卖出决策] 计算指标失败: {e}")
+                
                 prompt += f"   {symbol}市场历史指标数据: {json.dumps(timeframes, indent=2, ensure_ascii=False, default=str)}\n"
             else:
                 prompt += f"   {symbol}市场历史指标数据: 无\n"

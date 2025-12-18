@@ -70,6 +70,11 @@ public class ModelDTO implements Serializable {
     private String symbolSource;
 
     /**
+     * 交易类型（ai或strategy）
+     */
+    private String tradeType;
+
+    /**
      * 最大持仓数量
      */
     private Integer maxPositions;

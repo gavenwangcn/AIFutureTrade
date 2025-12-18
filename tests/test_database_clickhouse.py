@@ -1,4 +1,4 @@
-"""Executable integration checks for common.database_mysql.
+"""Executable integration checks for common.database_market_tickers.
 
 Run with:
 
@@ -15,17 +15,17 @@ import uuid
 from typing import Callable, List, Tuple
 from datetime import datetime, timezone
 
-from common.database_mysql import MySQLDatabase, MARKET_TICKER_TABLE
+from common.database_market_tickers import MarketTickersDatabase, MARKET_TICKER_TABLE
 
 
-def _require_mysql() -> MySQLDatabase:
+def _require_mysql() -> MarketTickersDatabase:
     try:
-        return MySQLDatabase(auto_init_tables=False)
+        return MarketTickersDatabase()
     except Exception as exc:
         raise RuntimeError(f"MySQL unavailable: {exc}") from exc
 
 
-def _check_table_exists(db: MySQLDatabase) -> None:
+def _check_table_exists(db: MarketTickersDatabase) -> None:
     db.ensure_market_ticker_table()
     result = db.query(
         "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = %s",
@@ -34,7 +34,7 @@ def _check_table_exists(db: MySQLDatabase) -> None:
     assert result[0][0] >= 1, "market ticker table missing"
 
 
-def _check_insert_rows(db: MySQLDatabase) -> None:
+def _check_insert_rows(db: MarketTickersDatabase) -> None:
     table_name = f"test_insert_rows_{uuid.uuid4().hex[:8]}"
     db.command(f"DROP TABLE IF EXISTS `{table_name}`")
     db.command(f"CREATE TABLE `{table_name}` (`a` BIGINT UNSIGNED, `b` VARCHAR(255)) ENGINE=InnoDB")
@@ -57,7 +57,7 @@ def main() -> int:
         logging.error(exc)
         return 1
 
-    checks: List[Tuple[str, Callable[[MySQLDatabase], None]]] = [
+    checks: List[Tuple[str, Callable[[MarketTickersDatabase], None]]] = [
         ("ensure_table_exists", _check_table_exists),
         ("insert_rows", _check_insert_rows),
     ]

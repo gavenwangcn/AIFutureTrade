@@ -163,7 +163,7 @@ SHOW STATUS LIKE 'Table_open_cache%';
 ## 6. 应用层优化建议
 
 ### 连接池配置
-根据 `common/database_mysql.py` 中的配置：
+根据 `common/database_basic.py` 中的配置：
 - 当前最大连接数：50
 - 建议：根据并发请求量调整，但不要超过 MySQL 的 `max_connections`
 

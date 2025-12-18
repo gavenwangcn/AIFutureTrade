@@ -225,12 +225,12 @@ def exercise_binance_futures_client(api_key: str, api_secret: str) -> None:
     try:
         # 导入MarketDataFetcher类
         from market.market_data import MarketDataFetcher
-        from common.database_mysql import MySQLDatabase
+        from common.database_market_tickers import MarketTickersDatabase
         import json
         
         # 创建MarketDataFetcher实例（需要数据库连接）
         # 由于这是一个测试脚本，我们创建一个简单的数据库实例
-        db = MySQLDatabase(auto_init_tables=False)
+        db = MarketTickersDatabase()
         market_fetcher = MarketDataFetcher(db)
         
         # 设置币安期货客户端

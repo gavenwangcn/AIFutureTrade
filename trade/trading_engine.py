@@ -39,7 +39,7 @@ class TradingEngine:
     支持买入和卖出两个独立的服务线程，以不同的周期执行交易决策。
     """
     
-    def __init__(self, model_id: int, db, market_fetcher, ai_trader, trade_fee_rate: float = 0.001,
+    def __init__(self, model_id: int, db, market_fetcher, trader, trade_fee_rate: float = 0.001,
                  buy_cycle_interval: int = 5, sell_cycle_interval: int = 5):
         """
         初始化交易引擎
@@ -48,7 +48,7 @@ class TradingEngine:
             model_id: 模型ID，用于标识和管理不同的交易模型
             db: 数据库实例，用于数据持久化
             market_fetcher: 市场数据获取器，用于获取实时价格和技术指标
-            ai_trader: AI交易决策器，用于生成买入/卖出决策
+            trader: 交易决策器，用于生成买入/卖出决策（可以是AITrader或StrategyTrader）
             trade_fee_rate: 交易费率，默认0.001（0.1%）
             buy_cycle_interval: 买入周期间隔（秒），默认5秒
             sell_cycle_interval: 卖出周期间隔（秒），默认5秒
@@ -56,11 +56,12 @@ class TradingEngine:
         Note:
             - Binance订单客户端不在初始化时创建，改为每次使用时新建实例
             - 确保每次交易都使用最新的 model 表中的 api_key 和 api_secret
+            - trader可以是AITrader或StrategyTrader的实例，都实现了Trader接口
         """
         self.model_id = model_id
         self.db = db
         self.market_fetcher = market_fetcher
-        self.ai_trader = ai_trader
+        self.trader = trader
         self.trade_fee_rate = trade_fee_rate
         # 从数据库获取 max_positions（最大持仓数量），如果获取失败则使用默认值3
         try:
@@ -765,20 +766,18 @@ class TradingEngine:
             price_info = prices.get(original_symbol) or prices.get(symbol_mapping.get(original_symbol.upper(), original_symbol.upper()))
             if price_info:
                 market_state[original_symbol] = price_info.copy()
-                # 根据参数决定是否获取技术指标
-                if include_indicators:
-                    # 使用新方法获取所有时间周期的技术指标（无缓存）
-                    # 确保传入的symbol以USDT结尾
-                    query_symbol = original_symbol.upper()
-                    if not query_symbol.endswith('USDT'):
-                        query_symbol = f"{query_symbol}USDT"
-                    merged_data = self._merge_timeframe_data(query_symbol)
-                    # 将合并后的数据格式调整为与原有格式兼容
-                    if query_symbol in merged_data:
-                        market_state[original_symbol]['indicators'] = {'timeframes': merged_data[query_symbol]}
-                    else:
-                        market_state[original_symbol]['indicators'] = {'timeframes': {}}
-                # 如果 include_indicators=False，则不获取指标，只保留价格信息
+            # 获取K线数据（不计算指标）
+            # 注意：include_indicators 参数已废弃，但保留以兼容旧代码
+            # 现在只获取klines，指标由ai_trader内部按需计算
+            query_symbol = original_symbol.upper()
+            if not query_symbol.endswith('USDT'):
+                query_symbol = f"{query_symbol}USDT"
+            merged_data = self._merge_timeframe_data(query_symbol)
+            # 将合并后的数据格式调整为与原有格式兼容（只包含klines）
+            if query_symbol in merged_data:
+                market_state[original_symbol]['indicators'] = {'timeframes': merged_data[query_symbol]}
+            else:
+                market_state[original_symbol]['indicators'] = {'timeframes': {}}
 
         return market_state
 
@@ -847,13 +846,14 @@ class TradingEngine:
     
     def _merge_timeframe_data(self, symbol: str) -> Dict:
         """
-        合并7个时间周期的市场数据和技术指标
+        合并7个时间周期的K线数据（不计算指标）
         
         Args:
             symbol: 交易对符号（如 'BTC' 或 'BTCUSDT'）
             
         Returns:
-            Dict: 合并后的数据格式 {symbol: {1m: {get_market_data_1m返回格式}, 5m: {get_market_data_5m返回格式}, ...}}
+            Dict: 合并后的数据格式 {symbol: {1m: {klines: [...]}, 5m: {klines: [...]}, ...}}
+            只包含klines数据，不包含indicators
         """
         # 确保symbol以USDT结尾，防止重复添加
         symbol_upper = symbol.upper()
@@ -880,8 +880,12 @@ class TradingEngine:
             try:
                 data = method(formatted_symbol)  # 使用格式化后的symbol
                 if data:
-                    # 直接使用get_market_data_*方法返回的完整数据格式
-                    merged_data[formatted_symbol][timeframe] = data
+                    # 只提取klines数据，不包含indicators
+                    klines = data.get('klines', [])
+                    if klines:
+                        merged_data[formatted_symbol][timeframe] = {'klines': klines}
+                    else:
+                        errors.append(f"{timeframe}: K线数据为空")
                 else:
                     errors.append(f"{timeframe}: 返回数据为空")
             except Exception as e:
@@ -1471,30 +1475,12 @@ class TradingEngine:
             logger.debug(f"[Model {self.model_id}] [批次 {batch_num}/{total_batches}] "
                         f"[步骤1] 调用AI模型获取买入决策... (有效symbol数: {len(valid_candidates)})")
             
-            # 将market_state转换为market_snapshot格式（用于AI决策），只包含有效的symbol
-            market_snapshot = []
-            for candidate in valid_candidates:
-                symbol = candidate.get('symbol', '').upper()
-                if symbol in market_state:
-                    state_info = market_state[symbol]
-                    snapshot_entry = {
-                        'symbol': symbol,
-                        'contract_symbol': state_info.get('contract_symbol', f"{symbol}USDT"),
-                        'price': state_info.get('price', 0),
-                        'quote_volume': state_info.get('quote_volume', state_info.get('daily_volume', 0)),
-                        'change_percent': state_info.get('change_24h', 0),
-                        'timeframes': state_info.get('indicators', {}).get('timeframes', {})
-                    }
-                    market_snapshot.append(snapshot_entry)
-            
             ai_call_start = datetime.now(timezone(timedelta(hours=8)))
-            buy_payload = self.ai_trader.make_buy_decision(
+            buy_payload = self.trader.make_buy_decision(
                 valid_candidates,  # 只传递有效的candidates
                 portfolio,
                 account_info,
-                constraints,
-                constraints_text=constraints_text,
-                market_snapshot=market_snapshot if market_snapshot else None,
+                market_state,  # 统一使用market_state
                 symbol_source=symbol_source,
                 model_id=self.model_id
             )
@@ -2046,11 +2032,10 @@ class TradingEngine:
                         f"[步骤2] 调用AI模型进行卖出决策... (有效symbol数: {len(valid_positions)})")
             
             ai_call_start = datetime.now(timezone(timedelta(hours=8)))
-            sell_payload = self.ai_trader.make_sell_decision(
+            sell_payload = self.trader.make_sell_decision(
                 batch_portfolio,
                 market_state,
                 account_info,
-                constraints_text=constraints_text,
                 model_id=self.model_id
             )
             ai_call_duration = (datetime.now(timezone(timedelta(hours=8))) - ai_call_start).total_seconds()
@@ -2378,14 +2363,13 @@ class TradingEngine:
                 logger.warning(f"[Model {self.model_id}] 无法获取 {symbol} 的实时价格")
                 continue
             
-            # 根据参数决定是否获取技术指标
-            timeframes_data = {}
-            if include_indicators:
-                # 获取技术指标（所有时间周期）
-                merged_data = self._merge_timeframe_data(query_symbol)
-                timeframes_data = merged_data.get(query_symbol, {}) if merged_data else {}
+            # 获取K线数据（不计算指标）
+            # 注意：include_indicators 参数已废弃，但保留以兼容旧代码
+            # 现在只获取klines，指标由ai_trader内部按需计算
+            merged_data = self._merge_timeframe_data(query_symbol)
+            timeframes_data = merged_data.get(query_symbol, {}) if merged_data else {}
             
-            # 构建市场状态条目
+            # 构建市场状态条目（只包含klines，不包含indicators）
             market_state[symbol_upper] = {
                 'price': price_info.get('price', candidate.get('price', candidate.get('last_price', 0))),
                 'name': candidate.get('name', symbol),
@@ -2394,7 +2378,7 @@ class TradingEngine:
                 'change_24h': price_info.get('change_24h', candidate.get('change_percent', 0)),
                 'daily_volume': price_info.get('daily_volume', candidate.get('quote_volume', 0)),
                 'quote_volume': price_info.get('daily_volume', candidate.get('quote_volume', 0)),
-                'indicators': {'timeframes': timeframes_data} if timeframes_data else {},
+                'indicators': {'timeframes': timeframes_data} if timeframes_data else {},  # 只包含klines
                 'source': symbol_source
             }
         

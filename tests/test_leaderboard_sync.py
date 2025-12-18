@@ -17,17 +17,17 @@ import sys
 from typing import Callable, List, Tuple
 from datetime import datetime, timezone
 
-from common.database_mysql import MySQLDatabase
+from common.database_market_tickers import MarketTickersDatabase
 
 
-def _require_mysql() -> MySQLDatabase:
+def _require_mysql() -> MarketTickersDatabase:
     try:
-        return MySQLDatabase(auto_init_tables=True)
+        return MarketTickersDatabase()
     except Exception as exc:
         raise RuntimeError(f"MySQL unavailable: {exc}") from exc
 
 
-def _check_leaderboard_query_functionality(db: MySQLDatabase) -> None:
+def _check_leaderboard_query_functionality(db: MarketTickersDatabase) -> None:
     """检查涨跌榜查询功能是否正常工作"""
     # 确保 market_ticker_table 存在
     db.ensure_market_ticker_table()
@@ -99,7 +99,7 @@ def main() -> int:
         logging.error(exc)
         return 1
 
-    checks: List[Tuple[str, Callable[[MySQLDatabase], None]]] = [
+    checks: List[Tuple[str, Callable[[MarketTickersDatabase], None]]] = [
         ("leaderboard_query_functionality", _check_leaderboard_query_functionality),
     ]
 

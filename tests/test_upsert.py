@@ -8,7 +8,7 @@ import sys
 import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from common.database_mysql import MySQLDatabase
+from common.database_market_tickers import MarketTickersDatabase
 import logging
 import time
 from datetime import datetime, timezone
@@ -23,7 +23,7 @@ def test_upsert_market_tickers():
     logger.info("开始测试upsert_market_tickers方法...")
     
     # 创建数据库连接
-    db = MySQLDatabase()
+    db = MarketTickersDatabase()
     
     # 测试数据1：新数据（应该执行INSERT）
     test_data1 = [

@@ -31,11 +31,68 @@ import uuid
 import common.config as app_config
 from datetime import datetime, timezone, timedelta
 from typing import List, Dict, Optional, Any, Callable, Tuple
-from common.database_mysql import MySQLConnectionPool
+from common.database_init import init_database_tables
 import pymysql
 from pymysql import cursors
+from DBUtils.PooledDB import PooledDB
 
 logger = logging.getLogger(__name__)
+
+
+def create_pooled_db(
+    host: str,
+    port: int,
+    user: str,
+    password: str,
+    database: str,
+    charset: str = 'utf8mb4',
+    mincached: int = 5,
+    maxconnections: int = 50,
+    blocking: bool = True
+) -> PooledDB:
+    """
+    创建DBUtils连接池
+    
+    Args:
+        host: MySQL host
+        port: MySQL port
+        user: MySQL username
+        password: MySQL password
+        database: MySQL database name
+        charset: Character set, default utf8mb4
+        mincached: Minimum number of cached connections
+        maxconnections: Maximum number of connections allowed
+        blocking: Whether to block when pool is exhausted
+        
+    Returns:
+        DBUtils PooledDB instance
+    """
+    def _create_connection():
+        """创建单个连接的工厂函数"""
+        return pymysql.connect(
+            host=host,
+            port=port,
+            user=user,
+            password=password,
+            database=database,
+            charset=charset,
+            cursorclass=cursors.DictCursor,
+            autocommit=False
+        )
+    
+    return PooledDB(
+        creator=_create_connection,
+        mincached=mincached,
+        maxconnections=maxconnections,
+        maxshared=maxconnections,  # 最大共享连接数
+        maxcached=maxconnections,  # 最大缓存连接数
+        blocking=blocking,
+        maxusage=None,  # 每个连接的最大使用次数，None表示无限制
+        setsession=None,  # 设置会话的SQL语句列表
+        reset=True,  # 连接归还时重置
+        failures=None,  # 失败重试次数
+        ping=1,  # 在获取连接时ping数据库（1=每次获取时ping）
+    )
 
 
 class Database:
@@ -46,13 +103,13 @@ class Database:
     使用连接池管理数据库连接，支持高并发访问。
     
     主要功能：
-    - 提供商管理：LLM提供商的增删改查
-    - 模型管理：交易模型的增删改查、自动交易开关、杠杆设置
+    - 提供商管理：LLM提供商的查询（增删改已迁移到Java后端）
+    - 模型管理：交易模型的查询和配置（增删改已迁移到Java后端）
     - 投资组合管理：持仓更新、账户价值记录、投资组合查询
     - 交易记录：交易历史的记录和查询
     - 对话记录：AI对话历史的记录和查询
-    - 合约配置：期货合约配置管理
-    - 账户资产：账户资产信息管理
+    - 合约配置：期货合约配置查询（增删改已迁移到Java后端）
+    - 账户资产：账户资产信息查询（增删改已迁移到Java后端）
     - 提示词管理：模型买卖提示词配置
     
     使用示例：
@@ -77,17 +134,17 @@ class Database:
             - 不自动初始化表结构，需要调用init_db()方法
             - 使用配置文件中的MySQL连接信息
         """
-        # 使用 MySQL 连接池，参考 database_mysql.py 的模式
-        self._pool = MySQLConnectionPool(
+        # 使用 DBUtils 连接池
+        self._pool = create_pooled_db(
             host=app_config.MYSQL_HOST,
             port=app_config.MYSQL_PORT,
             user=app_config.MYSQL_USER,
             password=app_config.MYSQL_PASSWORD,
             database=app_config.MYSQL_DATABASE,
             charset='utf8mb4',
-            min_connections=15,
-            max_connections=100,
-            connection_timeout=30
+            mincached=15,
+            maxconnections=100,
+            blocking=True
         )
         
         # 表名定义
@@ -106,6 +163,8 @@ class Database:
         self.asset_table = "asset"
         self.binance_trade_logs_table = "binance_trade_logs"
         self.llm_api_error_table = "llm_api_error"
+        self.strategys_table = "strategys"
+        self.model_strategy_table = "model_strategy"
     
     def close(self) -> None:
         """
@@ -115,8 +174,14 @@ class Database:
         在不再需要数据库连接时，应显式调用此方法。
         """
         if hasattr(self, '_pool') and self._pool:
-            self._pool.close_all()
-            logger.info("[Database] Connection pool closed successfully")
+            try:
+                # DBUtils连接池会自动管理连接，这里只需要关闭连接池
+                # 注意：DBUtils的PooledDB没有close_all方法，连接会在对象销毁时自动关闭
+                # 但我们可以通过删除引用来触发清理
+                self._pool = None
+                logger.info("[Database] Connection pool closed successfully")
+            except Exception as e:
+                logger.warning(f"[Database] Error closing connection pool: {e}")
     
     def __del__(self) -> None:
         """
@@ -150,7 +215,8 @@ class Database:
             conn = None
             connection_acquired = False
             try:
-                conn = self._pool.acquire()
+                # 使用DBUtils连接池获取连接
+                conn = self._pool.connection()
                 if not conn:
                     raise Exception("Failed to acquire MySQL connection")
                 connection_acquired = True
@@ -158,10 +224,10 @@ class Database:
                 # 执行函数
                 result = func(conn, *args, **kwargs)
                 
-                # 成功执行，提交事务并释放连接
+                # 成功执行，提交事务
                 conn.commit()
-                self._pool.release(conn)
-                conn = None  # 标记已释放，避免 finally 中重复处理
+                # DBUtils会自动管理连接，使用完毕后会自动归还，不需要手动release
+                conn = None  # 标记已处理，避免 finally 中重复处理
                 return result
                 
             except Exception as e:
@@ -182,7 +248,7 @@ class Database:
                     'valueerror'
                 ]) or (isinstance(e, pymysql.err.MySQLError) and e.args[0] == 1213)
                 
-                # 如果已获取连接，需要处理连接（关闭或释放）
+                # 如果已获取连接，需要处理连接（关闭）
                 if connection_acquired and conn:
                     try:
                         # 回滚事务
@@ -191,45 +257,14 @@ class Database:
                         except Exception:
                             pass
                         
-                        # 对于网络错误，连接很可能已损坏，应该关闭而不是放回池中
-                        if is_network_error:
-                            logger.warning(
-                                f"[Database] Network error detected, closing damaged connection: "
-                                f"{error_type}: {error_msg}"
-                            )
-                            try:
-                                conn.close()
-                            except Exception:
-                                pass
-                            # 减少连接计数（因为连接已损坏，不能放回池中）
-                            with self._pool._lock:
-                                if self._pool._current_connections > 0:
-                                    self._pool._current_connections -= 1
-                            conn = None  # 标记已处理，避免 finally 中重复处理
-                        else:
-                            # 对于非网络错误，尝试释放连接回池中
-                            try:
-                                self._pool.release(conn)
-                                conn = None  # 标记已释放
-                            except Exception as release_error:
-                                # 如果释放失败，关闭连接
-                                logger.warning(
-                                    f"[Database] Failed to release connection, closing it: {release_error}"
-                                )
-                                try:
-                                    conn.close()
-                                except Exception:
-                                    pass
-                                with self._pool._lock:
-                                    if self._pool._current_connections > 0:
-                                        self._pool._current_connections -= 1
-                                conn = None  # 标记已处理
+                        # 对于所有错误，关闭连接，DBUtils会自动处理损坏的连接
+                        try:
+                            conn.close()
+                        except Exception:
+                            pass
+                        conn = None  # 标记已处理，避免 finally 中重复处理
                     except Exception as close_error:
                         logger.debug(f"[Database] Error closing failed connection: {close_error}")
-                        # 确保连接计数被减少
-                        with self._pool._lock:
-                            if self._pool._current_connections > 0:
-                                self._pool._current_connections -= 1
                         conn = None  # 标记已处理
                 
                 # 判断是否需要重试
@@ -271,18 +306,16 @@ class Database:
                 # 确保连接被正确处理（双重保险）
                 if connection_acquired and conn:
                     try:
-                        # 如果连接还没有被释放，尝试关闭它
+                        # 如果连接还没有被处理，尝试关闭它
                         logger.warning(
-                            f"[Database] Connection not released in finally block, closing it"
+                            f"[Database] Connection not closed in finally block, closing it"
                         )
                         try:
                             conn.rollback()
                             conn.close()
                         except Exception:
                             pass
-                        with self._pool._lock:
-                            if self._pool._current_connections > 0:
-                                self._pool._current_connections -= 1
+                        # DBUtils会自动处理连接，不需要手动管理连接计数
                     except Exception as final_error:
                         logger.debug(f"[Database] Error in finally block: {final_error}")
     
@@ -299,20 +332,34 @@ class Database:
                 cursor.close()
         self._with_connection(_execute_command)
     
-    def query(self, sql: str, params: tuple = None) -> List[Tuple]:
+    def query(self, sql: str, params: tuple = None, as_dict: bool = False) -> List:
         """Execute a query and return results.
         
         注意：MySQL 支持参数化查询，使用 %s 作为占位符。
+        
+        Args:
+            sql: SQL查询语句
+            params: 查询参数元组
+            as_dict: 是否返回字典格式（默认False，返回元组列表以保持兼容性）
+        
+        Returns:
+            List: 查询结果列表，如果as_dict=True则返回字典列表，否则返回元组列表
         """
         def _execute_query(conn):
-            cursor = conn.cursor()
+            if as_dict:
+                cursor = conn.cursor(cursors.DictCursor)
+            else:
+                cursor = conn.cursor()
             try:
                 if params:
                     cursor.execute(sql, params)
                 else:
                     cursor.execute(sql)
                 rows = cursor.fetchall()
-                # 转换为元组列表以保持兼容性
+                # 如果使用字典游标，直接返回字典列表
+                if as_dict:
+                    return [dict(row) for row in rows] if rows else []
+                # 否则转换为元组列表以保持兼容性
                 if rows and isinstance(rows[0], dict):
                     return [tuple(row.values()) for row in rows]
                 return rows
@@ -346,206 +393,32 @@ class Database:
         """Initialize database tables - only CREATE TABLE IF NOT EXISTS, no migration logic"""
         logger.info("[Database] Initializing MySQL tables...")
         
-        # Providers table (API提供方)
-        self._ensure_providers_table()
-        
-        # Models table
-        self._ensure_models_table()
-        
-        # Portfolios table
-        self._ensure_portfolios_table()
-        
-        # Trades table
-        self._ensure_trades_table()
-        
-        # Conversations table
-        self._ensure_conversations_table()
-        
-        # Account values table (用于当前值，支持UPDATE/INSERT)
-        self._ensure_account_values_table()
-        
-        # Account value historys table (用于历史记录，只INSERT)
-        self._ensure_account_value_historys_table()
-        
-        # Settings table
-        self._ensure_settings_table()
-        
-        # Model prompts table
-        self._ensure_model_prompts_table()
-        
-        # Model-specific futures configuration table
-        self._ensure_model_futures_table()
-        
-        # Futures table (USDS-M contract universe)
-        self._ensure_futures_table()
-        
-        
-        # Account asset table (accounts表已废弃，不再创建)
-        self._ensure_account_asset_table()
-        
-        # Asset table
-        self._ensure_asset_table()
-        
-        # Binance trade logs table
-        self._ensure_binance_trade_logs_table()
-        
-        # LLM API error table
-        self._ensure_llm_api_error_table()
+        # 使用统一的表初始化模块
+        table_names = {
+            'providers_table': self.providers_table,
+            'models_table': self.models_table,
+            'portfolios_table': self.portfolios_table,
+            'trades_table': self.trades_table,
+            'conversations_table': self.conversations_table,
+            'account_values_table': self.account_values_table,
+            'account_value_historys_table': self.account_value_historys_table,
+            'settings_table': self.settings_table,
+            'model_prompts_table': self.model_prompts_table,
+            'model_futures_table': self.model_futures_table,
+            'futures_table': self.futures_table,
+            'account_asset_table': self.account_asset_table,
+            'asset_table': self.asset_table,
+            'binance_trade_logs_table': self.binance_trade_logs_table,
+            'llm_api_error_table': self.llm_api_error_table,
+        }
+        init_database_tables(self.command, table_names)
         
         # Insert default settings if no settings exist
         self._init_default_settings()
         
         logger.info("[Database] MySQL tables initialized")
     
-    def _ensure_providers_table(self):
-        """Create providers table if not exists"""
-        ddl = f"""
-        CREATE TABLE IF NOT EXISTS `{self.providers_table}` (
-            `id` VARCHAR(36) PRIMARY KEY,
-            `name` VARCHAR(200) NOT NULL,
-            `api_url` VARCHAR(500) NOT NULL,
-            `api_key` VARCHAR(500) NOT NULL,
-            `models` TEXT,
-            `provider_type` VARCHAR(50) DEFAULT 'openai',
-            `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP,
-            INDEX `idx_created_at` (`created_at`)
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-        """
-        self.command(ddl)
-        logger.debug(f"[Database] Ensured table {self.providers_table} exists")
-    
-    def _ensure_models_table(self):
-        """Create models table if not exists"""
-        ddl = f"""
-        CREATE TABLE IF NOT EXISTS `{self.models_table}` (
-            `id` VARCHAR(36) PRIMARY KEY,
-            `name` VARCHAR(200) NOT NULL,
-            `provider_id` VARCHAR(36) NOT NULL,
-            `model_name` VARCHAR(200) NOT NULL,
-            `initial_capital` DOUBLE DEFAULT 10000,
-            `leverage` TINYINT UNSIGNED DEFAULT 10,
-            `auto_buy_enabled` TINYINT UNSIGNED DEFAULT 1,
-            `auto_sell_enabled` TINYINT UNSIGNED DEFAULT 1,
-            `max_positions` TINYINT UNSIGNED DEFAULT 3,
-            `buy_batch_size` INT UNSIGNED DEFAULT 1,
-            `buy_batch_execution_interval` INT UNSIGNED DEFAULT 60,
-            `buy_batch_execution_group_size` INT UNSIGNED DEFAULT 1,
-            `sell_batch_size` INT UNSIGNED DEFAULT 1,
-            `sell_batch_execution_interval` INT UNSIGNED DEFAULT 60,
-            `sell_batch_execution_group_size` INT UNSIGNED DEFAULT 1,
-            `api_key` VARCHAR(500),
-            `api_secret` VARCHAR(500),
-            `account_alias` VARCHAR(100),
-            `is_virtual` TINYINT UNSIGNED DEFAULT 0,
-            `symbol_source` VARCHAR(50) DEFAULT 'leaderboard',
-            `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP,
-            INDEX `idx_provider_id` (`provider_id`),
-            INDEX `idx_account_alias` (`account_alias`),
-            INDEX `idx_created_at` (`created_at`)
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-        """
-        self.command(ddl)
-        logger.debug(f"[Database] Ensured table {self.models_table} exists")
-  
-    def _ensure_portfolios_table(self):
-        """Create portfolios table if not exists"""
-        ddl = f"""
-        CREATE TABLE IF NOT EXISTS `{self.portfolios_table}` (
-            `id` VARCHAR(36) PRIMARY KEY,
-            `model_id` VARCHAR(36) NOT NULL,
-            `symbol` VARCHAR(50) NOT NULL,
-            `position_amt` DOUBLE DEFAULT 0.0,
-            `avg_price` DOUBLE DEFAULT 0.0,
-            `leverage` TINYINT UNSIGNED DEFAULT 1,
-            `position_side` VARCHAR(10) DEFAULT 'LONG',
-            `initial_margin` DOUBLE DEFAULT 0.0,
-            `unrealized_profit` DOUBLE DEFAULT 0.0,
-            `updated_at` DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-            UNIQUE KEY `uk_model_symbol_side` (`model_id`, `symbol`, `position_side`),
-            INDEX `idx_model_id` (`model_id`),
-            INDEX `idx_updated_at` (`updated_at`)
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-        """
-        self.command(ddl)
-        logger.debug(f"[Database] Ensured table {self.portfolios_table} exists")
-    
-    def _ensure_trades_table(self):
-        """Create trades table if not exists"""
-        ddl = f"""
-        CREATE TABLE IF NOT EXISTS `{self.trades_table}` (
-            `id` VARCHAR(36) PRIMARY KEY,
-            `model_id` VARCHAR(36) NOT NULL,
-            `future` VARCHAR(50) NOT NULL,
-            `signal` VARCHAR(50) NOT NULL,
-            `quantity` DOUBLE DEFAULT 0.0,
-            `price` DOUBLE DEFAULT 0.0,
-            `leverage` TINYINT UNSIGNED DEFAULT 1,
-            `side` VARCHAR(10) DEFAULT 'long',
-            `pnl` DOUBLE DEFAULT 0,
-            `fee` DOUBLE DEFAULT 0,
-            `timestamp` DATETIME DEFAULT CURRENT_TIMESTAMP,
-            INDEX `idx_model_timestamp` (`model_id`, `timestamp`),
-            INDEX `idx_future` (`future`)
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-        """
-        self.command(ddl)
-        logger.debug(f"[Database] Ensured table {self.trades_table} exists")
-    
-    def _ensure_conversations_table(self):
-        """Create conversations table if not exists"""
-        ddl = f"""
-        CREATE TABLE IF NOT EXISTS `{self.conversations_table}` (
-            `id` VARCHAR(36) PRIMARY KEY,
-            `model_id` VARCHAR(36) NOT NULL,
-            `user_prompt` LONGTEXT,
-            `ai_response` LONGTEXT,
-            `cot_trace` LONGTEXT,
-            `tokens` INT DEFAULT 0,
-            `type` VARCHAR(10) DEFAULT NULL,
-            `timestamp` DATETIME DEFAULT CURRENT_TIMESTAMP,
-            INDEX `idx_model_timestamp` (`model_id`, `timestamp`),
-            INDEX `idx_type` (`type`)
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-        """
-        self.command(ddl)
-        logger.debug(f"[Database] Ensured table {self.conversations_table} exists with index for efficient timestamp DESC sorting")
-    
-    def _ensure_account_values_table(self):
-        """Create account_values table if not exists"""
-        ddl = f"""
-        CREATE TABLE IF NOT EXISTS `{self.account_values_table}` (
-            `id` VARCHAR(36) PRIMARY KEY,
-            `model_id` VARCHAR(36) NOT NULL,
-            `account_alias` VARCHAR(100) DEFAULT '',
-            `balance` DOUBLE DEFAULT 0.0,
-            `available_balance` DOUBLE DEFAULT 0.0,
-            `cross_wallet_balance` DOUBLE DEFAULT 0.0,
-            `cross_un_pnl` DOUBLE DEFAULT 0.0,
-            `timestamp` DATETIME DEFAULT CURRENT_TIMESTAMP,
-            INDEX `idx_model_alias_timestamp` (`model_id`, `account_alias`, `timestamp`)
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-        """
-        self.command(ddl)
-        logger.debug(f"[Database] Ensured table {self.account_values_table} exists")
-    
-    def _ensure_account_value_historys_table(self):
-        """Create account_value_historys table if not exists (用于账户价值历史图表)"""
-        ddl = f"""
-        CREATE TABLE IF NOT EXISTS `{self.account_value_historys_table}` (
-            `id` VARCHAR(36) PRIMARY KEY,
-            `model_id` VARCHAR(36) NOT NULL,
-            `account_alias` VARCHAR(100) DEFAULT '',
-            `balance` DOUBLE DEFAULT 0.0,
-            `available_balance` DOUBLE DEFAULT 0.0,
-            `cross_wallet_balance` DOUBLE DEFAULT 0.0,
-            `cross_un_pnl` DOUBLE DEFAULT 0.0,
-            `timestamp` DATETIME DEFAULT CURRENT_TIMESTAMP,
-            INDEX `idx_model_timestamp` (`model_id`, `timestamp`),
-            INDEX `idx_timestamp` (`timestamp`)
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-        """
-        self.command(ddl)
-        logger.debug(f"[Database] Ensured table {self.account_value_historys_table} exists")
+    # 表初始化方法已移至 common/database_init.py
     
     @staticmethod
     def _format_timestamp_to_string(timestamp) -> Optional[str]:
@@ -583,184 +456,7 @@ class Database:
             # 如果已经是字符串，直接返回
             return str(timestamp)
     
-    def _ensure_settings_table(self):
-        """Create settings table if not exists"""
-        ddl = f"""
-        CREATE TABLE IF NOT EXISTS `{self.settings_table}` (
-            `id` VARCHAR(36) PRIMARY KEY,
-            `buy_frequency_minutes` INT UNSIGNED DEFAULT 5,
-            `sell_frequency_minutes` INT UNSIGNED DEFAULT 5,
-            `trading_fee_rate` DOUBLE DEFAULT 0.002,
-            `show_system_prompt` TINYINT UNSIGNED DEFAULT 0,
-            `conversation_limit` INT UNSIGNED DEFAULT 5,
-            `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP,
-            `updated_at` DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-        """
-        self.command(ddl)
-        logger.debug(f"[Database] Ensured table {self.settings_table} exists")
-         
-    def _ensure_model_prompts_table(self):
-        """Create model_prompts table if not exists"""
-        ddl = f"""
-        CREATE TABLE IF NOT EXISTS `{self.model_prompts_table}` (
-            `id` VARCHAR(36) PRIMARY KEY,
-            `model_id` VARCHAR(36) NOT NULL,
-            `buy_prompt` TEXT,
-            `sell_prompt` TEXT,
-            `updated_at` DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-            UNIQUE KEY `uk_model_id` (`model_id`)
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-        """
-        self.command(ddl)
-        logger.debug(f"[Database] Ensured table {self.model_prompts_table} exists")
-    
-    def _ensure_model_futures_table(self):
-        """Create model_futures table if not exists"""
-        ddl = f"""
-        CREATE TABLE IF NOT EXISTS `{self.model_futures_table}` (
-            `id` VARCHAR(36) PRIMARY KEY,
-            `model_id` VARCHAR(36) NOT NULL,
-            `symbol` VARCHAR(50) NOT NULL,
-            `contract_symbol` VARCHAR(100) DEFAULT '',
-            `name` VARCHAR(200) DEFAULT '',
-            `exchange` VARCHAR(50) DEFAULT 'BINANCE_FUTURES',
-            `link` VARCHAR(500) DEFAULT '',
-            `sort_order` INT DEFAULT 0,
-            UNIQUE KEY `uk_model_symbol` (`model_id`, `symbol`),
-            INDEX `idx_sort_order` (`sort_order`)
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-        """
-        self.command(ddl)
-        logger.debug(f"[Database] Ensured table {self.model_futures_table} exists")
-    
-    def _ensure_futures_table(self):
-        """Create futures table if not exists"""
-        ddl = f"""
-        CREATE TABLE IF NOT EXISTS `{self.futures_table}` (
-            `id` VARCHAR(36) PRIMARY KEY,
-            `symbol` VARCHAR(50) NOT NULL,
-            `contract_symbol` VARCHAR(100) DEFAULT '',
-            `name` VARCHAR(200) DEFAULT '',
-            `exchange` VARCHAR(50) DEFAULT 'BINANCE_FUTURES',
-            `link` VARCHAR(500) DEFAULT '',
-            `sort_order` INT DEFAULT 0,
-            `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP,
-            UNIQUE KEY `uk_symbol` (`symbol`),
-            INDEX `idx_sort_order` (`sort_order`)
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-        """
-        self.command(ddl)
-        logger.debug(f"[Database] Ensured table {self.futures_table} exists")
-    
-    
-    # accounts表已废弃，不再创建
-    
-    def _ensure_account_asset_table(self):
-        """Create account_asset table if not exists"""
-        ddl = f"""
-        CREATE TABLE IF NOT EXISTS `{self.account_asset_table}` (
-            `account_alias` VARCHAR(100) PRIMARY KEY,
-            `account_name` VARCHAR(200) NOT NULL,
-            `api_key` VARCHAR(500) NOT NULL,
-            `api_secret` VARCHAR(500) NOT NULL,
-            `total_initial_margin` DOUBLE DEFAULT 0.0,
-            `total_maint_margin` DOUBLE DEFAULT 0.0,
-            `total_wallet_balance` DOUBLE DEFAULT 0.0,
-            `total_unrealized_profit` DOUBLE DEFAULT 0.0,
-            `total_margin_balance` DOUBLE DEFAULT 0.0,
-            `total_position_initial_margin` DOUBLE DEFAULT 0.0,
-            `total_open_order_initial_margin` DOUBLE DEFAULT 0.0,
-            `total_cross_wallet_balance` DOUBLE DEFAULT 0.0,
-            `total_cross_un_pnl` DOUBLE DEFAULT 0.0,
-            `available_balance` DOUBLE DEFAULT 0.0,
-            `max_withdraw_amount` DOUBLE DEFAULT 0.0,
-            `update_time` BIGINT UNSIGNED DEFAULT 0,
-            `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP,
-            UNIQUE INDEX `idx_account_alias` (`account_alias`),
-            INDEX `idx_update_time` (`update_time`)
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-        """
-        self.command(ddl)
-        logger.debug(f"[Database] Ensured table {self.account_asset_table} exists")
-    
-    def _ensure_asset_table(self):
-        """Create asset table if not exists"""
-        ddl = f"""
-        CREATE TABLE IF NOT EXISTS `{self.asset_table}` (
-            `account_alias` VARCHAR(100) NOT NULL,
-            `asset` VARCHAR(50) NOT NULL,
-            `wallet_balance` DOUBLE DEFAULT 0.0,
-            `unrealized_profit` DOUBLE DEFAULT 0.0,
-            `margin_balance` DOUBLE DEFAULT 0.0,
-            `maint_margin` DOUBLE DEFAULT 0.0,
-            `initial_margin` DOUBLE DEFAULT 0.0,
-            `position_initial_margin` DOUBLE DEFAULT 0.0,
-            `open_order_initial_margin` DOUBLE DEFAULT 0.0,
-            `cross_wallet_balance` DOUBLE DEFAULT 0.0,
-            `cross_un_pnl` DOUBLE DEFAULT 0.0,
-            `available_balance` DOUBLE DEFAULT 0.0,
-            `max_withdraw_amount` DOUBLE DEFAULT 0.0,
-            `update_time` BIGINT UNSIGNED DEFAULT 0,
-            `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP,
-            PRIMARY KEY (`account_alias`, `asset`),
-            INDEX `idx_account_alias` (`account_alias`),
-            INDEX `idx_update_time` (`update_time`),
-            FOREIGN KEY (`account_alias`) REFERENCES `{self.account_asset_table}`(`account_alias`) ON DELETE CASCADE
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-        """
-        self.command(ddl)
-        logger.debug(f"[Database] Ensured table {self.asset_table} exists")
-    
-    def _ensure_binance_trade_logs_table(self):
-        """Create binance_trade_logs table if not exists"""
-        ddl = f"""
-        CREATE TABLE IF NOT EXISTS `{self.binance_trade_logs_table}` (
-            `id` VARCHAR(36) PRIMARY KEY,
-            `model_id` VARCHAR(36),
-            `conversation_id` VARCHAR(36),
-            `trade_id` VARCHAR(36),
-            `type` VARCHAR(10) NOT NULL COMMENT 'test or real',
-            `method_name` VARCHAR(50) NOT NULL COMMENT 'stop_loss_trade, take_profit_trade, market_trade, close_position_trade',
-            `param` JSON COMMENT '所有调用接口的入参数，JSON格式存储',
-            `response_context` JSON COMMENT '接口返回的内容，JSON格式',
-            `response_type` VARCHAR(10) COMMENT '接口返回状态码：200, 4XX, 5XX等',
-            `error_context` TEXT COMMENT '接口返回状态不为200时记录相关的返回错误信息',
-            `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP,
-            INDEX `idx_model_id` (`model_id`),
-            INDEX `idx_conversation_id` (`conversation_id`),
-            INDEX `idx_trade_id` (`trade_id`),
-            INDEX `idx_type` (`type`),
-            INDEX `idx_method_name` (`method_name`),
-            INDEX `idx_response_type` (`response_type`),
-            INDEX `idx_created_at` (`created_at`)
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-        """
-        self.command(ddl)
-        logger.debug(f"[Database] Ensured table {self.binance_trade_logs_table} exists")
-    
-    def _ensure_llm_api_error_table(self):
-        """Create llm_api_error table if not exists
-        
-        注意：created_at 字段不使用 DEFAULT CURRENT_TIMESTAMP，必须显式提供 UTC+8 时间值
-        以确保时间一致性，避免因服务器时区设置不同而导致的时间不一致问题
-        
-        注意：不记录prompt字段，以减少存储空间和提高性能
-        """
-        ddl = f"""
-        CREATE TABLE IF NOT EXISTS `{self.llm_api_error_table}` (
-            `id` VARCHAR(36) PRIMARY KEY,
-            `model_id` VARCHAR(36) NOT NULL,
-            `provider_name` VARCHAR(200),
-            `model` VARCHAR(200),
-            `error_msg` TEXT,
-            `created_at` DATETIME NOT NULL COMMENT 'UTC+8时区时间（北京时间），必须显式提供',
-            INDEX `idx_model_id` (`model_id`),
-            INDEX `idx_created_at` (`created_at`)
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-        """
-        self.command(ddl)
-        logger.debug(f"[Database] Ensured table {self.llm_api_error_table} exists")
+    # 表初始化方法已移至 common/database_init.py
     
     def _init_default_settings(self):
         """Initialize default settings if none exist"""
@@ -815,24 +511,6 @@ class Database:
     
     # ============ Provider（提供商）管理方法 ============
     
-    def add_provider(self, name: str, api_url: str, api_key: str, models: str = '', provider_type: str = 'openai') -> int:
-        """Add new API provider
-        
-        注意：返回类型保持为 int 以兼容原接口，但实际存储的是 String (UUID)
-        """
-        provider_id = self._generate_id()
-        try:
-            self.insert_rows(
-                self.providers_table,
-                [[provider_id, name, api_url, api_key, models or '', provider_type.lower(), datetime.now(timezone.utc)]],
-                ["id", "name", "api_url", "api_key", "models", "provider_type", "created_at"]
-            )
-            # 为了兼容性，返回一个数字 ID（使用 UUID 的 hash）
-            return self._uuid_to_int(provider_id)
-        except Exception as e:
-            logger.error(f"[Database] Failed to add provider: {e}")
-            raise
-    
     def get_provider(self, provider_id: int) -> Optional[Dict]:
         """Get provider information
         
@@ -871,41 +549,6 @@ class Database:
             logger.error(f"[Database] Failed to get all providers: {e}")
             return []
     
-    def update_provider(self, provider_id: int, name: str, api_url: str, api_key: str, models: str, provider_type: str = 'openai'):
-        """Update provider information"""
-        try:
-            # 查找匹配的 provider
-            provider = self.get_provider(provider_id)
-            if not provider:
-                logger.warning(f"[Database] Provider {provider_id} not found for update")
-                return
-            
-            actual_id = provider['id']
-            # MySQL 使用 DELETE + INSERT 来实现 UPDATE
-            self.command(f"DELETE FROM {self.providers_table} WHERE id = '{actual_id}'")
-            self.insert_rows(
-                self.providers_table,
-                [[actual_id, name, api_url, api_key, models or '', provider_type.lower(), provider.get('created_at', datetime.now(timezone.utc))]],
-                ["id", "name", "api_url", "api_key", "models", "provider_type", "created_at"]
-            )
-        except Exception as e:
-            logger.error(f"[Database] Failed to update provider {provider_id}: {e}")
-            raise
-    
-    def delete_provider(self, provider_id: int):
-        """Delete provider"""
-        try:
-            provider = self.get_provider(provider_id)
-            if not provider:
-                logger.warning(f"[Database] Provider {provider_id} not found for deletion")
-                return
-            
-            actual_id = provider['id']
-            self.command(f"DELETE FROM {self.providers_table} WHERE id = '{actual_id}'")
-        except Exception as e:
-            logger.error(f"[Database] Failed to delete provider {provider_id}: {e}")
-            raise
-    
     # ============ Model（模型）管理方法 ============
     
     def _get_model_id_mapping(self) -> Dict[int, str]:
@@ -936,119 +579,7 @@ class Database:
             logger.error(f"[Database] Failed to get provider ID mapping: {e}")
             return {}
     
-    def add_model(self, name: str, provider_id: int, model_name: str,
-                 initial_capital: float = 10000, leverage: int = 10, api_key: str = '', api_secret: str = '', 
-                 account_alias: str = '', is_virtual: bool = True, symbol_source: str = 'leaderboard', 
-                 max_positions: int = 3,
-                 buy_batch_size: int = 1, buy_batch_execution_interval: int = 60, buy_batch_execution_group_size: int = 1,
-                 sell_batch_size: int = 1, sell_batch_execution_interval: int = 60, sell_batch_execution_group_size: int = 1) -> int:
-        """
-        Add new trading model
-        
-        【symbol_source字段说明】
-        此字段用于AI交易买入决策时确定交易对数据来源：
-        - 'leaderboard': 从涨跌榜（24_market_tickers表）获取交易对，这是默认值，保持向后兼容
-        - 'future': 从合约配置信息表（futures表）获取所有已配置的交易对
-        
-        该字段仅在buy类型的AI交互中使用，sell逻辑不受影响。
-        相关调用链：trading_engine._select_buy_candidates() -> market_data.get_leaderboard() 或 get_configured_futures_symbols()
-        
-        Args:
-            name: 模型名称
-            provider_id: 提供方ID
-            model_name: 模型名称
-            initial_capital: 初始资金
-            leverage: 杠杆倍数
-            api_key: API密钥（如果提供了account_alias，则从account_asset表获取）
-            api_secret: API密钥（如果提供了account_alias，则从account_asset表获取）
-            account_alias: 账户别名（可选，如果提供则从account_asset表获取api_key和api_secret）
-            is_virtual: 是否虚拟账户，默认False
-            symbol_source: 交易对来源，'future'（合约配置信息）或'leaderboard'（涨跌榜），默认'leaderboard'
-            max_positions: 最大持仓数量，默认3
-        """
-        model_id = self._generate_id()
-        provider_mapping = self._get_provider_id_mapping()
-        provider_uuid = provider_mapping.get(provider_id, '')
-        
-        # 【数据验证】确保symbol_source值合法，非法值自动回退到默认值'leaderboard'
-        if symbol_source not in ['future', 'leaderboard']:
-            logger.warning(f"[Database] Invalid symbol_source value '{symbol_source}', using default 'leaderboard'")
-            symbol_source = 'leaderboard'
-        
-        # 如果提供了account_alias，从account_asset表获取api_key和api_secret
-        final_api_key = api_key
-        final_api_secret = api_secret
-        if account_alias:
-            try:
-                account_rows = self.query(f"""
-                    SELECT api_key, api_secret FROM `{self.account_asset_table}`
-                    WHERE account_alias = %s
-                    LIMIT 1
-                """, (account_alias,))
-                if account_rows and len(account_rows) > 0:
-                    final_api_key = account_rows[0][0] if account_rows[0][0] else api_key
-                    final_api_secret = account_rows[0][1] if account_rows[0][1] else api_secret
-                    # 验证从数据库获取的api_key和api_secret不能为空
-                    if not final_api_key or not final_api_key.strip():
-                        raise ValueError(f"Account {account_alias} has empty api_key in database")
-                    if not final_api_secret or not final_api_secret.strip():
-                        raise ValueError(f"Account {account_alias} has empty api_secret in database")
-                else:
-                    raise ValueError(f"Account {account_alias} not found in database")
-            except Exception as e:
-                logger.error(f"[Database] Failed to get account credentials for {account_alias}: {e}")
-                raise
-        
-        # 验证最终使用的api_key和api_secret不能为空
-        if not final_api_key or not final_api_key.strip():
-            raise ValueError("api_key is required and cannot be empty")
-        if not final_api_secret or not final_api_secret.strip():
-            raise ValueError("api_secret is required and cannot be empty")
-        
-        try:
-            # 验证max_positions值
-            if not isinstance(max_positions, int) or max_positions < 1:
-                logger.warning(f"[Database] Invalid max_positions value: {max_positions}, using default 3")
-                max_positions = 3
-            
-            # 验证批次配置值
-            buy_batch_size = max(1, int(buy_batch_size)) if buy_batch_size is not None else 1
-            buy_batch_execution_interval = max(0, int(buy_batch_execution_interval)) if buy_batch_execution_interval is not None else 60
-            buy_batch_execution_group_size = max(1, int(buy_batch_execution_group_size)) if buy_batch_execution_group_size is not None else 1
-            sell_batch_size = max(1, int(sell_batch_size)) if sell_batch_size is not None else 1
-            sell_batch_execution_interval = max(0, int(sell_batch_execution_interval)) if sell_batch_execution_interval is not None else 60
-            sell_batch_execution_group_size = max(1, int(sell_batch_execution_group_size)) if sell_batch_execution_group_size is not None else 1
-            
-            self.insert_rows(
-                self.models_table,
-                [[model_id, name, provider_uuid, model_name, initial_capital, leverage, 1, 1, max_positions, 
-                  buy_batch_size, buy_batch_execution_interval, buy_batch_execution_group_size,
-                  sell_batch_size, sell_batch_execution_interval, sell_batch_execution_group_size,
-                  final_api_key, final_api_secret, account_alias, 1 if is_virtual else 0, symbol_source, datetime.now(timezone.utc)]],
-                ["id", "name", "provider_id", "model_name", "initial_capital", "leverage", "auto_buy_enabled", "auto_sell_enabled", "max_positions",
-                 "buy_batch_size", "buy_batch_execution_interval", "buy_batch_execution_group_size",
-                 "sell_batch_size", "sell_batch_execution_interval", "sell_batch_execution_group_size",
-                 "api_key", "api_secret", "account_alias", "is_virtual", "symbol_source", "created_at"]
-            )
-            
-            # 初始化account_values表的一条记录（确保account_alias插入到account_values表中）
-            try:
-                av_id = self._generate_id()
-                # 初始值使用initial_capital作为balance
-                self.insert_rows(
-                    self.account_values_table,
-                    [[av_id, model_id, account_alias or '', initial_capital, initial_capital, initial_capital, 0.0, datetime.now(timezone.utc)]],
-                    ["id", "model_id", "account_alias", "balance", "available_balance", "cross_wallet_balance", "cross_un_pnl", "timestamp"]
-                )
-                logger.debug(f"[Database] Initialized account_values record for model {self._uuid_to_int(model_id)} with account_alias={account_alias}")
-            except Exception as av_err:
-                logger.warning(f"[Database] Failed to initialize account_values record for model {self._uuid_to_int(model_id)}: {av_err}")
-                # 不阻止模型创建，account_values初始化失败不影响模型创建
-            
-            return self._uuid_to_int(model_id)
-        except Exception as e:
-            logger.error(f"[Database] Failed to add model: {e}")
-            raise
+    # add_model 方法已迁移到Java后端，不再需要
     
     def get_model(self, model_id: int) -> Optional[Dict]:
         """Get model information"""
@@ -1185,67 +716,7 @@ class Database:
             logger.error(f"[Database] Failed to get all models: {e}")
             return []
     
-    def delete_model(self, model_id: int):
-        """
-        删除模型及其所有相关数据
-        
-        删除顺序（先删除依赖表，再删除主表）：
-        1. portfolios - 持仓数据
-        2. trades - 交易记录
-        3. conversations - 对话记录
-        4. account_values - 账户价值历史
-        5. model_futures - 模型关联的期货合约
-        6. model_prompts - 模型提示词配置
-        7. models - 模型主表
-        
-        Args:
-            model_id: 模型ID（整数ID）
-        """
-        try:
-            model_mapping = self._get_model_id_mapping()
-            model_uuid = model_mapping.get(model_id)
-            if not model_uuid:
-                logger.warning(f"[Database] Model {model_id} not found for deletion")
-                return
-            
-            logger.info(f"[Database] Starting deletion of model {model_id} (UUID: {model_uuid}) and all related data")
-            
-            # 删除相关数据（按依赖顺序删除）
-            # 1. 删除持仓数据
-            self.command(f"DELETE FROM `{self.portfolios_table}` WHERE model_id = %s", (model_uuid,))
-            logger.debug(f"[Database] Deleted portfolios for model {model_id}")
-            
-            # 2. 删除交易记录
-            self.command(f"DELETE FROM `{self.trades_table}` WHERE model_id = %s", (model_uuid,))
-            logger.debug(f"[Database] Deleted trades for model {model_id}")
-            
-            # 3. 删除对话记录
-            self.command(f"DELETE FROM `{self.conversations_table}` WHERE model_id = %s", (model_uuid,))
-            logger.debug(f"[Database] Deleted conversations for model {model_id}")
-            
-            # 4. 删除账户价值记录（account_values表，用于当前值）
-            self.command(f"DELETE FROM `{self.account_values_table}` WHERE model_id = %s", (model_uuid,))
-            logger.debug(f"[Database] Deleted account_values for model {model_id}")
-            
-            # 4.1. 删除账户价值历史记录（account_value_historys表，用于历史图表）
-            self.command(f"DELETE FROM `{self.account_value_historys_table}` WHERE model_id = %s", (model_uuid,))
-            logger.debug(f"[Database] Deleted account_value_historys for model {model_id}")
-            
-            # 5. 删除模型关联的期货合约
-            self.command(f"DELETE FROM `{self.model_futures_table}` WHERE model_id = %s", (model_uuid,))
-            logger.debug(f"[Database] Deleted model_futures for model {model_id}")
-            
-            # 6. 删除模型提示词配置
-            self.command(f"DELETE FROM `{self.model_prompts_table}` WHERE model_id = %s", (model_uuid,))
-            logger.debug(f"[Database] Deleted model_prompts for model {model_id}")
-            
-            # 7. 最后删除模型主表
-            self.command(f"DELETE FROM `{self.models_table}` WHERE id = %s", (model_uuid,))
-            logger.info(f"[Database] Successfully deleted model {model_id} and all related data")
-            
-        except Exception as e:
-            logger.error(f"[Database] Failed to delete model {model_id}: {e}")
-            raise
+    # delete_model 方法已迁移到Java后端，不再需要
     
     def set_model_auto_trading(self, model_id: int, enabled: bool) -> bool:
         """
@@ -2319,20 +1790,7 @@ class Database:
             logger.error(f"[Database] Failed to get futures: {e}")
             return []
     
-    def add_future(self, symbol: str, contract_symbol: str, name: str,
-                   exchange: str = 'BINANCE_FUTURES', link: Optional[str] = None, sort_order: int = 0) -> int:
-        """Add new future configuration"""
-        future_id = self._generate_id()
-        try:
-            self.insert_rows(
-                self.futures_table,
-                [[future_id, symbol.upper(), contract_symbol.upper(), name, exchange.upper(), (link or '').strip() or '', sort_order, datetime.now(timezone.utc)]],
-                ["id", "symbol", "contract_symbol", "name", "exchange", "link", "sort_order", "created_at"]
-            )
-            return self._uuid_to_int(future_id)
-        except Exception as e:
-            logger.error(f"[Database] Failed to add future: {e}")
-            raise
+    # add_future 方法已迁移到Java后端，不再需要
     
     def upsert_future(self, symbol: str, contract_symbol: str, name: str,
                      exchange: str = 'BINANCE_FUTURES', link: Optional[str] = None, sort_order: int = 0):
@@ -2349,20 +1807,7 @@ class Database:
             logger.error(f"[Database] Failed to upsert future: {e}")
             raise
     
-    def delete_future(self, future_id: int):
-        """Delete future configuration"""
-        try:
-            # 查找匹配的 future
-            futures = self.get_futures()
-            for future in futures:
-                if self._uuid_to_int(future['id']) == future_id:
-                    actual_id = future['id']
-                    self.command(f"DELETE FROM {self.futures_table} WHERE id = '{actual_id}'")
-                    return
-            logger.warning(f"[Database] Future {future_id} not found for deletion")
-        except Exception as e:
-            logger.error(f"[Database] Failed to delete future {future_id}: {e}")
-            raise
+    # delete_future 方法已迁移到Java后端，不再需要
     
     # ============ Futures（合约配置）管理方法 ============
     
@@ -2386,39 +1831,7 @@ class Database:
     
     # ============ Model Futures（模型合约关联）管理方法 ============
     
-    def add_model_future(self, model_id: int, symbol: str, contract_symbol: str,
-                         name: str, exchange: str = 'BINANCE_FUTURES',
-                         link: Optional[str] = None, sort_order: int = 0) -> int:
-        """Add model-specific future configuration"""
-        try:
-            model_mapping = self._get_model_id_mapping()
-            model_uuid = model_mapping.get(model_id)
-            if not model_uuid:
-                raise ValueError(f"Model {model_id} not found")
-            
-            mf_id = self._generate_id()
-            self.insert_rows(
-                self.model_futures_table,
-                [[mf_id, model_uuid, symbol.upper(), contract_symbol.upper(), name, exchange.upper(), (link or '').strip() or '', sort_order]],
-                ["id", "model_id", "symbol", "contract_symbol", "name", "exchange", "link", "sort_order"]
-            )
-            return self._uuid_to_int(mf_id)
-        except Exception as e:
-            logger.error(f"[Database] Failed to add model future: {e}")
-            raise
-    
-    def delete_model_future(self, model_id: int, symbol: str):
-        """Delete model-specific future configuration"""
-        try:
-            model_mapping = self._get_model_id_mapping()
-            model_uuid = model_mapping.get(model_id)
-            if not model_uuid:
-                return
-            
-            self.command(f"DELETE FROM {self.model_futures_table} WHERE model_id = '{model_uuid}' AND symbol = '{symbol.upper()}'")
-        except Exception as e:
-            logger.error(f"[Database] Failed to delete model future: {e}")
-            raise
+    # add_model_future 和 delete_model_future 方法已迁移到Java后端，不再需要
     
     def get_model_held_symbols(self, model_id: int) -> List[str]:
         """
@@ -2944,98 +2357,7 @@ class Database:
             logger.error(f"[Database] Failed to get all account assets: {e}")
             return []
     
-    def update_account_asset(self, account_alias: str,
-                            total_initial_margin: float = None,
-                            total_maint_margin: float = None,
-                            total_wallet_balance: float = None,
-                            total_unrealized_profit: float = None,
-                            total_margin_balance: float = None,
-                            total_position_initial_margin: float = None,
-                            total_open_order_initial_margin: float = None,
-                            total_cross_wallet_balance: float = None,
-                            total_cross_un_pnl: float = None,
-                            available_balance: float = None,
-                            max_withdraw_amount: float = None,
-                            update_time: int = None) -> bool:
-        """
-        更新账户资产信息（部分字段）
-        
-        Args:
-            account_alias: 账户唯一识别码
-            total_initial_margin: 当前所需起始保证金总额（可选）
-            total_maint_margin: 维持保证金总额（可选）
-            total_wallet_balance: 账户总余额（可选）
-            total_unrealized_profit: 持仓未实现盈亏总额（可选）
-            total_margin_balance: 保证金总余额（可选）
-            total_position_initial_margin: 持仓所需起始保证金（可选）
-            total_open_order_initial_margin: 当前挂单所需起始保证金（可选）
-            total_cross_wallet_balance: 全仓账户余额（可选）
-            total_cross_un_pnl: 全仓持仓未实现盈亏总额（可选）
-            available_balance: 可用余额（可选）
-            max_withdraw_amount: 最大可转出余额（可选）
-            update_time: 更新时间（可选，如果不提供则使用当前时间戳）
-            
-        Returns:
-            操作是否成功
-        """
-        try:
-            # 先获取现有账户资产信息
-            existing = self.get_account_asset(account_alias)
-            if not existing:
-                logger.warning(f"[Database] Account asset {account_alias} not found for update")
-                return False
-            
-            # 使用提供的值或保留现有值
-            final_total_initial_margin = total_initial_margin if total_initial_margin is not None else float(existing["totalInitialMargin"])
-            final_total_maint_margin = total_maint_margin if total_maint_margin is not None else float(existing["totalMaintMargin"])
-            final_total_wallet_balance = total_wallet_balance if total_wallet_balance is not None else float(existing["totalWalletBalance"])
-            final_total_unrealized_profit = total_unrealized_profit if total_unrealized_profit is not None else float(existing["totalUnrealizedProfit"])
-            final_total_margin_balance = total_margin_balance if total_margin_balance is not None else float(existing["totalMarginBalance"])
-            final_total_position_initial_margin = total_position_initial_margin if total_position_initial_margin is not None else float(existing["totalPositionInitialMargin"])
-            final_total_open_order_initial_margin = total_open_order_initial_margin if total_open_order_initial_margin is not None else float(existing["totalOpenOrderInitialMargin"])
-            final_total_cross_wallet_balance = total_cross_wallet_balance if total_cross_wallet_balance is not None else float(existing["totalCrossWalletBalance"])
-            final_total_cross_un_pnl = total_cross_un_pnl if total_cross_un_pnl is not None else float(existing["totalCrossUnPnl"])
-            final_available_balance = available_balance if available_balance is not None else float(existing["availableBalance"])
-            final_max_withdraw_amount = max_withdraw_amount if max_withdraw_amount is not None else float(existing["maxWithdrawAmount"])
-            final_update_time = update_time if update_time is not None else existing["updateTime"]
-            
-            # 使用 add_account_asset 方法（MySQL 使用 INSERT ... ON DUPLICATE KEY UPDATE 实现去重）
-            return self.add_account_asset(
-                account_alias=account_alias,
-                total_initial_margin=final_total_initial_margin,
-                total_maint_margin=final_total_maint_margin,
-                total_wallet_balance=final_total_wallet_balance,
-                total_unrealized_profit=final_total_unrealized_profit,
-                total_margin_balance=final_total_margin_balance,
-                total_position_initial_margin=final_total_position_initial_margin,
-                total_open_order_initial_margin=final_total_open_order_initial_margin,
-                total_cross_wallet_balance=final_total_cross_wallet_balance,
-                total_cross_un_pnl=final_total_cross_un_pnl,
-                available_balance=final_available_balance,
-                max_withdraw_amount=final_max_withdraw_amount,
-                update_time=final_update_time
-            )
-        except Exception as e:
-            logger.error(f"[Database] Failed to update account asset {account_alias}: {e}")
-            return False
-    
-    def delete_account_asset(self, account_alias: str) -> bool:
-        """
-        删除账户资产信息
-        
-        Args:
-            account_alias: 账户唯一识别码
-            
-        Returns:
-            操作是否成功
-        """
-        try:
-            self.command(f"DELETE FROM {self.account_asset_table} WHERE account_alias = '{account_alias}'")
-            logger.debug(f"[Database] Deleted account asset: {account_alias}")
-            return True
-        except Exception as e:
-            logger.error(f"[Database] Failed to delete account asset {account_alias}: {e}")
-            return False
+    # update_account_asset 和 delete_account_asset 方法已迁移到Java后端，不再需要
     
     # ============ Asset（资产明细）管理方法 ============
     
@@ -3211,103 +2533,38 @@ class Database:
             logger.error(f"[Database] Failed to get all assets: {e}")
             return []
     
-    def update_asset(self, account_alias: str, asset: str,
-                    wallet_balance: float = None,
-                    unrealized_profit: float = None,
-                    margin_balance: float = None,
-                    maint_margin: float = None,
-                    initial_margin: float = None,
-                    position_initial_margin: float = None,
-                    open_order_initial_margin: float = None,
-                    cross_wallet_balance: float = None,
-                    cross_un_pnl: float = None,
-                    available_balance: float = None,
-                    max_withdraw_amount: float = None,
-                    update_time: int = None) -> bool:
-        """
-        更新资产信息（部分字段）
-        
-        Args:
-            account_alias: 账户唯一识别码
-            asset: 资产类型
-            wallet_balance: 余额（可选）
-            unrealized_profit: 未实现盈亏（可选）
-            margin_balance: 保证金余额（可选）
-            maint_margin: 维持保证金（可选）
-            initial_margin: 当前所需起始保证金（可选）
-            position_initial_margin: 持仓所需起始保证金（可选）
-            open_order_initial_margin: 当前挂单所需起始保证金（可选）
-            cross_wallet_balance: 全仓账户余额（可选）
-            cross_un_pnl: 全仓持仓未实现盈亏（可选）
-            available_balance: 可用余额（可选）
-            max_withdraw_amount: 最大可转出余额（可选）
-            update_time: 更新时间（可选，如果不提供则使用当前时间戳）
-            
-        Returns:
-            操作是否成功
-        """
-        try:
-            # 先获取现有资产信息
-            existing = self.get_asset(account_alias, asset)
-            if not existing:
-                logger.warning(f"[Database] Asset {account_alias}/{asset} not found for update")
-                return False
-            
-            # 使用提供的值或保留现有值
-            final_wallet_balance = wallet_balance if wallet_balance is not None else float(existing["walletBalance"])
-            final_unrealized_profit = unrealized_profit if unrealized_profit is not None else float(existing["unrealizedProfit"])
-            final_margin_balance = margin_balance if margin_balance is not None else float(existing["marginBalance"])
-            final_maint_margin = maint_margin if maint_margin is not None else float(existing["maintMargin"])
-            final_initial_margin = initial_margin if initial_margin is not None else float(existing["initialMargin"])
-            final_position_initial_margin = position_initial_margin if position_initial_margin is not None else float(existing["positionInitialMargin"])
-            final_open_order_initial_margin = open_order_initial_margin if open_order_initial_margin is not None else float(existing["openOrderInitialMargin"])
-            final_cross_wallet_balance = cross_wallet_balance if cross_wallet_balance is not None else float(existing["crossWalletBalance"])
-            final_cross_un_pnl = cross_un_pnl if cross_un_pnl is not None else float(existing["crossUnPnl"])
-            final_available_balance = available_balance if available_balance is not None else float(existing["availableBalance"])
-            final_max_withdraw_amount = max_withdraw_amount if max_withdraw_amount is not None else float(existing["maxWithdrawAmount"])
-            final_update_time = update_time if update_time is not None else existing["updateTime"]
-            
-            # 使用 add_asset 方法（MySQL 使用主键 (account_alias, asset) 和 INSERT 实现去重）
-            return self.add_asset(
-                account_alias=account_alias,
-                asset=asset,
-                wallet_balance=final_wallet_balance,
-                unrealized_profit=final_unrealized_profit,
-                margin_balance=final_margin_balance,
-                maint_margin=final_maint_margin,
-                initial_margin=final_initial_margin,
-                position_initial_margin=final_position_initial_margin,
-                open_order_initial_margin=final_open_order_initial_margin,
-                cross_wallet_balance=final_cross_wallet_balance,
-                cross_un_pnl=final_cross_un_pnl,
-                available_balance=final_available_balance,
-                max_withdraw_amount=final_max_withdraw_amount,
-                update_time=final_update_time
-            )
-        except Exception as e:
-            logger.error(f"[Database] Failed to update asset {account_alias}/{asset}: {e}")
-            return False
+    # update_asset 和 delete_asset 方法已迁移到Java后端，不再需要
     
-    def delete_asset(self, account_alias: str, asset: str = None) -> bool:
+    # ============ 策略管理方法 ============
+    
+    def get_model_strategies(self, model_id: int, strategy_type: str) -> List[Dict]:
         """
-        删除资产信息
+        获取模型关联的策略列表（按优先级和创建时间排序）
+        
+        注意：此方法已迁移到 common.database_strategys.StrategysDatabase
+        保留此方法仅用于向后兼容。
         
         Args:
-            account_alias: 账户唯一识别码
-            asset: 资产类型（可选，如果指定则只删除该资产的信息，否则删除该账户的所有资产信息）
-            
+            model_id: 模型ID
+            strategy_type: 策略类型，'buy' 或 'sell'
+        
         Returns:
-            操作是否成功
+            List[Dict]: 策略列表
         """
         try:
-            if asset:
-                self.command(f"DELETE FROM {self.asset_table} WHERE account_alias = '{account_alias}' AND asset = '{asset}'")
-                logger.debug(f"[Database] Deleted asset: {account_alias}, {asset}")
-            else:
-                self.command(f"DELETE FROM {self.asset_table} WHERE account_alias = '{account_alias}'")
-                logger.debug(f"[Database] Deleted all assets for: {account_alias}")
-            return True
+            from common.database_strategys import StrategysDatabase
+            # 将model_id转换为UUID字符串
+            model_mapping = self._get_model_id_mapping()
+            model_uuid = model_mapping.get(model_id)
+            if not model_uuid:
+                logger.warning(f"[Database] Model {model_id} not found in mapping, cannot get strategies")
+                return []
+            
+            # 使用新的StrategysDatabase模块
+            strategys_db = StrategysDatabase(pool=self._pool)
+            # 注意：StrategysDatabase.get_model_strategies需要UUID字符串
+            return strategys_db.get_model_strategies(model_uuid, strategy_type)
         except Exception as e:
-            logger.error(f"[Database] Failed to delete asset {account_alias}/{asset}: {e}")
-            return False
+            logger.error(f"[Database] Failed to get model strategies: {e}")
+            return []
 

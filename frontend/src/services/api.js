@@ -268,3 +268,88 @@ export const accountApi = {
   delete: (accountAlias) => apiDelete(`/api/accounts/${accountAlias}`)
 }
 
+/**
+ * 策略管理相关 API
+ */
+export const strategyApi = {
+  /**
+   * 获取所有策略
+   */
+  getAll: () => apiGet('/api/strategies'),
+
+  /**
+   * 根据ID获取策略
+   */
+  getById: (id) => apiGet(`/api/strategies/${id}`),
+
+  /**
+   * 根据条件查询策略
+   */
+  search: (params) => apiGet('/api/strategies/search', params),
+
+  /**
+   * 分页查询策略
+   */
+  getPage: (params) => apiGet('/api/strategies/page', params),
+
+  /**
+   * 添加策略
+   */
+  create: (data) => apiPost('/api/strategies', data),
+
+  /**
+   * 更新策略
+   */
+  update: (id, data) => apiPut(`/api/strategies/${id}`, data),
+
+  /**
+   * 删除策略
+   */
+  delete: (id) => apiDelete(`/api/strategies/${id}`)
+}
+
+/**
+ * 模型关联策略相关 API
+ */
+export const modelStrategyApi = {
+  /**
+   * 获取所有模型策略关联
+   */
+  getAll: () => apiGet('/api/model-strategies'),
+
+  /**
+   * 根据ID获取模型策略关联
+   */
+  getById: (id) => apiGet(`/api/model-strategies/${id}`),
+
+  /**
+   * 根据模型ID获取模型策略关联
+   */
+  getByModelId: (modelId) => apiGet(`/api/model-strategies/model/${modelId}`),
+
+  /**
+   * 根据模型ID和类型获取模型策略关联
+   */
+  getByModelIdAndType: (modelId, type) => apiGet(`/api/model-strategies/model/${modelId}/type/${type}`),
+
+  /**
+   * 添加模型策略关联
+   */
+  create: (data) => apiPost('/api/model-strategies', data),
+
+  /**
+   * 更新模型策略关联优先级
+   */
+  updatePriority: (id, priority) => apiPut(`/api/model-strategies/${id}/priority`, { priority }),
+
+  /**
+   * 批量保存模型策略关联
+   */
+  batchSave: (modelId, type, data) => apiPost(`/api/model-strategies/model/${modelId}/type/${type}/batch`, data),
+
+  /**
+   * 删除模型策略关联
+   */
+  delete: (id) => apiDelete(`/api/model-strategies/${id}`)
+}
+

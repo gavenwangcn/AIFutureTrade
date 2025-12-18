@@ -46,7 +46,7 @@ from typing import List, Optional
 
 import common.config as app_config
 from common.binance_futures import BinanceFuturesClient
-from common.database_mysql import MySQLDatabase
+from common.database_market_tickers import MarketTickersDatabase
 
 logger = logging.getLogger(__name__)
 
@@ -98,7 +98,7 @@ def parse_cron_interval(cron_expr: str) -> int:
 
 async def refresh_price_for_symbol(
     binance_client: BinanceFuturesClient,
-    db: MySQLDatabase,
+    db: MarketTickersDatabase,
     symbol: str
 ) -> bool:
     """
@@ -204,7 +204,7 @@ async def refresh_price_for_symbol(
 
 async def refresh_prices_batch(
     binance_client: BinanceFuturesClient,
-    db: MySQLDatabase,
+    db: MarketTickersDatabase,
     symbols: List[str],
     max_per_minute: int = 1000
 ) -> dict:
@@ -354,9 +354,9 @@ async def refresh_all_prices() -> None:
     try:
         # 初始化数据库和币安客户端
         logger.info("[PriceRefresh] [步骤1] 初始化数据库和币安客户端...")
-        logger.info("[PriceRefresh] [步骤1] 开始创建MySQLDatabase实例")
-        db = MySQLDatabase(auto_init_tables=False)
-        logger.info("[PriceRefresh] [步骤1] 成功创建MySQLDatabase实例")
+        logger.info("[PriceRefresh] [步骤1] 开始创建MarketTickersDatabase实例")
+        db = MarketTickersDatabase()
+        logger.info("[PriceRefresh] [步骤1] 成功创建MarketTickersDatabase实例")
         
         logger.info("[PriceRefresh] [步骤1] 开始创建BinanceFuturesClient实例")
         binance_client = BinanceFuturesClient(

@@ -11,7 +11,9 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
  * 控制器：合约配置
@@ -55,9 +57,18 @@ public class FutureController {
      */
     @DeleteMapping("/{futureId}")
     @ApiOperation("删除合约配置")
-    public ResponseEntity<Boolean> deleteFutureConfig(@PathVariable Integer futureId) {
+    public ResponseEntity<Map<String, Object>> deleteFutureConfig(@PathVariable Integer futureId) {
         Boolean deleted = futureService.deleteFuture(futureId);
-        return new ResponseEntity<>(deleted, HttpStatus.OK);
+        Map<String, Object> response = new HashMap<>();
+        if (deleted) {
+            response.put("success", true);
+            response.put("message", "Future deleted successfully");
+            return new ResponseEntity<>(response, HttpStatus.OK);
+        } else {
+            response.put("success", false);
+            response.put("error", "Failed to delete future");
+            return new ResponseEntity<>(response, HttpStatus.INTERNAL_SERVER_ERROR);
+        }
     }
 
     /**

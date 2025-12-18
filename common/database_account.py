@@ -7,7 +7,7 @@ from __future__ import annotations
 import logging
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
-from common.database_mysql import MySQLDatabase
+from common.database_basic import Database
 
 logger = logging.getLogger(__name__)
 
@@ -22,7 +22,7 @@ class AccountDatabase:
         Args:
             auto_init_tables: 是否自动初始化表结构，默认True（注意：表结构在database_basic.py中统一管理）
         """
-        self.db = MySQLDatabase(auto_init_tables=auto_init_tables)
+        self.db = Database()
         self.account_asset_table = "account_asset"
         self.asset_table = "asset"
     

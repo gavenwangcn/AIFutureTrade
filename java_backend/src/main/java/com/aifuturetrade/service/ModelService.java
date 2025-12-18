@@ -169,4 +169,39 @@ public interface ModelService {
      */
     Map<String, Object> getAggregatedPortfolio();
 
+    /**
+     * 手动执行一次交易周期（同时执行买入和卖出）
+     * @param modelId 模型ID
+     * @return 交易执行结果
+     */
+    Map<String, Object> executeTrading(Integer modelId);
+
+    /**
+     * 手动执行一次买入交易周期
+     * @param modelId 模型ID
+     * @return 买入交易执行结果
+     */
+    Map<String, Object> executeBuyTrading(Integer modelId);
+
+    /**
+     * 手动执行一次卖出交易周期
+     * @param modelId 模型ID
+     * @return 卖出交易执行结果
+     */
+    Map<String, Object> executeSellTrading(Integer modelId);
+
+    /**
+     * 禁用模型的自动买入功能
+     * @param modelId 模型ID
+     * @return 更新后的自动买入状态
+     */
+    Map<String, Object> disableBuyTrading(Integer modelId);
+
+    /**
+     * 禁用模型的自动卖出功能
+     * @param modelId 模型ID
+     * @return 更新后的自动卖出状态
+     */
+    Map<String, Object> disableSellTrading(Integer modelId);
+
 }

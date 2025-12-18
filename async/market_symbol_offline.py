@@ -27,7 +27,7 @@ from datetime import datetime, timezone, timedelta
 from typing import Optional
 
 import common.config as app_config
-from common.database_mysql import MySQLDatabase
+from common.database_market_tickers import MarketTickersDatabase
 
 logger = logging.getLogger(__name__)
 
@@ -112,7 +112,7 @@ async def delete_old_symbols() -> None:
         
         # 初始化数据库
         logger.info("[MarketSymbolOffline] [步骤1] 初始化数据库...")
-        db = MySQLDatabase(auto_init_tables=False)
+        db = MarketTickersDatabase()
         logger.info("[MarketSymbolOffline] [步骤1] ✅ 数据库初始化完成")
         
         # 计算截止日期

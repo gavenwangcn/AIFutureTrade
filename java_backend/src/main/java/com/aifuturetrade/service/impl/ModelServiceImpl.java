@@ -103,6 +103,19 @@ public class ModelServiceImpl implements ModelService {
         modelDO.setUpdatedAt(LocalDateTime.now());
         modelDO.setAutoBuyEnabled(true);
         modelDO.setAutoSellEnabled(true);
+        // 设置默认trade_type为'strategy'（如果未提供）
+        if (modelDO.getTradeType() == null || modelDO.getTradeType().trim().isEmpty()) {
+            modelDO.setTradeType("strategy");
+        } else {
+            // 验证trade_type值
+            String tradeType = modelDO.getTradeType().toLowerCase();
+            if (!tradeType.equals("ai") && !tradeType.equals("strategy")) {
+                log.warn("[ModelService] Invalid trade_type '{}', defaulting to 'strategy'", modelDO.getTradeType());
+                modelDO.setTradeType("strategy");
+            } else {
+                modelDO.setTradeType(tradeType);
+            }
+        }
         modelMapper.insert(modelDO);
         return convertToDTO(modelDO);
     }
@@ -112,6 +125,22 @@ public class ModelServiceImpl implements ModelService {
     public ModelDTO updateModel(ModelDTO modelDTO) {
         ModelDO modelDO = convertToDO(modelDTO);
         modelDO.setUpdatedAt(LocalDateTime.now());
+        // 验证trade_type值（如果提供）
+        if (modelDO.getTradeType() != null && !modelDO.getTradeType().trim().isEmpty()) {
+            String tradeType = modelDO.getTradeType().toLowerCase();
+            if (!tradeType.equals("ai") && !tradeType.equals("strategy")) {
+                log.warn("[ModelService] Invalid trade_type '{}', keeping existing value", modelDO.getTradeType());
+                // 如果值无效，从数据库获取现有值
+                ModelDO existingModel = modelMapper.selectModelById(modelDO.getId());
+                if (existingModel != null && existingModel.getTradeType() != null) {
+                    modelDO.setTradeType(existingModel.getTradeType());
+                } else {
+                    modelDO.setTradeType("strategy");
+                }
+            } else {
+                modelDO.setTradeType(tradeType);
+            }
+        }
         modelMapper.updateById(modelDO);
         return convertToDTO(modelDO);
     }
@@ -956,6 +985,169 @@ public class ModelServiceImpl implements ModelService {
         ModelDO modelDO = new ModelDO();
         BeanUtils.copyProperties(modelDTO, modelDO);
         return modelDO;
+    }
+
+    @Override
+    public Map<String, Object> executeTrading(Integer modelId) {
+        Map<String, Object> result = new HashMap<>();
+        try {
+            // 检查模型是否存在
+            ModelDTO model = getModelById(modelId);
+            if (model == null) {
+                result.put("success", false);
+                result.put("error", "Model not found");
+                return result;
+            }
+
+            // 启用自动交易
+            setModelAutoTrading(modelId, true, true);
+
+            // TODO: 实现交易引擎逻辑
+            // 这里需要调用交易引擎执行买入和卖出周期
+            // 目前返回占位符响应
+            result.put("success", true);
+            result.put("executions", new ArrayList<>());
+            result.put("portfolio", getPortfolio(modelId));
+            result.put("conversations", java.util.Arrays.asList("buy", "sell"));
+            result.put("auto_buy_enabled", true);
+            result.put("auto_sell_enabled", true);
+            result.put("message", "Trading execution initiated (trading engine not yet implemented)");
+            
+            return result;
+        } catch (Exception e) {
+            log.error("[ModelService] 执行交易失败: {}", e.getMessage(), e);
+            result.put("success", false);
+            result.put("error", e.getMessage());
+            return result;
+        }
+    }
+
+    @Override
+    public Map<String, Object> executeBuyTrading(Integer modelId) {
+        Map<String, Object> result = new HashMap<>();
+        try {
+            // 检查模型是否存在
+            ModelDTO model = getModelById(modelId);
+            if (model == null) {
+                result.put("success", false);
+                result.put("error", "Model not found");
+                return result;
+            }
+
+            // 启用自动买入
+            setModelAutoTrading(modelId, true, model.getAutoSellEnabled() != null && model.getAutoSellEnabled());
+
+            // TODO: 实现交易引擎逻辑
+            // 这里需要调用交易引擎执行买入周期
+            // 目前返回占位符响应
+            result.put("success", true);
+            result.put("executions", new ArrayList<>());
+            result.put("portfolio", getPortfolio(modelId));
+            result.put("conversations", java.util.Arrays.asList("buy"));
+            result.put("auto_buy_enabled", true);
+            result.put("message", "Buy trading execution initiated (trading engine not yet implemented)");
+            
+            return result;
+        } catch (Exception e) {
+            log.error("[ModelService] 执行买入交易失败: {}", e.getMessage(), e);
+            result.put("success", false);
+            result.put("error", e.getMessage());
+            return result;
+        }
+    }
+
+    @Override
+    public Map<String, Object> executeSellTrading(Integer modelId) {
+        Map<String, Object> result = new HashMap<>();
+        try {
+            // 检查模型是否存在
+            ModelDTO model = getModelById(modelId);
+            if (model == null) {
+                result.put("success", false);
+                result.put("error", "Model not found");
+                return result;
+            }
+
+            // 启用自动卖出
+            setModelAutoTrading(modelId, model.getAutoBuyEnabled() != null && model.getAutoBuyEnabled(), true);
+
+            // TODO: 实现交易引擎逻辑
+            // 这里需要调用交易引擎执行卖出周期
+            // 目前返回占位符响应
+            result.put("success", true);
+            result.put("executions", new ArrayList<>());
+            result.put("portfolio", getPortfolio(modelId));
+            result.put("conversations", java.util.Arrays.asList("sell"));
+            result.put("auto_sell_enabled", true);
+            result.put("message", "Sell trading execution initiated (trading engine not yet implemented)");
+            
+            return result;
+        } catch (Exception e) {
+            log.error("[ModelService] 执行卖出交易失败: {}", e.getMessage(), e);
+            result.put("success", false);
+            result.put("error", e.getMessage());
+            return result;
+        }
+    }
+
+    @Override
+    public Map<String, Object> disableBuyTrading(Integer modelId) {
+        Map<String, Object> result = new HashMap<>();
+        try {
+            // 检查模型是否存在
+            ModelDTO model = getModelById(modelId);
+            if (model == null) {
+                result.put("success", false);
+                result.put("error", "Model not found");
+                return result;
+            }
+
+            // 禁用自动买入
+            Boolean currentSellEnabled = model.getAutoSellEnabled() != null && model.getAutoSellEnabled();
+            setModelAutoTrading(modelId, false, currentSellEnabled);
+
+            result.put("model_id", modelId);
+            result.put("auto_buy_enabled", false);
+            result.put("success", true);
+            result.put("message", "Auto buy disabled successfully");
+            
+            return result;
+        } catch (Exception e) {
+            log.error("[ModelService] 禁用自动买入失败: {}", e.getMessage(), e);
+            result.put("success", false);
+            result.put("error", e.getMessage());
+            return result;
+        }
+    }
+
+    @Override
+    public Map<String, Object> disableSellTrading(Integer modelId) {
+        Map<String, Object> result = new HashMap<>();
+        try {
+            // 检查模型是否存在
+            ModelDTO model = getModelById(modelId);
+            if (model == null) {
+                result.put("success", false);
+                result.put("error", "Model not found");
+                return result;
+            }
+
+            // 禁用自动卖出
+            Boolean currentBuyEnabled = model.getAutoBuyEnabled() != null && model.getAutoBuyEnabled();
+            setModelAutoTrading(modelId, currentBuyEnabled, false);
+
+            result.put("model_id", modelId);
+            result.put("auto_sell_enabled", false);
+            result.put("success", true);
+            result.put("message", "Auto sell disabled successfully");
+            
+            return result;
+        } catch (Exception e) {
+            log.error("[ModelService] 禁用自动卖出失败: {}", e.getMessage(), e);
+            result.put("success", false);
+            result.put("error", e.getMessage());
+            return result;
+        }
     }
 
 }

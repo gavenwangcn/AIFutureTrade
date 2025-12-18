@@ -232,31 +232,113 @@ public class ModelController {
 
     /**
      * 设置模型的自动交易开关
+     * 兼容两种格式：
+     * 1. {enabled: true} - 前端使用的格式，同时设置买入和卖出
+     * 2. {auto_buy_enabled: true, auto_sell_enabled: true} - 分别设置买入和卖出
      * @param modelId 模型ID
-     * @param requestBody 请求体，包含auto_buy_enabled和auto_sell_enabled
+     * @param requestBody 请求体
      * @return 更新操作结果
      */
     @PostMapping("/{modelId}/auto-trading")
     @ApiOperation("设置模型的自动交易开关")
     public ResponseEntity<Map<String, Object>> setModelAutoTrading(@PathVariable Integer modelId, @RequestBody Map<String, Object> requestBody) {
-        Boolean autoBuyEnabled = requestBody.get("auto_buy_enabled") instanceof Boolean ? 
-                (Boolean) requestBody.get("auto_buy_enabled") : 
-                ((Number) requestBody.get("auto_buy_enabled")).intValue() == 1;
-        Boolean autoSellEnabled = requestBody.get("auto_sell_enabled") instanceof Boolean ? 
-                (Boolean) requestBody.get("auto_sell_enabled") : 
-                ((Number) requestBody.get("auto_sell_enabled")).intValue() == 1;
+        Boolean autoBuyEnabled;
+        Boolean autoSellEnabled;
+        
+        // 兼容前端格式：{enabled: true}
+        if (requestBody.containsKey("enabled")) {
+            Object enabledObj = requestBody.get("enabled");
+            Boolean enabled = enabledObj instanceof Boolean ? 
+                    (Boolean) enabledObj : 
+                    ((Number) enabledObj).intValue() == 1;
+            autoBuyEnabled = enabled;
+            autoSellEnabled = enabled;
+        } else {
+            // 兼容格式：{auto_buy_enabled: true, auto_sell_enabled: true}
+            Object buyEnabledObj = requestBody.get("auto_buy_enabled");
+            Object sellEnabledObj = requestBody.get("auto_sell_enabled");
+            
+            autoBuyEnabled = buyEnabledObj instanceof Boolean ? 
+                    (Boolean) buyEnabledObj : 
+                    buyEnabledObj != null && ((Number) buyEnabledObj).intValue() == 1;
+            autoSellEnabled = sellEnabledObj instanceof Boolean ? 
+                    (Boolean) sellEnabledObj : 
+                    sellEnabledObj != null && ((Number) sellEnabledObj).intValue() == 1;
+        }
+        
         Map<String, Object> result = modelService.setModelAutoTrading(modelId, autoBuyEnabled, autoSellEnabled);
         return new ResponseEntity<>(result, HttpStatus.OK);
     }
 
     /**
      * 获取聚合投资组合数据（所有模型）
+     * 支持两种路径：/api/models/aggregated/portfolio 和 /api/aggregated/portfolio
      * @return 聚合投资组合数据
      */
     @GetMapping("/aggregated/portfolio")
     @ApiOperation("获取聚合投资组合数据")
     public ResponseEntity<Map<String, Object>> getAggregatedPortfolio() {
         Map<String, Object> result = modelService.getAggregatedPortfolio();
+        return new ResponseEntity<>(result, HttpStatus.OK);
+    }
+
+    /**
+     * 手动执行一次交易周期（同时执行买入和卖出）
+     * @param modelId 模型ID
+     * @return 交易执行结果
+     */
+    @PostMapping("/{modelId}/execute")
+    @ApiOperation("手动执行一次交易周期（同时执行买入和卖出）")
+    public ResponseEntity<Map<String, Object>> executeTrading(@PathVariable Integer modelId) {
+        Map<String, Object> result = modelService.executeTrading(modelId);
+        return new ResponseEntity<>(result, HttpStatus.OK);
+    }
+
+    /**
+     * 手动执行一次买入交易周期
+     * @param modelId 模型ID
+     * @return 买入交易执行结果
+     */
+    @PostMapping("/{modelId}/execute-buy")
+    @ApiOperation("手动执行一次买入交易周期")
+    public ResponseEntity<Map<String, Object>> executeBuyTrading(@PathVariable Integer modelId) {
+        Map<String, Object> result = modelService.executeBuyTrading(modelId);
+        return new ResponseEntity<>(result, HttpStatus.OK);
+    }
+
+    /**
+     * 手动执行一次卖出交易周期
+     * @param modelId 模型ID
+     * @return 卖出交易执行结果
+     */
+    @PostMapping("/{modelId}/execute-sell")
+    @ApiOperation("手动执行一次卖出交易周期")
+    public ResponseEntity<Map<String, Object>> executeSellTrading(@PathVariable Integer modelId) {
+        Map<String, Object> result = modelService.executeSellTrading(modelId);
+        return new ResponseEntity<>(result, HttpStatus.OK);
+    }
+
+    /**
+     * 禁用模型的自动买入功能
+     * @param modelId 模型ID
+     * @return 更新后的自动买入状态
+     */
+    @PostMapping("/{modelId}/disable-buy")
+    @ApiOperation("禁用模型的自动买入功能")
+    public ResponseEntity<Map<String, Object>> disableBuyTrading(@PathVariable Integer modelId) {
+        Map<String, Object> result = modelService.disableBuyTrading(modelId);
+        return new ResponseEntity<>(result, HttpStatus.OK);
+    }
+
+    /**
+     * 禁用模型的自动卖出功能
+     * @param modelId 模型ID
+     * @return 更新后的自动卖出状态
+     */
+    @PostMapping("/{modelId}/disable-sell")
+    @ApiOperation("禁用模型的自动卖出功能")
+    public ResponseEntity<Map<String, Object>> disableSellTrading(@PathVariable Integer modelId) {
+        Map<String, Object> result = modelService.disableSellTrading(modelId);
         return new ResponseEntity<>(result, HttpStatus.OK);
     }
 
