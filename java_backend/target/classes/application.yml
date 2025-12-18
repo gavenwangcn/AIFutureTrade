@@ -1,0 +1,134 @@
+spring:
+  application:
+    name: java-backend
+  profiles:
+    active: dev
+  
+  # 数据库配置
+  datasource:
+    url: jdbc:mysql://localhost:3306/aifuturetrade?useSSL=false&serverTimezone=UTC&characterEncoding=utf8
+    username: root
+    password: root
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    type: com.alibaba.druid.pool.DruidDataSource
+    # Druid连接池配置
+    druid:
+      # 初始化连接池大小
+      initial-size: 5
+      # 最小连接池数量
+      min-idle: 5
+      # 最大连接池数量
+      max-active: 20
+      # 获取连接超时时间
+      max-wait: 30000
+      # 连接最小空闲时间
+      min-evictable-idle-time-millis: 60000
+      # 连接最大空闲时间
+      max-evictable-idle-time-millis: 600000
+      # 间隔多久进行一次检测，检测需要关闭的空闲连接
+      time-between-eviction-runs-millis: 60000
+      # 检查连接有效性的SQL语句
+      validation-query: SELECT 1
+      # 检测连接是否有效的超时时间
+      validation-query-timeout: 30000
+      # 获取连接时是否验证连接有效性
+      test-on-borrow: false
+      # 归还连接时是否验证连接有效性
+      test-on-return: false
+      # 空闲时是否验证连接有效性
+      test-while-idle: true
+      # 配置监控统计拦截的filters
+      filters: stat,wall
+      # 连接池名称
+      pool-name: DruidCP
+      # 关闭abandoned连接时输出错误日志
+      remove-abandoned: true
+      # 连接在池中的最大生存时间
+      remove-abandoned-timeout-millis: 1800000
+      # 关闭abandoned连接时是否输出错误日志
+      log-abandoned: true
+      # 启用监控统计
+      use-global-data-source-stat: true
+  
+  # MyBatis配置
+  mybatis-plus:
+    mapper-locations: classpath:mybatis/*.xml
+    type-aliases-package: com.aifuturetrade.dal.entity
+    configuration:
+      map-underscore-to-camel-case: true
+      cache-enabled: false
+      call-setters-on-nulls: true
+      log-impl: org.apache.ibatis.logging.stdout.StdOutImpl
+    global-config:
+      db-config:
+        id-type: auto
+        logic-delete-field: deleted
+        logic-delete-value: 1
+        logic-not-delete-value: 0
+
+# 服务器配置
+server:
+  port: 8080
+  servlet:
+    context-path: /
+    encoding:
+      charset: UTF-8
+      enabled: true
+      force: true
+  tomcat:
+    uri-encoding: UTF-8
+    max-threads: 200
+    min-spare-threads: 10
+    connection-timeout: 30000
+
+# 日志配置
+logging:
+  level:
+    root: info
+    com.aifuturetrade: debug
+  pattern:
+    console: "%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n"
+    file: "%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n"
+  file:
+    name: logs/java-backend.log
+    max-size: 10MB
+    max-history: 7
+
+# Binance API配置
+binance:
+    api-key: your-api-key
+    secret-key: your-secret-key
+    private-key-path: 
+    private-key-pass: 
+    base-url: https://api.binance.com
+    testnet: false
+    quote-asset: USDT
+    # 连接超时时间（毫秒）
+    connect-timeout: 10000
+    # 读取超时时间（毫秒）
+    read-timeout: 50000
+    # 重试次数
+    retries: 3
+    # 重试间隔时间（毫秒）
+    backoff: 200
+    # 是否启用压缩
+    compression: true
+  
+# 应用配置
+app:
+  auto-trading: true
+  trade-fee-rate: 0.001
+  leaderboard-refresh: 10
+  trading-interval: 3600
+  trades-query-limit: 10
+
+# Swagger配置
+swagger:
+  enabled: true
+  title: AI Future Trade API
+  description: AI Future Trade Java Backend API Documentation
+  version: 1.0.0
+  base-package: com.aifuturetrade.controller
+  contact:
+    name: AI Future Trade Team
+    email: contact@aifuturetrade.com
