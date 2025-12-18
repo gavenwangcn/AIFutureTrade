@@ -14,10 +14,10 @@ import org.springframework.scheduling.annotation.EnableScheduling;
 @ComponentScan(basePackages = "com.aifuturetrade")
 @EnableAsync  // 启用异步任务支持
 @EnableScheduling  // 启用定时任务支持
-public class Application {
+public class BackEndApplication {
 
     public static void main(String[] args) {
-        SpringApplication.run(Application.class, args);
+        SpringApplication.run(BackEndApplication.class, args);
     }
 
 }
