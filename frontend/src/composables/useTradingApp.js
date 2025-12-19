@@ -74,7 +74,6 @@ const lastPortfolioSymbolsRefreshTime = ref(null) // 持仓合约列表最后刷
   // UI 状态
   const loggerEnabled = ref(localStorage.getItem('frontendLoggingEnabled') !== 'false')
   const showSettingsModal = ref(false)
-  const showStrategyModal = ref(false)
   const showStrategyManagementModal = ref(false)
   const showFutureConfigModal = ref(false)
   const showApiProviderModal = ref(false)
@@ -1724,13 +1723,6 @@ let portfolioSymbolsRefreshInterval = null // 模型持仓合约列表自动刷�
   /**
    * 删除模型
    */
-  const handleStrategyConfigClick = () => {
-    if (!currentModelId.value) {
-      alert('请选择对应模型，或初始化模型')
-      return
-    }
-    showStrategyModal.value = true
-  }
   
   /**
    * 打开删除模型确认弹框
@@ -2370,7 +2362,6 @@ let portfolioSymbolsRefreshInterval = null // 模型持仓合约列表自动刷�
     lastPortfolioSymbolsRefreshTime,
     loggerEnabled,
     showSettingsModal,
-    showStrategyModal,
     showStrategyManagementModal,
     showFutureConfigModal,
     showApiProviderModal,
@@ -2400,7 +2391,6 @@ let portfolioSymbolsRefreshInterval = null // 模型持仓合约列表自动刷�
     selectModel,
     showAggregatedView,
     deleteModel,
-    handleStrategyConfigClick,
     openLeverageModal,
     saveModelLeverage,
     showMaxPositionsModal,

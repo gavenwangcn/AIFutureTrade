@@ -69,10 +69,6 @@
             <i class="bi bi-gear"></i>
             设置
           </button>
-          <button class="btn-secondary" @click="handleStrategyConfigClick" title="配置当前模型的买卖提示词">
-            <i class="bi bi-sliders"></i>
-            策略配置
-          </button>
           <button class="btn-secondary" @click="showApiProviderModal = true">
             <i class="bi bi-cloud-plus"></i>
             API提供方
@@ -608,12 +604,7 @@
       @close="handleSettingsModalClose"
     />
     
-    <StrategyModal
-      :visible="showStrategyModal"
-      :model-id="currentModelId"
-      @update:visible="showStrategyModal = $event"
-      @close="showStrategyModal = false"
-    />
+    
     
     <StrategyManagementModal
       :visible="showStrategyManagementModal"
@@ -799,7 +790,6 @@
 import { ref, onMounted, watch } from 'vue'
 import KLineChart from './components/KLineChart.vue'
 import SettingsModal from './components/SettingsModal.vue'
-import StrategyModal from './components/StrategyModal.vue'
 import StrategyManagementModal from './components/StrategyManagementModal.vue'
 import FutureConfigModal from './components/FutureConfigModal.vue'
 import ApiProviderModal from './components/ApiProviderModal.vue'
@@ -843,7 +833,6 @@ const {
   settings,
   loggerEnabled,
   showSettingsModal,
-  showStrategyModal,
   showStrategyManagementModal,
   showFutureConfigModal,
   showApiProviderModal,
@@ -892,7 +881,6 @@ const {
   selectModel,
   showAggregatedView,
   deleteModel,
-  handleStrategyConfigClick,
   openLeverageModal,
   saveModelLeverage,
   getModelDisplayName,
