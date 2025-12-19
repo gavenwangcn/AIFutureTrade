@@ -30,6 +30,7 @@ from trade.prompt_defaults import DEFAULT_BUY_CONSTRAINTS, DEFAULT_SELL_CONSTRAI
 from common.binance_futures import BinanceFuturesOrderClient
 from common.database.database_model_prompts import ModelPromptsDatabase
 from common.database.database_models import ModelsDatabase
+from common.database.database_portfolios import PortfoliosDatabase
 
 logger = logging.getLogger(__name__)
 
@@ -65,9 +66,10 @@ class TradingEngine:
         self.market_fetcher = market_fetcher
         self.trader = trader
         self.trade_fee_rate = trade_fee_rate
-        # 初始化 ModelPromptsDatabase 和 ModelsDatabase 实例
+        # 初始化 ModelPromptsDatabase、ModelsDatabase 和 PortfoliosDatabase 实例
         self.model_prompts_db = ModelPromptsDatabase(pool=db._pool if hasattr(db, '_pool') else None)
         self.models_db = ModelsDatabase(pool=db._pool if hasattr(db, '_pool') else None)
+        self.portfolios_db = PortfoliosDatabase(pool=db._pool if hasattr(db, '_pool') else None)
         # 从数据库获取 max_positions（最大持仓数量），如果获取失败则使用默认值3
         try:
             model = self.models_db.get_model(model_id)
@@ -139,7 +141,7 @@ class TradingEngine:
             logger.debug(f"[Model {self.model_id}] [卖出服务] [阶段1.2] 价格映射提取完成, 价格数量: {len(current_prices)}")
             
             # 获取当前持仓信息
-            portfolio = self.db.get_portfolio(self.model_id, current_prices)
+            portfolio = self._get_portfolio(self.model_id, current_prices)
             logger.debug(f"[Model {self.model_id}] [卖出服务] [阶段1.3] 持仓信息获取完成: "
                         f"总价值=${portfolio.get('total_value', 0):.2f}, "
                         f"现金=${portfolio.get('cash', 0):.2f}, "
@@ -211,7 +213,7 @@ class TradingEngine:
                         f"对话类型={conversation_prompts}")
             
             # 获取最终持仓信息
-            updated_portfolio = self.db.get_portfolio(self.model_id, current_prices)
+            updated_portfolio = self._get_portfolio(self.model_id, current_prices)
             return {
                 'success': True,
                 'executions': executions,
@@ -304,7 +306,7 @@ class TradingEngine:
             logger.info(f"[Model {self.model_id}] [买入服务] [阶段1.1] 模型symbol_source配置: {symbol_source}")
             
             # 获取当前持仓信息（先使用空价格映射，后续会更新）
-            portfolio = self.db.get_portfolio(self.model_id, {})
+            portfolio = self._get_portfolio(self.model_id, {})
             current_positions_count = len(portfolio.get('positions', []) or [])
             logger.info(f"[Model {self.model_id}] [买入服务] [阶段1.2] 持仓信息获取完成: "
                         f"总价值=${portfolio.get('total_value', 0):.2f}, "
@@ -376,7 +378,7 @@ class TradingEngine:
                 logger.debug(f"[Model {self.model_id}] [买入服务] [阶段2.2] 价格映射提取完成, 价格数量: {len(current_prices)}")
                 
                 # 更新持仓信息（使用最新价格）
-                portfolio = self.db.get_portfolio(self.model_id, current_prices)
+                portfolio = self._get_portfolio(self.model_id, current_prices)
                 logger.debug(f"[Model {self.model_id}] [买入服务] [阶段2.3] 持仓信息已更新: "
                             f"总价值=${portfolio.get('total_value', 0):.2f}, "
                             f"现金=${portfolio.get('cash', 0):.2f}")
@@ -441,7 +443,7 @@ class TradingEngine:
                 delattr(self, 'current_model_leverage')
             
             # 获取最终持仓信息
-            updated_portfolio = self.db.get_portfolio(self.model_id, current_prices)
+            updated_portfolio = self._get_portfolio(self.model_id, current_prices)
             return {
                 'success': True,
                 'executions': executions,
@@ -521,7 +523,7 @@ class TradingEngine:
         Args:
             current_prices: 当前价格映射
         """
-        updated_portfolio = self.db.get_portfolio(self.model_id, current_prices)
+        updated_portfolio = self._get_portfolio(self.model_id, current_prices)
         balance = updated_portfolio.get('total_value', 0)
         available_balance = updated_portfolio.get('cash', 0)
         cross_wallet_balance = updated_portfolio.get('positions_value', 0)
@@ -1008,6 +1010,46 @@ class TradingEngine:
             'cross_un_pnl': cross_un_pnl
         }
 
+    # ============ 投资组合管理辅助方法 ============
+    # 封装对 PortfoliosDatabase 的调用
+    
+    def _get_portfolio(self, model_id: int, current_prices: Dict = None) -> Dict:
+        """
+        获取投资组合信息（委托给 PortfoliosDatabase）
+        """
+        try:
+            model_mapping = self.models_db._get_model_id_mapping() if self.models_db else None
+            return self.portfolios_db.get_portfolio(model_id, current_prices, model_mapping, 
+                                                   self.models_db.get_model, self.db.trades_table)
+        except Exception as e:
+            logger.error(f"[TradingEngine] Failed to get portfolio for model {model_id}: {e}")
+            raise
+    
+    def _update_position(self, model_id: int, symbol: str, position_amt: float,
+                        avg_price: float, leverage: int = 1, position_side: str = 'LONG',
+                        initial_margin: float = 0.0, unrealized_profit: float = 0.0):
+        """
+        更新持仓信息（委托给 PortfoliosDatabase）
+        """
+        try:
+            model_mapping = self.models_db._get_model_id_mapping() if self.models_db else None
+            self.portfolios_db.update_position(model_id, symbol, position_amt, avg_price, leverage,
+                                            position_side, initial_margin, unrealized_profit, model_mapping)
+        except Exception as e:
+            logger.error(f"[TradingEngine] Failed to update position: {e}")
+            raise
+    
+    def _close_position(self, model_id: int, symbol: str, position_side: str = 'LONG'):
+        """
+        平仓（委托给 PortfoliosDatabase）
+        """
+        try:
+            model_mapping = self.models_db._get_model_id_mapping() if self.models_db else None
+            self.portfolios_db.close_position(model_id, symbol, position_side, model_mapping)
+        except Exception as e:
+            logger.error(f"[TradingEngine] Failed to close position: {e}")
+            raise
+    
     # ============ 提示词管理方法 ============
     # 获取和管理AI决策的提示词模板
     
@@ -1587,7 +1629,7 @@ class TradingEngine:
             
             # 获取最新持仓状态
             logger.debug(f"[Model {self.model_id}] [批次组处理] [步骤2.2] 获取最新持仓状态...")
-            latest_portfolio = self.db.get_portfolio(self.model_id, current_prices)
+            latest_portfolio = self._get_portfolio(self.model_id, current_prices)
             logger.debug(f"[Model {self.model_id}] [批次组处理] [步骤2.2] 最新持仓状态: "
                         f"总价值=${latest_portfolio.get('total_value', 0):.2f}, "
                         f"现金=${latest_portfolio.get('cash', 0):.2f}, "
@@ -2140,7 +2182,7 @@ class TradingEngine:
             
             # 获取最新持仓状态
             logger.debug(f"[Model {self.model_id}] [卖出批次组处理] [步骤2.2] 获取最新持仓状态...")
-            latest_portfolio = self.db.get_portfolio(self.model_id, current_prices)
+            latest_portfolio = self._get_portfolio(self.model_id, current_prices)
             logger.debug(f"[Model {self.model_id}] [卖出批次组处理] [步骤2.2] 最新持仓状态: "
                         f"总价值=${latest_portfolio.get('total_value', 0):.2f}, "
                         f"现金=${latest_portfolio.get('cash', 0):.2f}, "
@@ -2638,7 +2680,7 @@ class TradingEngine:
 
         # 【更新持仓】使用根据signal自动确定的position_side
         try:
-            self.db.update_position(
+            self._update_position(
                 self.model_id, symbol=symbol, position_amt=quantity, avg_price=price, 
                 leverage=leverage, position_side=position_side  # 使用根据signal自动确定的position_side
             )
@@ -2776,7 +2818,7 @@ class TradingEngine:
 
         # Close position in database
         try:
-            self.db.close_position(self.model_id, symbol=symbol, position_side=position_side)
+            self._close_position(self.model_id, symbol=symbol, position_side=position_side)
         except Exception as db_err:
             logger.error(f"TRADE: Close position failed model={self.model_id} future={symbol}: {db_err}")
             raise

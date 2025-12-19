@@ -122,8 +122,12 @@ class Database:
     使用示例：
         db = Database()
         db.init_db()  # 初始化所有表
-        model = db.get_model(model_id)
-        portfolio = db.get_portfolio(model_id, current_prices)
+        from common.database.database_models import ModelsDatabase
+        from common.database.database_portfolios import PortfoliosDatabase
+        models_db = ModelsDatabase(pool=db._pool)
+        portfolios_db = PortfoliosDatabase(pool=db._pool)
+        model = models_db.get_model(model_id)
+        portfolio = portfolios_db.get_portfolio(model_id, current_prices, ...)
         db.add_trade(model_id, symbol, signal, quantity, price)
         db.close()  # 显式关闭连接池，释放资源
     
@@ -563,63 +567,11 @@ class Database:
     
     # ============ Portfolio（投资组合）管理方法 ============
     
-    def update_position(self, model_id: int, symbol: str, position_amt: float,
-                       avg_price: float, leverage: int = 1, position_side: str = 'LONG',
-                       initial_margin: float = 0.0, unrealized_profit: float = 0.0):
-        """
-        Update position
-        
-        注意：此方法已迁移到 common.database.database_portfolios.PortfoliosDatabase
-        保留此方法仅用于向后兼容。
-        """
-        try:
-            from .database_portfolios import PortfoliosDatabase
-            from .database_models import ModelsDatabase
-            portfolios_db = PortfoliosDatabase(pool=self._pool)
-            models_db = ModelsDatabase(pool=self._pool)
-            model_mapping = models_db._get_model_id_mapping()
-            portfolios_db.update_position(model_id, symbol, position_amt, avg_price, leverage, 
-                                        position_side, initial_margin, unrealized_profit, model_mapping)
-        except Exception as e:
-            logger.error(f"[Database] Failed to update position: {e}")
-            raise
-    
-    def get_portfolio(self, model_id: int, current_prices: Dict = None) -> Dict:
-        """
-        Get portfolio with positions and P&L
-        
-        注意：此方法已迁移到 common.database.database_portfolios.PortfoliosDatabase
-        保留此方法仅用于向后兼容。
-        """
-        try:
-            from .database_portfolios import PortfoliosDatabase
-            portfolios_db = PortfoliosDatabase(pool=self._pool)
-            from .database_models import ModelsDatabase
-            models_db = ModelsDatabase(pool=self._pool)
-            model_mapping = models_db._get_model_id_mapping()
-            return portfolios_db.get_portfolio(model_id, current_prices, model_mapping, 
-                                             models_db.get_model, self.trades_table)
-        except Exception as e:
-            logger.error(f"[Database] Failed to get portfolio for model {model_id}: {e}")
-            raise
-    
-    def close_position(self, model_id: int, symbol: str, position_side: str = 'LONG'):
-        """
-        Close position and clean up futures universe if unused
-        
-        注意：此方法已迁移到 common.database.database_portfolios.PortfoliosDatabase
-        保留此方法仅用于向后兼容。
-        """
-        try:
-            from .database_portfolios import PortfoliosDatabase
-            from .database_models import ModelsDatabase
-            portfolios_db = PortfoliosDatabase(pool=self._pool)
-            models_db = ModelsDatabase(pool=self._pool)
-            model_mapping = models_db._get_model_id_mapping()
-            portfolios_db.close_position(model_id, symbol, position_side, model_mapping)
-        except Exception as e:
-            logger.error(f"[Database] Failed to close position: {e}")
-            raise
+    # 所有投资组合相关方法已迁移到 common.database.database_portfolios.PortfoliosDatabase
+    # 请直接使用 PortfoliosDatabase 类的方法：
+    # - update_position(model_id, symbol, position_amt, avg_price, leverage, position_side, initial_margin, unrealized_profit, model_id_mapping)
+    # - get_portfolio(model_id, current_prices, model_id_mapping, get_model_func, trades_table)
+    # - close_position(model_id, symbol, position_side, model_id_mapping)
     
     # ============ Trade（交易记录）管理方法 ============
     
