@@ -70,6 +70,13 @@ docker-compose.yml
 # TA-Lib 缓存文件（如果需要使用本地缓存，请注释掉下面这行）
 # ta-lib-0.4.0-src.tar.gz
 
+# Maven（本地构建产生的文件，不需要复制到 Docker 构建上下文）
+backend/target/
+backend/.m2/
+backend/.settings/
+backend/.classpath
+backend/.project
+
 # 其他
 *.log
 .env

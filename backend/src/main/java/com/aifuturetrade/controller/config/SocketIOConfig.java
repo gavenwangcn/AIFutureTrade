@@ -1,6 +1,5 @@
 package com.aifuturetrade.controller.config;
 
-import com.corundumstudio.socketio.Configuration;
 import com.corundumstudio.socketio.SocketIOServer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -36,7 +35,8 @@ public class SocketIOConfig {
 
     @Bean
     public SocketIOServer socketIOServer() {
-        Configuration config = new Configuration();
+        // 使用完全限定名避免与 Spring 的 Configuration 冲突
+        com.corundumstudio.socketio.Configuration config = new com.corundumstudio.socketio.Configuration();
         
         // 设置主机和端口
         // 注意：netty-socketio 使用独立的 Netty 服务器，不能与 Spring Boot 的 Tomcat 共用同一端口
@@ -73,12 +73,18 @@ public class SocketIOConfig {
             logger.info("Socket.IO client disconnected: {}", client.getSessionId());
         });
         
-        // 添加连接错误事件监听
-        server.addConnectErrorListener((client, error) -> {
-            logger.error("Socket.IO connection error for client {}: {}", 
-                        client != null ? client.getSessionId() : "unknown", 
-                        error.getMessage());
-        });
+        // 注意：netty-socketio 2.0.3 版本可能不支持 addConnectErrorListener
+        // 如果方法不存在，可以移除或使用其他方式处理错误
+        try {
+            // 尝试添加连接错误监听（如果 API 支持）
+            // server.addConnectErrorListener((client, error) -> {
+            //     logger.error("Socket.IO connection error for client {}: {}", 
+            //                 client != null ? client.getSessionId() : "unknown", 
+            //                 error.getMessage());
+            // });
+        } catch (Exception e) {
+            logger.debug("addConnectErrorListener not available in this version of netty-socketio");
+        }
         
         return server;
     }

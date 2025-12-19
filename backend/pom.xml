@@ -156,6 +156,13 @@
                 <version>${spring-boot.version}</version>
                 <configuration>
                     <mainClass>com.aifuturetrade.BackEndApplication</mainClass>
+                    <!-- 排除 Lombok（Lombok 是编译时依赖，不需要打包到 JAR 中） -->
+                    <excludes>
+                        <exclude>
+                            <groupId>org.projectlombok</groupId>
+                            <artifactId>lombok</artifactId>
+                        </exclude>
+                    </excludes>
                 </configuration>
             </plugin>
             <plugin>
@@ -166,6 +173,13 @@
                     <source>${java.version}</source>
                     <target>${java.version}</target>
                     <encoding>UTF-8</encoding>
+                    <annotationProcessorPaths>
+                        <path>
+                            <groupId>org.projectlombok</groupId>
+                            <artifactId>lombok</artifactId>
+                            <version>${lombok.version}</version>
+                        </path>
+                    </annotationProcessorPaths>
                 </configuration>
             </plugin>
         </plugins>
