@@ -53,7 +53,7 @@ def trading_buy_loop(auto_trading, trading_engines, db):
     while auto_trading:
         try:
             if not trading_engines:
-                time.sleep(10)
+                time.sleep(5)
                 continue
 
             logger.info(f"\n{'='*60}")
@@ -64,12 +64,12 @@ def trading_buy_loop(auto_trading, trading_engines, db):
             for model_id, engine in list(trading_engines.items()):
                 try:
                     # 检查模型的 auto_buy_enabled 字段
-                    # 如果为 0（False），则跳过该模型的 AI 买入决策
+                    # 如果为 0（False），则跳过该模型的买入决策
                     if not models_db.is_model_auto_buy_enabled(model_id):
                         logger.info(f"SKIP: Model {model_id} - auto_buy_enabled=0, skipping AI buy decision")
                         continue
 
-                    # 只有 auto_buy_enabled=1 的模型才会执行 AI 买入决策
+                    # 只有 auto_buy_enabled=1 的模型才会执行买入决策
                     logger.info(f"\nEXEC BUY: Model {model_id} - auto_buy_enabled=1, executing AI buy decision")
                     result = engine.execute_buy_cycle()
 
@@ -120,7 +120,7 @@ def trading_sell_loop(auto_trading, trading_engines, db):
     while auto_trading:
         try:
             if not trading_engines:
-                time.sleep(10)
+                time.sleep(5)
                 continue
 
             logger.info(f"\n{'='*60}")
@@ -131,12 +131,12 @@ def trading_sell_loop(auto_trading, trading_engines, db):
             for model_id, engine in list(trading_engines.items()):
                 try:
                     # 检查模型的 auto_sell_enabled 字段
-                    # 如果为 0（False），则跳过该模型的 AI 卖出决策
+                    # 如果为 0（False），则跳过该模型的 卖出决策
                     if not models_db.is_model_auto_sell_enabled(model_id):
                         logger.info(f"SKIP: Model {model_id} - auto_sell_enabled=0, skipping AI sell decision")
                         continue
 
-                    # 只有 auto_sell_enabled=1 的模型才会执行 AI 卖出决策
+                    # 只有 auto_sell_enabled=1 的模型才会执行 卖出决策
                     logger.info(f"\nEXEC SELL: Model {model_id} - auto_sell_enabled=1, executing AI sell decision")
                     result = engine.execute_sell_cycle()
 

@@ -83,7 +83,7 @@ models_db = ModelsDatabase(pool=db._pool)
 market_fetcher = MarketDataFetcher(db)
 trading_engines = {}
 auto_trading = getattr(app_config, 'AUTO_TRADING', True)
-TRADE_FEE_RATE = getattr(app_config, 'TRADE_FEE_RATE', 0.001)
+TRADE_FEE_RATE = getattr(app_config, 'TRADE_FEE_RATE', 0.002)
 
 # ============ Helper Functions ============
 

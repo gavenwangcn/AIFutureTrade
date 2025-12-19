@@ -19,7 +19,6 @@ RUN pip install --no-cache-dir -r requirements.txt
 # 服务目录
 COPY backend/ backend/
 COPY async/ async/
-COPY data/ data/
 COPY common/ common/
 COPY trade/ trade/
 COPY market/ market/
