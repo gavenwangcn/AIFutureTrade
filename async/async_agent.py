@@ -113,7 +113,7 @@ async def _run_market_tickers(duration: Optional[int] = None) -> None:
         - Ticker流每30分钟自动重连（币安WebSocket连接限制）
         - 数据实时写入24_market_tickers表
     """
-    run_market_ticker_stream, _ = _lazy_import_market_streams()
+    run_market_ticker_stream = _lazy_import_market_streams()
     await run_market_ticker_stream(run_seconds=duration)
 
 
@@ -171,7 +171,7 @@ async def _run_all_services(duration: Optional[int] = None) -> None:
     - market_symbol_offline: 市场Symbol下线服务
     
     """
-    run_market_ticker_stream, _ = _lazy_import_market_streams()
+    run_market_ticker_stream = _lazy_import_market_streams()
     run_price_refresh_scheduler = _lazy_import_price_refresh()
     run_market_symbol_offline_scheduler = _lazy_import_market_symbol_offline()
     
