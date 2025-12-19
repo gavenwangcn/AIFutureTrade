@@ -20,6 +20,8 @@ import logging
 from typing import Dict, Optional, Tuple, List
 from openai import OpenAI, APIConnectionError, APIError
 from trade.trader import Trader
+from common.database.database_model_prompts import ModelPromptsDatabase
+from common.database.database_models import ModelsDatabase
 
 logger = logging.getLogger(__name__)
 
@@ -82,6 +84,9 @@ class AITrader(Trader):
         self.model_name = model_name
         self.db = db
         self.market_fetcher = market_fetcher
+        # 初始化 ModelPromptsDatabase 和 ModelsDatabase 实例
+        self.model_prompts_db = ModelPromptsDatabase(pool=db._pool if db and hasattr(db, '_pool') else None)
+        self.models_db = ModelsDatabase(pool=db._pool if db and hasattr(db, '_pool') else None)
 
     # ============ 公共决策方法 ============
     
@@ -144,9 +149,10 @@ class AITrader(Trader):
 
         # 内部处理：从数据库获取constraints_text（buy_prompt）
         constraints_text = None
-        if self.db and model_id:
+        if self.model_prompts_db and model_id:
             try:
-                model_prompt = self.db.get_model_prompt(model_id)
+                model_mapping = self.models_db._get_model_id_mapping() if self.models_db else None
+                model_prompt = self.model_prompts_db.get_model_prompt(model_id, model_mapping)
                 if model_prompt:
                     constraints_text = model_prompt.get('buy_prompt')
             except Exception as e:
@@ -209,7 +215,7 @@ class AITrader(Trader):
             if self.db and model_id:
                 try:
                     # 获取模型信息以获取provider信息
-                    model = self.db.get_model(model_id)
+                    model = self.models_db.get_model(model_id)
                     if model:
                         provider_id = model.get('provider_id')
                         if provider_id:
@@ -284,9 +290,10 @@ class AITrader(Trader):
 
         # 内部处理：从数据库获取constraints_text（sell_prompt）
         constraints_text = None
-        if self.db and model_id:
+        if self.model_prompts_db and model_id:
             try:
-                model_prompt = self.db.get_model_prompt(model_id)
+                model_mapping = self.models_db._get_model_id_mapping() if self.models_db else None
+                model_prompt = self.model_prompts_db.get_model_prompt(model_id, model_mapping)
                 if model_prompt:
                     constraints_text = model_prompt.get('sell_prompt')
             except Exception as e:
@@ -304,7 +311,7 @@ class AITrader(Trader):
             if self.db and model_id:
                 try:
                     # 获取模型信息以获取provider信息
-                    model = self.db.get_model(model_id)
+                    model = self.models_db.get_model(model_id)
                     if model:
                         provider_id = model.get('provider_id')
                         if provider_id:

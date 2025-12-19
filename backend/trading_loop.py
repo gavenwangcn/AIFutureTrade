@@ -8,6 +8,7 @@ import time
 import logging
 from datetime import datetime, timezone, timedelta
 import common.config as app_config
+from common.database.database_models import ModelsDatabase
 
 logger = logging.getLogger(__name__)
 
@@ -45,6 +46,9 @@ def get_sell_interval_seconds(db) -> int:
 def trading_buy_loop(auto_trading, trading_engines, db):
     """买入交易循环 - 只执行买入决策"""
     logger.info("Trading buy loop started")
+    
+    # 创建 ModelsDatabase 实例用于模型操作
+    models_db = ModelsDatabase(pool=db._pool if hasattr(db, '_pool') else None)
 
     while auto_trading:
         try:
@@ -61,7 +65,7 @@ def trading_buy_loop(auto_trading, trading_engines, db):
                 try:
                     # 检查模型的 auto_buy_enabled 字段
                     # 如果为 0（False），则跳过该模型的 AI 买入决策
-                    if not db.is_model_auto_buy_enabled(model_id):
+                    if not models_db.is_model_auto_buy_enabled(model_id):
                         logger.info(f"SKIP: Model {model_id} - auto_buy_enabled=0, skipping AI buy decision")
                         continue
 
@@ -109,6 +113,9 @@ def trading_buy_loop(auto_trading, trading_engines, db):
 def trading_sell_loop(auto_trading, trading_engines, db):
     """卖出交易循环 - 只执行卖出决策"""
     logger.info("Trading sell loop started")
+    
+    # 创建 ModelsDatabase 实例用于模型操作
+    models_db = ModelsDatabase(pool=db._pool if hasattr(db, '_pool') else None)
 
     while auto_trading:
         try:
@@ -125,7 +132,7 @@ def trading_sell_loop(auto_trading, trading_engines, db):
                 try:
                     # 检查模型的 auto_sell_enabled 字段
                     # 如果为 0（False），则跳过该模型的 AI 卖出决策
-                    if not db.is_model_auto_sell_enabled(model_id):
+                    if not models_db.is_model_auto_sell_enabled(model_id):
                         logger.info(f"SKIP: Model {model_id} - auto_sell_enabled=0, skipping AI sell decision")
                         continue
 

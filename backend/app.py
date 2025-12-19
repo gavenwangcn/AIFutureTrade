@@ -15,6 +15,7 @@ from market.market_data import MarketDataFetcher
 from trade.ai_trader import AITrader
 from trade.strategy.strategy_trader import StrategyTrader
 from common.database.database_basic import Database
+from common.database.database_models import ModelsDatabase
 from common.version import __version__
 from backend.trading_loop import trading_buy_loop as _trading_buy_loop, trading_sell_loop as _trading_sell_loop
 
@@ -76,6 +77,9 @@ with app.app_context():
     init_all_database_tables(db.command)
     logger.info("Database tables initialized")
 
+# Initialize ModelsDatabase for direct model operations
+models_db = ModelsDatabase(pool=db._pool)
+
 market_fetcher = MarketDataFetcher(db)
 trading_engines = {}
 auto_trading = getattr(app_config, 'AUTO_TRADING', True)
@@ -87,7 +91,7 @@ def init_trading_engine_for_model(model_id: int):
     """Initialize trading engine for a model if possible."""
     logger.info(f"Initializing trading engine for model {model_id}...")
     
-    model = db.get_model(model_id)
+    model = models_db.get_model(model_id)
     if not model:
         logger.warning(f"Model {model_id} not found, cannot initialize trading engine")
         return None, 'Model not found'
@@ -139,7 +143,7 @@ def init_trading_engine_for_model(model_id: int):
 def init_trading_engines():
     """Initialize trading engines for all models"""
     try:
-        models = db.get_all_models()
+        models = models_db.get_all_models()
 
         if not models:
             logger.warning("No trading models found")
@@ -297,7 +301,7 @@ def execute_buy_trading(model_id):
         engine = trading_engines[model_id]
 
     # 启用自动买入
-    db.set_model_auto_buy_enabled(model_id, True)
+    models_db.set_model_auto_buy_enabled(model_id, True)
     
     # 确保交易循环已启动
     _start_trading_loops_if_needed()
@@ -328,7 +332,7 @@ def execute_sell_trading(model_id):
         engine = trading_engines[model_id]
 
     # 启用自动卖出
-    db.set_model_auto_sell_enabled(model_id, True)
+    models_db.set_model_auto_sell_enabled(model_id, True)
     
     # 确保交易循环已启动
     _start_trading_loops_if_needed()
@@ -351,11 +355,11 @@ def disable_buy_trading(model_id):
     Returns:
         JSON: 更新后的自动买入状态
     """
-    model = db.get_model(model_id)
+    model = models_db.get_model(model_id)
     if not model:
         return jsonify({'error': 'Model not found'}), 404
 
-    success = db.set_model_auto_buy_enabled(model_id, False)
+    success = models_db.set_model_auto_buy_enabled(model_id, False)
     if not success:
         return jsonify({'error': 'Failed to update auto buy status'}), 500
 
@@ -373,11 +377,11 @@ def disable_sell_trading(model_id):
     Returns:
         JSON: 更新后的自动卖出状态
     """
-    model = db.get_model(model_id)
+    model = models_db.get_model(model_id)
     if not model:
         return jsonify({'error': 'Model not found'}), 404
 
-    success = db.set_model_auto_sell_enabled(model_id, False)
+    success = models_db.set_model_auto_sell_enabled(model_id, False)
     if not success:
         return jsonify({'error': 'Failed to update auto sell status'}), 500
 

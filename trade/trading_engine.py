@@ -28,6 +28,8 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import common.config as app_config
 from trade.prompt_defaults import DEFAULT_BUY_CONSTRAINTS, DEFAULT_SELL_CONSTRAINTS, PROMPT_JSON_OUTPUT_SUFFIX
 from common.binance_futures import BinanceFuturesOrderClient
+from common.database.database_model_prompts import ModelPromptsDatabase
+from common.database.database_models import ModelsDatabase
 
 logger = logging.getLogger(__name__)
 
@@ -63,9 +65,12 @@ class TradingEngine:
         self.market_fetcher = market_fetcher
         self.trader = trader
         self.trade_fee_rate = trade_fee_rate
+        # 初始化 ModelPromptsDatabase 和 ModelsDatabase 实例
+        self.model_prompts_db = ModelPromptsDatabase(pool=db._pool if hasattr(db, '_pool') else None)
+        self.models_db = ModelsDatabase(pool=db._pool if hasattr(db, '_pool') else None)
         # 从数据库获取 max_positions（最大持仓数量），如果获取失败则使用默认值3
         try:
-            model = self.db.get_model(model_id)
+            model = self.models_db.get_model(model_id)
             self.max_positions = model.get('max_positions', 3) if model else 3
         except Exception as e:
             logger.warning(f"[TradingEngine] Failed to get max_positions for model {model_id}, using default 3: {e}")
@@ -260,7 +265,7 @@ class TradingEngine:
         
         try:
             # 检查模型是否存在
-            model = self.db.get_model(self.model_id)
+            model = self.models_db.get_model(self.model_id)
             if not model:
                 logger.warning(f"[Model {self.model_id}] [买入服务] 模型不存在，跳过买入决策周期")
                 return {
@@ -468,7 +473,7 @@ class TradingEngine:
             模型字典，如果不存在则返回None
         """
         try:
-            model = self.db.get_model(self.model_id)
+            model = self.models_db.get_model(self.model_id)
             if not model:
                 logger.warning(f"[Model {self.model_id}] 模型不存在")
             return model
@@ -526,7 +531,7 @@ class TradingEngine:
                    f"可用余额(available_balance)=${available_balance:.2f}, "
                    f"全仓余额(cross_wallet_balance)=${cross_wallet_balance:.2f}")
         
-        model = self.db.get_model(self.model_id)
+        model = self.models_db.get_model(self.model_id)
         account_alias = model.get('account_alias', '') if model else ''
         
         self.db.record_account_value(
@@ -581,7 +586,7 @@ class TradingEngine:
         Returns:
             (model_uuid, trade_id) 元组
         """
-        model_mapping = self.db._get_model_id_mapping()
+        model_mapping = self.models_db._get_model_id_mapping()
         model_uuid = model_mapping.get(self.model_id)
         trade_id = self.db._generate_id()
         return model_uuid, trade_id
@@ -608,7 +613,7 @@ class TradingEngine:
             (sdk_call_skipped, sdk_skip_reason) 元组
         """
         try:
-            model = self.db.get_model(self.model_id)
+            model = self.models_db.get_model(self.model_id)
             if not model:
                 reason = "Model not found in database"
             else:
@@ -676,7 +681,7 @@ class TradingEngine:
         """
         try:
             # 【步骤1】从model表获取API密钥（每次都重新获取，确保使用最新值）
-            model = self.db.get_model(self.model_id)
+            model = self.models_db.get_model(self.model_id)
             if not model:
                 logger.error(f"[Model {self.model_id}] Model not found, cannot create Binance order client")
                 return None
@@ -934,7 +939,7 @@ class TradingEngine:
         - available_balance -> available_balance
         - total_cross_un_pnl -> cross_un_pnl
         """
-        model = self.db.get_model(self.model_id)
+        model = self.models_db.get_model(self.model_id)
         if not model:
             logger.error(f"[Model {self.model_id}] Model not found when building account info")
             return {
@@ -1021,7 +1026,9 @@ class TradingEngine:
             - 从数据库获取的prompt不包含JSON输出要求结尾句，这里会自动拼接上PROMPT_JSON_OUTPUT_SUFFIX
             - 结尾句永远作为传入给AI Prompt策略的结尾输入
         """
-        prompt_config = self.db.get_model_prompt(self.model_id) or {}
+        # 使用 ModelPromptsDatabase 获取提示词配置
+        model_mapping = self.models_db._get_model_id_mapping() if self.models_db else None
+        prompt_config = self.model_prompts_db.get_model_prompt(self.model_id, model_mapping) or {}
         buy_prompt = prompt_config.get('buy_prompt') or DEFAULT_BUY_CONSTRAINTS
         sell_prompt = prompt_config.get('sell_prompt') or DEFAULT_SELL_CONSTRAINTS
         
@@ -1118,7 +1125,7 @@ class TradingEngine:
             return
 
         # 从模型配置获取批次大小、批次间隔、分组大小（买入配置）
-        model = self.db.get_model(self.model_id)
+        model = self.models_db.get_model(self.model_id)
         if model:
             batch_size = model.get('buy_batch_size', 1)
             batch_interval = model.get('buy_batch_execution_interval', 60)
@@ -1672,7 +1679,7 @@ class TradingEngine:
             return
 
         # 从模型配置获取批次大小、批次间隔、分组大小（卖出配置）
-        model = self.db.get_model(self.model_id)
+        model = self.models_db.get_model(self.model_id)
         if model:
             batch_size = model.get('sell_batch_size', 1)
             batch_interval = model.get('sell_batch_execution_interval', 60)
@@ -3040,7 +3047,7 @@ class TradingEngine:
         
         # 如果没有缓存，则查询数据库
         try:
-            model = self.db.get_model(self.model_id)
+            model = self.models_db.get_model(self.model_id)
         except Exception as exc:
             logger.warning(f"[Model {self.model_id}] 读取杠杆失败: {exc}")
             return 10

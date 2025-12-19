@@ -224,4 +224,49 @@ class StrategysDatabase:
         except Exception as e:
             logger.error(f"[Strategys] Failed to get model strategies: {e}")
             return []
+    
+    def get_model_strategies_by_int_id(self, model_id: int, strategy_type: str, 
+                                      model_id_mapping: Dict[int, str] = None) -> List[Dict]:
+        """
+        获取模型关联的策略列表（按优先级和创建时间排序）
+        
+        此方法接受整数 model_id，内部转换为 UUID 字符串后调用 get_model_strategies。
+        
+        Args:
+            model_id: 模型ID（整数）
+            strategy_type: 策略类型，'buy' 或 'sell'
+            model_id_mapping: 可选的模型ID映射字典，如果不提供则从数据库查询
+        
+        Returns:
+            List[Dict]: 策略列表，每个元素包含：
+                - id: 关联ID
+                - model_id: 模型ID
+                - strategy_id: 策略ID
+                - type: 策略类型
+                - priority: 优先级
+                - created_at: 创建时间
+                - strategy_name: 策略名称
+                - strategy_code: 策略代码
+                - strategy_context: 策略上下文
+        """
+        try:
+            # 如果没有提供映射，从数据库查询
+            if model_id_mapping is None:
+                rows = self.query(f"SELECT id FROM models")
+                model_id_mapping = {}
+                for row in rows:
+                    uuid_str = row[0]
+                    int_id = abs(hash(uuid_str)) % (10 ** 9)
+                    model_id_mapping[int_id] = uuid_str
+            
+            model_uuid = model_id_mapping.get(model_id)
+            if not model_uuid:
+                logger.warning(f"[Strategys] Model {model_id} not found in mapping, cannot get strategies")
+                return []
+            
+            # 调用接受 UUID 字符串的方法
+            return self.get_model_strategies(model_uuid, strategy_type)
+        except Exception as e:
+            logger.error(f"[Strategys] Failed to get model strategies by int ID: {e}")
+            return []
 

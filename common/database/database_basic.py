@@ -546,180 +546,20 @@ class Database:
     
     # ============ Model（模型）管理方法 ============
     
-    def _get_model_id_mapping(self) -> Dict[int, str]:
-        """Get mapping from int ID to UUID string ID for models"""
-        try:
-            from .database_models import ModelsDatabase
-            models_db = ModelsDatabase(pool=self._pool)
-            return models_db._get_model_id_mapping()
-        except Exception as e:
-            logger.error(f"[Database] Failed to get model ID mapping: {e}")
-            return {}
-    
-    def _get_provider_id_mapping(self) -> Dict[int, str]:
-        """Get mapping from int ID to UUID string ID for providers"""
-        try:
-            from .database_models import ModelsDatabase
-            models_db = ModelsDatabase(pool=self._pool)
-            return models_db._get_provider_id_mapping()
-        except Exception as e:
-            logger.error(f"[Database] Failed to get provider ID mapping: {e}")
-            return {}
-    
-    def get_model(self, model_id: int) -> Optional[Dict]:
-        """
-        Get model information
-        
-        注意：此方法已迁移到 common.database.database_models.ModelsDatabase
-        保留此方法仅用于向后兼容。
-        """
-        try:
-            from .database_models import ModelsDatabase
-            models_db = ModelsDatabase(pool=self._pool)
-            return models_db.get_model(model_id)
-        except Exception as e:
-            logger.error(f"[Database] Failed to get model {model_id}: {e}")
-            return None
-    
-    def get_all_models(self) -> List[Dict]:
-        """
-        Get all trading models
-        
-        注意：此方法已迁移到 common.database.database_models.ModelsDatabase
-        保留此方法仅用于向后兼容。
-        """
-        try:
-            from .database_models import ModelsDatabase
-            models_db = ModelsDatabase(pool=self._pool)
-            return models_db.get_all_models()
-        except Exception as e:
-            logger.error(f"[Database] Failed to get all models: {e}")
-            return []
-    
-    # delete_model 方法已迁移到Java后端，不再需要
-    
-    def is_model_auto_buy_enabled(self, model_id: int) -> bool:
-        """
-        Check auto buy flag for a model
-        
-        注意：此方法已迁移到 common.database.database_models.ModelsDatabase
-        保留此方法仅用于向后兼容。
-        """
-        try:
-            from .database_models import ModelsDatabase
-            models_db = ModelsDatabase(pool=self._pool)
-            return models_db.is_model_auto_buy_enabled(model_id)
-        except Exception as e:
-            logger.error(f"[Database] Failed to check auto buy flag for model {model_id}: {e}")
-            return False
-    
-    def is_model_auto_sell_enabled(self, model_id: int) -> bool:
-        """
-        Check auto sell flag for a model
-        
-        注意：此方法已迁移到 common.database.database_models.ModelsDatabase
-        保留此方法仅用于向后兼容。
-        """
-        try:
-            from .database_models import ModelsDatabase
-            models_db = ModelsDatabase(pool=self._pool)
-            return models_db.is_model_auto_sell_enabled(model_id)
-        except Exception as e:
-            logger.error(f"[Database] Failed to check auto sell flag for model {model_id}: {e}")
-            return False
-    
-    def set_model_auto_buy_enabled(self, model_id: int, enabled: bool) -> bool:
-        """
-        Enable or disable auto buy for a model
-        
-        注意：此方法已迁移到 common.database.database_models.ModelsDatabase
-        保留此方法仅用于向后兼容。
-        """
-        try:
-            from .database_models import ModelsDatabase
-            models_db = ModelsDatabase(pool=self._pool)
-            return models_db.set_model_auto_buy_enabled(model_id, enabled)
-        except Exception as e:
-            logger.error(f"[Database] Failed to update auto buy flag for model {model_id}: {e}")
-            return False
-    
-    def set_model_auto_sell_enabled(self, model_id: int, enabled: bool) -> bool:
-        """
-        Enable or disable auto sell for a model
-        
-        注意：此方法已迁移到 common.database.database_models.ModelsDatabase
-        保留此方法仅用于向后兼容。
-        """
-        try:
-            from .database_models import ModelsDatabase
-            models_db = ModelsDatabase(pool=self._pool)
-            return models_db.set_model_auto_sell_enabled(model_id, enabled)
-        except Exception as e:
-            logger.error(f"[Database] Failed to update auto sell flag for model {model_id}: {e}")
-            return False
-    
-    def set_model_leverage(self, model_id: int, leverage: int) -> bool:
-        """
-        Update model leverage
-        
-        注意：此方法已迁移到 common.database.database_models.ModelsDatabase
-        保留此方法仅用于向后兼容。
-        """
-        try:
-            from .database_models import ModelsDatabase
-            models_db = ModelsDatabase(pool=self._pool)
-            return models_db.set_model_leverage(model_id, leverage)
-        except Exception as e:
-            logger.error(f"[Database] Failed to update leverage for model {model_id}: {e}")
-            return False
-    
-    def set_model_batch_config(self, model_id: int, 
-                               buy_batch_size: int = None, buy_batch_execution_interval: int = None, buy_batch_execution_group_size: int = None,
-                               sell_batch_size: int = None, sell_batch_execution_interval: int = None, sell_batch_execution_group_size: int = None) -> bool:
-        """
-        Update model batch configuration (批次配置)
-        
-        注意：此方法已迁移到 common.database.database_models.ModelsDatabase
-        保留此方法仅用于向后兼容。
-        """
-        try:
-            from .database_models import ModelsDatabase
-            models_db = ModelsDatabase(pool=self._pool)
-            return models_db.set_model_batch_config(model_id, buy_batch_size, buy_batch_execution_interval, buy_batch_execution_group_size,
-                                                   sell_batch_size, sell_batch_execution_interval, sell_batch_execution_group_size)
-        except Exception as e:
-            logger.error(f"[Database] Failed to update batch config for model {model_id}: {e}")
-            return False
-    
-    def set_model_max_positions(self, model_id: int, max_positions: int) -> bool:
-        """
-        Update model max_positions (最大持仓数量)
-        
-        注意：此方法已迁移到 common.database.database_models.ModelsDatabase
-        保留此方法仅用于向后兼容。
-        """
-        try:
-            from .database_models import ModelsDatabase
-            models_db = ModelsDatabase(pool=self._pool)
-            return models_db.set_model_max_positions(model_id, max_positions)
-        except Exception as e:
-            logger.error(f"[Database] Failed to update max_positions for model {model_id}: {e}")
-            return False
-    
-    def set_model_provider_and_model_name(self, model_id: int, provider_id: int, model_name: str) -> bool:
-        """
-        Update model provider_id and model_name
-        
-        注意：此方法已迁移到 common.database.database_models.ModelsDatabase
-        保留此方法仅用于向后兼容。
-        """
-        try:
-            from .database_models import ModelsDatabase
-            models_db = ModelsDatabase(pool=self._pool)
-            return models_db.set_model_provider_and_model_name(model_id, provider_id, model_name)
-        except Exception as e:
-            logger.error(f"[Database] Failed to update provider and model_name for model {model_id}: {e}")
-            return False
+    # 所有模型相关方法已迁移到 common.database.database_models.ModelsDatabase
+    # 请直接使用 ModelsDatabase 类的方法：
+    # - _get_model_id_mapping()
+    # - _get_provider_id_mapping()
+    # - get_model(model_id)
+    # - get_all_models()
+    # - is_model_auto_buy_enabled(model_id)
+    # - is_model_auto_sell_enabled(model_id)
+    # - set_model_auto_buy_enabled(model_id, enabled)
+    # - set_model_auto_sell_enabled(model_id, enabled)
+    # - set_model_leverage(model_id, leverage)
+    # - set_model_batch_config(model_id, ...)
+    # - set_model_max_positions(model_id, max_positions)
+    # - set_model_provider_and_model_name(model_id, provider_id, model_name)
     
     # ============ Portfolio（投资组合）管理方法 ============
     
@@ -734,8 +574,10 @@ class Database:
         """
         try:
             from .database_portfolios import PortfoliosDatabase
+            from .database_models import ModelsDatabase
             portfolios_db = PortfoliosDatabase(pool=self._pool)
-            model_mapping = self._get_model_id_mapping()
+            models_db = ModelsDatabase(pool=self._pool)
+            model_mapping = models_db._get_model_id_mapping()
             portfolios_db.update_position(model_id, symbol, position_amt, avg_price, leverage, 
                                         position_side, initial_margin, unrealized_profit, model_mapping)
         except Exception as e:
@@ -752,9 +594,11 @@ class Database:
         try:
             from .database_portfolios import PortfoliosDatabase
             portfolios_db = PortfoliosDatabase(pool=self._pool)
-            model_mapping = self._get_model_id_mapping()
+            from .database_models import ModelsDatabase
+            models_db = ModelsDatabase(pool=self._pool)
+            model_mapping = models_db._get_model_id_mapping()
             return portfolios_db.get_portfolio(model_id, current_prices, model_mapping, 
-                                             self.get_model, self.trades_table)
+                                             models_db.get_model, self.trades_table)
         except Exception as e:
             logger.error(f"[Database] Failed to get portfolio for model {model_id}: {e}")
             raise
@@ -768,8 +612,10 @@ class Database:
         """
         try:
             from .database_portfolios import PortfoliosDatabase
+            from .database_models import ModelsDatabase
             portfolios_db = PortfoliosDatabase(pool=self._pool)
-            model_mapping = self._get_model_id_mapping()
+            models_db = ModelsDatabase(pool=self._pool)
+            model_mapping = models_db._get_model_id_mapping()
             portfolios_db.close_position(model_id, symbol, position_side, model_mapping)
         except Exception as e:
             logger.error(f"[Database] Failed to close position: {e}")
@@ -787,8 +633,10 @@ class Database:
         """
         try:
             from .database_trades import TradesDatabase
+            from .database_models import ModelsDatabase
             trades_db = TradesDatabase(pool=self._pool)
-            model_mapping = self._get_model_id_mapping()
+            models_db = ModelsDatabase(pool=self._pool)
+            model_mapping = models_db._get_model_id_mapping()
             trades_db.add_trade(model_id, future, signal, quantity, price, leverage, side, pnl, fee, model_mapping)
         except Exception as e:
             logger.error(f"[Database] Failed to add trade: {e}")
@@ -807,8 +655,10 @@ class Database:
         """
         try:
             from .database_conversations import ConversationsDatabase
+            from .database_models import ModelsDatabase
             conversations_db = ConversationsDatabase(pool=self._pool)
-            model_mapping = self._get_model_id_mapping()
+            models_db = ModelsDatabase(pool=self._pool)
+            model_mapping = models_db._get_model_id_mapping()
             return conversations_db.add_conversation(model_id, user_prompt, ai_response, cot_trace, 
                                                   tokens, conversation_type, model_mapping)
         except Exception as e:
@@ -843,8 +693,10 @@ class Database:
         """
         try:
             from .database_conversations import ConversationsDatabase
+            from .database_models import ModelsDatabase
             conversations_db = ConversationsDatabase(pool=self._pool)
-            model_mapping = self._get_model_id_mapping()
+            models_db = ModelsDatabase(pool=self._pool)
+            model_mapping = models_db._get_model_id_mapping()
             conversations_db.record_llm_api_error(model_id, provider_name, model, error_msg, model_mapping)
         except Exception as e:
             logger.error(f"[Database] Failed to record LLM API error: {e}")
@@ -864,11 +716,13 @@ class Database:
         try:
             from .database_account_values import AccountValuesDatabase
             account_values_db = AccountValuesDatabase(pool=self._pool)
-            model_mapping = self._get_model_id_mapping()
+            from .database_models import ModelsDatabase
+            models_db = ModelsDatabase(pool=self._pool)
+            model_mapping = models_db._get_model_id_mapping()
             from .database_init import ACCOUNT_VALUE_HISTORYS_TABLE
             account_values_db.record_account_value(model_id, balance, available_balance, cross_wallet_balance,
                                                   account_alias, cross_un_pnl, model_mapping, 
-                                                  self.get_model, ACCOUNT_VALUE_HISTORYS_TABLE)
+                                                  models_db.get_model, ACCOUNT_VALUE_HISTORYS_TABLE)
         except Exception as e:
             logger.error(f"[Database] Failed to record account value: {e}")
             raise
@@ -882,47 +736,15 @@ class Database:
         """
         try:
             from .database_account_value_historys import AccountValueHistorysDatabase
+            from .database_models import ModelsDatabase
             account_value_historys_db = AccountValueHistorysDatabase(pool=self._pool)
-            model_mapping = self._get_model_id_mapping()
+            models_db = ModelsDatabase(pool=self._pool)
+            model_mapping = models_db._get_model_id_mapping()
             return account_value_historys_db.get_account_value_history(model_id, limit, model_mapping)
         except Exception as e:
             logger.error(f"[Database] Failed to get account value history for model {model_id}: {e}")
             return []
-    
-    # ============ Prompt（提示词）管理方法 ============
-    
-    def get_model_prompt(self, model_id: int) -> Optional[Dict]:
-        """
-        Get model prompt configuration
-        
-        注意：此方法已迁移到 common.database.database_model_prompts.ModelPromptsDatabase
-        保留此方法仅用于向后兼容。
-        """
-        try:
-            from .database_model_prompts import ModelPromptsDatabase
-            model_prompts_db = ModelPromptsDatabase(pool=self._pool)
-            model_mapping = self._get_model_id_mapping()
-            return model_prompts_db.get_model_prompt(model_id, model_id_mapping=model_mapping)
-        except Exception as e:
-            logger.error(f"[Database] Failed to get model prompt: {e}")
-            return None
-    
-    def upsert_model_prompt(self, model_id: int, buy_prompt: Optional[str], sell_prompt: Optional[str]) -> bool:
-        """
-        Insert or update model prompt configuration
-        
-        注意：此方法已迁移到 common.database.database_model_prompts.ModelPromptsDatabase
-        保留此方法仅用于向后兼容。
-        """
-        try:
-            from .database_model_prompts import ModelPromptsDatabase
-            model_prompts_db = ModelPromptsDatabase(pool=self._pool)
-            model_mapping = self._get_model_id_mapping()
-            return model_prompts_db.upsert_model_prompt(model_id, buy_prompt, sell_prompt, model_id_mapping=model_mapping)
-        except Exception as e:
-            logger.error(f"[Database] Failed to upsert model prompt: {e}")
-            return False
-    
+
     # ============ Futures（合约配置）管理方法 ============
     
     # add_future, delete_future, get_futures, upsert_future 方法已迁移到Java后端，不再需要
@@ -959,7 +781,9 @@ class Database:
             List[str]: 当前持仓的合约symbol列表（如 ['BTC', 'ETH']）
         """
         try:
-            model_mapping = self._get_model_id_mapping()
+            from .database_models import ModelsDatabase
+            models_db = ModelsDatabase(pool=self._pool)
+            model_mapping = models_db._get_model_id_mapping()
             model_uuid = model_mapping.get(model_id)
             if not model_uuid:
                 logger.warning(f"[Database] Model {model_id} UUID not found")
@@ -998,7 +822,9 @@ class Database:
         try:
             logger.info(f"[Database] Starting sync_model_futures_from_portfolio for model {model_id}")
             
-            model_mapping = self._get_model_id_mapping()
+            from .database_models import ModelsDatabase
+            models_db = ModelsDatabase(pool=self._pool)
+            model_mapping = models_db._get_model_id_mapping()
             model_uuid = model_mapping.get(model_id)
             if not model_uuid:
                 logger.error(f"[Database] Model {model_id} not found in mapping")
@@ -1253,40 +1079,16 @@ class Database:
             包含字段：balance, available_balance, cross_wallet_balance, cross_un_pnl, account_alias
         """
         try:
-            model_mapping = self._get_model_id_mapping()
-            model_uuid = model_mapping.get(model_id)
-            if not model_uuid:
-                return None
-            
-            rows = self.query(f"""
-                SELECT `account_alias`, `balance`, `available_balance`, 
-                       `cross_wallet_balance`, `cross_un_pnl`, `timestamp`
-                FROM `{self.account_values_table}`
-                WHERE `model_id` = %s
-                ORDER BY `timestamp` DESC
-                LIMIT 1
-            """, (model_uuid,))
-            
-            if not rows:
-                return None
-            
-            columns = ["account_alias", "balance", "available_balance", 
-                      "cross_wallet_balance", "cross_un_pnl", "timestamp"]
-            result = self._row_to_dict(rows[0], columns)
-            
-            return {
-                "account_alias": result["account_alias"] or '',
-                "balance": float(result["balance"]) if result["balance"] is not None else 0.0,
-                "available_balance": float(result["available_balance"]) if result["available_balance"] is not None else 0.0,
-                "cross_wallet_balance": float(result["cross_wallet_balance"]) if result["cross_wallet_balance"] is not None else 0.0,
-                "cross_un_pnl": float(result["cross_un_pnl"]) if result["cross_un_pnl"] is not None else 0.0
-            }
+            from .database_account_values import AccountValuesDatabase
+            from .database_models import ModelsDatabase
+            account_values_db = AccountValuesDatabase(pool=self._pool)
+            models_db = ModelsDatabase(pool=self._pool)
+            model_mapping = models_db._get_model_id_mapping()
+            return account_values_db.get_latest_account_value(model_id, model_mapping)
         except Exception as e:
             logger.error(f"[Database] Failed to get latest account value for model {model_id}: {e}")
             return None
     
-    # add_asset, get_asset, get_all_assets 方法已迁移到AccountDatabase类，不再需要
-    # update_asset 和 delete_asset 方法已迁移到Java后端，不再需要
     
     # ============ 策略管理方法 ============
     
@@ -1298,7 +1100,7 @@ class Database:
         保留此方法仅用于向后兼容。
         
         Args:
-            model_id: 模型ID
+            model_id: 模型ID（整数）
             strategy_type: 策略类型，'buy' 或 'sell'
         
         Returns:
@@ -1306,17 +1108,11 @@ class Database:
         """
         try:
             from .database_strategys import StrategysDatabase
-            # 将model_id转换为UUID字符串
-            model_mapping = self._get_model_id_mapping()
-            model_uuid = model_mapping.get(model_id)
-            if not model_uuid:
-                logger.warning(f"[Database] Model {model_id} not found in mapping, cannot get strategies")
-                return []
-            
-            # 使用新的StrategysDatabase模块
+            from .database_models import ModelsDatabase
             strategys_db = StrategysDatabase(pool=self._pool)
-            # 注意：StrategysDatabase.get_model_strategies需要UUID字符串
-            return strategys_db.get_model_strategies(model_uuid, strategy_type)
+            models_db = ModelsDatabase(pool=self._pool)
+            model_mapping = models_db._get_model_id_mapping()
+            return strategys_db.get_model_strategies_by_int_id(model_id, strategy_type, model_mapping)
         except Exception as e:
             logger.error(f"[Database] Failed to get model strategies: {e}")
             return []
