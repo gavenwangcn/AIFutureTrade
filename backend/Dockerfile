@@ -36,7 +36,27 @@ COPY src ./src
 # -U: 不检查更新（使用缓存的依赖）
 # -B: 批处理模式
 # -DskipTests: 跳过测试
-RUN mvn clean package -DskipTests -B -U
+# 注意：mvn package 会自动执行 spring-boot:repackage，生成可执行的 JAR 文件
+# 使用 -X 参数显示详细日志，便于调试（如果需要可以移除 -B 来显示进度）
+RUN mvn clean package -DskipTests -B -U || \
+    (echo "Build failed, showing error details..." && \
+     mvn clean package -DskipTests -U && \
+     exit 1)
+
+# 验证 JAR 文件是否存在且包含主清单属性
+RUN echo "=== Verifying JAR file ===" && \
+    if [ ! -f /app/target/java-backend-1.0.0.jar ]; then \
+        echo "ERROR: JAR file not found. Available files:" && \
+        ls -lh /app/target/ && \
+        exit 1; \
+    fi && \
+    echo "JAR file found, checking manifest..." && \
+    unzip -p /app/target/java-backend-1.0.0.jar META-INF/MANIFEST.MF | grep -q "Main-Class" || \
+    (echo "ERROR: JAR file missing Main-Class in manifest" && \
+     echo "Manifest content:" && \
+     unzip -p /app/target/java-backend-1.0.0.jar META-INF/MANIFEST.MF && \
+     exit 1) && \
+    echo "JAR file verification passed"
 
 # 第二阶段：运行阶段
 FROM adoptopenjdk:11-jre-hotspot
@@ -45,6 +65,9 @@ FROM adoptopenjdk:11-jre-hotspot
 WORKDIR /app
 
 # 从构建阶段复制JAR文件
+# Spring Boot Maven 插件会生成可执行的 JAR 文件（包含所有依赖）
+# 文件名格式：{artifactId}-{version}.jar
+# 注意：如果构建失败，可以检查 target 目录中的实际文件名
 COPY --from=builder /app/target/java-backend-1.0.0.jar app.jar
 
 # 暴露服务端口（5002端口供前端调用）

@@ -164,6 +164,14 @@
                         </exclude>
                     </excludes>
                 </configuration>
+                <executions>
+                    <!-- 确保 repackage 目标被执行，生成可执行的 JAR 文件 -->
+                    <execution>
+                        <goals>
+                            <goal>repackage</goal>
+                        </goals>
+                    </execution>
+                </executions>
             </plugin>
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>

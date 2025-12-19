@@ -14,4 +14,7 @@ gunicorn>=21.2.0
 eventlet>=0.33.3
 python-engineio>=4.7.1
 python-socketio>=5.9.0
-TA-Lib>=0.4.28
+# 数据分析和科学计算库（用于技术指标计算）
+numpy>=1.24.0  # 数值计算库，TA-Lib的依赖
+pandas>=2.0.0  # 数据分析库，用于K线数据处理和技术指标计算
+TA-Lib>=0.4.28  # 技术分析库，用于计算MA、MACD、RSI等指标
