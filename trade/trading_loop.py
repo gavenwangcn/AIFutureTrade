@@ -10,6 +10,7 @@ from datetime import datetime, timezone, timedelta
 import common.config as app_config
 from common.database.database_models import ModelsDatabase
 from common.database.database_settings import SettingsDatabase
+from common.database.database_strategys import StrategysDatabase
 
 logger = logging.getLogger(__name__)
 
@@ -50,8 +51,9 @@ def trading_buy_loop(auto_trading, trading_engines, db):
     """买入交易循环 - 只执行买入决策"""
     logger.info("Trading buy loop started")
     
-    # 创建 ModelsDatabase 实例用于模型操作
+    # 创建 ModelsDatabase 和 StrategysDatabase 实例用于模型操作
     models_db = ModelsDatabase(pool=db._pool if hasattr(db, '_pool') else None)
+    strategys_db = StrategysDatabase(pool=db._pool if hasattr(db, '_pool') else None)
 
     while auto_trading:
         try:
@@ -71,6 +73,23 @@ def trading_buy_loop(auto_trading, trading_engines, db):
                     if not models_db.is_model_auto_buy_enabled(model_id):
                         logger.info(f"SKIP: Model {model_id} - auto_buy_enabled=0, skipping AI buy decision")
                         continue
+
+                    # 对于 trade_type='strategy' 的模型，检查是否存在买入策略
+                    model = models_db.get_model(model_id)
+                    if model:
+                        trade_type = model.get('trade_type', 'strategy')
+                        if trade_type == 'strategy':
+                            # 获取模型ID映射
+                            model_mapping = models_db._get_model_id_mapping()
+                            # 查询买入策略
+                            buy_strategies = strategys_db.get_model_strategies_by_int_id(
+                                model_id, 
+                                'buy', 
+                                model_mapping
+                            )
+                            if not buy_strategies:
+                                logger.info(f"SKIP: Model {model_id} - trade_type=strategy but no buy strategy configured, skipping buy decision")
+                                continue
 
                     # 只有 auto_buy_enabled=1 的模型才会执行买入决策
                     logger.info(f"\nEXEC BUY: Model {model_id} - auto_buy_enabled=1, executing AI buy decision")
@@ -117,8 +136,9 @@ def trading_sell_loop(auto_trading, trading_engines, db):
     """卖出交易循环 - 只执行卖出决策"""
     logger.info("Trading sell loop started")
     
-    # 创建 ModelsDatabase 实例用于模型操作
+    # 创建 ModelsDatabase 和 StrategysDatabase 实例用于模型操作
     models_db = ModelsDatabase(pool=db._pool if hasattr(db, '_pool') else None)
+    strategys_db = StrategysDatabase(pool=db._pool if hasattr(db, '_pool') else None)
 
     while auto_trading:
         try:
@@ -138,6 +158,23 @@ def trading_sell_loop(auto_trading, trading_engines, db):
                     if not models_db.is_model_auto_sell_enabled(model_id):
                         logger.info(f"SKIP: Model {model_id} - auto_sell_enabled=0, skipping AI sell decision")
                         continue
+
+                    # 对于 trade_type='strategy' 的模型，检查是否存在卖出策略
+                    model = models_db.get_model(model_id)
+                    if model:
+                        trade_type = model.get('trade_type', 'strategy')
+                        if trade_type == 'strategy':
+                            # 获取模型ID映射
+                            model_mapping = models_db._get_model_id_mapping()
+                            # 查询卖出策略
+                            sell_strategies = strategys_db.get_model_strategies_by_int_id(
+                                model_id, 
+                                'sell', 
+                                model_mapping
+                            )
+                            if not sell_strategies:
+                                logger.info(f"SKIP: Model {model_id} - trade_type=strategy but no sell strategy configured, skipping sell decision")
+                                continue
 
                     # 只有 auto_sell_enabled=1 的模型才会执行 卖出决策
                     logger.info(f"\nEXEC SELL: Model {model_id} - auto_sell_enabled=1, executing AI sell decision")

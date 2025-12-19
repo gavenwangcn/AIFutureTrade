@@ -117,6 +117,10 @@ binance:
 # 应用配置（可通过环境变量覆盖）
 app:
   auto-trading: ${APP_AUTO_TRADING:true}
+
+# Socket.IO 配置（可通过环境变量覆盖）
+socketio:
+  port: ${SOCKETIO_PORT:5003}  # Socket.IO 服务器端口（独立于 HTTP 服务器端口）
   trade-fee-rate: ${APP_TRADE_FEE_RATE:0.001}
   leaderboard-refresh: 10  # 涨跌幅榜刷新间隔（秒）
   trading-interval: 3600  # 交易执行间隔（秒）

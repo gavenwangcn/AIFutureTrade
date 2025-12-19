@@ -18,6 +18,7 @@ from trade.strategy.strategy_trader import StrategyTrader
 from common.database.database_basic import Database
 from common.database.database_models import ModelsDatabase
 from common.database.database_providers import ProvidersDatabase
+from common.database.database_strategys import StrategysDatabase
 from common.version import __version__
 from trade.trading_loop import trading_buy_loop, trading_sell_loop
 
@@ -79,9 +80,10 @@ with app.app_context():
     init_all_database_tables(db.command)
     logger.info("Database tables initialized")
 
-# Initialize ModelsDatabase and ProvidersDatabase for direct operations
+# Initialize ModelsDatabase, ProvidersDatabase and StrategysDatabase for direct operations
 models_db = ModelsDatabase(pool=db._pool)
 providers_db = ProvidersDatabase(pool=db._pool)
+strategys_db = StrategysDatabase(pool=db._pool)
 
 market_fetcher = MarketDataFetcher(db)
 trading_engines = {}
@@ -89,6 +91,46 @@ auto_trading = getattr(app_config, 'AUTO_TRADING', True)
 TRADE_FEE_RATE = getattr(app_config, 'TRADE_FEE_RATE', 0.002)
 
 # ============ Helper Functions ============
+
+def check_strategy_exists(model_id: int, strategy_type: str):
+    """
+    检查模型是否存在指定类型的策略配置
+    
+    Args:
+        model_id: 模型ID（整数）
+        strategy_type: 策略类型，'buy' 或 'sell'
+    
+    Returns:
+        tuple[bool, str]: (是否存在策略, 错误消息)
+    """
+    try:
+        model = models_db.get_model(model_id)
+        if not model:
+            return False, f"Model {model_id} not found"
+        
+        # 只对 trade_type='strategy' 的模型进行策略检查
+        trade_type = model.get('trade_type', 'strategy')
+        if trade_type != 'strategy':
+            # 非策略类型的模型不需要检查策略
+            return True, None
+        
+        # 获取模型ID映射
+        model_mapping = models_db._get_model_id_mapping()
+        
+        # 查询策略
+        strategies = strategys_db.get_model_strategies_by_int_id(
+            model_id, 
+            strategy_type, 
+            model_mapping
+        )
+        
+        if not strategies:
+            return False, f"Model {model_id} (trade_type=strategy) has no {strategy_type} strategy configured in model_strategy table"
+        
+        return True, None
+    except Exception as e:
+        logger.error(f"Failed to check strategy for model {model_id}, type {strategy_type}: {e}")
+        return False, f"Error checking strategy: {str(e)}"
 
 def init_trading_engine_for_model(model_id: int):
     """Initialize trading engine for a model if possible."""
@@ -276,6 +318,12 @@ def execute_buy_trading(model_id):
     Returns:
         JSON: 买入交易执行结果
     """
+    # 检查策略配置（仅对 trade_type='strategy' 的模型）
+    has_strategy, error_msg = check_strategy_exists(model_id, 'buy')
+    if not has_strategy:
+        logger.warning(f"Model {model_id} buy execution blocked: {error_msg}")
+        return jsonify({'error': error_msg, 'success': False}), 400
+    
     if model_id not in trading_engines:
         engine, error = init_trading_engine_for_model(model_id)
         if error:
@@ -307,6 +355,12 @@ def execute_sell_trading(model_id):
     Returns:
         JSON: 卖出交易执行结果
     """
+    # 检查策略配置（仅对 trade_type='strategy' 的模型）
+    has_strategy, error_msg = check_strategy_exists(model_id, 'sell')
+    if not has_strategy:
+        logger.warning(f"Model {model_id} sell execution blocked: {error_msg}")
+        return jsonify({'error': error_msg, 'success': False}), 400
+    
     if model_id not in trading_engines:
         engine, error = init_trading_engine_for_model(model_id)
         if error:

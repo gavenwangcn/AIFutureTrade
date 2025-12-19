@@ -1259,9 +1259,10 @@ let portfolioSymbolsRefreshInterval = null // 模型持仓合约列表自动刷�
       console.log('[TradingApp] 加载系统设置...')
       await loadSettings()
       
-      // 先初始化 WebSocket（确保连接建立）
-      console.log('[TradingApp] 初始化 WebSocket 连接...')
-      initWebSocket()
+      // WebSocket 功能已禁用（涨跌幅榜和K线数据已改为轮询方式）
+      // 如果需要启用 WebSocket，请取消下面的注释
+      // console.log('[TradingApp] 初始化 WebSocket 连接...')
+      // initWebSocket()
       
       // 等待一小段时间确保 WebSocket 连接建立
       await new Promise(resolve => setTimeout(resolve, 500))
