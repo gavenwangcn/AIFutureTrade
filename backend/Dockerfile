@@ -44,6 +44,7 @@ RUN mvn clean package -DskipTests -B -U || \
      exit 1)
 
 # 验证 JAR 文件是否存在且包含主清单属性
+# 使用 Java 自带的 jar 命令来检查清单文件（不需要安装额外的工具）
 RUN echo "=== Verifying JAR file ===" && \
     if [ ! -f /app/target/java-backend-1.0.0.jar ]; then \
         echo "ERROR: JAR file not found. Available files:" && \
@@ -51,12 +52,19 @@ RUN echo "=== Verifying JAR file ===" && \
         exit 1; \
     fi && \
     echo "JAR file found, checking manifest..." && \
-    unzip -p /app/target/java-backend-1.0.0.jar META-INF/MANIFEST.MF | grep -q "Main-Class" || \
-    (echo "ERROR: JAR file missing Main-Class in manifest" && \
-     echo "Manifest content:" && \
-     unzip -p /app/target/java-backend-1.0.0.jar META-INF/MANIFEST.MF && \
-     exit 1) && \
-    echo "JAR file verification passed"
+    jar xf /app/target/java-backend-1.0.0.jar META-INF/MANIFEST.MF && \
+    if grep -q "Main-Class" META-INF/MANIFEST.MF; then \
+        echo "Main-Class found in manifest:" && \
+        grep "Main-Class" META-INF/MANIFEST.MF && \
+        rm -rf META-INF && \
+        echo "JAR file verification passed"; \
+    else \
+        echo "ERROR: JAR file missing Main-Class in manifest" && \
+        echo "Manifest content:" && \
+        cat META-INF/MANIFEST.MF && \
+        rm -rf META-INF && \
+        exit 1; \
+    fi
 
 # 第二阶段：运行阶段
 FROM adoptopenjdk:11-jre-hotspot
