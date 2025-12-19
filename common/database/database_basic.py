@@ -41,7 +41,7 @@ from .database_init import (
 )
 import pymysql
 from pymysql import cursors
-from DBUtils.PooledDB import PooledDB
+from dbutils.pooled_db import PooledDB
 
 logger = logging.getLogger(__name__)
 
