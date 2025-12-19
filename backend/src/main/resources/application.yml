@@ -3,6 +3,9 @@ spring:
     name: backend
   profiles:
     active: dev
+  # 禁用调试模式（这会禁用自动配置条件评估报告）
+  main:
+    banner-mode: console
   
   # 数据库配置（可通过环境变量覆盖）
   datasource:
@@ -86,6 +89,9 @@ logging:
   level:
     root: info
     com.aifuturetrade: debug
+    # 禁用 Spring Boot 自动配置条件评估报告日志
+    org.springframework.boot.autoconfigure: WARN
+    org.springframework.boot.autoconfigure.condition: WARN
   pattern:
     console: "%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n"
     file: "%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n"
