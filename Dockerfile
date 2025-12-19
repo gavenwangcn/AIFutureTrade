@@ -34,15 +34,16 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # 注意：如果使用本地缓存文件，请注释掉下面这行，并取消注释上面的 COPY 行
 RUN wget -q http://prdownloads.sourceforge.net/ta-lib/ta-lib-0.4.0-src.tar.gz -O /tmp/ta-lib-0.4.0-src.tar.gz
 
-# 解压和编译步骤（如果下载的文件没有变化，此步骤会使用Docker缓存）
-RUN tar -xzf /tmp/ta-lib-0.4.0-src.tar.gz -C /tmp && \
-    cd /tmp/ta-lib/ && \
-    ./configure --prefix=/usr && \
-    make -j$(nproc) && \
-    make install && \
-    cd / && \
-    rm -rf /tmp/ta-lib /tmp/ta-lib-0.4.0-src.tar.gz && \
-    ldconfig
+    # 解压和编译步骤（如果下载的文件没有变化，此步骤会使用Docker缓存）
+    # 注意：TA-Lib 编译时使用单线程编译，避免并行编译导致的文件冲突问题
+    RUN tar -xzf /tmp/ta-lib-0.4.0-src.tar.gz -C /tmp && \
+        cd /tmp/ta-lib/ && \
+        ./configure --prefix=/usr && \
+        make && \
+        make install && \
+        cd / && \
+        rm -rf /tmp/ta-lib /tmp/ta-lib-0.4.0-src.tar.gz && \
+        ldconfig
 
 # 复制Python依赖文件并安装
 COPY requirements.txt .
