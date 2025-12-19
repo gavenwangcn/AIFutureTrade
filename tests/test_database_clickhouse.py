@@ -1,4 +1,4 @@
-"""Executable integration checks for common.database_market_tickers.
+"""Executable integration checks for common.database.database_market_tickers.
 
 Run with:
 
@@ -15,7 +15,7 @@ import uuid
 from typing import Callable, List, Tuple
 from datetime import datetime, timezone
 
-from common.database_market_tickers import MarketTickersDatabase, MARKET_TICKER_TABLE
+from common.database.database_market_tickers import MarketTickersDatabase, MARKET_TICKER_TABLE
 
 
 def _require_mysql() -> MarketTickersDatabase:

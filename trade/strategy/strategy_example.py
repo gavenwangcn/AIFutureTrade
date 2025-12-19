@@ -5,7 +5,7 @@ Strategy Code Example - 策略代码示例
 此示例展示了如何继承 StrategyBase 并实现策略方法。
 """
 
-from trade.strategy_template import StrategyBase
+from trade.strategy.strategy_template import StrategyBase
 from typing import Dict, List
 import numpy as np
 

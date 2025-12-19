@@ -27,7 +27,7 @@ from datetime import datetime, timezone, timedelta
 from typing import Optional
 
 import common.config as app_config
-from common.database_market_tickers import MarketTickersDatabase
+from common.database.database_market_tickers import MarketTickersDatabase
 
 logger = logging.getLogger(__name__)
 

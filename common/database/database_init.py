@@ -8,6 +8,7 @@
 - 业务表初始化：providers, models, portfolios, trades 等
     - 市场数据表初始化：market_tickers 等
 - 统一的初始化接口：init_database_tables() 和 init_market_tables()
+- 表名定义：所有业务表的表名常量
 """
 
 import logging
@@ -16,6 +17,27 @@ from datetime import datetime, timezone, timedelta
 from typing import Callable, Any
 
 logger = logging.getLogger(__name__)
+
+# ============ 表名定义 ============
+# 所有业务表的表名常量，统一管理
+PROVIDERS_TABLE = "providers"
+MODELS_TABLE = "models"
+PORTFOLIOS_TABLE = "portfolios"
+TRADES_TABLE = "trades"
+CONVERSATIONS_TABLE = "conversations"
+ACCOUNT_VALUES_TABLE = "account_values"
+ACCOUNT_VALUE_HISTORYS_TABLE = "account_value_historys"
+SETTINGS_TABLE = "settings"
+MODEL_PROMPTS_TABLE = "model_prompts"
+MODEL_FUTURES_TABLE = "model_futures"
+FUTURES_TABLE = "futures"
+ACCOUNT_ASSET_TABLE = "account_asset"
+ASSET_TABLE = "asset"
+BINANCE_TRADE_LOGS_TABLE = "binance_trade_logs"
+LLM_API_ERROR_TABLE = "llm_api_error"
+STRATEGYS_TABLE = "strategys"
+MODEL_STRATEGY_TABLE = "model_strategy"
+MARKET_TICKER_TABLE = "24_market_tickers"
 
 
 class DatabaseInitializer:
@@ -528,4 +550,48 @@ def init_market_tables(command_func: Callable[[str], Any], table_config: dict):
     initializer.ensure_market_ticker_table(table_config.get('market_ticker_table', '24_market_tickers'))
     
     logger.info("[DatabaseInit] MySQL market tables initialized")
+
+
+def init_all_database_tables(command_func: Callable[[str, tuple], Any]):
+    """
+    初始化所有数据库表（业务表 + 市场数据表）
+    
+    这是一个统一的初始化函数，用于系统启动时初始化所有表。
+    
+    Args:
+        command_func: 执行SQL命令的函数，接受SQL字符串和参数元组
+    """
+    logger.info("[DatabaseInit] Initializing all database tables...")
+    
+    # 构建表名字典（使用常量）
+    table_names = {
+        'providers_table': PROVIDERS_TABLE,
+        'models_table': MODELS_TABLE,
+        'portfolios_table': PORTFOLIOS_TABLE,
+        'trades_table': TRADES_TABLE,
+        'conversations_table': CONVERSATIONS_TABLE,
+        'account_values_table': ACCOUNT_VALUES_TABLE,
+        'account_value_historys_table': ACCOUNT_VALUE_HISTORYS_TABLE,
+        'settings_table': SETTINGS_TABLE,
+        'model_prompts_table': MODEL_PROMPTS_TABLE,
+        'model_futures_table': MODEL_FUTURES_TABLE,
+        'futures_table': FUTURES_TABLE,
+        'account_asset_table': ACCOUNT_ASSET_TABLE,
+        'asset_table': ASSET_TABLE,
+        'binance_trade_logs_table': BINANCE_TRADE_LOGS_TABLE,
+        'llm_api_error_table': LLM_API_ERROR_TABLE,
+        'strategy_table': STRATEGYS_TABLE,
+        'model_strategy_table': MODEL_STRATEGY_TABLE,
+    }
+    
+    # 初始化业务表
+    init_database_tables(command_func, table_names)
+    
+    # 初始化市场数据表
+    table_config = {
+        'market_ticker_table': MARKET_TICKER_TABLE,
+    }
+    init_market_tables(command_func, table_config)
+    
+    logger.info("[DatabaseInit] All database tables initialized successfully")
 

@@ -15,7 +15,7 @@ import json
 import logging
 from typing import Dict, List, Optional
 from trade.trader import Trader
-from trade.strategy_code_executor import StrategyCodeExecutor
+from trade.strategy.strategy_code_executor import StrategyCodeExecutor
 
 logger = logging.getLogger(__name__)
 

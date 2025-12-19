@@ -17,7 +17,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Iterable, List, Optional, Callable
 import pymysql
 from pymysql import cursors
-from common.database_basic import create_pooled_db
+from .database_basic import create_pooled_db
 import common.config as app_config
 
 MARKET_TICKER_TABLE = "24_market_tickers"
@@ -1093,7 +1093,7 @@ class MarketTickersDatabase:
     
     def ensure_market_ticker_table(self) -> None:
         """Create the 24h market ticker table if it does not exist."""
-        from common.database_init import DatabaseInitializer
+        from .database_init import DatabaseInitializer
         def _command(sql: str, params: tuple = None) -> Any:
             def _execute_command(conn):
                 cursor = conn.cursor()

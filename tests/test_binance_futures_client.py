@@ -225,7 +225,7 @@ def exercise_binance_futures_client(api_key: str, api_secret: str) -> None:
     try:
         # 导入MarketDataFetcher类
         from market.market_data import MarketDataFetcher
-        from common.database_market_tickers import MarketTickersDatabase
+        from common.database.database_market_tickers import MarketTickersDatabase
         import json
         
         # 创建MarketDataFetcher实例（需要数据库连接）

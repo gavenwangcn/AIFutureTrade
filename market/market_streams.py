@@ -31,7 +31,7 @@ from binance_sdk_derivatives_trading_usds_futures.derivatives_trading_usds_futur
 from binance_common.constants import WebsocketMode
 
 import common.config as app_config
-from common.database_market_tickers import MarketTickersDatabase
+from common.database.database_market_tickers import MarketTickersDatabase
 
 logger = logging.getLogger(__name__)
 

@@ -211,7 +211,7 @@ class StrategyCodeExecutor:
             execution_context = self._create_safe_globals()
             
             # 导入 StrategyBase 类
-            from trade.strategy_template import StrategyBase
+            from trade.strategy.strategy_template import StrategyBase
             execution_context['StrategyBase'] = StrategyBase
             execution_context['ABC'] = ABC
             execution_context['abstractmethod'] = abstractmethod

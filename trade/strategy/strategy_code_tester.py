@@ -20,8 +20,8 @@ import ast
 import logging
 from typing import Dict, List, Optional, Tuple
 import traceback
-from trade.strategy_template import StrategyBase
-from trade.strategy_code_executor import StrategyCodeExecutor
+from trade.strategy.strategy_template import StrategyBase
+from trade.strategy.strategy_code_executor import StrategyCodeExecutor
 
 logger = logging.getLogger(__name__)
 
@@ -204,11 +204,13 @@ class StrategyCodeTester:
         warnings = []
         
         # 检查是否导入了 StrategyBase
-        if 'from trade.strategy_template import StrategyBase' not in strategy_code:
-            if 'import StrategyBase' in strategy_code:
-                warnings.append("建议使用 'from trade.strategy_template import StrategyBase' 导入方式")
+        if 'from trade.strategy.strategy_template import StrategyBase' not in strategy_code:
+            if 'from trade.strategy_template import StrategyBase' in strategy_code:
+                warnings.append("建议使用 'from trade.strategy.strategy_template import StrategyBase' 导入方式")
+            elif 'import StrategyBase' in strategy_code:
+                warnings.append("建议使用 'from trade.strategy.strategy_template import StrategyBase' 导入方式")
             else:
-                errors.append("未找到 StrategyBase 导入语句，必须包含: from trade.strategy_template import StrategyBase")
+                errors.append("未找到 StrategyBase 导入语句，必须包含: from trade.strategy.strategy_template import StrategyBase")
         
         # 检查是否导入了 typing
         has_typing_import = 'from typing import' in strategy_code or 'import typing' in strategy_code
@@ -301,7 +303,17 @@ class StrategyCodeTester:
                         if isinstance(base.value, ast.Name) and base.value.id == 'StrategyBase':
                             strategy_class = cls
                             break
-                        # 处理 from trade.strategy_template import StrategyBase 的情况
+                        # 处理 from trade.strategy.strategy_template import StrategyBase 的情况
+                        if (isinstance(base.value, ast.Attribute) and 
+                            isinstance(base.value.value, ast.Attribute) and
+                            isinstance(base.value.value.value, ast.Name) and
+                            base.value.value.value.id == 'trade' and
+                            base.value.value.attr == 'strategy' and
+                            base.value.attr == 'strategy_template' and
+                            base.attr == 'StrategyBase'):
+                            strategy_class = cls
+                            break
+                        # 处理 from trade.strategy_template import StrategyBase 的情况（向后兼容）
                         if (isinstance(base.value, ast.Attribute) and 
                             isinstance(base.value.value, ast.Name) and
                             base.value.value.id == 'trade' and

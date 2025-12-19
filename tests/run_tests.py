@@ -27,7 +27,7 @@ def test_imports():
     
     modules_to_test = [
         ("common.config", "配置模块"),
-        ("common.database_market_tickers", "市场行情数据库模块"),
+        ("common.database.database_market_tickers", "市场行情数据库模块"),
         ("common.binance_futures", "币安期货客户端模块"),
         ("market.market_data", "市场数据模块"),
         ("market.market_streams", "市场数据流模块"),

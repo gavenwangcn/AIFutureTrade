@@ -7,7 +7,7 @@ from __future__ import annotations
 import logging
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
-from common.database_basic import Database
+from .database_basic import Database
 
 logger = logging.getLogger(__name__)
 

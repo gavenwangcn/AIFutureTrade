@@ -17,7 +17,7 @@ import sys
 from typing import Callable, List, Tuple
 from datetime import datetime, timezone
 
-from common.database_market_tickers import MarketTickersDatabase
+from common.database.database_market_tickers import MarketTickersDatabase
 
 
 def _require_mysql() -> MarketTickersDatabase:

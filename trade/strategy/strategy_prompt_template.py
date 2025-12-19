@@ -17,7 +17,7 @@ STRATEGY_CODE_GENERATION_PROMPT = """你是一个专业的量化交易策略代�
 生成的代码必须是一个继承自 `StrategyBase` 的类，并实现其抽象方法：
 
 ```python
-from trade.strategy_template import StrategyBase
+from trade.strategy.strategy_template import StrategyBase
 from typing import Dict, List
 
 class GeneratedStrategy(StrategyBase):
@@ -220,7 +220,7 @@ klines_1h = timeframes.get('1h', {{}}).get('klines', [])
 - 必须处理边界情况（如数据为空、价格无效、K线数据不足等）
 - 必须添加必要的注释说明
 - 必须遵循 Python 代码规范
-- 必须正确导入 StrategyBase：`from trade.strategy_template import StrategyBase`
+- 必须正确导入 StrategyBase：`from trade.strategy.strategy_template import StrategyBase`
 
 ### 6. 策略实现要求
 
@@ -258,7 +258,7 @@ klines_1h = timeframes.get('1h', {{}}).get('klines', [])
 ## 请根据提供的 strategy_context 生成完整的策略代码：
 
 生成的代码必须：
-1. 导入 StrategyBase：`from trade.strategy_template import StrategyBase`
+1. 导入 StrategyBase：`from trade.strategy.strategy_template import StrategyBase`
 2. 定义类继承 StrategyBase：`class GeneratedStrategy(StrategyBase):`
 3. 实现 `execute_buy_decision()` 方法
 4. 实现 `execute_sell_decision()` 方法

@@ -28,7 +28,7 @@ import pandas as pd
 from finta import TA as ta
 
 from common.binance_futures import BinanceFuturesClient
-from common.database_market_tickers import MarketTickersDatabase
+from common.database.database_market_tickers import MarketTickersDatabase
 
 logger = logging.getLogger(__name__)
 

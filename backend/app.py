@@ -13,8 +13,8 @@ import threading
 from trade.trading_engine import TradingEngine
 from market.market_data import MarketDataFetcher
 from trade.ai_trader import AITrader
-from trade.strategy_trader import StrategyTrader
-from common.database_basic import Database
+from trade.strategy.strategy_trader import StrategyTrader
+from common.database.database_basic import Database
 from common.version import __version__
 from backend.trading_loop import trading_buy_loop as _trading_buy_loop, trading_sell_loop as _trading_sell_loop
 
@@ -69,8 +69,11 @@ logger = logging.getLogger(__name__)
 db = Database()
 
 # Initialize database tables immediately when the application starts
+# 使用统一的初始化函数，确保所有表都被正确创建
 with app.app_context():
-    db.init_db()
+    from common.database.database_init import init_all_database_tables
+    # 使用 Database 的 command 方法作为初始化函数
+    init_all_database_tables(db.command)
     logger.info("Database tables initialized")
 
 market_fetcher = MarketDataFetcher(db)

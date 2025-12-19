@@ -6,7 +6,7 @@ import json
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 from market.market_data import MarketDataFetcher
-from common.database_basic import Database
+from common.database.database_basic import Database
 
 try:
     import tiktoken
