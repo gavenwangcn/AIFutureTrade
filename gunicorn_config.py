@@ -5,7 +5,7 @@ import multiprocessing
 import os
 
 # Server socket
-bind = os.getenv('GUNICORN_BIND', '0.0.0.0:5002')
+bind = os.getenv('GUNICORN_BIND', '0.0.0.0:5000')
 backlog = int(os.getenv('GUNICORN_BACKLOG', '2048'))
 
 # Worker processes
@@ -61,7 +61,13 @@ def post_fork(server, worker):
 
 def post_worker_init(worker):
     """Called just after a worker has initialized the application."""
-    pass
+    # 在worker初始化后启动交易循环
+    try:
+        from trade.app import _start_trading_loops
+        _start_trading_loops()
+        worker.log.info("Trading loops started in worker")
+    except Exception as e:
+        worker.log.warning(f"Failed to start trading loops in worker: {e}")
 
 def worker_abort(worker):
     """Called when a worker times out."""

@@ -1,14 +1,14 @@
 spring:
   application:
-    name: java-backend
+    name: backend
   profiles:
     active: dev
   
-  # 数据库配置
+  # 数据库配置（可通过环境变量覆盖）
   datasource:
-    url: jdbc:mysql://localhost:3306/aifuturetrade?useSSL=false&serverTimezone=UTC&characterEncoding=utf8
-    username: root
-    password: root
+    url: ${SPRING_DATASOURCE_URL:jdbc:mysql://154.89.148.172:32123/aifuturetrade?useSSL=false&serverTimezone=UTC&characterEncoding=utf8}
+    username: ${SPRING_DATASOURCE_USERNAME:aifuturetrade}
+    password: ${SPRING_DATASOURCE_PASSWORD:aifuturetrade123}
     driver-class-name: com.mysql.cj.jdbc.Driver
     type: com.alibaba.druid.pool.DruidDataSource
     # Druid连接池配置
@@ -68,7 +68,7 @@ spring:
 
 # 服务器配置
 server:
-  port: 8080
+  port: ${SERVER_PORT:5002}  # 默认使用5002端口，可通过环境变量SERVER_PORT覆盖
   servlet:
     context-path: /
     encoding:
@@ -90,14 +90,14 @@ logging:
     console: "%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n"
     file: "%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n"
   file:
-    name: logs/java-backend.log
+    name: logs/backend.log
     max-size: 10MB
     max-history: 7
 
-# Binance API配置
+# Binance API配置（可通过环境变量覆盖）
 binance:
-    api-key: your-api-key
-    secret-key: your-secret-key
+    api-key: ${BINANCE_API_KEY:your-api-key}
+    secret-key: ${BINANCE_SECRET_KEY:your-secret-key}
     private-key-path: 
     private-key-pass: 
     base-url: https://api.binance.com
@@ -114,14 +114,22 @@ binance:
     # 是否启用压缩
     compression: true
   
-# 应用配置
+# 应用配置（可通过环境变量覆盖）
 app:
-  auto-trading: true
-  trade-fee-rate: 0.001
+  auto-trading: ${APP_AUTO_TRADING:true}
+  trade-fee-rate: ${APP_TRADE_FEE_RATE:0.001}
   leaderboard-refresh: 10  # 涨跌幅榜刷新间隔（秒）
   trading-interval: 3600  # 交易执行间隔（秒）
   trades-query-limit: 10  # 后端查询的交易记录数量
   trades-display-count: 5  # 前端显示的交易记录数量
+
+# Trade服务配置（可通过环境变量覆盖）
+trade:
+  base-url: ${TRADE_SERVICE_URL:http://154.89.148.172:5000}  # Trade服务基础URL，默认 http://trade:5000
+  connect-timeout: 10000  # 连接超时时间（毫秒）
+  read-timeout: 30000  # 读取超时时间（毫秒）
+  retries: 3  # 重试次数
+  backoff: 200  # 重试间隔时间（毫秒）
   # 市场数据配置
   market-prices-refresh: 10  # 市场行情价格前端轮询刷新间隔（秒）
   futures-top-gainers-limit: 5  # 涨幅榜返回的交易对数量限制

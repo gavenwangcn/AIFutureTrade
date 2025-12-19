@@ -2014,25 +2014,6 @@ body {
     word-break: break-word;
 }
 
-/* LLM API Errors */
-.llm-api-errors-list {
-    max-height: 500px;
-    overflow-y: auto;
-}
-
-.llm-api-error-item {
-    padding: 16px;
-    border-bottom: 1px solid var(--border-1);
-    background: var(--bg-1);
-    max-width: 100%;
-    box-sizing: border-box;
-    overflow-wrap: break-word;
-}
-
-.llm-api-error-item:last-child {
-    border-bottom: none;
-}
-
 .error-header {
     display: flex;
     justify-content: space-between;

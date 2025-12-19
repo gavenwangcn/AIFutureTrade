@@ -7,7 +7,7 @@
 - version: 版本信息
 
 注意：
-- 交易相关服务（ai_trader, trading_engine, prompt_defaults）已迁移到 trade 包
+- 交易相关服务（ai.ai_trader, trading_engine, ai.prompt_defaults）已迁移到 trade 包
 - 市场数据服务（market_data, market_streams）已迁移到 market 包
 """
 

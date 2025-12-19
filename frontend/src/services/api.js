@@ -46,11 +46,6 @@ export const modelApi = {
   getConversations: (modelId, limit = 20) => apiGet(`/api/models/${modelId}/conversations`, { limit }),
 
   /**
-   * 获取模型LLM API错误记录
-   */
-  getLlmApiErrors: (modelId, limit = 10) => apiGet(`/api/models/${modelId}/llm-api-errors`, { limit }),
-
-  /**
    * 获取模型提示词配置
    */
   getPrompts: (modelId) => apiGet(`/api/models/${modelId}/prompts`),

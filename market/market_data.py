@@ -9,7 +9,7 @@
 
 主要功能：
 - 价格获取：实时从币安API获取价格数据（无缓存，保证实时性）
-- 技术指标计算：使用finta库计算多时间框架的技术指标
+- 技术指标计算：使用TA-Lib库计算多时间框架的技术指标
 - 市场数据：提供1m、5m、15m、1h、4h、1d、1w等7个时间周期的数据
 - 涨跌榜同步：从24_market_tickers表查询涨跌幅排行榜
 
@@ -25,10 +25,12 @@ import common.config as app_config
 from datetime import datetime, timezone, timedelta
 from typing import Dict, List, Optional
 import pandas as pd
-from finta import TA as ta
+import numpy as np
+import talib
 
 from common.binance_futures import BinanceFuturesClient
 from common.database.database_market_tickers import MarketTickersDatabase
+from common.database.database_futures import FuturesDatabase
 
 logger = logging.getLogger(__name__)
 
@@ -66,7 +68,7 @@ class MarketDataFetcher:
     主要特性：
     - 实时价格获取：每次调用都直接请求交易所API
     - 多时间框架支持：支持1m到1w共7个时间周期
-    - 技术指标计算：使用finta库计算MA、MACD、RSI、VOL等指标
+    - 技术指标计算：使用TA-Lib库计算MA、MACD、RSI、VOL等指标
     - 涨跌榜查询：从MySQL数据库的24_market_tickers表查询
     
     使用示例：
@@ -102,8 +104,10 @@ class MarketDataFetcher:
         self._last_leaderboard_sync: float = 0
         self._leaderboard_lock = threading.Lock()
         self._mysql_db: Optional[MarketTickersDatabase] = None
+        self._futures_db: Optional[FuturesDatabase] = None
         self._init_futures_client()
         self._init_mysql_db()
+        self._init_futures_db()
 
     # ============ Initialization Methods ============
 
@@ -157,6 +161,25 @@ class MarketDataFetcher:
         except Exception as exc:
             logger.warning('[MySQL] Failed to initialize MySQL connection: %s', exc)
             self._mysql_db = None
+    
+    def _init_futures_db(self):
+        """
+        初始化期货合约配置数据库连接
+        
+        创建FuturesDatabase实例，用于查询期货合约配置数据。
+        如果连接失败，_futures_db将为None，期货配置功能将不可用。
+        
+        Note:
+            - 使用db的连接池（如果可用）
+            - 连接失败时记录警告日志，但不抛出异常
+        """
+        try:
+            pool = self.db._pool if hasattr(self.db, '_pool') else None
+            self._futures_db = FuturesDatabase(pool=pool)
+            logger.info('[Futures] Futures database connection initialized')
+        except Exception as exc:
+            logger.warning('[Futures] Failed to initialize Futures database connection: %s', exc)
+            self._futures_db = None
 
     # ============ 工具方法 ============
     
@@ -193,7 +216,10 @@ class MarketDataFetcher:
         Note:
             - 如果没有配置的合约，返回空列表并记录警告日志
         """
-        futures = self.db.get_future_configs()
+        if not self._futures_db:
+            logger.warning('[配置] Futures database not initialized')
+            return []
+        futures = self._futures_db.get_future_configs()
         if not futures:
             logger.warning('[配置] 未检测到任何已持仓的USDS-M合约，等待交易产生持仓后自动记录')
         return futures
@@ -224,7 +250,10 @@ class MarketDataFetcher:
             - change_percent: 涨跌幅（初始0.0，需实时获取）
             - timeframes: 技术指标（初始{}，需实时计算）
         """
-        futures = self.db.get_future_configs()
+        if not self._futures_db:
+            logger.warning('[配置] Futures database not initialized')
+            return []
+        futures = self._futures_db.get_future_configs()
         if not futures:
             logger.debug('[Futures] 未检测到任何已配置的USDS-M合约')
             return []
@@ -624,7 +653,7 @@ class MarketDataFetcher:
                     logger.debug(f'[Indicators] No klines data for {symbol} {label}')
                     continue
                 
-                # 提取完整的OHLCV数据（finta库需要完整的OHLCV数据）
+                # 提取完整的OHLCV数据（TA-Lib库需要numpy数组格式）
                 opens = []
                 highs = []
                 lows = []
@@ -689,23 +718,25 @@ class MarketDataFetcher:
                     logger.warning(f'[Indicators] Failed to parse kline data for {symbol} {label}: {e}')
                     continue
                 
-                # 创建pandas DataFrame用于技术指标计算（finta需要完整的OHLCV数据）
-                df = pd.DataFrame({
-                    'open': opens,
-                    'high': highs,
-                    'low': lows,
-                    'close': closes,
-                    'volume': volumes
-                })
+                # 转换为numpy数组用于TA-Lib计算（TA-Lib需要numpy数组格式）
+                open_array = np.array(opens, dtype=np.float64)
+                high_array = np.array(highs, dtype=np.float64)
+                low_array = np.array(lows, dtype=np.float64)
+                close_array = np.array(closes, dtype=np.float64)
+                volume_array = np.array(volumes, dtype=np.float64)
                 
-                # 实时计算MA值（简单移动平均）使用finta
+                # 实时计算MA值（简单移动平均）使用TA-Lib
                 ma_values = {}
                 for length in ma_lengths:
                     if len(closes) >= length:
                         try:
-                            ma_series = ta.SMA(df, period=length)
-                            if ma_series is not None and not ma_series.empty:
-                                ma_values[f'ma{length}'] = float(ma_series.iloc[-1])
+                            ma_result = talib.SMA(close_array, timeperiod=length)
+                            if ma_result is not None and len(ma_result) > 0:
+                                last_value = ma_result[-1]
+                                if not np.isnan(last_value) and not np.isinf(last_value):
+                                    ma_values[f'ma{length}'] = float(last_value)
+                                else:
+                                    ma_values[f'ma{length}'] = 0.0
                             else:
                                 ma_values[f'ma{length}'] = 0.0
                         except Exception as e:
@@ -719,51 +750,66 @@ class MarketDataFetcher:
                             f'[MA] 数据不足: MA{length}需要至少{length}根K线数据，实际只有{len(closes)}根，无法计算'
                         )
                 
-                # 实时计算MACD指标使用finta
+                # 实时计算MACD指标使用TA-Lib
                 macd = {'dif': 0.0, 'dea': 0.0, 'bar': 0.0}
                 if len(closes) >= 26:  # MACD需要至少26个数据点
                     try:
-                        macd_df = ta.MACD(df, period_fast=12, period_slow=26, signal=9)
-                        if macd_df is not None and not macd_df.empty:
-                            # finta返回固定的列名: MACD, SIGNAL, HISTOGRAM
-                            if 'MACD' in macd_df.columns:
-                                macd['dif'] = float(macd_df['MACD'].iloc[-1])
-                            if 'SIGNAL' in macd_df.columns:
-                                macd['dea'] = float(macd_df['SIGNAL'].iloc[-1])
-                            # 计算BAR值：BAR = DIF - DEA（简单模式，不乘以2）
-                            # 如果finta的HISTOGRAM列有值且不为0，使用它；否则手动计算
-                            if 'HISTOGRAM' in macd_df.columns:
-                                histogram_value = macd_df['HISTOGRAM'].iloc[-1]
-                                if pd.notna(histogram_value) and histogram_value != 0:
-                                    macd['bar'] = float(histogram_value)
+                        # TA-Lib的MACD返回三个数组：macd, signal, histogram
+                        macd_result, signal_result, histogram_result = talib.MACD(
+                            close_array, 
+                            fastperiod=12, 
+                            slowperiod=26, 
+                            signalperiod=9
+                        )
+                        if macd_result is not None and len(macd_result) > 0:
+                            # DIF = MACD线
+                            dif_value = macd_result[-1]
+                            if not np.isnan(dif_value) and not np.isinf(dif_value):
+                                macd['dif'] = float(dif_value)
+                            
+                            # DEA = Signal线
+                            if signal_result is not None and len(signal_result) > 0:
+                                dea_value = signal_result[-1]
+                                if not np.isnan(dea_value) and not np.isinf(dea_value):
+                                    macd['dea'] = float(dea_value)
+                            
+                            # BAR = Histogram = DIF - DEA
+                            if histogram_result is not None and len(histogram_result) > 0:
+                                bar_value = histogram_result[-1]
+                                if not np.isnan(bar_value) and not np.isinf(bar_value):
+                                    macd['bar'] = float(bar_value)
                                 else:
-                                    # 如果HISTOGRAM为0或NaN，手动计算：BAR = DIF - DEA
+                                    # 如果histogram为NaN，手动计算：BAR = DIF - DEA
                                     macd['bar'] = macd['dif'] - macd['dea']
                             else:
-                                # 如果没有HISTOGRAM列，手动计算
+                                # 如果没有histogram，手动计算
                                 macd['bar'] = macd['dif'] - macd['dea']
                     except Exception as e:
                         logger.warning(f'[MACD] 无法计算MACD: {e}')
                 else:
                     logger.warning(f'[MACD] 数据不足: 需要至少26个数据点，实际只有{len(closes)}个')
                 
-                # 实时计算RSI指标使用finta
+                # 实时计算RSI指标使用TA-Lib
                 rsi = {'rsi6': 50.0, 'rsi9': 50.0}
                 # 计算RSI(6)
                 if len(closes) >= 7:  # RSI(6)需要至少7个数据点
                     try:
-                        rsi6_series = ta.RSI(df, period=6)
-                        if rsi6_series is not None and not rsi6_series.empty:
-                            rsi['rsi6'] = float(rsi6_series.iloc[-1])
+                        rsi6_result = talib.RSI(close_array, timeperiod=6)
+                        if rsi6_result is not None and len(rsi6_result) > 0:
+                            rsi6_value = rsi6_result[-1]
+                            if not np.isnan(rsi6_value) and not np.isinf(rsi6_value):
+                                rsi['rsi6'] = float(rsi6_value)
                     except Exception as e:
                         logger.warning(f'[RSI] 无法计算RSI6: {e}')
                 
                 # 计算RSI(9)
                 if len(closes) >= 10:  # RSI(9)需要至少10个数据点
                     try:
-                        rsi9_series = ta.RSI(df, period=9)
-                        if rsi9_series is not None and not rsi9_series.empty:
-                            rsi['rsi9'] = float(rsi9_series.iloc[-1])
+                        rsi9_result = talib.RSI(close_array, timeperiod=9)
+                        if rsi9_result is not None and len(rsi9_result) > 0:
+                            rsi9_value = rsi9_result[-1]
+                            if not np.isnan(rsi9_value) and not np.isinf(rsi9_value):
+                                rsi['rsi9'] = float(rsi9_value)
                     except Exception as e:
                         logger.warning(f'[RSI] 无法计算RSI9: {e}')
                 
@@ -929,23 +975,30 @@ class MarketDataFetcher:
                     result[timeframe] = data.copy()
                     continue
                 
-                # 创建DataFrame用于指标计算
+                # 转换为numpy数组用于TA-Lib计算
+                open_array = np.array(opens, dtype=np.float64)
+                high_array = np.array(highs, dtype=np.float64)
+                low_array = np.array(lows, dtype=np.float64)
+                close_array = np.array(closes, dtype=np.float64)
+                volume_array = np.array(volumes, dtype=np.float64)
+                
+                # 创建DataFrame用于VOL指标计算（MAVOL使用pandas rolling）
                 df = pd.DataFrame({
-                    'open': opens,
-                    'high': highs,
-                    'low': lows,
-                    'close': closes,
                     'volume': volumes
                 })
                 
-                # 计算MA值
+                # 计算MA值使用TA-Lib
                 ma_values = {}
                 for length in ma_lengths:
                     if len(closes) >= length:
                         try:
-                            ma_series = ta.SMA(df, period=length)
-                            if ma_series is not None and not ma_series.empty:
-                                ma_values[f'ma{length}'] = float(ma_series.iloc[-1])
+                            ma_result = talib.SMA(close_array, timeperiod=length)
+                            if ma_result is not None and len(ma_result) > 0:
+                                last_value = ma_result[-1]
+                                if not np.isnan(last_value) and not np.isinf(last_value):
+                                    ma_values[f'ma{length}'] = float(last_value)
+                                else:
+                                    ma_values[f'ma{length}'] = 0.0
                             else:
                                 ma_values[f'ma{length}'] = 0.0
                         except Exception as e:
@@ -954,20 +1007,30 @@ class MarketDataFetcher:
                     else:
                         ma_values[f'ma{length}'] = 0.0
                 
-                # 计算MACD指标
+                # 计算MACD指标使用TA-Lib
                 macd = {'dif': 0.0, 'dea': 0.0, 'bar': 0.0}
                 if len(closes) >= 26:
                     try:
-                        macd_df = ta.MACD(df, period_fast=12, period_slow=26, signal=9)
-                        if macd_df is not None and not macd_df.empty:
-                            if 'MACD' in macd_df.columns:
-                                macd['dif'] = float(macd_df['MACD'].iloc[-1])
-                            if 'SIGNAL' in macd_df.columns:
-                                macd['dea'] = float(macd_df['SIGNAL'].iloc[-1])
-                            if 'HISTOGRAM' in macd_df.columns:
-                                histogram_value = macd_df['HISTOGRAM'].iloc[-1]
-                                if pd.notna(histogram_value) and histogram_value != 0:
-                                    macd['bar'] = float(histogram_value)
+                        macd_result, signal_result, histogram_result = talib.MACD(
+                            close_array, 
+                            fastperiod=12, 
+                            slowperiod=26, 
+                            signalperiod=9
+                        )
+                        if macd_result is not None and len(macd_result) > 0:
+                            dif_value = macd_result[-1]
+                            if not np.isnan(dif_value) and not np.isinf(dif_value):
+                                macd['dif'] = float(dif_value)
+                            
+                            if signal_result is not None and len(signal_result) > 0:
+                                dea_value = signal_result[-1]
+                                if not np.isnan(dea_value) and not np.isinf(dea_value):
+                                    macd['dea'] = float(dea_value)
+                            
+                            if histogram_result is not None and len(histogram_result) > 0:
+                                bar_value = histogram_result[-1]
+                                if not np.isnan(bar_value) and not np.isinf(bar_value):
+                                    macd['bar'] = float(bar_value)
                                 else:
                                     macd['bar'] = macd['dif'] - macd['dea']
                             else:
@@ -975,21 +1038,25 @@ class MarketDataFetcher:
                     except Exception as e:
                         logger.warning(f'[Indicators] 无法计算MACD for {timeframe}: {e}')
                 
-                # 计算RSI指标
+                # 计算RSI指标使用TA-Lib
                 rsi = {'rsi6': 50.0, 'rsi9': 50.0}
                 if len(closes) >= 7:
                     try:
-                        rsi6_series = ta.RSI(df, period=6)
-                        if rsi6_series is not None and not rsi6_series.empty:
-                            rsi['rsi6'] = float(rsi6_series.iloc[-1])
+                        rsi6_result = talib.RSI(close_array, timeperiod=6)
+                        if rsi6_result is not None and len(rsi6_result) > 0:
+                            rsi6_value = rsi6_result[-1]
+                            if not np.isnan(rsi6_value) and not np.isinf(rsi6_value):
+                                rsi['rsi6'] = float(rsi6_value)
                     except Exception as e:
                         logger.warning(f'[Indicators] 无法计算RSI6 for {timeframe}: {e}')
                 
                 if len(closes) >= 10:
                     try:
-                        rsi9_series = ta.RSI(df, period=9)
-                        if rsi9_series is not None and not rsi9_series.empty:
-                            rsi['rsi9'] = float(rsi9_series.iloc[-1])
+                        rsi9_result = talib.RSI(close_array, timeperiod=9)
+                        if rsi9_result is not None and len(rsi9_result) > 0:
+                            rsi9_value = rsi9_result[-1]
+                            if not np.isnan(rsi9_value) and not np.isinf(rsi9_value):
+                                rsi['rsi9'] = float(rsi9_value)
                     except Exception as e:
                         logger.warning(f'[Indicators] 无法计算RSI9 for {timeframe}: {e}')
                 

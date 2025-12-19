@@ -939,7 +939,7 @@ class BinanceFuturesOrderClient(_BinanceFuturesBase):
         记录交易日志到数据库
         
         Args:
-            db: 数据库实例
+            db: 数据库实例（可以是 BinanceTradeLogsDatabase 或 Database 实例，为了向后兼容）
             method_name: 方法名称
             trade_mode: 交易模式 ('test' 或 'real')
             order_params: 订单参数字典
@@ -955,17 +955,35 @@ class BinanceFuturesOrderClient(_BinanceFuturesBase):
         
         try:
             serializable_params = self._serialize_params(order_params)
-            db.add_binance_trade_log(
-                model_id=model_id,
-                conversation_id=conversation_id,
-                trade_id=trade_id,
-                type=trade_mode,
-                method_name=method_name,
-                param=serializable_params,
-                response_context=response_dict,
-                response_type=response_type,
-                error_context=error_context
-            )
+            # 检查 db 是否有 add_binance_trade_log 方法（BinanceTradeLogsDatabase 或 Database 实例）
+            if hasattr(db, 'add_binance_trade_log'):
+                db.add_binance_trade_log(
+                    model_id=model_id,
+                    conversation_id=conversation_id,
+                    trade_id=trade_id,
+                    type=trade_mode,
+                    method_name=method_name,
+                    param=serializable_params,
+                    response_context=response_dict,
+                    response_type=response_type,
+                    error_context=error_context
+                )
+            else:
+                # 向后兼容：如果 db 没有 add_binance_trade_log 方法，尝试创建 BinanceTradeLogsDatabase 实例
+                from common.database.database_binance_trade_logs import BinanceTradeLogsDatabase
+                if hasattr(db, '_pool'):
+                    binance_trade_logs_db = BinanceTradeLogsDatabase(pool=db._pool)
+                    binance_trade_logs_db.add_binance_trade_log(
+                        model_id=model_id,
+                        conversation_id=conversation_id,
+                        trade_id=trade_id,
+                        type=trade_mode,
+                        method_name=method_name,
+                        param=serializable_params,
+                        response_context=response_dict,
+                        response_type=response_type,
+                        error_context=error_context
+                    )
         except Exception as log_err:
             logger.warning(f"[Binance Futures] 记录日志失败: {log_err}")
     

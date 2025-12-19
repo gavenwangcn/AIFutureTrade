@@ -14,10 +14,10 @@
 
     <!-- 应用日志 -->
     <appender name="FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
-        <file>${LOG_HOME}/java-backend.log</file>
+        <file>${LOG_HOME}/backend.log</file>
         <rollingPolicy class="ch.qos.logback.core.rolling.TimeBasedRollingPolicy">
             <!-- 每天生成一个日志文件 -->
-            <fileNamePattern>${LOG_HOME}/java-backend.%d{yyyy-MM-dd}.log</fileNamePattern>
+            <fileNamePattern>${LOG_HOME}/backend.%d{yyyy-MM-dd}.log</fileNamePattern>
             <!-- 保留7天日志 -->
             <maxHistory>7</maxHistory>
         </rollingPolicy>

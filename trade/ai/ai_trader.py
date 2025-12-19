@@ -22,6 +22,8 @@ from openai import OpenAI, APIConnectionError, APIError
 from trade.trader import Trader
 from common.database.database_model_prompts import ModelPromptsDatabase
 from common.database.database_models import ModelsDatabase
+from common.database.database_providers import ProvidersDatabase
+from common.database.database_conversations import ConversationsDatabase
 
 logger = logging.getLogger(__name__)
 
@@ -84,9 +86,11 @@ class AITrader(Trader):
         self.model_name = model_name
         self.db = db
         self.market_fetcher = market_fetcher
-        # 初始化 ModelPromptsDatabase 和 ModelsDatabase 实例
+        # 初始化 ModelPromptsDatabase、ModelsDatabase、ProvidersDatabase 和 ConversationsDatabase 实例
         self.model_prompts_db = ModelPromptsDatabase(pool=db._pool if db and hasattr(db, '_pool') else None)
         self.models_db = ModelsDatabase(pool=db._pool if db and hasattr(db, '_pool') else None)
+        self.providers_db = ProvidersDatabase(pool=db._pool if db and hasattr(db, '_pool') else None)
+        self.conversations_db = ConversationsDatabase(pool=db._pool if db and hasattr(db, '_pool') else None)
 
     # ============ 公共决策方法 ============
     
@@ -219,16 +223,18 @@ class AITrader(Trader):
                     if model:
                         provider_id = model.get('provider_id')
                         if provider_id:
-                            provider = self.db.get_provider(provider_id)
+                            provider = self.providers_db.get_provider(provider_id)
                             if provider:
                                 provider_name = provider.get('name', '')
                                 model_name = model.get('model_name', self.model_name)
                                 # 记录错误到数据库（不记录prompt字段）
-                                self.db.record_llm_api_error(
+                                model_mapping = self.models_db._get_model_id_mapping()
+                                self.conversations_db.record_llm_api_error(
                                     model_id=model_id,
                                     provider_name=provider_name,
                                     model=model_name,
-                                    error_msg=error_msg
+                                    error_msg=error_msg,
+                                    model_id_mapping=model_mapping
                                 )
                                 logger.info(f"[{self.provider_type}] [买入决策] 已记录API错误到数据库: model_id={model_id}, provider={provider_name}, model={model_name}")
                 except Exception as db_error:
@@ -315,16 +321,18 @@ class AITrader(Trader):
                     if model:
                         provider_id = model.get('provider_id')
                         if provider_id:
-                            provider = self.db.get_provider(provider_id)
+                            provider = self.providers_db.get_provider(provider_id)
                             if provider:
                                 provider_name = provider.get('name', '')
                                 model_name = model.get('model_name', self.model_name)
                                 # 记录错误到数据库（不记录prompt字段）
-                                self.db.record_llm_api_error(
+                                model_mapping = self.models_db._get_model_id_mapping()
+                                self.conversations_db.record_llm_api_error(
                                     model_id=model_id,
                                     provider_name=provider_name,
                                     model=model_name,
-                                    error_msg=error_msg
+                                    error_msg=error_msg,
+                                    model_id_mapping=model_mapping
                                 )
                                 logger.info(f"[{self.provider_type}] [卖出决策] 已记录API错误到数据库: model_id={model_id}, provider={provider_name}, model={model_name}")
                 except Exception as db_error:
@@ -1020,3 +1028,4 @@ class AITrader(Trader):
             return json.dumps(cot_trace, ensure_ascii=False)
         except TypeError:
             return str(cot_trace)
+

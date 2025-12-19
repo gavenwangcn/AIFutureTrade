@@ -12,7 +12,7 @@
 # ==============================================================================
 # 使用说明：
 # 1. 启动MySQL服务：docker-compose -f docker-compose-mysql.yml up -d（必须先启动）
-# 2. 默认启动：docker-compose up -d（启动backend、frontend和async-agent服务）
+# 2. 默认启动：docker-compose up -d（启动backend、trade、frontend和async-agent服务）
 # ==============================================================================
 # 注意：
 # - MySQL服务已拆分到 docker-compose-mysql.yml，需要先启动
@@ -22,15 +22,48 @@
 
 services:
   # ============================================================================
-  # 后端服务（Python Flask API）
+  # 后端服务（Java Spring Boot API服务）
   # ============================================================================
   backend:
     build:
-      context: .
+      context: ./backend
       dockerfile: Dockerfile
     container_name: ${BACKEND_CONTAINER_NAME:-aifuturetrade-backend}
     ports:
-      - "${BACKEND_PORT:-5002}:5002"  # 后端API端口
+      - "${BACKEND_PORT:-5002}:5002"  # 后端API端口，供前端调用
+    environment:
+      # 服务器端口配置
+      - SERVER_PORT=${SERVER_PORT:-5002}
+      # MySQL配置
+      - SPRING_DATASOURCE_URL=jdbc:mysql://${MYSQL_HOST:-154.89.148.172}:${MYSQL_PORT:-32123}/${MYSQL_DATABASE:-aifuturetrade}?useSSL=false&serverTimezone=UTC&characterEncoding=utf8
+      - SPRING_DATASOURCE_USERNAME=${MYSQL_USER:-aifuturetrade}
+      - SPRING_DATASOURCE_PASSWORD=${MYSQL_PASSWORD:-aifuturetrade123}
+      # Binance配置
+      - BINANCE_API_KEY=${BINANCE_API_KEY}
+      - BINANCE_SECRET_KEY=${BINANCE_API_SECRET}
+      # 应用配置
+      - APP_AUTO_TRADING=${AUTO_TRADING:-true}
+      - APP_TRADE_FEE_RATE=${TRADE_FEE_RATE:-0.001}
+      # Trade服务配置
+      - TRADE_SERVICE_URL=${TRADE_SERVICE_URL:-http://trade:5000}
+      # JVM参数
+      - JAVA_OPTS=${JAVA_OPTS:--Xms512m -Xmx1024m -Dserver.port=5002}
+    restart: unless-stopped
+    networks:
+      - aifuturetrade-network
+    # 注意：MySQL服务在docker-compose-mysql.yml中，需要先启动
+    # 如果MySQL服务未启动，请先运行：docker-compose -f docker-compose-mysql.yml up -d
+
+  # ============================================================================
+  # 交易服务（Python Flask Trading Service）
+  # ============================================================================
+  trade:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: ${TRADE_CONTAINER_NAME:-aifuturetrade-trade}
+    ports:
+      - "${TRADE_PORT:-5000}:5000"  # 交易服务端口
     environment:
       # 基础配置
       - USE_GUNICORN=${USE_GUNICORN:-true}

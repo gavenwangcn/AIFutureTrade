@@ -43,7 +43,6 @@ export function useTradingApp() {
   const isRefreshingPositions = ref(false)          // 持仓模块刷新状态
   const isRefreshingTrades = ref(false)             // 交易记录模块刷新状态
   const isRefreshingConversations = ref(false)      // AI对话模块刷新状态
-  const isRefreshingLlmApiErrors = ref(false)      // AI接口报错信息模块刷新状态
   
   // 投资组合状态
   const portfolio = ref({
@@ -59,7 +58,6 @@ export function useTradingApp() {
   const allTrades = ref([])  // 存储所有从后端获取的交易记录
   const tradesDisplayCount = ref(5)  // 前端显示的交易记录数量（从配置读取，默认5条）
   const conversations = ref([])
-  const llmApiErrors = ref([])  // LLM API错误记录列表
   const modelPortfolioSymbols = ref([]) // 模型持仓合约列表
 const lastPortfolioSymbolsRefreshTime = ref(null) // 持仓合约列表最后刷新时间
   
@@ -120,7 +118,6 @@ const lastPortfolioSymbolsRefreshTime = ref(null) // 持仓合约列表最后刷
     positions: false,
     trades: false,
     conversations: false,
-    llmApiErrors: false,
     portfolioSymbols: false
   })
   
@@ -1249,59 +1246,6 @@ let portfolioSymbolsRefreshInterval = null // 模型持仓合约列表自动刷�
     }
   }
 
-  /**
-   * 加载LLM API错误记录
-   * 只加载当前选中模型（currentModelId）的错误记录
-   */
-  const loadLlmApiErrors = async () => {
-    if (!currentModelId.value) {
-      // 如果没有选中模型，清空错误列表
-      llmApiErrors.value = []
-      return
-    }
-    
-    loading.value.llmApiErrors = true
-    errors.value.llmApiErrors = null
-    
-    // 记录当前请求的 model_id，防止异步请求返回时 model_id 已切换
-    const requestedModelId = currentModelId.value
-    
-    try {
-      const data = await modelApi.getLlmApiErrors(requestedModelId, 10)
-      
-      // 检查在请求期间 model_id 是否已切换
-      if (currentModelId.value !== requestedModelId) {
-        console.log(`[TradingApp] Model changed during LLM API errors load (${requestedModelId} -> ${currentModelId.value}), ignoring response`)
-        return
-      }
-      
-      // 后端直接返回数组格式，且只包含当前 model_id 的错误记录
-      const errorList = Array.isArray(data) ? data : []
-      
-      // 映射数据格式以匹配前端显示
-      const mappedErrors = errorList.map(error => ({
-        id: error.id || `${error.created_at || Date.now()}_${Math.random()}`,
-        provider_name: error.provider_name || '',
-        model: error.model || '',
-        error_msg: error.error_msg || '',
-        created_at: error.created_at || '',
-        // 保留原始数据
-        ...error
-      }))
-      
-      llmApiErrors.value = mappedErrors
-      
-      console.log(`[TradingApp] Loaded ${llmApiErrors.value.length} LLM API errors for model ${requestedModelId}`)
-    } catch (error) {
-      console.error(`[TradingApp] Error loading LLM API errors for model ${requestedModelId}:`, error)
-      errors.value.llmApiErrors = error.message
-      // 发生错误时清空错误列表
-      llmApiErrors.value = []
-    } finally {
-      loading.value.llmApiErrors = false
-    }
-  }
-
   // ============ 业务操作方法 ============
   
   /**
@@ -1620,7 +1564,6 @@ let portfolioSymbolsRefreshInterval = null // 模型持仓合约列表自动刷�
         isRefreshingPositions.value = true
         isRefreshingTrades.value = true
         isRefreshingConversations.value = true
-        isRefreshingLlmApiErrors.value = true
         
         try {
           await Promise.all([
@@ -1656,14 +1599,6 @@ let portfolioSymbolsRefreshInterval = null // 模型持仓合约列表自动刷�
               } finally {
                 isRefreshingConversations.value = false
               }
-            })(),
-            (async () => {
-              // AI接口报错信息模块
-              try {
-                await loadLlmApiErrors()
-              } finally {
-                isRefreshingLlmApiErrors.value = false
-              }
             })()
           ])
         } catch (error) {
@@ -1672,7 +1607,6 @@ let portfolioSymbolsRefreshInterval = null // 模型持仓合约列表自动刷�
           isRefreshingPositions.value = false
           isRefreshingTrades.value = false
           isRefreshingConversations.value = false
-          isRefreshingLlmApiErrors.value = false
           throw error
         }
       } else if (isAggregatedView.value) {
@@ -1690,7 +1624,6 @@ let portfolioSymbolsRefreshInterval = null // 模型持仓合约列表自动刷�
   const selectModel = async (modelId) => {
     // 切换模型时，立即清空旧的对话数据和聚合图表数据，避免显示错误的数据
     conversations.value = []
-    llmApiErrors.value = []
     aggregatedChartData.value = [] // 清空聚合图表数据，确保只显示当前模型的数据
     
     currentModelId.value = modelId
@@ -1701,7 +1634,6 @@ let portfolioSymbolsRefreshInterval = null // 模型持仓合约列表自动刷�
       loadPositions(),
       loadTrades(),
       loadConversations(), // 加载新模型的对话数据
-      loadLlmApiErrors(), // 加载新模型的LLM API错误数据
       loadModelPortfolioSymbols() // 立即加载一次模型持仓合约数据
     ])
     // 选择模型后启动模型持仓合约列表自动刷新
@@ -2349,14 +2281,12 @@ let portfolioSymbolsRefreshInterval = null // 模型持仓合约列表自动刷�
     isRefreshingPositions,
     isRefreshingTrades,
     isRefreshingConversations,
-    isRefreshingLlmApiErrors,
     portfolio,
     accountValueHistory,
     aggregatedChartData,
     positions,
     trades,
     conversations,
-    llmApiErrors,
     settings,
     modelPortfolioSymbols,
     lastPortfolioSymbolsRefreshTime,
@@ -2447,7 +2377,6 @@ let portfolioSymbolsRefreshInterval = null // 模型持仓合约列表自动刷�
     loadPositions,
     loadTrades,
     loadConversations,
-    loadLlmApiErrors,
     loadModelPortfolioSymbols,
     loadSettings,
     

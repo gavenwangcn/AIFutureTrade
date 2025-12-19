@@ -67,6 +67,9 @@ Dockerfile
 docker-compose.yml
 .dockerignore
 
+# TA-Lib 缓存文件（如果需要使用本地缓存，请注释掉下面这行）
+# ta-lib-0.4.0-src.tar.gz
+
 # 其他
 *.log
 .env

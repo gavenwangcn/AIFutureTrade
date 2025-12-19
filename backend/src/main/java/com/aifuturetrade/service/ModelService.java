@@ -98,14 +98,6 @@ public interface ModelService {
     List<Map<String, Object>> getConversations(Integer modelId, Integer limit);
 
     /**
-     * 获取模型的LLM API错误记录
-     * @param modelId 模型ID
-     * @param limit 限制数量
-     * @return LLM API错误记录
-     */
-    List<Map<String, Object>> getLlmApiErrors(Integer modelId, Integer limit);
-
-    /**
      * 获取模型的提示词配置
      * @param modelId 模型ID
      * @return 提示词配置

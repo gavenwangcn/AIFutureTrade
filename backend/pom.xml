@@ -148,7 +148,7 @@
                 <artifactId>spring-boot-maven-plugin</artifactId>
                 <version>${spring-boot.version}</version>
                 <configuration>
-                    <mainClass>com.aifuturetrade.Application</mainClass>
+                    <mainClass>com.aifuturetrade.BackEndApplication</mainClass>
                 </configuration>
             </plugin>
             <plugin>

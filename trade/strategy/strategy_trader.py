@@ -16,6 +16,8 @@ import logging
 from typing import Dict, List, Optional
 from trade.trader import Trader
 from trade.strategy.strategy_code_executor import StrategyCodeExecutor
+from common.database.database_strategys import StrategysDatabase
+from common.database.database_models import ModelsDatabase
 
 logger = logging.getLogger(__name__)
 
@@ -44,6 +46,9 @@ class StrategyTrader(Trader):
         self.model_id = model_id
         # 初始化策略代码执行器
         self.code_executor = StrategyCodeExecutor(preload_talib=True)
+        # 初始化 StrategysDatabase 和 ModelsDatabase 实例
+        self.strategys_db = StrategysDatabase(pool=db._pool if db and hasattr(db, '_pool') else None)
+        self.models_db = ModelsDatabase(pool=db._pool if db and hasattr(db, '_pool') else None)
     
     def make_buy_decision(
         self,
@@ -85,7 +90,8 @@ class StrategyTrader(Trader):
         effective_model_id = model_id if model_id is not None else self.model_id
         
         # 获取模型关联的买入类型策略（按优先级排序）
-        strategies = self.db.get_model_strategies(effective_model_id, 'buy')
+        model_mapping = self.models_db._get_model_id_mapping()
+        strategies = self.strategys_db.get_model_strategies_by_int_id(effective_model_id, 'buy', model_mapping)
         
         if not strategies:
             logger.info(f"[StrategyTrader] [Model {effective_model_id}] 未找到买入类型策略，返回hold决策")
@@ -202,7 +208,8 @@ class StrategyTrader(Trader):
         effective_model_id = model_id if model_id is not None else self.model_id
         
         # 获取模型关联的卖出类型策略（按优先级排序）
-        strategies = self.db.get_model_strategies(effective_model_id, 'sell')
+        model_mapping = self.models_db._get_model_id_mapping()
+        strategies = self.strategys_db.get_model_strategies_by_int_id(effective_model_id, 'sell', model_mapping)
         
         if not strategies:
             logger.info(f"[StrategyTrader] [Model {effective_model_id}] 未找到卖出类型策略，返回hold决策")

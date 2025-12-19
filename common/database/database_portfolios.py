@@ -455,4 +455,44 @@ class PortfoliosDatabase:
         except Exception as e:
             logger.error(f"[Portfolios] Failed to close position: {e}")
             raise
+    
+    def get_model_held_symbols(self, model_id: int, model_id_mapping: Dict[int, str] = None) -> List[str]:
+        """
+        获取模型当前持仓的期货合约symbol列表（去重）
+        
+        从portfolios表中通过关联model_id获取当前有持仓的symbol（position_amt != 0），
+        用于卖出服务获取市场状态。
+        
+        Args:
+            model_id: 模型ID
+            model_id_mapping: 可选的模型ID映射字典
+        
+        Returns:
+            List[str]: 当前持仓的合约symbol列表（如 ['BTC', 'ETH']）
+        """
+        try:
+            if model_id_mapping is None:
+                from .database_models import ModelsDatabase
+                models_db = ModelsDatabase(pool=self._pool)
+                model_id_mapping = models_db._get_model_id_mapping()
+            
+            model_uuid = model_id_mapping.get(model_id)
+            if not model_uuid:
+                logger.warning(f"[Portfolios] Model {model_id} UUID not found")
+                return []
+            
+            # 从portfolios表获取当前模型有持仓的去重symbol合约（position_amt != 0）
+            # 使用参数化查询，避免SQL注入
+            rows = self.query(f"""
+                SELECT DISTINCT symbol
+                FROM `{self.portfolios_table}`
+                WHERE model_id = %s AND position_amt != 0
+                ORDER BY symbol ASC
+            """, (model_uuid,))
+            
+            symbols = [row[0] for row in rows] if rows else []
+            return symbols
+        except Exception as e:
+            logger.error(f"[Portfolios] Failed to get model held symbols for model {model_id}: {e}")
+            return []
 

@@ -15,8 +15,8 @@
 4. 并发处理：使用多线程批量处理AI决策，提高执行效率
 
 注意：
-- 交易循环管理已移至 backend/app.py，不再在此模块中管理线程
-- 买入和卖出循环在 backend/app.py 中分别独立运行
+- 交易循环管理已移至 trade/app.py，不再在此模块中管理线程
+- 买入和卖出循环在 trade/app.py 中分别独立运行
 """
 from datetime import datetime, timezone, timedelta
 from typing import Dict, List, Optional
@@ -26,11 +26,16 @@ import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import common.config as app_config
-from trade.prompt_defaults import DEFAULT_BUY_CONSTRAINTS, DEFAULT_SELL_CONSTRAINTS, PROMPT_JSON_OUTPUT_SUFFIX
+from trade.ai.prompt_defaults import DEFAULT_BUY_CONSTRAINTS, DEFAULT_SELL_CONSTRAINTS, PROMPT_JSON_OUTPUT_SUFFIX
 from common.binance_futures import BinanceFuturesOrderClient
 from common.database.database_model_prompts import ModelPromptsDatabase
 from common.database.database_models import ModelsDatabase
 from common.database.database_portfolios import PortfoliosDatabase
+from common.database.database_conversations import ConversationsDatabase
+from common.database.database_account_values import AccountValuesDatabase
+from common.database.database_futures import FuturesDatabase
+from common.database.database_account_asset import AccountAssetDatabase
+from common.database.database_binance_trade_logs import BinanceTradeLogsDatabase
 
 logger = logging.getLogger(__name__)
 
@@ -66,10 +71,15 @@ class TradingEngine:
         self.market_fetcher = market_fetcher
         self.trader = trader
         self.trade_fee_rate = trade_fee_rate
-        # 初始化 ModelPromptsDatabase、ModelsDatabase 和 PortfoliosDatabase 实例
+        # 初始化 ModelPromptsDatabase、ModelsDatabase、PortfoliosDatabase、ConversationsDatabase、AccountValuesDatabase、FuturesDatabase、AccountAssetDatabase 和 BinanceTradeLogsDatabase 实例
         self.model_prompts_db = ModelPromptsDatabase(pool=db._pool if hasattr(db, '_pool') else None)
         self.models_db = ModelsDatabase(pool=db._pool if hasattr(db, '_pool') else None)
         self.portfolios_db = PortfoliosDatabase(pool=db._pool if hasattr(db, '_pool') else None)
+        self.conversations_db = ConversationsDatabase(pool=db._pool if hasattr(db, '_pool') else None)
+        self.account_values_db = AccountValuesDatabase(pool=db._pool if hasattr(db, '_pool') else None)
+        self.futures_db = FuturesDatabase(pool=db._pool if hasattr(db, '_pool') else None)
+        self.account_asset_db = AccountAssetDatabase(pool=db._pool if hasattr(db, '_pool') else None)
+        self.binance_trade_logs_db = BinanceTradeLogsDatabase(pool=db._pool if hasattr(db, '_pool') else None)
         # 从数据库获取 max_positions（最大持仓数量），如果获取失败则使用默认值3
         try:
             model = self.models_db.get_model(model_id)
@@ -77,7 +87,7 @@ class TradingEngine:
         except Exception as e:
             logger.warning(f"[TradingEngine] Failed to get max_positions for model {model_id}, using default 3: {e}")
             self.max_positions = 3
-        # 配置执行周期（秒）（保留用于兼容性，实际循环管理在backend/app.py）
+        # 配置执行周期（秒）（保留用于兼容性，实际循环管理在trade/app.py）
         self.buy_cycle_interval = buy_cycle_interval
         self.sell_cycle_interval = sell_cycle_interval
         # 全局交易锁，用于协调买入和卖出决策执行之间的并发操作
@@ -536,17 +546,24 @@ class TradingEngine:
         model = self.models_db.get_model(self.model_id)
         account_alias = model.get('account_alias', '') if model else ''
         
-        self.db.record_account_value(
+        # 获取模型ID映射和账户价值历史表名
+        model_mapping = self.models_db._get_model_id_mapping()
+        from common.database.database_init import ACCOUNT_VALUE_HISTORYS_TABLE
+        self.account_values_db.record_account_value(
             self.model_id,
             balance=balance,
             available_balance=available_balance,
             cross_wallet_balance=cross_wallet_balance,
-            account_alias=account_alias
+            account_alias=account_alias,
+            cross_un_pnl=0.0,
+            model_id_mapping=model_mapping,
+            get_model_func=self.models_db.get_model,
+            account_value_historys_table=ACCOUNT_VALUE_HISTORYS_TABLE
         )
     
     def _sync_model_futures(self) -> None:
         """同步model_futures表数据"""
-        sync_success = self.db.sync_model_futures_from_portfolio(self.model_id)
+        sync_success = self.futures_db.sync_model_futures_from_portfolio(self.model_id)
         if sync_success:
             logger.debug(f"[Model {self.model_id}] model_futures表同步成功")
         else:
@@ -732,7 +749,9 @@ class TradingEngine:
         Returns:
             List[str]: 当前持仓的合约symbol列表（如 ['BTC', 'ETH']）
         """
-        symbols = self.db.get_model_held_symbols(self.model_id)
+        # 获取模型ID映射
+        model_mapping = self.models_db._get_model_id_mapping()
+        symbols = self.portfolios_db.get_model_held_symbols(self.model_id, model_mapping)
         logger.debug(f"[Model {self.model_id}] Retrieved {len(symbols)} held symbols from portfolios table")
         return symbols
     
@@ -961,7 +980,9 @@ class TradingEngine:
         # 根据is_virtual判断数据源
         if is_virtual:
             # 从account_values表获取最新记录
-            account_data = self.db.get_latest_account_value(self.model_id)
+            # 获取模型ID映射
+            model_mapping = self.models_db._get_model_id_mapping()
+            account_data = self.account_values_db.get_latest_account_value(self.model_id, model_mapping)
             if account_data:
                 balance = account_data.get('balance', 0.0)
                 available_balance = account_data.get('available_balance', 0.0)
@@ -983,7 +1004,7 @@ class TradingEngine:
                 cross_wallet_balance = portfolio.get('positions_value', 0)
                 cross_un_pnl = 0.0
             else:
-                account_data = self.db.get_account_asset(account_alias)
+                account_data = self.account_asset_db.get_account_asset(account_alias)
                 if account_data:
                     balance = account_data.get('balance', 0.0)
                     available_balance = account_data.get('available_balance', 0.0)
@@ -1119,13 +1140,16 @@ class TradingEngine:
         tokens = payload.get('tokens', 0)  # 获取tokens数量，默认为0
         if not isinstance(raw_response, str):
             raw_response = json.dumps(payload.get('decisions', {}), ensure_ascii=False)
-        conversation_id = self.db.add_conversation(
+        # 获取模型ID映射
+        model_mapping = self.models_db._get_model_id_mapping()
+        conversation_id = self.conversations_db.add_conversation(
             self.model_id,
             user_prompt='',
             ai_response=raw_response,
             cot_trace=cot_trace,
             tokens=tokens,
-            conversation_type=conversation_type
+            conversation_type=conversation_type,
+            model_id_mapping=model_mapping
         )
         # 保存 conversation_id 到实例变量（线程安全）
         if conversation_id:
@@ -2667,7 +2691,7 @@ class TradingEngine:
                     model_id=model_uuid,
                     conversation_id=conversation_id,
                     trade_id=trade_id,
-                    db=self.db
+                    db=self.binance_trade_logs_db
                 )
                 
                 logger.info(f"@API@ [Model {self.model_id}] [market_trade] === 接口调用成功 ==="
@@ -2803,7 +2827,7 @@ class TradingEngine:
                     model_id=model_uuid,
                     conversation_id=conversation_id,
                     trade_id=trade_id,
-                    db=self.db
+                    db=self.binance_trade_logs_db
                 )
                 
                 # 【调用后日志】记录接口返回内容
@@ -2920,7 +2944,7 @@ class TradingEngine:
                     model_id=model_uuid,
                     conversation_id=conversation_id,
                     trade_id=trade_id,
-                    db=self.db
+                    db=self.binance_trade_logs_db
                 )
                 
                 # 【调用后日志】记录接口返回内容
@@ -3037,7 +3061,7 @@ class TradingEngine:
                     model_id=model_uuid,
                     conversation_id=conversation_id,
                     trade_id=trade_id,
-                    db=self.db
+                    db=self.binance_trade_logs_db
                 )
                 
                 # 【调用后日志】记录接口返回内容

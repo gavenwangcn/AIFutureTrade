@@ -9,6 +9,7 @@ import logging
 from datetime import datetime, timezone, timedelta
 import common.config as app_config
 from common.database.database_models import ModelsDatabase
+from common.database.database_settings import SettingsDatabase
 
 logger = logging.getLogger(__name__)
 
@@ -18,7 +19,8 @@ def get_buy_interval_seconds(db) -> int:
     default_interval_seconds = getattr(app_config, 'TRADING_INTERVAL', 3600)
     default_minutes = max(1, int(default_interval_seconds / 60))
     try:
-        settings = db.get_settings()
+        settings_db = SettingsDatabase(pool=db._pool if hasattr(db, '_pool') else None)
+        settings = settings_db.get_settings()
         minutes = int(settings.get('buy_frequency_minutes', default_minutes))
     except Exception as e:
         logger.warning(f"Unable to load buy trading frequency setting: {e}")
@@ -33,7 +35,8 @@ def get_sell_interval_seconds(db) -> int:
     default_interval_seconds = getattr(app_config, 'TRADING_INTERVAL', 3600)
     default_minutes = max(1, int(default_interval_seconds / 60))
     try:
-        settings = db.get_settings()
+        settings_db = SettingsDatabase(pool=db._pool if hasattr(db, '_pool') else None)
+        settings = settings_db.get_settings()
         minutes = int(settings.get('sell_frequency_minutes', default_minutes))
     except Exception as e:
         logger.warning(f"Unable to load sell trading frequency setting: {e}")

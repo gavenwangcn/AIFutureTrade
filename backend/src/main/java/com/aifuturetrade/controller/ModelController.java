@@ -129,22 +129,9 @@ public class ModelController {
      */
     @GetMapping("/{modelId}/conversations")
     @ApiOperation("获取模型的对话历史记录")
-    public ResponseEntity<List<Map<String, Object>>> getConversations(@PathVariable Integer modelId, @RequestParam(defaultValue = "5") Integer limit) {
+    public ResponseEntity<List<Map<String, Object>>> getConversations(@PathVariable Integer modelId, @RequestParam(defaultValue = "20") Integer limit) {
         List<Map<String, Object>> conversations = modelService.getConversations(modelId, limit);
         return new ResponseEntity<>(conversations, HttpStatus.OK);
-    }
-
-    /**
-     * 获取模型的LLM API错误记录
-     * @param modelId 模型ID
-     * @param limit 返回记录数限制
-     * @return LLM API错误记录
-     */
-    @GetMapping("/{modelId}/llm-api-errors")
-    @ApiOperation("获取模型的LLM API错误记录")
-    public ResponseEntity<List<Map<String, Object>>> getLlmApiErrors(@PathVariable Integer modelId, @RequestParam(defaultValue = "10") Integer limit) {
-        List<Map<String, Object>> errors = modelService.getLlmApiErrors(modelId, limit);
-        return new ResponseEntity<>(errors, HttpStatus.OK);
     }
 
     /**

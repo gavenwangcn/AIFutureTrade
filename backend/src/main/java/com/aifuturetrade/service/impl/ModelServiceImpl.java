@@ -7,6 +7,7 @@ import com.aifuturetrade.service.MarketService;
 import com.aifuturetrade.service.dto.ModelDTO;
 import com.aifuturetrade.common.util.PageResult;
 import com.aifuturetrade.common.util.PageRequest;
+import com.aifuturetrade.common.api.trade.TradeServiceClient;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
@@ -44,9 +45,6 @@ public class ModelServiceImpl implements ModelService {
     private ConversationMapper conversationMapper;
 
     @Autowired
-    private LlmApiErrorMapper llmApiErrorMapper;
-
-    @Autowired
     private PortfolioMapper portfolioMapper;
 
     @Autowired
@@ -63,6 +61,9 @@ public class ModelServiceImpl implements ModelService {
 
     @Autowired
     private FutureMapper futureMapper;
+
+    @Autowired
+    private TradeServiceClient tradeServiceClient;
 
     @Value("${app.trades-query-limit:10}")
     private Integer defaultTradesQueryLimit;
@@ -483,12 +484,11 @@ public class ModelServiceImpl implements ModelService {
     public List<Map<String, Object>> getConversations(Integer modelId, Integer limit) {
         log.info("[ModelService] 获取对话历史记录, modelId={}, limit={}", modelId, limit);
         try {
-            // 从settings读取conversation_limit，默认5
-            Integer defaultLimit = 5;
+            // 默认limit为20，与前端保持一致
             if (limit == null) {
-                limit = defaultLimit;
+                limit = 20;
             }
-            limit = Math.min(limit, defaultLimit); // 确保不超过限制
+            // 移除限制，允许前端传递更大的limit值
             
             List<ConversationDO> conversationDOList = conversationMapper.selectConversationsByModelId(modelId, limit);
             List<Map<String, Object>> conversations = new ArrayList<>();
@@ -497,15 +497,30 @@ public class ModelServiceImpl implements ModelService {
                 Map<String, Object> conversation = new HashMap<>();
                 conversation.put("id", conversationDO.getId());
                 conversation.put("modelId", conversationDO.getModelId());
-                conversation.put("userPrompt", conversationDO.getUserPrompt());
-                conversation.put("aiResponse", conversationDO.getAiResponse());
-                conversation.put("cotTrace", conversationDO.getCotTrace());
+                
+                // 同时提供camelCase和snake_case格式，确保前端兼容性
+                String userPrompt = conversationDO.getUserPrompt();
+                String aiResponse = conversationDO.getAiResponse();
+                String cotTrace = conversationDO.getCotTrace();
+                
+                // camelCase格式（Java标准）
+                conversation.put("userPrompt", userPrompt);
+                conversation.put("aiResponse", aiResponse);
+                conversation.put("cotTrace", cotTrace);
+                
+                // snake_case格式（前端期望的格式）
+                conversation.put("user_prompt", userPrompt);
+                conversation.put("ai_response", aiResponse);
+                conversation.put("cot_trace", cotTrace);
+                
                 conversation.put("conversationType", conversationDO.getConversationType());
+                conversation.put("conversation_type", conversationDO.getConversationType()); // snake_case格式
                 conversation.put("tokens", conversationDO.getTokens());
                 
                 // 格式化timestamp字段为字符串（北京时间）
                 if (conversationDO.getCreatedAt() != null) {
-                    conversation.put("timestamp", conversationDO.getCreatedAt().format(DATETIME_FORMATTER));
+                    String timestamp = conversationDO.getCreatedAt().format(DATETIME_FORMATTER);
+                    conversation.put("timestamp", timestamp);
                 } else {
                     conversation.put("timestamp", "");
                 }
@@ -516,42 +531,6 @@ public class ModelServiceImpl implements ModelService {
             return conversations;
         } catch (Exception e) {
             log.error("[ModelService] 获取对话历史记录失败: {}", e.getMessage(), e);
-            return new ArrayList<>();
-        }
-    }
-
-    @Override
-    public List<Map<String, Object>> getLlmApiErrors(Integer modelId, Integer limit) {
-        log.info("[ModelService] 获取LLM API错误记录, modelId={}, limit={}", modelId, limit);
-        try {
-            if (limit == null) {
-                limit = 10;
-            }
-            
-            List<LlmApiErrorDO> errorDOList = llmApiErrorMapper.selectLlmApiErrorsByModelId(modelId, limit);
-            List<Map<String, Object>> errors = new ArrayList<>();
-            
-            for (LlmApiErrorDO errorDO : errorDOList) {
-                Map<String, Object> error = new HashMap<>();
-                error.put("id", errorDO.getId());
-                error.put("modelId", errorDO.getModelId());
-                error.put("providerName", errorDO.getProviderName());
-                error.put("model", errorDO.getModel());
-                error.put("errorMsg", errorDO.getErrorMsg());
-                
-                // 格式化createdAt字段为字符串
-                if (errorDO.getCreatedAt() != null) {
-                    error.put("createdAt", errorDO.getCreatedAt().format(DATETIME_FORMATTER));
-                } else {
-                    error.put("createdAt", "");
-                }
-                
-                errors.add(error);
-            }
-            
-            return errors;
-        } catch (Exception e) {
-            log.error("[ModelService] 获取LLM API错误记录失败: {}", e.getMessage(), e);
             return new ArrayList<>();
         }
     }
@@ -989,6 +968,7 @@ public class ModelServiceImpl implements ModelService {
 
     @Override
     public Map<String, Object> executeTrading(Integer modelId) {
+        log.info("[ModelService] 执行交易周期（同时执行买入和卖出）, modelId={}", modelId);
         Map<String, Object> result = new HashMap<>();
         try {
             // 检查模型是否存在
@@ -1002,16 +982,15 @@ public class ModelServiceImpl implements ModelService {
             // 启用自动交易
             setModelAutoTrading(modelId, true, true);
 
-            // TODO: 实现交易引擎逻辑
-            // 这里需要调用交易引擎执行买入和卖出周期
-            // 目前返回占位符响应
+            // 调用trade服务执行买入和卖出
+            Map<String, Object> buyResult = tradeServiceClient.executeBuyTrading(modelId);
+            Map<String, Object> sellResult = tradeServiceClient.executeSellTrading(modelId);
+
+            // 合并结果
             result.put("success", true);
-            result.put("executions", new ArrayList<>());
-            result.put("portfolio", getPortfolio(modelId));
-            result.put("conversations", java.util.Arrays.asList("buy", "sell"));
-            result.put("auto_buy_enabled", true);
-            result.put("auto_sell_enabled", true);
-            result.put("message", "Trading execution initiated (trading engine not yet implemented)");
+            result.put("buy_result", buyResult);
+            result.put("sell_result", sellResult);
+            result.put("message", "Trading execution completed");
             
             return result;
         } catch (Exception e) {
@@ -1024,129 +1003,97 @@ public class ModelServiceImpl implements ModelService {
 
     @Override
     public Map<String, Object> executeBuyTrading(Integer modelId) {
-        Map<String, Object> result = new HashMap<>();
+        log.info("[ModelService] 执行买入交易周期, modelId={}", modelId);
         try {
             // 检查模型是否存在
             ModelDTO model = getModelById(modelId);
             if (model == null) {
-                result.put("success", false);
-                result.put("error", "Model not found");
-                return result;
+                Map<String, Object> errorResult = new HashMap<>();
+                errorResult.put("success", false);
+                errorResult.put("error", "Model not found");
+                return errorResult;
             }
 
-            // 启用自动买入
-            setModelAutoTrading(modelId, true, model.getAutoSellEnabled() != null && model.getAutoSellEnabled());
-
-            // TODO: 实现交易引擎逻辑
-            // 这里需要调用交易引擎执行买入周期
-            // 目前返回占位符响应
-            result.put("success", true);
-            result.put("executions", new ArrayList<>());
-            result.put("portfolio", getPortfolio(modelId));
-            result.put("conversations", java.util.Arrays.asList("buy"));
-            result.put("auto_buy_enabled", true);
-            result.put("message", "Buy trading execution initiated (trading engine not yet implemented)");
-            
-            return result;
+            // 调用trade服务执行买入
+            return tradeServiceClient.executeBuyTrading(modelId);
         } catch (Exception e) {
             log.error("[ModelService] 执行买入交易失败: {}", e.getMessage(), e);
-            result.put("success", false);
-            result.put("error", e.getMessage());
-            return result;
+            Map<String, Object> errorResult = new HashMap<>();
+            errorResult.put("success", false);
+            errorResult.put("error", e.getMessage());
+            return errorResult;
         }
     }
 
     @Override
     public Map<String, Object> executeSellTrading(Integer modelId) {
-        Map<String, Object> result = new HashMap<>();
+        log.info("[ModelService] 执行卖出交易周期, modelId={}", modelId);
         try {
             // 检查模型是否存在
             ModelDTO model = getModelById(modelId);
             if (model == null) {
-                result.put("success", false);
-                result.put("error", "Model not found");
-                return result;
+                Map<String, Object> errorResult = new HashMap<>();
+                errorResult.put("success", false);
+                errorResult.put("error", "Model not found");
+                return errorResult;
             }
 
-            // 启用自动卖出
-            setModelAutoTrading(modelId, model.getAutoBuyEnabled() != null && model.getAutoBuyEnabled(), true);
-
-            // TODO: 实现交易引擎逻辑
-            // 这里需要调用交易引擎执行卖出周期
-            // 目前返回占位符响应
-            result.put("success", true);
-            result.put("executions", new ArrayList<>());
-            result.put("portfolio", getPortfolio(modelId));
-            result.put("conversations", java.util.Arrays.asList("sell"));
-            result.put("auto_sell_enabled", true);
-            result.put("message", "Sell trading execution initiated (trading engine not yet implemented)");
-            
-            return result;
+            // 调用trade服务执行卖出
+            return tradeServiceClient.executeSellTrading(modelId);
         } catch (Exception e) {
             log.error("[ModelService] 执行卖出交易失败: {}", e.getMessage(), e);
-            result.put("success", false);
-            result.put("error", e.getMessage());
-            return result;
+            Map<String, Object> errorResult = new HashMap<>();
+            errorResult.put("success", false);
+            errorResult.put("error", e.getMessage());
+            return errorResult;
         }
     }
 
     @Override
     public Map<String, Object> disableBuyTrading(Integer modelId) {
-        Map<String, Object> result = new HashMap<>();
+        log.info("[ModelService] 禁用自动买入, modelId={}", modelId);
         try {
             // 检查模型是否存在
             ModelDTO model = getModelById(modelId);
             if (model == null) {
-                result.put("success", false);
-                result.put("error", "Model not found");
-                return result;
+                Map<String, Object> errorResult = new HashMap<>();
+                errorResult.put("success", false);
+                errorResult.put("error", "Model not found");
+                return errorResult;
             }
 
-            // 禁用自动买入
-            Boolean currentSellEnabled = model.getAutoSellEnabled() != null && model.getAutoSellEnabled();
-            setModelAutoTrading(modelId, false, currentSellEnabled);
-
-            result.put("model_id", modelId);
-            result.put("auto_buy_enabled", false);
-            result.put("success", true);
-            result.put("message", "Auto buy disabled successfully");
-            
-            return result;
+            // 调用trade服务禁用自动买入
+            return tradeServiceClient.disableBuyTrading(modelId);
         } catch (Exception e) {
             log.error("[ModelService] 禁用自动买入失败: {}", e.getMessage(), e);
-            result.put("success", false);
-            result.put("error", e.getMessage());
-            return result;
+            Map<String, Object> errorResult = new HashMap<>();
+            errorResult.put("success", false);
+            errorResult.put("error", e.getMessage());
+            return errorResult;
         }
     }
 
     @Override
     public Map<String, Object> disableSellTrading(Integer modelId) {
-        Map<String, Object> result = new HashMap<>();
+        log.info("[ModelService] 禁用自动卖出, modelId={}", modelId);
         try {
             // 检查模型是否存在
             ModelDTO model = getModelById(modelId);
             if (model == null) {
-                result.put("success", false);
-                result.put("error", "Model not found");
-                return result;
+                Map<String, Object> errorResult = new HashMap<>();
+                errorResult.put("success", false);
+                errorResult.put("error", "Model not found");
+                return errorResult;
             }
 
-            // 禁用自动卖出
-            Boolean currentBuyEnabled = model.getAutoBuyEnabled() != null && model.getAutoBuyEnabled();
-            setModelAutoTrading(modelId, currentBuyEnabled, false);
-
-            result.put("model_id", modelId);
-            result.put("auto_sell_enabled", false);
-            result.put("success", true);
-            result.put("message", "Auto sell disabled successfully");
-            
-            return result;
+            // 调用trade服务禁用自动卖出
+            return tradeServiceClient.disableSellTrading(modelId);
         } catch (Exception e) {
             log.error("[ModelService] 禁用自动卖出失败: {}", e.getMessage(), e);
-            result.put("success", false);
-            result.put("error", e.getMessage());
-            return result;
+            Map<String, Object> errorResult = new HashMap<>();
+            errorResult.put("success", false);
+            errorResult.put("error", e.getMessage());
+            return errorResult;
         }
     }
 
