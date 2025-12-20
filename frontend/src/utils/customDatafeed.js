@@ -80,43 +80,19 @@ export function createDataLoader(onLoadingStart, onLoadingEnd) {
       // 计算需要的数据量（统一返回499条K线数据）
       const limit = 499
 
-      // 构建请求参数
+      // 构建请求参数（不传入startTime和endTime）
       const apiBaseUrl = getApiBaseUrl()
       const urlParams = new URLSearchParams({
         symbol: ticker,
         interval: interval,
         limit: limit.toString()
       })
-
-      // 根据加载类型设置时间范围
-      // backward: 加载更早的数据（timestamp 之前的数据）
-      // forward: 加载更新的数据（timestamp 之后的数据）
-      if (timestamp) {
-        const timeISO = new Date(timestamp).toISOString()
-        if (type === 'backward') {
-          // 向后加载：加载 timestamp 之前的数据，使用 end_time
-          urlParams.append('end_time', timeISO)
-        } else if (type === 'forward') {
-          // 向前加载：加载 timestamp 之后的数据，使用 start_time
-          urlParams.append('start_time', timeISO)
-        }
-      }
       
       const apiUrl = `${apiBaseUrl}/api/market/klines?${urlParams.toString()}`
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/34f8560e-dcef-4245-a2be-f23557e97d5f',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'customDatafeed.js:105',message:'API请求开始',data:{apiUrl,apiBaseUrl,symbol:ticker,interval,limit,type,timestamp:timestamp?new Date(timestamp).toISOString():null},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
-      // #endregion
       const response = await fetch(apiUrl)
-      
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/34f8560e-dcef-4245-a2be-f23557e97d5f',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'customDatafeed.js:107',message:'API响应状态',data:{status:response.status,statusText:response.statusText,ok:response.ok},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
-      // #endregion
       
       if (!response.ok) {
         const errorText = await response.text()
-        // #region agent log
-        fetch('http://127.0.0.1:7242/ingest/34f8560e-dcef-4245-a2be-f23557e97d5f',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'customDatafeed.js:110',message:'HTTP错误',data:{status:response.status,errorText},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
-        // #endregion
         console.error('[DataLoader] HTTP错误详情:', errorText)
         callback([])
         loadingCallbacks.end()
@@ -124,28 +100,16 @@ export function createDataLoader(onLoadingStart, onLoadingEnd) {
       }
       
       const result = await response.json()
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/34f8560e-dcef-4245-a2be-f23557e97d5f',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'customDatafeed.js:125',message:'API响应数据',data:{resultType:Array.isArray(result)?'array':'object',hasData:!!result.data,isArray:Array.isArray(result),isArrayData:Array.isArray(result?.data),resultLength:Array.isArray(result)?result.length:null,dataLength:Array.isArray(result?.data)?result.data.length:null,resultKeys:result&&typeof result==='object'&&!Array.isArray(result)?Object.keys(result):null},timestamp:Date.now(),sessionId:'debug-session',runId:'post-fix',hypothesisId:'D'})}).catch(()=>{});
-      // #endregion
 
       // 处理响应格式：后端可能直接返回数组，也可能返回 {data: [...]} 格式
       let klinesData = null
       if (Array.isArray(result)) {
         // 后端直接返回数组格式
         klinesData = result
-        // #region agent log
-        fetch('http://127.0.0.1:7242/ingest/34f8560e-dcef-4245-a2be-f23557e97d5f',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'customDatafeed.js:132',message:'检测到数组格式响应',data:{arrayLength:result.length},timestamp:Date.now(),sessionId:'debug-session',runId:'post-fix',hypothesisId:'A'})}).catch(()=>{});
-        // #endregion
       } else if (result && result.data && Array.isArray(result.data)) {
         // 后端返回 {data: [...]} 格式
         klinesData = result.data
-        // #region agent log
-        fetch('http://127.0.0.1:7242/ingest/34f8560e-dcef-4245-a2be-f23557e97d5f',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'customDatafeed.js:136',message:'检测到对象格式响应',data:{dataLength:result.data.length},timestamp:Date.now(),sessionId:'debug-session',runId:'post-fix',hypothesisId:'A'})}).catch(()=>{});
-        // #endregion
       } else {
-        // #region agent log
-        fetch('http://127.0.0.1:7242/ingest/34f8560e-dcef-4245-a2be-f23557e97d5f',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'customDatafeed.js:139',message:'响应格式无效',data:{resultType:typeof result,isArray:Array.isArray(result),hasData:!!result?.data,resultSample:result?JSON.stringify(result).substring(0,300):null},timestamp:Date.now(),sessionId:'debug-session',runId:'post-fix',hypothesisId:'F'})}).catch(()=>{});
-        // #endregion
         console.warn('[DataLoader] Invalid response format:', result)
         callback([])
         loadingCallbacks.end()

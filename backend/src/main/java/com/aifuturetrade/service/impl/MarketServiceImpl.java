@@ -10,8 +10,6 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
-import java.time.LocalDateTime;
-import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -278,30 +276,10 @@ public class MarketServiceImpl implements MarketService {
 
     @Override
     public List<Map<String, Object>> getMarketKlines(String symbol, String interval, Integer limit, String startTime, String endTime) {
-        log.info("[MarketService] 获取K线数据, symbol={}, interval={}, limit={}, startTime={}, endTime={}", 
-                symbol, interval, limit, startTime, endTime);
+        log.info("[MarketService] 获取K线数据, symbol={}, interval={}, limit={}", 
+                symbol, interval, limit);
         try {
             BinanceFuturesClient client = getFuturesClient();
-            
-            // 解析时间参数
-            Long startTimestamp = null;
-            Long endTimestamp = null;
-            if (startTime != null && !startTime.isEmpty()) {
-                try {
-                    LocalDateTime start = LocalDateTime.parse(startTime.replace("Z", ""));
-                    startTimestamp = start.toInstant(ZoneOffset.UTC).toEpochMilli();
-                } catch (Exception e) {
-                    log.warn("[MarketService] 解析 startTime 失败: {}", startTime);
-                }
-            }
-            if (endTime != null && !endTime.isEmpty()) {
-                try {
-                    LocalDateTime end = LocalDateTime.parse(endTime.replace("Z", ""));
-                    endTimestamp = end.toInstant(ZoneOffset.UTC).toEpochMilli();
-                } catch (Exception e) {
-                    log.warn("[MarketService] 解析 endTime 失败: {}", endTime);
-                }
-            }
 
             // 统一所有interval类型的默认limit为499
             if (limit == null) {
@@ -319,8 +297,8 @@ public class MarketServiceImpl implements MarketService {
                 }
             }
 
-            // 调用 Binance API 获取 K 线数据
-            List<Map<String, Object>> klines = client.getKlines(symbol, interval, limit, startTimestamp, endTimestamp);
+            // 调用 Binance API 获取 K 线数据（不传入startTime和endTime）
+            List<Map<String, Object>> klines = client.getKlines(symbol, interval, limit, null, null);
 
             // 格式化 K 线数据
             List<Map<String, Object>> formattedKlines = new ArrayList<>();

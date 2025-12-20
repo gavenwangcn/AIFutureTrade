@@ -117,9 +117,7 @@ const initChart = async () => {
   // Wait for DOM to be ready
   await nextTick()
   
-  // Destroy existing chart if it exists
-  destroyChart()
-  
+  // 检查容器是否存在
   if (!chartContainerRef.value) {
     console.error('[KLineChart] Chart container not found')
     return
@@ -128,13 +126,32 @@ const initChart = async () => {
   // 立即显示加载状态，避免空白屏幕
   isLoading.value = true
   
+  // Destroy existing chart if it exists (before clearing)
+  destroyChart()
+  
+  // 等待销毁完成
+  await nextTick()
+  
   try {
+    // 再次检查容器是否存在（可能在销毁过程中被移除）
+    if (!chartContainerRef.value) {
+      console.error('[KLineChart] Chart container removed during destroy')
+      isLoading.value = false
+      return
+    }
+    
     // 获取 klinecharts 库（UMD 方式）
     const klinecharts = getKLineCharts()
-    const { init, dispose } = klinecharts
+    const { init } = klinecharts
     
-    // Clear container
-    chartContainerRef.value.innerHTML = ''
+    // Clear container safely
+    try {
+      if (chartContainerRef.value && chartContainerRef.value.parentNode) {
+        chartContainerRef.value.innerHTML = ''
+      }
+    } catch (e) {
+      console.warn('[KLineChart] Error clearing container:', e)
+    }
     
     // Create data loader with loading callbacks
     // 确保加载状态正确触发
@@ -244,6 +261,7 @@ const initChart = async () => {
     console.log('[KLineChart] Chart initialized successfully with red-up-green-down style')
   } catch (error) {
     console.error('[KLineChart] Failed to initialize chart:', error)
+    isLoading.value = false
   }
 }
 
@@ -275,12 +293,19 @@ watch(() => props.visible, async (newVal) => {
     isLoading.value = true
     await nextTick()
     // Add small delay to ensure modal is fully rendered
-    setTimeout(() => {
-      initChart()
-    }, 100)
+    // 使用 requestAnimationFrame 确保 DOM 已完全渲染
+    requestAnimationFrame(() => {
+      setTimeout(() => {
+        if (props.visible && chartContainerRef.value) {
+          initChart()
+        }
+      }, 100)
+    })
   } else {
-    destroyChart()
+    // 隐藏时立即隐藏加载状态，避免覆盖层残留
     isLoading.value = false
+    // 然后销毁图表
+    destroyChart()
   }
 }, { immediate: false })
 
@@ -313,12 +338,28 @@ watch(() => props.interval, (newVal) => {
 
 // Destroy chart and cleanup
 const destroyChart = () => {
+  // 先清理数据加载器，避免异步操作继续执行
+  if (dataLoader.value) {
+    dataLoader.value = null
+  }
+  
   // Destroy chart using KLineChart 10.0.0 API
-  if (chartInstance.value && chartContainerRef.value) {
+  if (chartInstance.value) {
     try {
       const klinecharts = getKLineCharts()
       const { dispose } = klinecharts
-      dispose(chartContainerRef.value)
+      
+      // 如果容器存在，使用容器销毁
+      if (chartContainerRef.value && chartContainerRef.value.parentNode) {
+        dispose(chartContainerRef.value)
+      } else if (chartInstance.value) {
+        // 如果容器不存在，尝试直接使用实例销毁
+        try {
+          dispose(chartInstance.value)
+        } catch (e) {
+          console.warn('[KLineChart] Error disposing chart instance:', e)
+        }
+      }
     } catch (error) {
       console.error('[KLineChart] Error destroying chart:', error)
     }
@@ -328,9 +369,19 @@ const destroyChart = () => {
   chartInstance.value = null
   dataLoader.value = null
   
-  // Clear container
-  if (chartContainerRef.value) {
-    chartContainerRef.value.innerHTML = ''
+  // 延迟清空容器，避免与 Vue 的 DOM 更新冲突
+  if (chartContainerRef.value && chartContainerRef.value.parentNode) {
+    // 使用 setTimeout 确保在下一个事件循环中清空
+    setTimeout(() => {
+      try {
+        if (chartContainerRef.value && chartContainerRef.value.parentNode) {
+          chartContainerRef.value.innerHTML = ''
+        }
+      } catch (e) {
+        // 忽略清空时的错误（可能容器已被移除）
+        console.warn('[KLineChart] Error clearing container:', e)
+      }
+    }, 0)
   }
 }
 
@@ -476,7 +527,7 @@ onUnmounted(() => {
   height: 100%;
   background-color: rgba(255, 255, 255, 0.95);
   backdrop-filter: blur(2px);
-  z-index: 1000;
+  z-index: 10;
   transition: opacity 0.3s ease-in-out;
 }
 
