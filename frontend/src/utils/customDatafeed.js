@@ -3,9 +3,8 @@
  * 实现 KLineChart 10.0.0 版本的 DataLoader 接口
  * 参考 https://klinecharts.com/guide/quick-start
  * 使用 fetch API 直接调用后端接口，避免 ES6 模块依赖
+ * 注意：K线页面仅使用历史数据，不使用WebSocket实时更新
  */
-
-import { createSocketConnection } from './websocket.js'
 
 // 获取 API 基础 URL（与 api.js 保持一致）
 function getApiBaseUrl() {
@@ -32,6 +31,41 @@ function getApiBaseUrl() {
 export function createDataLoader() {
   const subscriptions = new Map() // 存储订阅信息: key = `${symbol.ticker}:${period.text}`, value = { callback, symbol, period }
   const marketPrices = [] // 缓存市场行情数据
+  let isFirstLoadCompleted = false // 标记第一次加载是否已完成
+
+  /**
+   * 调用 /api/market/prices API 获取市场价格
+   * 仅在第一次K线数据加载完成后调用一次
+   */
+  async function fetchMarketPrices() {
+    // 如果已经调用过，不再重复调用
+    if (isFirstLoadCompleted) {
+      console.log('[DataLoader] Market prices API already called, skipping...')
+      return
+    }
+
+    try {
+      const apiBaseUrl = getApiBaseUrl()
+      const apiUrl = `${apiBaseUrl}/api/market/prices`
+      
+      console.log('[DataLoader] Calling /api/market/prices after first K-line data load...')
+      const response = await fetch(apiUrl)
+      
+      if (!response.ok) {
+        const errorText = await response.text()
+        console.error('[DataLoader] Failed to fetch market prices:', errorText)
+        return
+      }
+      
+      const prices = await response.json()
+      console.log('[DataLoader] Market prices fetched successfully:', Object.keys(prices).length, 'symbols')
+      
+      // 标记为已调用，防止重复调用
+      isFirstLoadCompleted = true
+    } catch (error) {
+      console.error('[DataLoader] Error fetching market prices:', error)
+    }
+  }
 
   /**
    * 获取历史K线数据
@@ -195,6 +229,10 @@ export function createDataLoader() {
         if (type === 'init') {
           // 初始化时，如果返回的数据量达到限制，可能还有更多数据
           more = klines.length >= limit
+          
+          // 第一次加载完成后，调用 /api/market/prices API
+          // 注意：仅调用一次，不再使用WebSocket等实时加载数据
+          fetchMarketPrices()
         } else if (type === 'backward') {
           // 向后加载：如果返回的数据量达到限制，可能还有更早的数据
           more = klines.length >= limit
