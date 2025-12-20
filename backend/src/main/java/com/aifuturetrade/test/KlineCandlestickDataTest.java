@@ -105,10 +105,14 @@ public class KlineCandlestickDataTest {
         if (startTime != null) {
             ZonedDateTime startZoned = Instant.ofEpochMilli(startTime).atZone(utcPlus8);
             System.out.println("起始时间: " + startTime + " (UTC+8: " + startZoned.format(formatter) + ")");
+        } else {
+            System.out.println("起始时间: 未指定（将自动计算）");
         }
         if (endTime != null) {
             ZonedDateTime endZoned = Instant.ofEpochMilli(endTime).atZone(utcPlus8);
             System.out.println("结束时间: " + endTime + " (UTC+8: " + endZoned.format(formatter) + ")");
+        } else {
+            System.out.println("结束时间: 未指定（将使用当前时间）");
         }
         System.out.println("----------------------------------------");
         
@@ -142,8 +146,8 @@ public class KlineCandlestickDataTest {
                 System.out.println("  interval: " + interval + " = " + intervalMinutes + " 分钟/根");
                 System.out.println("  limit: " + limit + " 根");
                 System.out.println("  总时间跨度: " + totalMinutes + " 分钟");
-                System.out.println("  计算的 startTime: " + calculatedStartTime + " (UTC+8: " + Instant.ofEpochMilli(calculatedStartTime).atZone(utcPlus8).format(formatter) + ")");
-                System.out.println("  计算的 endTime: " + calculatedEndTime + " (UTC+8: " + Instant.ofEpochMilli(calculatedEndTime).atZone(utcPlus8).format(formatter) + ")");
+                System.out.println("  计算的 startTime: " + calculatedStartTime + " (UTC+8: " + Instant.ofEpochMilli(calculatedStartTime.longValue()).atZone(utcPlus8).format(formatter) + ")");
+                System.out.println("  计算的 endTime: " + calculatedEndTime + " (UTC+8: " + Instant.ofEpochMilli(calculatedEndTime.longValue()).atZone(utcPlus8).format(formatter) + ")");
             }
             
             System.out.println("调用API获取K线数据...");
@@ -154,8 +158,8 @@ public class KlineCandlestickDataTest {
             System.out.println("实际请求参数:");
             System.out.println("  symbol: " + symbol);
             System.out.println("  interval: " + intervalEnum);
-            System.out.println("  startTime: " + calculatedStartTime + " (UTC+8: " + Instant.ofEpochMilli(calculatedStartTime).atZone(utcPlus8).format(formatter) + ")");
-            System.out.println("  endTime: " + calculatedEndTime + " (UTC+8: " + Instant.ofEpochMilli(calculatedEndTime).atZone(utcPlus8).format(formatter) + ")");
+            System.out.println("  startTime: " + calculatedStartTime + " (UTC+8: " + Instant.ofEpochMilli(calculatedStartTime.longValue()).atZone(utcPlus8).format(formatter) + ")");
+            System.out.println("  endTime: " + calculatedEndTime + " (UTC+8: " + Instant.ofEpochMilli(calculatedEndTime.longValue()).atZone(utcPlus8).format(formatter) + ")");
             System.out.println("  limit: " + limit);
             if (calculatedStartTime != null && calculatedEndTime != null) {
                 long timeDiff = calculatedEndTime.longValue() - calculatedStartTime.longValue();
@@ -304,8 +308,8 @@ public class KlineCandlestickDataTest {
                         ZonedDateTime lastZoned = Instant.ofEpochMilli(lastTime).atZone(utcPlus8);
                         long actualMinutes = (lastTime - firstTime) / (1000L * 60);
                         System.out.println("返回数据时间范围:");
-                        System.out.println("  第一条: " + firstTime + " (UTC+8: " + firstZoned.format(formatter) + ")");
-                        System.out.println("  最后一条: " + lastTime + " (UTC+8: " + lastZoned.format(formatter) + ")");
+                        System.out.println("  第一条: UTC+8 " + firstZoned.format(formatter));
+                        System.out.println("  最后一条: UTC+8 " + lastZoned.format(formatter));
                         System.out.println("  实际时间跨度: " + actualMinutes + " 分钟");
                         if (calculatedStartTime != null && calculatedEndTime != null) {
                             long expectedMinutes = (calculatedEndTime.longValue() - calculatedStartTime.longValue()) / (1000L * 60);
@@ -465,14 +469,14 @@ public class KlineCandlestickDataTest {
             ZonedDateTime closeTimeZoned = closeTime > 0 ? Instant.ofEpochMilli(closeTime).atZone(utcPlus8) : null;
             
             System.out.println("  K线 #" + index + ":");
-            System.out.println("    开盘时间: " + openTime + " (UTC+8: " + openTimeZoned.format(formatter) + ")");
+            System.out.println("    开盘时间: UTC+8 " + openTimeZoned.format(formatter));
             System.out.println("    开盘价: " + kline.get(1));
             System.out.println("    最高价: " + kline.get(2));
             System.out.println("    最低价: " + kline.get(3));
             System.out.println("    收盘价: " + kline.get(4));
             System.out.println("    成交量: " + kline.get(5));
             if (closeTime > 0 && closeTimeZoned != null) {
-                System.out.println("    收盘时间: " + closeTime + " (UTC+8: " + closeTimeZoned.format(formatter) + ")");
+                System.out.println("    收盘时间: UTC+8 " + closeTimeZoned.format(formatter));
             }
             if (kline.size() > 7) {
                 System.out.println("    成交额: " + kline.get(7));
