@@ -10,6 +10,14 @@
 #   4. 验证安装
 # ============================================
 
+# 确保使用 bash 执行此脚本
+if [ -z "$BASH_VERSION" ]; then
+    echo "错误: 此脚本需要使用 bash 执行"
+    echo "请使用: bash $0"
+    echo "或者: chmod +x $0 && ./$0"
+    exit 1
+fi
+
 set -e  # 遇到错误立即退出
 
 # 颜色定义
@@ -350,7 +358,8 @@ export MAVEN_OPTS="-Xms512m -Xmx1024m"
 EOF
     
     # 使环境变量立即生效（当前会话）
-    source $ENV_FILE
+    # 使用 . 代替 source 以兼容 sh
+    . $ENV_FILE
     
     log_info "环境变量已配置到: $ENV_FILE"
     log_info "新开终端会话将自动加载环境变量"
@@ -461,7 +470,7 @@ main() {
     log_info "使用说明："
     log_info "1. 运行 'java -version' 验证 Java 安装"
     log_info "2. 运行 'mvn -version' 验证 Maven 安装"
-    log_info "3. 如果环境变量未生效，请运行: source /etc/profile.d/jdk11-maven.sh"
+    log_info "3. 如果环境变量未生效，请运行: . /etc/profile.d/jdk11-maven.sh 或 source /etc/profile.d/jdk11-maven.sh"
     log_info "4. 或者重新登录终端以加载环境变量"
     log_info "============================================"
 }
