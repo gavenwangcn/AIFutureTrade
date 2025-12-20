@@ -43,7 +43,7 @@ public class ModelController {
      */
     @GetMapping("/{modelId}")
     @ApiOperation("根据ID获取交易模型")
-    public ResponseEntity<ModelDTO> getModelById(@PathVariable Integer modelId) {
+    public ResponseEntity<ModelDTO> getModelById(@PathVariable String modelId) {
         ModelDTO model = modelService.getModelById(modelId);
         return model != null ? new ResponseEntity<>(model, HttpStatus.OK) : new ResponseEntity<>(HttpStatus.NOT_FOUND);
     }
@@ -70,7 +70,7 @@ public class ModelController {
      */
     @DeleteMapping("/{modelId}")
     @ApiOperation("删除交易模型")
-    public ResponseEntity<Map<String, Object>> deleteModel(@PathVariable Integer modelId) {
+    public ResponseEntity<Map<String, Object>> deleteModel(@PathVariable String modelId) {
         Boolean deleted = modelService.deleteModel(modelId);
         Map<String, Object> response = new HashMap<>();
         if (deleted) {
@@ -91,7 +91,7 @@ public class ModelController {
      */
     @GetMapping("/{modelId}/portfolio")
     @ApiOperation("获取模型的投资组合数据")
-    public ResponseEntity<Map<String, Object>> getPortfolio(@PathVariable Integer modelId) {
+    public ResponseEntity<Map<String, Object>> getPortfolio(@PathVariable String modelId) {
         Map<String, Object> portfolio = modelService.getPortfolio(modelId);
         return new ResponseEntity<>(portfolio, HttpStatus.OK);
     }
@@ -103,7 +103,7 @@ public class ModelController {
      */
     @GetMapping("/{modelId}/portfolio/symbols")
     @ApiOperation("获取模型的持仓合约symbol列表")
-    public ResponseEntity<Map<String, Object>> getModelPortfolioSymbols(@PathVariable Integer modelId) {
+    public ResponseEntity<Map<String, Object>> getModelPortfolioSymbols(@PathVariable String modelId) {
         Map<String, Object> symbols = modelService.getModelPortfolioSymbols(modelId);
         return new ResponseEntity<>(symbols, HttpStatus.OK);
     }
@@ -116,7 +116,7 @@ public class ModelController {
      */
     @GetMapping("/{modelId}/trades")
     @ApiOperation("获取模型的交易历史记录")
-    public ResponseEntity<List<Map<String, Object>>> getTrades(@PathVariable Integer modelId, @RequestParam(defaultValue = "10") Integer limit) {
+    public ResponseEntity<List<Map<String, Object>>> getTrades(@PathVariable String modelId, @RequestParam(defaultValue = "10") Integer limit) {
         List<Map<String, Object>> trades = modelService.getTrades(modelId, limit);
         return new ResponseEntity<>(trades, HttpStatus.OK);
     }
@@ -129,7 +129,7 @@ public class ModelController {
      */
     @GetMapping("/{modelId}/conversations")
     @ApiOperation("获取模型的对话历史记录")
-    public ResponseEntity<List<Map<String, Object>>> getConversations(@PathVariable Integer modelId, @RequestParam(defaultValue = "20") Integer limit) {
+    public ResponseEntity<List<Map<String, Object>>> getConversations(@PathVariable String modelId, @RequestParam(defaultValue = "20") Integer limit) {
         List<Map<String, Object>> conversations = modelService.getConversations(modelId, limit);
         return new ResponseEntity<>(conversations, HttpStatus.OK);
     }
@@ -141,7 +141,7 @@ public class ModelController {
      */
     @GetMapping("/{modelId}/prompts")
     @ApiOperation("获取模型的提示词配置")
-    public ResponseEntity<Map<String, Object>> getModelPrompts(@PathVariable Integer modelId) {
+    public ResponseEntity<Map<String, Object>> getModelPrompts(@PathVariable String modelId) {
         Map<String, Object> prompts = modelService.getModelPrompts(modelId);
         return new ResponseEntity<>(prompts, HttpStatus.OK);
     }
@@ -154,7 +154,7 @@ public class ModelController {
      */
     @PutMapping("/{modelId}/prompts")
     @ApiOperation("更新模型的提示词配置")
-    public ResponseEntity<Map<String, Object>> updateModelPrompts(@PathVariable Integer modelId, @RequestBody Map<String, String> prompts) {
+    public ResponseEntity<Map<String, Object>> updateModelPrompts(@PathVariable String modelId, @RequestBody Map<String, String> prompts) {
         String buyPrompt = prompts.get("buy_prompt");
         String sellPrompt = prompts.get("sell_prompt");
         Map<String, Object> result = modelService.updateModelPrompts(modelId, buyPrompt, sellPrompt);
@@ -169,7 +169,7 @@ public class ModelController {
      */
     @PostMapping("/{modelId}/batch-config")
     @ApiOperation("更新模型的批次配置")
-    public ResponseEntity<Map<String, Object>> updateModelBatchConfig(@PathVariable Integer modelId, @RequestBody Map<String, Object> batchConfig) {
+    public ResponseEntity<Map<String, Object>> updateModelBatchConfig(@PathVariable String modelId, @RequestBody Map<String, Object> batchConfig) {
         Map<String, Object> result = modelService.updateModelBatchConfig(modelId, batchConfig);
         return new ResponseEntity<>(result, HttpStatus.OK);
     }
@@ -182,7 +182,7 @@ public class ModelController {
      */
     @PostMapping("/{modelId}/max_positions")
     @ApiOperation("更新模型的最大持仓数量")
-    public ResponseEntity<Map<String, Object>> updateModelMaxPositions(@PathVariable Integer modelId, @RequestBody Map<String, Object> requestBody) {
+    public ResponseEntity<Map<String, Object>> updateModelMaxPositions(@PathVariable String modelId, @RequestBody Map<String, Object> requestBody) {
         Integer maxPositions = ((Number) requestBody.get("max_positions")).intValue();
         Map<String, Object> result = modelService.updateModelMaxPositions(modelId, maxPositions);
         return new ResponseEntity<>(result, HttpStatus.OK);
@@ -196,7 +196,7 @@ public class ModelController {
      */
     @PostMapping("/{modelId}/leverage")
     @ApiOperation("更新模型的杠杆倍数")
-    public ResponseEntity<Map<String, Object>> updateModelLeverage(@PathVariable Integer modelId, @RequestBody Map<String, Object> requestBody) {
+    public ResponseEntity<Map<String, Object>> updateModelLeverage(@PathVariable String modelId, @RequestBody Map<String, Object> requestBody) {
         Integer leverage = ((Number) requestBody.get("leverage")).intValue();
         Map<String, Object> result = modelService.updateModelLeverage(modelId, leverage);
         return new ResponseEntity<>(result, HttpStatus.OK);
@@ -210,8 +210,8 @@ public class ModelController {
      */
     @PutMapping("/{modelId}/provider")
     @ApiOperation("更新模型的API提供方和模型名称")
-    public ResponseEntity<Map<String, Object>> updateModelProvider(@PathVariable Integer modelId, @RequestBody Map<String, Object> requestBody) {
-        Integer providerId = ((Number) requestBody.get("provider_id")).intValue();
+    public ResponseEntity<Map<String, Object>> updateModelProvider(@PathVariable String modelId, @RequestBody Map<String, Object> requestBody) {
+        String providerId = (String) requestBody.get("provider_id");
         String modelName = (String) requestBody.get("model_name");
         Map<String, Object> result = modelService.updateModelProvider(modelId, providerId, modelName);
         return new ResponseEntity<>(result, HttpStatus.OK);
@@ -228,7 +228,7 @@ public class ModelController {
      */
     @PostMapping("/{modelId}/auto-trading")
     @ApiOperation("设置模型的自动交易开关")
-    public ResponseEntity<Map<String, Object>> setModelAutoTrading(@PathVariable Integer modelId, @RequestBody Map<String, Object> requestBody) {
+    public ResponseEntity<Map<String, Object>> setModelAutoTrading(@PathVariable String modelId, @RequestBody Map<String, Object> requestBody) {
         Boolean autoBuyEnabled;
         Boolean autoSellEnabled;
         
@@ -276,7 +276,7 @@ public class ModelController {
      */
     @PostMapping("/{modelId}/execute")
     @ApiOperation("手动执行一次交易周期（同时执行买入和卖出）")
-    public ResponseEntity<Map<String, Object>> executeTrading(@PathVariable Integer modelId) {
+    public ResponseEntity<Map<String, Object>> executeTrading(@PathVariable String modelId) {
         Map<String, Object> result = modelService.executeTrading(modelId);
         return new ResponseEntity<>(result, HttpStatus.OK);
     }
@@ -288,7 +288,7 @@ public class ModelController {
      */
     @PostMapping("/{modelId}/execute-buy")
     @ApiOperation("手动执行一次买入交易周期")
-    public ResponseEntity<Map<String, Object>> executeBuyTrading(@PathVariable Integer modelId) {
+    public ResponseEntity<Map<String, Object>> executeBuyTrading(@PathVariable String modelId) {
         Map<String, Object> result = modelService.executeBuyTrading(modelId);
         return new ResponseEntity<>(result, HttpStatus.OK);
     }
@@ -300,7 +300,7 @@ public class ModelController {
      */
     @PostMapping("/{modelId}/execute-sell")
     @ApiOperation("手动执行一次卖出交易周期")
-    public ResponseEntity<Map<String, Object>> executeSellTrading(@PathVariable Integer modelId) {
+    public ResponseEntity<Map<String, Object>> executeSellTrading(@PathVariable String modelId) {
         Map<String, Object> result = modelService.executeSellTrading(modelId);
         return new ResponseEntity<>(result, HttpStatus.OK);
     }
@@ -312,7 +312,7 @@ public class ModelController {
      */
     @PostMapping("/{modelId}/disable-buy")
     @ApiOperation("禁用模型的自动买入功能")
-    public ResponseEntity<Map<String, Object>> disableBuyTrading(@PathVariable Integer modelId) {
+    public ResponseEntity<Map<String, Object>> disableBuyTrading(@PathVariable String modelId) {
         Map<String, Object> result = modelService.disableBuyTrading(modelId);
         return new ResponseEntity<>(result, HttpStatus.OK);
     }
@@ -324,7 +324,7 @@ public class ModelController {
      */
     @PostMapping("/{modelId}/disable-sell")
     @ApiOperation("禁用模型的自动卖出功能")
-    public ResponseEntity<Map<String, Object>> disableSellTrading(@PathVariable Integer modelId) {
+    public ResponseEntity<Map<String, Object>> disableSellTrading(@PathVariable String modelId) {
         Map<String, Object> result = modelService.disableSellTrading(modelId);
         return new ResponseEntity<>(result, HttpStatus.OK);
     }

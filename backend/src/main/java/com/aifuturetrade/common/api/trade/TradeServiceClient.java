@@ -49,40 +49,40 @@ public class TradeServiceClient {
 
     /**
      * 手动执行一次买入交易周期
-     * @param modelId 模型ID
+     * @param modelId 模型ID（UUID格式）
      * @return 买入交易执行结果
      */
-    public Map<String, Object> executeBuyTrading(Integer modelId) {
+    public Map<String, Object> executeBuyTrading(String modelId) {
         String url = tradeConfig.getBaseUrl() + "/api/models/" + modelId + "/execute-buy";
         return executePostRequest(url, "执行买入交易");
     }
 
     /**
      * 手动执行一次卖出交易周期
-     * @param modelId 模型ID
+     * @param modelId 模型ID（UUID格式）
      * @return 卖出交易执行结果
      */
-    public Map<String, Object> executeSellTrading(Integer modelId) {
+    public Map<String, Object> executeSellTrading(String modelId) {
         String url = tradeConfig.getBaseUrl() + "/api/models/" + modelId + "/execute-sell";
         return executePostRequest(url, "执行卖出交易");
     }
 
     /**
      * 禁用模型的自动买入功能
-     * @param modelId 模型ID
+     * @param modelId 模型ID（UUID格式）
      * @return 更新后的自动买入状态
      */
-    public Map<String, Object> disableBuyTrading(Integer modelId) {
+    public Map<String, Object> disableBuyTrading(String modelId) {
         String url = tradeConfig.getBaseUrl() + "/api/models/" + modelId + "/disable-buy";
         return executePostRequest(url, "禁用自动买入");
     }
 
     /**
      * 禁用模型的自动卖出功能
-     * @param modelId 模型ID
+     * @param modelId 模型ID（UUID格式）
      * @return 更新后的自动卖出状态
      */
-    public Map<String, Object> disableSellTrading(Integer modelId) {
+    public Map<String, Object> disableSellTrading(String modelId) {
         String url = tradeConfig.getBaseUrl() + "/api/models/" + modelId + "/disable-sell";
         return executePostRequest(url, "禁用自动卖出");
     }

@@ -57,7 +57,7 @@ public class ProviderController {
      */
     @DeleteMapping("/{providerId}")
     @ApiOperation("删除API提供方")
-    public ResponseEntity<Map<String, Object>> deleteProvider(@PathVariable Integer providerId) {
+    public ResponseEntity<Map<String, Object>> deleteProvider(@PathVariable String providerId) {
         Boolean deleted = providerService.deleteProvider(providerId);
         Map<String, Object> response = new HashMap<>();
         if (deleted) {

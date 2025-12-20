@@ -91,7 +91,7 @@ public class ModelServiceImpl implements ModelService {
     }
 
     @Override
-    public ModelDTO getModelById(Integer id) {
+    public ModelDTO getModelById(String id) {
         ModelDO modelDO = modelMapper.selectModelById(id);
         return modelDO != null ? convertToDTO(modelDO) : null;
     }
@@ -148,7 +148,7 @@ public class ModelServiceImpl implements ModelService {
 
     @Override
     @Transactional(rollbackFor = Exception.class)
-    public Boolean deleteModel(Integer id) {
+    public Boolean deleteModel(String id) {
         int result = modelMapper.deleteById(id);
         return result > 0;
     }
@@ -164,17 +164,17 @@ public class ModelServiceImpl implements ModelService {
     }
 
     @Override
-    public Boolean isModelAutoBuyEnabled(Integer modelId) {
+    public Boolean isModelAutoBuyEnabled(String modelId) {
         return modelMapper.isModelAutoBuyEnabled(modelId);
     }
 
     @Override
-    public Boolean isModelAutoSellEnabled(Integer modelId) {
+    public Boolean isModelAutoSellEnabled(String modelId) {
         return modelMapper.isModelAutoSellEnabled(modelId);
     }
 
     @Override
-    public Map<String, Object> getPortfolio(Integer modelId) {
+    public Map<String, Object> getPortfolio(String modelId) {
         log.info("[ModelService] 获取投资组合数据, modelId={}", modelId);
         try {
             ModelDO model = modelMapper.selectModelById(modelId);
@@ -325,7 +325,7 @@ public class ModelServiceImpl implements ModelService {
     }
 
     @Override
-    public Map<String, Object> getModelPortfolioSymbols(Integer modelId) {
+    public Map<String, Object> getModelPortfolioSymbols(String modelId) {
         log.info("[ModelService] 获取持仓合约symbol列表, modelId={}", modelId);
         try {
             ModelDO model = modelMapper.selectModelById(modelId);
@@ -389,7 +389,7 @@ public class ModelServiceImpl implements ModelService {
     }
 
     @Override
-    public List<Map<String, Object>> getTrades(Integer modelId, Integer limit) {
+    public List<Map<String, Object>> getTrades(String modelId, Integer limit) {
         log.info("[ModelService] 获取交易历史记录, modelId={}, limit={}", modelId, limit);
         try {
             if (limit == null) {
@@ -481,7 +481,7 @@ public class ModelServiceImpl implements ModelService {
     }
 
     @Override
-    public List<Map<String, Object>> getConversations(Integer modelId, Integer limit) {
+    public List<Map<String, Object>> getConversations(String modelId, Integer limit) {
         log.info("[ModelService] 获取对话历史记录, modelId={}, limit={}", modelId, limit);
         try {
             // 默认limit为20，与前端保持一致
@@ -536,7 +536,7 @@ public class ModelServiceImpl implements ModelService {
     }
 
     @Override
-    public Map<String, Object> getModelPrompts(Integer modelId) {
+    public Map<String, Object> getModelPrompts(String modelId) {
         log.info("[ModelService] 获取模型提示词配置, modelId={}", modelId);
         try {
             ModelDO model = modelMapper.selectModelById(modelId);
@@ -592,7 +592,7 @@ public class ModelServiceImpl implements ModelService {
 
     @Override
     @Transactional(rollbackFor = Exception.class)
-    public Map<String, Object> updateModelPrompts(Integer modelId, String buyPrompt, String sellPrompt) {
+    public Map<String, Object> updateModelPrompts(String modelId, String buyPrompt, String sellPrompt) {
         log.info("[ModelService] 更新模型提示词配置, modelId={}", modelId);
         try {
             ModelDO model = modelMapper.selectModelById(modelId);
@@ -658,7 +658,7 @@ public class ModelServiceImpl implements ModelService {
 
     @Override
     @Transactional(rollbackFor = Exception.class)
-    public Map<String, Object> updateModelBatchConfig(Integer modelId, Map<String, Object> batchConfig) {
+    public Map<String, Object> updateModelBatchConfig(String modelId, Map<String, Object> batchConfig) {
         log.info("[ModelService] 更新模型批次配置, modelId={}", modelId);
         try {
             ModelDO model = modelMapper.selectModelById(modelId);
@@ -709,7 +709,7 @@ public class ModelServiceImpl implements ModelService {
 
     @Override
     @Transactional(rollbackFor = Exception.class)
-    public Map<String, Object> updateModelMaxPositions(Integer modelId, Integer maxPositions) {
+    public Map<String, Object> updateModelMaxPositions(String modelId, Integer maxPositions) {
         log.info("[ModelService] 更新模型最大持仓数量, modelId={}, maxPositions={}", modelId, maxPositions);
         try {
             if (maxPositions == null || maxPositions < 1) {
@@ -739,7 +739,7 @@ public class ModelServiceImpl implements ModelService {
 
     @Override
     @Transactional(rollbackFor = Exception.class)
-    public Map<String, Object> updateModelLeverage(Integer modelId, Integer leverage) {
+    public Map<String, Object> updateModelLeverage(String modelId, Integer leverage) {
         log.info("[ModelService] 更新模型杠杆倍数, modelId={}, leverage={}", modelId, leverage);
         try {
             if (leverage == null || leverage < 1) {
@@ -769,7 +769,7 @@ public class ModelServiceImpl implements ModelService {
 
     @Override
     @Transactional(rollbackFor = Exception.class)
-    public Map<String, Object> updateModelProvider(Integer modelId, Integer providerId, String modelName) {
+    public Map<String, Object> updateModelProvider(String modelId, String providerId, String modelName) {
         log.info("[ModelService] 更新模型提供方和模型名称, modelId={}, providerId={}, modelName={}", modelId, providerId, modelName);
         try {
             if (modelName == null || modelName.trim().isEmpty()) {
@@ -807,7 +807,7 @@ public class ModelServiceImpl implements ModelService {
 
     @Override
     @Transactional(rollbackFor = Exception.class)
-    public Map<String, Object> setModelAutoTrading(Integer modelId, Boolean autoBuyEnabled, Boolean autoSellEnabled) {
+    public Map<String, Object> setModelAutoTrading(String modelId, Boolean autoBuyEnabled, Boolean autoSellEnabled) {
         log.info("[ModelService] 设置模型自动交易开关, modelId={}, autoBuyEnabled={}, autoSellEnabled={}", 
                 modelId, autoBuyEnabled, autoSellEnabled);
         try {
@@ -967,7 +967,7 @@ public class ModelServiceImpl implements ModelService {
     }
 
     @Override
-    public Map<String, Object> executeTrading(Integer modelId) {
+    public Map<String, Object> executeTrading(String modelId) {
         log.info("[ModelService] 执行交易周期（同时执行买入和卖出）, modelId={}", modelId);
         Map<String, Object> result = new HashMap<>();
         try {
@@ -1002,7 +1002,7 @@ public class ModelServiceImpl implements ModelService {
     }
 
     @Override
-    public Map<String, Object> executeBuyTrading(Integer modelId) {
+    public Map<String, Object> executeBuyTrading(String modelId) {
         log.info("[ModelService] 执行买入交易周期, modelId={}", modelId);
         try {
             // 检查模型是否存在
@@ -1026,7 +1026,7 @@ public class ModelServiceImpl implements ModelService {
     }
 
     @Override
-    public Map<String, Object> executeSellTrading(Integer modelId) {
+    public Map<String, Object> executeSellTrading(String modelId) {
         log.info("[ModelService] 执行卖出交易周期, modelId={}", modelId);
         try {
             // 检查模型是否存在
@@ -1050,7 +1050,7 @@ public class ModelServiceImpl implements ModelService {
     }
 
     @Override
-    public Map<String, Object> disableBuyTrading(Integer modelId) {
+    public Map<String, Object> disableBuyTrading(String modelId) {
         log.info("[ModelService] 禁用自动买入, modelId={}", modelId);
         try {
             // 检查模型是否存在
@@ -1074,7 +1074,7 @@ public class ModelServiceImpl implements ModelService {
     }
 
     @Override
-    public Map<String, Object> disableSellTrading(Integer modelId) {
+    public Map<String, Object> disableSellTrading(String modelId) {
         log.info("[ModelService] 禁用自动卖出, modelId={}", modelId);
         try {
             // 检查模型是否存在

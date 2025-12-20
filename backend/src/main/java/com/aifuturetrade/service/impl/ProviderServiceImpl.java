@@ -35,7 +35,7 @@ public class ProviderServiceImpl implements ProviderService {
     }
 
     @Override
-    public ProviderDTO getProviderById(Integer id) {
+    public ProviderDTO getProviderById(String id) {
         ProviderDO providerDO = providerMapper.selectProviderById(id);
         return providerDO != null ? convertToDTO(providerDO) : null;
     }
@@ -61,7 +61,7 @@ public class ProviderServiceImpl implements ProviderService {
 
     @Override
     @Transactional(rollbackFor = Exception.class)
-    public Boolean deleteProvider(Integer id) {
+    public Boolean deleteProvider(String id) {
         int result = providerMapper.deleteById(id);
         return result > 0;
     }

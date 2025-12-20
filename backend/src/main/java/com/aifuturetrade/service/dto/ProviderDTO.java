@@ -15,9 +15,9 @@ public class ProviderDTO implements Serializable {
     private static final long serialVersionUID = 1L;
 
     /**
-     * 主键ID
+     * 主键ID（UUID格式）
      */
-    private Integer id;
+    private String id;
 
     /**
      * 提供方名称

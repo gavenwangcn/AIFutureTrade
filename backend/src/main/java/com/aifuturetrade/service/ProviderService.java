@@ -19,10 +19,10 @@ public interface ProviderService {
 
     /**
      * 根据ID查询API提供方
-     * @param id 提供方ID
+     * @param id 提供方ID（UUID格式）
      * @return API提供方
      */
-    ProviderDTO getProviderById(Integer id);
+    ProviderDTO getProviderById(String id);
 
     /**
      * 添加API提供方
@@ -40,10 +40,10 @@ public interface ProviderService {
 
     /**
      * 删除API提供方
-     * @param id 提供方ID
+     * @param id 提供方ID（UUID格式）
      * @return 是否删除成功
      */
-    Boolean deleteProvider(Integer id);
+    Boolean deleteProvider(String id);
 
     /**
      * 分页查询API提供方

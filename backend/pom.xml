@@ -24,12 +24,27 @@
         <maven.compiler.target>11</maven.compiler.target>
     </properties>
 
-    <!-- 阿里云Maven仓库配置 -->
+    <!-- Maven仓库配置 -->
     <repositories>
+        <!-- 阿里云Maven仓库（主要） -->
         <repository>
             <id>aliyunmaven</id>
             <name>阿里云公共仓库</name>
             <url>https://maven.aliyun.com/repository/public</url>
+            <layout>default</layout>
+            <releases>
+                <enabled>true</enabled>
+                <checksumPolicy>warn</checksumPolicy>
+            </releases>
+            <snapshots>
+                <enabled>false</enabled>
+            </snapshots>
+        </repository>
+        <!-- Maven中央仓库（备用） -->
+        <repository>
+            <id>central</id>
+            <name>Maven Central Repository</name>
+            <url>https://repo1.maven.org/maven2</url>
             <layout>default</layout>
             <releases>
                 <enabled>true</enabled>
@@ -41,10 +56,25 @@
     </repositories>
 
     <pluginRepositories>
+        <!-- 阿里云Maven仓库（主要） -->
         <pluginRepository>
             <id>aliyunmaven</id>
             <name>阿里云公共仓库</name>
             <url>https://maven.aliyun.com/repository/public</url>
+            <layout>default</layout>
+            <releases>
+                <enabled>true</enabled>
+                <checksumPolicy>warn</checksumPolicy>
+            </releases>
+            <snapshots>
+                <enabled>false</enabled>
+            </snapshots>
+        </pluginRepository>
+        <!-- Maven中央仓库（备用） -->
+        <pluginRepository>
+            <id>central</id>
+            <name>Maven Central Repository</name>
+            <url>https://repo1.maven.org/maven2</url>
             <layout>default</layout>
             <releases>
                 <enabled>true</enabled>

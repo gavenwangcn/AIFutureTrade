@@ -15,9 +15,9 @@ public class ModelDTO implements Serializable {
     private static final long serialVersionUID = 1L;
 
     /**
-     * 主键ID
+     * 主键ID（UUID格式）
      */
-    private Integer id;
+    private String id;
 
     /**
      * 模型名称
@@ -25,9 +25,9 @@ public class ModelDTO implements Serializable {
     private String name;
 
     /**
-     * 提供方ID
+     * 提供方ID（UUID格式）
      */
-    private Integer providerId;
+    private String providerId;
 
     /**
      * 模型名称（如gpt-3.5-turbo）
