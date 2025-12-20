@@ -313,6 +313,17 @@ public class MarketServiceImpl implements MarketService {
                     limit = 499;
                 }
             }
+            
+            // 验证limit参数的有效性（Binance API限制：1-1000）
+            if (limit != null) {
+                if (limit <= 0) {
+                    log.warn("[MarketService] limit参数 {} 无效，使用默认值500", limit);
+                    limit = 500;
+                } else if (limit > 1000) {
+                    log.warn("[MarketService] limit参数 {} 超过最大值1000，已限制为1000", limit);
+                    limit = 1000;
+                }
+            }
 
             // 调用 Binance API 获取 K 线数据
             List<Map<String, Object>> klines = client.getKlines(symbol, interval, limit, startTimestamp, endTimestamp);

@@ -48,7 +48,7 @@
     </appender>
 
     <!-- 日志级别 -->
-    <logger name="com.aifuturetrade" level="debug" additivity="true">
+    <logger name="com.aifuturetrade" level="info" additivity="true">
         <appender-ref ref="CONSOLE" />
         <appender-ref ref="FILE" />
     </logger>
