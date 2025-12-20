@@ -17,12 +17,12 @@ public interface PortfolioMapper extends BaseMapper<PortfolioDO> {
     /**
      * 根据模型ID查询持仓列表
      */
-    List<Map<String, Object>> selectPortfoliosByModelId(@Param("modelId") Integer modelId);
+    List<Map<String, Object>> selectPortfoliosByModelId(@Param("modelId") String modelId);
 
     /**
      * 根据模型ID和交易对查询持仓
      */
-    PortfolioDO selectByModelIdAndSymbol(@Param("modelId") Integer modelId, @Param("symbol") String symbol, @Param("positionSide") String positionSide);
+    PortfolioDO selectByModelIdAndSymbol(@Param("modelId") String modelId, @Param("symbol") String symbol, @Param("positionSide") String positionSide);
 
 }
 

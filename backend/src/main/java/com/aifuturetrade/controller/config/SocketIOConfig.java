@@ -4,8 +4,6 @@ import com.corundumstudio.socketio.SocketIOServer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.context.ApplicationContext;
-import org.springframework.context.ApplicationContextAware;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
@@ -23,7 +21,7 @@ import javax.annotation.PreDestroy;
  * 因此使用独立的端口（默认 5003），前端需要通过代理或直接连接此端口
  */
 @Configuration
-public class SocketIOConfig implements ApplicationContextAware {
+public class SocketIOConfig {
 
     private static final Logger logger = LoggerFactory.getLogger(SocketIOConfig.class);
 
@@ -34,13 +32,6 @@ public class SocketIOConfig implements ApplicationContextAware {
     private int socketioPort;
 
     private SocketIOServer server;
-    
-    private ApplicationContext applicationContext;
-    
-    @Override
-    public void setApplicationContext(ApplicationContext applicationContext) {
-        this.applicationContext = applicationContext;
-    }
 
     @Bean
     public SocketIOServer socketIOServer() {
@@ -101,17 +92,7 @@ public class SocketIOConfig implements ApplicationContextAware {
     @PostConstruct
     public void startServer() {
         try {
-            // 如果server字段为null，尝试从ApplicationContext获取Bean
-            if (server == null && applicationContext != null) {
-                try {
-                    server = applicationContext.getBean(SocketIOServer.class);
-                    logger.info("Socket.IO server retrieved from ApplicationContext");
-                } catch (Exception e) {
-                    logger.warn("Failed to get SocketIOServer from ApplicationContext: {}", e.getMessage());
-                }
-            }
-            
-            // 如果仍然为null，记录警告并跳过启动
+            // server字段在@Bean方法中已经设置，直接使用即可
             if (server == null) {
                 logger.warn("Socket.IO server is null, cannot start. This may be due to initialization order issue.");
                 logger.warn("Socket.IO functionality will not be available, but application will continue to run.");

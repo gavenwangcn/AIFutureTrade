@@ -23,10 +23,10 @@ public class ModelDO implements Serializable {
     private static final long serialVersionUID = 1L;
 
     /**
-     * 主键ID
+     * 主键ID（UUID格式）
      */
-    @TableId(value = "id", type = IdType.AUTO)
-    private Integer id;
+    @TableId(value = "id", type = IdType.ASSIGN_UUID)
+    private String id;
 
     /**
      * 模型名称
@@ -34,9 +34,9 @@ public class ModelDO implements Serializable {
     private String name;
 
     /**
-     * 提供方ID
+     * 提供方ID（UUID格式）
      */
-    private Integer providerId;
+    private String providerId;
 
     /**
      * 模型名称（如gpt-3.5-turbo）

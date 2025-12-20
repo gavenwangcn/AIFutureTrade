@@ -23,26 +23,26 @@ public interface ModelMapper extends BaseMapper<ModelDO> {
 
     /**
      * 根据ID查询交易模型
-     * @param id 模型ID
+     * @param id 模型ID（UUID格式）
      * @return 交易模型
      */
     @Select("select * from models where id = #{id}")
-    ModelDO selectModelById(Integer id);
+    ModelDO selectModelById(String id);
 
     /**
      * 检查模型是否启用自动买入
-     * @param modelId 模型ID
+     * @param modelId 模型ID（UUID格式）
      * @return 1：启用，0：未启用
      */
     @Select("select auto_buy_enabled from models where id = #{modelId}")
-    Boolean isModelAutoBuyEnabled(Integer modelId);
+    Boolean isModelAutoBuyEnabled(String modelId);
 
     /**
      * 检查模型是否启用自动卖出
-     * @param modelId 模型ID
+     * @param modelId 模型ID（UUID格式）
      * @return 1：启用，0：未启用
      */
     @Select("select auto_sell_enabled from models where id = #{modelId}")
-    Boolean isModelAutoSellEnabled(Integer modelId);
+    Boolean isModelAutoSellEnabled(String modelId);
 
 }

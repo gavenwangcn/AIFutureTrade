@@ -23,15 +23,15 @@ public class ModelPromptDO implements Serializable {
     private static final long serialVersionUID = 1L;
 
     /**
-     * 主键ID
+     * 主键ID（UUID格式）
      */
-    @TableId(value = "id", type = IdType.AUTO)
-    private Integer id;
+    @TableId(value = "id", type = IdType.ASSIGN_UUID)
+    private String id;
 
     /**
-     * 模型ID
+     * 模型ID（UUID格式）
      */
-    private Integer modelId;
+    private String modelId;
 
     /**
      * 买入策略提示词

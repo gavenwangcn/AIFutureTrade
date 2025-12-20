@@ -29,13 +29,9 @@ function getApiBaseUrl() {
  * 实现 KLineChart 10.0.0 的 DataLoader 接口
  * @returns {DataLoader} 数据加载器对象
  */
-export function createDataLoader(onLoadingStart, onLoadingEnd) {
+export function createDataLoader() {
   const subscriptions = new Map() // 存储订阅信息: key = `${symbol.ticker}:${period.text}`, value = { callback, symbol, period }
   const marketPrices = [] // 缓存市场行情数据
-  const loadingCallbacks = {
-    start: onLoadingStart || (() => {}),
-    end: onLoadingEnd || (() => {})
-  }
 
   /**
    * 获取历史K线数据
@@ -50,7 +46,6 @@ export function createDataLoader(onLoadingStart, onLoadingEnd) {
   async function getBars(params) {
     try {
       const { type, timestamp, symbol, period, callback } = params
-      loadingCallbacks.start()
       
       console.log('[DataLoader] Getting K-line data:', {
         type,
@@ -64,7 +59,6 @@ export function createDataLoader(onLoadingStart, onLoadingEnd) {
       if (!interval) {
         console.warn('[DataLoader] Unsupported period:', period)
         callback([])
-        loadingCallbacks.end()
         return
       }
 
@@ -73,7 +67,6 @@ export function createDataLoader(onLoadingStart, onLoadingEnd) {
       if (!ticker) {
         console.warn('[DataLoader] Invalid symbol:', symbol)
         callback([])
-        loadingCallbacks.end()
         return
       }
 
@@ -95,7 +88,6 @@ export function createDataLoader(onLoadingStart, onLoadingEnd) {
         const errorText = await response.text()
         console.error('[DataLoader] HTTP错误详情:', errorText)
         callback([])
-        loadingCallbacks.end()
         return
       }
       
@@ -112,7 +104,6 @@ export function createDataLoader(onLoadingStart, onLoadingEnd) {
       } else {
         console.warn('[DataLoader] Invalid response format:', result)
         callback([])
-        loadingCallbacks.end()
         return
       }
 
@@ -215,11 +206,9 @@ export function createDataLoader(onLoadingStart, onLoadingEnd) {
         }
       }
       callback(klines, more)
-      loadingCallbacks.end()
     } catch (error) {
       console.error('[DataLoader] Error getting K-line data:', error)
       callback([])
-      loadingCallbacks.end()
     }
   }
 

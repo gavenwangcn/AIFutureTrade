@@ -32,6 +32,8 @@ services:
     ports:
       - "${BACKEND_PORT:-5002}:5002"  # 后端API端口，供前端调用
     environment:
+      # Spring Profile配置（生产环境）
+      - SPRING_PROFILES_ACTIVE=${SPRING_PROFILES_ACTIVE:-prod}
       # 服务器端口配置
       - SERVER_PORT=${SERVER_PORT:-5002}
       # MySQL配置

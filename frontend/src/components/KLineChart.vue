@@ -22,10 +22,6 @@
         </div>
         <div class="kline-modal-body">
           <div ref="chartContainerRef" class="kline-chart-container">
-            <div class="loading-overlay" v-if="isLoading">
-              <div class="loader"></div>
-              <div class="loading-text">加载中...</div>
-            </div>
           </div>
         </div>
       </div>
@@ -77,7 +73,6 @@ const chartInstance = ref(null)
 const dataLoader = ref(null)
 const currentInterval = ref(props.interval)
 const title = ref(`${props.symbol} - K线图`)
-const isLoading = ref(false)
 
 // Timeframes configuration
 // KLineChart 10.0.0 使用 { span: number, type: string } 格式
@@ -123,9 +118,6 @@ const initChart = async () => {
     return
   }
   
-  // 立即显示加载状态，避免空白屏幕
-  isLoading.value = true
-  
   // Destroy existing chart if it exists (before clearing)
   destroyChart()
   
@@ -136,7 +128,6 @@ const initChart = async () => {
     // 再次检查容器是否存在（可能在销毁过程中被移除）
     if (!chartContainerRef.value) {
       console.error('[KLineChart] Chart container removed during destroy')
-      isLoading.value = false
       return
     }
     
@@ -153,18 +144,8 @@ const initChart = async () => {
       console.warn('[KLineChart] Error clearing container:', e)
     }
     
-    // Create data loader with loading callbacks
-    // 确保加载状态正确触发
-    dataLoader.value = createDataLoader(
-      () => { 
-        isLoading.value = true
-        console.log('[KLineChart] 数据加载开始')
-      },
-      () => { 
-        isLoading.value = false
-        console.log('[KLineChart] 数据加载完成')
-      }
-    )
+    // Create data loader
+    dataLoader.value = createDataLoader()
     
     // Convert symbol and period
     const symbolInfo = symbolToSymbolInfo(props.symbol)
@@ -261,7 +242,6 @@ const initChart = async () => {
     console.log('[KLineChart] Chart initialized successfully with red-up-green-down style')
   } catch (error) {
     console.error('[KLineChart] Failed to initialize chart:', error)
-    isLoading.value = false
   }
 }
 
@@ -269,9 +249,6 @@ const initChart = async () => {
 const handleTimeframeChange = (interval) => {
   currentInterval.value = interval
   emit('interval-change', interval)
-  
-  // 切换时间周期时显示加载状态
-  isLoading.value = true
   
   if (chartInstance.value && typeof chartInstance.value.setPeriod === 'function') {
     const period = intervalToPeriod(interval)
@@ -289,22 +266,14 @@ watch(() => props.visible, async (newVal) => {
   if (newVal) {
     title.value = `${props.symbol} - K线图`
     currentInterval.value = props.interval
-    // 立即显示加载状态
-    isLoading.value = true
     await nextTick()
     // Add small delay to ensure modal is fully rendered
-    // 使用 requestAnimationFrame 确保 DOM 已完全渲染
-    requestAnimationFrame(() => {
-      setTimeout(() => {
-        if (props.visible && chartContainerRef.value) {
-          initChart()
-        }
-      }, 100)
-    })
+    setTimeout(() => {
+      if (props.visible && chartContainerRef.value) {
+        initChart()
+      }
+    }, 100)
   } else {
-    // 隐藏时立即隐藏加载状态，避免覆盖层残留
-    isLoading.value = false
-    // 然后销毁图表
     destroyChart()
   }
 }, { immediate: false })
@@ -511,53 +480,5 @@ onUnmounted(() => {
 .kline-chart-container {
   width: 100%;
   height: 100%;
-  position: relative;
-}
-
-/* Loading styles */
-.loading-overlay {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
-  background-color: rgba(255, 255, 255, 0.95);
-  backdrop-filter: blur(2px);
-  z-index: 10;
-  transition: opacity 0.3s ease-in-out;
-}
-
-.loader {
-  width: 56px;
-  height: 56px;
-  border: 6px solid #f0f0f0;
-  border-top: 6px solid #1677ff;
-  border-right: 6px solid #1677ff;
-  border-radius: 50%;
-  animation: spin 0.8s linear infinite;
-  margin-bottom: 20px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-}
-
-@keyframes spin {
-  0% { transform: rotate(0deg); }
-  100% { transform: rotate(360deg); }
-}
-
-.loading-text {
-  font-size: 16px;
-  color: #1677ff;
-  font-weight: 600;
-  letter-spacing: 0.5px;
-  animation: pulse 1.5s ease-in-out infinite;
-}
-
-@keyframes pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.6; }
 }
 </style>

@@ -17,7 +17,7 @@ public interface AccountValueHistoryMapper extends BaseMapper<AccountValueHistor
     /**
      * 根据模型ID查询账户价值历史
      */
-    List<Map<String, Object>> selectHistoryByModelId(@Param("modelId") Integer modelId, @Param("limit") Integer limit);
+    List<Map<String, Object>> selectHistoryByModelId(@Param("modelId") String modelId, @Param("limit") Integer limit);
 
     /**
      * 查询聚合账户价值历史（所有模型）

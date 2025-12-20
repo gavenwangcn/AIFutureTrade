@@ -23,10 +23,10 @@ public interface ProviderMapper extends BaseMapper<ProviderDO> {
 
     /**
      * 根据ID查询API提供方
-     * @param id 提供方ID
+     * @param id 提供方ID（UUID格式）
      * @return API提供方
      */
     @Select("select * from providers where id = #{id}")
-    ProviderDO selectProviderById(Integer id);
+    ProviderDO selectProviderById(String id);
 
 }
