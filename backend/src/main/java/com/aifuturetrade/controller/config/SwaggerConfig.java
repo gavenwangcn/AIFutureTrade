@@ -2,6 +2,8 @@ package com.aifuturetrade.controller.config;
 
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.web.servlet.config.annotation.PathMatchConfigurer;
+import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 import springfox.documentation.builders.ApiInfoBuilder;
 import springfox.documentation.builders.PathSelectors;
 import springfox.documentation.builders.RequestHandlerSelectors;
@@ -17,7 +19,17 @@ import springfox.documentation.swagger2.annotations.EnableSwagger2;
  */
 @Configuration
 @EnableSwagger2
-public class SwaggerConfig {
+public class SwaggerConfig implements WebMvcConfigurer {
+
+    /**
+     * 修复 Spring Boot 2.7+ 与 Springfox 的兼容性问题
+     * Spring Boot 2.7+ 默认使用 PathPatternParser，但 Springfox 2.9.2 不支持
+     * 需要强制使用 AntPathMatcher
+     */
+    @Override
+    public void configurePathMatch(PathMatchConfigurer configurer) {
+        configurer.setPatternParser(null);
+    }
 
     @Bean
     public Docket createRestApi() {
