@@ -1,6 +1,7 @@
 package com.aifuturetrade.common.api.binance;
 
 import com.binance.connector.client.common.ApiResponse;
+import com.binance.connector.client.derivatives_trading_usds_futures.rest.model.Interval;
 import lombok.extern.slf4j.Slf4j;
 
 import java.time.Instant;
@@ -218,23 +219,19 @@ public class BinanceFuturesClient extends BinanceFuturesBase {
                 log.debug("[Binance Futures] 准备调用SDK获取K线数据, symbol={}, interval={}, limit={}, startTime={}, endTime={}", 
                         requestSymbol, interval, limit, startTime, endTime);
                 
-                // 构建请求参数Map（Binance SDK通常使用Map参数）
-                Map<String, Object> requestParams = new HashMap<>();
-                requestParams.put("symbol", requestSymbol);
-                requestParams.put("interval", interval);
-                if (limit != null) {
-                    requestParams.put("limit", limit);
-                }
-                if (startTime != null) {
-                    requestParams.put("startTime", startTime);
-                }
-                if (endTime != null) {
-                    requestParams.put("endTime", endTime);
+                // 将字符串interval转换为Interval枚举
+                Interval intervalEnum = convertStringToInterval(interval);
+                if (intervalEnum == null) {
+                    log.error("[Binance Futures] 不支持的interval: {}", interval);
+                    return new ArrayList<>();
                 }
                 
+                // 转换limit为Long类型（如果为null则使用默认值）
+                Long limitLong = limit != null ? limit.longValue() : 500L;
+                
                 // 调用SDK API获取K线数据
-                // 注意：根据Binance Java SDK的文档，klineCandlestickData方法接受Map<String, Object>参数
-                response = restApi.klineCandlestickData(requestParams);
+                // 方法签名：klineCandlestickData(String symbol, Interval interval, Long limit, Long startTime, Long endTime)
+                response = restApi.klineCandlestickData(requestSymbol, intervalEnum, limitLong, startTime, endTime);
                 
                 // 获取响应数据
                 if (response != null) {
@@ -435,6 +432,55 @@ public class BinanceFuturesClient extends BinanceFuturesBase {
         if (obj instanceof Number) {
             return ((Number) obj).longValue();
         }
+        return null;
+    }
+    
+    /**
+     * 将字符串interval转换为Interval枚举
+     * @param intervalStr 字符串格式的interval，如 "1m", "5m", "1h", "1d" 等
+     * @return Interval枚举值，如果不支持则返回null
+     */
+    private Interval convertStringToInterval(String intervalStr) {
+        if (intervalStr == null || intervalStr.isEmpty()) {
+            return null;
+        }
+        
+        String upperInterval = intervalStr.toUpperCase();
+        
+        // 尝试多种可能的枚举命名格式
+        String[] possibleNames = {
+            "INTERVAL_" + upperInterval,           // INTERVAL_1M, INTERVAL_5M
+            "INTERVAL_" + upperInterval.replaceAll("[^A-Z0-9]", ""),  // INTERVAL_1M (移除特殊字符)
+            upperInterval,                         // 直接使用 1M, 5M
+            intervalStr                            // 保持原样 1m, 5m
+        };
+        
+        for (String enumName : possibleNames) {
+            try {
+                return Interval.valueOf(enumName);
+            } catch (IllegalArgumentException e) {
+                // 继续尝试下一个
+                continue;
+            }
+        }
+        
+        // 如果所有格式都失败，尝试使用反射查找所有枚举值
+        try {
+            Interval[] values = Interval.values();
+            for (Interval interval : values) {
+                // 检查枚举值的字符串表示是否匹配
+                String enumStr = interval.toString().toUpperCase();
+                if (enumStr.equals(upperInterval) || 
+                    enumStr.endsWith(upperInterval) ||
+                    enumStr.contains(upperInterval)) {
+                    return interval;
+                }
+            }
+        } catch (Exception e) {
+            log.warn("[Binance Futures] 使用反射查找Interval枚举失败: {}", e.getMessage());
+        }
+        
+        log.error("[Binance Futures] 不支持的interval格式: {}", intervalStr);
         return null;
     }
 }

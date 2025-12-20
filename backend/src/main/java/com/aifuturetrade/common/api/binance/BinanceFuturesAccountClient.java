@@ -3,7 +3,6 @@ package com.aifuturetrade.common.api.binance;
 import com.binance.connector.client.common.ApiResponse;
 import lombok.extern.slf4j.Slf4j;
 
-import java.util.HashMap;
 import java.util.Map;
 
 /**
@@ -51,11 +50,10 @@ public class BinanceFuturesAccountClient extends BinanceFuturesBase {
     public Map<String, Object> getAccount() {
         try {
             log.info("[BinanceFuturesAccountClient] 开始获取账户信息");
-            // TODO: 根据实际SDK API调整调用方式，可能需要传递参数
-            // ApiResponse<?> response = restApi.accountInformationV3(null);
-            // Object data = getResponseData(response);
-            // Map<String, Object> accountInfo = toMap(data);
-            Map<String, Object> accountInfo = new HashMap<>(); // 临时占位符
+            // 调用SDK API获取账户信息 - 使用null作为recvWindow参数（可选）
+            ApiResponse<?> response = restApi.accountInformationV3((Long) null);
+            Object data = getResponseData(response);
+            Map<String, Object> accountInfo = toMap(data);
             log.info("[BinanceFuturesAccountClient] 账户信息获取成功");
             return accountInfo;
         } catch (Exception e) {
@@ -75,11 +73,10 @@ public class BinanceFuturesAccountClient extends BinanceFuturesBase {
     public Map<String, Object> getAccountV2() {
         try {
             log.info("[BinanceFuturesAccountClient] 开始获取账户信息（V2）");
-            // TODO: 根据实际SDK API调整调用方式
-            // ApiResponse<?> response = restApi.accountInformationV2(null);
-            // Object data = getResponseData(response);
-            // Map<String, Object> accountInfo = toMap(data);
-            Map<String, Object> accountInfo = new HashMap<>(); // 临时占位符
+            // 调用SDK API获取账户信息V2 - 使用null作为recvWindow参数（可选）
+            ApiResponse<?> response = restApi.accountInformationV2((Long) null);
+            Object data = getResponseData(response);
+            Map<String, Object> accountInfo = toMap(data);
             log.info("[BinanceFuturesAccountClient] 账户信息获取成功（V2）");
             return accountInfo;
         } catch (Exception e) {
@@ -100,10 +97,9 @@ public class BinanceFuturesAccountClient extends BinanceFuturesBase {
     public java.util.List<Map<String, Object>> getBalance() {
         try {
             log.info("[BinanceFuturesAccountClient] 开始获取账户余额");
-            // TODO: 根据实际SDK API调整调用方式
-            // ApiResponse<?> response = restApi.futuresAccountBalanceV2(null);
-            // Object data = getResponseData(response);
-            Object data = null; // 临时占位符
+            // 调用SDK API获取账户余额 - 使用null作为recvWindow参数（可选）
+            ApiResponse<?> response = restApi.futuresAccountBalanceV2((Long) null);
+            Object data = getResponseData(response);
             
             if (data instanceof java.util.List) {
                 java.util.List<Object> balanceList = (java.util.List<Object>) data;

@@ -1,7 +1,12 @@
 package com.aifuturetrade.common.api.binance;
 
 import com.binance.connector.client.common.ApiResponse;
+import com.binance.connector.client.derivatives_trading_usds_futures.rest.model.ChangeInitialLeverageRequest;
+import com.binance.connector.client.derivatives_trading_usds_futures.rest.model.NewOrderRequest;
+import com.binance.connector.client.derivatives_trading_usds_futures.rest.model.TestOrderRequest;
 import lombok.extern.slf4j.Slf4j;
+
+import java.lang.reflect.Method;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -117,11 +122,13 @@ public class BinanceFuturesOrderClient extends BinanceFuturesBase {
             String formattedSymbol = formatSymbol(symbol);
             log.info("[Binance Futures] 修改初始杠杆，交易对: {}，杠杆倍数: {}", formattedSymbol, leverage);
             
-            // 调用REST API接口
-            // TODO: 根据实际SDK API调整调用方式，可能需要使用Request对象
-            // ApiResponse<?> response = restApi.changeInitialLeverage(...);
-            // Map<String, Object> data = toMap(getResponseData(response));
-            Map<String, Object> data = new HashMap<>(); // 临时占位符
+            // 调用REST API接口 - 构建Request对象
+            ChangeInitialLeverageRequest request = new ChangeInitialLeverageRequest();
+            request.setSymbol(formattedSymbol);
+            request.setLeverage(leverage.longValue()); // 转换为Long类型
+            ApiResponse<?> response = restApi.changeInitialLeverage(request);
+            Object responseData = getResponseData(response);
+            Map<String, Object> data = toMap(responseData);
             
             log.info("[Binance Futures] 成功修改初始杠杆，交易对: {}，新杠杆: {}", 
                     formattedSymbol, data.get("leverage"));
@@ -252,18 +259,51 @@ public class BinanceFuturesOrderClient extends BinanceFuturesBase {
                     testParams.put("positionSide", orderParams.get("positionSide"));
                 }
                 
-                // TODO: 根据实际SDK API调整调用方式，可能需要使用Request对象
-                // response = restApi.testOrder(...);
-                response = null; // 临时占位符
+                // 调用测试订单接口 - 构建Request对象
+                TestOrderRequest testRequest = new TestOrderRequest();
+                testRequest.setSymbol((String) testParams.get("symbol"));
+                // 使用反射设置side（可能是枚举或字符串）
+                setRequestField(testRequest, "setSide", testParams.get("side"));
+                setRequestField(testRequest, "setType", testParams.get("type"));
+                if (testParams.get("quantity") != null) {
+                    testRequest.setQuantity(((Number) testParams.get("quantity")).doubleValue());
+                }
+                if (testParams.get("positionSide") != null) {
+                    setRequestField(testRequest, "setPositionSide", testParams.get("positionSide"));
+                }
+                response = restApi.testOrder(testRequest);
                 
                 log.info("[Binance Futures] 测试接口调用成功（未真实下单）");
             } else {
                 // 使用真实交易接口
                 log.info("[Binance Futures] 使用真实交易接口下单");
                 
-                // TODO: 根据实际SDK API调整调用方式，可能需要使用Request对象
-                // response = restApi.newOrder(...);
-                response = null; // 临时占位符
+                // 调用真实订单接口 - 构建Request对象
+                NewOrderRequest newOrderRequest = new NewOrderRequest();
+                newOrderRequest.setSymbol((String) orderParams.get("symbol"));
+                // 使用反射设置字段（可能是枚举或字符串）
+                setRequestField(newOrderRequest, "setSide", orderParams.get("side"));
+                setRequestField(newOrderRequest, "setType", orderParams.get("type"));
+                if (orderParams.get("quantity") != null) {
+                    newOrderRequest.setQuantity(((Number) orderParams.get("quantity")).doubleValue());
+                }
+                if (orderParams.get("price") != null) {
+                    newOrderRequest.setPrice(((Number) orderParams.get("price")).doubleValue());
+                }
+                if (orderParams.get("stopPrice") != null) {
+                    newOrderRequest.setStopPrice(((Number) orderParams.get("stopPrice")).doubleValue());
+                }
+                if (orderParams.get("positionSide") != null) {
+                    setRequestField(newOrderRequest, "setPositionSide", orderParams.get("positionSide"));
+                }
+                if (orderParams.get("closePosition") != null) {
+                    Boolean closePos = (Boolean) orderParams.get("closePosition");
+                    setRequestField(newOrderRequest, "setClosePosition", closePos);
+                }
+                if (orderParams.get("timeInForce") != null) {
+                    setRequestField(newOrderRequest, "setTimeInForce", orderParams.get("timeInForce"));
+                }
+                response = restApi.newOrder(newOrderRequest);
             }
             
             // 处理响应
@@ -450,6 +490,56 @@ public class BinanceFuturesOrderClient extends BinanceFuturesBase {
         } catch (Exception exc) {
             log.error("[Binance Futures] 平仓交易失败: {}", exc.getMessage(), exc);
             throw exc;
+        }
+    }
+    
+    /**
+     * 使用反射设置Request对象的字段（支持枚举和字符串类型）
+     */
+    private void setRequestField(Object request, String methodName, Object value) {
+        if (value == null) {
+            return;
+        }
+        try {
+            // 尝试多种方法签名
+            Method[] methods = request.getClass().getMethods();
+            for (Method method : methods) {
+                if (method.getName().equals(methodName) && method.getParameterCount() == 1) {
+                    Class<?> paramType = method.getParameterTypes()[0];
+                    Object paramValue = value;
+                    
+                    // 如果参数类型是枚举，尝试转换
+                    if (paramType.isEnum() && value instanceof String) {
+                        try {
+                            @SuppressWarnings({"unchecked", "rawtypes"})
+                            Class enumClass = paramType;
+                            paramValue = Enum.valueOf(enumClass, ((String) value).toUpperCase());
+                        } catch (IllegalArgumentException e) {
+                            log.warn("无法将值 {} 转换为枚举类型 {}", value, paramType.getName());
+                            continue; // 尝试下一个方法
+                        }
+                    } else if (paramType == String.class && !(value instanceof String)) {
+                        paramValue = value.toString();
+                    } else if (paramType == Boolean.class && value instanceof Boolean) {
+                        paramValue = value;
+                    } else if (Number.class.isAssignableFrom(paramType) && value instanceof Number) {
+                        // 数字类型转换
+                        if (paramType == Long.class) {
+                            paramValue = ((Number) value).longValue();
+                        } else if (paramType == Integer.class) {
+                            paramValue = ((Number) value).intValue();
+                        } else if (paramType == Double.class) {
+                            paramValue = ((Number) value).doubleValue();
+                        }
+                    }
+                    
+                    method.invoke(request, paramValue);
+                    return;
+                }
+            }
+            log.warn("未找到方法 {} 或无法设置值 {}", methodName, value);
+        } catch (Exception e) {
+            log.warn("设置Request字段失败: {} = {}, 错误: {}", methodName, value, e.getMessage());
         }
     }
     

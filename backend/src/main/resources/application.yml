@@ -102,8 +102,8 @@ logging:
 
 # Binance API配置（可通过环境变量覆盖）
 binance:
-    api-key: ${BINANCE_API_KEY:your-api-key}
-    secret-key: ${BINANCE_SECRET_KEY:your-secret-key}
+    api-key: ${BINANCE_API_KEY:LBtjhBgX1RCksNJDdOoJPeDD30Z70YIGHHH9DrqjIDDkK7xcPRQcgydPxGRr6MN1}
+    secret-key: ${BINANCE_SECRET_KEY:55arJnwlytDflHv151UpHN1s32ACnJZEs86mbc79wGyeuSUJNHTDPN7jEgBbqO6I}
     private-key-path: 
     private-key-pass: 
     base-url: https://api.binance.com
