@@ -254,6 +254,31 @@ public class BinanceFuturesClient extends BinanceFuturesBase {
         List<Map<String, Object>> klines = new ArrayList<>();
         
         try {
+            // 如果 startTime 和 endTime 为空，自动计算时间范围
+            Long calculatedStartTime = startTime;
+            Long calculatedEndTime = endTime;
+            
+            if (calculatedStartTime == null || calculatedEndTime == null) {
+                // endTime 取当前时间
+                calculatedEndTime = System.currentTimeMillis();
+                
+                // 验证和转换limit参数（Binance API限制：1-1000）
+                Long defaultLimit = ("1d".equals(interval) || "1w".equals(interval)) ? 99L : 499L;
+                Long limitLong = (limit != null && limit > 0 && limit <= 1000) 
+                    ? limit.longValue() 
+                    : defaultLimit;
+                
+                // startTime 根据 limit 和 interval 计算
+                // 例如：limit=100, interval=1m，则 startTime = endTime - 100分钟
+                long intervalMinutes = getIntervalMinutes(interval);
+                long totalMinutes = limitLong * intervalMinutes;
+                calculatedStartTime = calculatedEndTime - (totalMinutes * 60 * 1000);
+                
+                log.info("[Binance Futures] 自动计算时间范围: interval={} ({}分钟/根), limit={}, 总时间跨度={}分钟", 
+                        interval, intervalMinutes, limitLong, totalMinutes);
+                log.info("[Binance Futures] 计算的 startTime={}, endTime={}", calculatedStartTime, calculatedEndTime);
+            }
+            
             // 构建API调用参数
             Map<String, Object> params = new HashMap<>();
             params.put("symbol", symbol.toUpperCase());
@@ -261,11 +286,11 @@ public class BinanceFuturesClient extends BinanceFuturesBase {
             if (limit != null) {
                 params.put("limit", limit);
             }
-            if (startTime != null) {
-                params.put("startTime", startTime);
+            if (calculatedStartTime != null) {
+                params.put("startTime", calculatedStartTime);
             }
-            if (endTime != null) {
-                params.put("endTime", endTime);
+            if (calculatedEndTime != null) {
+                params.put("endTime", calculatedEndTime);
             }
             
             // 调用API获取K线数据
@@ -276,7 +301,7 @@ public class BinanceFuturesClient extends BinanceFuturesBase {
             try {
                 String requestSymbol = symbol.toUpperCase();
                 log.debug("[Binance Futures] 准备调用SDK获取K线数据, symbol={}, interval={}, limit={}, startTime={}, endTime={}", 
-                        requestSymbol, interval, limit, startTime, endTime);
+                        requestSymbol, interval, limit, calculatedStartTime, calculatedEndTime);
                 
                 // 将字符串interval转换为Interval枚举
                 Interval intervalEnum = convertStringToInterval(interval);
@@ -293,11 +318,11 @@ public class BinanceFuturesClient extends BinanceFuturesBase {
                     : defaultLimit;
                 
                 log.info("[Binance Futures] 调用参数: symbol={}, interval={}, startTime={}, endTime={}, limit={}", 
-                        requestSymbol, intervalEnum, startTime, endTime, limitLong);
+                        requestSymbol, intervalEnum, calculatedStartTime, calculatedEndTime, limitLong);
                 
                 // 调用SDK API获取K线数据
                 // 参考官方示例：klineCandlestickData(symbol, interval, startTime, endTime, limit)
-                response = restApi.klineCandlestickData(requestSymbol, intervalEnum, startTime, endTime, limitLong);
+                response = restApi.klineCandlestickData(requestSymbol, intervalEnum, calculatedStartTime, calculatedEndTime, limitLong);
                 
                 // 获取响应数据
                 if (response != null) {
@@ -521,6 +546,65 @@ public class BinanceFuturesClient extends BinanceFuturesBase {
             return ((Number) obj).longValue();
         }
         return null;
+    }
+    
+    /**
+     * 根据interval字符串获取对应的分钟数
+     * @param intervalStr 时间间隔字符串，如 "1m", "5m", "1h", "1d" 等
+     * @return 对应的分钟数
+     */
+    private long getIntervalMinutes(String intervalStr) {
+        if (intervalStr == null || intervalStr.isEmpty()) {
+            return 1; // 默认1分钟
+        }
+        
+        String lowerInterval = intervalStr.toLowerCase();
+        
+        // 解析数字和单位
+        if (lowerInterval.endsWith("m")) {
+            // 分钟：1m, 3m, 5m, 15m, 30m
+            String numStr = lowerInterval.substring(0, lowerInterval.length() - 1);
+            try {
+                return Long.parseLong(numStr);
+            } catch (NumberFormatException e) {
+                return 1;
+            }
+        } else if (lowerInterval.endsWith("h")) {
+            // 小时：1h, 2h, 4h, 6h, 8h, 12h
+            String numStr = lowerInterval.substring(0, lowerInterval.length() - 1);
+            try {
+                return Long.parseLong(numStr) * 60;
+            } catch (NumberFormatException e) {
+                return 60;
+            }
+        } else if (lowerInterval.endsWith("d")) {
+            // 天：1d, 3d
+            String numStr = lowerInterval.substring(0, lowerInterval.length() - 1);
+            try {
+                return Long.parseLong(numStr) * 24 * 60;
+            } catch (NumberFormatException e) {
+                return 24 * 60;
+            }
+        } else if (lowerInterval.endsWith("w")) {
+            // 周：1w
+            String numStr = lowerInterval.substring(0, lowerInterval.length() - 1);
+            try {
+                return Long.parseLong(numStr) * 7 * 24 * 60;
+            } catch (NumberFormatException e) {
+                return 7 * 24 * 60;
+            }
+        } else if (lowerInterval.endsWith("M")) {
+            // 月：1M
+            String numStr = lowerInterval.substring(0, lowerInterval.length() - 1);
+            try {
+                return Long.parseLong(numStr) * 30 * 24 * 60; // 近似30天
+            } catch (NumberFormatException e) {
+                return 30 * 24 * 60;
+            }
+        }
+        
+        // 默认返回1分钟
+        return 1;
     }
     
     /**
