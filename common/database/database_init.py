@@ -34,7 +34,6 @@ FUTURES_TABLE = "futures"
 ACCOUNT_ASSET_TABLE = "account_asset"
 ASSET_TABLE = "asset"
 BINANCE_TRADE_LOGS_TABLE = "binance_trade_logs"
-LLM_API_ERROR_TABLE = "llm_api_error"
 STRATEGYS_TABLE = "strategys"
 MODEL_STRATEGY_TABLE = "model_strategy"
 MARKET_TICKER_TABLE = "24_market_tickers"
@@ -364,29 +363,6 @@ class DatabaseInitializer:
         self.command(ddl)
         logger.debug(f"[DatabaseInit] Ensured table {table_name} exists")
     
-    def ensure_llm_api_error_table(self, table_name: str = "llm_api_error"):
-        """Create llm_api_error table if not exists
-        
-        注意：created_at 字段不使用 DEFAULT CURRENT_TIMESTAMP，必须显式提供 UTC+8 时间值
-        以确保时间一致性，避免因服务器时区设置不同而导致的时间不一致问题
-        
-        注意：不记录prompt字段，以减少存储空间和提高性能
-        """
-        ddl = f"""
-        CREATE TABLE IF NOT EXISTS `{table_name}` (
-            `id` VARCHAR(36) PRIMARY KEY,
-            `model_id` VARCHAR(36) NOT NULL,
-            `provider_name` VARCHAR(200),
-            `model` VARCHAR(200),
-            `error_msg` TEXT,
-            `created_at` DATETIME NOT NULL COMMENT 'UTC+8时区时间（北京时间），必须显式提供',
-            INDEX `idx_model_id` (`model_id`),
-            INDEX `idx_created_at` (`created_at`)
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-        """
-        self.command(ddl)
-        logger.debug(f"[DatabaseInit] Ensured table {table_name} exists")
-    
     def ensure_strategy_table(self, table_name: str = "strategys"):
         """Create strategys table if not exists"""
         ddl = f"""
@@ -521,9 +497,6 @@ def init_database_tables(command_func: Callable[[str], Any], table_names: dict):
     # Binance trade logs table
     initializer.ensure_binance_trade_logs_table(table_names.get('binance_trade_logs_table', 'binance_trade_logs'))
     
-    # LLM API error table
-    initializer.ensure_llm_api_error_table(table_names.get('llm_api_error_table', 'llm_api_error'))
-    
     # Strategy table
     initializer.ensure_strategy_table(table_names.get('strategy_table', 'strategys'))
     
@@ -579,7 +552,6 @@ def init_all_database_tables(command_func: Callable[[str, tuple], Any]):
         'account_asset_table': ACCOUNT_ASSET_TABLE,
         'asset_table': ASSET_TABLE,
         'binance_trade_logs_table': BINANCE_TRADE_LOGS_TABLE,
-        'llm_api_error_table': LLM_API_ERROR_TABLE,
         'strategy_table': STRATEGYS_TABLE,
         'model_strategy_table': MODEL_STRATEGY_TABLE,
     }

@@ -215,31 +215,6 @@ class AITrader(Trader):
             error_msg = str(e)
             logger.error(f"[{self.provider_type}] [买入决策] LLM API调用失败: {error_msg}")
             
-            # 如果提供了数据库实例和模型ID，记录错误信息
-            if self.db and model_id:
-                try:
-                    # 获取模型信息以获取provider信息
-                    model = self.models_db.get_model(model_id)
-                    if model:
-                        provider_id = model.get('provider_id')
-                        if provider_id:
-                            provider = self.providers_db.get_provider(provider_id)
-                            if provider:
-                                provider_name = provider.get('name', '')
-                                model_name = model.get('model_name', self.model_name)
-                                # 记录错误到数据库（不记录prompt字段）
-                                model_mapping = self.models_db._get_model_id_mapping()
-                                self.conversations_db.record_llm_api_error(
-                                    model_id=model_id,
-                                    provider_name=provider_name,
-                                    model=model_name,
-                                    error_msg=error_msg,
-                                    model_id_mapping=model_mapping
-                                )
-                                logger.info(f"[{self.provider_type}] [买入决策] 已记录API错误到数据库: model_id={model_id}, provider={provider_name}, model={model_name}")
-                except Exception as db_error:
-                    logger.error(f"[{self.provider_type}] [买入决策] 记录API错误到数据库失败: {db_error}")
-            
             # 重新抛出异常，让调用者处理
             raise
 
@@ -312,31 +287,6 @@ class AITrader(Trader):
             # 记录API调用错误到数据库
             error_msg = str(e)
             logger.error(f"[{self.provider_type}] [卖出决策] LLM API调用失败: {error_msg}")
-            
-            # 如果提供了数据库实例和模型ID，记录错误信息
-            if self.db and model_id:
-                try:
-                    # 获取模型信息以获取provider信息
-                    model = self.models_db.get_model(model_id)
-                    if model:
-                        provider_id = model.get('provider_id')
-                        if provider_id:
-                            provider = self.providers_db.get_provider(provider_id)
-                            if provider:
-                                provider_name = provider.get('name', '')
-                                model_name = model.get('model_name', self.model_name)
-                                # 记录错误到数据库（不记录prompt字段）
-                                model_mapping = self.models_db._get_model_id_mapping()
-                                self.conversations_db.record_llm_api_error(
-                                    model_id=model_id,
-                                    provider_name=provider_name,
-                                    model=model_name,
-                                    error_msg=error_msg,
-                                    model_id_mapping=model_mapping
-                                )
-                                logger.info(f"[{self.provider_type}] [卖出决策] 已记录API错误到数据库: model_id={model_id}, provider={provider_name}, model={model_name}")
-                except Exception as db_error:
-                    logger.error(f"[{self.provider_type}] [卖出决策] 记录API错误到数据库失败: {db_error}")
             
             # 重新抛出异常，让调用者处理
             raise

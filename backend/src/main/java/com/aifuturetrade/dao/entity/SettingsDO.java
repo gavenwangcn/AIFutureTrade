@@ -1,6 +1,7 @@
 package com.aifuturetrade.dao.entity;
 
 import com.baomidou.mybatisplus.annotation.IdType;
+import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
 import lombok.Data;
@@ -56,11 +57,13 @@ public class SettingsDO implements Serializable {
     /**
      * 创建时间
      */
+    @TableField("created_at")
     private LocalDateTime createdAt;
 
     /**
      * 更新时间
      */
+    @TableField("updated_at")
     private LocalDateTime updatedAt;
 
 }

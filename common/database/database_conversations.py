@@ -15,7 +15,7 @@ from typing import Dict, List, Optional, Any, Callable
 import pymysql
 from .database_basic import create_pooled_db
 import common.config as app_config
-from .database_init import CONVERSATIONS_TABLE, LLM_API_ERROR_TABLE
+from .database_init import CONVERSATIONS_TABLE
 
 logger = logging.getLogger(__name__)
 
@@ -50,7 +50,6 @@ class ConversationsDatabase:
             self._pool = pool
         
         self.conversations_table = CONVERSATIONS_TABLE
-        self.llm_api_error_table = LLM_API_ERROR_TABLE
     
     def _with_connection(self, func: Callable, *args, **kwargs) -> Any:
         """Execute a function with a MySQL connection from the pool."""
@@ -215,54 +214,6 @@ class ConversationsDatabase:
         except Exception as e:
             logger.error(f"[Conversations] Failed to add conversation: {e}")
             raise
-    
-    def record_llm_api_error(self, model_id: int, provider_name: str, model: str, error_msg: str,
-                            model_id_mapping: Dict[int, str] = None):
-        """
-        记录LLM API调用错误
-        
-        注意：created_at 字段必须使用 UTC+8 时区时间（北京时间），以确保时间一致性。
-        不使用数据库的 DEFAULT CURRENT_TIMESTAMP，因为服务器时区可能不同。
-        
-        注意：不记录prompt字段，以减少存储空间和提高性能
-        
-        Args:
-            model_id: 模型ID（整数）
-            provider_name: 提供商名称（从providers表获取）
-            model: 模型名称（从providers表获取）
-            error_msg: 错误信息
-            model_id_mapping: 可选的模型ID映射字典
-        """
-        try:
-            if model_id_mapping is None:
-                rows = self.query(f"SELECT id FROM models")
-                model_id_mapping = {}
-                for row in rows:
-                    uuid_str = row[0]
-                    int_id = abs(hash(uuid_str)) % (10 ** 9)
-                    model_id_mapping[int_id] = uuid_str
-            
-            model_uuid = model_id_mapping.get(model_id)
-            if not model_uuid:
-                logger.warning(f"[Conversations] Model {model_id} not found for LLM API error record")
-                return
-            
-            error_id = self._generate_id()
-            
-            # 【重要】使用 UTC+8 时区时间（北京时间），转换为 naive datetime 存储
-            # 确保时间一致性，避免因服务器时区设置不同而导致的时间不一致问题
-            beijing_tz = timezone(timedelta(hours=8))
-            current_time = datetime.now(beijing_tz).replace(tzinfo=None)
-            
-            self.insert_rows(
-                self.llm_api_error_table,
-                [[error_id, model_uuid, provider_name, model, error_msg, current_time]],
-                ["id", "model_id", "provider_name", "model", "error_msg", "created_at"]
-            )
-            logger.info(f"[Conversations] Recorded LLM API error for model {model_id}, provider: {provider_name}, model: {model}")
-        except Exception as e:
-            logger.error(f"[Conversations] Failed to record LLM API error: {e}")
-            # 不抛出异常，避免影响主流程
     
     def query(self, sql: str, params: tuple = None, as_dict: bool = False):
         """Execute a query and return results."""
