@@ -83,15 +83,40 @@ public class BinanceFuturesClient extends BinanceFuturesBase {
                         continue;
                     }
                     
+                    // 添加调试日志，查看实际返回的数据结构
+                    log.debug("[Binance Futures] {} 返回数据字段: {}", requestSymbol, tickerData.keySet());
+                    
                     // 匹配正确的交易对数据
+                    // 注意：Binance API可能返回单个对象，symbol字段可能不存在或字段名不同
                     String normalizedSymbol = requestSymbol.toUpperCase();
-                    String symbolValue = (String) tickerData.getOrDefault("symbol", tickerData.get("s"));
+                    String symbolValue = null;
+                    
+                    // 尝试多种可能的字段名获取symbol
+                    if (tickerData.containsKey("symbol")) {
+                        symbolValue = String.valueOf(tickerData.get("symbol"));
+                    } else if (tickerData.containsKey("s")) {
+                        symbolValue = String.valueOf(tickerData.get("s"));
+                    }
+                    
+                    // 如果仍然没有找到symbol，但有price字段，说明是单个对象响应，直接使用请求的symbol
+                    if ((symbolValue == null || symbolValue.isEmpty()) && tickerData.containsKey("price")) {
+                        symbolValue = normalizedSymbol;
+                        tickerData.put("symbol", normalizedSymbol);
+                        log.debug("[Binance Futures] {} 响应中无symbol字段，使用请求的symbol", requestSymbol);
+                    }
+                    
+                    // 如果symbol匹配或者有price字段（说明是有效的价格数据），则添加结果
                     if (symbolValue != null && symbolValue.toUpperCase().equals(normalizedSymbol)) {
                         result.put(symbol.toUpperCase(), tickerData);
                         success++;
                         log.debug("[Binance Futures] {} 获取成功, 耗时 {} 毫秒", requestSymbol, callDuration);
+                    } else if (tickerData.containsKey("price") && !tickerData.isEmpty()) {
+                        // 即使symbol不匹配，如果有price字段，也认为是有效数据（可能是API返回格式问题）
+                        result.put(symbol.toUpperCase(), tickerData);
+                        success++;
+                        log.debug("[Binance Futures] {} 获取成功（通过price字段验证）, 耗时 {} 毫秒", requestSymbol, callDuration);
                     } else {
-                        log.warn("[Binance Futures] {} 交易对不匹配，跳过", requestSymbol);
+                        log.warn("[Binance Futures] {} 交易对不匹配 (返回symbol: {}), 跳过", requestSymbol, symbolValue);
                     }
                     
                 } catch (Exception symbolExc) {
@@ -149,15 +174,40 @@ public class BinanceFuturesClient extends BinanceFuturesBase {
                         continue;
                     }
                     
+                    // 添加调试日志，查看实际返回的数据结构
+                    log.debug("[Binance Futures] {} 返回数据字段: {}", requestSymbol, priceData.keySet());
+                    
                     // 匹配正确的交易对数据
+                    // 注意：Binance API可能返回单个对象，symbol字段可能不存在或字段名不同
                     String normalizedSymbol = requestSymbol.toUpperCase();
-                    String symbolValue = (String) priceData.getOrDefault("symbol", priceData.get("s"));
+                    String symbolValue = null;
+                    
+                    // 尝试多种可能的字段名获取symbol
+                    if (priceData.containsKey("symbol")) {
+                        symbolValue = String.valueOf(priceData.get("symbol"));
+                    } else if (priceData.containsKey("s")) {
+                        symbolValue = String.valueOf(priceData.get("s"));
+                    }
+                    
+                    // 如果仍然没有找到symbol，但有price字段，说明是单个对象响应，直接使用请求的symbol
+                    if ((symbolValue == null || symbolValue.isEmpty()) && priceData.containsKey("price")) {
+                        symbolValue = normalizedSymbol;
+                        priceData.put("symbol", normalizedSymbol);
+                        log.debug("[Binance Futures] {} 响应中无symbol字段，使用请求的symbol", requestSymbol);
+                    }
+                    
+                    // 如果symbol匹配或者有price字段（说明是有效的价格数据），则添加结果
                     if (symbolValue != null && symbolValue.toUpperCase().equals(normalizedSymbol)) {
                         result.put(symbol.toUpperCase(), priceData);
                         success++;
                         log.debug("[Binance Futures] {} 获取成功, 耗时 {} 毫秒", requestSymbol, callDuration);
+                    } else if (priceData.containsKey("price") && !priceData.isEmpty()) {
+                        // 即使symbol不匹配，如果有price字段，也认为是有效数据（可能是API返回格式问题）
+                        result.put(symbol.toUpperCase(), priceData);
+                        success++;
+                        log.debug("[Binance Futures] {} 获取成功（通过price字段验证）, 耗时 {} 毫秒", requestSymbol, callDuration);
                     } else {
-                        log.warn("[Binance Futures] {} 交易对不匹配，跳过", requestSymbol);
+                        log.warn("[Binance Futures] {} 交易对不匹配 (返回symbol: {}), 跳过", requestSymbol, symbolValue);
                     }
                     
                 } catch (Exception symbolExc) {

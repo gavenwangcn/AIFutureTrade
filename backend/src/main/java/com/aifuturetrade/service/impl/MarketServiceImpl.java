@@ -273,6 +273,47 @@ public class MarketServiceImpl implements MarketService {
             return 0.0;
         }
     }
+    
+    /**
+     * 从Map中获取Long值
+     */
+    private Long getLongValue(Map<String, Object> map, String key) {
+        Object value = map.get(key);
+        if (value == null) {
+            return null;
+        }
+        if (value instanceof Number) {
+            return ((Number) value).longValue();
+        }
+        try {
+            return Long.parseLong(value.toString());
+        } catch (Exception e) {
+            return null;
+        }
+    }
+    
+    /**
+     * 将数值保留6位小数
+     */
+    private double roundTo6Decimals(double value) {
+        return Math.round(value * 1000000.0) / 1000000.0;
+    }
+    
+    /**
+     * 将timestamp（毫秒）转换为datetime字符串用于验证
+     */
+    private String formatTimestamp(Long timestamp) {
+        if (timestamp == null || timestamp == 0) {
+            return "N/A";
+        }
+        try {
+            java.time.Instant instant = java.time.Instant.ofEpochMilli(timestamp);
+            java.time.ZonedDateTime zonedDateTime = instant.atZone(java.time.ZoneId.of("UTC"));
+            return zonedDateTime.format(java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss 'UTC'"));
+        } catch (Exception e) {
+            return timestamp + " (转换失败: " + e.getMessage() + ")";
+        }
+    }
 
     @Override
     public List<Map<String, Object>> getMarketKlines(String symbol, String interval, Integer limit, String startTime, String endTime) {
@@ -309,23 +350,118 @@ public class MarketServiceImpl implements MarketService {
             }
 
             // 调用 Binance API 获取 K 线数据（不传入startTime和endTime）
-            List<Map<String, Object>> klines = client.getKlines(symbol, interval, limit, null, null);
+            List<Map<String, Object>> klinesRaw = client.getKlines(symbol, interval, limit, null, null);
 
-            // 格式化 K 线数据
+            // SDK返回的数据是倒序的（从新到旧），数组[0]是最新的K线，数组[-1]是最旧的K线
+            // 注意：K线页面已改为仅使用历史数据，不再订阅实时K线更新，因此保留所有数据（包括最新K线）
+            log.debug("[MarketService] SDK返回{}条K线数据（倒序：最新→最旧），保留所有数据（包括最新K线）", 
+                    klinesRaw != null ? klinesRaw.size() : 0);
+
+            // 格式化 K 线数据，价格保留6位小数
             List<Map<String, Object>> formattedKlines = new ArrayList<>();
-            for (Map<String, Object> kline : klines) {
-                Map<String, Object> formatted = new HashMap<>();
-                formatted.put("timestamp", kline.get("open_time"));
-                formatted.put("open", kline.get("open"));
-                formatted.put("high", kline.get("high"));
-                formatted.put("low", kline.get("low"));
-                formatted.put("close", kline.get("close"));
-                formatted.put("volume", kline.get("volume"));
-                formatted.put("turnover", kline.get("quote_asset_volume"));
-                formattedKlines.add(formatted);
+            if (klinesRaw != null && !klinesRaw.isEmpty()) {
+                for (Map<String, Object> kline : klinesRaw) {
+                    // 转换为浮点数并保留6位小数
+                    double formattedOpen = roundTo6Decimals(getDoubleValue(kline, "open"));
+                    double formattedHigh = roundTo6Decimals(getDoubleValue(kline, "high"));
+                    double formattedLow = roundTo6Decimals(getDoubleValue(kline, "low"));
+                    double formattedClose = roundTo6Decimals(getDoubleValue(kline, "close"));
+                    
+                    Map<String, Object> formatted = new HashMap<>();
+                    formatted.put("timestamp", kline.get("open_time"));
+                    formatted.put("open", formattedOpen);
+                    formatted.put("high", formattedHigh);
+                    formatted.put("low", formattedLow);
+                    formatted.put("close", formattedClose);
+                    formatted.put("volume", getDoubleValue(kline, "volume"));
+                    formatted.put("turnover", getDoubleValue(kline, "quote_asset_volume"));
+                    formattedKlines.add(formatted);
+                }
+                
+                // 由于SDK返回的数据是倒序的（从新到旧），需要按timestamp升序排序（从旧到新）
+                // 确保与前端期望的数据顺序一致
+                // 前端K线图表从左到右显示，左边是最旧的数据，右边是最新的数据，所以需要从旧到新的顺序
+                formattedKlines.sort((a, b) -> {
+                    Long timestampA = getLongValue(a, "timestamp");
+                    Long timestampB = getLongValue(b, "timestamp");
+                    if (timestampA == null && timestampB == null) return 0;
+                    if (timestampA == null) return -1;
+                    if (timestampB == null) return 1;
+                    return timestampA.compareTo(timestampB);
+                });
+                
+                log.info("[MarketService] SDK查询完成，共获取 {} 条K线数据（已排序为从旧到新，包含最新K线）", 
+                        formattedKlines.size());
+                
+                // 验证数据顺序：确保第一条时间戳小于最后一条时间戳（从旧到新，timestamp升序）
+                // 前端K线图表从左到右显示，左边是最旧的数据（第一条），右边是最新的数据（最后一条）
+                // 所以数据顺序应该是：第一条（最旧）< 最后一条（最新）
+                if (formattedKlines.size() > 1) {
+                    Long firstTimestamp = getLongValue(formattedKlines.get(0), "timestamp");
+                    Long lastTimestamp = getLongValue(formattedKlines.get(formattedKlines.size() - 1), "timestamp");
+                    
+                    if (firstTimestamp != null && lastTimestamp != null) {
+                        String firstTimestampStr = formatTimestamp(firstTimestamp);
+                        String lastTimestampStr = formatTimestamp(lastTimestamp);
+                        
+                        if (firstTimestamp >= lastTimestamp) {
+                            log.warn("[MarketService] ⚠️ 数据顺序异常：第一条时间戳({}, {}) >= 最后一条({}, {})，" +
+                                    "重新排序以确保从旧到新的顺序（与前端K线图表从左到右的要求一致）",
+                                    firstTimestamp, firstTimestampStr, lastTimestamp, lastTimestampStr);
+                            
+                            // 重新排序
+                            formattedKlines.sort((a, b) -> {
+                                Long timestampA = getLongValue(a, "timestamp");
+                                Long timestampB = getLongValue(b, "timestamp");
+                                if (timestampA == null && timestampB == null) return 0;
+                                if (timestampA == null) return -1;
+                                if (timestampB == null) return 1;
+                                return timestampA.compareTo(timestampB);
+                            });
+                            
+                            // 重新验证
+                            firstTimestamp = getLongValue(formattedKlines.get(0), "timestamp");
+                            lastTimestamp = getLongValue(formattedKlines.get(formattedKlines.size() - 1), "timestamp");
+                            firstTimestampStr = formatTimestamp(firstTimestamp);
+                            lastTimestampStr = formatTimestamp(lastTimestamp);
+                            
+                            log.debug("[MarketService] ✓ 重新排序后：第一条时间戳={} ({}), 最后一条时间戳={} ({})",
+                                    firstTimestamp, firstTimestampStr, lastTimestamp, lastTimestampStr);
+                        } else {
+                            log.debug("[MarketService] ✓ 数据顺序验证通过：第一条时间戳={} ({}) < 最后一条时间戳={} ({}) " +
+                                    "（从旧到新，符合前端K线图表从左到右的显示要求）",
+                                    firstTimestamp, firstTimestampStr, lastTimestamp, lastTimestampStr);
+                        }
+                    }
+                }
             }
 
-            log.info("[MarketService] 成功获取 {} 条K线数据", formattedKlines.size());
+            // 记录返回数据信息
+            int klinesCount = formattedKlines.size();
+            log.info("[MarketService] 获取K线历史数据查询完成: symbol={}, interval={}, 返回数据条数={}", 
+                    symbol, interval, klinesCount);
+            
+            if (klinesCount > 0) {
+                // 记录第一条和最后一条数据的时间戳（用于调试）
+                Map<String, Object> firstKline = formattedKlines.get(0);
+                Map<String, Object> lastKline = formattedKlines.get(formattedKlines.size() - 1);
+                Long firstTimestamp = getLongValue(firstKline, "timestamp");
+                Long lastTimestamp = getLongValue(lastKline, "timestamp");
+                
+                String firstTimestampStr = formatTimestamp(firstTimestamp);
+                String lastTimestampStr = formatTimestamp(lastTimestamp);
+                
+                log.info("[MarketService] 获取K线历史数据时间范围: 第一条timestamp={} ({}), " +
+                        "最后一条timestamp={} ({}), 共返回{}条数据",
+                        firstTimestamp, firstTimestampStr, lastTimestamp, lastTimestampStr, klinesCount);
+                
+                // 记录第一条数据的详细信息（用于调试数据格式）
+                log.debug("[MarketService] 获取K线历史数据示例（第一条）: {}", firstKline);
+                log.debug("[MarketService] 获取K线历史数据示例（最后一条）: {}", lastKline);
+            } else {
+                log.warn("[MarketService] 未找到K线历史数据: symbol={}, interval={}", symbol, interval);
+            }
+            
             return formattedKlines;
         } catch (Exception e) {
             log.error("[MarketService] 获取K线数据失败: {}", e.getMessage(), e);

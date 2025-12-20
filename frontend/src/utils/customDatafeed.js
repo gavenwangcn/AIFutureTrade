@@ -111,26 +111,21 @@ export function createDataLoader() {
         return
       }
 
-      // 转换数据格式
+      // 转换数据格式为 KLineChart 所需格式
+      // 后端返回格式：{ timestamp, open, high, low, close, volume, turnover }
+      // KLineChart 需要格式：{ timestamp, open, high, low, close, volume }
       const klines = klinesData
         .map(kline => {
-          // 处理时间戳：确保是数字类型（毫秒）
+          // 处理时间戳：后端返回的是毫秒时间戳
           let ts = kline.timestamp
           
           if (ts === null || ts === undefined) {
-            if (kline.kline_start_time) {
-              ts = typeof kline.kline_start_time === 'number' 
-                ? kline.kline_start_time 
-                : new Date(kline.kline_start_time).getTime()
-            } else if (kline.kline_end_time) {
-              ts = typeof kline.kline_end_time === 'number'
-                ? kline.kline_end_time
-                : new Date(kline.kline_end_time).getTime()
-            } else {
-              return null
-            }
-          } else if (typeof ts === 'string') {
-            ts = new Date(ts).getTime()
+            return null
+          }
+          
+          // 转换为数字类型
+          if (typeof ts === 'string') {
+            ts = parseInt(ts, 10)
             if (isNaN(ts)) {
               return null
             }
@@ -138,23 +133,21 @@ export function createDataLoader() {
             return null
           }
 
-          // 确保时间戳是毫秒
+          // 确保时间戳是毫秒（如果小于 1e12，说明是秒，需要转换为毫秒）
           if (ts < 1e12) {
             ts = ts * 1000
           }
 
-          // 根据加载类型过滤数据（确保返回的数据在正确的时间范围内）
+          // 根据加载类型过滤数据
           if (timestamp) {
             if (type === 'backward' && ts >= timestamp) {
-              // 向后加载：只返回时间戳小于 timestamp 的数据
               return null
             } else if (type === 'forward' && ts <= timestamp) {
-              // 向前加载：只返回时间戳大于 timestamp 的数据
               return null
             }
           }
 
-          // 转换价格和成交量数据
+          // 转换价格和成交量数据（后端返回的是字符串，需要转换为数字）
           const open = parseFloat(kline.open)
           const high = parseFloat(kline.high)
           const low = parseFloat(kline.low)
@@ -166,12 +159,13 @@ export function createDataLoader() {
             return null
           }
 
-          // 确保 high >= max(open, close) 和 low <= min(open, close)
+          // 确保价格数据的逻辑正确性
           const maxPrice = Math.max(open, close)
           const minPrice = Math.min(open, close)
           const validHigh = Math.max(high, maxPrice)
           const validLow = Math.min(low, minPrice)
 
+          // 返回 KLineChart 所需的数据格式
           return {
             timestamp: Math.floor(ts),
             open: open,
@@ -182,7 +176,7 @@ export function createDataLoader() {
           }
         })
         .filter(kline => kline !== null && kline.timestamp > 0)
-        .sort((a, b) => a.timestamp - b.timestamp) // 按时间升序排序
+        .sort((a, b) => a.timestamp - b.timestamp)
 
       console.log('[DataLoader] Loaded K-line data:', {
         total: klines.length,

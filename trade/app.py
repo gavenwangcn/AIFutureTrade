@@ -425,6 +425,188 @@ def disable_sell_trading(model_id):
     logger.info(f"Auto sell disabled for model {model_id}")
     return jsonify({'model_id': model_id, 'auto_sell_enabled': False})
 
+@app.route('/api/market/klines', methods=['GET'])
+def get_market_klines():
+    """
+    获取K线历史数据（仅使用SDK，不查询数据库）
+    
+    参数:
+        symbol: 交易对符号（如 'BTCUSDT'）
+        interval: 时间间隔（'1m', '5m', '15m', '1h', '4h', '1d', '1w'）
+        limit: 返回的最大记录数，默认值根据interval不同：
+               - 1d（1天）：默认499条，最大499条
+               - 1w（1周）：默认99条，最大99条
+               - 其他interval：默认499条，最大499条
+        start_time: 开始时间（可选，ISO格式字符串）
+        end_time: 结束时间（可选，ISO格式字符串）
+    """
+    try:
+        from datetime import datetime
+        
+        symbol = request.args.get('symbol', '').upper()
+        interval = request.args.get('interval', '5m')
+        
+        # 根据不同的interval设置不同的默认limit
+        interval_default_limits = {
+            '1d': 499,  # 1天周期，默认499条
+            '1w': 99,   # 1周周期，默认99条
+        }
+        default_limit = interval_default_limits.get(interval, 499)  # 其他周期默认499条
+        
+        limit = request.args.get('limit', type=int) or default_limit
+        start_time_str = request.args.get('start_time')
+        end_time_str = request.args.get('end_time')
+        
+        if not symbol:
+            return jsonify({'error': 'symbol parameter is required'}), 400
+        
+        # 验证interval
+        valid_intervals = ['1m', '5m', '15m', '1h', '4h', '1d', '1w']
+        if interval not in valid_intervals:
+            return jsonify({'error': f'invalid interval. Must be one of: {valid_intervals}'}), 400
+        
+        # 解析时间参数
+        start_timestamp = None
+        end_timestamp = None
+        
+        if start_time_str:
+            try:
+                start_time = datetime.fromisoformat(start_time_str.replace('Z', '+00:00'))
+                start_timestamp = int(start_time.timestamp() * 1000)  # 转换为毫秒
+            except ValueError:
+                return jsonify({'error': 'invalid start_time format. Use ISO format'}), 400
+        
+        if end_time_str:
+            try:
+                end_time = datetime.fromisoformat(end_time_str.replace('Z', '+00:00'))
+                end_timestamp = int(end_time.timestamp() * 1000)  # 转换为毫秒
+            except ValueError:
+                return jsonify({'error': 'invalid end_time format. Use ISO format'}), 400
+        
+        # 获取客户端IP地址
+        client_ip = request.remote_addr
+        
+        # 查询K线数据，添加客户端IP信息
+        logger.info(f"[API] 获取K线历史数据请求: symbol={symbol}, interval={interval}, limit={limit}, start_time={start_time_str}, end_time={end_time_str}, client_ip={client_ip}")
+        
+        # 检查 market_fetcher 和 _futures_client 是否可用
+        if not market_fetcher or not market_fetcher._futures_client:
+            logger.error("[API] MarketDataFetcher or BinanceFuturesClient not initialized")
+            return jsonify({'error': 'Market data service not available'}), 503
+        
+        # SDK模式下根据不同的interval设置不同的最大limit
+        interval_max_limits = {
+            '1d': 499,  # 1天周期，最大499条
+            '1w': 99,   # 1周周期，最大99条
+        }
+        max_limit = interval_max_limits.get(interval, 499)  # 其他周期最大499条
+        
+        sdk_limit = limit
+        if sdk_limit > max_limit:
+            sdk_limit = max_limit
+            logger.debug(f"[API] SDK模式下限制limit为{max_limit}（interval={interval}），原请求limit={limit}")
+        
+        logger.info(f"[API] 从SDK获取K线数据: symbol={symbol}, interval={interval}, limit={sdk_limit}")
+        
+        # 调用SDK获取K线数据
+        klines_raw = market_fetcher._futures_client.get_klines(
+            symbol=symbol,
+            interval=interval,
+            limit=sdk_limit,
+            startTime=start_timestamp,  # 如果提供了startTime，也传入
+            endTime=end_timestamp  # 如果提供了endTime，也传入
+        )
+        
+        if not klines_raw or len(klines_raw) == 0:
+            logger.warning(f"[API] SDK未返回K线数据: symbol={symbol}, interval={interval}")
+            klines = []
+        else:
+            # SDK返回的数据是倒序的（从新到旧），数组[0]是最新的K线，数组[-1]是最旧的K线
+            logger.debug(f"[API] SDK返回{len(klines_raw)}条K线数据（倒序：最新→最旧），保留所有数据（包括最新K线）")
+            
+            # 转换SDK返回数据为统一格式，价格保留6位小数
+            formatted_klines = []
+            for kline in klines_raw:
+                # 获取原始价格数据（可能是字符串或数字）
+                raw_open = kline.get('open', 0)
+                raw_high = kline.get('high', 0)
+                raw_low = kline.get('low', 0)
+                raw_close = kline.get('close', 0)
+                
+                # 转换为浮点数并保留6位小数
+                formatted_open = round(float(raw_open) if raw_open else 0.0, 6)
+                formatted_high = round(float(raw_high) if raw_high else 0.0, 6)
+                formatted_low = round(float(raw_low) if raw_low else 0.0, 6)
+                formatted_close = round(float(raw_close) if raw_close else 0.0, 6)
+                
+                formatted_klines.append({
+                    'timestamp': kline.get('open_time', 0),
+                    'open': formatted_open,
+                    'high': formatted_high,
+                    'low': formatted_low,
+                    'close': formatted_close,
+                    'volume': float(kline.get('volume', 0)),
+                    'turnover': float(kline.get('quote_asset_volume', 0))
+                })
+            
+            # 由于SDK返回的数据是倒序的（从新到旧），需要按timestamp升序排序（从旧到新）
+            # 确保与前端期望的数据顺序一致
+            # 前端K线图表从左到右显示，左边是最旧的数据，右边是最新的数据，所以需要从旧到新的顺序
+            formatted_klines.sort(key=lambda x: x.get('timestamp', 0))
+            klines = formatted_klines
+            
+            logger.info(f"[API] SDK查询完成，共获取 {len(klines)} 条K线数据（已排序为从旧到新，包含最新K线）")
+        
+        # 记录返回数据信息，添加客户端IP
+        klines_count = len(klines) if klines else 0
+        logger.info(f"[API] 获取K线历史数据查询完成: symbol={symbol}, interval={interval}, 返回数据条数={klines_count}, client_ip={client_ip}")
+        
+        if klines_count > 0:
+            # 记录第一条和最后一条数据的时间戳（用于调试）
+            first_kline = klines[0]
+            last_kline = klines[-1]
+            first_timestamp = first_kline.get('timestamp', 'N/A')
+            last_timestamp = last_kline.get('timestamp', 'N/A')
+            
+            # 将timestamp转换为datetime格式便于排查
+            def format_timestamp(ts):
+                """将timestamp（毫秒）转换为datetime字符串"""
+                if ts == 'N/A' or ts is None:
+                    return 'N/A'
+                try:
+                    # timestamp是毫秒时间戳，需要除以1000
+                    from datetime import timezone as tz
+                    dt = datetime.fromtimestamp(ts / 1000, tz=tz.utc)
+                    return dt.strftime('%Y-%m-%d %H:%M:%S UTC')
+                except (ValueError, TypeError, OSError) as e:
+                    return f'{ts} (转换失败: {e})'
+            
+            first_timestamp_dt = format_timestamp(first_timestamp)
+            last_timestamp_dt = format_timestamp(last_timestamp)
+            
+            logger.info(
+                f"[API] 获取K线历史数据时间范围: "
+                f"第一条timestamp={first_timestamp} ({first_timestamp_dt}), "
+                f"最后一条timestamp={last_timestamp} ({last_timestamp_dt}), "
+                f"共返回{klines_count}条数据, client_ip={client_ip}"
+            )
+        else:
+            logger.warning(f"[API] 未找到K线历史数据: symbol={symbol}, interval={interval}, client_ip={client_ip}")
+        
+        response_data = {
+            'symbol': symbol,
+            'interval': interval,
+            'source': 'sdk',
+            'data': klines,
+            'count': klines_count  # 添加数据条数字段，便于前端调试
+        }
+        
+        return jsonify(response_data)
+        
+    except Exception as e:
+        logger.error(f"[API] 获取K线数据失败: symbol={symbol if 'symbol' in locals() else 'N/A'}, interval={interval if 'interval' in locals() else 'N/A'}, error={e}", exc_info=True)
+        return jsonify({'error': str(e)}), 500
+
 # ============ Main Entry Point ============
 
 if __name__ == '__main__':
@@ -453,6 +635,7 @@ if __name__ == '__main__':
     logger.info("  POST /api/models/<model_id>/execute-sell")
     logger.info("  POST /api/models/<model_id>/disable-buy")
     logger.info("  POST /api/models/<model_id>/disable-sell")
+    logger.info("  GET  /api/market/klines")
     logger.info("=" * 60 + "\n")
 
     # 开发环境：使用Flask内置服务器
