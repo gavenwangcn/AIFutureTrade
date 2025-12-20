@@ -122,35 +122,14 @@ public class BinanceFuturesAccountClient extends BinanceFuturesBase {
     
     /**
      * 从ApiResponse中获取数据
+     * 直接使用SDK的getData()方法，不使用反射
      */
     private Object getResponseData(ApiResponse<?> response) {
         if (response == null) {
             return null;
         }
-        try {
-            // 尝试使用反射获取data字段或方法
-            try {
-                java.lang.reflect.Method dataMethod = response.getClass().getMethod("data");
-                return dataMethod.invoke(response);
-            } catch (NoSuchMethodException e) {
-                try {
-                    java.lang.reflect.Method getDataMethod = response.getClass().getMethod("getData");
-                    return getDataMethod.invoke(response);
-                } catch (NoSuchMethodException e2) {
-                    // 尝试直接访问data字段
-                    try {
-                        java.lang.reflect.Field dataField = response.getClass().getField("data");
-                        return dataField.get(response);
-                    } catch (NoSuchFieldException e3) {
-                        // 如果都失败，返回response本身
-                        return response;
-                    }
-                }
-            }
-        } catch (Exception e) {
-            log.warn("获取响应数据失败: {}", e.getMessage());
-            return response;
-        }
+        // 直接使用SDK的getData()方法
+        return response.getData();
     }
 }
 

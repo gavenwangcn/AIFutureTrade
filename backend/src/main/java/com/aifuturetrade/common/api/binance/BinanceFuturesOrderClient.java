@@ -4,9 +4,10 @@ import com.binance.connector.client.common.ApiResponse;
 import com.binance.connector.client.derivatives_trading_usds_futures.rest.model.ChangeInitialLeverageRequest;
 import com.binance.connector.client.derivatives_trading_usds_futures.rest.model.NewOrderRequest;
 import com.binance.connector.client.derivatives_trading_usds_futures.rest.model.TestOrderRequest;
+import com.binance.connector.client.derivatives_trading_usds_futures.rest.model.Side;
+import com.binance.connector.client.derivatives_trading_usds_futures.rest.model.PositionSide;
+import com.binance.connector.client.derivatives_trading_usds_futures.rest.model.TimeInForce;
 import lombok.extern.slf4j.Slf4j;
-
-import java.lang.reflect.Method;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -262,14 +263,18 @@ public class BinanceFuturesOrderClient extends BinanceFuturesBase {
                 // 调用测试订单接口 - 构建Request对象
                 TestOrderRequest testRequest = new TestOrderRequest();
                 testRequest.setSymbol((String) testParams.get("symbol"));
-                // 使用反射设置side（可能是枚举或字符串）
-                setRequestField(testRequest, "setSide", testParams.get("side"));
-                setRequestField(testRequest, "setType", testParams.get("type"));
+                // 直接使用SDK枚举类设置side
+                Object testSideObj = testParams.get("side");
+                if (testSideObj != null) {
+                    testRequest.setSide(Side.fromValue(String.valueOf(testSideObj).toUpperCase()));
+                }
+                testRequest.setType((String) testParams.get("type"));
                 if (testParams.get("quantity") != null) {
                     testRequest.setQuantity(((Number) testParams.get("quantity")).doubleValue());
                 }
                 if (testParams.get("positionSide") != null) {
-                    setRequestField(testRequest, "setPositionSide", testParams.get("positionSide"));
+                    String positionSideStr = (String) testParams.get("positionSide");
+                    testRequest.setPositionSide(PositionSide.fromValue(positionSideStr.toUpperCase()));
                 }
                 response = restApi.testOrder(testRequest);
                 
@@ -281,9 +286,10 @@ public class BinanceFuturesOrderClient extends BinanceFuturesBase {
                 // 调用真实订单接口 - 构建Request对象
                 NewOrderRequest newOrderRequest = new NewOrderRequest();
                 newOrderRequest.setSymbol((String) orderParams.get("symbol"));
-                // 使用反射设置字段（可能是枚举或字符串）
-                setRequestField(newOrderRequest, "setSide", orderParams.get("side"));
-                setRequestField(newOrderRequest, "setType", orderParams.get("type"));
+                // 直接使用SDK枚举类设置字段
+                String sideStr = String.valueOf(orderParams.get("side"));
+                newOrderRequest.setSide(Side.fromValue(sideStr.toUpperCase()));
+                newOrderRequest.setType((String) orderParams.get("type"));
                 if (orderParams.get("quantity") != null) {
                     newOrderRequest.setQuantity(((Number) orderParams.get("quantity")).doubleValue());
                 }
@@ -294,14 +300,17 @@ public class BinanceFuturesOrderClient extends BinanceFuturesBase {
                     newOrderRequest.setStopPrice(((Number) orderParams.get("stopPrice")).doubleValue());
                 }
                 if (orderParams.get("positionSide") != null) {
-                    setRequestField(newOrderRequest, "setPositionSide", orderParams.get("positionSide"));
+                    String positionSideStr = String.valueOf(orderParams.get("positionSide"));
+                    newOrderRequest.setPositionSide(PositionSide.fromValue(positionSideStr.toUpperCase()));
                 }
                 if (orderParams.get("closePosition") != null) {
+                    // closePosition是String类型，不是Boolean
                     Boolean closePos = (Boolean) orderParams.get("closePosition");
-                    setRequestField(newOrderRequest, "setClosePosition", closePos);
+                    newOrderRequest.setClosePosition(closePos ? "true" : "false");
                 }
                 if (orderParams.get("timeInForce") != null) {
-                    setRequestField(newOrderRequest, "setTimeInForce", orderParams.get("timeInForce"));
+                    String timeInForceStr = String.valueOf(orderParams.get("timeInForce"));
+                    newOrderRequest.setTimeInForce(TimeInForce.fromValue(timeInForceStr.toUpperCase()));
                 }
                 response = restApi.newOrder(newOrderRequest);
             }
@@ -494,86 +503,15 @@ public class BinanceFuturesOrderClient extends BinanceFuturesBase {
     }
     
     /**
-     * 使用反射设置Request对象的字段（支持枚举和字符串类型）
-     */
-    private void setRequestField(Object request, String methodName, Object value) {
-        if (value == null) {
-            return;
-        }
-        try {
-            // 尝试多种方法签名
-            Method[] methods = request.getClass().getMethods();
-            for (Method method : methods) {
-                if (method.getName().equals(methodName) && method.getParameterCount() == 1) {
-                    Class<?> paramType = method.getParameterTypes()[0];
-                    Object paramValue = value;
-                    
-                    // 如果参数类型是枚举，尝试转换
-                    if (paramType.isEnum() && value instanceof String) {
-                        try {
-                            @SuppressWarnings({"unchecked", "rawtypes"})
-                            Class enumClass = paramType;
-                            paramValue = Enum.valueOf(enumClass, ((String) value).toUpperCase());
-                        } catch (IllegalArgumentException e) {
-                            log.warn("无法将值 {} 转换为枚举类型 {}", value, paramType.getName());
-                            continue; // 尝试下一个方法
-                        }
-                    } else if (paramType == String.class && !(value instanceof String)) {
-                        paramValue = value.toString();
-                    } else if (paramType == Boolean.class && value instanceof Boolean) {
-                        paramValue = value;
-                    } else if (Number.class.isAssignableFrom(paramType) && value instanceof Number) {
-                        // 数字类型转换
-                        if (paramType == Long.class) {
-                            paramValue = ((Number) value).longValue();
-                        } else if (paramType == Integer.class) {
-                            paramValue = ((Number) value).intValue();
-                        } else if (paramType == Double.class) {
-                            paramValue = ((Number) value).doubleValue();
-                        }
-                    }
-                    
-                    method.invoke(request, paramValue);
-                    return;
-                }
-            }
-            log.warn("未找到方法 {} 或无法设置值 {}", methodName, value);
-        } catch (Exception e) {
-            log.warn("设置Request字段失败: {} = {}, 错误: {}", methodName, value, e.getMessage());
-        }
-    }
-    
-    /**
      * 从ApiResponse中获取数据
+     * 直接使用SDK的getData()方法，不使用反射
      */
     private Object getResponseData(ApiResponse<?> response) {
         if (response == null) {
             return null;
         }
-        try {
-            // 尝试使用反射获取data字段或方法
-            try {
-                java.lang.reflect.Method dataMethod = response.getClass().getMethod("data");
-                return dataMethod.invoke(response);
-            } catch (NoSuchMethodException e) {
-                try {
-                    java.lang.reflect.Method getDataMethod = response.getClass().getMethod("getData");
-                    return getDataMethod.invoke(response);
-                } catch (NoSuchMethodException e2) {
-                    // 尝试直接访问data字段
-                    try {
-                        java.lang.reflect.Field dataField = response.getClass().getField("data");
-                        return dataField.get(response);
-                    } catch (NoSuchFieldException e3) {
-                        // 如果都失败，返回response本身
-                        return response;
-                    }
-                }
-            }
-        } catch (Exception e) {
-            log.warn("获取响应数据失败: {}", e.getMessage());
-            return response;
-        }
+        // 直接使用SDK的getData()方法
+        return response.getData();
     }
 }
 

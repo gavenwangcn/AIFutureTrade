@@ -198,63 +198,8 @@ public class KlineCandlestickDataTest {
                 return;
             }
             
-            // 从KlineCandlestickDataResponse中获取KlineCandlestickDataResponseItem列表
-            List<KlineCandlestickDataResponseItem> items = null;
-            try {
-                // 尝试通过反射获取items列表
-                java.lang.reflect.Method[] methods = responseData.getClass().getMethods();
-                for (java.lang.reflect.Method method : methods) {
-                    String methodName = method.getName();
-                    // 查找可能的getter方法，如getData(), getItems(), getKlines()等
-                    if ((methodName.startsWith("get") || methodName.equals("data")) 
-                            && method.getParameterCount() == 0) {
-                        try {
-                            Object result = method.invoke(responseData);
-                            if (result instanceof List) {
-                                @SuppressWarnings("unchecked")
-                                List<Object> resultList = (List<Object>) result;
-                                if (!resultList.isEmpty()) {
-                                    // 检查第一个元素是否是KlineCandlestickDataResponseItem
-                                    Object firstItem = resultList.get(0);
-                                    if (firstItem instanceof KlineCandlestickDataResponseItem) {
-                @SuppressWarnings("unchecked")
-                                        List<KlineCandlestickDataResponseItem> itemsList = 
-                                                (List<KlineCandlestickDataResponseItem>) (List<?>) resultList;
-                                        items = itemsList;
-                                        break;
-                                    }
-                                }
-                            }
-                        } catch (Exception e) {
-                            // 继续尝试下一个方法
-                            continue;
-                        }
-                    }
-                }
-                
-                // 如果方法调用失败，尝试直接访问字段
-                if (items == null) {
-                    java.lang.reflect.Field[] fields = responseData.getClass().getDeclaredFields();
-                    for (java.lang.reflect.Field field : fields) {
-                        field.setAccessible(true);
-                        Object value = field.get(responseData);
-                        if (value instanceof List) {
-                            @SuppressWarnings("unchecked")
-                            List<Object> valueList = (List<Object>) value;
-                            if (!valueList.isEmpty() && valueList.get(0) instanceof KlineCandlestickDataResponseItem) {
-                    @SuppressWarnings("unchecked")
-                                List<KlineCandlestickDataResponseItem> itemsList = 
-                                        (List<KlineCandlestickDataResponseItem>) (List<?>) valueList;
-                                items = itemsList;
-                                break;
-                            }
-                        }
-                    }
-                }
-            } catch (Exception e) {
-                System.err.println("无法从KlineCandlestickDataResponse中提取数据: " + e.getMessage());
-                e.printStackTrace();
-            }
+            // KlineCandlestickDataResponse继承自ArrayList<KlineCandlestickDataResponseItem>，可以直接当作List使用
+            List<KlineCandlestickDataResponseItem> items = responseData;
             
             if (items == null || items.isEmpty()) {
                 System.err.println("错误: 无法从响应中提取K线数据或数据为空");
@@ -391,66 +336,11 @@ public class KlineCandlestickDataTest {
     
     /**
      * 从KlineCandlestickDataResponseItem中提取K线数据数组
+     * KlineCandlestickDataResponseItem继承自ArrayList<String>，可以直接当作List使用
      */
     private List<Object> extractKlineDataFromItem(KlineCandlestickDataResponseItem item) {
-        List<Object> klineData = new ArrayList<>();
-        try {
-            // 尝试通过反射获取item中的数据数组
-            // 通常KlineCandlestickDataResponseItem包含一个数组或列表
-            java.lang.reflect.Method[] methods = item.getClass().getMethods();
-            for (java.lang.reflect.Method method : methods) {
-                String methodName = method.getName();
-                // 查找可能的getter方法
-                if ((methodName.startsWith("get") || methodName.equals("data") || methodName.equals("toArray"))
-                        && method.getParameterCount() == 0) {
-                    try {
-                        Object result = method.invoke(item);
-                        if (result instanceof List) {
-                            @SuppressWarnings("unchecked")
-                            List<Object> resultList = (List<Object>) result;
-                            if (!resultList.isEmpty()) {
-                                klineData = resultList;
-                                break;
-                            }
-                        } else if (result != null && result.getClass().isArray()) {
-                            // 如果是数组，转换为List
-                            Object[] array = (Object[]) result;
-                            for (Object obj : array) {
-                                klineData.add(obj);
-                            }
-                            break;
-                        }
-                    } catch (Exception e) {
-                        continue;
-                    }
-                }
-            }
-            
-            // 如果方法调用失败，尝试直接访问字段
-            if (klineData.isEmpty()) {
-                java.lang.reflect.Field[] fields = item.getClass().getDeclaredFields();
-                for (java.lang.reflect.Field field : fields) {
-                    field.setAccessible(true);
-                    Object value = field.get(item);
-                    if (value instanceof List) {
-                        @SuppressWarnings("unchecked")
-                        List<Object> valueList = (List<Object>) value;
-                        if (!valueList.isEmpty()) {
-                            klineData = valueList;
-                            break;
-                        }
-                    } else if (value != null && value.getClass().isArray()) {
-                        Object[] array = (Object[]) value;
-                        for (Object obj : array) {
-                            klineData.add(obj);
-                        }
-                        break;
-                    }
-                }
-            }
-        } catch (Exception e) {
-            System.err.println("无法从KlineCandlestickDataResponseItem中提取数据: " + e.getMessage());
-        }
+        // 直接使用item作为List<String>，转换为List<Object>
+        List<Object> klineData = new ArrayList<>(item);
         return klineData;
     }
     
@@ -554,100 +444,81 @@ public class KlineCandlestickDataTest {
     
     /**
      * 将字符串interval转换为Interval枚举（按照官方示例使用枚举值）
-     * 官方示例使用：Interval.INTERVAL_1m, Interval.INTERVAL_5m 等
-     * 
-     * 注意：枚举值可能是 INTERVAL_1m（小写m）或 INTERVAL_1M（大写M），需要尝试多种格式
+     * 根据实际枚举值的toString()结果，枚举值可能是 "1m", "3m", "1h" 等格式
+     * 或者 "INTERVAL_1m", "INTERVAL_3m" 等格式
      */
     private Interval convertStringToIntervalEnum(String intervalStr) {
         if (intervalStr == null || intervalStr.isEmpty()) {
             return null;
         }
         
-        // 尝试多种可能的枚举命名格式
-        // 注意：需要区分小写m（分钟）和大写M（月）
-        // 优先尝试保持原样，避免"1m"被误识别为"1M"
-        String[] possibleNames;
-        if (intervalStr.endsWith("M") && !intervalStr.endsWith("m")) {
-            // 明确是大写M（月），如 "1M"
-            possibleNames = new String[]{
-                "INTERVAL_" + intervalStr,           // INTERVAL_1M
-                "INTERVAL_" + intervalStr.toUpperCase(), // INTERVAL_1M
-            };
-        } else {
-            // 小写m（分钟）或其他，优先尝试小写和原样
-            possibleNames = new String[]{
-                "INTERVAL_" + intervalStr,                    // INTERVAL_1m (保持原样，优先)
-                "INTERVAL_" + intervalStr.toLowerCase(),      // INTERVAL_1m (全小写)
-                "INTERVAL_" + intervalStr.toUpperCase(),      // INTERVAL_1M (全大写，最后尝试)
-            };
-        }
-        
-        // 先尝试直接匹配
-        for (String enumName : possibleNames) {
-            try {
-                Interval result = Interval.valueOf(enumName);
-                System.out.println("成功匹配Interval枚举: " + intervalStr + " -> " + result);
-                return result;
-            } catch (IllegalArgumentException e) {
-                // 继续尝试下一个
-                continue;
-            }
-        }
-        
-        // 如果直接匹配失败，遍历所有枚举值进行模糊匹配
+        // 首先遍历所有枚举值，直接匹配toString()结果
+        // 因为枚举值的toString()可能返回 "1m", "3m" 等格式
         try {
             Interval[] values = Interval.values();
             String inputLower = intervalStr.toLowerCase();
+            String inputUpper = intervalStr.toUpperCase();
             
-            System.out.println("尝试模糊匹配Interval枚举，输入: " + intervalStr);
-            System.out.println("可用的Interval枚举值:");
+            // 优先尝试精确匹配（区分大小写）
             for (Interval interval : values) {
-                System.out.println("  " + interval);
+                String enumStr = interval.toString();
+                // 精确匹配（区分大小写，避免"1m"匹配到"1M"）
+                if (enumStr.equals(intervalStr)) {
+                    System.out.println("精确匹配Interval枚举: " + intervalStr + " -> " + interval);
+                    return interval;
+                }
             }
             
+            // 如果精确匹配失败，尝试忽略大小写匹配
+            // 但要注意区分小写m（分钟）和大写M（月）
             for (Interval interval : values) {
                 String enumStr = interval.toString();
                 String enumLower = enumStr.toLowerCase();
-                String enumUpper = enumStr.toUpperCase();
-                String inputUpper = intervalStr.toUpperCase();
                 
-                // 尝试多种匹配方式
-                // 1. 完全匹配（优先小写匹配，避免"1m"匹配到"1M"）
-                if (enumStr.equals("INTERVAL_" + intervalStr) || 
-                    enumLower.equals("INTERVAL_" + inputLower)) {
-                    System.out.println("模糊匹配成功（完全匹配）: " + intervalStr + " -> " + interval);
-                    return interval;
+                // 对于小写m（分钟），只匹配小写
+                if (intervalStr.endsWith("m") && !intervalStr.endsWith("M")) {
+                    if (enumLower.equals(inputLower) && enumStr.endsWith("m")) {
+                        System.out.println("小写匹配Interval枚举: " + intervalStr + " -> " + interval);
+                        return interval;
+                    }
                 }
-                // 2. 以输入值结尾
-                if (enumStr.endsWith("_" + intervalStr) || 
-                    enumLower.endsWith("_" + inputLower)) {
-                    System.out.println("模糊匹配成功（结尾匹配）: " + intervalStr + " -> " + interval);
-                    return interval;
+                // 对于大写M（月），只匹配大写
+                else if (intervalStr.endsWith("M") && !intervalStr.endsWith("m")) {
+                    if (enumStr.toUpperCase().equals(inputUpper) && enumStr.endsWith("M")) {
+                        System.out.println("大写匹配Interval枚举: " + intervalStr + " -> " + interval);
+                        return interval;
+                    }
                 }
-                // 3. 包含输入值（如 INTERVAL_ONE_MINUTE 匹配 1m）
-                if (enumUpper.contains(inputUpper) || enumLower.contains(inputLower)) {
-                    // 进一步验证：确保是合理的匹配
-                    // 例如：1m 应该匹配包含 "1" 和 "M" 或 "MIN" 的枚举
-                    if (inputUpper.contains("M") && (enumUpper.contains("MIN") || enumUpper.contains("M"))) {
-                        System.out.println("模糊匹配成功（包含匹配）: " + intervalStr + " -> " + interval);
-                        return interval;
-                    }
-                    if (inputUpper.contains("H") && enumUpper.contains("HOUR")) {
-                        System.out.println("模糊匹配成功（包含匹配）: " + intervalStr + " -> " + interval);
-                        return interval;
-                    }
-                    if (inputUpper.contains("D") && enumUpper.contains("DAY")) {
-                        System.out.println("模糊匹配成功（包含匹配）: " + intervalStr + " -> " + interval);
-                        return interval;
-                    }
-                    if (inputUpper.contains("W") && enumUpper.contains("WEEK")) {
-                        System.out.println("模糊匹配成功（包含匹配）: " + intervalStr + " -> " + interval);
+                // 其他情况，忽略大小写匹配
+                else {
+                    if (enumLower.equals(inputLower)) {
+                        System.out.println("忽略大小写匹配Interval枚举: " + intervalStr + " -> " + interval);
                         return interval;
                     }
                 }
             }
-        } catch (Exception e2) {
-            System.err.println("查找Interval枚举失败: " + e2.getMessage());
+            
+            // 如果直接匹配失败，尝试匹配枚举名称（可能包含INTERVAL_前缀）
+            String[] possibleNames = {
+                intervalStr,                           // 直接使用 1m, 3m
+                "INTERVAL_" + intervalStr,            // INTERVAL_1m, INTERVAL_3m
+                "INTERVAL_" + intervalStr.toLowerCase(), // INTERVAL_1m
+                "INTERVAL_" + intervalStr.toUpperCase(), // INTERVAL_1M
+            };
+            
+            for (String enumName : possibleNames) {
+                try {
+                    Interval result = Interval.valueOf(enumName);
+                    System.out.println("通过枚举名称匹配Interval枚举: " + intervalStr + " -> " + result);
+                    return result;
+                } catch (IllegalArgumentException e) {
+                    continue;
+                }
+            }
+            
+        } catch (Exception e) {
+            System.err.println("查找Interval枚举失败: " + e.getMessage());
+            e.printStackTrace();
         }
         
         return null;

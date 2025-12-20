@@ -2,6 +2,8 @@ package com.aifuturetrade.common.api.binance;
 
 import com.binance.connector.client.common.ApiResponse;
 import com.binance.connector.client.derivatives_trading_usds_futures.rest.model.Interval;
+import com.binance.connector.client.derivatives_trading_usds_futures.rest.model.KlineCandlestickDataResponse;
+import com.binance.connector.client.derivatives_trading_usds_futures.rest.model.KlineCandlestickDataResponseItem;
 import lombok.extern.slf4j.Slf4j;
 
 import java.time.Instant;
@@ -295,8 +297,7 @@ public class BinanceFuturesClient extends BinanceFuturesBase {
             
             // 调用API获取K线数据
             long apiStartTime = System.currentTimeMillis();
-            ApiResponse<?> response = null;
-            Object data = null;
+            List<KlineCandlestickDataResponseItem> items = null;
             
             try {
                 String requestSymbol = symbol.toUpperCase();
@@ -322,14 +323,25 @@ public class BinanceFuturesClient extends BinanceFuturesBase {
                 
                 // 调用SDK API获取K线数据
                 // 参考官方示例：klineCandlestickData(symbol, interval, startTime, endTime, limit)
-                response = restApi.klineCandlestickData(requestSymbol, intervalEnum, calculatedStartTime, calculatedEndTime, limitLong);
+                ApiResponse<KlineCandlestickDataResponse> response = 
+                        restApi.klineCandlestickData(requestSymbol, intervalEnum, calculatedStartTime, calculatedEndTime, limitLong);
                 
-                // 获取响应数据
+                // 直接使用SDK的getData()方法获取KlineCandlestickDataResponse
+                // KlineCandlestickDataResponse继承自ArrayList<KlineCandlestickDataResponseItem>，可以直接当作List使用
                 if (response != null) {
-                    data = getResponseData(response);
-                    log.debug("[Binance Futures] SDK响应获取成功, data类型: {}, 是否为List: {}", 
-                            data != null ? data.getClass().getName() : "null", 
-                            data instanceof List);
+                    KlineCandlestickDataResponse responseData = response.getData();
+                    if (responseData != null) {
+                        // KlineCandlestickDataResponse本身就是List<KlineCandlestickDataResponseItem>
+                        items = responseData;
+                        
+                        if (items != null && !items.isEmpty()) {
+                            log.debug("[Binance Futures] SDK响应获取成功, 返回 {} 条K线数据", items.size());
+                        } else {
+                            log.warn("[Binance Futures] SDK响应数据为空");
+                        }
+                    } else {
+                        log.error("[Binance Futures] SDK响应数据为null");
+                    }
                 } else {
                     log.error("[Binance Futures] SDK响应为null");
                 }
@@ -338,152 +350,79 @@ public class BinanceFuturesClient extends BinanceFuturesBase {
                 log.error("[Binance Futures] 调用SDK API失败: {}, 错误详情: {}", 
                         apiExc.getMessage(), apiExc.getClass().getName(), apiExc);
                 // 不抛出异常，返回空列表，让上层处理
-                data = null;
+                items = null;
             }
             
             long apiDuration = System.currentTimeMillis() - apiStartTime;
-            if (data instanceof List) {
+            if (items != null) {
                 log.info("[Binance Futures] API调用完成, 耗时: {} 毫秒, 返回 {} 条K线数据", 
-                        apiDuration, ((List<?>) data).size());
+                        apiDuration, items.size());
             } else {
-                log.warn("[Binance Futures] API调用完成, 耗时: {} 毫秒, 但返回数据不是List类型: {}", 
-                        apiDuration, data != null ? data.getClass().getName() : "null");
+                log.warn("[Binance Futures] API调用完成, 耗时: {} 毫秒, 但返回数据为空", apiDuration);
             }
             
-            // 处理响应数据
-            if (data instanceof List) {
-                @SuppressWarnings("unchecked")
-                List<Object> dataList = (List<Object>) data;
-                
-                for (Object item : dataList) {
+            // 处理响应数据 - 直接使用SDK对象
+            if (items != null && !items.isEmpty()) {
+                for (KlineCandlestickDataResponseItem item : items) {
                     Map<String, Object> klineDict = new HashMap<>();
                     
-                    if (item instanceof List) {
-                        @SuppressWarnings("unchecked")
-                        List<Object> klineList = (List<Object>) item;
+                    // KlineCandlestickDataResponseItem继承自ArrayList<String>，可以直接当作List使用
+                    // 直接使用item作为List<String>
+                    if (item != null && item.size() >= 11) {
+                        Long openTime = parseLong(item.get(0));
+                        String openPrice = item.get(1);
+                        String highPrice = item.get(2);
+                        String lowPrice = item.get(3);
+                        String closePrice = item.get(4);
+                        String volume = item.get(5);
+                        Long closeTime = parseLong(item.get(6));
+                        String quoteAssetVolume = item.get(7);
+                        Long numberOfTrades = parseLong(item.get(8));
+                        String takerBuyBaseVolume = item.get(9);
+                        String takerBuyQuoteVolume = item.get(10);
                         
-                        if (klineList.size() >= 11) {
-                            Long openTime = parseLong(klineList.get(0));
-                            String openPrice = String.valueOf(klineList.get(1));
-                            String highPrice = String.valueOf(klineList.get(2));
-                            String lowPrice = String.valueOf(klineList.get(3));
-                            String closePrice = String.valueOf(klineList.get(4));
-                            String volume = String.valueOf(klineList.get(5));
-                            Long closeTime = parseLong(klineList.get(6));
-                            String quoteAssetVolume = String.valueOf(klineList.get(7));
-                            Long numberOfTrades = parseLong(klineList.get(8));
-                            String takerBuyBaseVolume = String.valueOf(klineList.get(9));
-                            String takerBuyQuoteVolume = String.valueOf(klineList.get(10));
-                            
-                            // 转换时间戳为日期格式（使用 UTC+8 时区）
-                            // 注意：open_time 和 close_time 是 UTC 时间戳（毫秒），用于API调用
-                            // open_time_dt_str 和 close_time_dt_str 是 UTC+8 格式的时间字符串，用于显示
-                            ZoneId utcPlus8 = ZoneId.of("Asia/Shanghai");
-                            LocalDateTime openTimeDt = null;
-                            String openTimeDtStr = null;
-                            if (openTime != null) {
-                                ZonedDateTime openTimeZoned = Instant.ofEpochMilli(openTime).atZone(utcPlus8);
-                                openTimeDt = openTimeZoned.toLocalDateTime();
-                                // 格式：UTC+8 2025-01-01 12:00:00
-                                openTimeDtStr = "UTC+8 " + openTimeZoned.format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"));
-                            }
-                            LocalDateTime closeTimeDt = null;
-                            String closeTimeDtStr = null;
-                            if (closeTime != null) {
-                                ZonedDateTime closeTimeZoned = Instant.ofEpochMilli(closeTime).atZone(utcPlus8);
-                                closeTimeDt = closeTimeZoned.toLocalDateTime();
-                                // 格式：UTC+8 2025-01-01 12:00:00
-                                closeTimeDtStr = "UTC+8 " + closeTimeZoned.format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"));
-                            }
-                            
-                            // 保留原始UTC时间戳（用于API调用和计算）
-                            klineDict.put("open_time", openTime);
-                            klineDict.put("open_time_dt", openTimeDt);
-                            // UTC+8格式的时间字符串（用于显示）
-                            klineDict.put("open_time_dt_str", openTimeDtStr);
-                            klineDict.put("open", openPrice);
-                            klineDict.put("high", highPrice);
-                            klineDict.put("low", lowPrice);
-                            klineDict.put("close", closePrice);
-                            klineDict.put("volume", volume);
-                            // 保留原始UTC时间戳（用于API调用和计算）
-                            klineDict.put("close_time", closeTime);
-                            klineDict.put("close_time_dt", closeTimeDt);
-                            // UTC+8格式的时间字符串（用于显示）
-                            klineDict.put("close_time_dt_str", closeTimeDtStr);
-                            klineDict.put("quote_asset_volume", quoteAssetVolume);
-                            klineDict.put("number_of_trades", numberOfTrades);
-                            klineDict.put("taker_buy_base_volume", takerBuyBaseVolume);
-                            klineDict.put("taker_buy_quote_volume", takerBuyQuoteVolume);
-                            
-                            klines.add(klineDict);
+                        // 转换时间戳为日期格式（使用 UTC+8 时区）
+                        // 注意：open_time 和 close_time 是 UTC 时间戳（毫秒），用于API调用
+                        // open_time_dt_str 和 close_time_dt_str 是 UTC+8 格式的时间字符串，用于显示
+                        ZoneId utcPlus8 = ZoneId.of("Asia/Shanghai");
+                        LocalDateTime openTimeDt = null;
+                        String openTimeDtStr = null;
+                        if (openTime != null) {
+                            ZonedDateTime openTimeZoned = Instant.ofEpochMilli(openTime).atZone(utcPlus8);
+                            openTimeDt = openTimeZoned.toLocalDateTime();
+                            // 格式：UTC+8 2025-01-01 12:00:00
+                            openTimeDtStr = "UTC+8 " + openTimeZoned.format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"));
                         }
-                    } else {
-                        // 如果是字典或模型对象
-                        Map<String, Object> entry = toMap(item);
-                        if (!entry.isEmpty()) {
-                            Long openTime = parseLong(entry.get("open_time") != null ? entry.get("open_time") : 
-                                    entry.get("openTime") != null ? entry.get("openTime") : entry.get("t"));
-                            String openPrice = String.valueOf(entry.getOrDefault("open", entry.getOrDefault("o", "")));
-                            String highPrice = String.valueOf(entry.getOrDefault("high", entry.getOrDefault("h", "")));
-                            String lowPrice = String.valueOf(entry.getOrDefault("low", entry.getOrDefault("l", "")));
-                            String closePrice = String.valueOf(entry.getOrDefault("close", entry.getOrDefault("c", "")));
-                            String volume = String.valueOf(entry.getOrDefault("volume", entry.getOrDefault("v", "")));
-                            Long closeTime = parseLong(entry.get("close_time") != null ? entry.get("close_time") : 
-                                    entry.get("closeTime"));
-                            String quoteAssetVolume = String.valueOf(entry.getOrDefault("quote_asset_volume", 
-                                    entry.getOrDefault("quoteAssetVolume", entry.getOrDefault("q", ""))));
-                            Long numberOfTrades = parseLong(entry.get("number_of_trades") != null ? 
-                                    entry.get("number_of_trades") : entry.get("numberOfTrades") != null ? 
-                                    entry.get("numberOfTrades") : entry.get("n"));
-                            String takerBuyBaseVolume = String.valueOf(entry.getOrDefault("taker_buy_base_volume", 
-                                    entry.getOrDefault("takerBuyBaseVolume", entry.getOrDefault("V", ""))));
-                            String takerBuyQuoteVolume = String.valueOf(entry.getOrDefault("taker_buy_quote_volume", 
-                                    entry.getOrDefault("takerBuyQuoteVolume", entry.getOrDefault("Q", ""))));
-                            
-                            // 转换时间戳为日期格式（使用 UTC+8 时区）
-                            // 注意：open_time 和 close_time 是 UTC 时间戳（毫秒），用于API调用
-                            // open_time_dt_str 和 close_time_dt_str 是 UTC+8 格式的时间字符串，用于显示
-                            ZoneId utcPlus8 = ZoneId.of("Asia/Shanghai");
-                            LocalDateTime openTimeDt = null;
-                            String openTimeDtStr = null;
-                            if (openTime != null) {
-                                ZonedDateTime openTimeZoned = Instant.ofEpochMilli(openTime).atZone(utcPlus8);
-                                openTimeDt = openTimeZoned.toLocalDateTime();
-                                // 格式：UTC+8 2025-01-01 12:00:00
-                                openTimeDtStr = "UTC+8 " + openTimeZoned.format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"));
-                            }
-                            LocalDateTime closeTimeDt = null;
-                            String closeTimeDtStr = null;
-                            if (closeTime != null) {
-                                ZonedDateTime closeTimeZoned = Instant.ofEpochMilli(closeTime).atZone(utcPlus8);
-                                closeTimeDt = closeTimeZoned.toLocalDateTime();
-                                // 格式：UTC+8 2025-01-01 12:00:00
-                                closeTimeDtStr = "UTC+8 " + closeTimeZoned.format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"));
-                            }
-                            
-                            // 保留原始UTC时间戳（用于API调用和计算）
-                            klineDict.put("open_time", openTime);
-                            klineDict.put("open_time_dt", openTimeDt);
-                            // UTC+8格式的时间字符串（用于显示）
-                            klineDict.put("open_time_dt_str", openTimeDtStr);
-                            klineDict.put("open", openPrice);
-                            klineDict.put("high", highPrice);
-                            klineDict.put("low", lowPrice);
-                            klineDict.put("close", closePrice);
-                            klineDict.put("volume", volume);
-                            // 保留原始UTC时间戳（用于API调用和计算）
-                            klineDict.put("close_time", closeTime);
-                            klineDict.put("close_time_dt", closeTimeDt);
-                            // UTC+8格式的时间字符串（用于显示）
-                            klineDict.put("close_time_dt_str", closeTimeDtStr);
-                            klineDict.put("quote_asset_volume", quoteAssetVolume);
-                            klineDict.put("number_of_trades", numberOfTrades);
-                            klineDict.put("taker_buy_base_volume", takerBuyBaseVolume);
-                            klineDict.put("taker_buy_quote_volume", takerBuyQuoteVolume);
-                            
-                            klines.add(klineDict);
+                        LocalDateTime closeTimeDt = null;
+                        String closeTimeDtStr = null;
+                        if (closeTime != null) {
+                            ZonedDateTime closeTimeZoned = Instant.ofEpochMilli(closeTime).atZone(utcPlus8);
+                            closeTimeDt = closeTimeZoned.toLocalDateTime();
+                            // 格式：UTC+8 2025-01-01 12:00:00
+                            closeTimeDtStr = "UTC+8 " + closeTimeZoned.format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"));
                         }
+                        
+                        // 保留原始UTC时间戳（用于API调用和计算）
+                        klineDict.put("open_time", openTime);
+                        klineDict.put("open_time_dt", openTimeDt);
+                        // UTC+8格式的时间字符串（用于显示）
+                        klineDict.put("open_time_dt_str", openTimeDtStr);
+                        klineDict.put("open", openPrice);
+                        klineDict.put("high", highPrice);
+                        klineDict.put("low", lowPrice);
+                        klineDict.put("close", closePrice);
+                        klineDict.put("volume", volume);
+                        // 保留原始UTC时间戳（用于API调用和计算）
+                        klineDict.put("close_time", closeTime);
+                        klineDict.put("close_time_dt", closeTimeDt);
+                        // UTC+8格式的时间字符串（用于显示）
+                        klineDict.put("close_time_dt_str", closeTimeDtStr);
+                        klineDict.put("quote_asset_volume", quoteAssetVolume);
+                        klineDict.put("number_of_trades", numberOfTrades);
+                        klineDict.put("taker_buy_base_volume", takerBuyBaseVolume);
+                        klineDict.put("taker_buy_quote_volume", takerBuyQuoteVolume);
+                        
+                        klines.add(klineDict);
                     }
                 }
             }
@@ -507,35 +446,14 @@ public class BinanceFuturesClient extends BinanceFuturesBase {
     
     /**
      * 从ApiResponse中获取数据
+     * 直接使用SDK的getData()方法，不使用反射
      */
     private Object getResponseData(ApiResponse<?> response) {
         if (response == null) {
             return null;
         }
-        try {
-            // 尝试使用反射获取data字段或方法
-            try {
-                java.lang.reflect.Method dataMethod = response.getClass().getMethod("data");
-                return dataMethod.invoke(response);
-            } catch (NoSuchMethodException e) {
-                try {
-                    java.lang.reflect.Method getDataMethod = response.getClass().getMethod("getData");
-                    return getDataMethod.invoke(response);
-                } catch (NoSuchMethodException e2) {
-                    // 尝试直接访问data字段
-                    try {
-                        java.lang.reflect.Field dataField = response.getClass().getField("data");
-                        return dataField.get(response);
-                    } catch (NoSuchFieldException e3) {
-                        // 如果都失败，返回response本身
-                        return response;
-                    }
-                }
-            }
-        } catch (Exception e) {
-            log.warn("获取响应数据失败: {}", e.getMessage());
-            return response;
-        }
+        // 直接使用SDK的getData()方法
+        return response.getData();
     }
     
     /**
@@ -628,6 +546,9 @@ public class BinanceFuturesClient extends BinanceFuturesBase {
     
     /**
      * 将字符串interval转换为Interval枚举
+     * 根据实际枚举值的toString()结果，枚举值可能是 "1m", "3m", "1h" 等格式
+     * 或者 "INTERVAL_1m", "INTERVAL_3m" 等格式
+     * 
      * @param intervalStr 字符串格式的interval，如 "1m", "5m", "1h", "1d" 等
      * @return Interval枚举值，如果不支持则返回null
      */
@@ -636,39 +557,72 @@ public class BinanceFuturesClient extends BinanceFuturesBase {
             return null;
         }
         
-        String upperInterval = intervalStr.toUpperCase();
-        
-        // 尝试多种可能的枚举命名格式
-        String[] possibleNames = {
-            "INTERVAL_" + upperInterval,           // INTERVAL_1M, INTERVAL_5M
-            "INTERVAL_" + upperInterval.replaceAll("[^A-Z0-9]", ""),  // INTERVAL_1M (移除特殊字符)
-            upperInterval,                         // 直接使用 1M, 5M
-            intervalStr                            // 保持原样 1m, 5m
-        };
-        
-        for (String enumName : possibleNames) {
-            try {
-                return Interval.valueOf(enumName);
-            } catch (IllegalArgumentException e) {
-                // 继续尝试下一个
-                continue;
-            }
-        }
-        
-        // 如果所有格式都失败，尝试使用反射查找所有枚举值
+        // 首先遍历所有枚举值，直接匹配toString()结果
+        // 因为枚举值的toString()可能返回 "1m", "3m" 等格式
         try {
             Interval[] values = Interval.values();
+            String inputLower = intervalStr.toLowerCase();
+            String inputUpper = intervalStr.toUpperCase();
+            
+            // 优先尝试精确匹配（区分大小写）
             for (Interval interval : values) {
-                // 检查枚举值的字符串表示是否匹配
-                String enumStr = interval.toString().toUpperCase();
-                if (enumStr.equals(upperInterval) || 
-                    enumStr.endsWith(upperInterval) ||
-                    enumStr.contains(upperInterval)) {
+                String enumStr = interval.toString();
+                // 精确匹配（区分大小写，避免"1m"匹配到"1M"）
+                if (enumStr.equals(intervalStr)) {
+                    log.debug("[Binance Futures] 精确匹配Interval枚举: {} -> {}", intervalStr, interval);
                     return interval;
                 }
             }
+            
+            // 如果精确匹配失败，尝试忽略大小写匹配
+            // 但要注意区分小写m（分钟）和大写M（月）
+            for (Interval interval : values) {
+                String enumStr = interval.toString();
+                String enumLower = enumStr.toLowerCase();
+                
+                // 对于小写m（分钟），只匹配小写
+                if (intervalStr.endsWith("m") && !intervalStr.endsWith("M")) {
+                    if (enumLower.equals(inputLower) && enumStr.endsWith("m")) {
+                        log.debug("[Binance Futures] 小写匹配Interval枚举: {} -> {}", intervalStr, interval);
+                        return interval;
+                    }
+                }
+                // 对于大写M（月），只匹配大写
+                else if (intervalStr.endsWith("M") && !intervalStr.endsWith("m")) {
+                    if (enumStr.toUpperCase().equals(inputUpper) && enumStr.endsWith("M")) {
+                        log.debug("[Binance Futures] 大写匹配Interval枚举: {} -> {}", intervalStr, interval);
+                        return interval;
+                    }
+                }
+                // 其他情况，忽略大小写匹配
+                else {
+                    if (enumLower.equals(inputLower)) {
+                        log.debug("[Binance Futures] 忽略大小写匹配Interval枚举: {} -> {}", intervalStr, interval);
+                        return interval;
+                    }
+                }
+            }
+            
+            // 如果直接匹配失败，尝试匹配枚举名称（可能包含INTERVAL_前缀）
+            String[] possibleNames = {
+                intervalStr,                           // 直接使用 1m, 3m
+                "INTERVAL_" + intervalStr,            // INTERVAL_1m, INTERVAL_3m
+                "INTERVAL_" + intervalStr.toLowerCase(), // INTERVAL_1m
+                "INTERVAL_" + intervalStr.toUpperCase(), // INTERVAL_1M
+            };
+            
+            for (String enumName : possibleNames) {
+                try {
+                    Interval result = Interval.valueOf(enumName);
+                    log.debug("[Binance Futures] 通过枚举名称匹配Interval枚举: {} -> {}", intervalStr, result);
+                    return result;
+                } catch (IllegalArgumentException e) {
+                    continue;
+                }
+            }
+            
         } catch (Exception e) {
-            log.warn("[Binance Futures] 使用反射查找Interval枚举失败: {}", e.getMessage());
+            log.warn("[Binance Futures] 查找Interval枚举失败: {}", e.getMessage());
         }
         
         log.error("[Binance Futures] 不支持的interval格式: {}", intervalStr);
