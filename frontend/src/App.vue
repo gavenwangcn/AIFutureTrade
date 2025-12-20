@@ -167,11 +167,11 @@
                   </div>
                   <div class="price-right">
                     <div class="price-value-large">${{ formatPrice5(price.price) }}</div>
-                    <div class="price-change-with-arrow" :class="price.change_24h >= 0 ? 'positive' : 'negative'">
-                      <span class="change-arrow">{{ price.change_24h >= 0 ? '▲' : '▼' }}</span>
-                      <span class="change-value">{{ (Math.abs(price.change_24h) || 0).toFixed(2) }}%</span>
+                    <div class="price-change-with-arrow" :class="(price.change_24h || 0) >= 0 ? 'positive' : 'negative'">
+                      <span class="change-arrow">{{ (price.change_24h || 0) >= 0 ? '▲' : '▼' }}</span>
+                      <span class="change-value">{{ Math.abs(price.change_24h || 0).toFixed(2) }}%</span>
                     </div>
-                    <div v-if="price.daily_volume" class="price-volume-chinese">
+                    <div v-if="price.daily_volume && price.daily_volume > 0" class="price-volume-chinese">
                       <span class="volume-label">当日成交额: </span>
                       <span class="volume-value">{{ formatVolumeChinese(price.daily_volume) }}</span>
                     </div>

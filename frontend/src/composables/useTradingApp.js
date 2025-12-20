@@ -2012,35 +2012,44 @@ let portfolioSymbolsRefreshInterval = null // 模型持仓合约列表自动刷�
   // ============ 工具方法 ============
   
   /**
-   * 格式化价格（保留2位小数，用于通用场景）
+   * 格式化价格（去除尾部0）
+   * 统一的价格格式化函数，用于所有symbol价格显示
+   * @param {number|string} price - 价格值
+   * @param {number} maxDecimals - 最大小数位数（默认6位）
+   * @returns {string} 格式化后的价格字符串，去除尾部0
    */
-  const formatPrice = (price) => {
-    if (price === null || price === undefined) return '0.00'
-    return parseFloat(price).toFixed(2)
+  const formatPrice = (price, maxDecimals = 6) => {
+    if (price === null || price === undefined || price === '') return '0'
+    
+    const numPrice = parseFloat(price)
+    if (isNaN(numPrice)) return '0'
+    
+    // 先格式化为最大小数位数
+    const formatted = numPrice.toFixed(maxDecimals)
+    
+    // 去除尾部0和小数点
+    return formatted.replace(/\.?0+$/, '') || '0'
   }
 
   /**
-   * 格式化价格（保留5位小数，用于市场行情模块）
+   * 格式化价格（保留5位小数，去除尾部0，用于市场行情模块）
    */
   const formatPrice5 = (price) => {
-    if (price === null || price === undefined) return '0.00000'
-    return parseFloat(price).toFixed(5)
+    return formatPrice(price, 5)
   }
 
   /**
-   * 格式化价格（保留6位小数，用于持仓合约实时行情、持仓模块、交易记录等）
+   * 格式化价格（保留6位小数，去除尾部0，用于持仓合约实时行情、持仓模块、交易记录等）
    */
   const formatPrice6 = (price) => {
-    if (price === null || price === undefined) return '0.000000'
-    return parseFloat(price).toFixed(6)
+    return formatPrice(price, 6)
   }
 
   /**
-   * 格式化涨跌榜价格（保留6位小数）
+   * 格式化涨跌榜价格（保留6位小数，去除尾部0）
    */
   const formatLeaderboardPrice = (price) => {
-    if (price === null || price === undefined) return '0.000000'
-    return parseFloat(price).toFixed(6)
+    return formatPrice(price, 6)
   }
 
   /**

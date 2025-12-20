@@ -101,22 +101,43 @@ public class AccountServiceImpl implements AccountService {
             List<Map<String, Object>> assetList = new ArrayList<>();
             Object assetsObj = accountJson.get("assets");
             if (assetsObj instanceof List) {
-                @SuppressWarnings("unchecked")
-                List<Map<String, Object>> assets = (List<Map<String, Object>>) assetsObj;
-                for (Map<String, Object> assetItem : assets) {
+                List<?> assets = (List<?>) assetsObj;
+                for (Object assetItemObj : assets) {
                     Map<String, Object> assetInfo = new HashMap<>();
-                    assetInfo.put("asset", assetItem.get("asset"));
-                    assetInfo.put("walletBalance", getDoubleValue(assetItem, "walletBalance"));
-                    assetInfo.put("unrealizedProfit", getDoubleValue(assetItem, "unrealizedProfit"));
-                    assetInfo.put("marginBalance", getDoubleValue(assetItem, "marginBalance"));
-                    assetInfo.put("maintMargin", getDoubleValue(assetItem, "maintMargin"));
-                    assetInfo.put("initialMargin", getDoubleValue(assetItem, "initialMargin"));
-                    assetInfo.put("positionInitialMargin", getDoubleValue(assetItem, "positionInitialMargin"));
-                    assetInfo.put("openOrderInitialMargin", getDoubleValue(assetItem, "openOrderInitialMargin"));
-                    assetInfo.put("crossWalletBalance", getDoubleValue(assetItem, "crossWalletBalance"));
-                    assetInfo.put("crossUnPnl", getDoubleValue(assetItem, "crossUnPnl"));
-                    assetInfo.put("availableBalance", getDoubleValue(assetItem, "availableBalance"));
-                    assetInfo.put("maxWithdrawAmount", getDoubleValue(assetItem, "maxWithdrawAmount"));
+                    
+                    // 处理 AccountInformationV3ResponseAssetsInner 对象
+                    if (assetItemObj instanceof com.binance.connector.client.derivatives_trading_usds_futures.rest.model.AccountInformationV3ResponseAssetsInner) {
+                        com.binance.connector.client.derivatives_trading_usds_futures.rest.model.AccountInformationV3ResponseAssetsInner assetItem = 
+                            (com.binance.connector.client.derivatives_trading_usds_futures.rest.model.AccountInformationV3ResponseAssetsInner) assetItemObj;
+                        assetInfo.put("asset", assetItem.getAsset());
+                        assetInfo.put("walletBalance", getDoubleValueFromString(assetItem.getWalletBalance()));
+                        assetInfo.put("unrealizedProfit", getDoubleValueFromString(assetItem.getUnrealizedProfit()));
+                        assetInfo.put("marginBalance", getDoubleValueFromString(assetItem.getMarginBalance()));
+                        assetInfo.put("maintMargin", getDoubleValueFromString(assetItem.getMaintMargin()));
+                        assetInfo.put("initialMargin", getDoubleValueFromString(assetItem.getInitialMargin()));
+                        assetInfo.put("positionInitialMargin", getDoubleValueFromString(assetItem.getPositionInitialMargin()));
+                        assetInfo.put("openOrderInitialMargin", getDoubleValueFromString(assetItem.getOpenOrderInitialMargin()));
+                        assetInfo.put("crossWalletBalance", getDoubleValueFromString(assetItem.getCrossWalletBalance()));
+                        assetInfo.put("crossUnPnl", getDoubleValueFromString(assetItem.getCrossUnPnl()));
+                        assetInfo.put("availableBalance", getDoubleValueFromString(assetItem.getAvailableBalance()));
+                        assetInfo.put("maxWithdrawAmount", getDoubleValueFromString(assetItem.getMaxWithdrawAmount()));
+                    } else if (assetItemObj instanceof Map) {
+                        // 兼容处理：如果是Map类型，使用原有逻辑
+                        @SuppressWarnings("unchecked")
+                        Map<String, Object> assetItem = (Map<String, Object>) assetItemObj;
+                        assetInfo.put("asset", assetItem.get("asset"));
+                        assetInfo.put("walletBalance", getDoubleValue(assetItem, "walletBalance"));
+                        assetInfo.put("unrealizedProfit", getDoubleValue(assetItem, "unrealizedProfit"));
+                        assetInfo.put("marginBalance", getDoubleValue(assetItem, "marginBalance"));
+                        assetInfo.put("maintMargin", getDoubleValue(assetItem, "maintMargin"));
+                        assetInfo.put("initialMargin", getDoubleValue(assetItem, "initialMargin"));
+                        assetInfo.put("positionInitialMargin", getDoubleValue(assetItem, "positionInitialMargin"));
+                        assetInfo.put("openOrderInitialMargin", getDoubleValue(assetItem, "openOrderInitialMargin"));
+                        assetInfo.put("crossWalletBalance", getDoubleValue(assetItem, "crossWalletBalance"));
+                        assetInfo.put("crossUnPnl", getDoubleValue(assetItem, "crossUnPnl"));
+                        assetInfo.put("availableBalance", getDoubleValue(assetItem, "availableBalance"));
+                        assetInfo.put("maxWithdrawAmount", getDoubleValue(assetItem, "maxWithdrawAmount"));
+                    }
                     assetList.add(assetInfo);
                 }
             }
@@ -195,6 +216,23 @@ public class AccountServiceImpl implements AccountService {
         } catch (Exception e) {
             log.error("[AccountService] 生成 account_alias 失败: {}", e.getMessage());
             return "account_" + System.currentTimeMillis();
+        }
+    }
+
+    /**
+     * 从字符串值转换为Double
+     * @param value 字符串值（可能为null）
+     * @return Double值，如果转换失败则返回0.0
+     */
+    private Double getDoubleValueFromString(String value) {
+        if (value == null || value.isEmpty()) {
+            return 0.0;
+        }
+        try {
+            return Double.parseDouble(value);
+        } catch (NumberFormatException e) {
+            log.warn("[AccountService] 无法将字符串转换为Double: {}", value);
+            return 0.0;
         }
     }
 

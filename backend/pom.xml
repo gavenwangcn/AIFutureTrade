@@ -23,6 +23,19 @@
         <maven.compiler.source>11</maven.compiler.source>
         <maven.compiler.target>11</maven.compiler.target>
     </properties>
+    
+    <!-- 使用 Spring Boot 的依赖管理来统一版本 -->
+    <dependencyManagement>
+        <dependencies>
+            <dependency>
+                <groupId>org.springframework.boot</groupId>
+                <artifactId>spring-boot-dependencies</artifactId>
+                <version>${spring-boot.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+        </dependencies>
+    </dependencyManagement>
 
     <!-- Maven仓库配置 -->
     <repositories>
@@ -140,6 +153,21 @@
             <groupId>io.github.binance</groupId>
             <artifactId>binance-derivatives-trading-usds-futures</artifactId>
             <version>7.0.0</version>
+            <exclusions>
+                <!-- 排除 Binance SDK 中的 Jackson 依赖，使用 Spring Boot 管理的版本 -->
+                <exclusion>
+                    <groupId>com.fasterxml.jackson.core</groupId>
+                    <artifactId>jackson-core</artifactId>
+                </exclusion>
+                <exclusion>
+                    <groupId>com.fasterxml.jackson.core</groupId>
+                    <artifactId>jackson-databind</artifactId>
+                </exclusion>
+                <exclusion>
+                    <groupId>com.fasterxml.jackson.core</groupId>
+                    <artifactId>jackson-annotations</artifactId>
+                </exclusion>
+            </exclusions>
         </dependency>
         
         <!-- Jakarta Validation API (Binance SDK 2.0.0 需要) -->

@@ -85,7 +85,23 @@ public class MarketServiceImpl implements MarketService {
             BinanceFuturesClient client = getFuturesClient();
             Map<String, Map<String, Object>> pricesData = client.getSymbolPrices(contractSymbols);
 
-            // 将返回结果中的key从contract_symbol转换为symbol
+            // 从 24_market_tickers 表获取涨幅百分比和成交额
+            Map<String, Map<String, Object>> tickerDataMap = new HashMap<>();
+            try {
+                List<Map<String, Object>> tickerDataList = marketTickerMapper.selectTickersBySymbols(contractSymbols);
+                // 构建symbol到ticker数据的映射（使用contract_symbol作为key）
+                for (Map<String, Object> ticker : tickerDataList) {
+                    String tickerSymbol = (String) ticker.get("symbol");
+                    if (tickerSymbol != null) {
+                        tickerDataMap.put(tickerSymbol.toUpperCase(), ticker);
+                    }
+                }
+                log.debug("[MarketService] 从24_market_tickers表获取到 {} 条ticker数据", tickerDataMap.size());
+            } catch (Exception e) {
+                log.warn("[MarketService] 从24_market_tickers表获取数据失败: {}", e.getMessage());
+            }
+
+            // 将返回结果中的key从contract_symbol转换为symbol，并合并ticker数据
             Map<String, Map<String, Object>> result = new HashMap<>();
             for (Map.Entry<String, String> entry : symbolToContract.entrySet()) {
                 String symbol = entry.getKey();
@@ -104,6 +120,23 @@ public class MarketServiceImpl implements MarketService {
                             break;
                         }
                     }
+                    
+                    // 从24_market_tickers表获取涨幅百分比和成交额
+                    Map<String, Object> tickerData = tickerDataMap.get(contractSymbol);
+                    if (tickerData != null) {
+                        // 添加涨幅百分比（price_change_percent，有正负号）
+                        Object priceChangePercent = tickerData.get("price_change_percent");
+                        if (priceChangePercent != null) {
+                            priceInfo.put("change_24h", priceChangePercent);
+                        }
+                        // 添加当日成交额（quote_volume）
+                        Object quoteVolume = tickerData.get("quote_volume");
+                        if (quoteVolume != null) {
+                            priceInfo.put("daily_volume", quoteVolume);
+                            priceInfo.put("quote_volume", quoteVolume); // 同时提供quote_volume字段以便兼容
+                        }
+                    }
+                    
                     result.put(symbol, priceInfo);
                 }
             }

@@ -45,5 +45,26 @@ public interface MarketTickerMapper extends BaseMapper<MarketTickerDO> {
             "ORDER BY ABS(`price_change_percent`) DESC " +
             "LIMIT #{limit}")
     List<Map<String, Object>> selectLosersFromTickers(@Param("limit") Integer limit);
+
+    /**
+     * 从 24_market_tickers 表根据symbol列表获取ticker数据
+     * 每个symbol只返回最新的一条记录（按event_time降序）
+     * @param symbols 交易对符号列表
+     * @return ticker数据列表，包含 price_change_percent 和 quote_volume
+     */
+    @Select("<script>" +
+            "SELECT t1.`symbol`, t1.`price_change_percent`, t1.`quote_volume` " +
+            "FROM `24_market_tickers` t1 " +
+            "INNER JOIN (" +
+            "  SELECT `symbol`, MAX(`event_time`) as max_event_time " +
+            "  FROM `24_market_tickers` " +
+            "  WHERE `symbol` IN " +
+            "  <foreach collection='symbols' item='symbol' open='(' separator=',' close=')'>" +
+            "    #{symbol}" +
+            "  </foreach>" +
+            "  GROUP BY `symbol`" +
+            ") t2 ON t1.`symbol` = t2.`symbol` AND t1.`event_time` = t2.max_event_time" +
+            "</script>")
+    List<Map<String, Object>> selectTickersBySymbols(@Param("symbols") List<String> symbols);
 }
 

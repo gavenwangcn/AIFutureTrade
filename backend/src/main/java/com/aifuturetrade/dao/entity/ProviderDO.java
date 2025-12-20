@@ -1,6 +1,7 @@
 package com.aifuturetrade.dao.entity;
 
 import com.baomidou.mybatisplus.annotation.IdType;
+import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
 import lombok.Data;
@@ -60,7 +61,9 @@ public class ProviderDO implements Serializable {
 
     /**
      * 更新时间
+     * 注意：数据库表中不存在此字段，使用 @TableField(exist = false) 标记
      */
+    @TableField(exist = false)
     private LocalDateTime updatedAt;
 
 }

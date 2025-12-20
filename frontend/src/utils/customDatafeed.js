@@ -219,28 +219,17 @@ export function createDataLoader() {
         lastTimestamp: klines.length > 0 ? new Date(klines[klines.length - 1].timestamp).toISOString() : null
       })
 
-      // 根据加载类型决定是否还有更多数据
-      // more 参数可以是 boolean 或 { backward?: boolean, forward?: boolean }
-      // 如果返回 true，表示两个方向都有更多数据
-      // 如果返回 false，表示没有更多数据
-      // 如果返回对象，可以精确控制每个方向是否有更多数据
+      // limit是传递给API的参数，用于控制后端返回的K线数据量
+      // 不需要判断是否还有更多数据，所有加载类型都只返回false，表示没有更多数据
+      // 这样KLineChart就不会自动触发backward/forward加载
       let more = false
-      if (klines.length > 0) {
-        if (type === 'init') {
-          // 初始化时，如果返回的数据量达到限制，可能还有更多数据
-          more = klines.length >= limit
-          
-          // 第一次加载完成后，调用 /api/market/prices API
-          // 注意：仅调用一次，不再使用WebSocket等实时加载数据
-          fetchMarketPrices()
-        } else if (type === 'backward') {
-          // 向后加载：如果返回的数据量达到限制，可能还有更早的数据
-          more = klines.length >= limit
-        } else if (type === 'forward') {
-          // 向前加载：如果返回的数据量达到限制，可能还有更新的数据
-          more = klines.length >= limit
-        }
+      
+      // 第一次加载完成后，调用 /api/market/prices API
+      // 注意：仅调用一次，不再使用WebSocket等实时加载数据
+      if (type === 'init') {
+        fetchMarketPrices()
       }
+      
       callback(klines, more)
     } catch (error) {
       console.error('[DataLoader] Error getting K-line data:', error)
