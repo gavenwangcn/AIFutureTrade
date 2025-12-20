@@ -62,6 +62,124 @@ detect_os() {
     log_info "检测到操作系统: $OS $OS_VERSION"
 }
 
+# 安装下载工具（wget 或 curl）
+install_download_tool() {
+    log_info "检查下载工具..."
+    
+    if command -v wget &> /dev/null; then
+        DOWNLOAD_TOOL="wget"
+        log_info "已找到 wget"
+        return 0
+    elif command -v curl &> /dev/null; then
+        DOWNLOAD_TOOL="curl"
+        log_info "已找到 curl"
+        return 0
+    else
+        log_info "未找到下载工具，正在安装 wget..."
+        
+        # 如果 OS 变量未设置，尝试检测
+        if [ -z "$OS" ]; then
+            if [ -f /etc/os-release ]; then
+                . /etc/os-release
+                OS=$ID
+            fi
+        fi
+        
+        case $OS in
+            ubuntu|debian)
+                apt-get update -qq
+                apt-get install -y wget
+                ;;
+            centos|rhel|fedora|rocky|almalinux)
+                if command -v dnf &> /dev/null; then
+                    dnf install -y wget
+                else
+                    yum install -y wget
+                fi
+                ;;
+            *)
+                log_warn "未知的操作系统，尝试使用通用方法安装 wget..."
+                # 尝试使用包管理器
+                if command -v apt-get &> /dev/null; then
+                    apt-get update -qq && apt-get install -y wget
+                elif command -v dnf &> /dev/null; then
+                    dnf install -y wget
+                elif command -v yum &> /dev/null; then
+                    yum install -y wget
+                else
+                    log_error "无法确定包管理器，请手动安装 wget 或 curl"
+                    return 1
+                fi
+                ;;
+        esac
+        
+        if command -v wget &> /dev/null; then
+            DOWNLOAD_TOOL="wget"
+            log_info "wget 安装成功"
+            return 0
+        else
+            log_error "无法安装下载工具，请手动安装 wget 或 curl"
+            return 1
+        fi
+    fi
+}
+
+# 下载文件函数（支持 wget 和 curl，带超时和重试）
+download_file() {
+    local url=$1
+    local output=$2
+    local max_retries=3
+    local retry_count=0
+    local timeout=300  # 5分钟超时
+    
+    while [ $retry_count -lt $max_retries ]; do
+        log_info "正在下载... (尝试 $((retry_count + 1))/$max_retries)"
+        log_info "URL: $url"
+        
+        if [ "$DOWNLOAD_TOOL" = "wget" ]; then
+            # 使用 wget 下载，显示进度条
+            if wget --timeout=$timeout --tries=1 --progress=bar:force \
+                "$url" -O "$output" 2>&1; then
+                # 检查文件是否存在且大小大于0
+                if [ -f "$output" ] && [ -s "$output" ]; then
+                    log_info "下载完成"
+                    return 0
+                else
+                    log_warn "下载的文件为空或不存在"
+                fi
+            else
+                log_warn "wget 下载命令执行失败"
+            fi
+        elif [ "$DOWNLOAD_TOOL" = "curl" ]; then
+            # 使用 curl 下载，显示进度条
+            if curl -L --connect-timeout 30 --max-time $timeout --progress-bar \
+                "$url" -o "$output"; then
+                if [ -f "$output" ] && [ -s "$output" ]; then
+                    log_info "下载完成"
+                    return 0
+                else
+                    log_warn "下载的文件为空或不存在"
+                fi
+            else
+                log_warn "curl 下载命令执行失败"
+            fi
+        else
+            log_error "未知的下载工具: $DOWNLOAD_TOOL"
+            return 1
+        fi
+        
+        retry_count=$((retry_count + 1))
+        if [ $retry_count -lt $max_retries ]; then
+            log_warn "下载失败，3秒后重试..."
+            sleep 3
+            rm -f "$output"  # 删除不完整的文件
+        fi
+    done
+    
+    log_error "下载失败，已重试 $max_retries 次"
+    return 1
+}
+
 # 安装 OpenJDK 11
 install_openjdk11() {
     log_info "开始安装 OpenJDK 11..."
@@ -105,49 +223,86 @@ install_maven() {
     
     # 检查 Maven 是否已安装
     if command -v mvn &> /dev/null; then
-        MVN_VERSION=$(mvn -version 2>&1 | head -n 1 | grep -oP 'Apache Maven \K[0-9]+\.[0-9]+\.[0-9]+')
-        MVN_MAJOR=$(echo $MVN_VERSION | cut -d'.' -f1)
-        MVN_MINOR=$(echo $MVN_VERSION | cut -d'.' -f2)
-        
-        if [ "$MVN_MAJOR" = "3" ] && [ "$MVN_MINOR" -ge 8 ] && [ "$MVN_MINOR" -lt 9 ]; then
-            log_warn "Maven $MVN_VERSION 已安装，版本符合要求（3.8.x），跳过安装步骤"
-            return
-        else
-            log_warn "检测到已安装 Maven 版本: $MVN_VERSION，将安装 Maven 3.8.8"
+        MVN_VERSION=$(mvn -version 2>&1 | head -n 1 | grep -oP 'Apache Maven \K[0-9]+\.[0-9]+\.[0-9]+' || echo "")
+        if [ -n "$MVN_VERSION" ]; then
+            MVN_MAJOR=$(echo $MVN_VERSION | cut -d'.' -f1)
+            MVN_MINOR=$(echo $MVN_VERSION | cut -d'.' -f2)
+            
+            if [ "$MVN_MAJOR" = "3" ] && [ "$MVN_MINOR" -ge 8 ] && [ "$MVN_MINOR" -lt 9 ]; then
+                log_warn "Maven $MVN_VERSION 已安装，版本符合要求（3.8.x），跳过安装步骤"
+                return
+            else
+                log_warn "检测到已安装 Maven 版本: $MVN_VERSION，将安装 Maven 3.8.8"
+            fi
         fi
+    fi
+    
+    # 确保下载工具已安装
+    if ! install_download_tool; then
+        log_error "无法安装下载工具，Maven 安装失败"
+        exit 1
     fi
     
     # Maven 版本和下载 URL
     MAVEN_VERSION="3.8.8"
     MAVEN_DOWNLOAD_URL="https://archive.apache.org/dist/maven/maven-3/${MAVEN_VERSION}/binaries/apache-maven-${MAVEN_VERSION}-bin.tar.gz"
+    MAVEN_MIRROR_URL="https://mirrors.aliyun.com/apache/maven/maven-3/${MAVEN_VERSION}/binaries/apache-maven-${MAVEN_VERSION}-bin.tar.gz"
     MAVEN_INSTALL_DIR="/opt/maven"
     MAVEN_HOME_DIR="${MAVEN_INSTALL_DIR}/apache-maven-${MAVEN_VERSION}"
+    DOWNLOAD_FILE="/tmp/apache-maven-${MAVEN_VERSION}-bin.tar.gz"
     
     # 创建安装目录
     mkdir -p $MAVEN_INSTALL_DIR
     
+    # 检查文件是否已存在且完整
+    if [ -f "$DOWNLOAD_FILE" ] && [ -s "$DOWNLOAD_FILE" ]; then
+        log_info "检测到已存在的 Maven 安装包，验证完整性..."
+        # 简单验证：检查文件大小（Maven 3.8.8 大约 9-10MB）
+        FILE_SIZE=$(stat -f%z "$DOWNLOAD_FILE" 2>/dev/null || stat -c%s "$DOWNLOAD_FILE" 2>/dev/null || echo "0")
+        if [ "$FILE_SIZE" -gt 5000000 ]; then  # 大于 5MB 认为可能是完整的
+            log_warn "使用已存在的安装包"
+        else
+            log_warn "已存在的文件可能不完整，将重新下载"
+            rm -f "$DOWNLOAD_FILE"
+        fi
+    fi
+    
     # 下载 Maven
-    log_info "下载 Maven ${MAVEN_VERSION}..."
-    cd /tmp
-    if [ -f "apache-maven-${MAVEN_VERSION}-bin.tar.gz" ]; then
-        log_warn "Maven 安装包已存在，跳过下载"
-    else
-        wget -q $MAVEN_DOWNLOAD_URL -O apache-maven-${MAVEN_VERSION}-bin.tar.gz || {
-            log_error "Maven 下载失败，尝试使用备用镜像..."
-            # 尝试使用阿里云镜像
-            MAVEN_DOWNLOAD_URL="https://mirrors.aliyun.com/apache/maven/maven-3/${MAVEN_VERSION}/binaries/apache-maven-${MAVEN_VERSION}-bin.tar.gz"
-            wget -q $MAVEN_DOWNLOAD_URL -O apache-maven-${MAVEN_VERSION}-bin.tar.gz || {
-                log_error "Maven 下载失败，请检查网络连接"
+    if [ ! -f "$DOWNLOAD_FILE" ] || [ ! -s "$DOWNLOAD_FILE" ]; then
+        log_info "从 Apache 官方镜像下载 Maven ${MAVEN_VERSION}..."
+        if ! download_file "$MAVEN_DOWNLOAD_URL" "$DOWNLOAD_FILE"; then
+            log_warn "Apache 官方镜像下载失败，尝试使用阿里云镜像..."
+            if ! download_file "$MAVEN_MIRROR_URL" "$DOWNLOAD_FILE"; then
+                log_error "Maven 下载失败，请检查网络连接或手动下载"
+                log_error "下载地址: $MAVEN_DOWNLOAD_URL"
+                log_error "或: $MAVEN_MIRROR_URL"
                 exit 1
-            }
-        }
+            fi
+        fi
+    fi
+    
+    # 验证下载的文件
+    if [ ! -f "$DOWNLOAD_FILE" ] || [ ! -s "$DOWNLOAD_FILE" ]; then
+        log_error "下载的文件不存在或为空"
+        exit 1
     fi
     
     # 解压 Maven
-    log_info "解压 Maven..."
-    tar -xzf apache-maven-${MAVEN_VERSION}-bin.tar.gz -C $MAVEN_INSTALL_DIR
+    log_info "解压 Maven 到 $MAVEN_INSTALL_DIR..."
+    if ! tar -xzf "$DOWNLOAD_FILE" -C $MAVEN_INSTALL_DIR; then
+        log_error "Maven 解压失败，可能文件损坏"
+        log_error "请删除 $DOWNLOAD_FILE 后重新运行脚本"
+        exit 1
+    fi
+    
+    # 验证解压结果
+    if [ ! -d "$MAVEN_HOME_DIR" ]; then
+        log_error "Maven 解压后目录不存在: $MAVEN_HOME_DIR"
+        exit 1
+    fi
     
     # 设置权限
+    log_info "设置 Maven 目录权限..."
     chown -R root:root $MAVEN_HOME_DIR
     chmod -R 755 $MAVEN_HOME_DIR
     
