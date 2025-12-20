@@ -209,15 +209,58 @@ public class BinanceFuturesClient extends BinanceFuturesBase {
             }
             
             // 调用API获取K线数据
-            // 注意：实际API调用可能需要使用Request对象，这里先使用占位符
             long apiStartTime = System.currentTimeMillis();
-            // TODO: 根据实际SDK API调整调用方式
-            // ApiResponse<?> response = restApi.klineCandlestickData(...);
-            // Object data = getResponseData(response);
-            Object data = null; // 临时占位符，需要根据实际SDK调整
-            long apiDuration = System.currentTimeMillis() - apiStartTime;
+            ApiResponse<?> response = null;
+            Object data = null;
             
-            log.debug("[Binance Futures] API调用完成, 耗时: {} 毫秒", apiDuration);
+            try {
+                String requestSymbol = symbol.toUpperCase();
+                log.debug("[Binance Futures] 准备调用SDK获取K线数据, symbol={}, interval={}, limit={}, startTime={}, endTime={}", 
+                        requestSymbol, interval, limit, startTime, endTime);
+                
+                // 构建请求参数Map（Binance SDK通常使用Map参数）
+                Map<String, Object> requestParams = new HashMap<>();
+                requestParams.put("symbol", requestSymbol);
+                requestParams.put("interval", interval);
+                if (limit != null) {
+                    requestParams.put("limit", limit);
+                }
+                if (startTime != null) {
+                    requestParams.put("startTime", startTime);
+                }
+                if (endTime != null) {
+                    requestParams.put("endTime", endTime);
+                }
+                
+                // 调用SDK API获取K线数据
+                // 注意：根据Binance Java SDK的文档，klineCandlestickData方法接受Map<String, Object>参数
+                response = restApi.klineCandlestickData(requestParams);
+                
+                // 获取响应数据
+                if (response != null) {
+                    data = getResponseData(response);
+                    log.debug("[Binance Futures] SDK响应获取成功, data类型: {}, 是否为List: {}", 
+                            data != null ? data.getClass().getName() : "null", 
+                            data instanceof List);
+                } else {
+                    log.error("[Binance Futures] SDK响应为null");
+                }
+                
+            } catch (Exception apiExc) {
+                log.error("[Binance Futures] 调用SDK API失败: {}, 错误详情: {}", 
+                        apiExc.getMessage(), apiExc.getClass().getName(), apiExc);
+                // 不抛出异常，返回空列表，让上层处理
+                data = null;
+            }
+            
+            long apiDuration = System.currentTimeMillis() - apiStartTime;
+            if (data instanceof List) {
+                log.info("[Binance Futures] API调用完成, 耗时: {} 毫秒, 返回 {} 条K线数据", 
+                        apiDuration, ((List<?>) data).size());
+            } else {
+                log.warn("[Binance Futures] API调用完成, 耗时: {} 毫秒, 但返回数据不是List类型: {}", 
+                        apiDuration, data != null ? data.getClass().getName() : "null");
+            }
             
             // 处理响应数据
             if (data instanceof List) {

@@ -102,18 +102,49 @@ export function createDataLoader(onLoadingStart, onLoadingEnd) {
         }
       }
       
-      const response = await fetch(`${apiBaseUrl}/api/market/klines?${urlParams.toString()}`)
+      const apiUrl = `${apiBaseUrl}/api/market/klines?${urlParams.toString()}`
+      // #region agent log
+      fetch('http://127.0.0.1:7242/ingest/34f8560e-dcef-4245-a2be-f23557e97d5f',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'customDatafeed.js:105',message:'API请求开始',data:{apiUrl,apiBaseUrl,symbol:ticker,interval,limit,type,timestamp:timestamp?new Date(timestamp).toISOString():null},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
+      // #endregion
+      const response = await fetch(apiUrl)
+      
+      // #region agent log
+      fetch('http://127.0.0.1:7242/ingest/34f8560e-dcef-4245-a2be-f23557e97d5f',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'customDatafeed.js:107',message:'API响应状态',data:{status:response.status,statusText:response.statusText,ok:response.ok},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
+      // #endregion
       
       if (!response.ok) {
         const errorText = await response.text()
+        // #region agent log
+        fetch('http://127.0.0.1:7242/ingest/34f8560e-dcef-4245-a2be-f23557e97d5f',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'customDatafeed.js:110',message:'HTTP错误',data:{status:response.status,errorText},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
+        // #endregion
         console.error('[DataLoader] HTTP错误详情:', errorText)
         callback([])
         return
       }
       
       const result = await response.json()
+      // #region agent log
+      fetch('http://127.0.0.1:7242/ingest/34f8560e-dcef-4245-a2be-f23557e97d5f',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'customDatafeed.js:125',message:'API响应数据',data:{resultType:Array.isArray(result)?'array':'object',hasData:!!result.data,isArray:Array.isArray(result),isArrayData:Array.isArray(result?.data),resultLength:Array.isArray(result)?result.length:null,dataLength:Array.isArray(result?.data)?result.data.length:null,resultKeys:result&&typeof result==='object'&&!Array.isArray(result)?Object.keys(result):null},timestamp:Date.now(),sessionId:'debug-session',runId:'post-fix',hypothesisId:'D'})}).catch(()=>{});
+      // #endregion
 
-      if (!result || !result.data || !Array.isArray(result.data)) {
+      // 处理响应格式：后端可能直接返回数组，也可能返回 {data: [...]} 格式
+      let klinesData = null
+      if (Array.isArray(result)) {
+        // 后端直接返回数组格式
+        klinesData = result
+        // #region agent log
+        fetch('http://127.0.0.1:7242/ingest/34f8560e-dcef-4245-a2be-f23557e97d5f',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'customDatafeed.js:132',message:'检测到数组格式响应',data:{arrayLength:result.length},timestamp:Date.now(),sessionId:'debug-session',runId:'post-fix',hypothesisId:'A'})}).catch(()=>{});
+        // #endregion
+      } else if (result && result.data && Array.isArray(result.data)) {
+        // 后端返回 {data: [...]} 格式
+        klinesData = result.data
+        // #region agent log
+        fetch('http://127.0.0.1:7242/ingest/34f8560e-dcef-4245-a2be-f23557e97d5f',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'customDatafeed.js:136',message:'检测到对象格式响应',data:{dataLength:result.data.length},timestamp:Date.now(),sessionId:'debug-session',runId:'post-fix',hypothesisId:'A'})}).catch(()=>{});
+        // #endregion
+      } else {
+        // #region agent log
+        fetch('http://127.0.0.1:7242/ingest/34f8560e-dcef-4245-a2be-f23557e97d5f',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'customDatafeed.js:139',message:'响应格式无效',data:{resultType:typeof result,isArray:Array.isArray(result),hasData:!!result?.data,resultSample:result?JSON.stringify(result).substring(0,300):null},timestamp:Date.now(),sessionId:'debug-session',runId:'post-fix',hypothesisId:'F'})}).catch(()=>{});
+        // #endregion
         console.warn('[DataLoader] Invalid response format:', result)
         callback([])
         loadingCallbacks.end()
@@ -121,7 +152,7 @@ export function createDataLoader(onLoadingStart, onLoadingEnd) {
       }
 
       // 转换数据格式
-      const klines = result.data
+      const klines = klinesData
         .map(kline => {
           // 处理时间戳：确保是数字类型（毫秒）
           let ts = kline.timestamp
