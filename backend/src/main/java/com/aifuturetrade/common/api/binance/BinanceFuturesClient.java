@@ -139,6 +139,9 @@ public class BinanceFuturesClient extends BinanceFuturesBase {
     /**
      * 获取指定交易对的实时价格
      * 
+     * 使用 Symbol Price Ticker V2 API，参考官方示例实现。
+     * 根据传入的symbol数量，逐个调用API获取每个交易对的价格。
+     * 
      * @param symbols 交易对符号列表，如 ['BTCUSDT', 'ETHUSDT']
      * @return 字典，key为交易对符号，value为实时价格数据
      */
@@ -155,6 +158,8 @@ public class BinanceFuturesClient extends BinanceFuturesBase {
             int success = 0;
             long fetchStart = System.currentTimeMillis();
             
+            // 逐个调用API获取每个交易对的价格
+            // 参考官方示例：symbolPriceTickerV2(symbol)
             for (int idx = 0; idx < symbols.size(); idx++) {
                 String symbol = symbols.get(idx);
                 String requestSymbol = symbol.toUpperCase();
@@ -162,7 +167,10 @@ public class BinanceFuturesClient extends BinanceFuturesBase {
                 
                 try {
                     long callStart = System.currentTimeMillis();
-                    ApiResponse<?> response = restApi.symbolPriceTicker(requestSymbol);
+                    
+                    // 使用 symbolPriceTickerV2，参考官方示例
+                    // 参考官方示例：symbolPriceTickerV2(symbol)
+                    ApiResponse<?> response = restApi.symbolPriceTickerV2(requestSymbol);
                     long callDuration = System.currentTimeMillis() - callStart;
                     
                     // 尝试多种方式获取响应数据
@@ -178,7 +186,6 @@ public class BinanceFuturesClient extends BinanceFuturesBase {
                     log.debug("[Binance Futures] {} 返回数据字段: {}", requestSymbol, priceData.keySet());
                     
                     // 匹配正确的交易对数据
-                    // 注意：Binance API可能返回单个对象，symbol字段可能不存在或字段名不同
                     String normalizedSymbol = requestSymbol.toUpperCase();
                     String symbolValue = null;
                     
