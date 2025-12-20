@@ -30,7 +30,7 @@ spring:
 logging:
   level:
     root: info
-    com.aifuturetrade: info
+    com.aifuturetrade: debug
 
 # Binance API配置（开发环境使用测试网）
 binance:

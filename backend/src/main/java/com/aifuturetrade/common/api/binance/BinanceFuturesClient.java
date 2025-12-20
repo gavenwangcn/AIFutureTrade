@@ -226,36 +226,17 @@ public class BinanceFuturesClient extends BinanceFuturesBase {
                     return new ArrayList<>();
                 }
                 
-                // 验证和转换limit参数
-                // Binance API限制：limit必须在1-1000之间，推荐使用1-500
-                // 注意：即使提供了startTime/endTime，limit参数也必须有效（不能为null）
-                Long limitLong;
-                if (limit == null || limit <= 0) {
-                    // 如果limit为null或无效，使用默认值
-                    // 根据interval选择合理的默认值
-                    if ("1w".equals(interval)) {
-                        limitLong = 100L;  // 周线：100周数据
-                    } else if ("1d".equals(interval)) {
-                        limitLong = 500L;  // 日线：500天数据
-                    } else {
-                        limitLong = 500L;  // 其他：500条数据
-                    }
-                    log.debug("[Binance Futures] limit参数无效或为空，使用默认值: {} (interval: {})", limitLong, interval);
-                } else if (limit > 1000) {
-                    // 如果limit超过最大值，限制为1000
-                    limitLong = 1000L;
-                    log.warn("[Binance Futures] limit参数 {} 超过最大值1000，已限制为1000", limit);
-                } else {
-                    limitLong = limit.longValue();
-                }
+                // 验证和转换limit参数（Binance API限制：1-1000）
+                Long limitLong = (limit != null && limit > 0 && limit <= 1000) 
+                    ? limit.longValue() 
+                    : 500L; // 默认值
                 
-                log.debug("[Binance Futures] 最终调用参数: symbol={}, interval={}, limit={}, startTime={}, endTime={}", 
-                        requestSymbol, intervalEnum, limitLong, startTime, endTime);
+                log.info("[Binance Futures] 调用参数: symbol={}, interval={}, startTime={}, endTime={}, limit={}", 
+                        requestSymbol, intervalEnum, startTime, endTime, limitLong);
                 
                 // 调用SDK API获取K线数据
-                // 方法签名：klineCandlestickData(String symbol, Interval interval, Long limit, Long startTime, Long endTime)
-                // 注意：limit参数不能为null，必须是一个有效的Long值（1-1000之间）
-                response = restApi.klineCandlestickData(requestSymbol, intervalEnum, limitLong, startTime, endTime);
+                // 参考官方示例：klineCandlestickData(symbol, interval, startTime, endTime, limit)
+                response = restApi.klineCandlestickData(requestSymbol, intervalEnum, startTime, endTime, limitLong);
                 
                 // 获取响应数据
                 if (response != null) {
