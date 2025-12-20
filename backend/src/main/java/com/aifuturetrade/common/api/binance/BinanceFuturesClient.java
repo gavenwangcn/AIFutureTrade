@@ -376,32 +376,40 @@ public class BinanceFuturesClient extends BinanceFuturesBase {
                             String takerBuyQuoteVolume = String.valueOf(klineList.get(10));
                             
                             // 转换时间戳为日期格式（使用 UTC+8 时区）
+                            // 注意：open_time 和 close_time 是 UTC 时间戳（毫秒），用于API调用
+                            // open_time_dt_str 和 close_time_dt_str 是 UTC+8 格式的时间字符串，用于显示
                             ZoneId utcPlus8 = ZoneId.of("Asia/Shanghai");
                             LocalDateTime openTimeDt = null;
                             String openTimeDtStr = null;
                             if (openTime != null) {
                                 ZonedDateTime openTimeZoned = Instant.ofEpochMilli(openTime).atZone(utcPlus8);
                                 openTimeDt = openTimeZoned.toLocalDateTime();
-                                openTimeDtStr = openTimeZoned.format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"));
+                                // 格式：UTC+8 2025-01-01 12:00:00
+                                openTimeDtStr = "UTC+8 " + openTimeZoned.format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"));
                             }
                             LocalDateTime closeTimeDt = null;
                             String closeTimeDtStr = null;
                             if (closeTime != null) {
                                 ZonedDateTime closeTimeZoned = Instant.ofEpochMilli(closeTime).atZone(utcPlus8);
                                 closeTimeDt = closeTimeZoned.toLocalDateTime();
-                                closeTimeDtStr = closeTimeZoned.format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"));
+                                // 格式：UTC+8 2025-01-01 12:00:00
+                                closeTimeDtStr = "UTC+8 " + closeTimeZoned.format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"));
                             }
                             
+                            // 保留原始UTC时间戳（用于API调用和计算）
                             klineDict.put("open_time", openTime);
                             klineDict.put("open_time_dt", openTimeDt);
+                            // UTC+8格式的时间字符串（用于显示）
                             klineDict.put("open_time_dt_str", openTimeDtStr);
                             klineDict.put("open", openPrice);
                             klineDict.put("high", highPrice);
                             klineDict.put("low", lowPrice);
                             klineDict.put("close", closePrice);
                             klineDict.put("volume", volume);
+                            // 保留原始UTC时间戳（用于API调用和计算）
                             klineDict.put("close_time", closeTime);
                             klineDict.put("close_time_dt", closeTimeDt);
+                            // UTC+8格式的时间字符串（用于显示）
                             klineDict.put("close_time_dt_str", closeTimeDtStr);
                             klineDict.put("quote_asset_volume", quoteAssetVolume);
                             klineDict.put("number_of_trades", numberOfTrades);
@@ -434,32 +442,40 @@ public class BinanceFuturesClient extends BinanceFuturesBase {
                                     entry.getOrDefault("takerBuyQuoteVolume", entry.getOrDefault("Q", ""))));
                             
                             // 转换时间戳为日期格式（使用 UTC+8 时区）
+                            // 注意：open_time 和 close_time 是 UTC 时间戳（毫秒），用于API调用
+                            // open_time_dt_str 和 close_time_dt_str 是 UTC+8 格式的时间字符串，用于显示
                             ZoneId utcPlus8 = ZoneId.of("Asia/Shanghai");
                             LocalDateTime openTimeDt = null;
                             String openTimeDtStr = null;
                             if (openTime != null) {
                                 ZonedDateTime openTimeZoned = Instant.ofEpochMilli(openTime).atZone(utcPlus8);
                                 openTimeDt = openTimeZoned.toLocalDateTime();
-                                openTimeDtStr = openTimeZoned.format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"));
+                                // 格式：UTC+8 2025-01-01 12:00:00
+                                openTimeDtStr = "UTC+8 " + openTimeZoned.format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"));
                             }
                             LocalDateTime closeTimeDt = null;
                             String closeTimeDtStr = null;
                             if (closeTime != null) {
                                 ZonedDateTime closeTimeZoned = Instant.ofEpochMilli(closeTime).atZone(utcPlus8);
                                 closeTimeDt = closeTimeZoned.toLocalDateTime();
-                                closeTimeDtStr = closeTimeZoned.format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"));
+                                // 格式：UTC+8 2025-01-01 12:00:00
+                                closeTimeDtStr = "UTC+8 " + closeTimeZoned.format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"));
                             }
                             
+                            // 保留原始UTC时间戳（用于API调用和计算）
                             klineDict.put("open_time", openTime);
                             klineDict.put("open_time_dt", openTimeDt);
+                            // UTC+8格式的时间字符串（用于显示）
                             klineDict.put("open_time_dt_str", openTimeDtStr);
                             klineDict.put("open", openPrice);
                             klineDict.put("high", highPrice);
                             klineDict.put("low", lowPrice);
                             klineDict.put("close", closePrice);
                             klineDict.put("volume", volume);
+                            // 保留原始UTC时间戳（用于API调用和计算）
                             klineDict.put("close_time", closeTime);
                             klineDict.put("close_time_dt", closeTimeDt);
+                            // UTC+8格式的时间字符串（用于显示）
                             klineDict.put("close_time_dt_str", closeTimeDtStr);
                             klineDict.put("quote_asset_volume", quoteAssetVolume);
                             klineDict.put("number_of_trades", numberOfTrades);

@@ -154,12 +154,13 @@ public class KlineCandlestickDataTest {
             System.out.println("使用Interval枚举: " + intervalEnum);
             
             // 打印实际请求参数（用于排查）
+            // 注意：传入SDK的startTime和endTime是UTC时间戳（毫秒），System.currentTimeMillis()返回的就是UTC时间戳
             System.out.println("----------------------------------------");
-            System.out.println("实际请求参数:");
+            System.out.println("实际请求参数（传入SDK使用UTC时间戳）:");
             System.out.println("  symbol: " + symbol);
             System.out.println("  interval: " + intervalEnum);
-            System.out.println("  startTime: " + calculatedStartTime + " (UTC+8: " + Instant.ofEpochMilli(calculatedStartTime.longValue()).atZone(utcPlus8).format(formatter) + ")");
-            System.out.println("  endTime: " + calculatedEndTime + " (UTC+8: " + Instant.ofEpochMilli(calculatedEndTime.longValue()).atZone(utcPlus8).format(formatter) + ")");
+            System.out.println("  startTime: " + calculatedStartTime + " (UTC时间戳，对应UTC+8时间: " + Instant.ofEpochMilli(calculatedStartTime.longValue()).atZone(utcPlus8).format(formatter) + ")");
+            System.out.println("  endTime: " + calculatedEndTime + " (UTC时间戳，对应UTC+8时间: " + Instant.ofEpochMilli(calculatedEndTime.longValue()).atZone(utcPlus8).format(formatter) + ")");
             System.out.println("  limit: " + limit);
             if (calculatedStartTime != null && calculatedEndTime != null) {
                 long timeDiff = calculatedEndTime.longValue() - calculatedStartTime.longValue();
@@ -554,33 +555,99 @@ public class KlineCandlestickDataTest {
     /**
      * 将字符串interval转换为Interval枚举（按照官方示例使用枚举值）
      * 官方示例使用：Interval.INTERVAL_1m, Interval.INTERVAL_5m 等
+     * 
+     * 注意：枚举值可能是 INTERVAL_1m（小写m）或 INTERVAL_1M（大写M），需要尝试多种格式
      */
     private Interval convertStringToIntervalEnum(String intervalStr) {
         if (intervalStr == null || intervalStr.isEmpty()) {
             return null;
         }
         
-        // 按照官方示例，枚举值格式为 INTERVAL_1m, INTERVAL_5m 等
-        String upperInterval = intervalStr.toUpperCase();
-        String enumName = "INTERVAL_" + upperInterval;
+        // 尝试多种可能的枚举命名格式
+        // 注意：需要区分小写m（分钟）和大写M（月）
+        // 优先尝试保持原样，避免"1m"被误识别为"1M"
+        String[] possibleNames;
+        if (intervalStr.endsWith("M") && !intervalStr.endsWith("m")) {
+            // 明确是大写M（月），如 "1M"
+            possibleNames = new String[]{
+                "INTERVAL_" + intervalStr,           // INTERVAL_1M
+                "INTERVAL_" + intervalStr.toUpperCase(), // INTERVAL_1M
+            };
+        } else {
+            // 小写m（分钟）或其他，优先尝试小写和原样
+            possibleNames = new String[]{
+                "INTERVAL_" + intervalStr,                    // INTERVAL_1m (保持原样，优先)
+                "INTERVAL_" + intervalStr.toLowerCase(),      // INTERVAL_1m (全小写)
+                "INTERVAL_" + intervalStr.toUpperCase(),      // INTERVAL_1M (全大写，最后尝试)
+            };
+        }
         
-        try {
-            // 直接使用枚举值，如 Interval.INTERVAL_1m
-            return Interval.valueOf(enumName);
-        } catch (IllegalArgumentException e) {
-            // 如果失败，尝试查找所有枚举值进行匹配
+        // 先尝试直接匹配
+        for (String enumName : possibleNames) {
+            try {
+                Interval result = Interval.valueOf(enumName);
+                System.out.println("成功匹配Interval枚举: " + intervalStr + " -> " + result);
+                return result;
+            } catch (IllegalArgumentException e) {
+                // 继续尝试下一个
+                continue;
+            }
+        }
+        
+        // 如果直接匹配失败，遍历所有枚举值进行模糊匹配
         try {
             Interval[] values = Interval.values();
+            String inputLower = intervalStr.toLowerCase();
+            
+            System.out.println("尝试模糊匹配Interval枚举，输入: " + intervalStr);
+            System.out.println("可用的Interval枚举值:");
             for (Interval interval : values) {
-                String enumStr = interval.toString().toUpperCase();
-                    // 匹配 INTERVAL_1M, INTERVAL_5M 等格式
-                    if (enumStr.equals(enumName) || enumStr.endsWith("_" + upperInterval)) {
+                System.out.println("  " + interval);
+            }
+            
+            for (Interval interval : values) {
+                String enumStr = interval.toString();
+                String enumLower = enumStr.toLowerCase();
+                String enumUpper = enumStr.toUpperCase();
+                String inputUpper = intervalStr.toUpperCase();
+                
+                // 尝试多种匹配方式
+                // 1. 完全匹配（优先小写匹配，避免"1m"匹配到"1M"）
+                if (enumStr.equals("INTERVAL_" + intervalStr) || 
+                    enumLower.equals("INTERVAL_" + inputLower)) {
+                    System.out.println("模糊匹配成功（完全匹配）: " + intervalStr + " -> " + interval);
                     return interval;
+                }
+                // 2. 以输入值结尾
+                if (enumStr.endsWith("_" + intervalStr) || 
+                    enumLower.endsWith("_" + inputLower)) {
+                    System.out.println("模糊匹配成功（结尾匹配）: " + intervalStr + " -> " + interval);
+                    return interval;
+                }
+                // 3. 包含输入值（如 INTERVAL_ONE_MINUTE 匹配 1m）
+                if (enumUpper.contains(inputUpper) || enumLower.contains(inputLower)) {
+                    // 进一步验证：确保是合理的匹配
+                    // 例如：1m 应该匹配包含 "1" 和 "M" 或 "MIN" 的枚举
+                    if (inputUpper.contains("M") && (enumUpper.contains("MIN") || enumUpper.contains("M"))) {
+                        System.out.println("模糊匹配成功（包含匹配）: " + intervalStr + " -> " + interval);
+                        return interval;
+                    }
+                    if (inputUpper.contains("H") && enumUpper.contains("HOUR")) {
+                        System.out.println("模糊匹配成功（包含匹配）: " + intervalStr + " -> " + interval);
+                        return interval;
+                    }
+                    if (inputUpper.contains("D") && enumUpper.contains("DAY")) {
+                        System.out.println("模糊匹配成功（包含匹配）: " + intervalStr + " -> " + interval);
+                        return interval;
+                    }
+                    if (inputUpper.contains("W") && enumUpper.contains("WEEK")) {
+                        System.out.println("模糊匹配成功（包含匹配）: " + intervalStr + " -> " + interval);
+                        return interval;
                     }
                 }
-            } catch (Exception e2) {
-                System.err.println("查找Interval枚举失败: " + e2.getMessage());
             }
+        } catch (Exception e2) {
+            System.err.println("查找Interval枚举失败: " + e2.getMessage());
         }
         
         return null;
