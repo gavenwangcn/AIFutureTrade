@@ -157,12 +157,17 @@ public class KlineCandlestickDataTest {
             System.out.println("  startTime: " + calculatedStartTime + " (UTC+8: " + Instant.ofEpochMilli(calculatedStartTime).atZone(utcPlus8).format(formatter) + ")");
             System.out.println("  endTime: " + calculatedEndTime + " (UTC+8: " + Instant.ofEpochMilli(calculatedEndTime).atZone(utcPlus8).format(formatter) + ")");
             System.out.println("  limit: " + limit);
-            if (startTime != null && endTime != null) {
-                long timeDiff = endTime - startTime;
+            if (calculatedStartTime != null && calculatedEndTime != null) {
+                long timeDiff = calculatedEndTime.longValue() - calculatedStartTime.longValue();
                 long days = timeDiff / (1000L * 60 * 60 * 24);
-                System.out.println("  时间跨度: " + days + " 天 (" + (timeDiff / (1000L * 60)) + " 分钟)");
+                long hours = timeDiff / (1000L * 60 * 60);
+                long minutes = timeDiff / (1000L * 60);
+                System.out.println("  时间跨度: " + days + " 天 (" + hours + " 小时, " + minutes + " 分钟)");
                 if (days > 200) {
                     System.out.println("  ⚠️ 警告: 时间跨度超过200天，API可能自动调整");
+                }
+                if (startTime == null || endTime == null) {
+                    System.out.println("  ✓ 时间范围已自动计算");
                 }
             } else {
                 System.out.println("  ⚠️ 注意: 未指定时间范围，将返回最新的K线数据");
@@ -490,6 +495,17 @@ public class KlineCandlestickDataTest {
             return 1; // 默认1分钟
         }
         
+        // 先检查大写M（月），因为toLowerCase()会把M变成m
+        if (intervalStr.endsWith("M")) {
+            // 月：1M
+            String numStr = intervalStr.substring(0, intervalStr.length() - 1);
+            try {
+                return Long.parseLong(numStr) * 30 * 24 * 60; // 近似30天
+            } catch (NumberFormatException e) {
+                return 30 * 24 * 60;
+            }
+        }
+        
         String lowerInterval = intervalStr.toLowerCase();
         
         // 解析数字和单位
@@ -524,14 +540,6 @@ public class KlineCandlestickDataTest {
                 return Long.parseLong(numStr) * 7 * 24 * 60;
             } catch (NumberFormatException e) {
                 return 7 * 24 * 60;
-            }
-        } else if (lowerInterval.endsWith("M")) {
-            // 月：1M
-            String numStr = lowerInterval.substring(0, lowerInterval.length() - 1);
-            try {
-                return Long.parseLong(numStr) * 30 * 24 * 60; // 近似30天
-            } catch (NumberFormatException e) {
-                return 30 * 24 * 60;
             }
         }
         

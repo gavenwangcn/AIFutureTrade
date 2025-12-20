@@ -558,6 +558,17 @@ public class BinanceFuturesClient extends BinanceFuturesBase {
             return 1; // 默认1分钟
         }
         
+        // 先检查大写M（月），因为toLowerCase()会把M变成m
+        if (intervalStr.endsWith("M")) {
+            // 月：1M
+            String numStr = intervalStr.substring(0, intervalStr.length() - 1);
+            try {
+                return Long.parseLong(numStr) * 30 * 24 * 60; // 近似30天
+            } catch (NumberFormatException e) {
+                return 30 * 24 * 60;
+            }
+        }
+        
         String lowerInterval = intervalStr.toLowerCase();
         
         // 解析数字和单位
@@ -592,14 +603,6 @@ public class BinanceFuturesClient extends BinanceFuturesBase {
                 return Long.parseLong(numStr) * 7 * 24 * 60;
             } catch (NumberFormatException e) {
                 return 7 * 24 * 60;
-            }
-        } else if (lowerInterval.endsWith("M")) {
-            // 月：1M
-            String numStr = lowerInterval.substring(0, lowerInterval.length() - 1);
-            try {
-                return Long.parseLong(numStr) * 30 * 24 * 60; // 近似30天
-            } catch (NumberFormatException e) {
-                return 30 * 24 * 60;
             }
         }
         
