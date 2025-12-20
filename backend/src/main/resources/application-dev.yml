@@ -29,8 +29,8 @@ spring:
 # 日志配置
 logging:
   level:
-    root: debug
-    com.aifuturetrade: debug
+    root: info
+    com.aifuturetrade: info
 
 # Binance API配置（开发环境使用测试网）
 binance:
