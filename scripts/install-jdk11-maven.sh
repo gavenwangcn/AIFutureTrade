@@ -394,6 +394,42 @@ configure_maven_mirror() {
       <url>https://maven.aliyun.com/repository/public</url>
     </mirror>
   </mirrors>
+  <profiles>
+    <profile>
+      <id>aliyun-repo</id>
+      <repositories>
+        <repository>
+          <id>aliyunmaven</id>
+          <name>阿里云公共仓库</name>
+          <url>https://maven.aliyun.com/repository/public</url>
+          <releases>
+            <enabled>true</enabled>
+            <checksumPolicy>warn</checksumPolicy>
+          </releases>
+          <snapshots>
+            <enabled>false</enabled>
+          </snapshots>
+        </repository>
+      </repositories>
+      <pluginRepositories>
+        <pluginRepository>
+          <id>aliyunmaven</id>
+          <name>阿里云公共仓库</name>
+          <url>https://maven.aliyun.com/repository/public</url>
+          <releases>
+            <enabled>true</enabled>
+            <checksumPolicy>warn</checksumPolicy>
+          </releases>
+          <snapshots>
+            <enabled>false</enabled>
+          </snapshots>
+        </pluginRepository>
+      </pluginRepositories>
+    </profile>
+  </profiles>
+  <activeProfiles>
+    <activeProfile>aliyun-repo</activeProfile>
+  </activeProfiles>
 </settings>
 EOF
     

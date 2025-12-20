@@ -48,10 +48,16 @@ docker run --rm \
 
 ### 方法3: 本地运行（需要JDK 11+）
 
-1. 编译项目：
+1. 编译项目并复制依赖：
 ```bash
 cd backend
-mvn clean compile
+mvn clean compile dependency:copy-dependencies
+```
+
+或者使用 package 命令（会自动复制依赖）：
+```bash
+cd backend
+mvn clean package -DskipTests
 ```
 
 2. 运行测试：
@@ -63,6 +69,10 @@ java -cp target/classes:target/dependency/* \
   com.aifuturetrade.test.KlineCandlestickDataTest \
   BTCUSDT 1m 100
 ```
+
+**注意**：如果遇到 `NoClassDefFoundError` 错误，请确保：
+- 已运行 `mvn dependency:copy-dependencies` 或 `mvn package` 来复制依赖
+- `target/dependency` 目录存在且包含所有依赖的 JAR 文件
 
 ## 参数说明
 
