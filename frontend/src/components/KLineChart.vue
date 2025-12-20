@@ -125,6 +125,9 @@ const initChart = async () => {
     return
   }
   
+  // 立即显示加载状态，避免空白屏幕
+  isLoading.value = true
+  
   try {
     // 获取 klinecharts 库（UMD 方式）
     const klinecharts = getKLineCharts()
@@ -134,9 +137,16 @@ const initChart = async () => {
     chartContainerRef.value.innerHTML = ''
     
     // Create data loader with loading callbacks
+    // 确保加载状态正确触发
     dataLoader.value = createDataLoader(
-      () => { isLoading.value = true },
-      () => { isLoading.value = false }
+      () => { 
+        isLoading.value = true
+        console.log('[KLineChart] 数据加载开始')
+      },
+      () => { 
+        isLoading.value = false
+        console.log('[KLineChart] 数据加载完成')
+      }
     )
     
     // Convert symbol and period
@@ -242,6 +252,9 @@ const handleTimeframeChange = (interval) => {
   currentInterval.value = interval
   emit('interval-change', interval)
   
+  // 切换时间周期时显示加载状态
+  isLoading.value = true
+  
   if (chartInstance.value && typeof chartInstance.value.setPeriod === 'function') {
     const period = intervalToPeriod(interval)
     chartInstance.value.setPeriod(period)
@@ -258,6 +271,8 @@ watch(() => props.visible, async (newVal) => {
   if (newVal) {
     title.value = `${props.symbol} - K线图`
     currentInterval.value = props.interval
+    // 立即显示加载状态
+    isLoading.value = true
     await nextTick()
     // Add small delay to ensure modal is fully rendered
     setTimeout(() => {
@@ -265,6 +280,7 @@ watch(() => props.visible, async (newVal) => {
     }, 100)
   } else {
     destroyChart()
+    isLoading.value = false
   }
 }, { immediate: false })
 
@@ -458,18 +474,22 @@ onUnmounted(() => {
   left: 0;
   width: 100%;
   height: 100%;
-  background-color: rgba(255, 255, 255, 0.7);
-  z-index: 100;
+  background-color: rgba(255, 255, 255, 0.95);
+  backdrop-filter: blur(2px);
+  z-index: 1000;
+  transition: opacity 0.3s ease-in-out;
 }
 
 .loader {
-  width: 48px;
-  height: 48px;
-  border: 5px solid #f3f3f3;
-  border-top: 5px solid #1677ff;
+  width: 56px;
+  height: 56px;
+  border: 6px solid #f0f0f0;
+  border-top: 6px solid #1677ff;
+  border-right: 6px solid #1677ff;
   border-radius: 50%;
-  animation: spin 1s linear infinite;
-  margin-bottom: 16px;
+  animation: spin 0.8s linear infinite;
+  margin-bottom: 20px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
 }
 
 @keyframes spin {
@@ -479,7 +499,14 @@ onUnmounted(() => {
 
 .loading-text {
   font-size: 16px;
-  color: #666;
-  font-weight: 500;
+  color: #1677ff;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  animation: pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
 }
 </style>

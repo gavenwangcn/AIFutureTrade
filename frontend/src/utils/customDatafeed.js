@@ -77,8 +77,8 @@ export function createDataLoader(onLoadingStart, onLoadingEnd) {
         return
       }
 
-      // 计算需要的数据量（后端限制最多500条）
-      const limit = 500
+      // 计算需要的数据量（统一返回499条K线数据）
+      const limit = 499
 
       // 构建请求参数
       const apiBaseUrl = getApiBaseUrl()
@@ -119,6 +119,7 @@ export function createDataLoader(onLoadingStart, onLoadingEnd) {
         // #endregion
         console.error('[DataLoader] HTTP错误详情:', errorText)
         callback([])
+        loadingCallbacks.end()
         return
       }
       
