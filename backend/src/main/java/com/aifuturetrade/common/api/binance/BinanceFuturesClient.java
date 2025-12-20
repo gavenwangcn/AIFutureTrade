@@ -4,6 +4,14 @@ import com.binance.connector.client.common.ApiResponse;
 import com.binance.connector.client.derivatives_trading_usds_futures.rest.model.Interval;
 import com.binance.connector.client.derivatives_trading_usds_futures.rest.model.KlineCandlestickDataResponse;
 import com.binance.connector.client.derivatives_trading_usds_futures.rest.model.KlineCandlestickDataResponseItem;
+import com.binance.connector.client.derivatives_trading_usds_futures.rest.model.SymbolPriceTickerV2Response;
+import com.binance.connector.client.derivatives_trading_usds_futures.rest.model.SymbolPriceTickerV2Response1;
+import com.binance.connector.client.derivatives_trading_usds_futures.rest.model.SymbolPriceTickerV2Response2;
+import com.binance.connector.client.derivatives_trading_usds_futures.rest.model.Ticker24hrPriceChangeStatisticsResponse;
+import com.binance.connector.client.derivatives_trading_usds_futures.rest.model.Ticker24hrPriceChangeStatisticsResponse1;
+import com.binance.connector.client.derivatives_trading_usds_futures.rest.model.Ticker24hrPriceChangeStatisticsResponse2;
+import com.binance.connector.client.derivatives_trading_usds_futures.rest.model.Ticker24hrPriceChangeStatisticsResponse2Inner;
+import com.binance.connector.client.derivatives_trading_usds_futures.rest.model.SymbolPriceTickerV2Response2Inner;
 import lombok.extern.slf4j.Slf4j;
 
 import java.time.Instant;
@@ -75,50 +83,89 @@ public class BinanceFuturesClient extends BinanceFuturesBase {
                 
                 try {
                     long callStart = System.currentTimeMillis();
-                    ApiResponse<?> response = restApi.ticker24hrPriceChangeStatistics(requestSymbol);
+                    ApiResponse<Ticker24hrPriceChangeStatisticsResponse> response = restApi.ticker24hrPriceChangeStatistics(requestSymbol);
                     long callDuration = System.currentTimeMillis() - callStart;
                     
-                    // 尝试多种方式获取响应数据
-                    Object data = getResponseData(response);
-                    Map<String, Object> tickerData = toMap(data);
-                    
-                    if (tickerData.isEmpty()) {
+                    // 直接使用SDK的getData()方法获取响应数据
+                    Ticker24hrPriceChangeStatisticsResponse responseData = response.getData();
+                    if (responseData == null) {
                         log.warn("[Binance Futures] {} 无返回数据，跳过", requestSymbol);
                         continue;
                     }
                     
-                    // 添加调试日志，查看实际返回的数据结构
-                    log.debug("[Binance Futures] {} 返回数据字段: {}", requestSymbol, tickerData.keySet());
+                    // Ticker24hrPriceChangeStatisticsResponse是oneOf类型，需要使用getActualInstance()获取实际实例
+                    Object actualInstance = responseData.getActualInstance();
+                    if (actualInstance == null) {
+                        log.warn("[Binance Futures] {} 响应数据实例为null，跳过", requestSymbol);
+                        continue;
+                    }
                     
-                    // 匹配正确的交易对数据
-                    // 注意：Binance API可能返回单个对象，symbol字段可能不存在或字段名不同
-                    String normalizedSymbol = requestSymbol.toUpperCase();
+                    // 根据实际实例类型提取数据
+                    Map<String, Object> tickerData = new HashMap<>();
                     String symbolValue = null;
                     
-                    // 尝试多种可能的字段名获取symbol
-                    if (tickerData.containsKey("symbol")) {
-                        symbolValue = String.valueOf(tickerData.get("symbol"));
-                    } else if (tickerData.containsKey("s")) {
-                        symbolValue = String.valueOf(tickerData.get("s"));
+                    if (actualInstance instanceof Ticker24hrPriceChangeStatisticsResponse1) {
+                        Ticker24hrPriceChangeStatisticsResponse1 ticker = (Ticker24hrPriceChangeStatisticsResponse1) actualInstance;
+                        symbolValue = ticker.getSymbol();
+                        tickerData.put("symbol", ticker.getSymbol());
+                        tickerData.put("priceChange", ticker.getPriceChange());
+                        tickerData.put("priceChangePercent", ticker.getPriceChangePercent());
+                        tickerData.put("weightedAvgPrice", ticker.getWeightedAvgPrice());
+                        tickerData.put("lastPrice", ticker.getLastPrice());
+                        tickerData.put("lastQty", ticker.getLastQty());
+                        tickerData.put("openPrice", ticker.getOpenPrice());
+                        tickerData.put("highPrice", ticker.getHighPrice());
+                        tickerData.put("lowPrice", ticker.getLowPrice());
+                        tickerData.put("volume", ticker.getVolume());
+                        tickerData.put("quoteVolume", ticker.getQuoteVolume());
+                        tickerData.put("openTime", ticker.getOpenTime());
+                        tickerData.put("closeTime", ticker.getCloseTime());
+                        tickerData.put("firstId", ticker.getFirstId());
+                        tickerData.put("lastId", ticker.getLastId());
+                        tickerData.put("count", ticker.getCount());
+                    } else if (actualInstance instanceof Ticker24hrPriceChangeStatisticsResponse2) {
+                        // Response2继承自ArrayList，可以直接当作List使用
+                        Ticker24hrPriceChangeStatisticsResponse2 tickerList = (Ticker24hrPriceChangeStatisticsResponse2) actualInstance;
+                        if (tickerList != null && !tickerList.isEmpty()) {
+                            // 查找匹配的交易对
+                            for (Ticker24hrPriceChangeStatisticsResponse2Inner ticker : tickerList) {
+                                if (requestSymbol.equalsIgnoreCase(ticker.getSymbol())) {
+                                    symbolValue = ticker.getSymbol();
+                                    tickerData.put("symbol", ticker.getSymbol());
+                                    tickerData.put("priceChange", ticker.getPriceChange());
+                                    tickerData.put("priceChangePercent", ticker.getPriceChangePercent());
+                                    tickerData.put("weightedAvgPrice", ticker.getWeightedAvgPrice());
+                                    tickerData.put("lastPrice", ticker.getLastPrice());
+                                    tickerData.put("lastQty", ticker.getLastQty());
+                                    tickerData.put("openPrice", ticker.getOpenPrice());
+                                    tickerData.put("highPrice", ticker.getHighPrice());
+                                    tickerData.put("lowPrice", ticker.getLowPrice());
+                                    tickerData.put("volume", ticker.getVolume());
+                                    tickerData.put("quoteVolume", ticker.getQuoteVolume());
+                                    tickerData.put("openTime", ticker.getOpenTime());
+                                    tickerData.put("closeTime", ticker.getCloseTime());
+                                    tickerData.put("firstId", ticker.getFirstId());
+                                    tickerData.put("lastId", ticker.getLastId());
+                                    tickerData.put("count", ticker.getCount());
+                                    break;
+                                }
+                            }
+                        }
                     }
                     
-                    // 如果仍然没有找到symbol，但有price字段，说明是单个对象响应，直接使用请求的symbol
-                    if ((symbolValue == null || symbolValue.isEmpty()) && tickerData.containsKey("price")) {
-                        symbolValue = normalizedSymbol;
-                        tickerData.put("symbol", normalizedSymbol);
-                        log.debug("[Binance Futures] {} 响应中无symbol字段，使用请求的symbol", requestSymbol);
-                    }
+                    // 匹配正确的交易对数据
+                    String normalizedSymbol = requestSymbol.toUpperCase();
                     
-                    // 如果symbol匹配或者有price字段（说明是有效的价格数据），则添加结果
+                    // 如果symbol匹配或者有lastPrice字段（说明是有效的价格数据），则添加结果
                     if (symbolValue != null && symbolValue.toUpperCase().equals(normalizedSymbol)) {
                         result.put(symbol.toUpperCase(), tickerData);
                         success++;
                         log.debug("[Binance Futures] {} 获取成功, 耗时 {} 毫秒", requestSymbol, callDuration);
-                    } else if (tickerData.containsKey("price") && !tickerData.isEmpty()) {
-                        // 即使symbol不匹配，如果有price字段，也认为是有效数据（可能是API返回格式问题）
+                    } else if (tickerData.containsKey("lastPrice") && !tickerData.isEmpty()) {
+                        // 即使symbol不匹配，如果有lastPrice字段，也认为是有效数据
                         result.put(symbol.toUpperCase(), tickerData);
                         success++;
-                        log.debug("[Binance Futures] {} 获取成功（通过price字段验证）, 耗时 {} 毫秒", requestSymbol, callDuration);
+                        log.debug("[Binance Futures] {} 获取成功（通过lastPrice字段验证）, 耗时 {} 毫秒", requestSymbol, callDuration);
                     } else {
                         log.warn("[Binance Futures] {} 交易对不匹配 (返回symbol: {}), 跳过", requestSymbol, symbolValue);
                     }
@@ -174,38 +221,52 @@ public class BinanceFuturesClient extends BinanceFuturesBase {
                     
                     // 使用 symbolPriceTickerV2，参考官方示例
                     // 参考官方示例：symbolPriceTickerV2(symbol)
-                    ApiResponse<?> response = restApi.symbolPriceTickerV2(requestSymbol);
+                    ApiResponse<SymbolPriceTickerV2Response> response = restApi.symbolPriceTickerV2(requestSymbol);
                     long callDuration = System.currentTimeMillis() - callStart;
                     
-                    // 尝试多种方式获取响应数据
-                    Object data = getResponseData(response);
-                    Map<String, Object> priceData = toMap(data);
-                    
-                    if (priceData.isEmpty()) {
+                    // 直接使用SDK的getData()方法获取响应数据
+                    SymbolPriceTickerV2Response responseData = response.getData();
+                    if (responseData == null) {
                         log.warn("[Binance Futures] {} 无返回数据，跳过", requestSymbol);
                         continue;
                     }
                     
-                    // 添加调试日志，查看实际返回的数据结构
-                    log.debug("[Binance Futures] {} 返回数据字段: {}", requestSymbol, priceData.keySet());
+                    // SymbolPriceTickerV2Response是oneOf类型，需要使用getActualInstance()获取实际实例
+                    Object actualInstance = responseData.getActualInstance();
+                    if (actualInstance == null) {
+                        log.warn("[Binance Futures] {} 响应数据实例为null，跳过", requestSymbol);
+                        continue;
+                    }
+                    
+                    // 根据实际实例类型提取数据
+                    Map<String, Object> priceData = new HashMap<>();
+                    String symbolValue = null;
+                    
+                    if (actualInstance instanceof SymbolPriceTickerV2Response1) {
+                        SymbolPriceTickerV2Response1 price = (SymbolPriceTickerV2Response1) actualInstance;
+                        symbolValue = price.getSymbol();
+                        priceData.put("symbol", price.getSymbol());
+                        priceData.put("price", price.getPrice());
+                        priceData.put("time", price.getTime());
+                    } else if (actualInstance instanceof SymbolPriceTickerV2Response2) {
+                        // Response2继承自ArrayList，可以直接当作List使用
+                        SymbolPriceTickerV2Response2 priceList = (SymbolPriceTickerV2Response2) actualInstance;
+                        if (priceList != null && !priceList.isEmpty()) {
+                            // 查找匹配的交易对
+                            for (SymbolPriceTickerV2Response2Inner price : priceList) {
+                                if (requestSymbol.equalsIgnoreCase(price.getSymbol())) {
+                                    symbolValue = price.getSymbol();
+                                    priceData.put("symbol", price.getSymbol());
+                                    priceData.put("price", price.getPrice());
+                                    priceData.put("time", price.getTime());
+                                    break;
+                                }
+                            }
+                        }
+                    }
                     
                     // 匹配正确的交易对数据
                     String normalizedSymbol = requestSymbol.toUpperCase();
-                    String symbolValue = null;
-                    
-                    // 尝试多种可能的字段名获取symbol
-                    if (priceData.containsKey("symbol")) {
-                        symbolValue = String.valueOf(priceData.get("symbol"));
-                    } else if (priceData.containsKey("s")) {
-                        symbolValue = String.valueOf(priceData.get("s"));
-                    }
-                    
-                    // 如果仍然没有找到symbol，但有price字段，说明是单个对象响应，直接使用请求的symbol
-                    if ((symbolValue == null || symbolValue.isEmpty()) && priceData.containsKey("price")) {
-                        symbolValue = normalizedSymbol;
-                        priceData.put("symbol", normalizedSymbol);
-                        log.debug("[Binance Futures] {} 响应中无symbol字段，使用请求的symbol", requestSymbol);
-                    }
                     
                     // 如果symbol匹配或者有price字段（说明是有效的价格数据），则添加结果
                     if (symbolValue != null && symbolValue.toUpperCase().equals(normalizedSymbol)) {
@@ -213,7 +274,7 @@ public class BinanceFuturesClient extends BinanceFuturesBase {
                         success++;
                         log.debug("[Binance Futures] {} 获取成功, 耗时 {} 毫秒", requestSymbol, callDuration);
                     } else if (priceData.containsKey("price") && !priceData.isEmpty()) {
-                        // 即使symbol不匹配，如果有price字段，也认为是有效数据（可能是API返回格式问题）
+                        // 即使symbol不匹配，如果有price字段，也认为是有效数据
                         result.put(symbol.toUpperCase(), priceData);
                         success++;
                         log.debug("[Binance Futures] {} 获取成功（通过price字段验证）, 耗时 {} 毫秒", requestSymbol, callDuration);
@@ -270,9 +331,19 @@ public class BinanceFuturesClient extends BinanceFuturesBase {
                     ? limit.longValue() 
                     : defaultLimit;
                 
-                // startTime 根据 limit 和 interval 计算
-                // 例如：limit=100, interval=1m，则 startTime = endTime - 100分钟
+                // 计算interval对应的毫秒数
                 long intervalMinutes = getIntervalMinutes(interval);
+                long intervalMillis = intervalMinutes * 60 * 1000;
+                
+                // 将endTime对齐到当前K线周期的开始时间（向下取整）
+                // 例如：如果当前是18:11:30，interval=1m，对齐到18:11:00
+                // 这样确保返回的K线时间跨度正好是limit * interval
+                // 第一条K线从startTime开始，最后一条K线到endTime结束
+                calculatedEndTime = (calculatedEndTime / intervalMillis) * intervalMillis;
+                
+                // startTime 根据 limit 和 interval 计算
+                // 例如：limit=50, interval=1m，则 startTime = endTime - 50分钟
+                // 由于endTime已对齐到K线周期开始，计算出的startTime也会对齐到K线周期开始
                 long totalMinutes = limitLong * intervalMinutes;
                 calculatedStartTime = calculatedEndTime - (totalMinutes * 60 * 1000);
                 
@@ -444,17 +515,6 @@ public class BinanceFuturesClient extends BinanceFuturesBase {
         return getKlines(symbol, interval, limit, null, null);
     }
     
-    /**
-     * 从ApiResponse中获取数据
-     * 直接使用SDK的getData()方法，不使用反射
-     */
-    private Object getResponseData(ApiResponse<?> response) {
-        if (response == null) {
-            return null;
-        }
-        // 直接使用SDK的getData()方法
-        return response.getData();
-    }
     
     /**
      * 解析Long值

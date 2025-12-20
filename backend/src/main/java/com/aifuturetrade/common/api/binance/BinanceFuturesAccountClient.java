@@ -1,8 +1,15 @@
 package com.aifuturetrade.common.api.binance;
 
 import com.binance.connector.client.common.ApiResponse;
+import com.binance.connector.client.derivatives_trading_usds_futures.rest.model.AccountInformationV2Response;
+import com.binance.connector.client.derivatives_trading_usds_futures.rest.model.AccountInformationV3Response;
+import com.binance.connector.client.derivatives_trading_usds_futures.rest.model.FuturesAccountBalanceV2Response;
+import com.binance.connector.client.derivatives_trading_usds_futures.rest.model.FuturesAccountBalanceV2ResponseInner;
 import lombok.extern.slf4j.Slf4j;
 
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -51,9 +58,30 @@ public class BinanceFuturesAccountClient extends BinanceFuturesBase {
         try {
             log.info("[BinanceFuturesAccountClient] 开始获取账户信息");
             // 调用SDK API获取账户信息 - 使用null作为recvWindow参数（可选）
-            ApiResponse<?> response = restApi.accountInformationV3((Long) null);
-            Object data = getResponseData(response);
-            Map<String, Object> accountInfo = toMap(data);
+            ApiResponse<AccountInformationV3Response> response = restApi.accountInformationV3((Long) null);
+            
+            // 直接使用SDK的getData()方法获取响应数据
+            AccountInformationV3Response accountData = response.getData();
+            if (accountData == null) {
+                throw new RuntimeException("API调用返回null，请检查API调用方式");
+            }
+            
+            // 直接使用SDK对象的getter方法构建Map
+            Map<String, Object> accountInfo = new HashMap<>();
+            accountInfo.put("totalInitialMargin", accountData.getTotalInitialMargin());
+            accountInfo.put("totalMaintMargin", accountData.getTotalMaintMargin());
+            accountInfo.put("totalWalletBalance", accountData.getTotalWalletBalance());
+            accountInfo.put("totalUnrealizedProfit", accountData.getTotalUnrealizedProfit());
+            accountInfo.put("totalMarginBalance", accountData.getTotalMarginBalance());
+            accountInfo.put("totalPositionInitialMargin", accountData.getTotalPositionInitialMargin());
+            accountInfo.put("totalOpenOrderInitialMargin", accountData.getTotalOpenOrderInitialMargin());
+            accountInfo.put("totalCrossWalletBalance", accountData.getTotalCrossWalletBalance());
+            accountInfo.put("totalCrossUnPnl", accountData.getTotalCrossUnPnl());
+            accountInfo.put("availableBalance", accountData.getAvailableBalance());
+            accountInfo.put("maxWithdrawAmount", accountData.getMaxWithdrawAmount());
+            accountInfo.put("assets", accountData.getAssets());
+            accountInfo.put("positions", accountData.getPositions());
+            
             log.info("[BinanceFuturesAccountClient] 账户信息获取成功");
             return accountInfo;
         } catch (Exception e) {
@@ -74,9 +102,37 @@ public class BinanceFuturesAccountClient extends BinanceFuturesBase {
         try {
             log.info("[BinanceFuturesAccountClient] 开始获取账户信息（V2）");
             // 调用SDK API获取账户信息V2 - 使用null作为recvWindow参数（可选）
-            ApiResponse<?> response = restApi.accountInformationV2((Long) null);
-            Object data = getResponseData(response);
-            Map<String, Object> accountInfo = toMap(data);
+            ApiResponse<AccountInformationV2Response> response = restApi.accountInformationV2((Long) null);
+            
+            // 直接使用SDK的getData()方法获取响应数据
+            AccountInformationV2Response accountData = response.getData();
+            if (accountData == null) {
+                throw new RuntimeException("API调用返回null，请检查API调用方式");
+            }
+            
+            // 直接使用SDK对象的getter方法构建Map（AccountInformationV2Response有很多字段，这里只列出主要字段）
+            Map<String, Object> accountInfo = new HashMap<>();
+            accountInfo.put("feeTier", accountData.getFeeTier());
+            accountInfo.put("feeBurn", accountData.getFeeBurn());
+            accountInfo.put("canDeposit", accountData.getCanDeposit());
+            accountInfo.put("canWithdraw", accountData.getCanWithdraw());
+            accountInfo.put("updateTime", accountData.getUpdateTime());
+            accountInfo.put("multiAssetsMargin", accountData.getMultiAssetsMargin());
+            accountInfo.put("tradeGroupId", accountData.getTradeGroupId());
+            accountInfo.put("totalInitialMargin", accountData.getTotalInitialMargin());
+            accountInfo.put("totalMaintMargin", accountData.getTotalMaintMargin());
+            accountInfo.put("totalWalletBalance", accountData.getTotalWalletBalance());
+            accountInfo.put("totalUnrealizedProfit", accountData.getTotalUnrealizedProfit());
+            accountInfo.put("totalMarginBalance", accountData.getTotalMarginBalance());
+            accountInfo.put("totalPositionInitialMargin", accountData.getTotalPositionInitialMargin());
+            accountInfo.put("totalOpenOrderInitialMargin", accountData.getTotalOpenOrderInitialMargin());
+            accountInfo.put("totalCrossWalletBalance", accountData.getTotalCrossWalletBalance());
+            accountInfo.put("totalCrossUnPnl", accountData.getTotalCrossUnPnl());
+            accountInfo.put("availableBalance", accountData.getAvailableBalance());
+            accountInfo.put("maxWithdrawAmount", accountData.getMaxWithdrawAmount());
+            accountInfo.put("assets", accountData.getAssets());
+            accountInfo.put("positions", accountData.getPositions());
+            
             log.info("[BinanceFuturesAccountClient] 账户信息获取成功（V2）");
             return accountInfo;
         } catch (Exception e) {
@@ -93,43 +149,41 @@ public class BinanceFuturesAccountClient extends BinanceFuturesBase {
      * 
      * @return 账户余额列表
      */
-    @SuppressWarnings("unchecked")
-    public java.util.List<Map<String, Object>> getBalance() {
+    public List<Map<String, Object>> getBalance() {
         try {
             log.info("[BinanceFuturesAccountClient] 开始获取账户余额");
             // 调用SDK API获取账户余额 - 使用null作为recvWindow参数（可选）
-            ApiResponse<?> response = restApi.futuresAccountBalanceV2((Long) null);
-            Object data = getResponseData(response);
+            ApiResponse<FuturesAccountBalanceV2Response> response = restApi.futuresAccountBalanceV2((Long) null);
             
-            if (data instanceof java.util.List) {
-                java.util.List<Object> balanceList = (java.util.List<Object>) data;
-                java.util.List<Map<String, Object>> result = new java.util.ArrayList<>();
-                for (Object item : balanceList) {
-                    result.add(toMap(item));
-                }
-                log.info("[BinanceFuturesAccountClient] 账户余额获取成功，共 {} 条记录", result.size());
-                return result;
-            } else {
-                java.util.List<Map<String, Object>> result = new java.util.ArrayList<>();
-                result.add(toMap(data));
-                return result;
+            // 直接使用SDK的getData()方法获取响应数据
+            // FuturesAccountBalanceV2Response继承自ArrayList<FuturesAccountBalanceV2ResponseInner>
+            FuturesAccountBalanceV2Response balanceList = response.getData();
+            if (balanceList == null) {
+                throw new RuntimeException("API调用返回null，请检查API调用方式");
             }
+            
+            // 直接使用SDK对象的getter方法构建Map列表
+            List<Map<String, Object>> result = new ArrayList<>();
+            for (FuturesAccountBalanceV2ResponseInner item : balanceList) {
+                Map<String, Object> balanceMap = new HashMap<>();
+                balanceMap.put("accountAlias", item.getAccountAlias());
+                balanceMap.put("asset", item.getAsset());
+                balanceMap.put("balance", item.getBalance());
+                balanceMap.put("crossWalletBalance", item.getCrossWalletBalance());
+                balanceMap.put("crossUnPnl", item.getCrossUnPnl());
+                balanceMap.put("availableBalance", item.getAvailableBalance());
+                balanceMap.put("maxWithdrawAmount", item.getMaxWithdrawAmount());
+                balanceMap.put("marginAvailable", item.getMarginAvailable());
+                balanceMap.put("updateTime", item.getUpdateTime());
+                result.add(balanceMap);
+            }
+            
+            log.info("[BinanceFuturesAccountClient] 账户余额获取成功，共 {} 条记录", result.size());
+            return result;
         } catch (Exception e) {
             log.error("[BinanceFuturesAccountClient] 获取账户余额失败: {}", e.getMessage(), e);
             throw new RuntimeException("获取账户余额失败: " + e.getMessage(), e);
         }
-    }
-    
-    /**
-     * 从ApiResponse中获取数据
-     * 直接使用SDK的getData()方法，不使用反射
-     */
-    private Object getResponseData(ApiResponse<?> response) {
-        if (response == null) {
-            return null;
-        }
-        // 直接使用SDK的getData()方法
-        return response.getData();
     }
 }
 

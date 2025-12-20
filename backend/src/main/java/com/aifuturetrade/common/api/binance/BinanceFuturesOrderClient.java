@@ -2,11 +2,18 @@ package com.aifuturetrade.common.api.binance;
 
 import com.binance.connector.client.common.ApiResponse;
 import com.binance.connector.client.derivatives_trading_usds_futures.rest.model.ChangeInitialLeverageRequest;
+import com.binance.connector.client.derivatives_trading_usds_futures.rest.model.ChangeInitialLeverageResponse;
 import com.binance.connector.client.derivatives_trading_usds_futures.rest.model.NewOrderRequest;
+import com.binance.connector.client.derivatives_trading_usds_futures.rest.model.NewOrderResponse;
 import com.binance.connector.client.derivatives_trading_usds_futures.rest.model.TestOrderRequest;
+import com.binance.connector.client.derivatives_trading_usds_futures.rest.model.TestOrderResponse;
 import com.binance.connector.client.derivatives_trading_usds_futures.rest.model.Side;
 import com.binance.connector.client.derivatives_trading_usds_futures.rest.model.PositionSide;
 import com.binance.connector.client.derivatives_trading_usds_futures.rest.model.TimeInForce;
+import com.binance.connector.client.derivatives_trading_usds_futures.rest.model.SymbolOrderBookTickerResponse;
+import com.binance.connector.client.derivatives_trading_usds_futures.rest.model.SymbolOrderBookTickerResponse1;
+import com.binance.connector.client.derivatives_trading_usds_futures.rest.model.SymbolOrderBookTickerResponse2;
+import com.binance.connector.client.derivatives_trading_usds_futures.rest.model.SymbolOrderBookTickerResponse2Inner;
 import lombok.extern.slf4j.Slf4j;
 
 import java.util.ArrayList;
@@ -62,7 +69,6 @@ public class BinanceFuturesOrderClient extends BinanceFuturesBase {
      *               如果不提供，则返回所有交易对的最优挂单价格。
      * @return 最优挂单价格信息列表
      */
-    @SuppressWarnings("unchecked")
     public List<Map<String, Object>> getOrderBookTicker(String symbol) {
         try {
             String formattedSymbol = null;
@@ -74,20 +80,49 @@ public class BinanceFuturesOrderClient extends BinanceFuturesBase {
             }
             
             // 调用REST API接口
-            ApiResponse<?> response = restApi.symbolOrderBookTicker(formattedSymbol);
+            ApiResponse<SymbolOrderBookTickerResponse> response = restApi.symbolOrderBookTicker(formattedSymbol);
             
-            // 获取响应数据
-            Object data = getResponseData(response);
+            // 直接使用SDK的getData()方法获取响应数据
+            SymbolOrderBookTickerResponse responseData = response.getData();
+            if (responseData == null) {
+                log.warn("[Binance Futures] 无返回数据");
+                return new ArrayList<>();
+            }
+            
+            // SymbolOrderBookTickerResponse是oneOf类型，需要使用getActualInstance()获取实际实例
+            Object actualInstance = responseData.getActualInstance();
+            if (actualInstance == null) {
+                log.warn("[Binance Futures] 响应数据实例为null");
+                return new ArrayList<>();
+            }
             
             // 处理响应数据
             List<Map<String, Object>> tickers = new ArrayList<>();
-            if (data instanceof List) {
-                List<Object> dataList = (List<Object>) data;
-                for (Object item : dataList) {
-                    tickers.add(toMap(item));
+            
+            if (actualInstance instanceof SymbolOrderBookTickerResponse1) {
+                // Response1是单个对象
+                SymbolOrderBookTickerResponse1 ticker = (SymbolOrderBookTickerResponse1) actualInstance;
+                Map<String, Object> tickerMap = new HashMap<>();
+                tickerMap.put("symbol", ticker.getSymbol());
+                tickerMap.put("bidPrice", ticker.getBidPrice());
+                tickerMap.put("bidQty", ticker.getBidQty());
+                tickerMap.put("askPrice", ticker.getAskPrice());
+                tickerMap.put("askQty", ticker.getAskQty());
+                tickerMap.put("time", ticker.getTime());
+                tickers.add(tickerMap);
+            } else if (actualInstance instanceof SymbolOrderBookTickerResponse2) {
+                // Response2继承自ArrayList，可以直接当作List使用
+                SymbolOrderBookTickerResponse2 tickerList = (SymbolOrderBookTickerResponse2) actualInstance;
+                for (SymbolOrderBookTickerResponse2Inner ticker : tickerList) {
+                    Map<String, Object> tickerMap = new HashMap<>();
+                    tickerMap.put("symbol", ticker.getSymbol());
+                    tickerMap.put("bidPrice", ticker.getBidPrice());
+                    tickerMap.put("bidQty", ticker.getBidQty());
+                    tickerMap.put("askPrice", ticker.getAskPrice());
+                    tickerMap.put("askQty", ticker.getAskQty());
+                    tickerMap.put("time", ticker.getTime());
+                    tickers.add(tickerMap);
                 }
-            } else {
-                tickers.add(toMap(data));
             }
             
             log.info("[Binance Futures] 成功获取最优挂单价格，返回 {} 条数据", tickers.size());
@@ -127,9 +162,19 @@ public class BinanceFuturesOrderClient extends BinanceFuturesBase {
             ChangeInitialLeverageRequest request = new ChangeInitialLeverageRequest();
             request.setSymbol(formattedSymbol);
             request.setLeverage(leverage.longValue()); // 转换为Long类型
-            ApiResponse<?> response = restApi.changeInitialLeverage(request);
-            Object responseData = getResponseData(response);
-            Map<String, Object> data = toMap(responseData);
+            ApiResponse<ChangeInitialLeverageResponse> response = restApi.changeInitialLeverage(request);
+            
+            // 直接使用SDK的getData()方法获取响应数据
+            ChangeInitialLeverageResponse responseData = response.getData();
+            if (responseData == null) {
+                throw new RuntimeException("API调用返回null，请检查API调用方式");
+            }
+            
+            // 直接使用SDK对象的getter方法
+            Map<String, Object> data = new HashMap<>();
+            data.put("leverage", responseData.getLeverage());
+            data.put("maxNotionalValue", responseData.getMaxNotionalValue());
+            data.put("symbol", responseData.getSymbol());
             
             log.info("[Binance Futures] 成功修改初始杠杆，交易对: {}，新杠杆: {}", 
                     formattedSymbol, data.get("leverage"));
@@ -233,7 +278,7 @@ public class BinanceFuturesOrderClient extends BinanceFuturesBase {
      */
     private Map<String, Object> executeOrder(Map<String, Object> orderParams, boolean testMode) {
         try {
-            ApiResponse<?> response;
+            ApiResponse<?> response; // 可能是NewOrderResponse或TestOrderResponse，使用通配符因为两种类型都可能
             
             if (testMode) {
                 // 使用测试接口
@@ -319,8 +364,72 @@ public class BinanceFuturesOrderClient extends BinanceFuturesBase {
             if (response == null) {
                 throw new RuntimeException("API调用返回null，请检查API调用方式");
             }
-            Object data = getResponseData(response);
-            Map<String, Object> responseDict = toMap(data);
+            
+            // 根据testMode判断响应类型
+            Map<String, Object> responseDict = new HashMap<>();
+            @SuppressWarnings("unchecked")
+            ApiResponse<TestOrderResponse> testResponse = (ApiResponse<TestOrderResponse>) response;
+            @SuppressWarnings("unchecked")
+            ApiResponse<NewOrderResponse> newResponse = (ApiResponse<NewOrderResponse>) response;
+            
+            if (testMode) {
+                // 测试订单返回TestOrderResponse
+                TestOrderResponse testData = testResponse.getData();
+                if (testData != null) {
+                    responseDict.put("clientOrderId", testData.getClientOrderId());
+                    responseDict.put("cumQty", testData.getCumQty());
+                    responseDict.put("cumQuote", testData.getCumQuote());
+                    responseDict.put("executedQty", testData.getExecutedQty());
+                    responseDict.put("orderId", testData.getOrderId());
+                    responseDict.put("avgPrice", testData.getAvgPrice());
+                    responseDict.put("origQty", testData.getOrigQty());
+                    responseDict.put("price", testData.getPrice());
+                    responseDict.put("reduceOnly", testData.getReduceOnly());
+                    responseDict.put("side", testData.getSide());
+                    responseDict.put("positionSide", testData.getPositionSide());
+                    responseDict.put("status", testData.getStatus());
+                    responseDict.put("stopPrice", testData.getStopPrice());
+                    responseDict.put("closePosition", testData.getClosePosition());
+                    responseDict.put("symbol", testData.getSymbol());
+                    responseDict.put("timeInForce", testData.getTimeInForce());
+                    responseDict.put("type", testData.getType());
+                    responseDict.put("origType", testData.getOrigType());
+                    responseDict.put("activatePrice", testData.getActivatePrice());
+                    responseDict.put("priceRate", testData.getPriceRate());
+                    responseDict.put("updateTime", testData.getUpdateTime());
+                    responseDict.put("workingType", testData.getWorkingType());
+                    responseDict.put("priceProtect", testData.getPriceProtect());
+                }
+            } else {
+                // 真实订单返回NewOrderResponse
+                NewOrderResponse newData = newResponse.getData();
+                if (newData != null) {
+                    responseDict.put("clientOrderId", newData.getClientOrderId());
+                    responseDict.put("cumQty", newData.getCumQty());
+                    responseDict.put("cumQuote", newData.getCumQuote());
+                    responseDict.put("executedQty", newData.getExecutedQty());
+                    responseDict.put("orderId", newData.getOrderId());
+                    responseDict.put("avgPrice", newData.getAvgPrice());
+                    responseDict.put("origQty", newData.getOrigQty());
+                    responseDict.put("price", newData.getPrice());
+                    responseDict.put("reduceOnly", newData.getReduceOnly());
+                    responseDict.put("side", newData.getSide());
+                    responseDict.put("positionSide", newData.getPositionSide());
+                    responseDict.put("status", newData.getStatus());
+                    responseDict.put("stopPrice", newData.getStopPrice());
+                    responseDict.put("closePosition", newData.getClosePosition());
+                    responseDict.put("symbol", newData.getSymbol());
+                    responseDict.put("timeInForce", newData.getTimeInForce());
+                    responseDict.put("type", newData.getType());
+                    responseDict.put("origType", newData.getOrigType());
+                    responseDict.put("activatePrice", newData.getActivatePrice());
+                    responseDict.put("priceRate", newData.getPriceRate());
+                    responseDict.put("updateTime", newData.getUpdateTime());
+                    responseDict.put("workingType", newData.getWorkingType());
+                    responseDict.put("priceProtect", newData.getPriceProtect());
+                }
+            }
+            
             log.info("[Binance Futures] 订单执行成功: {}", responseDict);
             
             return responseDict;
@@ -500,18 +609,6 @@ public class BinanceFuturesOrderClient extends BinanceFuturesBase {
             log.error("[Binance Futures] 平仓交易失败: {}", exc.getMessage(), exc);
             throw exc;
         }
-    }
-    
-    /**
-     * 从ApiResponse中获取数据
-     * 直接使用SDK的getData()方法，不使用反射
-     */
-    private Object getResponseData(ApiResponse<?> response) {
-        if (response == null) {
-            return null;
-        }
-        // 直接使用SDK的getData()方法
-        return response.getData();
     }
 }
 

@@ -136,9 +136,19 @@ public class KlineCandlestickDataTest {
                 // endTime 取当前时间
                 calculatedEndTime = System.currentTimeMillis();
                 
-                // startTime 根据 limit 和 interval 计算
-                // 例如：limit=100, interval=1m，则 startTime = endTime - 100分钟
+                // 计算interval对应的毫秒数
                 long intervalMinutes = getIntervalMinutes(interval);
+                long intervalMillis = intervalMinutes * 60 * 1000;
+                
+                // 将endTime对齐到当前K线周期的开始时间（向下取整）
+                // 例如：如果当前是18:11:30，interval=1m，对齐到18:11:00
+                // 这样确保返回的K线时间跨度正好是limit * interval
+                // 第一条K线从startTime开始，最后一条K线到endTime结束
+                calculatedEndTime = (calculatedEndTime / intervalMillis) * intervalMillis;
+                
+                // startTime 根据 limit 和 interval 计算
+                // 例如：limit=50, interval=1m，则 startTime = endTime - 50分钟
+                // 由于endTime已对齐到K线周期开始，计算出的startTime也会对齐到K线周期开始
                 long totalMinutes = limit * intervalMinutes;
                 calculatedStartTime = calculatedEndTime - (totalMinutes * 60 * 1000);
                 
