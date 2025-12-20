@@ -68,6 +68,8 @@ const chartInstance = ref(null)
 const dataLoader = ref(null)
 const currentInterval = ref(props.interval)
 const title = ref(`${props.symbol} - K线图`)
+const isInitializing = ref(false) // 标记是否正在初始化
+const initTimeoutId = ref(null) // 存储初始化定时器ID
 
 // 时间周期配置
 // KLineChart 10.0.0 使用 { span: number, type: string } 格式
@@ -108,19 +110,39 @@ const initChart = async () => {
     return
   }
 
-  // 等待 DOM 渲染完成
-  await nextTick()
-
-  // 检查容器尺寸
-  const container = chartContainerRef.value
-  const rect = container.getBoundingClientRect()
-  if (rect.width === 0 || rect.height === 0) {
-    console.warn('[KLineChart] Container has zero size, retrying...')
-    setTimeout(() => initChart(), 100)
+  // 如果正在初始化，直接返回，避免重复初始化
+  if (isInitializing.value) {
+    console.log('[KLineChart] Chart is already initializing, skipping...')
     return
   }
 
+  // 清除之前的定时器
+  if (initTimeoutId.value) {
+    clearTimeout(initTimeoutId.value)
+    initTimeoutId.value = null
+  }
+
+  // 标记为正在初始化
+  isInitializing.value = true
+
   try {
+    // 等待 DOM 渲染完成
+    await nextTick()
+
+    // 检查容器尺寸
+    const container = chartContainerRef.value
+    const rect = container.getBoundingClientRect()
+    if (rect.width === 0 || rect.height === 0) {
+      console.warn('[KLineChart] Container has zero size, retrying...')
+      // 使用ref存储定时器ID，以便后续清除
+      initTimeoutId.value = setTimeout(() => {
+        initTimeoutId.value = null
+        isInitializing.value = false
+        initChart()
+      }, 100)
+      return
+    }
+
     // 销毁已存在的图表
     if (chartInstance.value) {
       destroyChart()
@@ -215,14 +237,25 @@ const initChart = async () => {
     console.log('[KLineChart] Chart initialized successfully')
   } catch (error) {
     console.error('[KLineChart] Failed to initialize chart:', error)
+  } finally {
+    // 初始化完成，重置标志
+    isInitializing.value = false
+    initTimeoutId.value = null
   }
 }
 
 // 处理时间周期切换
 const handleTimeframeChange = (interval) => {
+  // 如果interval没有变化，直接返回，避免重复调用
+  if (currentInterval.value === interval && chartInstance.value) {
+    console.log('[KLineChart] Interval unchanged, skipping update:', interval)
+    return
+  }
+
   currentInterval.value = interval
   emit('interval-change', interval)
 
+  // 只有在图表已初始化且interval确实变化时才调用setPeriod
   if (chartInstance.value) {
     const period = intervalToPeriod(interval)
     chartInstance.value.setPeriod(period)
@@ -236,6 +269,15 @@ const handleClose = () => {
 
 // 销毁图表
 const destroyChart = () => {
+  // 清除初始化定时器
+  if (initTimeoutId.value) {
+    clearTimeout(initTimeoutId.value)
+    initTimeoutId.value = null
+  }
+
+  // 重置初始化标志
+  isInitializing.value = false
+
   if (chartInstance.value) {
     try {
       const klinecharts = getKLineCharts()
@@ -260,16 +302,28 @@ const destroyChart = () => {
 // 监听 visible 变化
 watch(() => props.visible, async (newVal) => {
   if (newVal) {
+    // 清除之前的定时器
+    if (initTimeoutId.value) {
+      clearTimeout(initTimeoutId.value)
+      initTimeoutId.value = null
+    }
+
     title.value = `${props.symbol} - K线图`
     currentInterval.value = props.interval
     // 等待模态框完全渲染后再初始化
     await nextTick()
-    setTimeout(() => {
-      if (props.visible) {
+    initTimeoutId.value = setTimeout(() => {
+      initTimeoutId.value = null
+      if (props.visible && !isInitializing.value) {
         initChart()
       }
     }, 100)
   } else {
+    // 清除定时器
+    if (initTimeoutId.value) {
+      clearTimeout(initTimeoutId.value)
+      initTimeoutId.value = null
+    }
     destroyChart()
   }
 }, { immediate: false })
@@ -284,7 +338,17 @@ watch(() => props.symbol, (newVal) => {
 })
 
 // 监听 interval 变化
-watch(() => props.interval, (newVal) => {
+watch(() => props.interval, (newVal, oldVal) => {
+  // 如果interval没有变化，直接返回
+  if (newVal === oldVal) {
+    return
+  }
+
+  // 如果interval与currentInterval相同，说明已经通过handleTimeframeChange更新过了，避免重复调用
+  if (newVal === currentInterval.value) {
+    return
+  }
+
   if (newVal && props.visible && chartInstance.value) {
     currentInterval.value = newVal
     const period = intervalToPeriod(newVal)
