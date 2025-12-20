@@ -37,11 +37,13 @@ public class ProviderDO implements Serializable {
     /**
      * API URL
      */
+    @TableField(value = "api_url", insertStrategy = com.baomidou.mybatisplus.annotation.FieldStrategy.IGNORED)
     private String apiUrl;
 
     /**
      * API密钥
      */
+    @TableField(value = "api_key", insertStrategy = com.baomidou.mybatisplus.annotation.FieldStrategy.IGNORED)
     private String apiKey;
 
     /**
@@ -52,11 +54,13 @@ public class ProviderDO implements Serializable {
     /**
      * 提供方类型（openai、deepseek等）
      */
+    @TableField("provider_type")
     private String providerType;
 
     /**
      * 创建时间
      */
+    @TableField("created_at")
     private LocalDateTime createdAt;
 
     /**

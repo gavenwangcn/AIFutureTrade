@@ -52,12 +52,12 @@ public class FutureController {
 
     /**
      * 删除合约配置
-     * @param futureId 合约ID
+     * @param futureId 合约ID（UUID格式）
      * @return 删除操作结果
      */
     @DeleteMapping("/{futureId}")
     @ApiOperation("删除合约配置")
-    public ResponseEntity<Map<String, Object>> deleteFutureConfig(@PathVariable Integer futureId) {
+    public ResponseEntity<Map<String, Object>> deleteFutureConfig(@PathVariable String futureId) {
         Boolean deleted = futureService.deleteFuture(futureId);
         Map<String, Object> response = new HashMap<>();
         if (deleted) {

@@ -35,7 +35,7 @@ public class FutureServiceImpl implements FutureService {
     }
 
     @Override
-    public FutureDTO getFutureById(Integer id) {
+    public FutureDTO getFutureById(String id) {
         FutureDO futureDO = futureMapper.selectFutureById(id);
         return futureDO != null ? convertToDTO(futureDO) : null;
     }
@@ -43,6 +43,17 @@ public class FutureServiceImpl implements FutureService {
     @Override
     @Transactional(rollbackFor = Exception.class)
     public FutureDTO addFuture(FutureDTO futureDTO) {
+        // 验证必填字段
+        if (futureDTO.getSymbol() == null || futureDTO.getSymbol().trim().isEmpty()) {
+            throw new IllegalArgumentException("合约简称不能为空");
+        }
+        if (futureDTO.getContractSymbol() == null || futureDTO.getContractSymbol().trim().isEmpty()) {
+            throw new IllegalArgumentException("合约代码不能为空");
+        }
+        if (futureDTO.getName() == null || futureDTO.getName().trim().isEmpty()) {
+            throw new IllegalArgumentException("合约名称不能为空");
+        }
+        
         FutureDO futureDO = convertToDO(futureDTO);
         futureDO.setCreatedAt(LocalDateTime.now());
         futureDO.setUpdatedAt(LocalDateTime.now());
@@ -61,7 +72,7 @@ public class FutureServiceImpl implements FutureService {
 
     @Override
     @Transactional(rollbackFor = Exception.class)
-    public Boolean deleteFuture(Integer id) {
+    public Boolean deleteFuture(String id) {
         int result = futureMapper.deleteById(id);
         return result > 0;
     }

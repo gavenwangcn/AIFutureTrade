@@ -108,11 +108,11 @@ const handleSave = async () => {
   try {
     await futuresApi.create({
       symbol: formData.value.symbol.toUpperCase(),
-      contract_symbol: formData.value.contractSymbol.toUpperCase(),
+      contractSymbol: formData.value.contractSymbol.toUpperCase(),
       name: formData.value.name,
       exchange: formData.value.exchange.toUpperCase() || 'BINANCE_FUTURES',
       link: formData.value.link || null,
-      sort_order: formData.value.sortOrder || 0
+      sortOrder: formData.value.sortOrder || 0
     })
     alert('合约保存成功')
     clearForm()

@@ -242,20 +242,20 @@ const handleSubmit = async () => {
   loading.value = true
   try {
     await modelApi.create({
-      provider_id: formData.value.providerId,
-      model_name: formData.value.modelName,
+      providerId: formData.value.providerId,
+      modelName: formData.value.modelName,
       name: formData.value.displayName,
-      initial_capital: formData.value.initialCapital,
-      max_positions: formData.value.maxPositions,
-      account_alias: formData.value.accountAlias,
-      is_virtual: formData.value.isVirtual,
-      symbol_source: formData.value.symbolSource,
-      buy_batch_size: formData.value.buyBatchSize || 1,
-      buy_batch_execution_interval: formData.value.buyBatchExecutionInterval || 60,
-      buy_batch_execution_group_size: formData.value.buyBatchExecutionGroupSize || 1,
-      sell_batch_size: formData.value.sellBatchSize || 1,
-      sell_batch_execution_interval: formData.value.sellBatchExecutionInterval || 60,
-      sell_batch_execution_group_size: formData.value.sellBatchExecutionGroupSize || 1
+      initialCapital: formData.value.initialCapital,
+      maxPositions: formData.value.maxPositions,
+      accountAlias: formData.value.accountAlias,
+      isVirtual: formData.value.isVirtual,
+      symbolSource: formData.value.symbolSource,
+      buyBatchSize: formData.value.buyBatchSize || 1,
+      buyBatchExecutionInterval: formData.value.buyBatchExecutionInterval || 60,
+      buyBatchExecutionGroupSize: formData.value.buyBatchExecutionGroupSize || 1,
+      sellBatchSize: formData.value.sellBatchSize || 1,
+      sellBatchExecutionInterval: formData.value.sellBatchExecutionInterval || 60,
+      sellBatchExecutionGroupSize: formData.value.sellBatchExecutionGroupSize || 1
     })
     alert('模型添加成功')
     clearForm()

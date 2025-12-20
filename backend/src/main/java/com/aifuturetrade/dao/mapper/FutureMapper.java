@@ -23,11 +23,11 @@ public interface FutureMapper extends BaseMapper<FutureDO> {
 
     /**
      * 根据ID查询合约配置
-     * @param id 合约ID
+     * @param id 合约ID（UUID格式）
      * @return 合约配置
      */
     @Select("select * from futures where id = #{id}")
-    FutureDO selectFutureById(Integer id);
+    FutureDO selectFutureById(String id);
 
     /**
      * 获取所有合约符号列表

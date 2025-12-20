@@ -22,7 +22,7 @@ public interface FutureService {
      * @param id 合约ID
      * @return 合约配置
      */
-    FutureDTO getFutureById(Integer id);
+    FutureDTO getFutureById(String id);
 
     /**
      * 添加合约配置
@@ -40,10 +40,10 @@ public interface FutureService {
 
     /**
      * 删除合约配置
-     * @param id 合约ID
+     * @param id 合约ID（UUID格式）
      * @return 是否删除成功
      */
-    Boolean deleteFuture(Integer id);
+    Boolean deleteFuture(String id);
 
     /**
      * 分页查询合约配置

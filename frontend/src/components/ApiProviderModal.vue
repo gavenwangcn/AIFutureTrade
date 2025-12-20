@@ -119,8 +119,8 @@ const handleFetchModels = async () => {
   fetchingModels.value = true
   try {
     const data = await providerApi.fetchModels({
-      api_url: formData.value.apiUrl,
-      api_key: formData.value.apiKey
+      apiUrl: formData.value.apiUrl,
+      apiKey: formData.value.apiKey
     })
     if (data.models && data.models.length > 0) {
       formData.value.models = data.models.join(', ')
@@ -147,10 +147,10 @@ const handleSave = async () => {
   try {
     await providerApi.create({
       name: formData.value.name,
-      api_url: formData.value.apiUrl,
-      api_key: formData.value.apiKey,
+      apiUrl: formData.value.apiUrl,
+      apiKey: formData.value.apiKey,
       models: formData.value.models,
-      provider_type: formData.value.providerType
+      providerType: formData.value.providerType
     })
     alert('API提供方保存成功')
     clearForm()

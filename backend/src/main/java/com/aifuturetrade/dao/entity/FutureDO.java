@@ -37,6 +37,7 @@ public class FutureDO implements Serializable {
     /**
      * 合约符号（如BTCUSDT）
      */
+    @TableField("contract_symbol")
     private String contractSymbol;
 
     /**
@@ -57,11 +58,13 @@ public class FutureDO implements Serializable {
     /**
      * 排序顺序
      */
+    @TableField("sort_order")
     private Integer sortOrder;
 
     /**
      * 创建时间
      */
+    @TableField("created_at")
     private LocalDateTime createdAt;
 
     /**

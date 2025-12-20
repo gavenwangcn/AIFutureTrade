@@ -334,8 +334,8 @@ const handleSaveStrategy = async () => {
       await strategyApi.update(editingStrategy.value.id, {
         name: strategyForm.value.name.trim(),
         type: strategyForm.value.type,
-        strategy_context: strategyForm.value.strategy_context || null,
-        strategy_code: strategyForm.value.strategy_code || null
+        strategyContext: strategyForm.value.strategy_context || null,
+        strategyCode: strategyForm.value.strategy_code || null
       })
       alert('更新成功')
     } else {
@@ -343,8 +343,8 @@ const handleSaveStrategy = async () => {
       await strategyApi.create({
         name: strategyForm.value.name.trim(),
         type: strategyForm.value.type,
-        strategy_context: strategyForm.value.strategy_context || null,
-        strategy_code: strategyForm.value.strategy_code || null
+        strategyContext: strategyForm.value.strategy_context || null,
+        strategyCode: strategyForm.value.strategy_code || null
       })
       alert('添加成功')
     }

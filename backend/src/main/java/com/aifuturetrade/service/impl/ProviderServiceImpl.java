@@ -43,6 +43,14 @@ public class ProviderServiceImpl implements ProviderService {
     @Override
     @Transactional(rollbackFor = Exception.class)
     public ProviderDTO addProvider(ProviderDTO providerDTO) {
+        // 验证必填字段
+        if (providerDTO.getApiUrl() == null || providerDTO.getApiUrl().trim().isEmpty()) {
+            throw new IllegalArgumentException("API URL 不能为空");
+        }
+        if (providerDTO.getApiKey() == null || providerDTO.getApiKey().trim().isEmpty()) {
+            throw new IllegalArgumentException("API Key 不能为空");
+        }
+        
         ProviderDO providerDO = convertToDO(providerDTO);
         providerDO.setCreatedAt(LocalDateTime.now());
         providerDO.setUpdatedAt(LocalDateTime.now());
