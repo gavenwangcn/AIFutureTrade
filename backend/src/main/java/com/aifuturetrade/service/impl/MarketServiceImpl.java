@@ -281,16 +281,27 @@ public class MarketServiceImpl implements MarketService {
         try {
             BinanceFuturesClient client = getFuturesClient();
 
-            // 统一所有interval类型的默认limit为499
+            // 根据interval类型设置默认limit
+            // 1天（1d）和1周（1w）返回99根，其他interval返回499根
             if (limit == null) {
-                limit = 499;
+                if ("1d".equals(interval) || "1w".equals(interval)) {
+                    limit = 99;
+                } else {
+                    limit = 499;
+                }
             }
             
             // 验证limit参数的有效性（Binance API限制：1-1000）
             if (limit != null) {
                 if (limit <= 0) {
-                    log.warn("[MarketService] limit参数 {} 无效，使用默认值499", limit);
-                    limit = 499;
+                    // 根据interval设置默认值
+                    if ("1d".equals(interval) || "1w".equals(interval)) {
+                        log.warn("[MarketService] limit参数 {} 无效，使用默认值99", limit);
+                        limit = 99;
+                    } else {
+                        log.warn("[MarketService] limit参数 {} 无效，使用默认值499", limit);
+                        limit = 499;
+                    }
                 } else if (limit > 1000) {
                     log.warn("[MarketService] limit参数 {} 超过最大值1000，已限制为1000", limit);
                     limit = 1000;

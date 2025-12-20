@@ -70,8 +70,12 @@ export function createDataLoader() {
         return
       }
 
-      // 计算需要的数据量（统一返回499条K线数据）
-      const limit = 499
+      // 计算需要的数据量
+      // 1天（1d）和1周（1w）返回99根，其他interval返回499根
+      let limit = 499
+      if (interval === '1d' || interval === '1w') {
+        limit = 99
+      }
 
       // 构建请求参数（不传入startTime和endTime）
       const apiBaseUrl = getApiBaseUrl()

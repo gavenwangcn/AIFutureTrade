@@ -227,10 +227,11 @@ public class BinanceFuturesClient extends BinanceFuturesBase {
                 }
                 
                 // 验证和转换limit参数（Binance API限制：1-1000）
-                // 统一所有interval类型的默认limit为499
+                // 1天（1d）和1周（1w）返回99根，其他interval返回499根
+                Long defaultLimit = ("1d".equals(interval) || "1w".equals(interval)) ? 99L : 499L;
                 Long limitLong = (limit != null && limit > 0 && limit <= 1000) 
                     ? limit.longValue() 
-                    : 499L; // 默认值
+                    : defaultLimit;
                 
                 log.info("[Binance Futures] 调用参数: symbol={}, interval={}, startTime={}, endTime={}, limit={}", 
                         requestSymbol, intervalEnum, startTime, endTime, limitLong);
