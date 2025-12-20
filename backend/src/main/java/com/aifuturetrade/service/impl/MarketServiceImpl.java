@@ -300,7 +300,7 @@ public class MarketServiceImpl implements MarketService {
     }
     
     /**
-     * 将timestamp（毫秒）转换为datetime字符串用于验证
+     * 将timestamp（毫秒）转换为datetime字符串用于验证（使用 UTC+8 时区）
      */
     private String formatTimestamp(Long timestamp) {
         if (timestamp == null || timestamp == 0) {
@@ -308,8 +308,9 @@ public class MarketServiceImpl implements MarketService {
         }
         try {
             java.time.Instant instant = java.time.Instant.ofEpochMilli(timestamp);
-            java.time.ZonedDateTime zonedDateTime = instant.atZone(java.time.ZoneId.of("UTC"));
-            return zonedDateTime.format(java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss 'UTC'"));
+            java.time.ZoneId utcPlus8 = java.time.ZoneId.of("Asia/Shanghai");
+            java.time.ZonedDateTime zonedDateTime = instant.atZone(utcPlus8);
+            return zonedDateTime.format(java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss 'UTC+8'"));
         } catch (Exception e) {
             return timestamp + " (转换失败: " + e.getMessage() + ")";
         }

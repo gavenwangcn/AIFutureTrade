@@ -7,7 +7,12 @@ import com.binance.connector.client.common.configuration.SignatureConfiguration;
 import com.binance.connector.client.derivatives_trading_usds_futures.rest.DerivativesTradingUsdsFuturesRestApiUtil;
 import com.binance.connector.client.derivatives_trading_usds_futures.rest.api.DerivativesTradingUsdsFuturesRestApi;
 import com.binance.connector.client.derivatives_trading_usds_futures.rest.model.Interval;
+import com.binance.connector.client.derivatives_trading_usds_futures.rest.model.KlineCandlestickDataResponse;
 
+import java.time.Instant;
+import java.time.ZoneId;
+import java.time.ZonedDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.List;
 
 /**
@@ -92,62 +97,99 @@ public class KlineCandlestickDataTest {
         System.out.println("交易对: " + symbol);
         System.out.println("时间间隔: " + interval);
         System.out.println("限制数量: " + limit);
+        // 使用 UTC+8 时区格式化时间
+        ZoneId utcPlus8 = ZoneId.of("Asia/Shanghai");
+        DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
         if (startTime != null) {
-            System.out.println("起始时间: " + startTime + " (" + new java.util.Date(startTime) + ")");
+            ZonedDateTime startZoned = Instant.ofEpochMilli(startTime).atZone(utcPlus8);
+            System.out.println("起始时间: " + startTime + " (UTC+8: " + startZoned.format(formatter) + ")");
         }
         if (endTime != null) {
-            System.out.println("结束时间: " + endTime + " (" + new java.util.Date(endTime) + ")");
+            ZonedDateTime endZoned = Instant.ofEpochMilli(endTime).atZone(utcPlus8);
+            System.out.println("结束时间: " + endTime + " (UTC+8: " + endZoned.format(formatter) + ")");
         }
         System.out.println("----------------------------------------");
         
         try {
-            // 转换interval字符串为Interval枚举
-            Interval intervalEnum = convertStringToInterval(interval);
+            // 按照官方示例，使用Interval枚举值（如 Interval.INTERVAL_1m）
+            Interval intervalEnum = convertStringToIntervalEnum(interval);
             if (intervalEnum == null) {
                 System.err.println("错误: 不支持的时间间隔: " + interval);
+                System.out.println("可用的Interval枚举值:");
+                for (Interval iv : Interval.values()) {
+                    System.out.println("  " + iv);
+                }
                 return;
             }
             
             System.out.println("调用API获取K线数据...");
+            System.out.println("使用Interval枚举: " + intervalEnum);
             long startTimeMs = System.currentTimeMillis();
             
-            // 调用API
-            ApiResponse<?> response = 
+            // 按照官方示例调用API：klineCandlestickData(symbol, interval, startTime, endTime, limit)
+            // 使用 ApiResponse<KlineCandlestickDataResponse> 类型
+            ApiResponse<KlineCandlestickDataResponse> response = 
                     getApi().klineCandlestickData(symbol, intervalEnum, startTime, endTime, limit);
             
             long duration = System.currentTimeMillis() - startTimeMs;
             System.out.println("API调用完成，耗时: " + duration + " 毫秒");
             
-            // 获取响应数据
-            Object responseData = getResponseData(response);
+            // 按照官方示例，使用 response.getData() 获取数据
+            // 官方示例：System.out.println(response.getData());
+            KlineCandlestickDataResponse responseData = response.getData();
             
             if (responseData == null) {
                 System.err.println("错误: 响应数据为null");
                 return;
             }
             
-            // 处理响应数据 - 可能是List<List<Object>>格式
+            // 处理响应数据 - 通过反射获取KlineCandlestickDataResponse内部的K线数据列表
             List<List<Object>> klines = null;
             
-            if (responseData instanceof List) {
-                @SuppressWarnings("unchecked")
-                List<Object> dataList = (List<Object>) responseData;
-                
-                // 检查第一个元素是否是List（K线数据格式）
-                if (!dataList.isEmpty() && dataList.get(0) instanceof List) {
-                    @SuppressWarnings("unchecked")
-                    List<List<Object>> klinesList = (List<List<Object>>) (List<?>) dataList;
-                    klines = klinesList;
-                } else {
-                    System.err.println("错误: 响应数据格式不正确，期望List<List<Object>>");
-                    System.out.println("响应数据类型: " + responseData.getClass().getName());
-                    System.out.println("响应数据内容: " + responseData);
-                    return;
+            try {
+                // 尝试通过反射访问KlineCandlestickDataResponse的内部数据
+                // 首先尝试getData()方法
+                try {
+                    java.lang.reflect.Method getDataMethod = responseData.getClass().getMethod("getData");
+                    Object data = getDataMethod.invoke(responseData);
+                    if (data instanceof List) {
+                        @SuppressWarnings("unchecked")
+                        List<Object> dataList = (List<Object>) data;
+                        if (!dataList.isEmpty() && dataList.get(0) instanceof List) {
+                            @SuppressWarnings("unchecked")
+                            List<List<Object>> klinesList = (List<List<Object>>) (List<?>) dataList;
+                            klines = klinesList;
+                        }
+                    }
+                } catch (NoSuchMethodException e) {
+                    // 如果getData()方法不存在，尝试访问字段
+                    java.lang.reflect.Field[] fields = responseData.getClass().getDeclaredFields();
+                    for (java.lang.reflect.Field field : fields) {
+                        field.setAccessible(true);
+                        Object value = field.get(responseData);
+                        if (value instanceof List) {
+                            @SuppressWarnings("unchecked")
+                            List<Object> dataList = (List<Object>) value;
+                            if (!dataList.isEmpty() && dataList.get(0) instanceof List) {
+                                @SuppressWarnings("unchecked")
+                                List<List<Object>> klinesList = (List<List<Object>>) (List<?>) dataList;
+                                klines = klinesList;
+                                break;
+                            }
+                        }
+                    }
                 }
-            } else {
-                System.err.println("错误: 响应数据不是List类型");
+            } catch (Exception e) {
+                System.err.println("无法从KlineCandlestickDataResponse中提取数据: " + e.getMessage());
+                e.printStackTrace();
+            }
+            
+            if (klines == null) {
+                System.err.println("错误: 无法从响应中提取K线数据");
                 System.out.println("响应数据类型: " + responseData.getClass().getName());
-                System.out.println("响应数据详情: " + responseData);
+                System.out.println("响应数据内容: " + responseData);
+                // 按照官方示例，直接打印响应数据
+                System.out.println("按照官方示例打印响应数据: " + response.getData());
                 return;
             }
             
@@ -159,15 +201,16 @@ public class KlineCandlestickDataTest {
             if (klines.isEmpty()) {
                 System.out.println("警告: 返回的K线数据为空！");
             } else {
-                // 打印前几条K线数据详情
+                // 打印前几条K线数据详情（使用之前定义的 utcPlus8 和 formatter）
                 int printCount = Math.min(klines.size(), 5);
                 System.out.println("前 " + printCount + " 条K线数据详情:");
                 for (int i = 0; i < printCount; i++) {
                     List<Object> kline = klines.get(i);
                     if (kline != null && kline.size() >= 6) {
+                        long openTime = Long.parseLong(kline.get(0).toString());
+                        ZonedDateTime openTimeZoned = Instant.ofEpochMilli(openTime).atZone(utcPlus8);
                         System.out.println("  K线 #" + (i + 1) + ":");
-                        System.out.println("    开盘时间: " + kline.get(0) + " (" + 
-                                new java.util.Date(Long.parseLong(kline.get(0).toString())) + ")");
+                        System.out.println("    开盘时间: " + openTime + " (UTC+8: " + openTimeZoned.format(formatter) + ")");
                         System.out.println("    开盘价: " + kline.get(1));
                         System.out.println("    最高价: " + kline.get(2));
                         System.out.println("    最低价: " + kline.get(3));
@@ -184,9 +227,10 @@ public class KlineCandlestickDataTest {
                 if (klines.size() > printCount) {
                     List<Object> lastKline = klines.get(klines.size() - 1);
                     if (lastKline != null && lastKline.size() >= 6) {
+                        long lastOpenTime = Long.parseLong(lastKline.get(0).toString());
+                        ZonedDateTime lastOpenTimeZoned = Instant.ofEpochMilli(lastOpenTime).atZone(utcPlus8);
                         System.out.println("  最后一条K线:");
-                        System.out.println("    开盘时间: " + lastKline.get(0) + " (" + 
-                                new java.util.Date(Long.parseLong(lastKline.get(0).toString())) + ")");
+                        System.out.println("    开盘时间: " + lastOpenTime + " (UTC+8: " + lastOpenTimeZoned.format(formatter) + ")");
                         System.out.println("    收盘价: " + lastKline.get(4));
                     }
                 }
@@ -224,86 +268,37 @@ public class KlineCandlestickDataTest {
     }
     
     /**
-     * 从ApiResponse中获取数据
+     * 将字符串interval转换为Interval枚举（按照官方示例使用枚举值）
+     * 官方示例使用：Interval.INTERVAL_1m, Interval.INTERVAL_5m 等
      */
-    private Object getResponseData(ApiResponse<?> response) {
-        if (response == null) {
-            return null;
-        }
-        try {
-            // 尝试使用反射获取data字段或方法
-            try {
-                java.lang.reflect.Method dataMethod = response.getClass().getMethod("getData");
-                return dataMethod.invoke(response);
-            } catch (NoSuchMethodException e) {
-                try {
-                    java.lang.reflect.Method dataMethod = response.getClass().getMethod("data");
-                    return dataMethod.invoke(response);
-                } catch (NoSuchMethodException e2) {
-                    // 尝试直接访问data字段
-                    try {
-                        java.lang.reflect.Field dataField = response.getClass().getField("data");
-                        return dataField.get(response);
-                    } catch (NoSuchFieldException e3) {
-                        // 如果都失败，返回response本身
-                        return response;
-                    }
-                }
-            }
-        } catch (Exception e) {
-            System.err.println("获取响应数据失败: " + e.getMessage());
-            return response;
-        }
-    }
-    
-    /**
-     * 将字符串interval转换为Interval枚举
-     */
-    private Interval convertStringToInterval(String intervalStr) {
+    private Interval convertStringToIntervalEnum(String intervalStr) {
         if (intervalStr == null || intervalStr.isEmpty()) {
             return null;
         }
         
+        // 按照官方示例，枚举值格式为 INTERVAL_1m, INTERVAL_5m 等
         String upperInterval = intervalStr.toUpperCase();
+        String enumName = "INTERVAL_" + upperInterval;
         
-        // 尝试多种可能的枚举命名格式
-        String[] possibleNames = {
-            "INTERVAL_" + upperInterval,           // INTERVAL_1M, INTERVAL_5M
-            "INTERVAL_" + upperInterval.replaceAll("[^A-Z0-9]", ""),  // INTERVAL_1M (移除特殊字符)
-            upperInterval,                         // 直接使用 1M, 5M
-            intervalStr                            // 保持原样 1m, 5m
-        };
-        
-        for (String enumName : possibleNames) {
-            try {
-                return Interval.valueOf(enumName);
-            } catch (IllegalArgumentException e) {
-                // 继续尝试下一个
-                continue;
-            }
-        }
-        
-        // 如果所有格式都失败，尝试使用反射查找所有枚举值
         try {
-            Interval[] values = Interval.values();
-            for (Interval interval : values) {
-                // 检查枚举值的字符串表示是否匹配
-                String enumStr = interval.toString().toUpperCase();
-                if (enumStr.equals(upperInterval) || 
-                    enumStr.endsWith(upperInterval) ||
-                    enumStr.contains(upperInterval)) {
-                    return interval;
+            // 直接使用枚举值，如 Interval.INTERVAL_1m
+            return Interval.valueOf(enumName);
+        } catch (IllegalArgumentException e) {
+            // 如果失败，尝试查找所有枚举值进行匹配
+            try {
+                Interval[] values = Interval.values();
+                for (Interval interval : values) {
+                    String enumStr = interval.toString().toUpperCase();
+                    // 匹配 INTERVAL_1M, INTERVAL_5M 等格式
+                    if (enumStr.equals(enumName) || enumStr.endsWith("_" + upperInterval)) {
+                        return interval;
+                    }
                 }
+            } catch (Exception e2) {
+                System.err.println("查找Interval枚举失败: " + e2.getMessage());
             }
-        } catch (Exception e) {
-            System.err.println("使用反射查找Interval枚举失败: " + e.getMessage());
         }
         
-        System.err.println("不支持的interval格式: " + intervalStr);
-        System.out.println("可用的Interval枚举值:");
-        for (Interval interval : Interval.values()) {
-            System.out.println("  " + interval);
-        }
         return null;
     }
     

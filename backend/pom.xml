@@ -139,7 +139,7 @@
         <dependency>
             <groupId>io.github.binance</groupId>
             <artifactId>binance-derivatives-trading-usds-futures</artifactId>
-            <version>2.0.0</version>
+            <version>6.0.0</version>
         </dependency>
         
         <!-- Jakarta Validation API (Binance SDK 2.0.0 需要) -->

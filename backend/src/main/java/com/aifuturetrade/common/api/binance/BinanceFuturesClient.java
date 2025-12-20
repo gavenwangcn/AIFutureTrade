@@ -7,6 +7,8 @@ import lombok.extern.slf4j.Slf4j;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
+import java.time.ZonedDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -348,14 +350,26 @@ public class BinanceFuturesClient extends BinanceFuturesBase {
                             String takerBuyBaseVolume = String.valueOf(klineList.get(9));
                             String takerBuyQuoteVolume = String.valueOf(klineList.get(10));
                             
-                            // 转换时间戳为日期格式
-                            LocalDateTime openTimeDt = openTime != null ? 
-                                    LocalDateTime.ofInstant(Instant.ofEpochMilli(openTime), ZoneId.systemDefault()) : null;
-                            LocalDateTime closeTimeDt = closeTime != null ? 
-                                    LocalDateTime.ofInstant(Instant.ofEpochMilli(closeTime), ZoneId.systemDefault()) : null;
+                            // 转换时间戳为日期格式（使用 UTC+8 时区）
+                            ZoneId utcPlus8 = ZoneId.of("Asia/Shanghai");
+                            LocalDateTime openTimeDt = null;
+                            String openTimeDtStr = null;
+                            if (openTime != null) {
+                                ZonedDateTime openTimeZoned = Instant.ofEpochMilli(openTime).atZone(utcPlus8);
+                                openTimeDt = openTimeZoned.toLocalDateTime();
+                                openTimeDtStr = openTimeZoned.format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"));
+                            }
+                            LocalDateTime closeTimeDt = null;
+                            String closeTimeDtStr = null;
+                            if (closeTime != null) {
+                                ZonedDateTime closeTimeZoned = Instant.ofEpochMilli(closeTime).atZone(utcPlus8);
+                                closeTimeDt = closeTimeZoned.toLocalDateTime();
+                                closeTimeDtStr = closeTimeZoned.format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"));
+                            }
                             
                             klineDict.put("open_time", openTime);
                             klineDict.put("open_time_dt", openTimeDt);
+                            klineDict.put("open_time_dt_str", openTimeDtStr);
                             klineDict.put("open", openPrice);
                             klineDict.put("high", highPrice);
                             klineDict.put("low", lowPrice);
@@ -363,6 +377,7 @@ public class BinanceFuturesClient extends BinanceFuturesBase {
                             klineDict.put("volume", volume);
                             klineDict.put("close_time", closeTime);
                             klineDict.put("close_time_dt", closeTimeDt);
+                            klineDict.put("close_time_dt_str", closeTimeDtStr);
                             klineDict.put("quote_asset_volume", quoteAssetVolume);
                             klineDict.put("number_of_trades", numberOfTrades);
                             klineDict.put("taker_buy_base_volume", takerBuyBaseVolume);
@@ -393,18 +408,26 @@ public class BinanceFuturesClient extends BinanceFuturesBase {
                             String takerBuyQuoteVolume = String.valueOf(entry.getOrDefault("taker_buy_quote_volume", 
                                     entry.getOrDefault("takerBuyQuoteVolume", entry.getOrDefault("Q", ""))));
                             
-                            // 转换时间戳为日期格式
+                            // 转换时间戳为日期格式（使用 UTC+8 时区）
+                            ZoneId utcPlus8 = ZoneId.of("Asia/Shanghai");
                             LocalDateTime openTimeDt = null;
-                            LocalDateTime closeTimeDt = null;
+                            String openTimeDtStr = null;
                             if (openTime != null) {
-                                openTimeDt = LocalDateTime.ofInstant(Instant.ofEpochMilli(openTime), ZoneId.systemDefault());
+                                ZonedDateTime openTimeZoned = Instant.ofEpochMilli(openTime).atZone(utcPlus8);
+                                openTimeDt = openTimeZoned.toLocalDateTime();
+                                openTimeDtStr = openTimeZoned.format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"));
                             }
+                            LocalDateTime closeTimeDt = null;
+                            String closeTimeDtStr = null;
                             if (closeTime != null) {
-                                closeTimeDt = LocalDateTime.ofInstant(Instant.ofEpochMilli(closeTime), ZoneId.systemDefault());
+                                ZonedDateTime closeTimeZoned = Instant.ofEpochMilli(closeTime).atZone(utcPlus8);
+                                closeTimeDt = closeTimeZoned.toLocalDateTime();
+                                closeTimeDtStr = closeTimeZoned.format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"));
                             }
                             
                             klineDict.put("open_time", openTime);
                             klineDict.put("open_time_dt", openTimeDt);
+                            klineDict.put("open_time_dt_str", openTimeDtStr);
                             klineDict.put("open", openPrice);
                             klineDict.put("high", highPrice);
                             klineDict.put("low", lowPrice);
@@ -412,6 +435,7 @@ public class BinanceFuturesClient extends BinanceFuturesBase {
                             klineDict.put("volume", volume);
                             klineDict.put("close_time", closeTime);
                             klineDict.put("close_time_dt", closeTimeDt);
+                            klineDict.put("close_time_dt_str", closeTimeDtStr);
                             klineDict.put("quote_asset_volume", quoteAssetVolume);
                             klineDict.put("number_of_trades", numberOfTrades);
                             klineDict.put("taker_buy_base_volume", takerBuyBaseVolume);
