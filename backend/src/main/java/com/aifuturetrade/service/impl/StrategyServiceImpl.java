@@ -3,6 +3,7 @@ package com.aifuturetrade.service.impl;
 import com.aifuturetrade.dao.entity.StrategyDO;
 import com.aifuturetrade.dao.mapper.StrategyMapper;
 import com.aifuturetrade.service.StrategyService;
+import com.aifuturetrade.service.StrategyCodeTesterService;
 import com.aifuturetrade.service.dto.StrategyDTO;
 import com.aifuturetrade.common.util.PageResult;
 import com.aifuturetrade.common.util.PageRequest;
@@ -13,6 +14,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
+import lombok.extern.slf4j.Slf4j;
 
 import java.time.LocalDateTime;
 import java.util.List;
@@ -23,11 +25,15 @@ import java.util.stream.Collectors;
  * 业务逻辑实现类：策略
  * 实现策略的业务逻辑
  */
+@Slf4j
 @Service
 public class StrategyServiceImpl implements StrategyService {
 
     @Autowired
     private StrategyMapper strategyMapper;
+    
+    @Autowired
+    private StrategyCodeTesterService strategyCodeTesterService;
 
     @Override
     public List<StrategyDTO> getAllStrategies() {
@@ -87,6 +93,30 @@ public class StrategyServiceImpl implements StrategyService {
         if (strategyDO.getId() == null || strategyDO.getId().isEmpty()) {
             strategyDO.setId(UUID.randomUUID().toString());
         }
+        
+        // 如果提供了策略代码，进行测试验证
+        if (strategyDO.getStrategyCode() != null && !strategyDO.getStrategyCode().trim().isEmpty()) {
+            String strategyType = strategyDO.getType();
+            String strategyName = strategyDO.getName() != null ? strategyDO.getName() : "新策略";
+            
+            if (strategyType == null || strategyType.trim().isEmpty()) {
+                throw new IllegalArgumentException("策略类型不能为空，无法验证策略代码");
+            }
+            
+            try {
+                // 验证策略代码
+                strategyCodeTesterService.validateStrategyCode(
+                    strategyDO.getStrategyCode(), 
+                    strategyType, 
+                    strategyName
+                );
+                log.info("策略代码验证通过: {}", strategyName);
+            } catch (Exception e) {
+                log.error("策略代码验证失败: {}, 错误: {}", strategyName, e.getMessage());
+                throw new RuntimeException("策略代码验证失败，无法保存: " + e.getMessage(), e);
+            }
+        }
+        
         strategyDO.setCreatedAt(LocalDateTime.now());
         strategyDO.setUpdatedAt(LocalDateTime.now());
         strategyMapper.insert(strategyDO);
@@ -97,6 +127,38 @@ public class StrategyServiceImpl implements StrategyService {
     @Transactional(rollbackFor = Exception.class)
     public StrategyDTO updateStrategy(StrategyDTO strategyDTO) {
         StrategyDO strategyDO = convertToDO(strategyDTO);
+        
+        // 如果更新了策略代码，进行测试验证
+        if (strategyDO.getStrategyCode() != null && !strategyDO.getStrategyCode().trim().isEmpty()) {
+            String strategyType = strategyDO.getType();
+            String strategyName = strategyDO.getName() != null ? strategyDO.getName() : "策略";
+            
+            // 如果类型为空，尝试从数据库获取
+            if (strategyType == null || strategyType.trim().isEmpty()) {
+                StrategyDO existingStrategy = strategyMapper.selectById(strategyDO.getId());
+                if (existingStrategy != null) {
+                    strategyType = existingStrategy.getType();
+                }
+            }
+            
+            if (strategyType == null || strategyType.trim().isEmpty()) {
+                throw new IllegalArgumentException("策略类型不能为空，无法验证策略代码");
+            }
+            
+            try {
+                // 验证策略代码
+                strategyCodeTesterService.validateStrategyCode(
+                    strategyDO.getStrategyCode(), 
+                    strategyType, 
+                    strategyName
+                );
+                log.info("策略代码验证通过: {}", strategyName);
+            } catch (Exception e) {
+                log.error("策略代码验证失败: {}, 错误: {}", strategyName, e.getMessage());
+                throw new RuntimeException("策略代码验证失败，无法更新: " + e.getMessage(), e);
+            }
+        }
+        
         strategyDO.setUpdatedAt(LocalDateTime.now());
         strategyMapper.updateById(strategyDO);
         return convertToDTO(strategyDO);

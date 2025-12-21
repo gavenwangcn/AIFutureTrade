@@ -458,7 +458,7 @@ class Database:
                 settings_id = str(uuid.uuid4())
                 self.insert_rows(
                     self.settings_table,
-                    [[settings_id, 5, 5, 0.002, 0, 5, None, None, 0.7, 20000, 0.9, 50, current_time, current_time]],
+                    [[settings_id, 5, 5, 0.002, 0, 5, None, None, 0.0, 8192, 0.9, 50, current_time, current_time]],
                     ["id", "buy_frequency_minutes", "sell_frequency_minutes", "trading_fee_rate", "show_system_prompt", "conversation_limit", "strategy_provider", "strategy_model", "strategy_temperature", "strategy_max_tokens", "strategy_top_p", "strategy_top_k", "created_at", "updated_at"]
                 )
                 logger.info("[Database] Default settings initialized")

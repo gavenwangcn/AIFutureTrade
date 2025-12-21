@@ -114,8 +114,8 @@ public class SettingsServiceImpl implements SettingsService {
         settings.setTradingFeeRate(0.001);
         settings.setShowSystemPrompt(false);
         settings.setConversationLimit(5);
-        settings.setStrategyTemperature(0.7);
-        settings.setStrategyMaxTokens(20000);
+        settings.setStrategyTemperature(0.0);
+        settings.setStrategyMaxTokens(8192);  // OpenAI API 最大限制为 8192
         settings.setStrategyTopP(0.9);
         settings.setStrategyTopK(50);
         settings.setCreatedAt(LocalDateTime.now());

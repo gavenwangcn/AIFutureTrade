@@ -134,6 +134,11 @@ binance:
 app:
   auto-trading: ${APP_AUTO_TRADING:true}
 
+# Python配置（用于策略代码测试）
+python:
+  executable: ${PYTHON_EXECUTABLE:python}  # Python可执行文件路径，默认使用系统PATH中的python
+  project-root-path: ${PROJECT_ROOT_PATH:}  # 项目根路径，如果为空则使用相对路径
+
 # Socket.IO 配置（可通过环境变量覆盖）
 socketio:
   port: ${SOCKETIO_PORT:5003}  # Socket.IO 服务器端口（独立于 HTTP 服务器端口）

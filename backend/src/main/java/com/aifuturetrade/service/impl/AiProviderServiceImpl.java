@@ -143,8 +143,10 @@ public class AiProviderServiceImpl implements AiProviderService {
             
             // 获取配置参数
             Map<String, Object> config = getStrategyConfig();
-            Double temperature = getConfigDouble(config, "strategy_temperature", 0.7);
-            Integer maxTokens = getConfigInteger(config, "strategy_max_tokens", 20000);
+            Double temperature = getConfigDouble(config, "strategy_temperature", 0.0);
+            Integer maxTokens = getConfigInteger(config, "strategy_max_tokens", 8192);
+            // OpenAI API 限制：max_tokens 范围 [1, 8192]
+            maxTokens = Math.max(1, Math.min(8192, maxTokens));
             Double topP = getConfigDouble(config, "strategy_top_p", 0.9);
             
             // 构建请求体，参考Python版本的实现
@@ -231,8 +233,10 @@ public class AiProviderServiceImpl implements AiProviderService {
             
             // 获取配置参数
             Map<String, Object> config = getStrategyConfig();
-            Integer maxTokens = getConfigInteger(config, "strategy_max_tokens", 20000);
-            Double temperature = getConfigDouble(config, "strategy_temperature", 0.7);
+            Integer maxTokens = getConfigInteger(config, "strategy_max_tokens", 8192);
+            // Anthropic API 限制：max_tokens 范围 [1, 4096]（Claude 3）或 [1, 8192]（Claude 3.5）
+            maxTokens = Math.max(1, Math.min(8192, maxTokens));
+            Double temperature = getConfigDouble(config, "strategy_temperature", 0.0);
             Double topP = getConfigDouble(config, "strategy_top_p", 0.9);
             
             // 构建请求体，参考Python版本的实现
@@ -321,8 +325,10 @@ public class AiProviderServiceImpl implements AiProviderService {
             
             // 获取配置参数
             Map<String, Object> config = getStrategyConfig();
-            Double temperature = getConfigDouble(config, "strategy_temperature", 0.7);
-            Integer maxTokens = getConfigInteger(config, "strategy_max_tokens", 20000);
+            Double temperature = getConfigDouble(config, "strategy_temperature", 0.0);
+            Integer maxTokens = getConfigInteger(config, "strategy_max_tokens", 8192);
+            // Gemini API 限制：maxOutputTokens 范围 [1, 8192]
+            maxTokens = Math.max(1, Math.min(8192, maxTokens));
             Double topP = getConfigDouble(config, "strategy_top_p", 0.9);
             Integer topK = getConfigInteger(config, "strategy_top_k", 50);
             
@@ -629,8 +635,8 @@ public class AiProviderServiceImpl implements AiProviderService {
             log.warn("Failed to get settings, using default values: {}", e.getMessage());
             // 返回默认值
             Map<String, Object> defaultConfig = new HashMap<>();
-            defaultConfig.put("strategy_temperature", 0.7);
-            defaultConfig.put("strategy_max_tokens", 20000);
+            defaultConfig.put("strategy_temperature", 0.0);
+            defaultConfig.put("strategy_max_tokens", 8192);  // OpenAI API 最大限制为 8192
             defaultConfig.put("strategy_top_p", 0.9);
             defaultConfig.put("strategy_top_k", 50);
             return defaultConfig;

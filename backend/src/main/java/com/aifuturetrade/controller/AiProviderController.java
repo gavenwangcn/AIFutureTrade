@@ -1,6 +1,7 @@
 package com.aifuturetrade.controller;
 
 import com.aifuturetrade.service.AiProviderService;
+import com.aifuturetrade.service.StrategyCodeTesterService;
 import io.swagger.annotations.Api;
 import io.swagger.annotations.ApiOperation;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -23,6 +24,9 @@ public class AiProviderController {
 
     @Autowired
     private AiProviderService aiProviderService;
+    
+    @Autowired
+    private StrategyCodeTesterService strategyCodeTesterService;
 
     /**
      * 从提供方API获取可用的模型列表
@@ -80,8 +84,21 @@ public class AiProviderController {
         try {
             String strategyCode = aiProviderService.generateStrategyCode(
                     providerId, modelName, strategyContext, strategyType);
+            
+            // 自动测试生成的策略代码
+            String strategyName = request.get("strategyName");
+            if (strategyName == null || strategyName.trim().isEmpty()) {
+                strategyName = "新" + ("buy".equals(strategyType) ? "买入" : "卖出") + "策略";
+            }
+            
+            Map<String, Object> testResult = strategyCodeTesterService.testStrategyCode(
+                    strategyCode, strategyType, strategyName);
+            
             Map<String, Object> response = new HashMap<>();
             response.put("strategyCode", strategyCode);
+            response.put("testResult", testResult);
+            response.put("testPassed", testResult.get("passed"));
+            
             return new ResponseEntity<>(response, HttpStatus.OK);
         } catch (Exception e) {
             Map<String, Object> error = new HashMap<>();

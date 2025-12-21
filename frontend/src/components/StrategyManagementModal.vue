@@ -225,6 +225,62 @@
               </option>
             </select>
           </div>
+          
+          <div class="form-row">
+            <div class="form-group">
+              <label>Temperature (温度)</label>
+              <input 
+                v-model.number="strategyProviderForm.strategy_temperature" 
+                type="number" 
+                step="0.1" 
+                min="0" 
+                max="2" 
+                class="form-input"
+                placeholder="0.0"
+              />
+              <small class="form-hint">控制输出的随机性，范围 0-2，默认 0.0</small>
+            </div>
+            <div class="form-group">
+              <label>Max Tokens (最大Token数)</label>
+              <input 
+                v-model.number="strategyProviderForm.strategy_max_tokens" 
+                type="number" 
+                min="1" 
+                max="8192" 
+                class="form-input"
+                placeholder="8192"
+              />
+              <small class="form-hint">最大输出Token数，范围 1-8192，默认 8192</small>
+            </div>
+          </div>
+          
+          <div class="form-row">
+            <div class="form-group">
+              <label>Top P (核采样)</label>
+              <input 
+                v-model.number="strategyProviderForm.strategy_top_p" 
+                type="number" 
+                step="0.1" 
+                min="0" 
+                max="1" 
+                class="form-input"
+                placeholder="0.9"
+              />
+              <small class="form-hint">核采样参数，范围 0-1，默认 0.9</small>
+            </div>
+            <div class="form-group">
+              <label>Top K (Top-K采样)</label>
+              <input 
+                v-model.number="strategyProviderForm.strategy_top_k" 
+                type="number" 
+                min="1" 
+                max="100" 
+                class="form-input"
+                placeholder="50"
+              />
+              <small class="form-hint">Top-K采样参数，范围 1-100，默认 50（仅部分模型支持）</small>
+            </div>
+          </div>
         </div>
         <div class="modal-footer">
           <button class="btn-secondary" @click="closeStrategyProviderModal">取消</button>
@@ -249,6 +305,58 @@
         </div>
         <div class="modal-footer">
           <button class="btn-secondary" @click="closeCodeModal">关闭</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 测试结果弹框 -->
+    <div v-if="showTestResult" class="modal-overlay" @click.self="closeTestResult">
+      <div class="modal-content test-result-modal">
+        <div class="modal-header">
+          <h3>策略代码测试结果</h3>
+          <button class="btn-close" @click="closeTestResult">
+            <i class="bi bi-x-lg"></i>
+          </button>
+        </div>
+        <div class="modal-body">
+          <div v-if="testResult" class="test-result-content">
+            <div class="test-status" :class="testResult.passed ? 'status-passed' : 'status-failed'">
+              <i :class="testResult.passed ? 'bi bi-check-circle-fill' : 'bi bi-x-circle-fill'"></i>
+              <span>{{ testResult.passed ? '测试通过' : '测试失败' }}</span>
+            </div>
+            
+            <div v-if="testResult.errors && testResult.errors.length > 0" class="test-errors">
+              <h4>错误信息：</h4>
+              <ul>
+                <li v-for="(error, index) in testResult.errors" :key="index">{{ error }}</li>
+              </ul>
+            </div>
+            
+            <div v-if="testResult.warnings && testResult.warnings.length > 0" class="test-warnings">
+              <h4>警告信息：</h4>
+              <ul>
+                <li v-for="(warning, index) in testResult.warnings" :key="index">{{ warning }}</li>
+              </ul>
+            </div>
+            
+            <div v-if="testResult.test_results" class="test-details">
+              <h4>测试详情：</h4>
+              <div v-for="(result, testName) in testResult.test_results" :key="testName" class="test-item">
+                <span :class="result.passed ? 'test-passed' : 'test-failed'">
+                  {{ result.passed ? '✓' : '✗' }} {{ testName }}: {{ result.message }}
+                </span>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn-secondary" @click="closeTestResult">关闭</button>
+          <button v-if="!testResult || !testResult.passed" class="btn-primary" @click="handleRetryGenerate">
+            重新生成
+          </button>
+          <button v-if="testResult && testResult.passed" class="btn-primary" @click="handleSaveWithTestedCode">
+            保存策略
+          </button>
         </div>
       </div>
     </div>
@@ -298,7 +406,11 @@ const saving = ref(false)
 const showStrategyProviderModal = ref(false)
 const strategyProviderForm = ref({
   providerId: '',
-  modelName: ''
+  modelName: '',
+  strategy_temperature: 0.7,
+  strategy_max_tokens: 8192,
+  strategy_top_p: 0.9,
+  strategy_top_k: 50
 })
 const providers = ref([])
 const availableModels = ref([])
@@ -310,6 +422,8 @@ const viewingCode = ref('')
 
 // 获取策略代码相关
 const fetchingCode = ref(false)
+const testResult = ref(null)
+const showTestResult = ref(false)
 
 // 计算总页数
 const totalPages = computed(() => {
@@ -494,6 +608,19 @@ const handleOpenStrategyProviderModal = async () => {
         strategyProviderForm.value.modelName = settings.strategy_model
       }
     }
+    // 加载策略参数设置
+    if (settings.strategy_temperature !== undefined) {
+      strategyProviderForm.value.strategy_temperature = settings.strategy_temperature
+    }
+    if (settings.strategy_max_tokens !== undefined) {
+      strategyProviderForm.value.strategy_max_tokens = settings.strategy_max_tokens
+    }
+    if (settings.strategy_top_p !== undefined) {
+      strategyProviderForm.value.strategy_top_p = settings.strategy_top_p
+    }
+    if (settings.strategy_top_k !== undefined) {
+      strategyProviderForm.value.strategy_top_k = settings.strategy_top_k
+    }
     
     showStrategyProviderModal.value = true
   } catch (err) {
@@ -503,11 +630,15 @@ const handleOpenStrategyProviderModal = async () => {
 }
 
 // 关闭设置策略API提供方弹框
-const closeStrategyProviderModal = () => {
+const   closeStrategyProviderModal = () => {
   showStrategyProviderModal.value = false
   strategyProviderForm.value = {
     providerId: '',
-    modelName: ''
+    modelName: '',
+    strategy_temperature: 0.0,
+    strategy_max_tokens: 8192,
+    strategy_top_p: 0.9,
+    strategy_top_k: 50
   }
   availableModels.value = []
 }
@@ -539,7 +670,11 @@ const handleSaveStrategyProvider = async () => {
   try {
     await settingsApi.update({
       strategy_provider: strategyProviderForm.value.providerId,
-      strategy_model: strategyProviderForm.value.modelName
+      strategy_model: strategyProviderForm.value.modelName,
+      strategy_temperature: strategyProviderForm.value.strategy_temperature,
+      strategy_max_tokens: strategyProviderForm.value.strategy_max_tokens,
+      strategy_top_p: strategyProviderForm.value.strategy_top_p,
+      strategy_top_k: strategyProviderForm.value.strategy_top_k
     })
     alert('设置成功')
     closeStrategyProviderModal()
@@ -629,7 +764,24 @@ const handleFetchStrategyCode = async () => {
     
     if (result.strategyCode) {
       strategyForm.value.strategy_code = result.strategyCode
-      alert('策略代码生成成功')
+      
+      // 显示测试结果
+      if (result.testResult) {
+        testResult.value = result.testResult
+        showTestResult.value = true
+        
+        if (result.testPassed) {
+          alert('策略代码生成成功，测试通过！')
+        } else {
+          const errors = result.testResult.errors || []
+          const errorMsg = errors.length > 0 
+            ? '策略代码生成成功，但测试未通过：\n' + errors.join('\n')
+            : '策略代码生成成功，但测试未通过'
+          alert(errorMsg)
+        }
+      } else {
+        alert('策略代码生成成功')
+      }
     } else {
       alert('生成失败：未返回策略代码')
     }
@@ -645,6 +797,29 @@ const handleFetchStrategyCode = async () => {
 const handleViewCode = (strategy) => {
   viewingCode.value = strategy.strategy_code || '暂无策略代码'
   showCodeModal.value = true
+}
+
+// 关闭测试结果弹框
+const closeTestResult = () => {
+  showTestResult.value = false
+  testResult.value = null
+}
+
+// 重新生成代码
+const handleRetryGenerate = () => {
+  closeTestResult()
+  handleFetchStrategyCode()
+}
+
+// 保存已测试通过的代码
+const handleSaveWithTestedCode = () => {
+  closeTestResult()
+  // 如果表单未打开，先打开表单
+  if (!showStrategyForm.value) {
+    handleAddStrategy()
+  }
+  // 表单中已经有代码了，直接保存
+  handleSaveStrategy()
 }
 
 // 关闭查看代码弹框
@@ -816,6 +991,20 @@ watch(() => props.visible, (newVal) => {
   box-shadow: 0 0 0 3px rgba(51, 112, 255, 0.1);
 }
 
+.form-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+
+.form-hint {
+  display: block;
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--text-2);
+  font-style: italic;
+}
+
 .btn-icon {
   background: transparent;
   border: none;
@@ -894,6 +1083,91 @@ watch(() => props.visible, (newVal) => {
   line-height: 1.6;
   white-space: pre-wrap;
   word-wrap: break-word;
+}
+
+.test-result-modal {
+  max-width: 600px;
+}
+
+.test-result-content {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.test-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px;
+  border-radius: var(--radius);
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.test-status.status-passed {
+  background: rgba(40, 167, 69, 0.1);
+  color: #28a745;
+}
+
+.test-status.status-failed {
+  background: rgba(220, 53, 69, 0.1);
+  color: #dc3545;
+}
+
+.test-errors, .test-warnings {
+  padding: 12px;
+  border-radius: var(--radius);
+  background: var(--bg-2);
+}
+
+.test-errors {
+  border-left: 4px solid #dc3545;
+}
+
+.test-warnings {
+  border-left: 4px solid #ffc107;
+}
+
+.test-errors h4, .test-warnings h4 {
+  margin: 0 0 8px 0;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.test-errors ul, .test-warnings ul {
+  margin: 0;
+  padding-left: 20px;
+}
+
+.test-errors li, .test-warnings li {
+  margin: 4px 0;
+  font-size: 13px;
+}
+
+.test-details {
+  padding: 12px;
+  border-radius: var(--radius);
+  background: var(--bg-2);
+}
+
+.test-details h4 {
+  margin: 0 0 8px 0;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.test-item {
+  margin: 4px 0;
+  font-size: 13px;
+}
+
+.test-passed {
+  color: #28a745;
+}
+
+.test-failed {
+  color: #dc3545;
 }
 </style>
 
