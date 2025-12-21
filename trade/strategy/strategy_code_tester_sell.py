@@ -426,7 +426,6 @@ class StrategyCodeTesterSell:
                 portfolio=mock_portfolio,
                 account_info=mock_account_info,
                 market_state=mock_market_state,
-                symbol_source=None,
                 decision_type='sell'
             )
             

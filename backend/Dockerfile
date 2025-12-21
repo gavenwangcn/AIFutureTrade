@@ -82,7 +82,8 @@ COPY --from=builder /app/target/java-backend-1.0.0.jar app.jar
 EXPOSE 5002
 
 # 设置JVM参数
-ENV JAVA_OPTS="-Xms512m -Xmx1024m -Dserver.port=5002"
+# 添加 --add-opens 参数以解决 MyBatis-Plus 在 Java 9+ 上的反射访问警告
+ENV JAVA_OPTS="-Xms512m -Xmx1024m -Dserver.port=5002 --add-opens java.base/java.lang.invoke=ALL-UNNAMED"
 
 # 启动应用
 ENTRYPOINT ["sh", "-c", "java $JAVA_OPTS -jar app.jar"]

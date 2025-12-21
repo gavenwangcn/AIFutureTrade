@@ -49,7 +49,8 @@ services:
       # Trade服务配置
       - TRADE_SERVICE_URL=${TRADE_SERVICE_URL:-http://trade:5000}
       # JVM参数
-      - JAVA_OPTS=${JAVA_OPTS:--Xms512m -Xmx1024m -Dserver.port=5002}
+      # 添加 --add-opens 参数以解决 MyBatis-Plus 在 Java 9+ 上的反射访问警告
+      - JAVA_OPTS=${JAVA_OPTS:--Xms512m -Xmx1024m -Dserver.port=5002 --add-opens java.base/java.lang.invoke=ALL-UNNAMED}
     restart: unless-stopped
     networks:
       - aifuturetrade-network

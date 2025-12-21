@@ -124,7 +124,6 @@ class StrategyTrader(Trader):
                     portfolio=portfolio,
                     account_info=account_info,
                     market_state=market_state,  # 统一使用market_state
-                    symbol_source=None,  # symbol_source已废弃，不再传递
                     decision_type='buy'
                 )
                 
@@ -242,7 +241,6 @@ class StrategyTrader(Trader):
                     portfolio=portfolio,
                     account_info=account_info,
                     market_state=market_state,
-                    symbol_source=None,  # 卖出决策不需要symbol_source
                     decision_type='sell'
                 )
                 

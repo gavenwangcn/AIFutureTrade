@@ -55,11 +55,13 @@ class StrategyCodeExecutor:
     使用示例：
         executor = StrategyCodeExecutor()
         result = executor.execute_strategy_code(
-            strategy_code="result = {'decisions': {'BTC': {'signal': 'buy_to_enter'}}}",
+            strategy_code="...",
+            strategy_name="测试策略",
             candidates=[...],
             portfolio={...},
             account_info={...},
-            market_snapshot=[...]
+            market_state={...},
+            decision_type='buy'
         )
     """
     
@@ -171,7 +173,6 @@ class StrategyCodeExecutor:
         portfolio: Optional[Dict] = None,
         account_info: Optional[Dict] = None,
         market_state: Optional[Dict] = None,
-        symbol_source: Optional[str] = None,
         decision_type: str = 'buy'
     ) -> Optional[Dict]:
         """
@@ -187,7 +188,6 @@ class StrategyCodeExecutor:
             portfolio: 持仓组合信息
             account_info: 账户信息
             market_state: 市场状态字典，key为交易对符号，value包含价格、技术指标等
-            symbol_source: 数据源类型（已废弃，不再使用）
             decision_type: 决策类型，'buy' 或 'sell'
         
         Returns:

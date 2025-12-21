@@ -426,7 +426,6 @@ class StrategyCodeTesterBuy:
                 portfolio=mock_portfolio,
                 account_info=mock_account_info,
                 market_state=mock_market_state,
-                symbol_source=None,  # symbol_source已废弃，不再传递
                 decision_type='buy'
             )
             
