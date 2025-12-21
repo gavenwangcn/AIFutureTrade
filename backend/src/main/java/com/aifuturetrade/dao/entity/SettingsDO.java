@@ -67,6 +67,30 @@ public class SettingsDO implements Serializable {
     private String strategyModel;
 
     /**
+     * 策略生成温度参数（temperature）
+     */
+    @TableField("strategy_temperature")
+    private Double strategyTemperature;
+
+    /**
+     * 策略生成最大token数（max_tokens）
+     */
+    @TableField("strategy_max_tokens")
+    private Integer strategyMaxTokens;
+
+    /**
+     * 策略生成top_p参数
+     */
+    @TableField("strategy_top_p")
+    private Double strategyTopP;
+
+    /**
+     * 策略生成top_k参数
+     */
+    @TableField("strategy_top_k")
+    private Integer strategyTopK;
+
+    /**
      * 创建时间
      */
     @TableField("created_at")

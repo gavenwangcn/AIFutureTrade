@@ -222,6 +222,10 @@ class DatabaseInitializer:
             `conversation_limit` INT UNSIGNED DEFAULT 5,
             `strategy_provider` VARCHAR(36) DEFAULT NULL,
             `strategy_model` VARCHAR(255) DEFAULT NULL,
+            `strategy_temperature` DOUBLE DEFAULT 0.7,
+            `strategy_max_tokens` INT UNSIGNED DEFAULT 20000,
+            `strategy_top_p` DOUBLE DEFAULT 0.9,
+            `strategy_top_k` INT UNSIGNED DEFAULT 50,
             `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP,
             `updated_at` DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci

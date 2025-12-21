@@ -2,6 +2,7 @@ package com.aifuturetrade.service.impl;
 
 import com.aifuturetrade.service.AiProviderService;
 import com.aifuturetrade.service.ProviderService;
+import com.aifuturetrade.service.SettingsService;
 import com.aifuturetrade.service.dto.ProviderDTO;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -30,6 +31,9 @@ public class AiProviderServiceImpl implements AiProviderService {
 
     @Autowired
     private ProviderService providerService;
+
+    @Autowired
+    private SettingsService settingsService;
 
     private final ObjectMapper objectMapper = new ObjectMapper();
     private final HttpClient httpClient = HttpClient.newBuilder()
@@ -106,12 +110,17 @@ public class AiProviderServiceImpl implements AiProviderService {
                 provider.getProviderType().toLowerCase() : "openai";
         
         try {
+            // 根据provider_type判断调用哪个API，参考Python版本的_call_llm方法逻辑
             if (providerType.equals("anthropic")) {
                 return callAnthropicApi(provider.getApiUrl(), provider.getApiKey(), modelName, prompt);
             } else if (providerType.equals("gemini")) {
                 return callGeminiApi(provider.getApiUrl(), provider.getApiKey(), modelName, prompt);
-            } else {
+            } else if (providerType.equals("openai") || providerType.equals("azure_openai") || providerType.equals("deepseek")) {
                 // OpenAI兼容API（包括openai、azure_openai、deepseek等）
+                return callOpenAiCompatibleApi(provider.getApiUrl(), provider.getApiKey(), modelName, prompt);
+            } else {
+                // 默认使用OpenAI兼容的API
+                log.warn("Unknown provider type: {}, using OpenAI compatible API", providerType);
                 return callOpenAiCompatibleApi(provider.getApiUrl(), provider.getApiKey(), modelName, prompt);
             }
         } catch (Exception e) {
@@ -122,105 +131,262 @@ public class AiProviderServiceImpl implements AiProviderService {
 
     /**
      * 调用OpenAI兼容的API
+     * 参考Python版本的_call_openai_api方法
+     * 支持OpenAI、Azure OpenAI、DeepSeek等兼容OpenAI API格式的提供商
+     * 使用HTTP客户端实现，匹配Python版本使用OpenAI SDK的逻辑
      */
     private String callOpenAiCompatibleApi(String apiUrl, String apiKey, String modelName, String prompt) throws Exception {
-        String url = normalizeApiUrl(apiUrl) + "/chat/completions";
-        
-        Map<String, Object> requestBody = new HashMap<>();
-        requestBody.put("model", modelName);
-        requestBody.put("temperature", 0.7);
-        requestBody.put("max_tokens", 4000);
-        
-        List<Map<String, String>> messages = new ArrayList<>();
-        Map<String, String> systemMessage = new HashMap<>();
-        systemMessage.put("role", "system");
-        systemMessage.put("content", "You are a professional Python code generator. Generate complete, executable Python code only.");
-        messages.add(systemMessage);
-        
-        Map<String, String> userMessage = new HashMap<>();
-        userMessage.put("role", "user");
-        userMessage.put("content", prompt);
-        messages.add(userMessage);
-        
-        requestBody.put("messages", messages);
-        
-        String requestBodyJson = objectMapper.writeValueAsString(requestBody);
-        
-        HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create(url))
-                .header("Authorization", "Bearer " + apiKey)
-                .header("Content-Type", "application/json")
-                .POST(HttpRequest.BodyPublishers.ofString(requestBodyJson))
-                .timeout(Duration.ofSeconds(60))
-                .build();
-        
-        HttpResponse<String> response = httpClient.send(request, 
-                HttpResponse.BodyHandlers.ofString());
-        
-        if (response.statusCode() == 200) {
-            JsonNode jsonNode = objectMapper.readTree(response.body());
-            JsonNode choices = jsonNode.get("choices");
-            if (choices != null && choices.isArray() && choices.size() > 0) {
-                JsonNode message = choices.get(0).get("message");
-                if (message != null) {
-                    return message.get("content").asText();
+        try {
+            // 规范化base_url，确保以/v1结尾，参考Python版本的逻辑
+            String baseUrl = normalizeApiUrl(apiUrl);
+            String url = baseUrl + "/chat/completions";
+            
+            // 获取配置参数
+            Map<String, Object> config = getStrategyConfig();
+            Double temperature = getConfigDouble(config, "strategy_temperature", 0.7);
+            Integer maxTokens = getConfigInteger(config, "strategy_max_tokens", 20000);
+            Double topP = getConfigDouble(config, "strategy_top_p", 0.9);
+            
+            // 构建请求体，参考Python版本的实现
+            Map<String, Object> requestBody = new HashMap<>();
+            requestBody.put("model", modelName);
+            requestBody.put("temperature", temperature);
+            requestBody.put("max_tokens", maxTokens);
+            // OpenAI API 支持 top_p 参数
+            if (topP != null) {
+                requestBody.put("top_p", topP);
+            }
+            
+            List<Map<String, String>> messages = new ArrayList<>();
+            Map<String, String> systemMessage = new HashMap<>();
+            systemMessage.put("role", "system");
+            systemMessage.put("content", "You are a professional cryptocurrency trader. Output JSON format only.");
+            messages.add(systemMessage);
+            
+            Map<String, String> userMessage = new HashMap<>();
+            userMessage.put("role", "user");
+            userMessage.put("content", prompt);
+            messages.add(userMessage);
+            
+            requestBody.put("messages", messages);
+            
+            String requestBodyJson = objectMapper.writeValueAsString(requestBody);
+            
+            // 构建HTTP请求
+            HttpRequest request = HttpRequest.newBuilder()
+                    .uri(URI.create(url))
+                    .header("Authorization", "Bearer " + apiKey)
+                    .header("Content-Type", "application/json")
+                    .POST(HttpRequest.BodyPublishers.ofString(requestBodyJson))
+                    .timeout(Duration.ofSeconds(60))
+                    .build();
+            
+            // 发送请求
+            HttpResponse<String> response = httpClient.send(request, 
+                    HttpResponse.BodyHandlers.ofString());
+            
+            // 处理响应
+            if (response.statusCode() == 200) {
+                JsonNode jsonNode = objectMapper.readTree(response.body());
+                JsonNode choices = jsonNode.get("choices");
+                if (choices != null && choices.isArray() && choices.size() > 0) {
+                    JsonNode message = choices.get(0).get("message");
+                    if (message != null) {
+                        return message.get("content").asText();
+                    }
                 }
             }
+            
+            throw new RuntimeException("Failed to get response from OpenAI API: " + response.statusCode() + 
+                    ", body: " + response.body());
+            
+        } catch (java.net.http.HttpTimeoutException e) {
+            // 对应Python版本的APIConnectionError
+            String errorMsg = String.format("API connection failed: %s", e.getMessage());
+            log.error("OpenAI API: {}", errorMsg);
+            throw new RuntimeException(errorMsg, e);
+        } catch (java.io.IOException e) {
+            // 对应Python版本的APIConnectionError
+            String errorMsg = String.format("API connection failed: %s", e.getMessage());
+            log.error("OpenAI API: {}", errorMsg);
+            throw new RuntimeException(errorMsg, e);
+        } catch (Exception e) {
+            // 对应Python版本的APIError和其他异常
+            String errorMsg = String.format("OpenAI API call failed: %s", e.getMessage());
+            log.error("OpenAI API: {}", errorMsg, e);
+            throw new RuntimeException(errorMsg, e);
         }
-        
-        throw new RuntimeException("Failed to get response from OpenAI API: " + response.statusCode());
     }
 
     /**
      * 调用Anthropic API
+     * 参考Python版本的_call_anthropic_api方法
+     * 使用HTTP请求直接调用Anthropic的Claude API
      */
     private String callAnthropicApi(String apiUrl, String apiKey, String modelName, String prompt) throws Exception {
-        String url = normalizeApiUrl(apiUrl) + "/messages";
-        
-        Map<String, Object> requestBody = new HashMap<>();
-        requestBody.put("model", modelName);
-        requestBody.put("max_tokens", 4000);
-        
-        List<Map<String, String>> messages = new ArrayList<>();
-        Map<String, String> userMessage = new HashMap<>();
-        userMessage.put("role", "user");
-        userMessage.put("content", prompt);
-        messages.add(userMessage);
-        
-        requestBody.put("messages", messages);
-        
-        String requestBodyJson = objectMapper.writeValueAsString(requestBody);
-        
-        HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create(url))
-                .header("x-api-key", apiKey)
-                .header("anthropic-version", "2023-06-01")
-                .header("Content-Type", "application/json")
-                .POST(HttpRequest.BodyPublishers.ofString(requestBodyJson))
-                .timeout(Duration.ofSeconds(60))
-                .build();
-        
-        HttpResponse<String> response = httpClient.send(request, 
-                HttpResponse.BodyHandlers.ofString());
-        
-        if (response.statusCode() == 200) {
-            JsonNode jsonNode = objectMapper.readTree(response.body());
-            JsonNode content = jsonNode.get("content");
-            if (content != null && content.isArray() && content.size() > 0) {
-                return content.get(0).get("text").asText();
+        try {
+            // 规范化base_url，确保以/v1结尾
+            String baseUrl = normalizeApiUrl(apiUrl);
+            String url = baseUrl + "/messages";
+            
+            // 获取配置参数
+            Map<String, Object> config = getStrategyConfig();
+            Integer maxTokens = getConfigInteger(config, "strategy_max_tokens", 20000);
+            Double temperature = getConfigDouble(config, "strategy_temperature", 0.7);
+            Double topP = getConfigDouble(config, "strategy_top_p", 0.9);
+            
+            // 构建请求体，参考Python版本的实现
+            Map<String, Object> requestBody = new HashMap<>();
+            requestBody.put("model", modelName);
+            requestBody.put("max_tokens", maxTokens);
+            requestBody.put("temperature", temperature);
+            // Anthropic API 支持 top_p 参数
+            if (topP != null) {
+                requestBody.put("top_p", topP);
             }
+            requestBody.put("system", "You are a professional cryptocurrency trader. Output JSON format only.");
+            
+            List<Map<String, String>> messages = new ArrayList<>();
+            Map<String, String> userMessage = new HashMap<>();
+            userMessage.put("role", "user");
+            userMessage.put("content", prompt);
+            messages.add(userMessage);
+            requestBody.put("messages", messages);
+            
+            String requestBodyJson = objectMapper.writeValueAsString(requestBody);
+            
+            // 构建HTTP请求
+            HttpRequest request = HttpRequest.newBuilder()
+                    .uri(URI.create(url))
+                    .header("x-api-key", apiKey)
+                    .header("anthropic-version", "2023-06-01")
+                    .header("Content-Type", "application/json")
+                    .POST(HttpRequest.BodyPublishers.ofString(requestBodyJson))
+                    .timeout(Duration.ofSeconds(60))
+                    .build();
+            
+            // 发送请求
+            HttpResponse<String> response = httpClient.send(request, 
+                    HttpResponse.BodyHandlers.ofString());
+            
+            // 处理响应
+            if (response.statusCode() == 200) {
+                JsonNode jsonNode = objectMapper.readTree(response.body());
+                JsonNode content = jsonNode.get("content");
+                if (content != null && content.isArray() && content.size() > 0) {
+                    return content.get(0).get("text").asText();
+                }
+            }
+            
+            throw new RuntimeException("Failed to get response from Anthropic API: " + response.statusCode() + 
+                    ", body: " + response.body());
+            
+        } catch (java.net.http.HttpTimeoutException e) {
+            String errorMsg = String.format("Anthropic API connection timeout: %s", e.getMessage());
+            log.error("Anthropic API: {}", errorMsg);
+            throw new RuntimeException(errorMsg, e);
+        } catch (java.io.IOException e) {
+            String errorMsg = String.format("Anthropic API connection failed: %s", e.getMessage());
+            log.error("Anthropic API: {}", errorMsg);
+            throw new RuntimeException(errorMsg, e);
+        } catch (Exception e) {
+            String errorMsg = String.format("Anthropic API call failed: %s", e.getMessage());
+            log.error("Anthropic API: {}", errorMsg, e);
+            throw new RuntimeException(errorMsg, e);
         }
-        
-        throw new RuntimeException("Failed to get response from Anthropic API: " + response.statusCode());
     }
 
     /**
      * 调用Gemini API
+     * 参考Python版本的_call_gemini_api方法
+     * 使用HTTP请求直接调用Google的Gemini API
      */
     private String callGeminiApi(String apiUrl, String apiKey, String modelName, String prompt) throws Exception {
-        // Gemini API实现（简化版）
-        // 实际实现需要根据Gemini API文档
-        return callOpenAiCompatibleApi(apiUrl, apiKey, modelName, prompt);
+        try {
+            // 规范化base_url，确保以/v1结尾
+            String baseUrl = normalizeApiUrl(apiUrl);
+            String url = baseUrl + "/" + modelName + ":generateContent";
+            
+            // 构建请求体，参考Python版本的实现
+            Map<String, Object> requestBody = new HashMap<>();
+            List<Map<String, Object>> contents = new ArrayList<>();
+            Map<String, Object> content = new HashMap<>();
+            List<Map<String, String>> parts = new ArrayList<>();
+            Map<String, String> part = new HashMap<>();
+            part.put("text", "You are a professional cryptocurrency trader. Output JSON format only.\n\n" + prompt);
+            parts.add(part);
+            content.put("parts", parts);
+            contents.add(content);
+            requestBody.put("contents", contents);
+            
+            // 获取配置参数
+            Map<String, Object> config = getStrategyConfig();
+            Double temperature = getConfigDouble(config, "strategy_temperature", 0.7);
+            Integer maxTokens = getConfigInteger(config, "strategy_max_tokens", 20000);
+            Double topP = getConfigDouble(config, "strategy_top_p", 0.9);
+            Integer topK = getConfigInteger(config, "strategy_top_k", 50);
+            
+            Map<String, Object> generationConfig = new HashMap<>();
+            generationConfig.put("temperature", temperature);
+            generationConfig.put("maxOutputTokens", maxTokens);
+            // Gemini API 支持 top_p 和 top_k 参数
+            if (topP != null) {
+                generationConfig.put("topP", topP);
+            }
+            if (topK != null) {
+                generationConfig.put("topK", topK);
+            }
+            requestBody.put("generationConfig", generationConfig);
+            
+            String requestBodyJson = objectMapper.writeValueAsString(requestBody);
+            
+            // 构建URL，添加API密钥作为查询参数
+            String urlWithKey = url + "?key=" + java.net.URLEncoder.encode(apiKey, "UTF-8");
+            
+            // 构建HTTP请求
+            HttpRequest request = HttpRequest.newBuilder()
+                    .uri(URI.create(urlWithKey))
+                    .header("Content-Type", "application/json")
+                    .POST(HttpRequest.BodyPublishers.ofString(requestBodyJson))
+                    .timeout(Duration.ofSeconds(60))
+                    .build();
+            
+            // 发送请求
+            HttpResponse<String> response = httpClient.send(request, 
+                    HttpResponse.BodyHandlers.ofString());
+            
+            // 处理响应
+            if (response.statusCode() == 200) {
+                JsonNode jsonNode = objectMapper.readTree(response.body());
+                JsonNode candidates = jsonNode.get("candidates");
+                if (candidates != null && candidates.isArray() && candidates.size() > 0) {
+                    JsonNode candidate = candidates.get(0);
+                    JsonNode candidateContent = candidate.get("content");
+                    if (candidateContent != null) {
+                        JsonNode candidateParts = candidateContent.get("parts");
+                        if (candidateParts != null && candidateParts.isArray() && candidateParts.size() > 0) {
+                            return candidateParts.get(0).get("text").asText();
+                        }
+                    }
+                }
+            }
+            
+            throw new RuntimeException("Failed to get response from Gemini API: " + response.statusCode() + 
+                    ", body: " + response.body());
+            
+        } catch (java.net.http.HttpTimeoutException e) {
+            String errorMsg = String.format("Gemini API connection timeout: %s", e.getMessage());
+            log.error("Gemini API: {}", errorMsg);
+            throw new RuntimeException(errorMsg, e);
+        } catch (java.io.IOException e) {
+            String errorMsg = String.format("Gemini API connection failed: %s", e.getMessage());
+            log.error("Gemini API: {}", errorMsg);
+            throw new RuntimeException(errorMsg, e);
+        } catch (Exception e) {
+            String errorMsg = String.format("Gemini API call failed: %s", e.getMessage());
+            log.error("Gemini API: {}", errorMsg, e);
+            throw new RuntimeException(errorMsg, e);
+        }
     }
 
     /**
@@ -450,6 +616,63 @@ public class AiProviderServiceImpl implements AiProviderService {
             return List.of("gemini-pro", "gemini-pro-vision");
         }
         return List.of("gpt-3.5-turbo", "gpt-4", "gpt-4-turbo");
+    }
+
+    /**
+     * 获取策略配置参数
+     * @return 配置参数Map
+     */
+    private Map<String, Object> getStrategyConfig() {
+        try {
+            return settingsService.getSettings();
+        } catch (Exception e) {
+            log.warn("Failed to get settings, using default values: {}", e.getMessage());
+            // 返回默认值
+            Map<String, Object> defaultConfig = new HashMap<>();
+            defaultConfig.put("strategy_temperature", 0.7);
+            defaultConfig.put("strategy_max_tokens", 20000);
+            defaultConfig.put("strategy_top_p", 0.9);
+            defaultConfig.put("strategy_top_k", 50);
+            return defaultConfig;
+        }
+    }
+
+    /**
+     * 从配置中获取Double值，如果不存在则使用默认值
+     */
+    private Double getConfigDouble(Map<String, Object> config, String key, Double defaultValue) {
+        Object value = config.get(key);
+        if (value == null) {
+            return defaultValue;
+        }
+        if (value instanceof Number) {
+            return ((Number) value).doubleValue();
+        }
+        try {
+            return Double.parseDouble(String.valueOf(value));
+        } catch (NumberFormatException e) {
+            log.warn("Invalid {} value: {}, using default: {}", key, value, defaultValue);
+            return defaultValue;
+        }
+    }
+
+    /**
+     * 从配置中获取Integer值，如果不存在则使用默认值
+     */
+    private Integer getConfigInteger(Map<String, Object> config, String key, Integer defaultValue) {
+        Object value = config.get(key);
+        if (value == null) {
+            return defaultValue;
+        }
+        if (value instanceof Number) {
+            return ((Number) value).intValue();
+        }
+        try {
+            return Integer.parseInt(String.valueOf(value));
+        } catch (NumberFormatException e) {
+            log.warn("Invalid {} value: {}, using default: {}", key, value, defaultValue);
+            return defaultValue;
+        }
     }
 }
 

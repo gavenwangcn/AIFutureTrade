@@ -38,6 +38,10 @@ public class SettingsServiceImpl implements SettingsService {
         result.put("conversation_limit", settings.getConversationLimit());
         result.put("strategy_provider", settings.getStrategyProvider());
         result.put("strategy_model", settings.getStrategyModel());
+        result.put("strategy_temperature", settings.getStrategyTemperature());
+        result.put("strategy_max_tokens", settings.getStrategyMaxTokens());
+        result.put("strategy_top_p", settings.getStrategyTopP());
+        result.put("strategy_top_k", settings.getStrategyTopK());
         result.put("trades_display_count", 5); // 从配置读取
         result.put("trades_query_limit", 10); // 从配置读取
         return result;
@@ -77,6 +81,22 @@ public class SettingsServiceImpl implements SettingsService {
             Object value = settingsData.get("strategy_model");
             settings.setStrategyModel(value != null ? String.valueOf(value) : null);
         }
+        if (settingsData.containsKey("strategy_temperature")) {
+            Object value = settingsData.get("strategy_temperature");
+            settings.setStrategyTemperature(value != null ? ((Number) value).doubleValue() : null);
+        }
+        if (settingsData.containsKey("strategy_max_tokens")) {
+            Object value = settingsData.get("strategy_max_tokens");
+            settings.setStrategyMaxTokens(value != null ? ((Number) value).intValue() : null);
+        }
+        if (settingsData.containsKey("strategy_top_p")) {
+            Object value = settingsData.get("strategy_top_p");
+            settings.setStrategyTopP(value != null ? ((Number) value).doubleValue() : null);
+        }
+        if (settingsData.containsKey("strategy_top_k")) {
+            Object value = settingsData.get("strategy_top_k");
+            settings.setStrategyTopK(value != null ? ((Number) value).intValue() : null);
+        }
         
         settings.setUpdatedAt(LocalDateTime.now());
         settingsMapper.updateById(settings);
@@ -94,6 +114,10 @@ public class SettingsServiceImpl implements SettingsService {
         settings.setTradingFeeRate(0.001);
         settings.setShowSystemPrompt(false);
         settings.setConversationLimit(5);
+        settings.setStrategyTemperature(0.7);
+        settings.setStrategyMaxTokens(20000);
+        settings.setStrategyTopP(0.9);
+        settings.setStrategyTopK(50);
         settings.setCreatedAt(LocalDateTime.now());
         settings.setUpdatedAt(LocalDateTime.now());
         settingsMapper.insert(settings);
