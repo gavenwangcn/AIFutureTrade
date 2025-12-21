@@ -119,12 +119,10 @@ class GeneratedBuyStrategy(StrategyBaseBuy):
             if len(close_prices) < 99:
                 continue  # 有效数据不足
             
-            # 转换为numpy数组
-            import numpy as np
+            # 转换为numpy数组（np已经在执行环境中预加载，无需import）
             close_array = np.array(close_prices, dtype=float)
             
-            # 计算MA(99)（必须检查返回值）
-            import talib
+            # 计算MA(99)（必须检查返回值，talib已经在执行环境中预加载，无需import）
             try:
                 ma99 = talib.SMA(close_array, timeperiod=99)
                 if len(ma99) == 0:
@@ -319,13 +317,17 @@ def execute_buy_decision(...):
 ```
 from trade.strategy.strategy_template_buy import StrategyBaseBuy
 from typing import Dict, List
-import talib
-import numpy as np
 
 class GeneratedBuyStrategy(StrategyBaseBuy):
     def execute_buy_decision(...):
         ...
 ```
+
+**⚠️ 重要：关于库的使用（关键）：**
+- **不要使用 `import talib` 或 `import numpy as np`**
+- **talib 和 np (numpy) 已经在执行环境中预加载，可以直接使用**
+- **直接使用 `talib.SMA()` 和 `np.array()`，无需导入**
+- **如果必须检查库是否可用，使用 `try-except` 包装，但通常不需要**
 
 生成的代码必须：
 1. 导入 StrategyBaseBuy：`from trade.strategy.strategy_template_buy import StrategyBaseBuy`

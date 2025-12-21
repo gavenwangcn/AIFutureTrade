@@ -122,12 +122,10 @@ class GeneratedSellStrategy(StrategyBaseSell):
             if len(close_prices) < 99:
                 continue  # 有效数据不足
             
-            # 转换为numpy数组
-            import numpy as np
+            # 转换为numpy数组（np已经在执行环境中预加载，无需import）
             close_array = np.array(close_prices, dtype=float)
             
-            # 计算MA(99)（必须检查返回值）
-            import talib
+            # 计算MA(99)（必须检查返回值，talib已经在执行环境中预加载，无需import）
             try:
                 ma99 = talib.SMA(close_array, timeperiod=99)
                 if len(ma99) == 0:
@@ -171,6 +169,11 @@ class GeneratedSellStrategy(StrategyBaseSell):
 ```
 
 ### 2. 必须使用 TA-Lib 库计算技术指标
+
+**⚠️ 重要：关于库的使用（关键）：**
+- **不要使用 `import talib` 或 `import numpy as np`**
+- **talib 和 np (numpy) 已经在执行环境中预加载，可以直接使用**
+- **直接使用 `talib.SMA()` 和 `np.array()`，无需导入语句**
 
 - 使用 `talib.SMA()` 计算移动平均线
 - 使用 `talib.RSI()` 计算 RSI 指标
@@ -297,13 +300,17 @@ klines_1h = timeframes.get('1h', {}).get('klines', [])
 ```
 from trade.strategy.strategy_template_sell import StrategyBaseSell
 from typing import Dict
-import talib
-import numpy as np
 
 class GeneratedSellStrategy(StrategyBaseSell):
     def execute_sell_decision(...):
         ...
 ```
+
+**⚠️ 重要：关于库的使用（关键）：**
+- **不要使用 `import talib` 或 `import numpy as np`**
+- **talib 和 np (numpy) 已经在执行环境中预加载，可以直接使用**
+- **直接使用 `talib.SMA()` 和 `np.array()`，无需导入**
+- **如果必须检查库是否可用，使用 `try-except` 包装，但通常不需要**
 
 生成的代码必须：
 1. 导入 StrategyBaseSell：`from trade.strategy.strategy_template_sell import StrategyBaseSell`
