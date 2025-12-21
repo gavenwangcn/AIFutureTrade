@@ -1,9 +1,23 @@
 你是一个专业的量化交易卖出策略代码生成专家。请根据提供的策略规则（strategy_context）生成符合标准的 Python 卖出策略代码。
 
+## ⚠️ 关键要求（必须严格遵守）：
+
+### 返回值要求（最重要）：
+1. **必须初始化 `decisions = {}` 在方法开始处**
+2. **必须返回字典类型 `Dict[str, Dict]`，不能返回 None**
+3. **即使没有决策也要返回空字典 `{}`**
+4. **必须确保所有代码路径都返回 decisions**
+5. **建议使用 try-except 处理异常，确保异常时返回空字典**
+
+### 方法签名要求：
+- 必须包含且仅包含 4 个参数：`self`, `portfolio`, `market_state`, `account_info`
+- 参数顺序必须完全一致
+- 不能添加或删除任何参数
+
 ## 策略规则（strategy_context）：
 {strategy_context}
 
-## 重要要求：
+## 详细要求：
 
 ### 1. 必须继承 StrategyBaseSell 类并严格实现方法签名
 
@@ -85,26 +99,74 @@ class GeneratedSellStrategy(StrategyBaseSell):
             # 2. 根据持仓方向判断是否满足平仓条件
             # 3. 如果满足条件，添加到 decisions 字典中
             
-            # 示例：
-            # if position_side == 'LONG' and 满足多单平仓条件:
-            #     decisions[symbol] = {
-            #         "signal": "close_position",  # 或 "stop_loss" 或 "take_profit"
-            #         "quantity": position_amt,
-            #         "price": current_price,
-            #         "stop_price": trigger_price,
-            #         "leverage": position.get('leverage', 5),
-            #         "justification": "理由"
-            #     }
-            # elif position_side == 'SHORT' and 满足空单平仓条件:
-            #     decisions[symbol] = {
-            #         "signal": "close_position",  # 或 "stop_loss" 或 "take_profit"
-            #         "quantity": position_amt,
-            #         "price": current_price,
-            #         "stop_price": trigger_price,
-            #         "leverage": position.get('leverage', 5),
-            #         "justification": "理由"
-            #     }
+            # ⚠️ 重要：技术指标计算示例（必须遵循此模式）
+            # 获取K线数据（优先使用1h，其次4h，最后15m）
+            klines_data = None
+            for tf in ['1h', '4h', '15m']:
+                tf_data = timeframes.get(tf, {})
+                klines = tf_data.get('klines', [])
+                if len(klines) >= 99:
+                    klines_data = klines
+                    break
+            
+            if not klines_data or len(klines_data) < 99:
+                continue  # 数据不足，跳过
+            
+            # 提取收盘价（必须验证有效性）
+            close_prices = []
+            for kline in klines_data:
+                close = kline.get('close', 0)
+                if isinstance(close, (int, float)) and close > 0:
+                    close_prices.append(float(close))
+            
+            if len(close_prices) < 99:
+                continue  # 有效数据不足
+            
+            # 转换为numpy数组
+            import numpy as np
+            close_array = np.array(close_prices, dtype=float)
+            
+            # 计算MA(99)（必须检查返回值）
+            import talib
+            try:
+                ma99 = talib.SMA(close_array, timeperiod=99)
+                if len(ma99) == 0:
+                    continue  # 计算结果为空
+                if np.isnan(ma99[-1]):
+                    continue  # 结果为NaN
+                ma99_value = float(ma99[-1])
+                if ma99_value <= 0:
+                    continue  # 结果无效
+            except Exception:
+                continue  # 计算失败，跳过
+            
+            # 建议使用 try-except 处理异常，确保异常时继续处理下一个position
+            try:
+                # 示例：判断平仓条件
+                # if position_side == 'LONG' and 满足多单平仓条件:
+                #     decisions[symbol] = {
+                #         "signal": "close_position",  # 或 "stop_loss" 或 "take_profit"
+                #         "quantity": position_amt,
+                #         "price": current_price,
+                #         "stop_price": trigger_price,
+                #         "leverage": position.get('leverage', 5),
+                #         "justification": "理由"
+                #     }
+                # elif position_side == 'SHORT' and 满足空单平仓条件:
+                #     decisions[symbol] = {
+                #         "signal": "close_position",  # 或 "stop_loss" 或 "take_profit"
+                #         "quantity": position_amt,
+                #         "price": current_price,
+                #         "stop_price": trigger_price,
+                #         "leverage": position.get('leverage', 5),
+                #         "justification": "理由"
+                #     }
+            except Exception as e:
+                # 处理单个position时发生异常，继续处理下一个
+                continue
         
+        # ⚠️ 重要：必须返回decisions字典，不能返回None，即使没有决策也要返回空字典{}
+        # 必须确保所有代码路径都返回decisions，不能有任何路径返回None
         return decisions
 ```
 
@@ -114,6 +176,22 @@ class GeneratedSellStrategy(StrategyBaseSell):
 - 使用 `talib.RSI()` 计算 RSI 指标
 - 使用 `talib.MACD()` 计算 MACD 指标
 - 等等
+
+**⚠️ 技术指标计算注意事项（关键）：**
+1. **K线数据提取**：必须从 `market_state[symbol]['indicators']['timeframes']['1h']` 或 `'4h'`、`'15m'` 等获取
+2. **数据验证**：必须检查K线数据是否足够（至少99根），必须检查价格数据是否有效（> 0）
+3. **numpy数组处理**：
+   - 建议先使用列表收集有效的收盘价：`close_prices = [kline.get('close', 0) for kline in klines if isinstance(kline.get('close', 0), (int, float)) and kline.get('close', 0) > 0]`
+   - 然后转换为numpy数组：`close_array = np.array(close_prices, dtype=float)`
+   - 必须检查数组长度：`if len(close_array) < 99: continue`
+4. **talib.SMA使用**：
+   - 必须检查返回值：`ma99 = talib.SMA(close_array, timeperiod=99)`
+   - 必须检查数组是否为空：`if len(ma99) == 0: continue`
+   - 必须检查是否为NaN：`if np.isnan(ma99[-1]): continue`
+   - 必须检查值是否有效：`ma99_value = float(ma99[-1]); if ma99_value <= 0: continue`
+5. **异常处理**：
+   - 在循环内部使用 try-except 处理单个position的异常，确保一个失败不影响其他
+   - 在方法外层使用 try-except 确保即使发生异常也返回decisions字典
 
 ### 3. 技术指标数据获取方式（统一使用 market_state）
 
@@ -154,6 +232,8 @@ klines_1h = timeframes.get('1h', {}).get('klines', [])
 - 必须添加必要的注释说明
 - 必须遵循 Python 代码规范
 - 必须正确导入 StrategyBaseSell：`from trade.strategy.strategy_template_sell import StrategyBaseSell`
+- **必须确保方法始终返回字典**：不能返回 None，不能有未定义的返回值
+- **必须使用 try-except 处理异常**：确保即使发生异常也能返回空字典而不是抛出异常
 
 ### 6. 策略实现要求
 
@@ -161,6 +241,9 @@ klines_1h = timeframes.get('1h', {}).get('klines', [])
 - 正确计算技术指标（如 MA(99)）
 - 正确判断平仓条件（根据持仓方向 LONG/SHORT）
 - 正确处理多单和空单的不同平仓逻辑
+- **必须初始化 decisions = {} 在方法开始处**
+- **必须确保所有代码路径都返回 decisions 字典**
+- **建议使用 try-except 处理异常，确保异常时返回空字典而不是抛出异常**
 
 ### 7. 示例策略规则解析
 
@@ -181,6 +264,24 @@ klines_1h = timeframes.get('1h', {}).get('klines', [])
 - 使用 `talib.SMA()` 计算 MA(99)，需要至少 99 根 K 线数据
 - 根据持仓方向判断：多单（LONG）和空单（SHORT）有不同的平仓条件
 - **数据获取**：统一使用 `market_state` 获取技术指标数据
+- **返回值**：必须初始化 `decisions = {}`，必须返回字典，不能返回 None
+- **异常处理**：建议使用 try-except 包装主要逻辑，确保异常时返回空字典
+
+**⚠️ 技术指标计算注意事项（关键）：**
+1. **K线数据提取**：必须从 `market_state[symbol]['indicators']['timeframes']['1h']` 或 `'4h'`、`'15m'` 等获取
+2. **数据验证**：必须检查K线数据是否足够（至少99根），必须检查价格数据是否有效（> 0）
+3. **numpy数组处理**：
+   - 建议先使用列表收集有效的收盘价：`close_prices = [kline.get('close', 0) for kline in klines if isinstance(kline.get('close', 0), (int, float)) and kline.get('close', 0) > 0]`
+   - 然后转换为numpy数组：`close_array = np.array(close_prices, dtype=float)`
+   - 必须检查数组长度：`if len(close_array) < 99: continue`
+4. **talib.SMA使用**：
+   - 必须检查返回值：`ma99 = talib.SMA(close_array, timeperiod=99)`
+   - 必须检查数组是否为空：`if len(ma99) == 0: continue`
+   - 必须检查是否为NaN：`if np.isnan(ma99[-1]): continue`
+   - 必须检查值是否有效：`ma99_value = float(ma99[-1]); if ma99_value <= 0: continue`
+5. **异常处理**：
+   - 在循环内部使用 try-except 处理单个position的异常，确保一个失败不影响其他
+   - 在方法外层使用 try-except 确保即使发生异常也返回decisions字典
 
 ## 请根据提供的 strategy_context 生成完整的卖出策略代码：
 
@@ -220,14 +321,64 @@ class GeneratedSellStrategy(StrategyBaseSell):
    - **参数顺序必须完全一致：`self`, `portfolio`, `market_state`, `account_info`**
    - **不能添加任何额外参数**
    - **不能删除任何参数**
-4. 代码必须完整、可执行，不需要额外的实例化代码（系统会自动实例化）
-5. **直接输出Python代码，不要任何包装格式**
+4. **返回值要求（关键）：**
+   - **必须在方法开始处初始化：`decisions = {}`**
+   - **必须返回字典类型：`Dict[str, Dict]`**
+   - **不能返回 None**：即使没有决策也要返回空字典 `{}`
+   - **必须确保所有代码路径都返回 decisions**：不能有任何路径返回 None 或未定义
+   - **建议使用 try-except 包装主要逻辑**：确保异常时返回空字典而不是抛出异常
+5. 代码必须完整、可执行，不需要额外的实例化代码（系统会自动实例化）
+6. **直接输出Python代码，不要任何包装格式**
 
-**⚠️ 方法签名验证：**
+**⚠️ 方法签名和返回值验证：**
 生成的代码必须通过以下验证：
 - 方法名必须是 `execute_sell_decision`
 - 方法必须有且仅有 4 个参数（self + 3个参数）
 - 参数名称必须完全匹配：`self`, `portfolio`, `market_state`, `account_info`
 - 参数类型注解必须完全匹配：`Dict`, `Dict`, `Dict`
 - 返回类型注解必须是 `Dict[str, Dict]`
+- **必须初始化 `decisions = {}` 在方法开始处**
+- **必须确保所有代码路径都返回 `decisions` 字典（不能返回 None）**
+- **建议使用 try-except 包装主要逻辑，确保异常时返回空字典**
+
+**⚠️ 返回值错误示例（会导致测试失败）：**
+```python
+# ❌ 错误：返回None
+def execute_sell_decision(...):
+    if 条件:
+        return None  # 错误！
+    
+# ❌ 错误：没有初始化decisions
+def execute_sell_decision(...):
+    # 没有初始化decisions
+    if 条件:
+        decisions[symbol] = {...}  # 错误：decisions未定义
+    return decisions  # 可能返回未定义的变量
+
+# ❌ 错误：某些路径没有返回值
+def execute_sell_decision(...):
+    decisions = {}
+    if 条件:
+        return decisions
+    # 错误：如果条件不满足，没有返回值
+```
+
+**✅ 返回值正确示例：**
+```python
+# ✅ 正确：始终返回字典
+def execute_sell_decision(...):
+    decisions = {}  # 必须初始化
+    
+    try:
+        # 策略逻辑
+        for position in positions:
+            # ... 处理逻辑 ...
+            if 满足条件:
+                decisions[symbol] = {...}
+    except Exception as e:
+        # 异常时返回空字典，而不是抛出异常
+        pass
+    
+    return decisions  # 必须返回，即使为空字典
+```
 

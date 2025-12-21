@@ -96,9 +96,50 @@ class GeneratedBuyStrategy(StrategyBaseBuy):
             # 2. 判断是否满足开仓条件
             # 3. 如果满足条件，添加到 decisions 字典中
             
+            # ⚠️ 重要：技术指标计算示例（必须遵循此模式）
+            # 获取K线数据（优先使用1h，其次4h，最后15m）
+            klines_data = None
+            for tf in ['1h', '4h', '15m']:
+                tf_data = timeframes.get(tf, {})
+                klines = tf_data.get('klines', [])
+                if len(klines) >= 99:
+                    klines_data = klines
+                    break
+            
+            if not klines_data or len(klines_data) < 99:
+                continue  # 数据不足，跳过
+            
+            # 提取收盘价（必须验证有效性）
+            close_prices = []
+            for kline in klines_data:
+                close = kline.get('close', 0)
+                if isinstance(close, (int, float)) and close > 0:
+                    close_prices.append(float(close))
+            
+            if len(close_prices) < 99:
+                continue  # 有效数据不足
+            
+            # 转换为numpy数组
+            import numpy as np
+            close_array = np.array(close_prices, dtype=float)
+            
+            # 计算MA(99)（必须检查返回值）
+            import talib
+            try:
+                ma99 = talib.SMA(close_array, timeperiod=99)
+                if len(ma99) == 0:
+                    continue  # 计算结果为空
+                if np.isnan(ma99[-1]):
+                    continue  # 结果为NaN
+                ma99_value = float(ma99[-1])
+                if ma99_value <= 0:
+                    continue  # 结果无效
+            except Exception:
+                continue  # 计算失败，跳过
+            
             # 建议使用 try-except 处理异常，确保异常时继续处理下一个candidate
             try:
-                # 示例：
+                # 示例：判断开仓条件
                 # if 满足开多条件:
                 #     decisions[symbol] = {
                 #         "signal": "buy_to_enter",
@@ -128,6 +169,22 @@ class GeneratedBuyStrategy(StrategyBaseBuy):
 - 使用 `talib.RSI()` 计算 RSI 指标
 - 使用 `talib.MACD()` 计算 MACD 指标
 - 等等
+
+**⚠️ 技术指标计算注意事项（关键）：**
+1. **K线数据提取**：必须从 `market_state[symbol]['indicators']['timeframes']['1h']` 或 `'4h'`、`'15m'` 等获取
+2. **数据验证**：必须检查K线数据是否足够（至少99根），必须检查价格数据是否有效（> 0）
+3. **numpy数组处理**：
+   - 建议先使用列表收集有效的收盘价：`close_prices = [kline.get('close', 0) for kline in klines if isinstance(kline.get('close', 0), (int, float)) and kline.get('close', 0) > 0]`
+   - 然后转换为numpy数组：`close_array = np.array(close_prices, dtype=float)`
+   - 必须检查数组长度：`if len(close_array) < 99: continue`
+4. **talib.SMA使用**：
+   - 必须检查返回值：`ma99 = talib.SMA(close_array, timeperiod=99)`
+   - 必须检查数组是否为空：`if len(ma99) == 0: continue`
+   - 必须检查是否为NaN：`if np.isnan(ma99[-1]): continue`
+   - 必须检查值是否有效：`ma99_value = float(ma99[-1]); if ma99_value <= 0: continue`
+5. **异常处理**：
+   - 在循环内部使用 try-except 处理单个candidate的异常，确保一个失败不影响其他
+   - 在方法外层使用 try-except 确保即使发生异常也返回decisions字典
 
 ### 3. 技术指标数据获取方式（统一使用 market_state）
 
@@ -231,6 +288,22 @@ def execute_buy_decision(...):
 - **数据获取**：统一使用 `market_state` 获取技术指标数据
 - **返回值**：必须初始化 `decisions = {}`，必须返回字典，不能返回 None
 - **异常处理**：建议使用 try-except 包装主要逻辑，确保异常时返回空字典
+
+**⚠️ 技术指标计算注意事项（关键）：**
+1. **K线数据提取**：必须从 `market_state[symbol]['indicators']['timeframes']['1h']` 或 `'4h'`、`'15m'` 等获取
+2. **数据验证**：必须检查K线数据是否足够（至少99根），必须检查价格数据是否有效（> 0）
+3. **numpy数组处理**：
+   - 建议先使用列表收集有效的收盘价：`close_prices = [kline.get('close', 0) for kline in klines if kline.get('close', 0) > 0]`
+   - 然后转换为numpy数组：`close_array = np.array(close_prices, dtype=float)`
+   - 必须检查数组长度：`if len(close_array) < 99: continue`
+4. **talib.SMA使用**：
+   - 必须检查返回值：`ma99 = talib.SMA(close_array, timeperiod=99)`
+   - 必须检查数组是否为空：`if len(ma99) == 0: continue`
+   - 必须检查是否为NaN：`if np.isnan(ma99[-1]): continue`
+   - 必须检查值是否有效：`ma99_value = float(ma99[-1]); if ma99_value <= 0: continue`
+5. **异常处理**：
+   - 在循环内部使用 try-except 处理单个candidate的异常，确保一个失败不影响其他
+   - 在方法外层使用 try-except 确保即使发生异常也返回decisions字典
 
 ## 请根据提供的 strategy_context 生成完整的买入策略代码：
 
