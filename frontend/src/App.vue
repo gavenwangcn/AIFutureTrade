@@ -624,10 +624,10 @@
               <select 
                 id="settingsProviderInput" 
                 class="form-input" 
-                v-model.number="tempModelSettings.provider_id"
+                v-model="tempModelSettings.provider_id"
                 @change="handleProviderChangeInSettings"
               >
-                <option value="">请选择API提供方</option>
+                <option :value="null">请选择API提供方</option>
                 <option v-for="provider in providers" :key="provider.id" :value="provider.id">
                   {{ provider.name }}
                 </option>

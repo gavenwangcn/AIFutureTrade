@@ -1778,8 +1778,11 @@ let portfolioSymbolsRefreshInterval = null // 模型持仓合约列表自动刷�
     try {
       // 从后端获取模型信息
       const model = await modelApi.getById(modelId)
+      // 确保 provider_id 是字符串类型（如果是 null 或 undefined，则设为 null）
+      const providerId = model.provider_id ? String(model.provider_id) : null
+      
       tempModelSettings.value = {
-        provider_id: model.provider_id || null,
+        provider_id: providerId,
         model_name: model.model_name || '',
         leverage: model.leverage || 10,
         max_positions: model.max_positions || 3,
@@ -1791,17 +1794,25 @@ let portfolioSymbolsRefreshInterval = null // 模型持仓合约列表自动刷�
         sell_batch_execution_group_size: model.sell_batch_execution_group_size || 1
       }
       
-      // 加载当前提供方的可用模型列表
-      if (model.provider_id) {
-        handleProviderChangeInSettings()
+      // 加载当前提供方的可用模型列表（使用 nextTick 确保 DOM 更新后再执行）
+      if (providerId) {
+        // 使用 setTimeout 确保在下一个事件循环中执行，让 Vue 先完成响应式更新
+        setTimeout(() => {
+          handleProviderChangeInSettings()
+        }, 0)
+      } else {
+        availableModelsInSettings.value = []
       }
     } catch (error) {
       console.error('[TradingApp] Error loading model settings:', error)
       // 如果获取失败，使用本地缓存的数据
       const localModel = models.value.find(m => m.id === modelId)
       if (localModel) {
+        // 确保 provider_id 是字符串类型（如果是 null 或 undefined，则设为 null）
+        const providerId = localModel.provider_id ? String(localModel.provider_id) : null
+        
         tempModelSettings.value = {
-          provider_id: localModel.provider_id || null,
+          provider_id: providerId,
           model_name: localModel.model_name || '',
           leverage: localModel.leverage || 10,
           max_positions: localModel.max_positions || 3,
@@ -1813,9 +1824,13 @@ let portfolioSymbolsRefreshInterval = null // 模型持仓合约列表自动刷�
           sell_batch_execution_group_size: localModel.sell_batch_execution_group_size || 1
         }
         
-        // 加载当前提供方的可用模型列表
-        if (localModel.provider_id) {
-          handleProviderChangeInSettings()
+        // 加载当前提供方的可用模型列表（使用 setTimeout 确保在下一个事件循环中执行）
+        if (providerId) {
+          setTimeout(() => {
+            handleProviderChangeInSettings()
+          }, 0)
+        } else {
+          availableModelsInSettings.value = []
         }
       }
       alert('加载模型配置失败，使用缓存数据')
@@ -1835,7 +1850,9 @@ let portfolioSymbolsRefreshInterval = null // 模型持仓合约列表自动刷�
       return
     }
     
-    const provider = providers.value.find(p => p.id == providerId)
+    // 确保 providerId 是字符串类型，用于正确匹配
+    const providerIdStr = String(providerId)
+    const provider = providers.value.find(p => String(p.id) === providerIdStr)
     if (provider && provider.models) {
       availableModelsInSettings.value = provider.models.split(',').map(m => m.trim()).filter(m => m)
     } else {
