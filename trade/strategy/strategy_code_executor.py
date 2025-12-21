@@ -222,10 +222,8 @@ class StrategyCodeExecutor:
                 StrategyBase = StrategyBaseSell
                 base_class_name = 'StrategyBaseSell'
             else:
-                # 向后兼容：默认使用旧的 StrategyBase
-                from trade.strategy.strategy_template import StrategyBase
-                execution_context['StrategyBase'] = StrategyBase
-                base_class_name = 'StrategyBase'
+                # 未知的决策类型，抛出错误
+                raise ValueError(f"不支持的决策类型: {decision_type}，仅支持 'buy' 或 'sell'")
             
             execution_context['StrategyBase'] = StrategyBase
             execution_context['ABC'] = ABC

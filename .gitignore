@@ -21,7 +21,21 @@ __pycache__/
 *.py[cod]
 *$py.class
 *.so
+*.pyd
+*.pyc
 .Python
+
+# Python包和分发文件
+*.egg
+*.egg-info/
+.eggs/
+dist/
+build/
+*.egg-info
+
+# pip相关
+pip-log.txt
+pip-delete-this-directory.txt
 
 # Python虚拟环境
 venv/
