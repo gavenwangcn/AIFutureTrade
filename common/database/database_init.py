@@ -220,6 +220,8 @@ class DatabaseInitializer:
             `trading_fee_rate` DOUBLE DEFAULT 0.002,
             `show_system_prompt` TINYINT UNSIGNED DEFAULT 0,
             `conversation_limit` INT UNSIGNED DEFAULT 5,
+            `strategy_provider` VARCHAR(36) DEFAULT NULL,
+            `strategy_model` VARCHAR(255) DEFAULT NULL,
             `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP,
             `updated_at` DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci

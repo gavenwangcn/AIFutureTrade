@@ -25,6 +25,7 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 import java.util.stream.Collectors;
 
 /**
@@ -52,6 +53,9 @@ public class ModelServiceImpl implements ModelService {
 
     @Autowired
     private AccountValueHistoryMapper accountValueHistoryMapper;
+
+    @Autowired
+    private AccountValuesMapper accountValuesMapper;
 
     @Autowired
     private MarketService marketService;
@@ -118,6 +122,26 @@ public class ModelServiceImpl implements ModelService {
             }
         }
         modelMapper.insert(modelDO);
+        
+        // 初始化account_values表数据
+        try {
+            AccountValuesDO accountValues = new AccountValuesDO();
+            accountValues.setId(UUID.randomUUID().toString());
+            accountValues.setModelId(modelDO.getId());
+            accountValues.setAccountAlias(modelDO.getAccountAlias() != null ? modelDO.getAccountAlias() : "");
+            Double initialCapital = modelDO.getInitialCapital() != null ? modelDO.getInitialCapital() : 10000.0;
+            accountValues.setBalance(initialCapital);
+            accountValues.setAvailableBalance(initialCapital);
+            accountValues.setCrossWalletBalance(initialCapital);
+            accountValues.setCrossUnPnl(0.0);
+            accountValues.setTimestamp(LocalDateTime.now());
+            accountValuesMapper.insert(accountValues);
+            log.info("[ModelService] 初始化account_values数据成功, modelId={}, initialCapital={}", modelDO.getId(), initialCapital);
+        } catch (Exception e) {
+            log.error("[ModelService] 初始化account_values数据失败: {}", e.getMessage(), e);
+            // 不抛出异常，允许模型创建继续
+        }
+        
         return convertToDTO(modelDO);
     }
 
@@ -297,22 +321,23 @@ public class ModelServiceImpl implements ModelService {
             Double totalValue = initialCapital + realizedPnl + unrealizedPnl;
             
             Map<String, Object> portfolio = new LinkedHashMap<>();
-            portfolio.put("modelId", modelId);
-            portfolio.put("initialCapital", initialCapital);
+            portfolio.put("model_id", modelId);
+            portfolio.put("initial_capital", initialCapital);
             portfolio.put("cash", cash);
+            portfolio.put("available_cash", cash);  // 兼容字段名
             portfolio.put("positions", positions);
-            portfolio.put("positionsValue", positionsValue);
-            portfolio.put("marginUsed", marginUsed);
-            portfolio.put("totalValue", totalValue);
-            portfolio.put("realizedPnl", realizedPnl);
-            portfolio.put("unrealizedPnl", unrealizedPnl);
+            portfolio.put("positions_value", positionsValue);
+            portfolio.put("margin_used", marginUsed);
+            portfolio.put("total_value", totalValue);
+            portfolio.put("realized_pnl", realizedPnl);
+            portfolio.put("unrealized_pnl", unrealizedPnl);
             
             // 获取账户价值历史
             List<Map<String, Object>> accountValueHistory = accountValueHistoryMapper.selectHistoryByModelId(modelId, 100);
             
             Map<String, Object> result = new LinkedHashMap<>();
             result.put("portfolio", portfolio);
-            result.put("accountValueHistory", accountValueHistory);
+            result.put("account_value_history", accountValueHistory);
             result.put("autoBuyEnabled", model.getAutoBuyEnabled() != null ? model.getAutoBuyEnabled() : true);
             result.put("autoSellEnabled", model.getAutoSellEnabled() != null ? model.getAutoSellEnabled() : true);
             result.put("leverage", model.getLeverage() != null ? model.getLeverage() : 10);
@@ -854,12 +879,12 @@ public class ModelServiceImpl implements ModelService {
             
             List<ModelDO> models = modelMapper.selectAllModels();
             Map<String, Object> totalPortfolio = new LinkedHashMap<>();
-            totalPortfolio.put("totalValue", 0.0);
+            totalPortfolio.put("total_value", 0.0);
             totalPortfolio.put("cash", 0.0);
-            totalPortfolio.put("positionsValue", 0.0);
-            totalPortfolio.put("realizedPnl", 0.0);
-            totalPortfolio.put("unrealizedPnl", 0.0);
-            totalPortfolio.put("initialCapital", 0.0);
+            totalPortfolio.put("positions_value", 0.0);
+            totalPortfolio.put("realized_pnl", 0.0);
+            totalPortfolio.put("unrealized_pnl", 0.0);
+            totalPortfolio.put("initial_capital", 0.0);
             totalPortfolio.put("positions", new ArrayList<>());
             
             Map<String, Map<String, Object>> allPositions = new HashMap<>();
@@ -870,18 +895,18 @@ public class ModelServiceImpl implements ModelService {
                     @SuppressWarnings("unchecked")
                     Map<String, Object> portfolioData = (Map<String, Object>) portfolio.get("portfolio");
                     
-                    totalPortfolio.put("totalValue", ((Number) totalPortfolio.get("totalValue")).doubleValue() + 
-                            ((Number) portfolioData.getOrDefault("totalValue", 0.0)).doubleValue());
+                    totalPortfolio.put("total_value", ((Number) totalPortfolio.get("total_value")).doubleValue() + 
+                            ((Number) portfolioData.getOrDefault("total_value", 0.0)).doubleValue());
                     totalPortfolio.put("cash", ((Number) totalPortfolio.get("cash")).doubleValue() + 
                             ((Number) portfolioData.getOrDefault("cash", 0.0)).doubleValue());
-                    totalPortfolio.put("positionsValue", ((Number) totalPortfolio.get("positionsValue")).doubleValue() + 
-                            ((Number) portfolioData.getOrDefault("positionsValue", 0.0)).doubleValue());
-                    totalPortfolio.put("realizedPnl", ((Number) totalPortfolio.get("realizedPnl")).doubleValue() + 
-                            ((Number) portfolioData.getOrDefault("realizedPnl", 0.0)).doubleValue());
-                    totalPortfolio.put("unrealizedPnl", ((Number) totalPortfolio.get("unrealizedPnl")).doubleValue() + 
-                            ((Number) portfolioData.getOrDefault("unrealizedPnl", 0.0)).doubleValue());
-                    totalPortfolio.put("initialCapital", ((Number) totalPortfolio.get("initialCapital")).doubleValue() + 
-                            ((Number) portfolioData.getOrDefault("initialCapital", 0.0)).doubleValue());
+                    totalPortfolio.put("positions_value", ((Number) totalPortfolio.get("positions_value")).doubleValue() + 
+                            ((Number) portfolioData.getOrDefault("positions_value", 0.0)).doubleValue());
+                    totalPortfolio.put("realized_pnl", ((Number) totalPortfolio.get("realized_pnl")).doubleValue() + 
+                            ((Number) portfolioData.getOrDefault("realized_pnl", 0.0)).doubleValue());
+                    totalPortfolio.put("unrealized_pnl", ((Number) totalPortfolio.get("unrealized_pnl")).doubleValue() + 
+                            ((Number) portfolioData.getOrDefault("unrealized_pnl", 0.0)).doubleValue());
+                    totalPortfolio.put("initial_capital", ((Number) totalPortfolio.get("initial_capital")).doubleValue() + 
+                            ((Number) portfolioData.getOrDefault("initial_capital", 0.0)).doubleValue());
                     
                     @SuppressWarnings("unchecked")
                     List<Map<String, Object>> positions = (List<Map<String, Object>>) portfolioData.get("positions");

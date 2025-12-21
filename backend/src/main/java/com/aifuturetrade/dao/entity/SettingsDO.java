@@ -55,6 +55,18 @@ public class SettingsDO implements Serializable {
     private Integer conversationLimit;
 
     /**
+     * 策略API提供方ID（用于AI生成策略代码）
+     */
+    @TableField("strategy_provider")
+    private String strategyProvider;
+
+    /**
+     * 策略API模型名称（用于AI生成策略代码）
+     */
+    @TableField("strategy_model")
+    private String strategyModel;
+
+    /**
      * 创建时间
      */
     @TableField("created_at")

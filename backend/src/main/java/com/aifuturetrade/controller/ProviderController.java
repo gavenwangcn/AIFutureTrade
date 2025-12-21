@@ -73,15 +73,31 @@ public class ProviderController {
 
     /**
      * 从提供方API获取可用的模型列表
-     * @param apiUrl API地址
-     * @param apiKey API密钥
+     * @param request 包含apiUrl和apiKey的请求体
      * @return 可用模型列表
      */
     @PostMapping("/models")
     @ApiOperation("从提供方API获取可用的模型列表")
-    public ResponseEntity<List<String>> fetchProviderModels(@RequestBody ProviderDTO providerDTO) {
-        List<String> models = providerService.fetchProviderModels(providerDTO.getApiUrl(), providerDTO.getApiKey());
-        return new ResponseEntity<>(models, HttpStatus.OK);
+    public ResponseEntity<Map<String, Object>> fetchProviderModels(@RequestBody Map<String, String> request) {
+        String apiUrl = request.get("apiUrl");
+        String apiKey = request.get("apiKey");
+        
+        if (apiUrl == null || apiKey == null) {
+            Map<String, Object> error = new HashMap<>();
+            error.put("error", "API URL and key are required");
+            return new ResponseEntity<>(error, HttpStatus.BAD_REQUEST);
+        }
+        
+        try {
+            List<String> models = providerService.fetchProviderModels(apiUrl, apiKey);
+            Map<String, Object> response = new HashMap<>();
+            response.put("models", models);
+            return new ResponseEntity<>(response, HttpStatus.OK);
+        } catch (Exception e) {
+            Map<String, Object> error = new HashMap<>();
+            error.put("error", "Failed to fetch models: " + e.getMessage());
+            return new ResponseEntity<>(error, HttpStatus.INTERNAL_SERVER_ERROR);
+        }
     }
 
 }

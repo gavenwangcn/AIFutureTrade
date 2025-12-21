@@ -40,6 +40,10 @@
           </div>
         </div>
         <div class="action-section">
+          <button class="btn-secondary" @click="handleOpenStrategyProviderModal">
+            <i class="bi bi-gear"></i>
+            设置策略API提供方
+          </button>
           <button class="btn-primary" @click="handleAddStrategy">
             <i class="bi bi-plus-lg"></i>
             添加策略
@@ -81,6 +85,9 @@
                 </td>
                 <td>{{ formatDateTime(strategy.created_at) }}</td>
                 <td>
+                  <button class="btn-icon" @click="handleViewCode(strategy)" title="查看策略代码">
+                    <i class="bi bi-code-slash"></i>
+                  </button>
                   <button class="btn-icon" @click="handleEdit(strategy)" title="编辑">
                     <i class="bi bi-pencil"></i>
                   </button>
@@ -161,12 +168,24 @@
           </div>
           <div class="form-group">
             <label>策略代码</label>
-            <textarea 
-              v-model="strategyForm.strategy_code" 
-              class="form-textarea" 
-              rows="5"
-              placeholder="请输入策略代码"
-            ></textarea>
+            <div class="code-input-group">
+              <textarea 
+                v-model="strategyForm.strategy_code" 
+                class="form-textarea" 
+                rows="10"
+                placeholder="请输入策略代码"
+                style="font-family: 'JetBrains Mono', 'Fira Code', Consolas, monospace;"
+              ></textarea>
+              <button 
+                type="button" 
+                class="btn-secondary btn-fetch-code" 
+                @click="handleFetchStrategyCode" 
+                :disabled="fetchingCode || !strategyForm.type || !strategyForm.strategy_context"
+              >
+                <i :class="['bi', fetchingCode ? 'bi-arrow-clockwise spin' : 'bi-arrow-clockwise']"></i>
+                {{ fetchingCode ? '生成中...' : '获取代码' }}
+              </button>
+            </div>
           </div>
         </div>
         <div class="modal-footer">
@@ -177,13 +196,69 @@
         </div>
       </div>
     </div>
+
+    <!-- 设置策略API提供方弹框 -->
+    <div v-if="showStrategyProviderModal" class="modal-overlay" @click.self="closeStrategyProviderModal">
+      <div class="modal-content strategy-provider-modal">
+        <div class="modal-header">
+          <h3>设置策略API提供方</h3>
+          <button class="btn-close" @click="closeStrategyProviderModal">
+            <i class="bi bi-x-lg"></i>
+          </button>
+        </div>
+        <div class="modal-body">
+          <div class="form-group">
+            <label>选择API提供方</label>
+            <select v-model="strategyProviderForm.providerId" class="form-input" @change="handleProviderChange">
+              <option value="">请选择API提供方</option>
+              <option v-for="provider in providers" :key="provider.id" :value="provider.id">
+                {{ provider.name }}
+              </option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>模型</label>
+            <select v-model="strategyProviderForm.modelName" class="form-input">
+              <option value="">请先选择API提供方</option>
+              <option v-for="model in availableModels" :key="model" :value="model">
+                {{ model }}
+              </option>
+            </select>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn-secondary" @click="closeStrategyProviderModal">取消</button>
+          <button class="btn-primary" @click="handleSaveStrategyProvider" :disabled="savingProvider">
+            {{ savingProvider ? '保存中...' : '确认' }}
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 查看策略代码弹框 -->
+    <div v-if="showCodeModal" class="modal-overlay" @click.self="closeCodeModal">
+      <div class="modal-content code-view-modal">
+        <div class="modal-header">
+          <h3>策略代码</h3>
+          <button class="btn-close" @click="closeCodeModal">
+            <i class="bi bi-x-lg"></i>
+          </button>
+        </div>
+        <div class="modal-body">
+          <pre class="code-content">{{ viewingCode }}</pre>
+        </div>
+        <div class="modal-footer">
+          <button class="btn-secondary" @click="closeCodeModal">关闭</button>
+        </div>
+      </div>
+    </div>
   </Modal>
 </template>
 
 <script setup>
 import { ref, watch, computed } from 'vue'
 import Modal from './Modal.vue'
-import { strategyApi } from '../services/api.js'
+import { strategyApi, providerApi, settingsApi, aiProviderApi } from '../services/api.js'
 
 const props = defineProps({
   visible: {
@@ -218,6 +293,23 @@ const strategyForm = ref({
 })
 const formError = ref('')
 const saving = ref(false)
+
+// 设置策略API提供方相关
+const showStrategyProviderModal = ref(false)
+const strategyProviderForm = ref({
+  providerId: '',
+  modelName: ''
+})
+const providers = ref([])
+const availableModels = ref([])
+const savingProvider = ref(false)
+
+// 查看策略代码相关
+const showCodeModal = ref(false)
+const viewingCode = ref('')
+
+// 获取策略代码相关
+const fetchingCode = ref(false)
 
 // 计算总页数
 const totalPages = computed(() => {
@@ -383,6 +475,182 @@ const formatDateTime = (dateTime) => {
   if (!dateTime) return '-'
   const date = new Date(dateTime)
   return date.toLocaleString('zh-CN')
+}
+
+// 打开设置策略API提供方弹框
+const handleOpenStrategyProviderModal = async () => {
+  try {
+    // 加载提供方列表
+    const providersData = await providerApi.getAll()
+    providers.value = Array.isArray(providersData) ? providersData : []
+    
+    // 加载当前设置
+    const settings = await settingsApi.get()
+    if (settings.strategy_provider) {
+      strategyProviderForm.value.providerId = settings.strategy_provider
+      await handleProviderChange()
+      // 如果已设置模型，选中该模型
+      if (settings.strategy_model) {
+        strategyProviderForm.value.modelName = settings.strategy_model
+      }
+    }
+    
+    showStrategyProviderModal.value = true
+  } catch (err) {
+    console.error('[StrategyManagementModal] Error loading providers:', err)
+    alert('加载API提供方列表失败')
+  }
+}
+
+// 关闭设置策略API提供方弹框
+const closeStrategyProviderModal = () => {
+  showStrategyProviderModal.value = false
+  strategyProviderForm.value = {
+    providerId: '',
+    modelName: ''
+  }
+  availableModels.value = []
+}
+
+// 处理提供方变化
+const handleProviderChange = async () => {
+  const provider = providers.value.find(p => p.id == strategyProviderForm.value.providerId)
+  if (provider && provider.models) {
+    availableModels.value = provider.models.split(',').map(m => m.trim()).filter(m => m)
+  } else {
+    availableModels.value = []
+  }
+  strategyProviderForm.value.modelName = ''
+}
+
+// 保存策略API提供方设置
+const handleSaveStrategyProvider = async () => {
+  if (!strategyProviderForm.value.providerId) {
+    alert('请选择API提供方')
+    return
+  }
+  
+  if (!strategyProviderForm.value.modelName) {
+    alert('请选择模型')
+    return
+  }
+  
+  savingProvider.value = true
+  try {
+    await settingsApi.update({
+      strategy_provider: strategyProviderForm.value.providerId,
+      strategy_model: strategyProviderForm.value.modelName
+    })
+    alert('设置成功')
+    closeStrategyProviderModal()
+  } catch (err) {
+    console.error('[StrategyManagementModal] Error saving strategy provider:', err)
+    alert('保存失败: ' + (err.message || '未知错误'))
+  } finally {
+    savingProvider.value = false
+  }
+}
+
+// 获取策略代码
+const handleFetchStrategyCode = async () => {
+  if (!strategyForm.value.type) {
+    alert('请先选择策略类型')
+    return
+  }
+  
+  if (!strategyForm.value.strategy_context || !strategyForm.value.strategy_context.trim()) {
+    alert('请先输入策略内容')
+    return
+  }
+  
+  // 获取策略提供方设置
+  let providerId, modelName
+  try {
+    const settings = await settingsApi.get()
+    providerId = settings.strategy_provider
+    modelName = settings.strategy_model
+    
+    if (!providerId) {
+      alert('请先设置策略API提供方')
+      handleOpenStrategyProviderModal()
+      return
+    }
+    
+    if (!modelName) {
+      // 如果没有设置模型，从提供方获取第一个模型
+      const providersList = await providerApi.getAll()
+      const provider = Array.isArray(providersList) ? providersList.find(p => p.id === providerId) : null
+      
+      if (!provider) {
+        alert('API提供方不存在')
+        return
+      }
+      
+      // 获取模型列表（优先从提供方的models字段获取，如果没有则调用API获取）
+      let models = []
+      if (provider.models) {
+        models = provider.models.split(',').map(m => m.trim()).filter(m => m)
+      }
+      
+      if (models.length === 0) {
+        // 尝试从API获取模型列表
+        try {
+          const modelsResult = await aiProviderApi.fetchModels(providerId)
+          if (modelsResult.models && modelsResult.models.length > 0) {
+            models = modelsResult.models
+          }
+        } catch (err) {
+          console.warn('Failed to fetch models from API:', err)
+        }
+      }
+      
+      if (models.length === 0) {
+        alert('该API提供方没有可用模型，请先配置模型')
+        return
+      }
+      
+      // 使用第一个模型
+      modelName = models[0]
+    }
+  } catch (err) {
+    console.error('[StrategyManagementModal] Error loading settings:', err)
+    alert('加载设置失败')
+    return
+  }
+  
+  fetchingCode.value = true
+  try {
+    const result = await aiProviderApi.generateStrategyCode({
+      providerId: providerId,
+      modelName: modelName,
+      strategyContext: strategyForm.value.strategy_context,
+      strategyType: strategyForm.value.type
+    })
+    
+    if (result.strategyCode) {
+      strategyForm.value.strategy_code = result.strategyCode
+      alert('策略代码生成成功')
+    } else {
+      alert('生成失败：未返回策略代码')
+    }
+  } catch (err) {
+    console.error('[StrategyManagementModal] Error generating strategy code:', err)
+    alert('生成策略代码失败: ' + (err.message || '未知错误'))
+  } finally {
+    fetchingCode.value = false
+  }
+}
+
+// 查看策略代码
+const handleViewCode = (strategy) => {
+  viewingCode.value = strategy.strategy_code || '暂无策略代码'
+  showCodeModal.value = true
+}
+
+// 关闭查看代码弹框
+const closeCodeModal = () => {
+  showCodeModal.value = false
+  viewingCode.value = ''
 }
 
 // 监听 visible 变化，加载数据
@@ -573,6 +841,59 @@ watch(() => props.visible, (newVal) => {
   align-items: center;
   justify-content: center;
   padding: 40px;
+}
+
+.code-input-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.btn-fetch-code {
+  align-self: flex-start;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.spin {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.strategy-provider-modal,
+.code-view-modal {
+  background: var(--bg-1);
+  border-radius: var(--radius);
+  width: 90%;
+  max-width: 500px;
+  max-height: 90vh;
+  overflow: auto;
+}
+
+.code-view-modal {
+  max-width: 800px;
+}
+
+.code-content {
+  background: var(--bg-2);
+  padding: 16px;
+  border-radius: var(--radius);
+  overflow-x: auto;
+  max-height: 60vh;
+  font-family: 'JetBrains Mono', 'Fira Code', Consolas, monospace;
+  font-size: 13px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-wrap: break-word;
 }
 </style>
 

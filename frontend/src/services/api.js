@@ -348,3 +348,18 @@ export const modelStrategyApi = {
   delete: (id) => apiDelete(`/api/model-strategies/${id}`)
 }
 
+/**
+ * AI提供方服务相关 API
+ */
+export const aiProviderApi = {
+  /**
+   * 从提供方获取模型列表
+   */
+  fetchModels: (providerId) => apiPost('/api/ai/models', { providerId }),
+
+  /**
+   * 生成策略代码
+   */
+  generateStrategyCode: (data) => apiPost('/api/ai/generate-strategy-code', data)
+}
+

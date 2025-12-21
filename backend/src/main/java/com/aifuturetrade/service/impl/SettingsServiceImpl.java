@@ -36,6 +36,8 @@ public class SettingsServiceImpl implements SettingsService {
         result.put("trading_fee_rate", settings.getTradingFeeRate());
         result.put("show_system_prompt", settings.getShowSystemPrompt());
         result.put("conversation_limit", settings.getConversationLimit());
+        result.put("strategy_provider", settings.getStrategyProvider());
+        result.put("strategy_model", settings.getStrategyModel());
         result.put("trades_display_count", 5); // 从配置读取
         result.put("trades_query_limit", 10); // 从配置读取
         return result;
@@ -66,6 +68,14 @@ public class SettingsServiceImpl implements SettingsService {
         }
         if (settingsData.containsKey("conversation_limit")) {
             settings.setConversationLimit((Integer) settingsData.get("conversation_limit"));
+        }
+        if (settingsData.containsKey("strategy_provider")) {
+            Object value = settingsData.get("strategy_provider");
+            settings.setStrategyProvider(value != null ? String.valueOf(value) : null);
+        }
+        if (settingsData.containsKey("strategy_model")) {
+            Object value = settingsData.get("strategy_model");
+            settings.setStrategyModel(value != null ? String.valueOf(value) : null);
         }
         
         settings.setUpdatedAt(LocalDateTime.now());

@@ -86,9 +86,57 @@ public class ProviderServiceImpl implements ProviderService {
 
     @Override
     public List<String> fetchProviderModels(String apiUrl, String apiKey) {
-        // TODO: 实现从API获取可用模型列表的逻辑
-        // 示例代码，实际需要调用具体的API
-        return List.of("gpt-3.5-turbo", "gpt-4", "gpt-4-turbo");
+        try {
+            java.net.http.HttpClient client = java.net.http.HttpClient.newBuilder()
+                    .connectTimeout(java.time.Duration.ofSeconds(10))
+                    .build();
+            
+            String url = apiUrl.endsWith("/") ? apiUrl + "models" : apiUrl + "/models";
+            if (!url.contains("/v1")) {
+                url = url.replace("/models", "/v1/models");
+            }
+            
+            java.net.http.HttpRequest request = java.net.http.HttpRequest.newBuilder()
+                    .uri(java.net.URI.create(url))
+                    .header("Authorization", "Bearer " + apiKey)
+                    .header("Content-Type", "application/json")
+                    .GET()
+                    .timeout(java.time.Duration.ofSeconds(10))
+                    .build();
+            
+            java.net.http.HttpResponse<String> response = client.send(request, 
+                    java.net.http.HttpResponse.BodyHandlers.ofString());
+            
+            if (response.statusCode() == 200) {
+                com.fasterxml.jackson.databind.ObjectMapper mapper = new com.fasterxml.jackson.databind.ObjectMapper();
+                com.fasterxml.jackson.databind.JsonNode jsonNode = mapper.readTree(response.body());
+                com.fasterxml.jackson.databind.JsonNode dataNode = jsonNode.get("data");
+                
+                if (dataNode != null && dataNode.isArray()) {
+                    java.util.List<String> models = new java.util.ArrayList<>();
+                    for (com.fasterxml.jackson.databind.JsonNode modelNode : dataNode) {
+                        String modelId = modelNode.get("id").asText();
+                        // 过滤GPT模型或所有模型（根据提供方类型）
+                        if (apiUrl.toLowerCase().contains("openai") || 
+                            apiUrl.toLowerCase().contains("deepseek")) {
+                            if (modelId.toLowerCase().contains("gpt") || 
+                                modelId.toLowerCase().contains("deepseek")) {
+                                models.add(modelId);
+                            }
+                        } else {
+                            models.add(modelId);
+                        }
+                    }
+                    return models;
+                }
+            }
+            
+            // 如果API调用失败，返回默认模型列表
+            return List.of("gpt-3.5-turbo", "gpt-4", "gpt-4-turbo");
+        } catch (Exception e) {
+            // 如果API调用失败，返回默认模型列表
+            return List.of("gpt-3.5-turbo", "gpt-4", "gpt-4-turbo");
+        }
     }
 
     /**
