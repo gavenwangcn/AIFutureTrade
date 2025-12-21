@@ -48,7 +48,8 @@
     </appender>
 
     <!-- 日志级别 -->
-    <logger name="com.aifuturetrade" level="info" additivity="true">
+    <!-- 设置 additivity="false" 防止日志重复输出到root logger -->
+    <logger name="com.aifuturetrade" level="info" additivity="false">
         <appender-ref ref="CONSOLE" />
         <appender-ref ref="FILE" />
     </logger>

@@ -311,7 +311,7 @@ class StrategyCodeExecutor:
                 'decisions_count': len(decisions)
             })
             
-            logger.debug(f"[StrategyCodeExecutor] 策略 {strategy_name} 执行成功，返回决策数: {len(decisions)}")
+            logger.info(f"[StrategyCodeExecutor] 策略 {strategy_name} 执行成功，返回决策数: {len(decisions)}")
             return result
         
         except Exception as e:
