@@ -352,7 +352,7 @@ class StrategyCodeTesterBuy:
             for method_name in required_methods:
                 if method_name in method_names:
                     method = next(m for m in methods if m.name == method_name)
-                    # execute_buy_decision 应该有 5 个参数（self + 4个：candidates, portfolio, account_info, market_state, symbol_source）
+                    # execute_buy_decision 应该有 5 个参数（self + 4个：candidates, portfolio, account_info, market_state）
                     if method_name == 'execute_buy_decision':
                         expected_args = 5
                         actual_args = len(method.args.args)
@@ -426,7 +426,7 @@ class StrategyCodeTesterBuy:
                 portfolio=mock_portfolio,
                 account_info=mock_account_info,
                 market_state=mock_market_state,
-                symbol_source='leaderboard',
+                symbol_source=None,  # symbol_source已废弃，不再传递
                 decision_type='buy'
             )
             

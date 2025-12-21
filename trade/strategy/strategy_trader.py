@@ -31,7 +31,7 @@ class StrategyTrader(Trader):
     
     使用示例：
         trader = StrategyTrader(db=db, model_id=1)
-        result = trader.make_buy_decision(candidates, portfolio, account_info)
+        result = trader.make_buy_decision(candidates, portfolio, account_info, market_state)
     """
     
     def __init__(self, db, model_id: int):
@@ -56,7 +56,6 @@ class StrategyTrader(Trader):
         portfolio: Dict,
         account_info: Dict,
         market_state: Dict,
-        symbol_source: str = 'leaderboard',
         model_id: Optional[int] = None
     ) -> Dict:
         """
@@ -70,7 +69,6 @@ class StrategyTrader(Trader):
             portfolio: 持仓组合信息
             account_info: 账户信息
             market_state: 市场状态字典，key为交易对符号，value包含价格、技术指标等
-            symbol_source: 数据源类型
             model_id: 模型ID（可选，优先使用实例变量中的model_id）
         
         Returns:
@@ -126,7 +124,7 @@ class StrategyTrader(Trader):
                     portfolio=portfolio,
                     account_info=account_info,
                     market_state=market_state,  # 统一使用market_state
-                    symbol_source=symbol_source,
+                    symbol_source=None,  # symbol_source已废弃，不再传递
                     decision_type='buy'
                 )
                 

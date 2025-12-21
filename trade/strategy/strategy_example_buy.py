@@ -34,8 +34,7 @@ class ExampleBuyStrategy(StrategyBaseBuy):
         candidates: List[Dict],
         portfolio: Dict,
         account_info: Dict,
-        market_state: Dict,
-        symbol_source: str
+        market_state: Dict
     ) -> Dict[str, Dict]:
         """
         执行买入决策

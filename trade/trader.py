@@ -23,7 +23,7 @@ class Trader(ABC):
     
     使用示例：
         trader = AITrader(...)  # 或 StrategyTrader(...)
-        result = trader.make_buy_decision(candidates, portfolio, account_info)
+        result = trader.make_buy_decision(candidates, portfolio, account_info, market_state)
     """
     
     @abstractmethod
@@ -33,7 +33,6 @@ class Trader(ABC):
         portfolio: Dict,
         account_info: Dict,
         market_state: Dict,
-        symbol_source: str = 'leaderboard',
         model_id: Optional[int] = None
     ) -> Dict:
         """
@@ -44,7 +43,6 @@ class Trader(ABC):
             portfolio: 持仓组合信息
             account_info: 账户信息
             market_state: 市场状态字典，key为交易对符号，value包含价格、技术指标等
-            symbol_source: 数据源类型
             model_id: 模型ID
         
         Returns:

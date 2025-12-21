@@ -23,7 +23,7 @@ class StrategyBaseBuy(ABC):
     使用示例：
         class MyBuyStrategy(StrategyBaseBuy):
             def execute_buy_decision(self, candidates, portfolio, account_info, 
-                                    market_state, symbol_source):
+                                    market_state):
                 # 实现买入决策逻辑
                 return {"SYMBOL": {...}}
     """
@@ -34,8 +34,7 @@ class StrategyBaseBuy(ABC):
         candidates: List[Dict],
         portfolio: Dict,
         account_info: Dict,
-        market_state: Dict,
-        symbol_source: str
+        market_state: Dict
     ) -> Dict[str, Dict]:
         """
         执行买入决策（抽象方法）
@@ -64,7 +63,6 @@ class StrategyBaseBuy(ABC):
                 - indicators: 技术指标数据
                     - timeframes: 多时间周期的技术指标
                     格式：{"1h": {"klines": [...]}, "4h": {...}, ...}
-            symbol_source: 数据源类型（'leaderboard' 或 'future'）
         
         Returns:
             Dict[str, Dict]: 决策字典，格式为：

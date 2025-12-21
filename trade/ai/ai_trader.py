@@ -58,7 +58,7 @@ class AITrader(Trader):
             api_url='https://api.openai.com',
             model_name='gpt-4'
         )
-        result = trader.make_buy_decision(candidates, portfolio, account_info)
+        result = trader.make_buy_decision(candidates, portfolio, account_info, market_state)
     """
     
     # ============ 初始化方法 ============
@@ -100,7 +100,6 @@ class AITrader(Trader):
         portfolio: Dict,
         account_info: Dict,
         market_state: Dict,
-        symbol_source: str = 'leaderboard',
         model_id: Optional[int] = None
     ) -> Dict:
         """
@@ -125,11 +124,9 @@ class AITrader(Trader):
                 - total_return: 累计收益率
             market_state: 市场状态字典，key为交易对符号，value包含：
                 - price: 当前价格
+                - source: 数据源类型（'leaderboard' 或 'future'），用于prompt构建
                 - indicators: 技术指标数据
                     - timeframes: 多时间周期的技术指标
-            symbol_source: 数据源类型，影响prompt构建：
-                - 'leaderboard'（默认）：候选来自涨跌榜，说明"来自实时涨跌幅榜"
-                - 'future'：候选来自合约配置信息表，说明"来自合约配置信息表"
             model_id: 模型ID（用于从数据库获取buy_prompt）
         
         Returns:
@@ -205,6 +202,14 @@ class AITrader(Trader):
             'occupied': len(positions),
             'available_cash': portfolio.get('cash', 0)
         }
+        
+        # 从market_state中获取symbol_source信息（用于prompt构建）
+        # 优先从第一个candidate的market_state中获取source，如果没有则默认为'leaderboard'
+        symbol_source = 'leaderboard'  # 默认值
+        if candidates and market_state:
+            first_symbol = candidates[0].get('symbol', '').upper()
+            if first_symbol and first_symbol in market_state:
+                symbol_source = market_state[first_symbol].get('source', 'leaderboard')
         
         # 构建prompt
         prompt = self._build_buy_prompt(candidates, portfolio, account_info, constraints, constraints_text, market_snapshot, symbol_source)

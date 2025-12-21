@@ -1292,7 +1292,6 @@ class TradingEngine:
                             constraints,
                             constraints_text,
                             batch_market_state,
-                            symbol_source,
                             batch_num,
                             len(batches)
                         )
@@ -1391,7 +1390,6 @@ class TradingEngine:
                         constraints,
                         constraints_text,
                         batch_market_state,
-                        symbol_source,
                         batch_num,
                         len(batches)
                     )
@@ -1461,7 +1459,6 @@ class TradingEngine:
         constraints: Dict,
         constraints_text: str,
         market_state: Dict,
-        symbol_source: str,
         batch_num: int,
         total_batches: int
     ) -> Dict:
@@ -1553,8 +1550,7 @@ class TradingEngine:
                 valid_candidates,  # 只传递有效的candidates
                 portfolio,
                 account_info,
-                market_state,  # 统一使用market_state
-                symbol_source=symbol_source,
+                market_state,  # 统一使用market_state，其中已包含source信息
                 model_id=self.model_id
             )
             ai_call_duration = (datetime.now(timezone(timedelta(hours=8))) - ai_call_start).total_seconds()

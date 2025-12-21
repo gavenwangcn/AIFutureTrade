@@ -26,8 +26,7 @@ class GeneratedBuyStrategy(StrategyBaseBuy):
         candidates: List[Dict],
         portfolio: Dict,
         account_info: Dict,
-        market_state: Dict,
-        symbol_source: str
+        market_state: Dict
     ) -> Dict[str, Dict]:
         # 实现买入决策逻辑
         decisions = {{}}

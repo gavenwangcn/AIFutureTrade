@@ -5,10 +5,37 @@
 
 ## 重要要求：
 
-### 1. 必须继承 StrategyBaseBuy 类
+### 1. 必须继承 StrategyBaseBuy 类并严格实现方法签名
 
-生成的代码必须是一个继承自 `StrategyBaseBuy` 的类，并实现其抽象方法：
+**⚠️ 关键要求：方法签名必须严格匹配，不能多一个参数，也不能少一个参数！**
 
+生成的代码必须是一个继承自 `StrategyBaseBuy` 的类，并实现其抽象方法。
+
+**方法签名要求（必须严格遵循）：**
+```python
+def execute_buy_decision(
+    self,
+    candidates: List[Dict],
+    portfolio: Dict,
+    account_info: Dict,
+    market_state: Dict
+) -> Dict[str, Dict]:
+```
+
+**参数说明（共 5 个参数，包括 self）：**
+1. `self` - 实例自身（必须）
+2. `candidates: List[Dict]` - 候选交易对列表（必须）
+3. `portfolio: Dict` - 持仓组合信息（必须）
+4. `account_info: Dict` - 账户信息（必须）
+5. `market_state: Dict` - 市场状态字典（必须）
+
+**⚠️ 重要：**
+- 方法签名必须完全按照上述格式，不能添加任何额外参数
+- 不能删除任何参数
+- 参数顺序必须完全一致
+- 参数类型注解必须完全一致
+
+**完整示例代码结构：**
 ```python
 from trade.strategy.strategy_template_buy import StrategyBaseBuy
 from typing import Dict, List
@@ -19,8 +46,7 @@ class GeneratedBuyStrategy(StrategyBaseBuy):
         candidates: List[Dict],
         portfolio: Dict,
         account_info: Dict,
-        market_state: Dict,
-        symbol_source: str
+        market_state: Dict
     ) -> Dict[str, Dict]:
         # 实现买入决策逻辑
         decisions = {}
@@ -175,7 +201,28 @@ class GeneratedBuyStrategy(StrategyBaseBuy):
 生成的代码必须：
 1. 导入 StrategyBaseBuy：`from trade.strategy.strategy_template_buy import StrategyBaseBuy`
 2. 定义类继承 StrategyBaseBuy：`class GeneratedBuyStrategy(StrategyBaseBuy):`
-3. 实现 `execute_buy_decision()` 方法
+3. **严格实现 `execute_buy_decision()` 方法，方法签名必须完全匹配：**
+   ```python
+   def execute_buy_decision(
+       self,
+       candidates: List[Dict],
+       portfolio: Dict,
+       account_info: Dict,
+       market_state: Dict
+   ) -> Dict[str, Dict]:
+   ```
+   - **必须包含且仅包含这 5 个参数（包括 self）**
+   - **参数顺序必须完全一致：`self`, `candidates`, `portfolio`, `account_info`, `market_state`**
+   - **不能添加任何额外参数**
+   - **不能删除任何参数**
 4. 代码必须完整、可执行，不需要额外的实例化代码（系统会自动实例化）
 5. **直接输出Python代码，不要任何包装格式**
+
+**⚠️ 方法签名验证：**
+生成的代码必须通过以下验证：
+- 方法名必须是 `execute_buy_decision`
+- 方法必须有且仅有 5 个参数（self + 4个参数）
+- 参数名称必须完全匹配：`self`, `candidates`, `portfolio`, `account_info`, `market_state`
+- 参数类型注解必须完全匹配：`List[Dict]`, `Dict`, `Dict`, `Dict`
+- 返回类型注解必须是 `Dict[str, Dict]`
 

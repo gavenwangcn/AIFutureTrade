@@ -187,7 +187,7 @@ class StrategyCodeExecutor:
             portfolio: 持仓组合信息
             account_info: 账户信息
             market_state: 市场状态字典，key为交易对符号，value包含价格、技术指标等
-            symbol_source: 数据源类型（买入决策需要）
+            symbol_source: 数据源类型（已废弃，不再使用）
             decision_type: 决策类型，'buy' 或 'sell'
         
         Returns:
@@ -276,8 +276,7 @@ class StrategyCodeExecutor:
                     candidates=candidates or [],
                     portfolio=portfolio or {},
                     account_info=account_info or {},
-                    market_state=market_state or {},
-                    symbol_source=symbol_source or 'leaderboard'
+                    market_state=market_state or {}
                 )
             elif decision_type == 'sell':
                 # 调用卖出决策方法
