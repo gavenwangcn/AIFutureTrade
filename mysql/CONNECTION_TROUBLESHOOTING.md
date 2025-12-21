@@ -1,169 +1,281 @@
-# MySQL 连接问题排查指南
+# MySQL 连接数过多问题排查和解决方案
 
-## 问题：无法通过 localhost 或 127.0.0.1 连接
+## 问题症状
 
-### 常见错误
 ```
-[MySQL] Failed to create connection: (2003, "Can't connect to MySQL server on 'localhost' ([Errno 111] Connection refused)")
+java.sql.SQLNonTransientConnectionException: Too many connections
+errorCode 1040, state 08004
 ```
+
+## 原因分析
+
+1. **应用连接池配置过大**：Druid 连接池的 `max-active` 设置过高
+2. **连接泄漏**：应用没有正确关闭数据库连接
+3. **MySQL 最大连接数限制**：MySQL 的 `max_connections` 设置过低
+4. **多个应用实例**：多个应用实例共享同一个数据库，连接数累加
+
+## 快速诊断
+
+### 1. 查看当前连接数
+
+```sql
+-- 查看当前连接数
+SHOW STATUS LIKE 'Threads_connected';
+
+-- 查看最大连接数
+SHOW VARIABLES LIKE 'max_connections';
+
+-- 查看连接数使用率
+SELECT 
+    VARIABLE_VALUE as current_connections,
+    (SELECT VARIABLE_VALUE FROM information_schema.GLOBAL_VARIABLES WHERE VARIABLE_NAME = 'max_connections') as max_connections,
+    ROUND(VARIABLE_VALUE / (SELECT VARIABLE_VALUE FROM information_schema.GLOBAL_VARIABLES WHERE VARIABLE_NAME = 'max_connections') * 100, 2) as usage_percent
+FROM information_schema.GLOBAL_STATUS 
+WHERE VARIABLE_NAME = 'Threads_connected';
+```
+
+### 2. 查看连接详情
+
+```sql
+-- 查看所有连接的详细信息
+SHOW PROCESSLIST;
+
+-- 查看按用户分组的连接数
+SELECT user, COUNT(*) as connection_count 
+FROM information_schema.PROCESSLIST 
+GROUP BY user;
+
+-- 查看长时间运行的连接
+SELECT 
+    id, 
+    user, 
+    host, 
+    db, 
+    command, 
+    time, 
+    state, 
+    LEFT(info, 100) as query
+FROM information_schema.PROCESSLIST 
+WHERE time > 60  -- 运行时间超过60秒
+ORDER BY time DESC;
+```
+
+### 3. 查看连接池状态（Druid）
+
+访问 Druid 监控页面（如果已配置）：
+- URL: `http://your-server:port/druid/index.html`
+- 查看 "数据源" -> "连接池" 部分
 
 ## 解决方案
 
-### 1. 检查 MySQL 服务状态
+### 方案1：优化应用连接池配置（推荐）
 
-```bash
-# 检查容器是否运行
-docker ps | grep mysql
+已优化 `application-prod.yml` 配置：
 
-# 检查容器日志
-docker-compose -f docker-compose-mysql.yml logs -f mysql
-
-# 检查端口是否监听
-netstat -tlnp | grep 32123
-# 或
-ss -tlnp | grep 32123
+```yaml
+druid:
+  initial-size: 5          # 降低初始连接数
+  min-idle: 5              # 降低最小空闲连接数
+  max-active: 20           # 降低最大连接数（从50降到20）
+  max-wait: 10000          # 降低等待时间，快速失败
+  remove-abandoned: true   # 启用连接泄漏检测
+  remove-abandoned-timeout-millis: 300000  # 5分钟未使用自动回收
+  log-abandoned: true      # 记录泄漏连接堆栈
 ```
 
-### 2. 验证 MySQL 配置
+**修改后需要重启应用**。
 
-确保以下配置正确：
+### 方案2：增加 MySQL 最大连接数
 
-#### docker-compose-mysql.yml
-- 端口映射：`"0.0.0.0:32123:3306"`
-- command 参数：`--bind-address=0.0.0.0`
+如果确实需要更多连接，可以增加 MySQL 的 `max_connections`：
 
-#### mysql/my.cnf
-- `bind-address=0.0.0.0`（在 [mysqld] 部分）
+#### 临时修改（立即生效，重启后失效）
 
-### 3. 测试连接
-
-#### 从容器内部测试
-```bash
-# 进入容器
-docker exec -it aifuturetrade-mysql bash
-
-# 测试 localhost 连接
-mysql -h localhost -u aifuturetrade -paifuturetrade123 -e "SELECT 1"
-
-# 测试 127.0.0.1 连接
-mysql -h 127.0.0.1 -u aifuturetrade -paifuturetrade123 -e "SELECT 1"
+```sql
+SET GLOBAL max_connections = 200;
 ```
 
-#### 从主机测试
-```bash
-# 测试 localhost 连接
-mysql -h localhost -P 32123 -u aifuturetrade -paifuturetrade123 -e "SELECT 1"
+#### 永久修改（需要重启 MySQL）
 
-# 测试 127.0.0.1 连接
-mysql -h 127.0.0.1 -P 32123 -u aifuturetrade -paifuturetrade123 -e "SELECT 1"
+编辑 `mysql/my.cnf`：
+
+```ini
+[mysqld]
+max_connections = 200  # 根据实际需求调整
 ```
 
-### 4. 检查用户权限
+然后重启 MySQL：
 
 ```bash
-# 进入 MySQL 容器
-docker exec -it aifuturetrade-mysql mysql -u root -paifuturetrade_root123
-
-# 查看用户列表
-SELECT user, host, plugin FROM mysql.user WHERE user IN ('root', 'aifuturetrade');
-
-# 应该看到以下用户：
-# - root@%
-# - root@localhost
-# - aifuturetrade@%
-# - aifuturetrade@localhost
-# - aifuturetrade@127.0.0.1（如果已创建）
+docker restart aifuturetrade-mysql
 ```
 
-### 5. 重新初始化（如果需要）
+**注意**：增加 `max_connections` 会增加 MySQL 的内存使用，每个连接大约占用 256KB-1MB 内存。
 
-如果配置有问题，可以重新初始化：
+### 方案3：检查并修复连接泄漏
+
+#### 检查连接泄漏
+
+1. **查看 Druid 监控**：访问 `/druid/index.html`，查看 "连接泄漏检测" 部分
+2. **查看应用日志**：查找包含 "abandoned connection" 的日志
+3. **代码审查**：确保所有数据库操作都正确关闭连接
+
+#### 修复连接泄漏
+
+确保使用 try-with-resources 或 finally 块关闭连接：
+
+```java
+// ✅ 正确：使用 try-with-resources
+try (Connection conn = dataSource.getConnection();
+     PreparedStatement stmt = conn.prepareStatement(sql)) {
+    // 执行操作
+}
+
+// ✅ 正确：使用 finally 块
+Connection conn = null;
+try {
+    conn = dataSource.getConnection();
+    // 执行操作
+} finally {
+    if (conn != null) {
+        conn.close();
+    }
+}
+
+// ❌ 错误：忘记关闭连接
+Connection conn = dataSource.getConnection();
+// 执行操作
+// 没有关闭连接！
+```
+
+### 方案4：检查是否有多个应用实例
+
+如果部署了多个应用实例，每个实例的连接数会累加：
 
 ```bash
-# 停止并删除容器和数据卷
-docker-compose -f docker-compose-mysql.yml down -v
-
-# 重新启动
-docker-compose -f docker-compose-mysql.yml up -d
-
-# 查看初始化日志
-docker-compose -f docker-compose-mysql.yml logs -f mysql
+# 查看连接到数据库的客户端IP
+mysql -u root -p -e "
+SELECT 
+    SUBSTRING_INDEX(host, ':', 1) as client_ip,
+    COUNT(*) as connection_count
+FROM information_schema.PROCESSLIST
+WHERE user != 'system user'
+GROUP BY client_ip;
+"
 ```
 
-### 6. 检查防火墙
+如果发现多个应用实例，需要：
+1. 降低每个实例的连接池大小
+2. 或者增加 MySQL 的 `max_connections`
 
-确保防火墙允许 32123 端口：
+## 预防措施
+
+### 1. 监控连接数使用情况
+
+创建监控脚本 `scripts/monitor-connections.sh`：
 
 ```bash
-# 检查防火墙状态（Ubuntu/Debian）
-sudo ufw status
-
-# 如果防火墙开启，允许端口
-sudo ufw allow 32123/tcp
-
-# 检查防火墙状态（CentOS/RHEL）
-sudo firewall-cmd --list-ports
-
-# 如果防火墙开启，允许端口
-sudo firewall-cmd --add-port=32123/tcp --permanent
-sudo firewall-cmd --reload
+#!/bin/bash
+mysql -u root -p -e "
+SELECT 
+    VARIABLE_VALUE as current_connections,
+    (SELECT VARIABLE_VALUE FROM information_schema.GLOBAL_VARIABLES WHERE VARIABLE_NAME = 'max_connections') as max_connections,
+    ROUND(VARIABLE_VALUE / (SELECT VARIABLE_VALUE FROM information_schema.GLOBAL_VARIABLES WHERE VARIABLE_NAME = 'max_connections') * 100, 2) as usage_percent
+FROM information_schema.GLOBAL_STATUS 
+WHERE VARIABLE_NAME = 'Threads_connected';
+"
 ```
 
-### 7. 检查网络配置
+### 2. 设置告警
 
-如果使用 Docker 网络，确保服务在同一网络中：
+当连接数使用率超过 80% 时发送告警。
+
+### 3. 定期检查连接泄漏
+
+定期查看 Druid 监控页面，检查是否有连接泄漏。
+
+### 4. 代码规范
+
+- 所有数据库操作必须使用 try-with-resources
+- 禁止在类成员变量中持有 Connection
+- 使用连接池，不要直接创建连接
+
+## 紧急处理
+
+如果连接数已经达到上限，无法创建新连接：
+
+### 1. 临时增加最大连接数
+
+```sql
+SET GLOBAL max_connections = 500;
+```
+
+### 2. 杀死长时间空闲的连接
+
+```sql
+-- 查看空闲连接
+SELECT id, user, host, db, command, time, state 
+FROM information_schema.PROCESSLIST 
+WHERE command = 'Sleep' AND time > 300  -- 空闲超过5分钟
+ORDER BY time DESC;
+
+-- 杀死指定连接（谨慎操作）
+KILL <connection_id>;
+```
+
+### 3. 重启应用
+
+如果连接泄漏严重，重启应用可以释放所有连接：
 
 ```bash
-# 查看网络配置
-docker network inspect aifuturetrade-network
-
-# 确保 MySQL 容器在正确的网络中
-docker inspect aifuturetrade-mysql | grep NetworkMode
+docker restart aifuturetrade-backend
 ```
 
-## 连接方式说明
+## 配置建议
 
-### 从主机连接（推荐）
-- **localhost:32123** - 使用 localhost
-- **127.0.0.1:32123** - 使用 IP 地址
+### 小型应用（单实例）
 
-### 从 Docker 容器连接
-- **mysql:3306** - 使用 Docker 服务名（在同一网络中）
-- **localhost:3306** - 从容器内部连接
-- **127.0.0.1:3306** - 从容器内部连接
+```yaml
+druid:
+  initial-size: 3
+  min-idle: 3
+  max-active: 10
+```
 
-### 从外部网络连接
-- **<服务器IP>:32123** - 使用服务器公网IP
+### 中型应用（单实例）
 
-## 配置验证清单
+```yaml
+druid:
+  initial-size: 5
+  min-idle: 5
+  max-active: 20
+```
 
-- [ ] MySQL 容器正在运行
-- [ ] 端口 32123 正在监听
-- [ ] my.cnf 中设置了 `bind-address=0.0.0.0`
-- [ ] docker-compose-mysql.yml 中设置了 `--bind-address=0.0.0.0`
-- [ ] 用户权限正确（支持 %、localhost、127.0.0.1）
-- [ ] 防火墙允许 32123 端口
-- [ ] 可以从容器内部连接
-- [ ] 可以从主机连接
+### 大型应用（多实例）
 
-## 常见问题
+每个实例：
+```yaml
+druid:
+  initial-size: 5
+  min-idle: 5
+  max-active: 15  # 3个实例总共45个连接
+```
 
-### Q: 为什么设置了 bind-address=0.0.0.0 还是无法连接？
-A: 检查以下几点：
-1. 确保 my.cnf 文件正确挂载到容器
-2. 确保容器重启后配置生效
-3. 检查是否有其他配置覆盖了 bind-address
+MySQL 配置：
+```ini
+max_connections = 200  # 为3个实例预留足够空间
+```
 
-### Q: 为什么从容器内部可以连接，但从主机无法连接？
-A: 可能是端口映射问题：
-1. 检查 docker-compose-mysql.yml 中的端口映射
-2. 确保使用 `0.0.0.0:32123:3306` 而不是 `127.0.0.1:32123:3306`
+## 总结
 
-### Q: 为什么需要创建多个用户（%、localhost、127.0.0.1）？
-A: MySQL 将不同来源的连接视为不同的用户：
-- `%` - 匹配任何主机
-- `localhost` - 匹配 localhost 主机名
-- `127.0.0.1` - 匹配 IP 地址
+1. ✅ **已优化连接池配置**：降低 `max-active` 从 50 到 20
+2. ✅ **启用连接泄漏检测**：5分钟未使用的连接自动回收
+3. ✅ **降低连接等待时间**：快速失败，避免连接堆积
+4. ⚠️ **需要重启应用**：使新配置生效
+5. ⚠️ **监控连接数**：定期检查连接数使用情况
 
-为了确保从所有方式都能连接，需要为每种方式创建用户。
-
+**下一步操作**：
+1. 重启应用使新配置生效
+2. 监控连接数使用情况
+3. 如果问题持续，检查是否有连接泄漏
+4. 根据实际情况调整 MySQL 的 `max_connections`

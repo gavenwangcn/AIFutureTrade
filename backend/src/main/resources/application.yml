@@ -20,7 +20,7 @@ spring:
     password: ${SPRING_DATASOURCE_PASSWORD:aifuturetrade123}
     driver-class-name: com.mysql.cj.jdbc.Driver
     type: com.alibaba.druid.pool.DruidDataSource
-    # Druid连接池配置
+    # Druid连接池配置（优化连接泄漏检测）
     druid:
       # 初始化连接池大小
       initial-size: 5
@@ -29,17 +29,17 @@ spring:
       # 最大连接池数量
       max-active: 20
       # 获取连接超时时间
-      max-wait: 30000
+      max-wait: 10000  # 降低等待时间
       # 连接最小空闲时间
-      min-evictable-idle-time-millis: 60000
+      min-evictable-idle-time-millis: 300000  # 5分钟
       # 连接最大空闲时间
-      max-evictable-idle-time-millis: 600000
+      max-evictable-idle-time-millis: 600000  # 10分钟
       # 间隔多久进行一次检测，检测需要关闭的空闲连接
       time-between-eviction-runs-millis: 60000
       # 检查连接有效性的SQL语句
       validation-query: SELECT 1
       # 检测连接是否有效的超时时间
-      validation-query-timeout: 30000
+      validation-query-timeout: 3  # 降低验证超时
       # 获取连接时是否验证连接有效性
       test-on-borrow: false
       # 归还连接时是否验证连接有效性
@@ -50,14 +50,17 @@ spring:
       filters: stat,wall
       # 连接池名称
       pool-name: DruidCP
-      # 关闭abandoned连接时输出错误日志
+      # 连接泄漏检测和回收
       remove-abandoned: true
-      # 连接在池中的最大生存时间
-      remove-abandoned-timeout-millis: 1800000
-      # 关闭abandoned连接时是否输出错误日志
-      log-abandoned: true
+      remove-abandoned-timeout-millis: 300000  # 5分钟未使用的连接视为泄漏
+      log-abandoned: true  # 记录泄漏连接的堆栈信息
       # 启用监控统计
       use-global-data-source-stat: true
+      # 连接超时配置
+      connect-timeout: 5000
+      socket-timeout: 30000
+      keep-alive: true
+      phy-timeout-millis: 28800000  # 8小时
   
   # MyBatis配置
   mybatis-plus:
