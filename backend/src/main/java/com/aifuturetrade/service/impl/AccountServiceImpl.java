@@ -125,18 +125,18 @@ public class AccountServiceImpl implements AccountService {
                         // 兼容处理：如果是Map类型，使用原有逻辑
                         @SuppressWarnings("unchecked")
                         Map<String, Object> assetItem = (Map<String, Object>) assetItemObj;
-                        assetInfo.put("asset", assetItem.get("asset"));
-                        assetInfo.put("walletBalance", getDoubleValue(assetItem, "walletBalance"));
-                        assetInfo.put("unrealizedProfit", getDoubleValue(assetItem, "unrealizedProfit"));
-                        assetInfo.put("marginBalance", getDoubleValue(assetItem, "marginBalance"));
-                        assetInfo.put("maintMargin", getDoubleValue(assetItem, "maintMargin"));
-                        assetInfo.put("initialMargin", getDoubleValue(assetItem, "initialMargin"));
-                        assetInfo.put("positionInitialMargin", getDoubleValue(assetItem, "positionInitialMargin"));
-                        assetInfo.put("openOrderInitialMargin", getDoubleValue(assetItem, "openOrderInitialMargin"));
-                        assetInfo.put("crossWalletBalance", getDoubleValue(assetItem, "crossWalletBalance"));
-                        assetInfo.put("crossUnPnl", getDoubleValue(assetItem, "crossUnPnl"));
-                        assetInfo.put("availableBalance", getDoubleValue(assetItem, "availableBalance"));
-                        assetInfo.put("maxWithdrawAmount", getDoubleValue(assetItem, "maxWithdrawAmount"));
+                    assetInfo.put("asset", assetItem.get("asset"));
+                    assetInfo.put("walletBalance", getDoubleValue(assetItem, "walletBalance"));
+                    assetInfo.put("unrealizedProfit", getDoubleValue(assetItem, "unrealizedProfit"));
+                    assetInfo.put("marginBalance", getDoubleValue(assetItem, "marginBalance"));
+                    assetInfo.put("maintMargin", getDoubleValue(assetItem, "maintMargin"));
+                    assetInfo.put("initialMargin", getDoubleValue(assetItem, "initialMargin"));
+                    assetInfo.put("positionInitialMargin", getDoubleValue(assetItem, "positionInitialMargin"));
+                    assetInfo.put("openOrderInitialMargin", getDoubleValue(assetItem, "openOrderInitialMargin"));
+                    assetInfo.put("crossWalletBalance", getDoubleValue(assetItem, "crossWalletBalance"));
+                    assetInfo.put("crossUnPnl", getDoubleValue(assetItem, "crossUnPnl"));
+                    assetInfo.put("availableBalance", getDoubleValue(assetItem, "availableBalance"));
+                    assetInfo.put("maxWithdrawAmount", getDoubleValue(assetItem, "maxWithdrawAmount"));
                     }
                     assetList.add(assetInfo);
                 }

@@ -210,8 +210,23 @@ class StrategyCodeExecutor:
             # 构建执行上下文
             execution_context = self._create_safe_globals()
             
-            # 导入 StrategyBase 类
-            from trade.strategy.strategy_template import StrategyBase
+            # 根据决策类型导入对应的策略基类
+            if decision_type == 'buy':
+                from trade.strategy.strategy_template_buy import StrategyBaseBuy
+                execution_context['StrategyBaseBuy'] = StrategyBaseBuy
+                StrategyBase = StrategyBaseBuy
+                base_class_name = 'StrategyBaseBuy'
+            elif decision_type == 'sell':
+                from trade.strategy.strategy_template_sell import StrategyBaseSell
+                execution_context['StrategyBaseSell'] = StrategyBaseSell
+                StrategyBase = StrategyBaseSell
+                base_class_name = 'StrategyBaseSell'
+            else:
+                # 向后兼容：默认使用旧的 StrategyBase
+                from trade.strategy.strategy_template import StrategyBase
+                execution_context['StrategyBase'] = StrategyBase
+                base_class_name = 'StrategyBase'
+            
             execution_context['StrategyBase'] = StrategyBase
             execution_context['ABC'] = ABC
             execution_context['abstractmethod'] = abstractmethod
@@ -239,7 +254,7 @@ class StrategyCodeExecutor:
             # 存储模块引用
             self.modules[module_name] = module
             
-            # 查找策略类（查找第一个继承自 StrategyBase 的类）
+            # 查找策略类（查找第一个继承自对应基类的类）
             strategy_class = None
             for name in dir(module):
                 obj = getattr(module, name)
@@ -247,11 +262,11 @@ class StrategyCodeExecutor:
                     issubclass(obj, StrategyBase) and 
                     obj != StrategyBase):
                     strategy_class = obj
-                    logger.debug(f"[StrategyCodeExecutor] 找到策略类: {name}")
+                    logger.debug(f"[StrategyCodeExecutor] 找到策略类: {name} (继承自 {base_class_name})")
                     break
             
             if strategy_class is None:
-                raise ValueError(f"策略代码中未找到继承自 StrategyBase 的类")
+                raise ValueError(f"策略代码中未找到继承自 {base_class_name} 的类")
             
             # 实例化策略类
             strategy_instance = strategy_class()

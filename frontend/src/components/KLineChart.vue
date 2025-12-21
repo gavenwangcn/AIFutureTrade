@@ -126,22 +126,22 @@ const initChart = async () => {
   isInitializing.value = true
 
   try {
-    // 等待 DOM 渲染完成
-    await nextTick()
+  // 等待 DOM 渲染完成
+  await nextTick()
 
-    // 检查容器尺寸
-    const container = chartContainerRef.value
-    const rect = container.getBoundingClientRect()
-    if (rect.width === 0 || rect.height === 0) {
-      console.warn('[KLineChart] Container has zero size, retrying...')
+  // 检查容器尺寸
+  const container = chartContainerRef.value
+  const rect = container.getBoundingClientRect()
+  if (rect.width === 0 || rect.height === 0) {
+    console.warn('[KLineChart] Container has zero size, retrying...')
       // 使用ref存储定时器ID，以便后续清除
       initTimeoutId.value = setTimeout(() => {
         initTimeoutId.value = null
         isInitializing.value = false
         initChart()
       }, 100)
-      return
-    }
+    return
+  }
 
     // 销毁已存在的图表
     if (chartInstance.value) {

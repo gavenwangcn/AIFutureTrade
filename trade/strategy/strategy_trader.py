@@ -243,8 +243,6 @@ class StrategyTrader(Trader):
                     candidates=None,  # 卖出决策不需要candidates
                     portfolio=portfolio,
                     account_info=account_info,
-                    constraints=None,  # 卖出决策不需要constraints
-                    market_snapshot=None,  # 卖出决策不需要market_snapshot
                     market_state=market_state,
                     symbol_source=None,  # 卖出决策不需要symbol_source
                     decision_type='sell'

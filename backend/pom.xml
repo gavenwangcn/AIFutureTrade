@@ -23,7 +23,7 @@
         <maven.compiler.source>11</maven.compiler.source>
         <maven.compiler.target>11</maven.compiler.target>
     </properties>
-    
+
     <!-- 使用 Spring Boot 的依赖管理来统一版本 -->
     <dependencyManagement>
         <dependencies>

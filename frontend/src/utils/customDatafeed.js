@@ -226,9 +226,9 @@ export function createDataLoader() {
       
       // 第一次加载完成后，调用 /api/market/prices API
       // 注意：仅调用一次，不再使用WebSocket等实时加载数据
-      if (type === 'init') {
+        if (type === 'init') {
         fetchMarketPrices()
-      }
+        }
       
       callback(klines, more)
     } catch (error) {
