@@ -247,7 +247,10 @@ public class ModelServiceImpl implements ModelService {
             for (Map.Entry<String, Map<String, Object>> entry : pricesData.entrySet()) {
                 Object priceObj = entry.getValue().get("price");
                 if (priceObj != null) {
-                    currentPrices.put(entry.getKey(), ((Number) priceObj).doubleValue());
+                    Double priceValue = convertToDouble(priceObj);
+                    if (priceValue != null) {
+                        currentPrices.put(entry.getKey(), priceValue);
+                    }
                 }
             }
             
@@ -275,8 +278,9 @@ public class ModelServiceImpl implements ModelService {
             
             for (Map<String, Object> pos : positions) {
                 String symbol = (String) pos.get("symbol");
-                Double avgPrice = ((Number) pos.get("avgPrice")).doubleValue();
-                Double positionAmt = Math.abs(((Number) pos.get("positionAmt")).doubleValue());
+                Double avgPrice = convertToDouble(pos.get("avgPrice"));
+                Double positionAmt = Math.abs(convertToDouble(pos.get("positionAmt")) != null ? convertToDouble(pos.get("positionAmt")) : 0.0);
+                if (avgPrice == null) avgPrice = 0.0;
                 String positionSide = (String) pos.get("positionSide");
                 Integer leverage = (Integer) pos.get("leverage");
                 
@@ -470,20 +474,22 @@ public class ModelServiceImpl implements ModelService {
                         }
                         Map<String, Object> priceInfo = pricesData.get(symbol.toUpperCase());
                         if (priceInfo != null && priceInfo.get("price") != null) {
-                            Double currentPrice = ((Number) priceInfo.get("price")).doubleValue();
-                            trade.put("current_price", currentPrice);
-                            
-                            if (currentPrice > 0 && tradeDO.getPrice() != null && tradeDO.getPrice() > 0) {
-                                Double quantity = Math.abs(tradeDO.getQuantity() != null ? tradeDO.getQuantity() : 0.0);
-                                Double calculatedPnl;
-                                if (signal.equals("buy_to_enter")) {
-                                    // 开多：盈亏 = (当前价 - 开仓价) * 数量
-                                    calculatedPnl = (currentPrice - tradeDO.getPrice()) * quantity;
-                                } else {
-                                    // 开空：盈亏 = (开仓价 - 当前价) * 数量
-                                    calculatedPnl = (tradeDO.getPrice() - currentPrice) * quantity;
+                            Double currentPrice = convertToDouble(priceInfo.get("price"));
+                            if (currentPrice != null && currentPrice > 0) {
+                                trade.put("current_price", currentPrice);
+                                
+                                if (tradeDO.getPrice() != null && tradeDO.getPrice() > 0) {
+                                    Double quantity = Math.abs(tradeDO.getQuantity() != null ? tradeDO.getQuantity() : 0.0);
+                                    Double calculatedPnl;
+                                    if (signal.equals("buy_to_enter")) {
+                                        // 开多：盈亏 = (当前价 - 开仓价) * 数量
+                                        calculatedPnl = (currentPrice - tradeDO.getPrice()) * quantity;
+                                    } else {
+                                        // 开空：盈亏 = (开仓价 - 当前价) * 数量
+                                        calculatedPnl = (tradeDO.getPrice() - currentPrice) * quantity;
+                                    }
+                                    trade.put("pnl", calculatedPnl);
                                 }
-                                trade.put("pnl", calculatedPnl);
                             }
                         }
                     } else {
@@ -873,7 +879,10 @@ public class ModelServiceImpl implements ModelService {
             for (Map.Entry<String, Map<String, Object>> entry : pricesData.entrySet()) {
                 Object priceObj = entry.getValue().get("price");
                 if (priceObj != null) {
-                    currentPrices.put(entry.getKey(), ((Number) priceObj).doubleValue());
+                    Double priceValue = convertToDouble(priceObj);
+                    if (priceValue != null) {
+                        currentPrices.put(entry.getKey(), priceValue);
+                    }
                 }
             }
             
@@ -895,18 +904,30 @@ public class ModelServiceImpl implements ModelService {
                     @SuppressWarnings("unchecked")
                     Map<String, Object> portfolioData = (Map<String, Object>) portfolio.get("portfolio");
                     
-                    totalPortfolio.put("total_value", ((Number) totalPortfolio.get("total_value")).doubleValue() + 
-                            ((Number) portfolioData.getOrDefault("total_value", 0.0)).doubleValue());
-                    totalPortfolio.put("cash", ((Number) totalPortfolio.get("cash")).doubleValue() + 
-                            ((Number) portfolioData.getOrDefault("cash", 0.0)).doubleValue());
-                    totalPortfolio.put("positions_value", ((Number) totalPortfolio.get("positions_value")).doubleValue() + 
-                            ((Number) portfolioData.getOrDefault("positions_value", 0.0)).doubleValue());
-                    totalPortfolio.put("realized_pnl", ((Number) totalPortfolio.get("realized_pnl")).doubleValue() + 
-                            ((Number) portfolioData.getOrDefault("realized_pnl", 0.0)).doubleValue());
-                    totalPortfolio.put("unrealized_pnl", ((Number) totalPortfolio.get("unrealized_pnl")).doubleValue() + 
-                            ((Number) portfolioData.getOrDefault("unrealized_pnl", 0.0)).doubleValue());
-                    totalPortfolio.put("initial_capital", ((Number) totalPortfolio.get("initial_capital")).doubleValue() + 
-                            ((Number) portfolioData.getOrDefault("initial_capital", 0.0)).doubleValue());
+                    // 安全地累加数值，处理String和Number类型
+                    Double totalValue = convertToDouble(totalPortfolio.get("total_value"));
+                    Double portfolioTotalValue = convertToDouble(portfolioData.getOrDefault("total_value", 0.0));
+                    totalPortfolio.put("total_value", (totalValue != null ? totalValue : 0.0) + (portfolioTotalValue != null ? portfolioTotalValue : 0.0));
+                    
+                    Double cash = convertToDouble(totalPortfolio.get("cash"));
+                    Double portfolioCash = convertToDouble(portfolioData.getOrDefault("cash", 0.0));
+                    totalPortfolio.put("cash", (cash != null ? cash : 0.0) + (portfolioCash != null ? portfolioCash : 0.0));
+                    
+                    Double positionsValue = convertToDouble(totalPortfolio.get("positions_value"));
+                    Double portfolioPositionsValue = convertToDouble(portfolioData.getOrDefault("positions_value", 0.0));
+                    totalPortfolio.put("positions_value", (positionsValue != null ? positionsValue : 0.0) + (portfolioPositionsValue != null ? portfolioPositionsValue : 0.0));
+                    
+                    Double realizedPnl = convertToDouble(totalPortfolio.get("realized_pnl"));
+                    Double portfolioRealizedPnl = convertToDouble(portfolioData.getOrDefault("realized_pnl", 0.0));
+                    totalPortfolio.put("realized_pnl", (realizedPnl != null ? realizedPnl : 0.0) + (portfolioRealizedPnl != null ? portfolioRealizedPnl : 0.0));
+                    
+                    Double unrealizedPnl = convertToDouble(totalPortfolio.get("unrealized_pnl"));
+                    Double portfolioUnrealizedPnl = convertToDouble(portfolioData.getOrDefault("unrealized_pnl", 0.0));
+                    totalPortfolio.put("unrealized_pnl", (unrealizedPnl != null ? unrealizedPnl : 0.0) + (portfolioUnrealizedPnl != null ? portfolioUnrealizedPnl : 0.0));
+                    
+                    Double initialCapital = convertToDouble(totalPortfolio.get("initial_capital"));
+                    Double portfolioInitialCapital = convertToDouble(portfolioData.getOrDefault("initial_capital", 0.0));
+                    totalPortfolio.put("initial_capital", (initialCapital != null ? initialCapital : 0.0) + (portfolioInitialCapital != null ? portfolioInitialCapital : 0.0));
                     
                     @SuppressWarnings("unchecked")
                     List<Map<String, Object>> positions = (List<Map<String, Object>>) portfolioData.get("positions");
@@ -924,10 +945,16 @@ public class ModelServiceImpl implements ModelService {
                             }
                             
                             Map<String, Object> currentPos = allPositions.get(key);
-                            Double currentAmt = ((Number) currentPos.get("positionAmt")).doubleValue();
-                            Double currentAvgPrice = ((Number) currentPos.get("avgPrice")).doubleValue();
-                            Double newAmt = Math.abs(((Number) pos.get("positionAmt")).doubleValue());
-                            Double newAvgPrice = ((Number) pos.get("avgPrice")).doubleValue();
+                            Double currentAmt = convertToDouble(currentPos.get("positionAmt"));
+                            Double currentAvgPrice = convertToDouble(currentPos.get("avgPrice"));
+                            Double newAmtRaw = convertToDouble(pos.get("positionAmt"));
+                            Double newAmt = Math.abs(newAmtRaw != null ? newAmtRaw : 0.0);
+                            Double newAvgPrice = convertToDouble(pos.get("avgPrice"));
+                            
+                            // 处理null值
+                            if (currentAmt == null) currentAmt = 0.0;
+                            if (currentAvgPrice == null) currentAvgPrice = 0.0;
+                            if (newAvgPrice == null) newAvgPrice = 0.0;
                             
                             Double currentCost = currentAmt * currentAvgPrice;
                             Double newCost = newAmt * newAvgPrice;
@@ -940,11 +967,14 @@ public class ModelServiceImpl implements ModelService {
                                 
                                 Double currentPrice = currentPrices.get(symbol);
                                 if (currentPrice == null) {
-                                    currentPrice = ((Number) pos.getOrDefault("currentPrice", 0.0)).doubleValue();
+                                    currentPrice = convertToDouble(pos.getOrDefault("currentPrice", 0.0));
+                                    if (currentPrice == null) currentPrice = 0.0;
                                 }
                                 if (currentPrice > 0) {
                                     currentPos.put("currentPrice", currentPrice);
-                                    currentPos.put("pnl", (currentPrice - ((Number) currentPos.get("avgPrice")).doubleValue()) * totalAmt);
+                                    Double avgPriceForPnl = convertToDouble(currentPos.get("avgPrice"));
+                                    if (avgPriceForPnl == null) avgPriceForPnl = 0.0;
+                                    currentPos.put("pnl", (currentPrice - avgPriceForPnl) * totalAmt);
                                 }
                             }
                         }
@@ -1120,6 +1150,34 @@ public class ModelServiceImpl implements ModelService {
             errorResult.put("error", e.getMessage());
             return errorResult;
         }
+    }
+
+    /**
+     * 安全地将对象转换为Double值
+     * 支持Number类型和String类型的转换
+     * @param value 待转换的值
+     * @return Double值，如果转换失败返回null
+     */
+    private Double convertToDouble(Object value) {
+        if (value == null) {
+            return null;
+        }
+        
+        if (value instanceof Number) {
+            return ((Number) value).doubleValue();
+        }
+        
+        if (value instanceof String) {
+            try {
+                return Double.parseDouble((String) value);
+            } catch (NumberFormatException e) {
+                log.warn("[ModelService] 无法将字符串转换为Double: {}", value);
+                return null;
+            }
+        }
+        
+        log.warn("[ModelService] 不支持的类型转换: {} ({})", value, value.getClass().getName());
+        return null;
     }
 
 }

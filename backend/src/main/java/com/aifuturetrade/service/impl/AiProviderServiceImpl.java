@@ -162,7 +162,7 @@ public class AiProviderServiceImpl implements AiProviderService {
             List<Map<String, String>> messages = new ArrayList<>();
             Map<String, String> systemMessage = new HashMap<>();
             systemMessage.put("role", "system");
-            systemMessage.put("content", "You are a professional cryptocurrency trader. Output JSON format only.");
+            systemMessage.put("content", "You are a professional cryptocurrency trading strategy code generator. Output ONLY the Python code, without any JSON wrapper, markdown code blocks, or explanations. The output must be pure Python code that can be directly executed.");
             messages.add(systemMessage);
             
             Map<String, String> userMessage = new HashMap<>();
@@ -194,7 +194,8 @@ public class AiProviderServiceImpl implements AiProviderService {
                 if (choices != null && choices.isArray() && choices.size() > 0) {
                     JsonNode message = choices.get(0).get("message");
                     if (message != null) {
-                        return message.get("content").asText();
+                        String content = message.get("content").asText();
+                        return extractCodeFromResponse(content);
                     }
                 }
             }
@@ -248,7 +249,7 @@ public class AiProviderServiceImpl implements AiProviderService {
             if (topP != null) {
                 requestBody.put("top_p", topP);
             }
-            requestBody.put("system", "You are a professional cryptocurrency trader. Output JSON format only.");
+            requestBody.put("system", "You are a professional cryptocurrency trading strategy code generator. Output ONLY the Python code, without any JSON wrapper, markdown code blocks, or explanations. The output must be pure Python code that can be directly executed.");
             
             List<Map<String, String>> messages = new ArrayList<>();
             Map<String, String> userMessage = new HashMap<>();
@@ -276,10 +277,11 @@ public class AiProviderServiceImpl implements AiProviderService {
             // 处理响应
             if (response.statusCode() == 200) {
                 JsonNode jsonNode = objectMapper.readTree(response.body());
-                JsonNode content = jsonNode.get("content");
-                if (content != null && content.isArray() && content.size() > 0) {
-                    return content.get(0).get("text").asText();
-                }
+                    JsonNode content = jsonNode.get("content");
+                    if (content != null && content.isArray() && content.size() > 0) {
+                        String text = content.get(0).get("text").asText();
+                        return extractCodeFromResponse(text);
+                    }
             }
             
             throw new RuntimeException("Failed to get response from Anthropic API: " + response.statusCode() + 
@@ -371,7 +373,8 @@ public class AiProviderServiceImpl implements AiProviderService {
                     if (candidateContent != null) {
                         JsonNode candidateParts = candidateContent.get("parts");
                         if (candidateParts != null && candidateParts.isArray() && candidateParts.size() > 0) {
-                            return candidateParts.get(0).get("text").asText();
+                            String text = candidateParts.get(0).get("text").asText();
+                            return extractCodeFromResponse(text);
                         }
                     }
                 }
@@ -679,6 +682,137 @@ public class AiProviderServiceImpl implements AiProviderService {
             log.warn("Invalid {} value: {}, using default: {}", key, value, defaultValue);
             return defaultValue;
         }
+    }
+    
+    /**
+     * 从AI响应中提取代码
+     * 支持以下格式：
+     * 1. JSON格式：{"code": "..."} 或 {"strategy_code": "..."}
+     * 2. Markdown代码块：```python ... ``` 或 ``` ... ```
+     * 3. 纯代码：直接返回
+     * 
+     * @param response AI返回的原始内容
+     * @return 提取的Python代码（已处理转义字符）
+     */
+    private String extractCodeFromResponse(String response) {
+        if (response == null || response.trim().isEmpty()) {
+            return response;
+        }
+        
+        String trimmed = response.trim();
+        String extractedCode = null;
+        
+        // 尝试解析JSON格式
+        try {
+            JsonNode jsonNode = objectMapper.readTree(trimmed);
+            // 检查是否有code字段
+            if (jsonNode.has("code")) {
+                extractedCode = jsonNode.get("code").asText();
+                log.debug("从JSON响应中提取code字段");
+            }
+            // 检查是否有strategy_code字段
+            else if (jsonNode.has("strategy_code")) {
+                extractedCode = jsonNode.get("strategy_code").asText();
+                log.debug("从JSON响应中提取strategy_code字段");
+            }
+        } catch (Exception e) {
+            // 不是JSON格式，继续处理
+            log.debug("响应不是JSON格式，尝试其他解析方式");
+        }
+        
+        // 如果没有从JSON中提取到代码，尝试提取Markdown代码块
+        if (extractedCode == null) {
+            // 匹配 ```python ... ``` 或 ``` ... ```
+            java.util.regex.Pattern markdownPattern = java.util.regex.Pattern.compile(
+                "```(?:python)?\\s*\\n?(.*?)\\n?```", 
+                java.util.regex.Pattern.DOTALL
+            );
+            java.util.regex.Matcher matcher = markdownPattern.matcher(trimmed);
+            if (matcher.find()) {
+                extractedCode = matcher.group(1).trim();
+                log.debug("从Markdown代码块中提取代码");
+            }
+        }
+        
+        // 如果还是没有提取到代码，使用原始内容
+        if (extractedCode == null) {
+            extractedCode = trimmed;
+            log.debug("直接使用原始响应内容");
+        }
+        
+        // 处理转义字符：将字符串形式的转义字符转换为实际字符
+        // 例如：将 "\n" 转换为实际的换行符
+        String normalizedCode = normalizeEscapeCharacters(extractedCode);
+        
+        return normalizedCode;
+    }
+    
+    /**
+     * 规范化转义字符
+     * 将字符串形式的转义字符（如 "\n", "\t", "\r"）转换为实际的字符
+     * 
+     * 注意：
+     * - 如果代码是从JSON中提取的，Jackson的asText()已经处理了转义字符
+     * - 但如果AI返回的是字符串字面量形式的转义字符（如 "import talib\\nfrom typing"），
+     *   需要手动转换为实际的换行符
+     * 
+     * @param code 原始代码字符串
+     * @return 规范化后的代码字符串
+     */
+    private String normalizeEscapeCharacters(String code) {
+        if (code == null || code.isEmpty()) {
+            return code;
+        }
+        
+        // 使用StringEscapeUtils或手动处理转义字符
+        // 由于我们使用的是Java 11，没有Apache Commons，所以手动处理
+        
+        // 创建一个StringBuilder来构建结果
+        StringBuilder result = new StringBuilder();
+        int length = code.length();
+        
+        for (int i = 0; i < length; i++) {
+            char c = code.charAt(i);
+            
+            // 检查是否是转义序列的开始
+            if (c == '\\' && i + 1 < length) {
+                char next = code.charAt(i + 1);
+                switch (next) {
+                    case 'n':
+                        result.append('\n');  // 换行符
+                        i++; // 跳过下一个字符
+                        continue;
+                    case 't':
+                        result.append('\t');  // 制表符
+                        i++;
+                        continue;
+                    case 'r':
+                        result.append('\r');  // 回车符
+                        i++;
+                        continue;
+                    case '\\':
+                        result.append('\\');  // 反斜杠本身
+                        i++;
+                        continue;
+                    case '"':
+                        result.append('"');   // 双引号
+                        i++;
+                        continue;
+                    case '\'':
+                        result.append('\'');   // 单引号
+                        i++;
+                        continue;
+                    default:
+                        // 如果不是已知的转义序列，保留原样
+                        result.append(c);
+                        break;
+                }
+            } else {
+                result.append(c);
+            }
+        }
+        
+        return result.toString();
     }
 }
 

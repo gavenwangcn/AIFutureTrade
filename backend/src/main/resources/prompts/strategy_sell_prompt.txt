@@ -159,9 +159,30 @@ klines_1h = timeframes.get('1h', {}).get('klines', [])
 
 ## 请根据提供的 strategy_context 生成完整的卖出策略代码：
 
+## ⚠️ 重要：输出格式要求
+
+**你必须只输出纯Python代码，不要包含以下内容：**
+- ❌ 不要使用JSON格式包装（如 `{"code": "..."}`）
+- ❌ 不要使用Markdown代码块（如 ```python ... ```）
+- ❌ 不要添加任何解释文字或注释说明
+- ❌ 不要添加"生成的代码如下："等前缀
+
+**正确的输出格式：**
+```
+from trade.strategy.strategy_template_sell import StrategyBaseSell
+from typing import Dict
+import talib
+import numpy as np
+
+class GeneratedSellStrategy(StrategyBaseSell):
+    def execute_sell_decision(...):
+        ...
+```
+
 生成的代码必须：
 1. 导入 StrategyBaseSell：`from trade.strategy.strategy_template_sell import StrategyBaseSell`
 2. 定义类继承 StrategyBaseSell：`class GeneratedSellStrategy(StrategyBaseSell):`
 3. 实现 `execute_sell_decision()` 方法
 4. 代码必须完整、可执行，不需要额外的实例化代码（系统会自动实例化）
+5. **直接输出Python代码，不要任何包装格式**
 
