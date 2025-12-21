@@ -102,6 +102,9 @@ logging:
     # 禁用 Spring Boot 自动配置条件评估报告日志
     org.springframework.boot.autoconfigure: WARN
     org.springframework.boot.autoconfigure.condition: WARN
+    # 降低HTTP解析错误日志级别（减少攻击扫描产生的日志噪音）
+    org.apache.coyote.http11: WARN
+    org.apache.tomcat: WARN
   pattern:
     console: "%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n"
     file: "%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n"
