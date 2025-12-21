@@ -425,6 +425,59 @@ def disable_sell_trading(model_id):
     logger.info(f"Auto sell disabled for model {model_id}")
     return jsonify({'model_id': model_id, 'auto_sell_enabled': False})
 
+@app.route('/api/strategy/validate-code', methods=['POST'])
+def validate_strategy_code():
+    """
+    验证策略代码是否符合要求
+    
+    请求体:
+        strategy_code: 策略代码字符串
+        strategy_type: 策略类型（'buy' 或 'sell'）
+        strategy_name: 策略名称（可选，用于日志）
+    
+    返回:
+        JSON: 测试结果，包含passed、errors、warnings等字段
+    """
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({'error': '请求体不能为空', 'passed': False}), 400
+        
+        strategy_code = data.get('strategy_code')
+        strategy_type = data.get('strategy_type')
+        strategy_name = data.get('strategy_name', '测试策略')
+        
+        if not strategy_code:
+            return jsonify({'error': 'strategy_code参数不能为空', 'passed': False}), 400
+        
+        if not strategy_type or strategy_type not in ['buy', 'sell']:
+            return jsonify({'error': 'strategy_type参数必须为"buy"或"sell"', 'passed': False}), 400
+        
+        # 导入对应的测试器
+        if strategy_type == 'buy':
+            from trade.strategy.strategy_code_tester_buy import StrategyCodeTesterBuy
+            tester = StrategyCodeTesterBuy()
+        else:
+            from trade.strategy.strategy_code_tester_sell import StrategyCodeTesterSell
+            tester = StrategyCodeTesterSell()
+        
+        # 执行测试
+        result = tester.test_strategy_code(strategy_code, strategy_name)
+        
+        logger.info(f"策略代码验证完成: {strategy_name}, 类型: {strategy_type}, 通过: {result.get('passed', False)}")
+        
+        return jsonify(result)
+        
+    except Exception as e:
+        logger.error(f"验证策略代码时发生异常: {e}", exc_info=True)
+        error_result = {
+            "passed": False,
+            "errors": [f"测试执行异常: {str(e)}"],
+            "warnings": [],
+            "test_results": {}
+        }
+        return jsonify(error_result), 500
+
 @app.route('/api/market/klines', methods=['GET'])
 def get_market_klines():
     """
@@ -635,6 +688,7 @@ if __name__ == '__main__':
     logger.info("  POST /api/models/<model_id>/execute-sell")
     logger.info("  POST /api/models/<model_id>/disable-buy")
     logger.info("  POST /api/models/<model_id>/disable-sell")
+    logger.info("  POST /api/strategy/validate-code")
     logger.info("  GET  /api/market/klines")
     logger.info("=" * 60 + "\n")
 
