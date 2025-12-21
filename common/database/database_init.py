@@ -123,6 +123,7 @@ class DatabaseInitializer:
             `position_side` VARCHAR(10) DEFAULT 'LONG',
             `initial_margin` DOUBLE DEFAULT 0.0,
             `unrealized_profit` DOUBLE DEFAULT 0.0,
+            `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP,
             `updated_at` DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
             UNIQUE KEY `uk_model_symbol_side` (`model_id`, `symbol`, `position_side`),
             INDEX `idx_model_id` (`model_id`),
