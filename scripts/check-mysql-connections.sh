@@ -32,9 +32,10 @@ if [ "$USE_DOCKER" = true ]; then
     # 使用 Docker exec 在容器内执行 MySQL 命令
     # 在容器内使用 root 用户连接，确保有权限查看所有连接信息
     # 不指定 host，使用默认的 socket 连接（容器内推荐方式）
-    # 注意：密码通过环境变量传递，避免在命令行中暴露
-    MYSQL_CMD="docker exec -i -e MYSQL_PWD=\"$MYSQL_ROOT_PASSWORD\" $MYSQL_CONTAINER mysql"
-    MYSQL_ARGS="-uroot $MYSQL_DATABASE"
+    # 注意：使用 -e 参数传递环境变量，但需要确保变量值正确传递
+    # 为了简化，直接在命令中使用密码参数（诊断脚本可以接受）
+    MYSQL_CMD="docker exec -i $MYSQL_CONTAINER mysql"
+    MYSQL_ARGS="-uroot -p$MYSQL_ROOT_PASSWORD $MYSQL_DATABASE"
     DOCKER_USER="root"
 else
     # 使用本地 MySQL 客户端
