@@ -295,6 +295,9 @@ class StrategyCodeExecutor:
             if not isinstance(decisions, dict):
                 raise ValueError(f"策略方法返回结果格式不正确，期望 dict，实际 {type(decisions)}")
             
+            # 记录决策内容日志
+            logger.info(f"策略决策返回值: {json.dumps(decisions, ensure_ascii=False, default=str)}")
+            
             # 包装成标准格式
             result = {
                 "decisions": decisions
@@ -332,7 +335,7 @@ class StrategyCodeExecutor:
             })
             
             logger.error(f"[StrategyCodeExecutor] 执行策略代码失败 ({strategy_name}): {e}")
-            logger.debug(f"[StrategyCodeExecutor] 异常堆栈:\n{traceback.format_exc()}")
+            logger.error(f"[StrategyCodeExecutor] 异常堆栈:\n{traceback.format_exc()}")
             return None
     
     def get_execution_history(self) -> List[Dict]:
