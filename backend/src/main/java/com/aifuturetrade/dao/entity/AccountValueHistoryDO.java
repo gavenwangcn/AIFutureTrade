@@ -1,6 +1,7 @@
 package com.aifuturetrade.dao.entity;
 
 import com.baomidou.mybatisplus.annotation.IdType;
+import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
 import lombok.Data;
@@ -31,11 +32,13 @@ public class AccountValueHistoryDO implements Serializable {
     /**
      * 模型ID（UUID格式）
      */
+    @TableField("model_id")
     private String modelId;
 
     /**
      * 账户别名
      */
+    @TableField("account_alias")
     private String accountAlias;
 
     /**
@@ -46,16 +49,19 @@ public class AccountValueHistoryDO implements Serializable {
     /**
      * 可用余额
      */
+    @TableField("available_balance")
     private Double availableBalance;
 
     /**
      * 全仓钱包余额
      */
+    @TableField("cross_wallet_balance")
     private Double crossWalletBalance;
 
     /**
      * 全仓未实现盈亏
      */
+    @TableField("cross_un_pnl")
     private Double crossUnPnl;
 
     /**

@@ -42,11 +42,13 @@ public class StrategyDO implements Serializable {
     /**
      * 策略内容
      */
+    @TableField("strategy_context")
     private String strategyContext;
 
     /**
      * 策略代码
      */
+    @TableField("strategy_code")
     private String strategyCode;
 
     /**

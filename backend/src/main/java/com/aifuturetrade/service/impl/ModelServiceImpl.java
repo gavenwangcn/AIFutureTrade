@@ -69,6 +69,9 @@ public class ModelServiceImpl implements ModelService {
     @Autowired
     private TradeServiceClient tradeServiceClient;
 
+    @Autowired
+    private AccountAssetMapper accountAssetMapper;
+
     @Value("${app.trades-query-limit:10}")
     private Integer defaultTradesQueryLimit;
 
@@ -108,6 +111,31 @@ public class ModelServiceImpl implements ModelService {
         modelDO.setUpdatedAt(LocalDateTime.now());
         modelDO.setAutoBuyEnabled(true);
         modelDO.setAutoSellEnabled(true);
+        
+        // 如果提供了accountAlias，从account_asset表中获取api_key和api_secret
+        if (modelDO.getAccountAlias() != null && !modelDO.getAccountAlias().trim().isEmpty()) {
+            try {
+                AccountAssetDO accountAsset = accountAssetMapper.selectById(modelDO.getAccountAlias());
+                if (accountAsset != null) {
+                    // 从account_asset表中获取api_key和api_secret
+                    if (accountAsset.getApiKey() != null && !accountAsset.getApiKey().trim().isEmpty()) {
+                        modelDO.setApiKey(accountAsset.getApiKey());
+                        log.info("[ModelService] 从account_asset表获取api_key成功, accountAlias={}", modelDO.getAccountAlias());
+                    }
+                    if (accountAsset.getApiSecret() != null && !accountAsset.getApiSecret().trim().isEmpty()) {
+                        modelDO.setApiSecret(accountAsset.getApiSecret());
+                        log.info("[ModelService] 从account_asset表获取api_secret成功, accountAlias={}", modelDO.getAccountAlias());
+                    }
+                } else {
+                    log.warn("[ModelService] 未找到account_alias对应的账户信息, accountAlias={}", modelDO.getAccountAlias());
+                }
+            } catch (Exception e) {
+                log.error("[ModelService] 从account_asset表获取api_key和api_secret失败, accountAlias={}, error={}", 
+                        modelDO.getAccountAlias(), e.getMessage(), e);
+                // 不抛出异常，允许模型创建继续，但记录警告
+            }
+        }
+        
         // 设置默认trade_type为'strategy'（如果未提供）
         if (modelDO.getTradeType() == null || modelDO.getTradeType().trim().isEmpty()) {
             modelDO.setTradeType("strategy");
@@ -150,6 +178,31 @@ public class ModelServiceImpl implements ModelService {
     public ModelDTO updateModel(ModelDTO modelDTO) {
         ModelDO modelDO = convertToDO(modelDTO);
         modelDO.setUpdatedAt(LocalDateTime.now());
+        
+        // 如果提供了accountAlias，从account_asset表中获取api_key和api_secret
+        if (modelDO.getAccountAlias() != null && !modelDO.getAccountAlias().trim().isEmpty()) {
+            try {
+                AccountAssetDO accountAsset = accountAssetMapper.selectById(modelDO.getAccountAlias());
+                if (accountAsset != null) {
+                    // 从account_asset表中获取api_key和api_secret
+                    if (accountAsset.getApiKey() != null && !accountAsset.getApiKey().trim().isEmpty()) {
+                        modelDO.setApiKey(accountAsset.getApiKey());
+                        log.info("[ModelService] 更新模型时从account_asset表获取api_key成功, accountAlias={}", modelDO.getAccountAlias());
+                    }
+                    if (accountAsset.getApiSecret() != null && !accountAsset.getApiSecret().trim().isEmpty()) {
+                        modelDO.setApiSecret(accountAsset.getApiSecret());
+                        log.info("[ModelService] 更新模型时从account_asset表获取api_secret成功, accountAlias={}", modelDO.getAccountAlias());
+                    }
+                } else {
+                    log.warn("[ModelService] 更新模型时未找到account_alias对应的账户信息, accountAlias={}", modelDO.getAccountAlias());
+                }
+            } catch (Exception e) {
+                log.error("[ModelService] 更新模型时从account_asset表获取api_key和api_secret失败, accountAlias={}, error={}", 
+                        modelDO.getAccountAlias(), e.getMessage(), e);
+                // 不抛出异常，允许模型更新继续，但记录警告
+            }
+        }
+        
         // 验证trade_type值（如果提供）
         if (modelDO.getTradeType() != null && !modelDO.getTradeType().trim().isEmpty()) {
             String tradeType = modelDO.getTradeType().toLowerCase();
@@ -543,13 +596,16 @@ public class ModelServiceImpl implements ModelService {
                 conversation.put("ai_response", aiResponse);
                 conversation.put("cot_trace", cotTrace);
                 
-                conversation.put("conversationType", conversationDO.getConversationType());
-                conversation.put("conversation_type", conversationDO.getConversationType()); // snake_case格式
+                // 使用type字段（数据库字段为type）
+                String conversationType = conversationDO.getType();
+                conversation.put("conversationType", conversationType);
+                conversation.put("conversation_type", conversationType); // snake_case格式
+                conversation.put("type", conversationType); // 直接使用type字段
                 conversation.put("tokens", conversationDO.getTokens());
                 
                 // 格式化timestamp字段为字符串（北京时间）
-                if (conversationDO.getCreatedAt() != null) {
-                    String timestamp = conversationDO.getCreatedAt().format(DATETIME_FORMATTER);
+                if (conversationDO.getTimestamp() != null) {
+                    String timestamp = conversationDO.getTimestamp().format(DATETIME_FORMATTER);
                     conversation.put("timestamp", timestamp);
                 } else {
                     conversation.put("timestamp", "");

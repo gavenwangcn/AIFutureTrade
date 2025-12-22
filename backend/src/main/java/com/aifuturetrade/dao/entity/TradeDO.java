@@ -1,6 +1,7 @@
 package com.aifuturetrade.dao.entity;
 
 import com.baomidou.mybatisplus.annotation.IdType;
+import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
 import lombok.Data;
@@ -31,12 +32,13 @@ public class TradeDO implements Serializable {
     /**
      * 模型ID（UUID格式）
      */
+    @TableField("model_id")
     private String modelId;
 
     /**
      * 合约ID（已废弃，使用future字段）
      */
-    @com.baomidou.mybatisplus.annotation.TableField(exist = false)
+    @TableField(exist = false)
     private Integer futureId;
 
     /**
@@ -47,7 +49,7 @@ public class TradeDO implements Serializable {
     /**
      * 交易信号（buy_to_enter, sell_to_enter, close_position, stop_loss, take_profit）
      */
-    @com.baomidou.mybatisplus.annotation.TableField("`signal`")
+    @TableField("`signal`")
     private String signal;
 
     /**
@@ -68,7 +70,7 @@ public class TradeDO implements Serializable {
     /**
      * 状态（success, failed）
      */
-    @com.baomidou.mybatisplus.annotation.TableField(exist = false)
+    @TableField(exist = false)
     private String status;
 
     /**
@@ -77,8 +79,9 @@ public class TradeDO implements Serializable {
     private LocalDateTime timestamp;
 
     /**
-     * 创建时间
+     * 创建时间（数据库表中不存在此字段，使用timestamp字段）
      */
+    @TableField(exist = false)
     private LocalDateTime createdAt;
 
 }

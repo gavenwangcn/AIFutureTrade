@@ -1778,12 +1778,17 @@ let portfolioSymbolsRefreshInterval = null // 模型持仓合约列表自动刷�
     try {
       // 从后端获取模型信息
       const model = await modelApi.getById(modelId)
-      // 确保 provider_id 是字符串类型（如果是 null 或 undefined，则设为 null）
-      const providerId = model.provider_id ? String(model.provider_id) : null
+      console.log('[TradingApp] 加载模型信息, modelId=', modelId, 'model=', model)
+      
+      // 确保 provider_id 是字符串类型（如果是 null 或 undefined，则设为空字符串）
+      const providerId = model.provider_id ? String(model.provider_id) : ''
+      const modelName = model.model_name || ''
+      
+      console.log('[TradingApp] 设置模型配置, providerId=', providerId, 'modelName=', modelName)
       
       tempModelSettings.value = {
         provider_id: providerId,
-        model_name: model.model_name || '',
+        model_name: modelName,
         leverage: model.leverage || 10,
         max_positions: model.max_positions || 3,
         buy_batch_size: model.buy_batch_size || 1,
@@ -1794,22 +1799,26 @@ let portfolioSymbolsRefreshInterval = null // 模型持仓合约列表自动刷�
         sell_batch_execution_group_size: model.sell_batch_execution_group_size || 1
       }
       
+      console.log('[TradingApp] tempModelSettings 已设置:', tempModelSettings.value)
+      console.log('[TradingApp] 可用提供方列表:', providers.value.map(p => ({ id: p.id, name: p.name })))
+      
       // 加载当前提供方的可用模型列表（使用 nextTick 确保 DOM 更新后再执行）
       if (providerId) {
-        // 使用 setTimeout 确保在下一个事件循环中执行，让 Vue 先完成响应式更新
-        setTimeout(() => {
-          handleProviderChangeInSettings()
-        }, 0)
+        // 使用 nextTick 确保在下一个事件循环中执行，让 Vue 先完成响应式更新
+        await nextTick()
+        console.log('[TradingApp] 调用 handleProviderChangeInSettings, providerId=', providerId)
+        handleProviderChangeInSettings()
       } else {
         availableModelsInSettings.value = []
+        console.log('[TradingApp] providerId 为空，清空可用模型列表')
       }
     } catch (error) {
       console.error('[TradingApp] Error loading model settings:', error)
       // 如果获取失败，使用本地缓存的数据
       const localModel = models.value.find(m => m.id === modelId)
       if (localModel) {
-        // 确保 provider_id 是字符串类型（如果是 null 或 undefined，则设为 null）
-        const providerId = localModel.provider_id ? String(localModel.provider_id) : null
+        // 确保 provider_id 是字符串类型（如果是 null 或 undefined，则设为空字符串）
+        const providerId = localModel.provider_id ? String(localModel.provider_id) : ''
         
         tempModelSettings.value = {
           provider_id: providerId,
@@ -1824,11 +1833,10 @@ let portfolioSymbolsRefreshInterval = null // 模型持仓合约列表自动刷�
           sell_batch_execution_group_size: localModel.sell_batch_execution_group_size || 1
         }
         
-        // 加载当前提供方的可用模型列表（使用 setTimeout 确保在下一个事件循环中执行）
+        // 加载当前提供方的可用模型列表（使用 nextTick 确保在下一个事件循环中执行）
         if (providerId) {
-          setTimeout(() => {
-            handleProviderChangeInSettings()
-          }, 0)
+          await nextTick()
+          handleProviderChangeInSettings()
         } else {
           availableModelsInSettings.value = []
         }
@@ -1844,9 +1852,12 @@ let portfolioSymbolsRefreshInterval = null // 模型持仓合约列表自动刷�
    */
   const handleProviderChangeInSettings = () => {
     const providerId = tempModelSettings.value.provider_id
-    if (!providerId) {
+    if (!providerId || providerId === '') {
       availableModelsInSettings.value = []
-      tempModelSettings.value.model_name = ''
+      // 如果提供方被清空，也清空模型选择
+      if (!providerId || providerId === '') {
+        tempModelSettings.value.model_name = ''
+      }
       return
     }
     
@@ -1855,13 +1866,18 @@ let portfolioSymbolsRefreshInterval = null // 模型持仓合约列表自动刷�
     const provider = providers.value.find(p => String(p.id) === providerIdStr)
     if (provider && provider.models) {
       availableModelsInSettings.value = provider.models.split(',').map(m => m.trim()).filter(m => m)
+      console.log('[TradingApp] 加载可用模型列表成功, providerId=', providerIdStr, 'models=', availableModelsInSettings.value)
     } else {
       availableModelsInSettings.value = []
+      console.warn('[TradingApp] 未找到提供方或提供方没有可用模型, providerId=', providerIdStr)
     }
     
     // 如果当前选择的模型不在新提供方的模型列表中，清空选择
     if (tempModelSettings.value.model_name && !availableModelsInSettings.value.includes(tempModelSettings.value.model_name)) {
+      console.warn('[TradingApp] 当前选择的模型不在新提供方的模型列表中，清空选择, model_name=', tempModelSettings.value.model_name)
       tempModelSettings.value.model_name = ''
+    } else {
+      console.log('[TradingApp] 保持当前模型选择, model_name=', tempModelSettings.value.model_name)
     }
   }
   

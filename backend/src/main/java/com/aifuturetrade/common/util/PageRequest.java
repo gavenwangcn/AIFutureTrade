@@ -3,7 +3,6 @@ package com.aifuturetrade.common.util;
 import lombok.Data;
 
 import java.io.Serializable;
-import java.util.List;
 
 /**
  * 分页查询请求参数

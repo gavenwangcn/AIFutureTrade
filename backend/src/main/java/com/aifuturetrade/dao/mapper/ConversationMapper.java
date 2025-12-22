@@ -20,7 +20,7 @@ public interface ConversationMapper extends BaseMapper<ConversationDO> {
      * @param limit 限制数量
      * @return 对话记录列表
      */
-    @Select("select * from conversations where model_id = #{modelId} order by created_at desc limit #{limit}")
+    @Select("select * from conversations where model_id = #{modelId} order by timestamp desc limit #{limit}")
     List<ConversationDO> selectConversationsByModelId(String modelId, Integer limit);
 
 }

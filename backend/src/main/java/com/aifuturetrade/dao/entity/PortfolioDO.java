@@ -32,6 +32,7 @@ public class PortfolioDO implements Serializable {
     /**
      * 模型ID（UUID格式）
      */
+    @TableField("model_id")
     private String modelId;
 
     /**
@@ -42,16 +43,19 @@ public class PortfolioDO implements Serializable {
     /**
      * 持仓方向（LONG/SHORT）
      */
+    @TableField("position_side")
     private String positionSide;
 
     /**
      * 持仓数量
      */
+    @TableField("position_amt")
     private Double positionAmt;
 
     /**
      * 平均开仓价格
      */
+    @TableField("avg_price")
     private Double avgPrice;
 
     /**
@@ -60,8 +64,15 @@ public class PortfolioDO implements Serializable {
     private Integer leverage;
 
     /**
+     * 初始保证金
+     */
+    @TableField("initial_margin")
+    private Double initialMargin;
+
+    /**
      * 未实现盈亏
      */
+    @TableField("unrealized_profit")
     private Double unrealizedProfit;
 
     /**

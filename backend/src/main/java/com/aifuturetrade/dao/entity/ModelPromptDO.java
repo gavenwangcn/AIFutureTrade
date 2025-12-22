@@ -32,16 +32,19 @@ public class ModelPromptDO implements Serializable {
     /**
      * 模型ID（UUID格式）
      */
+    @TableField("model_id")
     private String modelId;
 
     /**
      * 买入策略提示词
      */
+    @TableField("buy_prompt")
     private String buyPrompt;
 
     /**
      * 卖出策略提示词
      */
+    @TableField("sell_prompt")
     private String sellPrompt;
 
     /**
