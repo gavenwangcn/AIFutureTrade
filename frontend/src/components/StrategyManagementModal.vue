@@ -450,9 +450,23 @@ const loadStrategies = async () => {
       params.type = searchForm.value.type
     }
     
+    console.log('[StrategyManagementModal] 请求参数:', params)
     const result = await strategyApi.getPage(params)
+    console.log('[StrategyManagementModal] API返回的原始数据:', JSON.stringify(result, null, 2))
+    
     strategies.value = result.data || []
     total.value = result.total || 0
+    
+    // 详细记录每条策略的字段
+    console.log('[StrategyManagementModal] 解析后的策略列表数量:', strategies.value.length)
+    strategies.value.forEach((strategy, index) => {
+      console.log(`[StrategyManagementModal] 策略[${index}] - ID: ${strategy.id}, 名称: ${strategy.name}`)
+      console.log(`[StrategyManagementModal] 策略[${index}] - strategy_context:`, strategy.strategy_context)
+      console.log(`[StrategyManagementModal] 策略[${index}] - strategy_code:`, strategy.strategy_code)
+      console.log(`[StrategyManagementModal] 策略[${index}] - created_at:`, strategy.created_at)
+      console.log(`[StrategyManagementModal] 策略[${index}] - 所有字段:`, Object.keys(strategy))
+      console.log(`[StrategyManagementModal] 策略[${index}] - 完整对象:`, JSON.stringify(strategy, null, 2))
+    })
   } catch (err) {
     console.error('[StrategyManagementModal] Error loading strategies:', err)
     alert('加载策略列表失败: ' + (err.message || '未知错误'))

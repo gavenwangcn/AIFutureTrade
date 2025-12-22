@@ -40,6 +40,16 @@ public class StrategyController {
         logger.info("开始获取所有策略");
         List<StrategyDTO> strategies = strategyService.getAllStrategies();
         logger.info("获取所有策略成功，共 {} 条记录", strategies.size());
+        // 添加详细日志，输出每条策略的关键字段
+        for (StrategyDTO strategy : strategies) {
+            logger.debug("策略详情 - ID: {}, 名称: {}, 类型: {}, 策略内容长度: {}, 策略代码长度: {}, 创建时间: {}", 
+                    strategy.getId(), 
+                    strategy.getName(), 
+                    strategy.getType(),
+                    strategy.getStrategyContext() != null ? strategy.getStrategyContext().length() : 0,
+                    strategy.getStrategyCode() != null ? strategy.getStrategyCode().length() : 0,
+                    strategy.getCreatedAt());
+        }
         return new ResponseEntity<>(strategies, HttpStatus.OK);
     }
 
@@ -100,6 +110,18 @@ public class StrategyController {
         pageRequest.setPageSize(pageSize);
         PageResult<StrategyDTO> result = strategyService.getStrategiesByPage(pageRequest, name, type);
         logger.info("分页查询策略成功，总记录数: {}, 当前页记录数: {}", result.getTotal(), result.getData().size());
+        // 添加详细日志，输出每条策略的关键字段
+        for (StrategyDTO strategy : result.getData()) {
+            logger.debug("策略详情 - ID: {}, 名称: {}, 类型: {}, 策略内容: {}, 策略代码: {}, 创建时间: {}", 
+                    strategy.getId(), 
+                    strategy.getName(), 
+                    strategy.getType(),
+                    strategy.getStrategyContext() != null ? (strategy.getStrategyContext().length() > 50 ? 
+                            strategy.getStrategyContext().substring(0, 50) + "..." : strategy.getStrategyContext()) : "null",
+                    strategy.getStrategyCode() != null ? (strategy.getStrategyCode().length() > 50 ? 
+                            strategy.getStrategyCode().substring(0, 50) + "..." : strategy.getStrategyCode()) : "null",
+                    strategy.getCreatedAt());
+        }
         return new ResponseEntity<>(result, HttpStatus.OK);
     }
 
