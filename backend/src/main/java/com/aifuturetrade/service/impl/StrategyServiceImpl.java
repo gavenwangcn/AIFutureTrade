@@ -37,26 +37,10 @@ public class StrategyServiceImpl implements StrategyService {
 
     @Override
     public List<StrategyDTO> getAllStrategies() {
-        log.info("[StrategyService] 开始查询所有策略");
         List<StrategyDO> strategyDOList = strategyMapper.selectAllStrategies();
-        log.info("[StrategyService] 从数据库查询到 {} 条策略记录", strategyDOList.size());
-        
-        // 记录DO对象的原始数据
-        for (StrategyDO strategyDO : strategyDOList) {
-            log.debug("[StrategyService] DO对象 - ID: {}, 名称: {}, 策略内容长度: {}, 策略代码长度: {}, 创建时间: {}", 
-                    strategyDO.getId(),
-                    strategyDO.getName(),
-                    strategyDO.getStrategyContext() != null ? strategyDO.getStrategyContext().length() : 0,
-                    strategyDO.getStrategyCode() != null ? strategyDO.getStrategyCode().length() : 0,
-                    strategyDO.getCreatedAt());
-        }
-        
-        List<StrategyDTO> result = strategyDOList.stream()
+        return strategyDOList.stream()
                 .map(this::convertToDTO)
                 .collect(Collectors.toList());
-        
-        log.info("[StrategyService] 转换完成，返回 {} 条策略DTO", result.size());
-        return result;
     }
 
     @Override
@@ -84,9 +68,6 @@ public class StrategyServiceImpl implements StrategyService {
 
     @Override
     public PageResult<StrategyDTO> getStrategiesByPage(PageRequest pageRequest, String name, String type) {
-        log.info("getStrategiesByPage - 开始分页查询策略，pageNum: {}, pageSize: {}, name: {}, type: {}", 
-                pageRequest.getPageNum(), pageRequest.getPageSize(), name, type);
-        
         Page<StrategyDO> page = new Page<>(pageRequest.getPageNum(), pageRequest.getPageSize());
         
         LambdaQueryWrapper<StrategyDO> queryWrapper = new LambdaQueryWrapper<>();
@@ -99,50 +80,12 @@ public class StrategyServiceImpl implements StrategyService {
         queryWrapper.orderByDesc(StrategyDO::getCreatedAt);
         
         Page<StrategyDO> strategyDOPage = strategyMapper.selectPage(page, queryWrapper);
-        log.info("getStrategiesByPage - 数据库查询结果，总记录数: {}, 当前页记录数: {}", 
-                strategyDOPage.getTotal(), strategyDOPage.getRecords().size());
-        
-        // 记录DO对象的原始数据
-        for (StrategyDO strategyDO : strategyDOPage.getRecords()) {
-            log.debug("[StrategyService] DO对象 - ID: {}, 名称: {}, 策略内容: {}, 策略代码: {}, 创建时间: {}", 
-                    strategyDO.getId(),
-                    strategyDO.getName(),
-                    strategyDO.getStrategyContext() != null ? 
-                            (strategyDO.getStrategyContext().length() > 100 ? 
-                                    strategyDO.getStrategyContext().substring(0, 100) + "..." : 
-                                    strategyDO.getStrategyContext()) : "null",
-                    strategyDO.getStrategyCode() != null ? 
-                            (strategyDO.getStrategyCode().length() > 100 ? 
-                                    strategyDO.getStrategyCode().substring(0, 100) + "..." : 
-                                    strategyDO.getStrategyCode()) : "null",
-                    strategyDO.getCreatedAt());
-        }
         
         List<StrategyDTO> strategyDTOList = strategyDOPage.getRecords().stream()
                 .map(this::convertToDTO)
                 .collect(Collectors.toList());
         
-        // 记录DTO对象的转换后数据
-        for (StrategyDTO strategyDTO : strategyDTOList) {
-            log.debug("[StrategyService] DTO对象 - ID: {}, 名称: {}, 策略内容: {}, 策略代码: {}, 创建时间: {}", 
-                    strategyDTO.getId(),
-                    strategyDTO.getName(),
-                    strategyDTO.getStrategyContext() != null ? 
-                            (strategyDTO.getStrategyContext().length() > 100 ? 
-                                    strategyDTO.getStrategyContext().substring(0, 100) + "..." : 
-                                    strategyDTO.getStrategyContext()) : "null",
-                    strategyDTO.getStrategyCode() != null ? 
-                            (strategyDTO.getStrategyCode().length() > 100 ? 
-                                    strategyDTO.getStrategyCode().substring(0, 100) + "..." : 
-                                    strategyDTO.getStrategyCode()) : "null",
-                    strategyDTO.getCreatedAt());
-        }
-        
-        PageResult<StrategyDTO> result = PageResult.build(strategyDTOList, strategyDOPage.getTotal(), pageRequest.getPageNum(), pageRequest.getPageSize());
-        log.info("getStrategiesByPage - 返回分页结果，total: {}, pageNum: {}, pageSize: {}, data size: {}", 
-                result.getTotal(), result.getPageNum(), result.getPageSize(), result.getData().size());
-        
-        return result;
+        return PageResult.build(strategyDTOList, strategyDOPage.getTotal(), pageRequest.getPageNum(), pageRequest.getPageSize());
     }
 
     @Override
@@ -238,17 +181,6 @@ public class StrategyServiceImpl implements StrategyService {
     private StrategyDTO convertToDTO(StrategyDO strategyDO) {
         StrategyDTO strategyDTO = new StrategyDTO();
         BeanUtils.copyProperties(strategyDO, strategyDTO);
-        
-        // 添加详细日志，记录转换过程
-        log.debug("convertToDTO - DO字段值: strategyContext={}, strategyCode={}, createdAt={}", 
-                strategyDO.getStrategyContext(), 
-                strategyDO.getStrategyCode(), 
-                strategyDO.getCreatedAt());
-        log.debug("convertToDTO - DTO字段值: strategyContext={}, strategyCode={}, createdAt={}", 
-                strategyDTO.getStrategyContext(), 
-                strategyDTO.getStrategyCode(), 
-                strategyDTO.getCreatedAt());
-        
         return strategyDTO;
     }
 
