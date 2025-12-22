@@ -313,11 +313,18 @@ const loadData = async () => {
   
   loading.value = true
   try {
+    // 构建查询参数，空字符串或空值时不传递该参数（实现全查询）
     const params = {
-      name: searchForm.value.name || undefined,
-      type: searchForm.value.type || undefined,
       pageNum: currentPage.value,
       pageSize: pageSize.value
+    }
+    // 只有当策略名称不为空时才添加name参数
+    if (searchForm.value.name && searchForm.value.name.trim()) {
+      params.name = searchForm.value.name.trim()
+    }
+    // 只有当策略类型不为空时才添加type参数
+    if (searchForm.value.type && searchForm.value.type.trim()) {
+      params.type = searchForm.value.type.trim()
     }
     const response = await modelApi.getStrategyConfig(props.modelId, params)
     allStrategies.value = response.strategies || []

@@ -76,8 +76,17 @@ export async function apiRequest(endpoint, options = {}) {
 export async function apiGet(endpoint, params = {}) {
   let url = endpoint
   if (Object.keys(params).length > 0) {
-    const searchParams = new URLSearchParams(params)
-    url = `${endpoint}?${searchParams.toString()}`
+    // 过滤掉 undefined、null 和空字符串的参数
+    const filteredParams = {}
+    for (const [key, value] of Object.entries(params)) {
+      if (value !== undefined && value !== null && value !== '') {
+        filteredParams[key] = value
+      }
+    }
+    if (Object.keys(filteredParams).length > 0) {
+      const searchParams = new URLSearchParams(filteredParams)
+      url = `${endpoint}?${searchParams.toString()}`
+    }
   }
   return apiRequest(url, { method: 'GET' })
 }

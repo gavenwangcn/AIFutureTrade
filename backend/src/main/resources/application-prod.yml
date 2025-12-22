@@ -24,10 +24,12 @@ spring:
       test-on-borrow: false
       test-on-return: false
       test-while-idle: true  # 空闲时验证连接有效性
-      # 连接泄漏检测和回收（重要：防止连接泄漏）
-      remove-abandoned: true  # 启用连接泄漏检测
-      remove-abandoned-timeout-millis: 300000  # 5分钟未使用的连接视为泄漏，强制回收
-      log-abandoned: true  # 记录泄漏连接的堆栈信息，便于排查
+      # 连接泄漏检测和回收（生产环境禁用，避免性能影响）
+      # 注意：remove-abandoned 在生产环境不建议使用，Druid会输出警告
+      # 如果确实需要检测连接泄漏，建议通过监控和日志来排查，而不是启用此功能
+      remove-abandoned: false  # 生产环境禁用连接泄漏自动检测
+      # remove-abandoned-timeout-millis: 300000  # 已禁用，无需配置
+      # log-abandoned: true  # 已禁用，无需配置
       # 连接池监控
       filters: stat,wall
       pool-name: DruidCP

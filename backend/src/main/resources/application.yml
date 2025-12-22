@@ -50,10 +50,11 @@ spring:
       filters: stat,wall
       # 连接池名称
       pool-name: DruidCP
-      # 连接泄漏检测和回收
-      remove-abandoned: true
-      remove-abandoned-timeout-millis: 300000  # 5分钟未使用的连接视为泄漏
-      log-abandoned: true  # 记录泄漏连接的堆栈信息
+      # 连接泄漏检测和回收（默认禁用，避免生产环境警告）
+      # 开发环境可以在 application-dev.yml 中启用此功能来检测连接泄漏
+      remove-abandoned: false  # 默认禁用，开发环境可在 application-dev.yml 中启用
+      # remove-abandoned-timeout-millis: 300000  # 已禁用，无需配置
+      # log-abandoned: true  # 已禁用，无需配置
       # 启用监控统计
       use-global-data-source-stat: true
       # 连接超时配置
