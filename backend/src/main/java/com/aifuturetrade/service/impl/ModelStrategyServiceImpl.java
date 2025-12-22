@@ -5,6 +5,7 @@ import com.aifuturetrade.dao.mapper.ModelStrategyMapper;
 import com.aifuturetrade.service.ModelStrategyService;
 import com.aifuturetrade.service.dto.ModelStrategyDTO;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.BeanUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
@@ -19,6 +20,7 @@ import java.util.stream.Collectors;
  * 业务逻辑实现类：模型关联策略
  * 实现模型关联策略的业务逻辑
  */
+@Slf4j
 @Service
 public class ModelStrategyServiceImpl implements ModelStrategyService {
 

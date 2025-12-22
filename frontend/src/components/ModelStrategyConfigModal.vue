@@ -53,7 +53,15 @@
               :class="['strategy-item', { selected: selectedLeftStrategyId === strategy.id }]"
               @click="selectLeftStrategy(strategy.id)"
             >
-              <div class="strategy-name">{{ strategy.name }}</div>
+              <div class="strategy-item-left">
+                <div class="strategy-name">{{ strategy.name }}</div>
+                <div class="strategy-meta">
+                  <span :class="['badge', strategy.type === 'buy' ? 'badge-long' : 'badge-short']">
+                    {{ strategy.type === 'buy' ? '买' : '卖' }}
+                  </span>
+                  <span class="strategy-time">{{ formatDateTime(strategy.created_at) }}</span>
+                </div>
+              </div>
             </div>
             <div v-if="filteredAllStrategies.length === 0" class="empty-state">
               暂无策略数据
@@ -119,19 +127,26 @@
           <div v-else class="strategy-list">
             <div
               v-for="item in modelStrategies"
-              :key="item.id"
-              :class="['strategy-item', { selected: selectedRightStrategyId === item.id }]"
-              @click="selectRightStrategy(item.id)"
+              :key="item.id || item.strategy_id"
+              :class="['strategy-item', { selected: selectedRightStrategyId === (item.id || item.strategy_id) }]"
+              @click="selectRightStrategy(item.id || item.strategy_id)"
             >
-              <div class="strategy-item-content">
-                <div class="strategy-name">{{ getStrategyName(item.strategyId) }}</div>
+              <div class="strategy-item-right">
+                <div class="strategy-info">
+                  <div class="strategy-name">{{ item.strategy_name || getStrategyName(item.strategy_id || item.strategyId) }}</div>
+                  <div class="strategy-meta">
+                    <span :class="['badge', (item.strategy_type || item.type) === 'buy' ? 'badge-long' : 'badge-short']">
+                      {{ (item.strategy_type || item.type) === 'buy' ? '买' : '卖' }}
+                    </span>
+                  </div>
+                </div>
                 <div class="priority-input-group">
                   <label>优先级:</label>
                   <input 
                     type="number" 
                     class="priority-input" 
                     :value="item.priority || 0"
-                    @input="updatePriority(item.id, $event.target.value)"
+                    @input="updatePriority(item.id || item.strategy_id, $event.target.value)"
                     @click.stop
                     min="0"
                   />
@@ -199,7 +214,7 @@ const totalPages = ref(0)
 
 // 计算属性：过滤后的所有策略（排除已关联的策略）
 const filteredAllStrategies = computed(() => {
-  const modelStrategyIds = new Set(modelStrategies.value.map(ms => ms.strategyId))
+  const modelStrategyIds = new Set(modelStrategies.value.map(ms => ms.strategy_id || ms.strategyId))
   return allStrategies.value.filter(strategy => !modelStrategyIds.has(strategy.id))
 })
 
@@ -236,7 +251,7 @@ const addStrategyToModel = () => {
   if (!strategy) return
   
   // 检查是否已存在
-  const exists = modelStrategies.value.find(ms => ms.strategyId === selectedLeftStrategyId.value)
+  const exists = modelStrategies.value.find(ms => (ms.strategy_id || ms.strategyId) === selectedLeftStrategyId.value)
   if (exists) {
     alert('该策略已添加到模型中')
     return
@@ -245,9 +260,12 @@ const addStrategyToModel = () => {
   // 添加到模型策略列表
   const newModelStrategy = {
     id: `temp_${Date.now()}_${Math.random()}`,
+    strategy_id: selectedLeftStrategyId.value,
     strategyId: selectedLeftStrategyId.value,
-    priority: 0,
-    type: strategy.type
+    strategy_name: strategy.name,
+    strategy_type: strategy.type,
+    type: strategy.type,
+    priority: 0
   }
   modelStrategies.value.push(newModelStrategy)
   priorityMap.value[newModelStrategy.id] = 0
@@ -260,9 +278,9 @@ const addStrategyToModel = () => {
 const removeStrategyFromModel = () => {
   if (!selectedRightStrategyId.value) return
   
-  const index = modelStrategies.value.findIndex(ms => ms.id === selectedRightStrategyId.value)
+  const index = modelStrategies.value.findIndex(ms => (ms.id || ms.strategy_id) === selectedRightStrategyId.value)
   if (index !== -1) {
-    const removedId = modelStrategies.value[index].id
+    const removedId = modelStrategies.value[index].id || modelStrategies.value[index].strategy_id
     modelStrategies.value.splice(index, 1)
     delete priorityMap.value[removedId]
   }
@@ -277,7 +295,7 @@ const updatePriority = (modelStrategyId, value) => {
   priorityMap.value[modelStrategyId] = priority
   
   // 同时更新modelStrategies中的优先级
-  const item = modelStrategies.value.find(ms => ms.id === modelStrategyId)
+  const item = modelStrategies.value.find(ms => (ms.id || ms.strategy_id) === modelStrategyId)
   if (item) {
     item.priority = priority
   }
@@ -314,7 +332,8 @@ const loadData = async () => {
     // 初始化优先级映射
     priorityMap.value = {}
     modelStrategies.value.forEach(ms => {
-      priorityMap.value[ms.id] = ms.priority || 0
+      const id = ms.id || ms.strategy_id
+      priorityMap.value[id] = ms.priority || 0
     })
   } catch (error) {
     console.error('加载策略配置失败:', error)
@@ -331,10 +350,13 @@ const handleSave = async () => {
   saving.value = true
   try {
     // 构建保存数据
-    const strategies = modelStrategies.value.map(ms => ({
-      strategyId: ms.strategyId,
-      priority: priorityMap.value[ms.id] || ms.priority || 0
-    }))
+    const strategies = modelStrategies.value.map(ms => {
+      const id = ms.id || ms.strategy_id
+      return {
+        strategyId: ms.strategy_id || ms.strategyId,
+        priority: priorityMap.value[id] || ms.priority || 0
+      }
+    })
     
     await modelApi.saveStrategyConfig(props.modelId, { strategies })
     
@@ -472,13 +494,56 @@ watch(() => props.modelId, () => {
 .strategy-name {
   font-weight: 500;
   color: var(--text-1);
+  margin-bottom: 6px;
 }
 
-.strategy-item-content {
+.strategy-item-left {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.strategy-item-right {
   display: flex;
   justify-content: space-between;
   align-items: center;
   gap: 12px;
+  width: 100%;
+}
+
+.strategy-info {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  flex: 1;
+}
+
+.strategy-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.badge {
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.badge-long {
+  background: rgba(0, 180, 42, 0.1);
+  color: var(--success);
+}
+
+.badge-short {
+  background: rgba(245, 63, 63, 0.1);
+  color: var(--danger);
+}
+
+.strategy-time {
+  font-size: 12px;
+  color: var(--text-2);
 }
 
 .priority-input-group {
@@ -504,20 +569,20 @@ watch(() => props.modelId, () => {
 
 .divider-with-actions {
   position: relative;
-  width: 1px;
+  width: 2px;
   background: var(--border-1);
   flex-shrink: 0;
-  margin: 0 20px;
+  margin: 0;
+  height: 100%;
 }
 
 .divider-line {
   position: absolute;
-  left: 50%;
+  left: 0;
   top: 0;
   bottom: 0;
-  width: 1px;
+  width: 2px;
   background: var(--border-1);
-  transform: translateX(-50%);
 }
 
 .action-buttons {
