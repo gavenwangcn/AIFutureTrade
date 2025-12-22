@@ -1645,9 +1645,11 @@ let portfolioSymbolsRefreshInterval = null // 模型持仓合约列表自动刷�
    * 加载提供方列表（用于显示提供方名称）
    */
   const loadProviders = async () => {
+    console.log('[TradingApp] 开始加载提供方列表')
     try {
       const { providerApi } = await import('../services/api.js')
       providers.value = await providerApi.getAll()
+      console.log('[TradingApp] 加载提供方列表成功, providers=', providers.value.map(p => ({ id: p.id, name: p.name, models: p.models })))
     } catch (error) {
       console.error('[TradingApp] Error loading providers:', error)
     }
@@ -1809,8 +1811,8 @@ let portfolioSymbolsRefreshInterval = null // 模型持仓合约列表自动刷�
         console.log('[TradingApp] 调用 handleProviderChangeInSettings, providerId=', providerId)
         handleProviderChangeInSettings()
       } else {
-        availableModelsInSettings.value = []
         console.log('[TradingApp] providerId 为空，清空可用模型列表')
+        availableModelsInSettings.value = []
       }
     } catch (error) {
       console.error('[TradingApp] Error loading model settings:', error)
@@ -1852,12 +1854,12 @@ let portfolioSymbolsRefreshInterval = null // 模型持仓合约列表自动刷�
    */
   const handleProviderChangeInSettings = () => {
     const providerId = tempModelSettings.value.provider_id
+    console.log('[TradingApp] handleProviderChangeInSettings 被调用, providerId=', providerId)
     if (!providerId || providerId === '') {
+      console.log('[TradingApp] providerId 为空，清空可用模型列表和模型选择')
       availableModelsInSettings.value = []
       // 如果提供方被清空，也清空模型选择
-      if (!providerId || providerId === '') {
-        tempModelSettings.value.model_name = ''
-      }
+      tempModelSettings.value.model_name = ''
       return
     }
     

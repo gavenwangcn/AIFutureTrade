@@ -1,5 +1,6 @@
 package com.aifuturetrade.service.dto;
 
+import com.fasterxml.jackson.annotation.JsonProperty;
 import lombok.Data;
 
 import java.io.Serializable;
@@ -27,11 +28,13 @@ public class ModelDTO implements Serializable {
     /**
      * 提供方ID（UUID格式）
      */
+    @JsonProperty("provider_id")
     private String providerId;
 
     /**
      * 模型名称（如gpt-3.5-turbo）
      */
+    @JsonProperty("model_name")
     private String modelName;
 
     /**
