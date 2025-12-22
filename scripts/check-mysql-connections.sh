@@ -14,6 +14,9 @@ MYSQL_PASSWORD=${MYSQL_PASSWORD:-aifuturetrade123}
 MYSQL_DATABASE=${MYSQL_DATABASE:-aifuturetrade}
 MYSQL_CONTAINER=${MYSQL_CONTAINER:-aifuturetrade-mysql}
 
+# Docker 环境下使用 root 用户（有完整权限查看所有连接信息）
+MYSQL_ROOT_PASSWORD=${MYSQL_ROOT_PASSWORD:-aifuturetrade_root123}
+
 # 检测是否使用 Docker
 USE_DOCKER=false
 if command -v docker &> /dev/null; then
@@ -27,24 +30,29 @@ fi
 # 构建 MySQL 命令
 if [ "$USE_DOCKER" = true ]; then
     # 使用 Docker exec 在容器内执行 MySQL 命令
+    # 在容器内使用 root 用户连接，确保有权限查看所有连接信息
+    # 不指定 host，使用默认的 socket 连接（容器内推荐方式）
     # 注意：密码通过环境变量传递，避免在命令行中暴露
-    MYSQL_CMD="docker exec -i -e MYSQL_PWD=\"$MYSQL_PASSWORD\" $MYSQL_CONTAINER mysql"
-    MYSQL_ARGS="-u$MYSQL_USER $MYSQL_DATABASE"
+    MYSQL_CMD="docker exec -i -e MYSQL_PWD=\"$MYSQL_ROOT_PASSWORD\" $MYSQL_CONTAINER mysql"
+    MYSQL_ARGS="-uroot $MYSQL_DATABASE"
+    DOCKER_USER="root"
 else
     # 使用本地 MySQL 客户端
     # 注意：密码通过环境变量传递，避免在命令行中暴露
     export MYSQL_PWD="$MYSQL_PASSWORD"
     MYSQL_CMD="mysql"
     MYSQL_ARGS="-h $MYSQL_HOST -P $MYSQL_PORT -u $MYSQL_USER $MYSQL_DATABASE"
+    DOCKER_USER="$MYSQL_USER"
 fi
 
 echo "连接信息:"
 if [ "$USE_DOCKER" = true ]; then
     echo "  方式: Docker 容器 ($MYSQL_CONTAINER)"
+    echo "  用户: $DOCKER_USER (容器内使用 root 用户以确保完整权限)"
 else
     echo "  Host: $MYSQL_HOST:$MYSQL_PORT"
+    echo "  用户: $DOCKER_USER"
 fi
-echo "  User: $MYSQL_USER"
 echo "  Database: $MYSQL_DATABASE"
 echo ""
 
