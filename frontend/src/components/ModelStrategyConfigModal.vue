@@ -61,6 +61,13 @@
                   </span>
                   <span class="strategy-time">{{ formatDateTime(strategy.created_at) }}</span>
                 </div>
+                <div 
+                  v-if="strategy.strategy_context" 
+                  class="strategy-context"
+                  :title="strategy.strategy_context"
+                >
+                  {{ truncateText(strategy.strategy_context, 100) }}
+                </div>
               </div>
             </div>
             <div v-if="filteredAllStrategies.length === 0" class="empty-state">
@@ -104,57 +111,100 @@
             >
               <i class="bi bi-arrow-right"></i>
             </button>
-            <button 
-              class="btn-action btn-remove" 
-              @click="removeStrategyFromModel"
-              :disabled="!selectedRightStrategyId"
-              title="从模型移除"
-            >
-              <i class="bi bi-arrow-left"></i>
-            </button>
+          <button 
+            class="btn-action btn-remove" 
+            @click="removeStrategyFromModel"
+            :disabled="!selectedRightStrategyId || !selectedRightStrategyType"
+            title="从模型移除"
+          >
+            <i class="bi bi-arrow-left"></i>
+          </button>
           </div>
         </div>
 
-        <!-- 右侧：模型已关联的策略列表 -->
-        <div class="strategy-list-panel right-panel">
-          <div class="panel-header">
-            <h4>已配置策略</h4>
-          </div>
-          <div v-if="loading" class="loading-container">
-            <i class="bi bi-arrow-repeat spin" style="font-size: 24px; color: var(--primary);"></i>
-            <p style="margin-top: 12px; color: var(--text-2);">加载中...</p>
-          </div>
-          <div v-else class="strategy-list">
-            <div
-              v-for="item in modelStrategies"
-              :key="item.id || item.strategy_id"
-              :class="['strategy-item', { selected: selectedRightStrategyId === (item.id || item.strategy_id) }]"
-              @click="selectRightStrategy(item.id || item.strategy_id)"
-            >
-              <div class="strategy-item-right">
-                <div class="strategy-info">
-                  <div class="strategy-name">{{ item.strategy_name || getStrategyName(item.strategy_id || item.strategyId) }}</div>
-                  <div class="strategy-meta">
-                    <span :class="['badge', (item.strategy_type || item.type) === 'buy' ? 'badge-long' : 'badge-short']">
-                      {{ (item.strategy_type || item.type) === 'buy' ? '买' : '卖' }}
-                    </span>
+        <!-- 右侧：模型已关联的策略列表（拆分为买入和卖出两个框） -->
+        <div class="right-panel-container">
+          <!-- 已配置买入策略 -->
+          <div class="strategy-list-panel right-panel buy-panel">
+            <div class="panel-header">
+              <h4>已配置买入策略</h4>
+            </div>
+            <div v-if="loading" class="loading-container">
+              <i class="bi bi-arrow-repeat spin" style="font-size: 24px; color: var(--primary);"></i>
+              <p style="margin-top: 12px; color: var(--text-2);">加载中...</p>
+            </div>
+            <div v-else class="strategy-list">
+              <div
+                v-for="item in buyStrategies"
+                :key="item.id || item.strategy_id"
+                :class="['strategy-item', { selected: selectedRightStrategyId === (item.id || item.strategy_id) && selectedRightStrategyType === 'buy' }]"
+                @click="selectRightStrategy(item.id || item.strategy_id, 'buy')"
+              >
+                <div class="strategy-item-right">
+                  <div class="strategy-info">
+                    <div class="strategy-name">{{ item.strategy_name || getStrategyName(item.strategy_id || item.strategyId) }}</div>
+                    <div class="strategy-meta">
+                      <span class="badge badge-long">买</span>
+                    </div>
+                  </div>
+                  <div class="priority-input-group">
+                    <label>优先级:</label>
+                    <input 
+                      type="number" 
+                      class="priority-input" 
+                      :value="item.priority || 0"
+                      @input="updatePriority(item.id || item.strategy_id, $event.target.value)"
+                      @click.stop
+                      min="0"
+                    />
                   </div>
                 </div>
-                <div class="priority-input-group">
-                  <label>优先级:</label>
-                  <input 
-                    type="number" 
-                    class="priority-input" 
-                    :value="item.priority || 0"
-                    @input="updatePriority(item.id || item.strategy_id, $event.target.value)"
-                    @click.stop
-                    min="0"
-                  />
-                </div>
+              </div>
+              <div v-if="buyStrategies.length === 0" class="empty-state">
+                暂无已配置买入策略
               </div>
             </div>
-            <div v-if="modelStrategies.length === 0" class="empty-state">
-              暂无已配置策略
+          </div>
+
+          <!-- 已配置卖出策略 -->
+          <div class="strategy-list-panel right-panel sell-panel">
+            <div class="panel-header">
+              <h4>已配置卖出策略</h4>
+            </div>
+            <div v-if="loading" class="loading-container">
+              <i class="bi bi-arrow-repeat spin" style="font-size: 24px; color: var(--primary);"></i>
+              <p style="margin-top: 12px; color: var(--text-2);">加载中...</p>
+            </div>
+            <div v-else class="strategy-list">
+              <div
+                v-for="item in sellStrategies"
+                :key="item.id || item.strategy_id"
+                :class="['strategy-item', { selected: selectedRightStrategyId === (item.id || item.strategy_id) && selectedRightStrategyType === 'sell' }]"
+                @click="selectRightStrategy(item.id || item.strategy_id, 'sell')"
+              >
+                <div class="strategy-item-right">
+                  <div class="strategy-info">
+                    <div class="strategy-name">{{ item.strategy_name || getStrategyName(item.strategy_id || item.strategyId) }}</div>
+                    <div class="strategy-meta">
+                      <span class="badge badge-short">卖</span>
+                    </div>
+                  </div>
+                  <div class="priority-input-group">
+                    <label>优先级:</label>
+                    <input 
+                      type="number" 
+                      class="priority-input" 
+                      :value="item.priority || 0"
+                      @input="updatePriority(item.id || item.strategy_id, $event.target.value)"
+                      @click.stop
+                      min="0"
+                    />
+                  </div>
+                </div>
+              </div>
+              <div v-if="sellStrategies.length === 0" class="empty-state">
+                暂无已配置卖出策略
+              </div>
             </div>
           </div>
         </div>
@@ -205,6 +255,7 @@ const allStrategies = ref([])
 const modelStrategies = ref([])
 const selectedLeftStrategyId = ref(null)
 const selectedRightStrategyId = ref(null)
+const selectedRightStrategyType = ref(null) // 记录选中的右侧策略类型（buy/sell）
 const priorityMap = ref({}) // 存储每个策略的优先级
 // 分页状态
 const currentPage = ref(1)
@@ -216,6 +267,16 @@ const totalPages = ref(0)
 const filteredAllStrategies = computed(() => {
   const modelStrategyIds = new Set(modelStrategies.value.map(ms => ms.strategy_id || ms.strategyId))
   return allStrategies.value.filter(strategy => !modelStrategyIds.has(strategy.id))
+})
+
+// 计算属性：买入策略列表
+const buyStrategies = computed(() => {
+  return modelStrategies.value.filter(ms => (ms.strategy_type || ms.type) === 'buy')
+})
+
+// 计算属性：卖出策略列表
+const sellStrategies = computed(() => {
+  return modelStrategies.value.filter(ms => (ms.strategy_type || ms.type) === 'sell')
 })
 
 // 分页处理
@@ -249,15 +310,24 @@ const formatDateTime = (dateTime) => {
   }
 }
 
+// 截断文本，超过指定长度显示省略号
+const truncateText = (text, maxLength = 100) => {
+  if (!text) return ''
+  if (text.length <= maxLength) return text
+  return text.substring(0, maxLength) + '...'
+}
+
 // 选择左侧策略
 const selectLeftStrategy = (strategyId) => {
   selectedLeftStrategyId.value = strategyId
   selectedRightStrategyId.value = null
+  selectedRightStrategyType.value = null
 }
 
 // 选择右侧策略
-const selectRightStrategy = (strategyId) => {
+const selectRightStrategy = (strategyId, strategyType) => {
   selectedRightStrategyId.value = strategyId
+  selectedRightStrategyType.value = strategyType
   selectedLeftStrategyId.value = null
 }
 
@@ -268,14 +338,17 @@ const addStrategyToModel = () => {
   const strategy = allStrategies.value.find(s => s.id === selectedLeftStrategyId.value)
   if (!strategy) return
   
-  // 检查是否已存在
-  const exists = modelStrategies.value.find(ms => (ms.strategy_id || ms.strategyId) === selectedLeftStrategyId.value)
+  // 检查是否已存在（同一策略类型）
+  const exists = modelStrategies.value.find(ms => 
+    (ms.strategy_id || ms.strategyId) === selectedLeftStrategyId.value && 
+    (ms.strategy_type || ms.type) === strategy.type
+  )
   if (exists) {
-    alert('该策略已添加到模型中')
+    alert(`该${strategy.type === 'buy' ? '买入' : '卖出'}策略已添加到模型中`)
     return
   }
   
-  // 添加到模型策略列表
+  // 添加到模型策略列表（根据策略类型自动添加到对应的框）
   const newModelStrategy = {
     id: `temp_${Date.now()}_${Math.random()}`,
     strategy_id: selectedLeftStrategyId.value,
@@ -294,9 +367,12 @@ const addStrategyToModel = () => {
 
 // 从模型移除策略
 const removeStrategyFromModel = () => {
-  if (!selectedRightStrategyId.value) return
+  if (!selectedRightStrategyId.value || !selectedRightStrategyType.value) return
   
-  const index = modelStrategies.value.findIndex(ms => (ms.id || ms.strategy_id) === selectedRightStrategyId.value)
+  const index = modelStrategies.value.findIndex(ms => 
+    (ms.id || ms.strategy_id) === selectedRightStrategyId.value &&
+    (ms.strategy_type || ms.type) === selectedRightStrategyType.value
+  )
   if (index !== -1) {
     const removedId = modelStrategies.value[index].id || modelStrategies.value[index].strategy_id
     modelStrategies.value.splice(index, 1)
@@ -305,6 +381,7 @@ const removeStrategyFromModel = () => {
   
   // 清空选择
   selectedRightStrategyId.value = null
+  selectedRightStrategyType.value = null
 }
 
 // 更新优先级
@@ -405,6 +482,7 @@ const handleClose = () => {
   currentPage.value = 1
   selectedLeftStrategyId.value = null
   selectedRightStrategyId.value = null
+  selectedRightStrategyType.value = null
   emit('update:visible', false)
   emit('close')
 }
@@ -468,6 +546,14 @@ watch(() => props.modelId, () => {
   position: relative;
 }
 
+.right-panel-container {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 0;
+}
+
 .strategy-list-panel {
   flex: 1;
   display: flex;
@@ -475,6 +561,12 @@ watch(() => props.modelId, () => {
   border: 1px solid var(--border-1);
   border-radius: 8px;
   overflow: hidden;
+  min-height: 0;
+}
+
+.right-panel-container .strategy-list-panel {
+  flex: 1;
+  min-height: 200px;
 }
 
 .panel-header {
@@ -569,6 +661,19 @@ watch(() => props.modelId, () => {
 .strategy-time {
   font-size: 12px;
   color: var(--text-2);
+}
+
+.strategy-context {
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--text-2);
+  line-height: 1.5;
+  word-break: break-word;
+  cursor: help;
+  padding: 6px;
+  background: var(--bg-2);
+  border-radius: 4px;
+  border-left: 3px solid var(--primary);
 }
 
 .priority-input-group {
