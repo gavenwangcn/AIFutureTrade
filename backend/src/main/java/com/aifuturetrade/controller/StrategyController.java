@@ -99,7 +99,7 @@ public class StrategyController {
         pageRequest.setPageNum(pageNum);
         pageRequest.setPageSize(pageSize);
         PageResult<StrategyDTO> result = strategyService.getStrategiesByPage(pageRequest, name, type);
-        logger.info("分页查询策略成功，总记录数: {}, 当前页记录数: {}", result.getTotal(), result.getList().size());
+        logger.info("分页查询策略成功，总记录数: {}, 当前页记录数: {}", result.getTotal(), result.getData().size());
         return new ResponseEntity<>(result, HttpStatus.OK);
     }
 
