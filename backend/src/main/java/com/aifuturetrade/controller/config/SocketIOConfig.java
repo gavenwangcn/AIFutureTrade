@@ -92,14 +92,22 @@ public class SocketIOConfig {
     @PostConstruct
     public void startServer() {
         try {
-            // server字段在@Bean方法中已经设置，直接使用即可
-            if (server == null) {
-                logger.warn("Socket.IO server is null, cannot start. This may be due to initialization order issue.");
+            // 不要直接依赖server字段，而是通过获取Bean来确保实例已创建
+            SocketIOServer socketIOServer = socketIOServer();
+            
+            if (socketIOServer == null) {
+                logger.warn("Socket.IO server is null, cannot start. This may be due to initialization issue.");
                 logger.warn("Socket.IO functionality will not be available, but application will continue to run.");
                 return;
             }
             
-            server.start();
+            // 检查服务器是否已经启动，避免重复启动
+            if (!socketIOServer.getAllClients().isEmpty()) {
+                logger.info("Socket.IO server is already running");
+                return;
+            }
+            
+            socketIOServer.start();
             logger.info("Socket.IO server started on port {} (context: /socket.io)", socketioPort);
             logger.info("Note: Socket.IO uses a separate port from HTTP server. HTTP server: {}, Socket.IO: {}", 
                        serverPort, socketioPort);
@@ -112,9 +120,15 @@ public class SocketIOConfig {
 
     @PreDestroy
     public void stopServer() {
-        if (server != null) {
-            server.stop();
-            logger.info("Socket.IO server stopped");
+        try {
+            // 同样通过获取Bean来确保使用正确的实例
+            SocketIOServer socketIOServer = socketIOServer();
+            if (socketIOServer != null) {
+                socketIOServer.stop();
+                logger.info("Socket.IO server stopped");
+            }
+        } catch (Exception e) {
+            logger.error("Failed to stop Socket.IO server", e);
         }
     }
 }

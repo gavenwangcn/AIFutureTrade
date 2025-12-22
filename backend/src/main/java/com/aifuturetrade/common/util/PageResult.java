@@ -36,20 +36,20 @@ public class PageResult<T> implements Serializable {
     /**
      * 数据列表
      */
-    private List<T> list;
+    private List<T> data;
 
     /**
      * 构建分页结果
-     * @param list 数据列表
+     * @param data 数据列表
      * @param total 总记录数
      * @param pageNum 当前页码
      * @param pageSize 每页记录数
      * @param <T> 数据类型
      * @return 分页结果
      */
-    public static <T> PageResult<T> build(List<T> list, Long total, Integer pageNum, Integer pageSize) {
+    public static <T> PageResult<T> build(List<T> data, Long total, Integer pageNum, Integer pageSize) {
         PageResult<T> result = new PageResult<>();
-        result.setList(list);
+        result.setData(data);
         result.setTotal(total);
         result.setPageNum(pageNum);
         result.setPageSize(pageSize);

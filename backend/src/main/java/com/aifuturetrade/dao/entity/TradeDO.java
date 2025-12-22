@@ -47,6 +47,7 @@ public class TradeDO implements Serializable {
     /**
      * 交易信号（buy_to_enter, sell_to_enter, close_position, stop_loss, take_profit）
      */
+    @com.baomidou.mybatisplus.annotation.TableField("`signal`")
     private String signal;
 
     /**
