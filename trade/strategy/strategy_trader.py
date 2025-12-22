@@ -117,6 +117,8 @@ class StrategyTrader(Trader):
             
             try:
                 # 执行策略代码（使用StrategyCodeExecutor，统一使用market_state）
+                # 注意：策略代码执行可能会调用外部API（如Binance），如果发生异常，
+                # 数据库连接会在 _with_connection 的 finally 块中自动释放
                 decision_result = self.code_executor.execute_strategy_code(
                     strategy_code=strategy_code,
                     strategy_name=strategy_name,
@@ -154,9 +156,12 @@ class StrategyTrader(Trader):
                     logger.debug(f"[StrategyTrader] [Model {effective_model_id}] 策略 {strategy_name} 返回结果无效，继续下一个策略")
             
             except Exception as e:
+                # 记录异常，但继续执行下一个策略
+                # 数据库连接会在 _with_connection 的异常处理和 finally 块中自动释放
                 logger.error(f"[StrategyTrader] [Model {effective_model_id}] 执行策略 {strategy_name} 失败: {e}")
                 import traceback
                 logger.debug(f"[StrategyTrader] 异常堆栈:\n{traceback.format_exc()}")
+                # 继续执行下一个策略，不中断整个决策流程
                 continue
         
         # 所有策略都未返回有效信号，返回hold决策
@@ -234,6 +239,8 @@ class StrategyTrader(Trader):
             
             try:
                 # 执行策略代码（使用StrategyCodeExecutor）
+                # 注意：策略代码执行可能会调用外部API（如Binance），如果发生异常，
+                # 数据库连接会在 _with_connection 的 finally 块中自动释放
                 decision_result = self.code_executor.execute_strategy_code(
                     strategy_code=strategy_code,
                     strategy_name=strategy_name,
@@ -271,9 +278,12 @@ class StrategyTrader(Trader):
                     logger.debug(f"[StrategyTrader] [Model {effective_model_id}] 策略 {strategy_name} 返回结果无效，继续下一个策略")
             
             except Exception as e:
+                # 记录异常，但继续执行下一个策略
+                # 数据库连接会在 _with_connection 的异常处理和 finally 块中自动释放
                 logger.error(f"[StrategyTrader] [Model {effective_model_id}] 执行策略 {strategy_name} 失败: {e}")
                 import traceback
                 logger.debug(f"[StrategyTrader] 异常堆栈:\n{traceback.format_exc()}")
+                # 继续执行下一个策略，不中断整个决策流程
                 continue
         
         # 所有策略都未返回有效信号，返回hold决策

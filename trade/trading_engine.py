@@ -2562,6 +2562,11 @@ class TradingEngine:
                     results.append(result)
 
                 except Exception as e:
+                    # 记录异常，但继续执行其他交易决策
+                    # 注意：所有数据库操作都通过 _with_connection 方法执行，连接会在异常时自动释放
+                    logger.error(f"[Model {self.model_id}] [交易执行] 执行交易决策失败 (symbol={symbol}): {e}")
+                    import traceback
+                    logger.debug(f"[Model {self.model_id}] [交易执行] 异常堆栈:\n{traceback.format_exc()}")
                     results.append({'symbol': symbol, 'error': str(e)})
             
             logger.debug(f"[Model {self.model_id}] [交易执行] 交易决策执行完成，释放交易锁")
