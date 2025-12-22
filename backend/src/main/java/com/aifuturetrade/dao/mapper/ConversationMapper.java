@@ -3,6 +3,7 @@ package com.aifuturetrade.dao.mapper;
 import com.aifuturetrade.dao.entity.ConversationDO;
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import org.apache.ibatis.annotations.Mapper;
+import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Select;
 
 import java.util.List;
@@ -21,6 +22,6 @@ public interface ConversationMapper extends BaseMapper<ConversationDO> {
      * @return 对话记录列表
      */
     @Select("select * from conversations where model_id = #{modelId} order by timestamp desc limit #{limit}")
-    List<ConversationDO> selectConversationsByModelId(String modelId, Integer limit);
+    List<ConversationDO> selectConversationsByModelId(@Param("modelId") String modelId, @Param("limit") Integer limit);
 
 }

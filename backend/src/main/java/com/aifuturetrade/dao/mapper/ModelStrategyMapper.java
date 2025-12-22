@@ -3,6 +3,7 @@ package com.aifuturetrade.dao.mapper;
 import com.aifuturetrade.dao.entity.ModelStrategyDO;
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import org.apache.ibatis.annotations.Mapper;
+import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Select;
 
 import java.util.List;
@@ -52,7 +53,7 @@ public interface ModelStrategyMapper extends BaseMapper<ModelStrategyDO> {
      * @return 模型策略关联列表
      */
     @Select("select * from model_strategy where model_id = #{modelId} and type = #{type} order by created_at desc")
-    List<ModelStrategyDO> selectModelStrategiesByModelIdAndType(String modelId, String type);
+    List<ModelStrategyDO> selectModelStrategiesByModelIdAndType(@Param("modelId") String modelId, @Param("type") String type);
 
 }
 
