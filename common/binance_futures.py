@@ -1212,6 +1212,106 @@ class BinanceFuturesOrderClient(_BinanceFuturesBase):
         if quantity <= 0:
             raise ValueError(f"quantity参数必须大于0，当前值: {quantity}")
     
+    def _adjust_quantity_precision(self, quantity: float, symbol: str) -> float:
+        """
+        调整订单数量精度，确保符合 Binance 要求
+        
+        Args:
+            quantity: 原始数量
+            symbol: 交易对符号
+            
+        Returns:
+            调整后的数量（根据数量大小自动调整精度）
+        """
+        # 使用更保守的精度策略，避免精度错误
+        # 大多数 Binance 交易对的数量精度在 3-8 位小数之间
+        # 根据数量大小动态调整精度
+        
+        # 将数量转换为字符串，检查小数位数
+        quantity_str = f"{quantity:.10f}".rstrip('0').rstrip('.')
+        if '.' in quantity_str:
+            decimal_places = len(quantity_str.split('.')[1])
+        else:
+            decimal_places = 0
+        
+        # 根据数量大小和原始精度，选择合适的精度
+        if quantity >= 1000:
+            # 大数量，保留0-2位小数
+            precision = min(2, decimal_places)
+        elif quantity >= 100:
+            # 中等数量，保留1-3位小数
+            precision = min(3, decimal_places)
+        elif quantity >= 10:
+            # 中等数量，保留2-4位小数
+            precision = min(4, decimal_places)
+        elif quantity >= 1:
+            # 小数量，保留3-5位小数
+            precision = min(5, decimal_places)
+        elif quantity >= 0.1:
+            # 很小数量，保留4-6位小数
+            precision = min(6, decimal_places)
+        elif quantity >= 0.01:
+            # 非常小数量，保留5-7位小数
+            precision = min(7, decimal_places)
+        else:
+            # 极小数量，保留最多8位小数
+            precision = min(8, decimal_places)
+        
+        # 确保精度至少为0
+        precision = max(0, precision)
+        
+        return round(quantity, precision)
+    
+    def _adjust_price_precision(self, price: float, symbol: str) -> float:
+        """
+        调整订单价格精度，确保符合 Binance 要求
+        
+        Args:
+            price: 原始价格
+            symbol: 交易对符号
+            
+        Returns:
+            调整后的价格（根据价格大小自动调整精度）
+        """
+        # 使用更保守的精度策略，避免精度错误
+        # 大多数 Binance 交易对的价格精度在 2-8 位小数之间
+        # 根据价格大小动态调整精度
+        
+        # 将价格转换为字符串，检查小数位数
+        price_str = f"{price:.10f}".rstrip('0').rstrip('.')
+        if '.' in price_str:
+            decimal_places = len(price_str.split('.')[1])
+        else:
+            decimal_places = 0
+        
+        # 根据价格大小和原始精度，选择合适的精度
+        if price >= 10000:
+            # 高价格，保留0-2位小数
+            precision = min(2, decimal_places)
+        elif price >= 1000:
+            # 高价格，保留1-3位小数
+            precision = min(3, decimal_places)
+        elif price >= 100:
+            # 中等价格，保留2-4位小数
+            precision = min(4, decimal_places)
+        elif price >= 10:
+            # 中等价格，保留3-5位小数
+            precision = min(5, decimal_places)
+        elif price >= 1:
+            # 低价格，保留4-6位小数
+            precision = min(6, decimal_places)
+        elif price >= 0.1:
+            # 很低价格，保留5-7位小数
+            precision = min(7, decimal_places)
+        else:
+            # 极低价格，保留最多8位小数
+            precision = min(8, decimal_places)
+        
+        # 确保精度至少为0
+        precision = max(0, precision)
+        
+        return round(price, precision)
+    
     def _validate_position_side(self, position_side: Optional[str]) -> Optional[str]:
         """
         验证并规范化position_side参数
@@ -1287,7 +1387,8 @@ class BinanceFuturesOrderClient(_BinanceFuturesBase):
         }
         
         if quantity is not None:
-            order_params["quantity"] = quantity
+            # 调整数量精度，确保符合 Binance 要求
+            order_params["quantity"] = self._adjust_quantity_precision(quantity, formatted_symbol)
         
         if close_position:
             order_params["close_position"] = True
@@ -1296,10 +1397,12 @@ class BinanceFuturesOrderClient(_BinanceFuturesBase):
             order_params["position_side"] = position_side
         
         if stop_price is not None:
-            order_params["stop_price"] = stop_price
+            # 调整触发价格精度，确保符合 Binance 要求
+            order_params["stop_price"] = self._adjust_price_precision(stop_price, formatted_symbol)
         
         if price is not None:
-            order_params["price"] = price
+            # 调整价格精度，确保符合 Binance 要求
+            order_params["price"] = self._adjust_price_precision(price, formatted_symbol)
             order_params["time_in_force"] = kwargs.get("time_in_force", "GTC")
         
         order_params.update(kwargs)

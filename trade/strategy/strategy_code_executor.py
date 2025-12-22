@@ -339,6 +339,44 @@ class StrategyCodeExecutor:
             })
             
             logger.info(f"[StrategyCodeExecutor] 策略 {strategy_name} 执行成功，返回决策数: {len(decisions)}")
+            
+            # 打印详细的决策信息
+            if decisions:
+                logger.info(f"[StrategyCodeExecutor] 策略 {strategy_name} 详细决策信息:")
+                for idx, (symbol, decision) in enumerate(decisions.items(), 1):
+                    decision_info = []
+                    decision_info.append(f"  决策 {idx}: {symbol}")
+                    
+                    # 提取决策的关键字段
+                    signal = decision.get('signal', 'N/A')
+                    decision_info.append(f"    信号: {signal}")
+                    
+                    if 'quantity' in decision:
+                        decision_info.append(f"    数量: {decision['quantity']}")
+                    
+                    if 'price' in decision:
+                        decision_info.append(f"    价格: {decision['price']}")
+                    
+                    if 'position_side' in decision:
+                        decision_info.append(f"    持仓方向: {decision['position_side']}")
+                    
+                    if 'reason' in decision:
+                        reason = decision['reason']
+                        # 如果 reason 太长，截断
+                        if len(str(reason)) > 100:
+                            reason = str(reason)[:100] + "..."
+                        decision_info.append(f"    原因: {reason}")
+                    
+                    # 打印其他字段（排除已打印的字段）
+                    printed_fields = {'signal', 'quantity', 'price', 'position_side', 'reason'}
+                    other_fields = {k: v for k, v in decision.items() if k not in printed_fields}
+                    if other_fields:
+                        decision_info.append(f"    其他字段: {json.dumps(other_fields, ensure_ascii=False, default=str)}")
+                    
+                    logger.info("\n".join(decision_info))
+            else:
+                logger.info(f"[StrategyCodeExecutor] 策略 {strategy_name} 无决策返回")
+            
             return result
         
         except Exception as e:
