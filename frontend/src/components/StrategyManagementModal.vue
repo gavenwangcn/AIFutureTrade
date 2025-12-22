@@ -434,12 +434,23 @@ const totalPages = computed(() => {
 const loadStrategies = async () => {
   loading.value = true
   try {
-    const result = await strategyApi.getPage({
+    // 构建查询参数，只包含非空值的参数
+    const params = {
       pageNum: currentPage.value,
-      pageSize: pageSize.value,
-      name: searchForm.value.name || undefined,
-      type: searchForm.value.type || undefined
-    })
+      pageSize: pageSize.value
+    }
+    
+    // 只在name有值时添加到参数中
+    if (searchForm.value.name && searchForm.value.name.trim()) {
+      params.name = searchForm.value.name.trim()
+    }
+    
+    // 只在type有值时添加到参数中
+    if (searchForm.value.type) {
+      params.type = searchForm.value.type
+    }
+    
+    const result = await strategyApi.getPage(params)
     strategies.value = result.data || []
     total.value = result.total || 0
   } catch (err) {

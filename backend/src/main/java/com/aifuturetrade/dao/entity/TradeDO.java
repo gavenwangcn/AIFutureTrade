@@ -68,6 +68,7 @@ public class TradeDO implements Serializable {
     /**
      * 状态（success, failed）
      */
+    @com.baomidou.mybatisplus.annotation.TableField(exist = false)
     private String status;
 
     /**
