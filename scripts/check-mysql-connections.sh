@@ -1,5 +1,5 @@
 #!/bin/bash
-# MySQL 连接数检查脚本
+# MySQL 连接数检查脚本（支持 Docker 环境）
 
 echo "=========================================="
 echo "MySQL 连接数诊断工具"
@@ -12,16 +12,45 @@ MYSQL_PORT=${MYSQL_PORT:-32123}
 MYSQL_USER=${MYSQL_USER:-aifuturetrade}
 MYSQL_PASSWORD=${MYSQL_PASSWORD:-aifuturetrade123}
 MYSQL_DATABASE=${MYSQL_DATABASE:-aifuturetrade}
+MYSQL_CONTAINER=${MYSQL_CONTAINER:-aifuturetrade-mysql}
+
+# 检测是否使用 Docker
+USE_DOCKER=false
+if command -v docker &> /dev/null; then
+    # 检查 MySQL 容器是否在运行
+    if docker ps --format '{{.Names}}' | grep -q "^${MYSQL_CONTAINER}$"; then
+        USE_DOCKER=true
+        echo "检测到 Docker 环境，使用容器: $MYSQL_CONTAINER"
+    fi
+fi
+
+# 构建 MySQL 命令
+if [ "$USE_DOCKER" = true ]; then
+    # 使用 Docker exec 在容器内执行 MySQL 命令
+    # 注意：密码通过环境变量传递，避免在命令行中暴露
+    MYSQL_CMD="docker exec -i -e MYSQL_PWD=\"$MYSQL_PASSWORD\" $MYSQL_CONTAINER mysql"
+    MYSQL_ARGS="-u$MYSQL_USER $MYSQL_DATABASE"
+else
+    # 使用本地 MySQL 客户端
+    # 注意：密码通过环境变量传递，避免在命令行中暴露
+    export MYSQL_PWD="$MYSQL_PASSWORD"
+    MYSQL_CMD="mysql"
+    MYSQL_ARGS="-h $MYSQL_HOST -P $MYSQL_PORT -u $MYSQL_USER $MYSQL_DATABASE"
+fi
 
 echo "连接信息:"
-echo "  Host: $MYSQL_HOST:$MYSQL_PORT"
+if [ "$USE_DOCKER" = true ]; then
+    echo "  方式: Docker 容器 ($MYSQL_CONTAINER)"
+else
+    echo "  Host: $MYSQL_HOST:$MYSQL_PORT"
+fi
 echo "  User: $MYSQL_USER"
 echo "  Database: $MYSQL_DATABASE"
 echo ""
 
 # 检查连接数
 echo "1. 当前连接数统计:"
-mysql -h "$MYSQL_HOST" -P "$MYSQL_PORT" -u "$MYSQL_USER" -p"$MYSQL_PASSWORD" "$MYSQL_DATABASE" <<EOF
+$MYSQL_CMD $MYSQL_ARGS <<EOF
 SELECT 
     VARIABLE_VALUE as current_connections,
     (SELECT VARIABLE_VALUE FROM information_schema.GLOBAL_VARIABLES WHERE VARIABLE_NAME = 'max_connections') as max_connections,
@@ -32,7 +61,7 @@ EOF
 
 echo ""
 echo "2. 按用户分组的连接数:"
-mysql -h "$MYSQL_HOST" -P "$MYSQL_PORT" -u "$MYSQL_USER" -p"$MYSQL_PASSWORD" "$MYSQL_DATABASE" <<EOF
+$MYSQL_CMD $MYSQL_ARGS <<EOF
 SELECT 
     user, 
     COUNT(*) as connection_count 
@@ -43,7 +72,7 @@ EOF
 
 echo ""
 echo "3. 长时间运行的连接（>60秒）:"
-mysql -h "$MYSQL_HOST" -P "$MYSQL_PORT" -u "$MYSQL_USER" -p"$MYSQL_PASSWORD" "$MYSQL_DATABASE" <<EOF
+$MYSQL_CMD $MYSQL_ARGS <<EOF
 SELECT 
     id, 
     user, 
@@ -61,7 +90,7 @@ EOF
 
 echo ""
 echo "4. 空闲连接（Sleep状态，>5分钟）:"
-mysql -h "$MYSQL_HOST" -P "$MYSQL_PORT" -u "$MYSQL_USER" -p"$MYSQL_PASSWORD" "$MYSQL_DATABASE" <<EOF
+$MYSQL_CMD $MYSQL_ARGS <<EOF
 SELECT 
     id, 
     user, 
