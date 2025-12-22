@@ -1645,11 +1645,9 @@ let portfolioSymbolsRefreshInterval = null // 模型持仓合约列表自动刷�
    * 加载提供方列表（用于显示提供方名称）
    */
   const loadProviders = async () => {
-    console.log('[TradingApp] 开始加载提供方列表')
     try {
       const { providerApi } = await import('../services/api.js')
       providers.value = await providerApi.getAll()
-      console.log('[TradingApp] 加载提供方列表成功, providers=', providers.value.map(p => ({ id: p.id, name: p.name, models: p.models })))
     } catch (error) {
       console.error('[TradingApp] Error loading providers:', error)
     }

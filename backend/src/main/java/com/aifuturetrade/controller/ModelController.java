@@ -4,7 +4,7 @@ import com.aifuturetrade.service.ModelService;
 import com.aifuturetrade.service.dto.ModelDTO;
 import io.swagger.annotations.Api;
 import io.swagger.annotations.ApiOperation;
-import lombok.extern.slf4j.Slf4j;
+
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -21,7 +21,6 @@ import java.util.Map;
 @RestController
 @RequestMapping("/api/models")
 @Api(tags = "交易模型管理")
-@Slf4j
 public class ModelController {
 
     @Autowired
@@ -48,11 +47,8 @@ public class ModelController {
     public ResponseEntity<ModelDTO> getModelById(@PathVariable String modelId) {
         ModelDTO model = modelService.getModelById(modelId);
         if (model != null) {
-            log.info("[ModelController] 获取模型信息成功, modelId={}, providerId={}, modelName={}", 
-                    modelId, model.getProviderId(), model.getModelName());
             return new ResponseEntity<>(model, HttpStatus.OK);
         } else {
-            log.warn("[ModelController] 未找到指定模型, modelId={}", modelId);
             return new ResponseEntity<>(HttpStatus.NOT_FOUND);
         }
     }
