@@ -106,6 +106,11 @@ const lastPortfolioSymbolsRefreshTime = ref(null) // 持仓合约列表最后刷
   const pendingDeleteModelId = ref(null)
   const pendingDeleteModelName = ref('')
   const deletingModel = ref(false)
+  const showStrategyConfigModal = ref(false)
+  const pendingStrategyConfigModelId = ref(null)
+  const strategyConfigModelName = ref('')
+  const loadingStrategyConfig = ref(false)
+  const savingStrategyConfig = ref(false)
   
   // 加载状态
   const loading = ref({
@@ -1762,6 +1767,15 @@ let portfolioSymbolsRefreshInterval = null // 模型持仓合约列表自动刷�
   }
   
   /**
+   * 打开策略配置模态框
+   */
+  const openStrategyConfigModal = async (modelId, modelName) => {
+    pendingStrategyConfigModelId.value = modelId
+    strategyConfigModelName.value = modelName || `模型 #${modelId}`
+    showStrategyConfigModal.value = true
+  }
+
+  /**
    * 打开模型设置模态框（合并杠杆和最大持仓数量）
    */
   const openModelSettingsModal = async (modelId, modelName) => {
@@ -2389,6 +2403,12 @@ let portfolioSymbolsRefreshInterval = null // 模型持仓合约列表自动刷�
     openDeleteModelConfirm,
     confirmDeleteModel,
     cancelDeleteModel,
+    showStrategyConfigModal,
+    pendingStrategyConfigModelId,
+    strategyConfigModelName,
+    loadingStrategyConfig,
+    savingStrategyConfig,
+    openStrategyConfigModal,
     toggleMysqlLeaderboardSync,
     updateMysqlLeaderboardSyncStatus,
     getModelDisplayName,

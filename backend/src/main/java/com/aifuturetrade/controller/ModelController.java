@@ -1,7 +1,13 @@
 package com.aifuturetrade.controller;
 
 import com.aifuturetrade.service.ModelService;
+import com.aifuturetrade.service.ModelStrategyService;
+import com.aifuturetrade.service.StrategyService;
 import com.aifuturetrade.service.dto.ModelDTO;
+import com.aifuturetrade.service.dto.StrategyDTO;
+import com.aifuturetrade.service.dto.ModelStrategyDTO;
+import com.aifuturetrade.common.util.PageResult;
+import com.aifuturetrade.common.util.PageRequest;
 import io.swagger.annotations.Api;
 import io.swagger.annotations.ApiOperation;
 
@@ -25,6 +31,12 @@ public class ModelController {
 
     @Autowired
     private ModelService modelService;
+
+    @Autowired
+    private StrategyService strategyService;
+
+    @Autowired
+    private ModelStrategyService modelStrategyService;
 
     /**
      * 获取所有交易模型
@@ -332,6 +344,115 @@ public class ModelController {
     public ResponseEntity<Map<String, Object>> disableSellTrading(@PathVariable String modelId) {
         Map<String, Object> result = modelService.disableSellTrading(modelId);
         return new ResponseEntity<>(result, HttpStatus.OK);
+    }
+
+    /**
+     * 获取模型策略配置页面所需的数据
+     * 返回策略列表（支持搜索和分页）和当前模型已关联的策略列表
+     * @param modelId 模型ID
+     * @param name 策略名称（可选，模糊查询）
+     * @param type 策略类型（可选，buy/sell）
+     * @param pageNum 页码（从1开始，默认1）
+     * @param pageSize 每页大小（默认10）
+     * @return 策略配置数据
+     */
+    @GetMapping("/{modelId}/strategy-config")
+    @ApiOperation("获取模型策略配置数据")
+    public ResponseEntity<Map<String, Object>> getModelStrategyConfig(
+            @PathVariable String modelId,
+            @RequestParam(required = false) String name,
+            @RequestParam(required = false) String type,
+            @RequestParam(defaultValue = "1") Integer pageNum,
+            @RequestParam(defaultValue = "10") Integer pageSize) {
+        // 分页查询策略列表（支持搜索）
+        PageRequest pageRequest = new PageRequest();
+        pageRequest.setPageNum(pageNum);
+        pageRequest.setPageSize(pageSize);
+        PageResult<StrategyDTO> strategiesPage = strategyService.getStrategiesByPage(pageRequest, name, type);
+        
+        // 获取当前模型已关联的策略列表
+        List<ModelStrategyDTO> modelStrategies = modelStrategyService.getModelStrategiesByModelId(modelId);
+        
+        // 构建返回数据
+        Map<String, Object> result = new HashMap<>();
+        result.put("strategies", strategiesPage.getData());
+        result.put("total", strategiesPage.getTotal());
+        result.put("pageNum", strategiesPage.getPageNum());
+        result.put("pageSize", strategiesPage.getPageSize());
+        result.put("totalPages", strategiesPage.getTotalPages());
+        result.put("modelStrategies", modelStrategies);
+        
+        return new ResponseEntity<>(result, HttpStatus.OK);
+    }
+
+    /**
+     * 批量保存模型策略配置
+     * @param modelId 模型ID
+     * @param requestBody 请求体，包含策略配置列表
+     * @return 保存操作结果
+     */
+    @PostMapping("/{modelId}/strategy-config")
+    @ApiOperation("批量保存模型策略配置")
+    public ResponseEntity<Map<String, Object>> saveModelStrategyConfig(
+            @PathVariable String modelId,
+            @RequestBody Map<String, Object> requestBody) {
+        try {
+            @SuppressWarnings("unchecked")
+            List<Map<String, Object>> strategies = (List<Map<String, Object>>) requestBody.get("strategies");
+            
+            if (strategies == null || strategies.isEmpty()) {
+                // 如果没有策略，删除该模型的所有策略关联
+                List<ModelStrategyDTO> existingStrategies = modelStrategyService.getModelStrategiesByModelId(modelId);
+                for (ModelStrategyDTO existing : existingStrategies) {
+                    modelStrategyService.deleteModelStrategy(existing.getId());
+                }
+                
+                Map<String, Object> response = new HashMap<>();
+                response.put("success", true);
+                response.put("message", "模型策略配置保存成功");
+                return new ResponseEntity<>(response, HttpStatus.OK);
+            }
+            
+            // 按类型分组处理策略
+            Map<String, List<Map<String, Object>>> strategiesByType = new HashMap<>();
+            for (Map<String, Object> strategy : strategies) {
+                String strategyId = (String) strategy.get("strategyId");
+                
+                // 获取策略信息以确定类型
+                StrategyDTO strategyDTO = strategyService.getStrategyById(strategyId);
+                if (strategyDTO == null) {
+                    continue;
+                }
+                String type = strategyDTO.getType();
+                
+                strategiesByType.computeIfAbsent(type, k -> new java.util.ArrayList<>()).add(strategy);
+            }
+            
+            // 为每种类型批量保存策略
+            for (Map.Entry<String, List<Map<String, Object>>> entry : strategiesByType.entrySet()) {
+                String type = entry.getKey();
+                List<Map<String, Object>> typeStrategies = entry.getValue();
+                
+                List<ModelStrategyDTO> modelStrategies = typeStrategies.stream().map(map -> {
+                    ModelStrategyDTO dto = new ModelStrategyDTO();
+                    dto.setStrategyId((String) map.get("strategyId"));
+                    dto.setPriority(map.get("priority") != null ? ((Number) map.get("priority")).intValue() : 0);
+                    return dto;
+                }).collect(java.util.stream.Collectors.toList());
+                
+                modelStrategyService.batchSaveModelStrategies(modelId, type, modelStrategies);
+            }
+            
+            Map<String, Object> response = new HashMap<>();
+            response.put("success", true);
+            response.put("message", "模型策略配置保存成功");
+            return new ResponseEntity<>(response, HttpStatus.OK);
+        } catch (Exception e) {
+            Map<String, Object> response = new HashMap<>();
+            response.put("success", false);
+            response.put("error", e.getMessage());
+            return new ResponseEntity<>(response, HttpStatus.INTERNAL_SERVER_ERROR);
+        }
     }
 
 }

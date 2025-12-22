@@ -33,6 +33,14 @@ public interface StrategyService {
     List<StrategyDTO> getStrategiesByCondition(String name, String type);
 
     /**
+     * 根据条件查询策略（支持名称、内容和类型筛选）
+     * @param keyword 搜索关键词（匹配策略名称或策略内容）
+     * @param type 策略类型
+     * @return 策略列表
+     */
+    List<StrategyDTO> getStrategiesByKeyword(String keyword, String type);
+
+    /**
      * 分页查询策略
      * @param pageRequest 分页请求
      * @param name 策略名称（可选）

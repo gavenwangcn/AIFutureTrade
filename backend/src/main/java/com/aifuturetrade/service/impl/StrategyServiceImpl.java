@@ -67,6 +67,27 @@ public class StrategyServiceImpl implements StrategyService {
     }
 
     @Override
+    public List<StrategyDTO> getStrategiesByKeyword(String keyword, String type) {
+        LambdaQueryWrapper<StrategyDO> queryWrapper = new LambdaQueryWrapper<>();
+        if (StringUtils.hasText(keyword)) {
+            queryWrapper.and(wrapper -> wrapper
+                    .like(StrategyDO::getName, keyword)
+                    .or()
+                    .like(StrategyDO::getStrategyContext, keyword)
+            );
+        }
+        if (StringUtils.hasText(type)) {
+            queryWrapper.eq(StrategyDO::getType, type);
+        }
+        queryWrapper.orderByDesc(StrategyDO::getCreatedAt);
+        
+        List<StrategyDO> strategyDOList = strategyMapper.selectList(queryWrapper);
+        return strategyDOList.stream()
+                .map(this::convertToDTO)
+                .collect(Collectors.toList());
+    }
+
+    @Override
     public PageResult<StrategyDTO> getStrategiesByPage(PageRequest pageRequest, String name, String type) {
         Page<StrategyDO> page = new Page<>(pageRequest.getPageNum(), pageRequest.getPageSize());
         

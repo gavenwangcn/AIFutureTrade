@@ -125,6 +125,9 @@
               <div class="model-header">
                 <div class="model-name">{{ model.name || `模型 #${model.id}` }}</div>
                 <div class="model-actions" @click.stop>
+                  <button class="model-action-btn" @click="handleOpenStrategyConfigModal(model.id, model.name || `模型 #${model.id}`)" title="策略配置">
+                    <i class="bi bi-diagram-3"></i>
+                  </button>
                   <button class="model-action-btn" @click="handleOpenModelSettingsModal(model.id, model.name || `模型 #${model.id}`)" title="模型设置">
                     <i class="bi bi-gear"></i>
                   </button>
@@ -604,6 +607,15 @@
       @close="showAddModelModal = false"
       @refresh="handleRefresh"
     />
+
+    <ModelStrategyConfigModal
+      :visible="showStrategyConfigModal"
+      :modelId="pendingStrategyConfigModelId"
+      :modelName="strategyConfigModelName"
+      @update:visible="showStrategyConfigModal = $event"
+      @close="showStrategyConfigModal = false"
+      @saved="handleRefresh"
+    />
     
     <!-- 模型设置模态框（合并杠杆和最大持仓数量） -->
     <div v-if="showModelSettingsModal" class="modal show" @click.self="showModelSettingsModal = false">
@@ -760,6 +772,7 @@ import FutureConfigModal from './components/FutureConfigModal.vue'
 import ApiProviderModal from './components/ApiProviderModal.vue'
 import AccountModal from './components/AccountModal.vue'
 import AddModelModal from './components/AddModelModal.vue'
+import ModelStrategyConfigModal from './components/ModelStrategyConfigModal.vue'
 import { useTradingApp } from './composables/useTradingApp'
 
 const {
@@ -945,6 +958,10 @@ const handleSaveModelSettings = async () => {
 
 const handleDeleteModel = (modelId, modelName) => {
   openDeleteModelConfirm(modelId, modelName)
+}
+
+const handleOpenStrategyConfigModal = (modelId, modelName) => {
+  openStrategyConfigModal(modelId, modelName)
 }
 
 const openKlineChartFromMarket = (symbol, contractSymbol) => {

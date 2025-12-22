@@ -121,7 +121,19 @@ export const modelApi = {
   /**
    * 获取模型持仓合约列表
    */
-  getPortfolioSymbols: (modelId) => apiGet(`/api/models/${modelId}/portfolio/symbols`)
+  getPortfolioSymbols: (modelId) => apiGet(`/api/models/${modelId}/portfolio/symbols`),
+
+  /**
+   * 获取模型策略配置数据（所有策略列表和当前模型已关联的策略列表）
+   */
+  getStrategyConfig: (modelId, params) => {
+    return apiGet(`/api/models/${modelId}/strategy-config`, params || {})
+  },
+
+  /**
+   * 批量保存模型策略配置
+   */
+  saveStrategyConfig: (modelId, data) => apiPost(`/api/models/${modelId}/strategy-config`, data)
 }
 
 /**
