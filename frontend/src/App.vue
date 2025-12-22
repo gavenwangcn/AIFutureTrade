@@ -388,14 +388,14 @@
                       <div class="price-contract-name">{{ item.symbol }}永续合约</div>
                     </div>
                     <div class="price-right">
-                      <div class="price-value-large">${{ formatPrice6(item.price) }}</div>
+                      <div class="price-value-large">${{ formatPrice6(item.price || 0) }}</div>
                       <div class="price-change-with-arrow" :class="getSymbolChangeClass(item.symbol)">
                         <span class="change-arrow">{{ getSymbolChangeArrow(item.symbol) }}</span>
-                        <span class="change-value">{{ item.changePercent.toFixed(2) }}%</span>
+                        <span class="change-value">{{ (item.changePercent || item.change || 0).toFixed(2) }}%</span>
                       </div>
                       <div class="price-volume-chinese">
                         <span class="volume-label">当日成交额: </span>
-                        <span class="volume-value">{{ formatVolumeChinese(item.quoteVolume) }}</span>
+                        <span class="volume-value">{{ formatVolumeChinese(item.quoteVolume || item.volume || 0) }}</span>
                       </div>
                     </div>
                   </div>
@@ -447,12 +447,12 @@
                 <tbody>
                   <tr v-for="position in positions" :key="position.id">
                     <td><strong>{{ position.symbol }}</strong></td>
-                    <td><span :class="['badge', (position.position_side || '').toLowerCase() === 'long' ? 'badge-long' : 'badge-short']">
-                      {{ (position.position_side || '').toLowerCase() === 'long' ? '做多' : '做空' }}
+                    <td><span :class="['badge', (position.side || position.position_side || '').toLowerCase() === 'long' ? 'badge-long' : 'badge-short']">
+                      {{ (position.side || position.position_side || '').toLowerCase() === 'long' ? '做多' : '做空' }}
                     </span></td>
-                    <td>{{ Math.abs(position.position_amt || 0).toFixed(4) }}</td>
-                    <td>${{ formatPrice6(position.openPrice || position.avg_price) }}</td>
-                    <td>${{ formatPrice6(position.currentPrice || position.current_price) }}</td>
+                    <td>{{ (position.quantity || Math.abs(position.position_amt || position.positionAmt || 0)).toFixed(4) }}</td>
+                    <td>${{ formatPrice6(position.openPrice || position.avg_price || position.avgPrice || 0) }}</td>
+                    <td>${{ formatPrice6(position.currentPrice || position.current_price || position.currentPrice || 0) }}</td>
                     <td>{{ position.leverage }}x</td>
                     <td :class="getPnlClass(position.pnl || 0, true)">
                       <strong>{{ formatPnl(position.pnl || 0, true) }}</strong>

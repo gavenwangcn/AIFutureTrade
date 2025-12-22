@@ -636,9 +636,56 @@ let portfolioSymbolsRefreshInterval = null // 模型持仓合约列表自动刷�
     loading.value.portfolioSymbols = true
     errors.value.portfolioSymbols = null
     try {
+      console.log('[TradingApp] 开始加载持仓合约实时行情, modelId:', currentModelId.value)
       const response = await modelApi.getPortfolioSymbols(currentModelId.value)
-      modelPortfolioSymbols.value = response.data || []
-    lastPortfolioSymbolsRefreshTime.value = new Date()
+      console.log('[TradingApp] 收到持仓合约实时行情API响应:', response)
+      
+      if (response.data && Array.isArray(response.data)) {
+        console.log('[TradingApp] 持仓合约实时行情数据数量:', response.data.length)
+        console.log('[TradingApp] 持仓合约实时行情原始数据:', JSON.stringify(response.data, null, 2))
+        
+        // 处理数据，确保字段名正确
+        modelPortfolioSymbols.value = response.data.map((item, index) => {
+          console.log(`[TradingApp] 持仓合约[${index + 1}] 原始数据:`, {
+            symbol: item.symbol,
+            price: item.price,
+            change: item.change,
+            changePercent: item.changePercent,
+            quoteVolume: item.quoteVolume,
+            volume: item.volume
+          })
+          
+          // 确保字段名正确
+          const mappedItem = {
+            symbol: item.symbol || '',
+            price: item.price || 0,
+            change: item.change !== undefined ? item.change : (item.changePercent !== undefined ? item.changePercent : 0),
+            changePercent: item.changePercent !== undefined ? item.changePercent : (item.change !== undefined ? item.change : 0),
+            quoteVolume: item.quoteVolume !== undefined ? item.quoteVolume : (item.volume !== undefined ? item.volume : 0),
+            volume: item.volume || 0,
+            high: item.high || 0,
+            low: item.low || 0,
+            ...item  // 保留所有原始字段
+          }
+          
+          console.log(`[TradingApp] 持仓合约[${index + 1}] 映射后数据:`, {
+            symbol: mappedItem.symbol,
+            price: mappedItem.price,
+            changePercent: mappedItem.changePercent,
+            quoteVolume: mappedItem.quoteVolume
+          })
+          
+          return mappedItem
+        })
+        
+        console.log('[TradingApp] 映射完成，最终持仓合约实时行情数据数量:', modelPortfolioSymbols.value.length)
+        console.log('[TradingApp] 最终持仓合约实时行情数据:', JSON.stringify(modelPortfolioSymbols.value, null, 2))
+      } else {
+        console.warn('[TradingApp] 持仓合约实时行情数据格式不正确:', response)
+        modelPortfolioSymbols.value = []
+      }
+      
+      lastPortfolioSymbolsRefreshTime.value = new Date()
     } catch (error) {
       console.error('[TradingApp] Error loading model portfolio symbols:', error)
       errors.value.portfolioSymbols = error.message
@@ -1077,21 +1124,69 @@ let portfolioSymbolsRefreshInterval = null // 模型持仓合约列表自动刷�
     loading.value.positions = true
     errors.value.positions = null
     try {
+      console.log('[TradingApp] 开始加载持仓数据, modelId:', currentModelId.value)
       const data = await modelApi.getPortfolio(currentModelId.value)
+      console.log('[TradingApp] 收到持仓API响应:', data)
+      
       if (data.portfolio && data.portfolio.positions) {
+        console.log('[TradingApp] 原始持仓数据数量:', data.portfolio.positions.length)
+        console.log('[TradingApp] 原始持仓数据:', JSON.stringify(data.portfolio.positions, null, 2))
+        
         // 映射数据格式以匹配前端显示
-        positions.value = (data.portfolio.positions || []).map(pos => ({
-          id: pos.id || `${pos.symbol}_${pos.position_side}`,
-          symbol: pos.symbol || '',
-          side: pos.position_side || '',
-          quantity: Math.abs(pos.position_amt || 0),
-          openPrice: pos.avg_price || 0,
-          currentPrice: pos.current_price || 0,
-          leverage: pos.leverage || 1,
-          pnl: pos.pnl || 0,
-          // 保留原始数据
-          ...pos
-        }))
+        // 支持两种字段命名方式：下划线命名和驼峰命名
+        positions.value = (data.portfolio.positions || []).map((pos, index) => {
+          // 尝试读取两种命名方式的字段
+          const positionAmt = pos.position_amt !== undefined ? pos.position_amt : (pos.positionAmt !== undefined ? pos.positionAmt : 0)
+          const avgPrice = pos.avg_price !== undefined ? pos.avg_price : (pos.avgPrice !== undefined ? pos.avgPrice : 0)
+          const currentPrice = pos.current_price !== undefined ? pos.current_price : (pos.currentPrice !== undefined ? pos.currentPrice : 0)
+          const positionSide = pos.position_side !== undefined ? pos.position_side : (pos.positionSide !== undefined ? pos.positionSide : '')
+          const pnl = pos.pnl !== undefined ? pos.pnl : 0
+          const leverage = pos.leverage !== undefined ? pos.leverage : 1
+          
+          console.log(`[TradingApp] 持仓[${index + 1}] 原始数据:`, {
+            symbol: pos.symbol,
+            position_amt: pos.position_amt,
+            positionAmt: pos.positionAmt,
+            avg_price: pos.avg_price,
+            avgPrice: pos.avgPrice,
+            current_price: pos.current_price,
+            currentPrice: pos.currentPrice,
+            position_side: pos.position_side,
+            positionSide: pos.positionSide,
+            pnl: pos.pnl,
+            leverage: pos.leverage
+          })
+          
+          const mappedPos = {
+            id: pos.id || `${pos.symbol}_${positionSide}`,
+            symbol: pos.symbol || '',
+            side: positionSide,
+            quantity: Math.abs(positionAmt || 0),
+            openPrice: avgPrice || 0,
+            currentPrice: currentPrice || 0,
+            leverage: leverage || 1,
+            pnl: pnl || 0,
+            // 保留原始数据
+            ...pos
+          }
+          
+          console.log(`[TradingApp] 持仓[${index + 1}] 映射后数据:`, {
+            symbol: mappedPos.symbol,
+            quantity: mappedPos.quantity,
+            openPrice: mappedPos.openPrice,
+            currentPrice: mappedPos.currentPrice,
+            pnl: mappedPos.pnl,
+            side: mappedPos.side
+          })
+          
+          return mappedPos
+        })
+        
+        console.log('[TradingApp] 映射完成，最终持仓数据数量:', positions.value.length)
+        console.log('[TradingApp] 最终持仓数据:', JSON.stringify(positions.value, null, 2))
+      } else {
+        console.warn('[TradingApp] 持仓数据为空或格式不正确:', data)
+        positions.value = []
       }
     } catch (error) {
       console.error('[TradingApp] Error loading positions:', error)
@@ -1111,29 +1206,64 @@ let portfolioSymbolsRefreshInterval = null // 模型持仓合约列表自动刷�
     loading.value.trades = true
     errors.value.trades = null
     try {
+      console.log('[TradingApp] 开始加载交易记录, modelId:', currentModelId.value)
       const data = await modelApi.getTrades(currentModelId.value)
+      console.log('[TradingApp] 收到交易记录API响应:', data)
+      
       // 后端直接返回数组格式
       const tradesList = Array.isArray(data) ? data : (data.trades || [])
+      console.log('[TradingApp] 交易记录数据数量:', tradesList.length)
+      console.log('[TradingApp] 交易记录原始数据:', JSON.stringify(tradesList, null, 2))
+      
       // 映射数据格式以匹配前端显示
       // 注意：trades表仍使用future和quantity字段，这里需要兼容
-      allTrades.value = tradesList.map(trade => ({
-        id: trade.id || `${trade.timestamp}_${trade.future || trade.symbol || ''}`,
-        time: trade.timestamp || '',  // 后端已转换为字符串，直接使用
-        timestamp: trade.timestamp || '',  // 确保timestamp字段存在
-        symbol: trade.future || trade.symbol || '',  // trades表使用future字段
-        signal: trade.signal || '',  // 使用signal字段
-        side: trade.signal || '',  // 兼容旧代码，保留side字段
-        quantity: trade.quantity || 0,  // trades表使用quantity字段
-        price: trade.price || 0,
-        current_price: trade.current_price || 0,  // 实时价格（如果有）
-        pnl: trade.pnl || 0,  // 盈亏（已根据实时价格计算）
-        fee: trade.fee || 0,
-        // 保留原始数据
-        ...trade
-      }))
+      allTrades.value = tradesList.map((trade, index) => {
+        console.log(`[TradingApp] 交易记录[${index + 1}] 原始数据:`, {
+          id: trade.id,
+          future: trade.future,
+          symbol: trade.symbol,
+          signal: trade.signal,
+          price: trade.price,
+          quantity: trade.quantity,
+          pnl: trade.pnl,
+          fee: trade.fee,
+          timestamp: trade.timestamp
+        })
+        
+        const mappedTrade = {
+          id: trade.id || `${trade.timestamp}_${trade.future || trade.symbol || ''}`,
+          time: trade.timestamp || '',  // 后端已转换为字符串，直接使用
+          timestamp: trade.timestamp || '',  // 确保timestamp字段存在
+          symbol: trade.future || trade.symbol || '',  // trades表使用future字段
+          signal: trade.signal || '',  // 使用signal字段
+          side: trade.signal || '',  // 兼容旧代码，保留side字段
+          quantity: trade.quantity || 0,  // trades表使用quantity字段
+          price: trade.price || 0,
+          current_price: trade.current_price || 0,  // 实时价格（如果有）
+          pnl: trade.pnl || 0,  // 盈亏（已根据实时价格计算）
+          fee: trade.fee !== undefined ? trade.fee : 0,  // 确保fee字段存在
+          // 保留原始数据
+          ...trade
+        }
+        
+        console.log(`[TradingApp] 交易记录[${index + 1}] 映射后数据:`, {
+          id: mappedTrade.id,
+          symbol: mappedTrade.symbol,
+          price: mappedTrade.price,
+          quantity: mappedTrade.quantity,
+          pnl: mappedTrade.pnl,
+          fee: mappedTrade.fee
+        })
+        
+        return mappedTrade
+      })
+      
+      console.log('[TradingApp] 映射完成，最终交易记录数据数量:', allTrades.value.length)
+      console.log('[TradingApp] 最终交易记录数据:', JSON.stringify(allTrades.value, null, 2))
       
       // 只显示前N条（从配置读取，默认5条）
       trades.value = allTrades.value.slice(0, tradesDisplayCount.value)
+      console.log('[TradingApp] 显示的交易记录数量:', trades.value.length)
     } catch (error) {
       console.error('[TradingApp] Error loading trades:', error)
       errors.value.trades = error.message

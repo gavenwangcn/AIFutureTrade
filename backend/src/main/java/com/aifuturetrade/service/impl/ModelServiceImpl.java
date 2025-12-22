@@ -72,8 +72,29 @@ public class ModelServiceImpl implements ModelService {
     @Autowired
     private AccountAssetMapper accountAssetMapper;
 
+    @Autowired
+    private MarketTickerMapper marketTickerMapper;
+
+    @Autowired
+    private com.aifuturetrade.common.api.binance.BinanceConfig binanceConfig;
+
     @Value("${app.trades-query-limit:10}")
     private Integer defaultTradesQueryLimit;
+    
+    private com.aifuturetrade.common.api.binance.BinanceFuturesClient binanceFuturesClient;
+    
+    private com.aifuturetrade.common.api.binance.BinanceFuturesClient getBinanceFuturesClient() {
+        if (binanceFuturesClient == null) {
+            binanceFuturesClient = new com.aifuturetrade.common.api.binance.BinanceFuturesClient(
+                    binanceConfig.getApiKey(),
+                    binanceConfig.getSecretKey(),
+                    binanceConfig.getQuoteAsset(),
+                    binanceConfig.getBaseUrl(),
+                    binanceConfig.getTestnet()
+            );
+        }
+        return binanceFuturesClient;
+    }
 
     private static final DateTimeFormatter DATETIME_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
     
@@ -268,20 +289,31 @@ public class ModelServiceImpl implements ModelService {
             List<Map<String, Object>> positions = new ArrayList<>();
             List<String> heldSymbols = new ArrayList<>();
             
+            log.info("[ModelService] 查询到持仓记录数: {}", portfolioDOList.size());
             for (PortfolioDO portfolioDO : portfolioDOList) {
+                log.info("[ModelService] 处理持仓记录: symbol={}, positionAmt={}, avgPrice={}, positionSide={}, leverage={}, unrealizedProfit={}",
+                        portfolioDO.getSymbol(), portfolioDO.getPositionAmt(), portfolioDO.getAvgPrice(),
+                        portfolioDO.getPositionSide(), portfolioDO.getLeverage(), portfolioDO.getUnrealizedProfit());
+                
                 Map<String, Object> position = new HashMap<>();
                 position.put("symbol", portfolioDO.getSymbol());
+                // 同时支持驼峰和下划线命名，确保前端兼容
                 position.put("positionSide", portfolioDO.getPositionSide());
+                position.put("position_side", portfolioDO.getPositionSide());
                 position.put("positionAmt", portfolioDO.getPositionAmt());
+                position.put("position_amt", portfolioDO.getPositionAmt());
                 position.put("avgPrice", portfolioDO.getAvgPrice());
+                position.put("avg_price", portfolioDO.getAvgPrice());
                 position.put("leverage", portfolioDO.getLeverage());
                 position.put("unrealizedProfit", portfolioDO.getUnrealizedProfit());
+                position.put("unrealized_profit", portfolioDO.getUnrealizedProfit());
                 positions.add(position);
                 
                 if (portfolioDO.getSymbol() != null) {
                     heldSymbols.add(portfolioDO.getSymbol().toUpperCase());
                 }
             }
+            log.info("[ModelService] 构建持仓列表完成，共 {} 条记录", positions.size());
             
             // 如果持仓为空，使用配置的合约列表作为备选
             if (heldSymbols.isEmpty()) {
@@ -295,6 +327,7 @@ public class ModelServiceImpl implements ModelService {
             }
             
             // 获取实时价格数据
+            log.info("[ModelService] 开始获取实时价格数据，持仓symbol列表: {}", heldSymbols);
             Map<String, Map<String, Object>> pricesData = marketService.getMarketPrices();
             Map<String, Double> currentPrices = new HashMap<>();
             for (Map.Entry<String, Map<String, Object>> entry : pricesData.entrySet()) {
@@ -303,9 +336,11 @@ public class ModelServiceImpl implements ModelService {
                     Double priceValue = convertToDouble(priceObj);
                     if (priceValue != null) {
                         currentPrices.put(entry.getKey(), priceValue);
+                        log.debug("[ModelService] 获取到价格: {} = {}", entry.getKey(), priceValue);
                     }
                 }
             }
+            log.info("[ModelService] 获取实时价格完成，共 {} 个价格数据", currentPrices.size());
             
             // 计算已实现盈亏（从交易记录中汇总）
             QueryWrapper<TradeDO> tradeQuery = new QueryWrapper<>();
@@ -329,38 +364,63 @@ public class ModelServiceImpl implements ModelService {
                 }
             }
             
+            log.info("[ModelService] 开始计算持仓盈亏和更新价格信息，持仓数: {}", positions.size());
             for (Map<String, Object> pos : positions) {
                 String symbol = (String) pos.get("symbol");
+                // 支持两种字段名
                 Double avgPrice = convertToDouble(pos.get("avgPrice"));
-                Double positionAmt = Math.abs(convertToDouble(pos.get("positionAmt")) != null ? convertToDouble(pos.get("positionAmt")) : 0.0);
+                if (avgPrice == null) avgPrice = convertToDouble(pos.get("avg_price"));
+                Double positionAmt = convertToDouble(pos.get("positionAmt"));
+                if (positionAmt == null) positionAmt = convertToDouble(pos.get("position_amt"));
+                positionAmt = Math.abs(positionAmt != null ? positionAmt : 0.0);
                 if (avgPrice == null) avgPrice = 0.0;
                 String positionSide = (String) pos.get("positionSide");
+                if (positionSide == null) positionSide = (String) pos.get("position_side");
                 Integer leverage = (Integer) pos.get("leverage");
+                
+                log.info("[ModelService] 处理持仓: symbol={}, positionAmt={}, avgPrice={}, positionSide={}, leverage={}",
+                        symbol, positionAmt, avgPrice, positionSide, leverage);
                 
                 PortfolioDO portfolioDO = symbolToPortfolio.get(symbol != null ? symbol.toUpperCase() : "");
                 
-                // 获取当前价格
-                Double currentPrice = currentPrices.get(symbol);
+                // 获取当前价格（尝试多种可能的symbol格式）
+                Double currentPrice = null;
+                if (symbol != null) {
+                    currentPrice = currentPrices.get(symbol.toUpperCase());
+                    if (currentPrice == null) {
+                        currentPrice = currentPrices.get(symbol);
+                    }
+                }
+                
+                log.info("[ModelService] 持仓 {} 的当前价格: {}", symbol, currentPrice);
+                
                 if (currentPrice != null && currentPrice > 0) {
+                    // 同时设置两种字段名
                     pos.put("currentPrice", currentPrice);
+                    pos.put("current_price", currentPrice);
                     
                     // 计算未实现盈亏
                     Double posPnl;
                     if (portfolioDO != null && portfolioDO.getUnrealizedProfit() != null && portfolioDO.getUnrealizedProfit() != 0) {
                         posPnl = portfolioDO.getUnrealizedProfit();
+                        log.info("[ModelService] 持仓 {} 使用数据库中的未实现盈亏: {}", symbol, posPnl);
                     } else {
                         if ("LONG".equals(positionSide)) {
                             posPnl = (currentPrice - avgPrice) * positionAmt;
                         } else {
                             posPnl = (avgPrice - currentPrice) * positionAmt;
                         }
+                        log.info("[ModelService] 持仓 {} 计算未实现盈亏: {} (当前价={}, 开仓价={}, 数量={}, 方向={})",
+                                symbol, posPnl, currentPrice, avgPrice, positionAmt, positionSide);
                     }
                     pos.put("pnl", posPnl);
                     unrealizedPnl += posPnl;
                 } else {
                     pos.put("currentPrice", null);
+                    pos.put("current_price", null);
                     Double storedPnl = (portfolioDO != null && portfolioDO.getUnrealizedProfit() != null) ? portfolioDO.getUnrealizedProfit() : 0.0;
                     pos.put("pnl", storedPnl);
+                    log.warn("[ModelService] 持仓 {} 未获取到当前价格，使用存储的盈亏: {}", symbol, storedPnl);
                     unrealizedPnl += storedPnl;
                 }
                 
@@ -371,7 +431,11 @@ public class ModelServiceImpl implements ModelService {
                 
                 // 计算持仓价值
                 positionsValue += positionAmt * avgPrice;
+                
+                log.info("[ModelService] 持仓 {} 最终数据: positionAmt={}, avgPrice={}, currentPrice={}, pnl={}",
+                        symbol, pos.get("position_amt"), pos.get("avg_price"), pos.get("current_price"), pos.get("pnl"));
             }
+            log.info("[ModelService] 持仓计算完成: 未实现盈亏={}, 已用保证金={}, 持仓价值={}", unrealizedPnl, marginUsed, positionsValue);
             
             Double initialCapital = model.getInitialCapital() != null ? model.getInitialCapital() : 10000.0;
             Double cash = initialCapital + realizedPnl - marginUsed;
@@ -399,6 +463,22 @@ public class ModelServiceImpl implements ModelService {
             result.put("autoSellEnabled", model.getAutoSellEnabled() != null ? model.getAutoSellEnabled() : true);
             result.put("leverage", model.getLeverage() != null ? model.getLeverage() : 10);
             
+            // 添加详细日志，输出返回的数据结构
+            log.info("[ModelService] ========== 返回投资组合数据 ==========");
+            log.info("[ModelService] portfolio.positions数量: {}", portfolio.get("positions") != null ? ((List<?>) portfolio.get("positions")).size() : 0);
+            if (portfolio.get("positions") != null) {
+                @SuppressWarnings("unchecked")
+                List<Map<String, Object>> posList = (List<Map<String, Object>>) portfolio.get("positions");
+                for (int i = 0; i < posList.size(); i++) {
+                    Map<String, Object> pos = posList.get(i);
+                    log.info("[ModelService] 持仓[{}]: symbol={}, position_amt={}, avg_price={}, current_price={}, pnl={}, position_side={}, leverage={}",
+                            i + 1, pos.get("symbol"), pos.get("position_amt"), pos.get("avg_price"),
+                            pos.get("current_price"), pos.get("pnl"), pos.get("position_side"), pos.get("leverage"));
+                    log.info("[ModelService] 持仓[{}] 完整数据: {}", i + 1, pos);
+                }
+            }
+            log.info("[ModelService] ========================================");
+            
             return result;
         } catch (Exception e) {
             log.error("[ModelService] 获取投资组合数据失败: {}", e.getMessage(), e);
@@ -408,10 +488,12 @@ public class ModelServiceImpl implements ModelService {
 
     @Override
     public Map<String, Object> getModelPortfolioSymbols(String modelId) {
-        log.info("[ModelService] 获取持仓合约symbol列表, modelId={}", modelId);
+        log.info("[ModelService] ========== 开始获取持仓合约symbol列表 ==========");
+        log.info("[ModelService] modelId: {}", modelId);
         try {
             ModelDO model = modelMapper.selectModelById(modelId);
             if (model == null) {
+                log.error("[ModelService] 模型不存在: {}", modelId);
                 throw new RuntimeException("Model not found");
             }
             
@@ -420,8 +502,9 @@ public class ModelServiceImpl implements ModelService {
             portfolioQuery.eq("model_id", modelId);
             portfolioQuery.ne("position_amt", 0);
             List<PortfolioDO> portfolioDOList = portfolioMapper.selectList(portfolioQuery);
+            log.info("[ModelService] 查询到持仓记录数: {}", portfolioDOList.size());
             
-            // 从持仓数据中提取去重的 symbol 列表
+            // 从持仓数据中提取去重的 symbol 列表（持仓的symbol是完整格式，如BTCUSDT）
             List<String> symbols = portfolioDOList.stream()
                     .map(PortfolioDO::getSymbol)
                     .filter(s -> s != null && !s.isEmpty())
@@ -430,37 +513,108 @@ public class ModelServiceImpl implements ModelService {
                     .sorted()
                     .collect(Collectors.toList());
             
+            log.info("[ModelService] 提取的持仓symbol列表: {}", symbols);
+            
             if (symbols.isEmpty()) {
+                log.warn("[ModelService] 持仓symbol列表为空，返回空数据");
                 Map<String, Object> result = new HashMap<>();
                 result.put("data", new ArrayList<>());
                 return result;
             }
             
-            // 从MarketService获取完整的市场数据（包括涨跌幅和成交量）
-            Map<String, Map<String, Object>> marketData = marketService.getMarketPrices();
+            // 从SDK实时获取价格（使用持仓的完整symbol格式，如BTCUSDT）
+            log.info("[ModelService] 开始从SDK实时获取价格，symbol列表: {}", symbols);
+            Map<String, Map<String, Object>> sdkPrices = new HashMap<>();
+            try {
+                // 使用BinanceFuturesClient直接获取实时价格
+                com.aifuturetrade.common.api.binance.BinanceFuturesClient binanceClient = getBinanceFuturesClient();
+                sdkPrices = binanceClient.getSymbolPrices(symbols);
+                log.info("[ModelService] SDK返回价格数据数量: {}", sdkPrices.size());
+                for (Map.Entry<String, Map<String, Object>> entry : sdkPrices.entrySet()) {
+                    log.info("[ModelService] SDK价格数据: {} = {}", entry.getKey(), entry.getValue());
+                }
+            } catch (Exception e) {
+                log.error("[ModelService] 从SDK获取实时价格失败: {}", e.getMessage(), e);
+            }
             
-            // 构建响应数据
+            // 从24_market_tickers表获取涨跌百分比和成交额
+            log.info("[ModelService] 开始从24_market_tickers表获取涨跌百分比和成交额");
+            Map<String, Map<String, Object>> tickerDataMap = new HashMap<>();
+            try {
+                List<Map<String, Object>> tickerDataList = marketTickerMapper.selectTickersBySymbols(symbols);
+                log.info("[ModelService] 从24_market_tickers表查询到 {} 条记录", tickerDataList.size());
+                for (Map<String, Object> ticker : tickerDataList) {
+                    String tickerSymbol = (String) ticker.get("symbol");
+                    if (tickerSymbol != null) {
+                        tickerDataMap.put(tickerSymbol.toUpperCase(), ticker);
+                        log.info("[ModelService] Ticker数据: {} = price_change_percent={}, quote_volume={}", 
+                                tickerSymbol, ticker.get("price_change_percent"), ticker.get("quote_volume"));
+                    }
+                }
+            } catch (Exception e) {
+                log.error("[ModelService] 从24_market_tickers表获取数据失败: {}", e.getMessage(), e);
+            }
+            
+            // 构建响应数据：合并SDK实时价格和数据库ticker数据
+            log.info("[ModelService] 开始构建响应数据");
             List<Map<String, Object>> result = new ArrayList<>();
             for (String symbol : symbols) {
-                Map<String, Object> dbInfo = marketData.get(symbol);
-                if (dbInfo == null) {
-                    dbInfo = new HashMap<>();
+                log.info("[ModelService] 处理symbol: {}", symbol);
+                
+                // 从SDK获取实时价格
+                Map<String, Object> sdkPriceInfo = sdkPrices.get(symbol);
+                Double realTimePrice = 0.0;
+                if (sdkPriceInfo != null) {
+                    Object priceObj = sdkPriceInfo.get("price");
+                    if (priceObj != null) {
+                        realTimePrice = convertToDouble(priceObj);
+                        log.info("[ModelService] symbol {} 的SDK实时价格: {}", symbol, realTimePrice);
+                    }
+                } else {
+                    log.warn("[ModelService] symbol {} 未从SDK获取到价格", symbol);
+                }
+                
+                // 从24_market_tickers表获取涨跌百分比和成交额
+                Map<String, Object> tickerData = tickerDataMap.get(symbol);
+                Double changePercent = 0.0;
+                Double quoteVolume = 0.0;
+                if (tickerData != null) {
+                    Object changePercentObj = tickerData.get("price_change_percent");
+                    if (changePercentObj != null) {
+                        changePercent = convertToDouble(changePercentObj);
+                        log.info("[ModelService] symbol {} 的涨跌百分比: {}%", symbol, changePercent);
+                    }
+                    Object quoteVolumeObj = tickerData.get("quote_volume");
+                    if (quoteVolumeObj != null) {
+                        quoteVolume = convertToDouble(quoteVolumeObj);
+                        log.info("[ModelService] symbol {} 的成交额: {}", symbol, quoteVolume);
+                    }
+                } else {
+                    log.warn("[ModelService] symbol {} 未从24_market_tickers表获取到数据", symbol);
                 }
                 
                 Map<String, Object> symbolData = new HashMap<>();
                 symbolData.put("symbol", symbol);
-                symbolData.put("price", dbInfo.getOrDefault("price", 0.0));
-                symbolData.put("change", dbInfo.getOrDefault("change_24h", dbInfo.getOrDefault("change", 0.0)));
-                symbolData.put("changePercent", dbInfo.getOrDefault("change_24h", dbInfo.getOrDefault("changePercent", 0.0)));
-                symbolData.put("volume", dbInfo.getOrDefault("daily_volume", dbInfo.getOrDefault("volume", 0.0)));
-                symbolData.put("quoteVolume", dbInfo.getOrDefault("daily_volume", dbInfo.getOrDefault("quote_volume", dbInfo.getOrDefault("quoteVolume", 0.0))));
-                symbolData.put("high", dbInfo.getOrDefault("high", 0.0));
-                symbolData.put("low", dbInfo.getOrDefault("low", 0.0));
+                symbolData.put("price", realTimePrice);
+                symbolData.put("change", changePercent);
+                symbolData.put("changePercent", changePercent);  // 前端期望的字段名
+                symbolData.put("volume", 0.0);  // 暂时不提供
+                symbolData.put("quoteVolume", quoteVolume);  // 前端期望的字段名
+                symbolData.put("high", 0.0);  // 暂时不提供
+                symbolData.put("low", 0.0);  // 暂时不提供
+                
+                log.info("[ModelService] symbol {} 最终数据: price={}, changePercent={}, quoteVolume={}", 
+                        symbol, realTimePrice, changePercent, quoteVolume);
+                
                 result.add(symbolData);
             }
             
+            log.info("[ModelService] 构建响应数据完成，共 {} 条记录", result.size());
+            
             Map<String, Object> response = new HashMap<>();
             response.put("data", result);
+            
+            log.info("[ModelService] ========== 获取持仓合约symbol列表完成 ==========");
             return response;
         } catch (Exception e) {
             log.error("[ModelService] 获取持仓合约symbol列表失败: {}", e.getMessage(), e);
@@ -472,13 +626,16 @@ public class ModelServiceImpl implements ModelService {
 
     @Override
     public List<Map<String, Object>> getTrades(String modelId, Integer limit) {
-        log.info("[ModelService] 获取交易历史记录, modelId={}, limit={}", modelId, limit);
+        log.info("[ModelService] ========== 开始获取交易历史记录 ==========");
+        log.info("[ModelService] modelId: {}, limit: {}", modelId, limit);
         try {
             if (limit == null) {
                 limit = defaultTradesQueryLimit;
             }
             
             List<TradeDO> tradeDOList = tradeMapper.selectTradesByModelId(modelId, limit);
+            log.info("[ModelService] 从数据库查询到 {} 条交易记录", tradeDOList.size());
+            
             List<Map<String, Object>> trades = new ArrayList<>();
             
             // 获取交易记录中涉及的symbol列表
@@ -488,6 +645,8 @@ public class ModelServiceImpl implements ModelService {
                     .distinct()
                     .collect(Collectors.toList());
             
+            log.info("[ModelService] 提取的symbol列表: {}", symbols);
+            
             // 获取实时价格
             Map<String, Map<String, Object>> pricesData = new HashMap<>();
             if (!symbols.isEmpty()) {
@@ -495,7 +654,13 @@ public class ModelServiceImpl implements ModelService {
             }
             
             // 转换并格式化交易记录
-            for (TradeDO tradeDO : tradeDOList) {
+            log.info("[ModelService] 开始转换交易记录数据");
+            for (int i = 0; i < tradeDOList.size(); i++) {
+                TradeDO tradeDO = tradeDOList.get(i);
+                log.info("[ModelService] 处理交易记录[{}]: id={}, future={}, signal={}, price={}, quantity={}, pnl={}, fee={}",
+                        i + 1, tradeDO.getId(), tradeDO.getFuture(), tradeDO.getSignal(),
+                        tradeDO.getPrice(), tradeDO.getQuantity(), tradeDO.getPnl(), tradeDO.getFee());
+                
                 Map<String, Object> trade = new HashMap<>();
                 trade.put("id", tradeDO.getId());
                 trade.put("modelId", tradeDO.getModelId());
@@ -505,6 +670,7 @@ public class ModelServiceImpl implements ModelService {
                 trade.put("price", tradeDO.getPrice());
                 trade.put("quantity", tradeDO.getQuantity());
                 trade.put("pnl", tradeDO.getPnl() != null ? tradeDO.getPnl() : 0.0);
+                trade.put("fee", tradeDO.getFee() != null ? tradeDO.getFee() : 0.0);  // 添加fee字段
                 trade.put("status", tradeDO.getStatus());
                 
                 // 格式化timestamp字段为字符串（北京时间）
@@ -553,8 +719,15 @@ public class ModelServiceImpl implements ModelService {
                     trade.put("pnl", tradeDO.getPnl() != null ? tradeDO.getPnl() : 0.0);
                 }
                 
+                log.info("[ModelService] 交易记录[{}] 最终数据: id={}, symbol={}, price={}, quantity={}, pnl={}, fee={}",
+                        i + 1, trade.get("id"), trade.get("symbol"), trade.get("price"),
+                        trade.get("quantity"), trade.get("pnl"), trade.get("fee"));
+                
                 trades.add(trade);
             }
+            
+            log.info("[ModelService] 转换完成，共 {} 条交易记录", trades.size());
+            log.info("[ModelService] ========== 获取交易历史记录完成 ==========");
             
             return trades;
         } catch (Exception e) {

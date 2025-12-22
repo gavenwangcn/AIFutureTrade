@@ -68,6 +68,11 @@ public class TradeDO implements Serializable {
     private Double pnl;
 
     /**
+     * 手续费
+     */
+    private Double fee;
+
+    /**
      * 状态（success, failed）
      */
     @TableField(exist = false)
