@@ -62,9 +62,9 @@ echo "1. 当前连接数统计:"
 $MYSQL_CMD $MYSQL_ARGS <<EOF
 SELECT 
     VARIABLE_VALUE as current_connections,
-    (SELECT VARIABLE_VALUE FROM information_schema.GLOBAL_VARIABLES WHERE VARIABLE_NAME = 'max_connections') as max_connections,
-    ROUND(VARIABLE_VALUE / (SELECT VARIABLE_VALUE FROM information_schema.GLOBAL_VARIABLES WHERE VARIABLE_NAME = 'max_connections') * 100, 2) as usage_percent
-FROM information_schema.GLOBAL_STATUS 
+    @@max_connections as max_connections,
+    ROUND(VARIABLE_VALUE / @@max_connections * 100, 2) as usage_percent
+FROM performance_schema.global_status 
 WHERE VARIABLE_NAME = 'Threads_connected';
 EOF
 
