@@ -307,32 +307,43 @@ def index():
 
 # ============ Trading API Endpoints ============
 
-@app.route('/api/models/<int:model_id>/execute-buy', methods=['POST'])
+@app.route('/api/models/<model_id>/execute-buy', methods=['POST'])
 def execute_buy_trading(model_id):
     """
     手动执行一次买入交易周期
     
     Args:
-        model_id (int): 模型ID
+        model_id (str): 模型ID（UUID字符串或整数字符串）
     
     Returns:
         JSON: 买入交易执行结果
     """
+    # 将 model_id 转换为整数（如果是 UUID 字符串，使用 hash 转换）
+    try:
+        if isinstance(model_id, str) and len(model_id) > 10:
+            # UUID 字符串，使用 hash 转换为整数
+            model_id_int = abs(hash(model_id)) % (10 ** 9)
+        else:
+            # 整数字符串，直接转换
+            model_id_int = int(model_id)
+    except (ValueError, TypeError):
+        return jsonify({'error': f'Invalid model_id: {model_id}'}), 400
+    
     # 检查策略配置（仅对 trade_type='strategy' 的模型）
-    has_strategy, error_msg = check_strategy_exists(model_id, 'buy')
+    has_strategy, error_msg = check_strategy_exists(model_id_int, 'buy')
     if not has_strategy:
-        logger.warning(f"Model {model_id} buy execution blocked: {error_msg}")
+        logger.warning(f"Model {model_id_int} buy execution blocked: {error_msg}")
         return jsonify({'error': error_msg, 'success': False}), 400
     
-    if model_id not in trading_engines:
-        engine, error = init_trading_engine_for_model(model_id)
+    if model_id_int not in trading_engines:
+        engine, error = init_trading_engine_for_model(model_id_int)
         if error:
             return jsonify({'error': error}), 404
     else:
-        engine = trading_engines[model_id]
+        engine = trading_engines[model_id_int]
 
     # 启用自动买入
-    models_db.set_model_auto_buy_enabled(model_id, True)
+    models_db.set_model_auto_buy_enabled(model_id_int, True)
     
     # 确保交易循环已启动
     _start_trading_loops()
@@ -344,32 +355,43 @@ def execute_buy_trading(model_id):
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
-@app.route('/api/models/<int:model_id>/execute-sell', methods=['POST'])
+@app.route('/api/models/<model_id>/execute-sell', methods=['POST'])
 def execute_sell_trading(model_id):
     """
     手动执行一次卖出交易周期
     
     Args:
-        model_id (int): 模型ID
+        model_id (str): 模型ID（UUID字符串或整数字符串）
     
     Returns:
         JSON: 卖出交易执行结果
     """
+    # 将 model_id 转换为整数（如果是 UUID 字符串，使用 hash 转换）
+    try:
+        if isinstance(model_id, str) and len(model_id) > 10:
+            # UUID 字符串，使用 hash 转换为整数
+            model_id_int = abs(hash(model_id)) % (10 ** 9)
+        else:
+            # 整数字符串，直接转换
+            model_id_int = int(model_id)
+    except (ValueError, TypeError):
+        return jsonify({'error': f'Invalid model_id: {model_id}'}), 400
+    
     # 检查策略配置（仅对 trade_type='strategy' 的模型）
-    has_strategy, error_msg = check_strategy_exists(model_id, 'sell')
+    has_strategy, error_msg = check_strategy_exists(model_id_int, 'sell')
     if not has_strategy:
-        logger.warning(f"Model {model_id} sell execution blocked: {error_msg}")
+        logger.warning(f"Model {model_id_int} sell execution blocked: {error_msg}")
         return jsonify({'error': error_msg, 'success': False}), 400
     
-    if model_id not in trading_engines:
-        engine, error = init_trading_engine_for_model(model_id)
+    if model_id_int not in trading_engines:
+        engine, error = init_trading_engine_for_model(model_id_int)
         if error:
             return jsonify({'error': error}), 404
     else:
-        engine = trading_engines[model_id]
+        engine = trading_engines[model_id_int]
 
     # 启用自动卖出
-    models_db.set_model_auto_sell_enabled(model_id, True)
+    models_db.set_model_auto_sell_enabled(model_id_int, True)
     
     # 确保交易循环已启动
     _start_trading_loops()
@@ -381,49 +403,71 @@ def execute_sell_trading(model_id):
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
-@app.route('/api/models/<int:model_id>/disable-buy', methods=['POST'])
+@app.route('/api/models/<model_id>/disable-buy', methods=['POST'])
 def disable_buy_trading(model_id):
     """
     禁用模型的自动买入功能
     
     Args:
-        model_id (int): 模型ID
+        model_id (str): 模型ID（UUID字符串或整数字符串）
     
     Returns:
         JSON: 更新后的自动买入状态
     """
-    model = models_db.get_model(model_id)
+    # 将 model_id 转换为整数（如果是 UUID 字符串，使用 hash 转换）
+    try:
+        if isinstance(model_id, str) and len(model_id) > 10:
+            # UUID 字符串，使用 hash 转换为整数
+            model_id_int = abs(hash(model_id)) % (10 ** 9)
+        else:
+            # 整数字符串，直接转换
+            model_id_int = int(model_id)
+    except (ValueError, TypeError):
+        return jsonify({'error': f'Invalid model_id: {model_id}'}), 400
+    
+    model = models_db.get_model(model_id_int)
     if not model:
         return jsonify({'error': 'Model not found'}), 404
 
-    success = models_db.set_model_auto_buy_enabled(model_id, False)
+    success = models_db.set_model_auto_buy_enabled(model_id_int, False)
     if not success:
         return jsonify({'error': 'Failed to update auto buy status'}), 500
 
-    logger.info(f"Auto buy disabled for model {model_id}")
-    return jsonify({'model_id': model_id, 'auto_buy_enabled': False})
+    logger.info(f"Auto buy disabled for model {model_id_int}")
+    return jsonify({'model_id': model_id_int, 'auto_buy_enabled': False})
 
-@app.route('/api/models/<int:model_id>/disable-sell', methods=['POST'])
+@app.route('/api/models/<model_id>/disable-sell', methods=['POST'])
 def disable_sell_trading(model_id):
     """
     禁用模型的自动卖出功能
     
     Args:
-        model_id (int): 模型ID
+        model_id (str): 模型ID（UUID字符串或整数字符串）
     
     Returns:
         JSON: 更新后的自动卖出状态
     """
-    model = models_db.get_model(model_id)
+    # 将 model_id 转换为整数（如果是 UUID 字符串，使用 hash 转换）
+    try:
+        if isinstance(model_id, str) and len(model_id) > 10:
+            # UUID 字符串，使用 hash 转换为整数
+            model_id_int = abs(hash(model_id)) % (10 ** 9)
+        else:
+            # 整数字符串，直接转换
+            model_id_int = int(model_id)
+    except (ValueError, TypeError):
+        return jsonify({'error': f'Invalid model_id: {model_id}'}), 400
+    
+    model = models_db.get_model(model_id_int)
     if not model:
         return jsonify({'error': 'Model not found'}), 404
 
-    success = models_db.set_model_auto_sell_enabled(model_id, False)
+    success = models_db.set_model_auto_sell_enabled(model_id_int, False)
     if not success:
         return jsonify({'error': 'Failed to update auto sell status'}), 500
 
-    logger.info(f"Auto sell disabled for model {model_id}")
-    return jsonify({'model_id': model_id, 'auto_sell_enabled': False})
+    logger.info(f"Auto sell disabled for model {model_id_int}")
+    return jsonify({'model_id': model_id_int, 'auto_sell_enabled': False})
 
 @app.route('/api/strategy/validate-code', methods=['POST'])
 def validate_strategy_code():
