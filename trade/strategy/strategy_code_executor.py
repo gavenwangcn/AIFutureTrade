@@ -115,55 +115,79 @@ class StrategyCodeExecutor:
         
         logger.info(f"[StrategyCodeExecutor] 初始化完成，已加载模块: {list(self.allowed_modules.keys())}")
     
-    def _create_safe_globals(self, extra_globals: Dict = None) -> Dict:
+    def get_available_libraries(self) -> Dict:
         """
-        创建安全的全局变量环境
+        获取可用的Python库信息
+        
+        Returns:
+            Dict: 包含可用库的字典，格式为{库名: 描述}
+        """
+        libraries = {
+            'talib': 'TA-Lib 技术指标库（可用）' if TALIB_AVAILABLE else 'TA-Lib 技术指标库（不可用）',
+            'numpy': 'NumPy 数值计算库（可用）' if NUMPY_AVAILABLE else 'NumPy 数值计算库（不可用）',
+            'pandas': 'Pandas 数据分析库（可用）' if PANDAS_AVAILABLE else 'Pandas 数据分析库（不可用）',
+            'math': 'Python 数学函数库（内置）',
+            'datetime': 'Python 日期时间库（内置）',
+            'json': 'Python JSON 处理库（内置）',
+            'time': 'Python 时间库（内置）',
+            'random': 'Python 随机数库（内置）',
+            'sys': 'Python 系统库（内置）',
+            'os': 'Python 操作系统接口（内置）',
+            're': 'Python 正则表达式库（内置）',
+            'collections': 'Python 集合工具库（内置）',
+            'itertools': 'Python 迭代工具库（内置）',
+            'functools': 'Python 函数工具库（内置）',
+            'typing': 'Python 类型注解库（内置）',
+            'ast': 'Python 抽象语法树库（内置）',
+            'logging': 'Python 日志库（内置）',
+            'traceback': 'Python 异常追踪库（内置）',
+        }
+        
+        # 检查并添加其他常用第三方库
+        try:
+            import requests
+            libraries['requests'] = 'HTTP 请求库（可用）'
+        except ImportError:
+            libraries['requests'] = 'HTTP 请求库（不可用）'
+        
+        try:
+            import matplotlib
+            libraries['matplotlib'] = '绘图库（可用）'
+        except ImportError:
+            libraries['matplotlib'] = '绘图库（不可用）'
+        
+        try:
+            import scipy
+            libraries['scipy'] = '科学计算库（可用）'
+        except ImportError:
+            libraries['scipy'] = '科学计算库（不可用）'
+        
+        return libraries
+
+    def _create_execution_globals(self, extra_globals: Dict = None) -> Dict:
+        """
+        创建完整的Python执行环境
         
         Args:
             extra_globals: 额外的全局变量字典
         
         Returns:
-            Dict: 安全的全局变量字典
+            Dict: 完整的全局变量字典
         """
-        safe_globals = {
-            '__builtins__': {
-                'print': print,
-                'len': len,
-                'str': str,
-                'int': int,
-                'float': float,
-                'list': list,
-                'dict': dict,
-                'tuple': tuple,
-                'set': set,
-                'range': range,
-                'sum': sum,
-                'min': min,
-                'max': max,
-                'abs': abs,
-                'round': round,
-                'sorted': sorted,
-                'enumerate': enumerate,
-                'zip': zip,
-                'isinstance': isinstance,
-                'type': type,
-                'bool': bool,
-                'True': True,
-                'False': False,
-                'None': None,
-            },
+        execution_globals = {
+            '__builtins__': __builtins__,  # 使用完整的builtins
             '__name__': '__main__',
             '__doc__': None,
         }
         
-        # 添加允许的模块
-        safe_globals.update(self.allowed_modules)
+        # 添加预加载的模块
+        execution_globals.update(self.allowed_modules)
         
         # 添加额外的全局变量
         if extra_globals:
-            safe_globals.update(extra_globals)
+            execution_globals.update(extra_globals)
             
-        return safe_globals
+        return execution_globals
     
     def execute_strategy_code(
         self,
@@ -208,7 +232,7 @@ class StrategyCodeExecutor:
         """
         try:
             # 构建执行上下文
-            execution_context = self._create_safe_globals()
+            execution_context = self._create_execution_globals()
             
             # 根据决策类型导入对应的策略基类
             if decision_type == 'buy':

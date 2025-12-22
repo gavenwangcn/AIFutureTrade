@@ -184,17 +184,7 @@ class StrategyCodeTesterBuy:
     
     def _test_imports(self, strategy_code: str) -> Dict:
         """测试导入语句"""
-        errors = []
         warnings = []
-        
-        # 检查是否导入了 StrategyBaseBuy
-        if 'from trade.strategy.strategy_template_buy import StrategyBaseBuy' not in strategy_code:
-            if 'from trade.strategy_template_buy import StrategyBaseBuy' in strategy_code:
-                warnings.append("建议使用 'from trade.strategy.strategy_template_buy import StrategyBaseBuy' 导入方式")
-            elif 'import StrategyBaseBuy' in strategy_code:
-                warnings.append("建议使用 'from trade.strategy.strategy_template_buy import StrategyBaseBuy' 导入方式")
-            else:
-                errors.append("未找到 StrategyBaseBuy 导入语句，必须包含: from trade.strategy.strategy_template_buy import StrategyBaseBuy")
         
         # 检查是否导入了 typing
         has_typing_import = 'from typing import' in strategy_code or 'import typing' in strategy_code
@@ -202,8 +192,8 @@ class StrategyCodeTesterBuy:
             warnings.append("建议导入 typing 模块用于类型注解: from typing import Dict, List")
         
         return {
-            'passed': len(errors) == 0,
-            'errors': errors,
+            'passed': True,  # 不限制导入语句，仅返回警告
+            'errors': [],
             'warnings': warnings,
             'message': '导入检查完成'
         }

@@ -75,21 +75,69 @@ class StrategyBaseSell(ABC):
     
     def get_available_libraries(self) -> Dict:
         """
-        获取可用的库（辅助方法）
-        
-        子类可以通过此方法了解可用的库和工具。
+        获取可用的Python库信息
         
         Returns:
-            Dict: 包含可用库的字典
+            Dict: 包含可用库的字典，格式为{库名: 描述}
         """
-        return {
-            'talib': 'TA-Lib 技术指标库（如果可用）',
-            'numpy': 'NumPy 数值计算库（如果可用）',
-            'pandas': 'Pandas 数据分析库（如果可用）',
-            'math': 'Python 数学函数库',
-            'datetime': 'Python 日期时间库',
-            'json': 'Python JSON 处理库',
-            'time': 'Python 时间库',
-            'random': 'Python 随机数库'
+        # 尝试导入TA-Lib、numpy、pandas
+        try:
+            import talib
+            TALIB_AVAILABLE = True
+        except ImportError:
+            TALIB_AVAILABLE = False
+        
+        try:
+            import numpy
+            NUMPY_AVAILABLE = True
+        except ImportError:
+            NUMPY_AVAILABLE = False
+        
+        try:
+            import pandas
+            PANDAS_AVAILABLE = True
+        except ImportError:
+            PANDAS_AVAILABLE = False
+            
+        libraries = {
+            'talib': 'TA-Lib 技术指标库（可用）' if TALIB_AVAILABLE else 'TA-Lib 技术指标库（不可用）',
+            'numpy': 'NumPy 数值计算库（可用）' if NUMPY_AVAILABLE else 'NumPy 数值计算库（不可用）',
+            'pandas': 'Pandas 数据分析库（可用）' if PANDAS_AVAILABLE else 'Pandas 数据分析库（不可用）',
+            'math': 'Python 数学函数库（内置）',
+            'datetime': 'Python 日期时间库（内置）',
+            'json': 'Python JSON 处理库（内置）',
+            'time': 'Python 时间库（内置）',
+            'random': 'Python 随机数库（内置）',
+            'sys': 'Python 系统库（内置）',
+            'os': 'Python 操作系统接口（内置）',
+            're': 'Python 正则表达式库（内置）',
+            'collections': 'Python 集合工具库（内置）',
+            'itertools': 'Python 迭代工具库（内置）',
+            'functools': 'Python 函数工具库（内置）',
+            'typing': 'Python 类型注解库（内置）',
+            'ast': 'Python 抽象语法树库（内置）',
+            'logging': 'Python 日志库（内置）',
+            'traceback': 'Python 异常追踪库（内置）',
         }
+        
+        # 检查并添加其他常用第三方库
+        try:
+            import requests
+            libraries['requests'] = 'HTTP 请求库（可用）'
+        except ImportError:
+            libraries['requests'] = 'HTTP 请求库（不可用）'
+        
+        try:
+            import matplotlib
+            libraries['matplotlib'] = '绘图库（可用）'
+        except ImportError:
+            libraries['matplotlib'] = '绘图库（不可用）'
+        
+        try:
+            import scipy
+            libraries['scipy'] = '科学计算库（可用）'
+        except ImportError:
+            libraries['scipy'] = '科学计算库（不可用）'
+        
+        return libraries
 

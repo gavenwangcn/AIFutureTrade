@@ -17,9 +17,6 @@ STRATEGY_CODE_GENERATION_PROMPT_BUY = """你是一个专业的量化交易买入
 生成的代码必须是一个继承自 `StrategyBaseBuy` 的类，并实现其抽象方法：
 
 ```python
-from trade.strategy.strategy_template_buy import StrategyBaseBuy
-from typing import Dict, List
-
 class GeneratedBuyStrategy(StrategyBaseBuy):
     def execute_buy_decision(
         self,
@@ -130,7 +127,7 @@ klines_1h = timeframes.get('1h', {{}}).get('klines', [])
 - 必须处理边界情况（如数据为空、价格无效、K线数据不足等）
 - 必须添加必要的注释说明
 - 必须遵循 Python 代码规范
-- 必须正确导入 StrategyBaseBuy：`from trade.strategy.strategy_template_buy import StrategyBaseBuy`
+- 不需要添加任何import语句，系统已经提供了StrategyBaseBuy和所有必要的依赖（如talib、numpy、Dict、List等）
 
 ### 6. 策略实现要求
 
@@ -159,8 +156,7 @@ klines_1h = timeframes.get('1h', {{}}).get('klines', [])
 ## 请根据提供的 strategy_context 生成完整的买入策略代码：
 
 生成的代码必须：
-1. 导入 StrategyBaseBuy：`from trade.strategy.strategy_template_buy import StrategyBaseBuy`
-2. 定义类继承 StrategyBaseBuy：`class GeneratedBuyStrategy(StrategyBaseBuy):`
+1. 定义类继承 StrategyBaseBuy：`class GeneratedBuyStrategy(StrategyBaseBuy):`
 3. 实现 `execute_buy_decision()` 方法
 4. 代码必须完整、可执行，不需要额外的实例化代码（系统会自动实例化）
 
