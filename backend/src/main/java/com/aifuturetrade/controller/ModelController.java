@@ -11,8 +11,6 @@ import com.aifuturetrade.common.util.PageRequest;
 import com.aifuturetrade.dao.mapper.ModelStrategyMapper;
 import io.swagger.annotations.Api;
 import io.swagger.annotations.ApiOperation;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -30,7 +28,6 @@ import java.util.Map;
 @RequestMapping("/api/models")
 @Api(tags = "交易模型管理")
 public class ModelController {
-    private static final Logger logger = LoggerFactory.getLogger(ModelController.class);
 
     @Autowired
     private ModelService modelService;
@@ -370,9 +367,6 @@ public class ModelController {
             @RequestParam(required = false) String type,
             @RequestParam(defaultValue = "1") Integer pageNum,
             @RequestParam(defaultValue = "10") Integer pageSize) {
-        logger.info("========== 开始获取模型策略配置数据 ==========");
-        logger.info("模型ID: {}", modelId);
-        
         // 过滤掉 "undefined" 字符串，转换为 null
         if (name != null && ("undefined".equalsIgnoreCase(name) || name.trim().isEmpty())) {
             name = null;
@@ -381,41 +375,14 @@ public class ModelController {
             type = null;
         }
         
-        logger.info("搜索参数 - 策略名称: {}, 策略类型: {}, 页码: {}, 每页大小: {}", name, type, pageNum, pageSize);
-        
         // 分页查询策略列表（支持搜索）
         PageRequest pageRequest = new PageRequest();
         pageRequest.setPageNum(pageNum);
         pageRequest.setPageSize(pageSize);
-        logger.info("开始查询左侧策略列表（分页查询strategys表）...");
         PageResult<StrategyDTO> strategiesPage = strategyService.getStrategiesByPage(pageRequest, name, type);
-        logger.info("左侧策略列表查询完成 - 总记录数: {}, 当前页记录数: {}, 总页数: {}", 
-                strategiesPage.getTotal(), strategiesPage.getData().size(), strategiesPage.getTotalPages());
-        if (strategiesPage.getData().size() > 0) {
-            logger.info("左侧策略列表数据示例（第一条）: ID={}, 名称={}, 类型={}, 创建时间={}", 
-                    strategiesPage.getData().get(0).getId(), 
-                    strategiesPage.getData().get(0).getName(),
-                    strategiesPage.getData().get(0).getType(),
-                    strategiesPage.getData().get(0).getCreatedAt());
-        } else {
-            logger.warn("左侧策略列表为空！请检查strategys表中是否有数据，以及搜索条件是否正确");
-        }
         
         // 获取当前模型已关联的策略列表（包含策略详细信息）
-        logger.info("开始查询右侧已配置策略列表（查询model_strategy表关联strategys表）...");
         List<Map<String, Object>> modelStrategiesWithInfo = modelStrategyMapper.selectModelStrategiesWithStrategyInfoByModelId(modelId);
-        logger.info("右侧已配置策略列表查询完成 - 记录数: {}", modelStrategiesWithInfo.size());
-        if (modelStrategiesWithInfo.size() > 0) {
-            Map<String, Object> firstItem = modelStrategiesWithInfo.get(0);
-            logger.info("右侧已配置策略列表数据示例（第一条）: ID={}, 策略ID={}, 策略名称={}, 策略类型={}, 优先级={}", 
-                    firstItem.get("id"),
-                    firstItem.get("strategy_id"),
-                    firstItem.get("strategy_name"),
-                    firstItem.get("strategy_type"),
-                    firstItem.get("priority"));
-        } else {
-            logger.info("右侧已配置策略列表为空（当前模型尚未配置任何策略）");
-        }
         
         // 构建返回数据
         Map<String, Object> result = new HashMap<>();
@@ -425,10 +392,6 @@ public class ModelController {
         result.put("pageSize", strategiesPage.getPageSize());
         result.put("totalPages", strategiesPage.getTotalPages());
         result.put("modelStrategies", modelStrategiesWithInfo);
-        
-        logger.info("返回数据 - 左侧策略数: {}, 右侧已配置策略数: {}", 
-                strategiesPage.getData().size(), modelStrategiesWithInfo.size());
-        logger.info("========== 获取模型策略配置数据完成 ==========");
         
         return new ResponseEntity<>(result, HttpStatus.OK);
     }

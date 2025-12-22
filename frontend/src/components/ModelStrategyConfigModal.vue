@@ -146,6 +146,13 @@
                     <div class="strategy-meta">
                       <span class="badge badge-long">买</span>
                     </div>
+                    <div 
+                      v-if="item.strategy_context" 
+                      class="strategy-context"
+                      :title="item.strategy_context"
+                    >
+                      {{ truncateText(item.strategy_context, 100) }}
+                    </div>
                   </div>
                   <div class="priority-input-group">
                     <label>优先级:</label>
@@ -187,6 +194,13 @@
                     <div class="strategy-name">{{ item.strategy_name || getStrategyName(item.strategy_id || item.strategyId) }}</div>
                     <div class="strategy-meta">
                       <span class="badge badge-short">卖</span>
+                    </div>
+                    <div 
+                      v-if="item.strategy_context" 
+                      class="strategy-context"
+                      :title="item.strategy_context"
+                    >
+                      {{ truncateText(item.strategy_context, 100) }}
                     </div>
                   </div>
                   <div class="priority-input-group">
@@ -623,7 +637,7 @@ watch(() => props.modelId, () => {
 .strategy-item-right {
   display: flex;
   justify-content: space-between;
-  align-items: center;
+  align-items: flex-start;
   gap: 12px;
   width: 100%;
 }

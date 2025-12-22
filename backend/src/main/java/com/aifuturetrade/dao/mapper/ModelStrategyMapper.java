@@ -42,9 +42,9 @@ public interface ModelStrategyMapper extends BaseMapper<ModelStrategyDO> {
     /**
      * 根据模型ID查询模型策略关联（包含策略详细信息）
      * @param modelId 模型ID
-     * @return 模型策略关联列表（包含策略名称和类型）
+     * @return 模型策略关联列表（包含策略名称、类型和内容）
      */
-    @Select("SELECT ms.*, s.name as strategy_name, s.type as strategy_type " +
+    @Select("SELECT ms.*, s.name as strategy_name, s.type as strategy_type, s.strategy_context as strategy_context " +
             "FROM model_strategy ms " +
             "INNER JOIN strategys s ON ms.strategy_id = s.id " +
             "WHERE ms.model_id = #{modelId} " +
