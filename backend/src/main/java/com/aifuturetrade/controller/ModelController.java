@@ -372,6 +372,15 @@ public class ModelController {
             @RequestParam(defaultValue = "10") Integer pageSize) {
         logger.info("========== 开始获取模型策略配置数据 ==========");
         logger.info("模型ID: {}", modelId);
+        
+        // 过滤掉 "undefined" 字符串，转换为 null
+        if (name != null && ("undefined".equalsIgnoreCase(name) || name.trim().isEmpty())) {
+            name = null;
+        }
+        if (type != null && ("undefined".equalsIgnoreCase(type) || type.trim().isEmpty())) {
+            type = null;
+        }
+        
         logger.info("搜索参数 - 策略名称: {}, 策略类型: {}, 页码: {}, 每页大小: {}", name, type, pageNum, pageSize);
         
         // 分页查询策略列表（支持搜索）

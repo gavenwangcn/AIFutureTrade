@@ -96,13 +96,18 @@ public class StrategyServiceImpl implements StrategyService {
         Page<StrategyDO> page = new Page<>(pageRequest.getPageNum(), pageRequest.getPageSize());
         
         LambdaQueryWrapper<StrategyDO> queryWrapper = new LambdaQueryWrapper<>();
-        if (StringUtils.hasText(name)) {
+        // 过滤掉 null、"undefined" 字符串和空字符串
+        if (StringUtils.hasText(name) && !"undefined".equalsIgnoreCase(name)) {
             queryWrapper.like(StrategyDO::getName, name);
             log.info("[StrategyService] 添加名称模糊查询条件: {}", name);
+        } else {
+            log.info("[StrategyService] 策略名称为空或undefined，不添加名称查询条件");
         }
-        if (StringUtils.hasText(type)) {
+        if (StringUtils.hasText(type) && !"undefined".equalsIgnoreCase(type)) {
             queryWrapper.eq(StrategyDO::getType, type);
             log.info("[StrategyService] 添加类型精确查询条件: {}", type);
+        } else {
+            log.info("[StrategyService] 策略类型为空或undefined，不添加类型查询条件");
         }
         queryWrapper.orderByDesc(StrategyDO::getCreatedAt);
         

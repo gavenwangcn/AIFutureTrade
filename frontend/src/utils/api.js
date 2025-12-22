@@ -76,10 +76,14 @@ export async function apiRequest(endpoint, options = {}) {
 export async function apiGet(endpoint, params = {}) {
   let url = endpoint
   if (Object.keys(params).length > 0) {
-    // 过滤掉 undefined、null 和空字符串的参数
+    // 过滤掉 undefined、null、空字符串和字符串 "undefined" 的参数
     const filteredParams = {}
     for (const [key, value] of Object.entries(params)) {
-      if (value !== undefined && value !== null && value !== '') {
+      // 检查值是否有效（不是 undefined、null、空字符串或字符串 "undefined"）
+      if (value !== undefined && 
+          value !== null && 
+          value !== '' && 
+          String(value).toLowerCase() !== 'undefined') {
         filteredParams[key] = value
       }
     }
