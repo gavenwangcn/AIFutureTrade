@@ -2660,6 +2660,24 @@ class TradingEngine:
         else:
             logger.info(f"TRADE: RECORDED - Model {self.model_id} STOP_LOSS {symbol}")
 
+        # 【修复bug】止损订单成功提交后，立即记录账户价值到 account_value_historys 表
+        # 确保在真实执行交易操作时，将账户信息保存到 account_value_historys 表中
+        # 同时更新当前 model 的 account_values 表中的数据
+        try:
+            # 构建 current_prices 字典，用于账户价值记录
+            current_prices = {symbol: {'price': current_price}}
+            # 如果 market_state 中有其他 symbol 的价格，也一并包含
+            for other_symbol, other_data in market_state.items():
+                if other_symbol not in current_prices and 'price' in other_data:
+                    current_prices[other_symbol] = {'price': other_data['price']}
+            
+            logger.info(f"[Model {self.model_id}] [止损订单] 订单提交成功，立即记录账户价值快照")
+            self._record_account_snapshot(current_prices)
+            logger.debug(f"[Model {self.model_id}] [止损订单] 账户价值快照已记录到 account_values 和 account_value_historys 表")
+        except Exception as account_snapshot_err:
+            # 账户价值记录失败不影响交易结果，只记录警告日志
+            logger.warning(f"[Model {self.model_id}] [止损订单] 记录账户价值快照失败: {account_snapshot_err}")
+
         return {
             'symbol': symbol,
             'signal': 'stop_loss',
@@ -2768,6 +2786,24 @@ class TradingEngine:
             logger.error(f"TRADE: Add trade failed (TAKE_PROFIT) model={self.model_id} symbol={symbol}: {db_err}")
             raise
         self._log_trade_record('take_profit', symbol, position_side, sdk_call_skipped, sdk_skip_reason)
+
+        # 【修复bug】止盈订单成功提交后，立即记录账户价值到 account_value_historys 表
+        # 确保在真实执行交易操作时，将账户信息保存到 account_value_historys 表中
+        # 同时更新当前 model 的 account_values 表中的数据
+        try:
+            # 构建 current_prices 字典，用于账户价值记录
+            current_prices = {symbol: {'price': current_price}}
+            # 如果 market_state 中有其他 symbol 的价格，也一并包含
+            for other_symbol, other_data in market_state.items():
+                if other_symbol not in current_prices and 'price' in other_data:
+                    current_prices[other_symbol] = {'price': other_data['price']}
+            
+            logger.info(f"[Model {self.model_id}] [止盈订单] 订单提交成功，立即记录账户价值快照")
+            self._record_account_snapshot(current_prices)
+            logger.debug(f"[Model {self.model_id}] [止盈订单] 账户价值快照已记录到 account_values 和 account_value_historys 表")
+        except Exception as account_snapshot_err:
+            # 账户价值记录失败不影响交易结果，只记录警告日志
+            logger.warning(f"[Model {self.model_id}] [止盈订单] 记录账户价值快照失败: {account_snapshot_err}")
 
         return {
             'symbol': symbol,
