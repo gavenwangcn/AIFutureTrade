@@ -899,38 +899,69 @@ def get_portfolio(model_id):
             'unrealized_pnl': 0
         }
     
-    # 获取实时价格数据（使用get_prices从数据库获取）
-    prices_data = market_fetcher.get_prices(held_symbols)
-    current_prices = {symbol: data.get('price', 0) for symbol, data in prices_data.items() if data.get('price')}
+    # 获取实时价格数据（使用get_current_prices从SDK API获取实时价格）
+    # 优先使用API获取实时价格，如果失败则回退到数据库
+    prices_data = market_fetcher.get_current_prices(held_symbols)
+    if not prices_data or len(prices_data) == 0:
+        # 如果API获取失败，回退到数据库
+        logger.warning(f"[Portfolio] API获取价格失败，回退到数据库获取价格")
+        prices_data = market_fetcher.get_prices(held_symbols)
+    
+    # 提取价格数据，支持两种格式，并处理symbol格式匹配（带/不带USDT后缀）
+    current_prices = {}
+    for symbol, data in prices_data.items():
+        if isinstance(data, dict):
+            price = data.get('price') or data.get('last_price', 0)
+            if price and price > 0:
+                # 同时支持带USDT和不带USDT的symbol格式
+                current_prices[symbol] = price
+                # 如果symbol不带USDT，也添加带USDT的版本
+                if not symbol.endswith('USDT'):
+                    current_prices[f"{symbol}USDT"] = price
+                # 如果symbol带USDT，也添加不带USDT的版本
+                elif symbol.endswith('USDT'):
+                    current_prices[symbol[:-4]] = price
+        elif isinstance(data, (int, float)) and data > 0:
+            current_prices[symbol] = data
+            # 同样处理格式匹配
+            if not symbol.endswith('USDT'):
+                current_prices[f"{symbol}USDT"] = data
+            elif symbol.endswith('USDT'):
+                current_prices[symbol[:-4]] = data
+    
+    logger.info(f"[Portfolio] 获取到 {len(current_prices)} 个持仓symbol的实时价格: {list(current_prices.keys())}")
 
     # 在内存中更新持仓的当前价格和盈亏信息，避免再次查询数据库
-    if positions and current_prices:
+    if positions:
         unrealized_pnl = 0
         for pos in positions:
             symbol = pos['symbol']
-            if symbol in current_prices:
+            entry_price = pos.get('avg_price', 0) or 0
+            position_amt = abs(pos.get('position_amt', 0) or 0)  # 使用绝对值
+            position_side = pos.get('position_side', 'LONG')
+            
+            if symbol in current_prices and current_prices[symbol] > 0:
+                # 有实时价格，使用实时价格计算
                 current_price = current_prices[symbol]
-                entry_price = pos['avg_price']
-                position_amt = abs(pos['position_amt'])  # 使用绝对值
                 pos['current_price'] = current_price
                 
-                # 优先使用数据库中的unrealized_profit字段
-                if pos.get('unrealized_profit') is not None and pos['unrealized_profit'] != 0:
-                    pos_pnl = pos['unrealized_profit']
-                else:
-                    # 如果没有，则计算
-                    if pos['position_side'] == 'LONG':
-                        pos_pnl = (current_price - entry_price) * position_amt
-                    else:  # SHORT
-                        pos_pnl = (entry_price - current_price) * position_amt
+                # 使用实时价格计算盈亏（覆盖数据库中的值，确保实时性）
+                if position_side == 'LONG':
+                    pos_pnl = (current_price - entry_price) * position_amt
+                else:  # SHORT
+                    pos_pnl = (entry_price - current_price) * position_amt
                 
                 pos['pnl'] = pos_pnl
                 unrealized_pnl += pos_pnl
+                
+                logger.debug(f"[Portfolio] 持仓 {symbol} {position_side}: 开仓价={entry_price}, 当前价={current_price}, 数量={position_amt}, 盈亏={pos_pnl:.2f}")
             else:
-                pos['current_price'] = None
-                # 使用数据库中的unrealized_profit字段
-                pos['pnl'] = pos.get('unrealized_profit', 0)
-                unrealized_pnl += pos.get('unrealized_profit', 0)
+                # 没有实时价格，使用数据库中的unrealized_profit字段
+                pos['current_price'] = 0
+                stored_pnl = pos.get('unrealized_profit', 0) or 0
+                pos['pnl'] = stored_pnl
+                unrealized_pnl += stored_pnl
+                logger.warning(f"[Portfolio] 持仓 {symbol} 未获取到实时价格，使用存储的盈亏: {stored_pnl:.2f}")
         
         # 更新组合的未实现盈亏和总价值
         portfolio['unrealized_pnl'] = unrealized_pnl

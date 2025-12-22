@@ -326,21 +326,105 @@ public class ModelServiceImpl implements ModelService {
                 heldSymbols = heldSymbols.stream().distinct().collect(Collectors.toList());
             }
             
-            // 获取实时价格数据
+            // 获取实时价格数据（优先从SDK API获取，确保实时性）
             log.info("[ModelService] 开始获取实时价格数据，持仓symbol列表: {}", heldSymbols);
-            Map<String, Map<String, Object>> pricesData = marketService.getMarketPrices();
             Map<String, Double> currentPrices = new HashMap<>();
-            for (Map.Entry<String, Map<String, Object>> entry : pricesData.entrySet()) {
-                Object priceObj = entry.getValue().get("price");
-                if (priceObj != null) {
-                    Double priceValue = convertToDouble(priceObj);
-                    if (priceValue != null) {
-                        currentPrices.put(entry.getKey(), priceValue);
-                        log.debug("[ModelService] 获取到价格: {} = {}", entry.getKey(), priceValue);
+            
+            if (!heldSymbols.isEmpty()) {
+                try {
+                    // 构建contract_symbol列表（确保所有symbol都以USDT结尾）
+                    List<String> contractSymbols = new ArrayList<>();
+                    Map<String, String> symbolToContract = new HashMap<>();
+                    for (String symbol : heldSymbols) {
+                        String upperSymbol = symbol.toUpperCase();
+                        String contractSymbol = upperSymbol;
+                        // 如果symbol不带USDT，添加USDT后缀
+                        if (!contractSymbol.endsWith("USDT")) {
+                            contractSymbol = upperSymbol + "USDT";
+                        }
+                        contractSymbols.add(contractSymbol);
+                        symbolToContract.put(upperSymbol, contractSymbol);
+                        // 同时支持带USDT和不带USDT的映射
+                        if (!upperSymbol.equals(contractSymbol)) {
+                            symbolToContract.put(contractSymbol, contractSymbol);
+                        }
+                    }
+                    
+                    // 直接调用SDK获取实时价格
+                    log.info("[ModelService] 从SDK API获取实时价格，contractSymbols: {}", contractSymbols);
+                    com.aifuturetrade.common.api.binance.BinanceFuturesClient binanceClient = getBinanceFuturesClient();
+                    Map<String, Map<String, Object>> sdkPrices = binanceClient.getSymbolPrices(contractSymbols);
+                    log.info("[ModelService] SDK返回价格数据数量: {}", sdkPrices.size());
+                    
+                    // 处理SDK返回的价格数据，支持多种symbol格式匹配
+                    for (Map.Entry<String, Map<String, Object>> entry : sdkPrices.entrySet()) {
+                        String contractSymbol = entry.getKey().toUpperCase();
+                        Map<String, Object> priceInfo = entry.getValue();
+                        Object priceObj = priceInfo.get("price");
+                        if (priceObj != null) {
+                            Double priceValue = convertToDouble(priceObj);
+                            if (priceValue != null && priceValue > 0) {
+                                // 同时支持带USDT和不带USDT的symbol格式
+                                currentPrices.put(contractSymbol, priceValue);
+                                // 如果contractSymbol带USDT，也添加不带USDT的版本
+                                if (contractSymbol.endsWith("USDT")) {
+                                    String symbolWithoutUSDT = contractSymbol.substring(0, contractSymbol.length() - 4);
+                                    currentPrices.put(symbolWithoutUSDT, priceValue);
+                                }
+                                log.debug("[ModelService] 从SDK获取到价格: {} = {}", contractSymbol, priceValue);
+                            }
+                        }
+                    }
+                    
+                    // 如果SDK获取失败或数据不完整，回退到marketService
+                    if (currentPrices.isEmpty() || currentPrices.size() < heldSymbols.size()) {
+                        log.warn("[ModelService] SDK获取价格不完整，回退到marketService获取价格");
+                        Map<String, Map<String, Object>> pricesData = marketService.getMarketPrices();
+                        for (Map.Entry<String, Map<String, Object>> entry : pricesData.entrySet()) {
+                            Object priceObj = entry.getValue().get("price");
+                            if (priceObj != null) {
+                                Double priceValue = convertToDouble(priceObj);
+                                if (priceValue != null && priceValue > 0) {
+                                    String symbol = entry.getKey().toUpperCase();
+                                    if (!currentPrices.containsKey(symbol)) {
+                                        currentPrices.put(symbol, priceValue);
+                                        // 同时支持带USDT和不带USDT的格式
+                                        if (symbol.endsWith("USDT")) {
+                                            String symbolWithoutUSDT = symbol.substring(0, symbol.length() - 4);
+                                            currentPrices.put(symbolWithoutUSDT, priceValue);
+                                        } else {
+                                            currentPrices.put(symbol + "USDT", priceValue);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                } catch (Exception e) {
+                    log.error("[ModelService] 从SDK获取实时价格失败，回退到marketService: {}", e.getMessage(), e);
+                    // 回退到marketService
+                    Map<String, Map<String, Object>> pricesData = marketService.getMarketPrices();
+                    for (Map.Entry<String, Map<String, Object>> entry : pricesData.entrySet()) {
+                        Object priceObj = entry.getValue().get("price");
+                        if (priceObj != null) {
+                            Double priceValue = convertToDouble(priceObj);
+                            if (priceValue != null && priceValue > 0) {
+                                String symbol = entry.getKey().toUpperCase();
+                                currentPrices.put(symbol, priceValue);
+                                // 同时支持带USDT和不带USDT的格式
+                                if (symbol.endsWith("USDT")) {
+                                    String symbolWithoutUSDT = symbol.substring(0, symbol.length() - 4);
+                                    currentPrices.put(symbolWithoutUSDT, priceValue);
+                                } else {
+                                    currentPrices.put(symbol + "USDT", priceValue);
+                                }
+                            }
+                        }
                     }
                 }
             }
-            log.info("[ModelService] 获取实时价格完成，共 {} 个价格数据", currentPrices.size());
+            
+            log.info("[ModelService] 获取实时价格完成，共 {} 个价格数据: {}", currentPrices.size(), currentPrices.keySet());
             
             // 计算已实现盈亏（从交易记录中汇总）
             QueryWrapper<TradeDO> tradeQuery = new QueryWrapper<>();
@@ -383,12 +467,21 @@ public class ModelServiceImpl implements ModelService {
                 
                 PortfolioDO portfolioDO = symbolToPortfolio.get(symbol != null ? symbol.toUpperCase() : "");
                 
-                // 获取当前价格（尝试多种可能的symbol格式）
+                // 获取当前价格（尝试多种可能的symbol格式，支持带/不带USDT后缀）
                 Double currentPrice = null;
                 if (symbol != null) {
-                    currentPrice = currentPrices.get(symbol.toUpperCase());
+                    String upperSymbol = symbol.toUpperCase();
+                    // 尝试多种格式匹配
+                    currentPrice = currentPrices.get(upperSymbol);
                     if (currentPrice == null) {
-                        currentPrice = currentPrices.get(symbol);
+                        // 如果symbol不带USDT，尝试添加USDT后缀
+                        if (!upperSymbol.endsWith("USDT")) {
+                            currentPrice = currentPrices.get(upperSymbol + "USDT");
+                        } else {
+                            // 如果symbol带USDT，尝试去掉USDT后缀
+                            String symbolWithoutUSDT = upperSymbol.substring(0, upperSymbol.length() - 4);
+                            currentPrice = currentPrices.get(symbolWithoutUSDT);
+                        }
                     }
                 }
                 
@@ -399,29 +492,25 @@ public class ModelServiceImpl implements ModelService {
                     pos.put("currentPrice", currentPrice);
                     pos.put("current_price", currentPrice);
                     
-                    // 计算未实现盈亏
+                    // 使用实时价格计算未实现盈亏（覆盖数据库中的值，确保实时性）
                     Double posPnl;
-                    if (portfolioDO != null && portfolioDO.getUnrealizedProfit() != null && portfolioDO.getUnrealizedProfit() != 0) {
-                        posPnl = portfolioDO.getUnrealizedProfit();
-                        log.info("[ModelService] 持仓 {} 使用数据库中的未实现盈亏: {}", symbol, posPnl);
+                    if ("LONG".equals(positionSide)) {
+                        posPnl = (currentPrice - avgPrice) * positionAmt;
                     } else {
-                        if ("LONG".equals(positionSide)) {
-                            posPnl = (currentPrice - avgPrice) * positionAmt;
-                        } else {
-                            posPnl = (avgPrice - currentPrice) * positionAmt;
-                        }
-                        log.info("[ModelService] 持仓 {} 计算未实现盈亏: {} (当前价={}, 开仓价={}, 数量={}, 方向={})",
-                                symbol, posPnl, currentPrice, avgPrice, positionAmt, positionSide);
+                        posPnl = (avgPrice - currentPrice) * positionAmt;
                     }
                     pos.put("pnl", posPnl);
                     unrealizedPnl += posPnl;
+                    log.info("[ModelService] 持仓 {} {} 计算未实现盈亏: {} (当前价={}, 开仓价={}, 数量={})",
+                            symbol, positionSide, posPnl, currentPrice, avgPrice, positionAmt);
                 } else {
-                    pos.put("currentPrice", null);
-                    pos.put("current_price", null);
+                    // 没有实时价格，使用数据库中的unrealized_profit字段
+                    pos.put("currentPrice", 0.0);
+                    pos.put("current_price", 0.0);
                     Double storedPnl = (portfolioDO != null && portfolioDO.getUnrealizedProfit() != null) ? portfolioDO.getUnrealizedProfit() : 0.0;
                     pos.put("pnl", storedPnl);
-                    log.warn("[ModelService] 持仓 {} 未获取到当前价格，使用存储的盈亏: {}", symbol, storedPnl);
                     unrealizedPnl += storedPnl;
+                    log.warn("[ModelService] 持仓 {} 未获取到实时价格，使用存储的盈亏: {}", symbol, storedPnl);
                 }
                 
                 // 计算已用保证金
