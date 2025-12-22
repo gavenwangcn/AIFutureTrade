@@ -452,7 +452,6 @@ public class ModelServiceImpl implements ModelService {
                 trade.put("price", tradeDO.getPrice());
                 trade.put("quantity", tradeDO.getQuantity());
                 trade.put("pnl", tradeDO.getPnl() != null ? tradeDO.getPnl() : 0.0);
-                trade.put("message", tradeDO.getMessage());
                 trade.put("status", tradeDO.getStatus());
                 
                 // 格式化timestamp字段为字符串（北京时间）

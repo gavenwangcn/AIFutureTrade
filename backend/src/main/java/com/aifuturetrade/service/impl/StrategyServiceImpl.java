@@ -68,6 +68,9 @@ public class StrategyServiceImpl implements StrategyService {
 
     @Override
     public PageResult<StrategyDTO> getStrategiesByPage(PageRequest pageRequest, String name, String type) {
+        log.info("getStrategiesByPage - 开始分页查询策略，pageNum: {}, pageSize: {}, name: {}, type: {}", 
+                pageRequest.getPageNum(), pageRequest.getPageSize(), name, type);
+        
         Page<StrategyDO> page = new Page<>(pageRequest.getPageNum(), pageRequest.getPageSize());
         
         LambdaQueryWrapper<StrategyDO> queryWrapper = new LambdaQueryWrapper<>();
@@ -80,10 +83,18 @@ public class StrategyServiceImpl implements StrategyService {
         queryWrapper.orderByDesc(StrategyDO::getCreatedAt);
         
         Page<StrategyDO> strategyDOPage = strategyMapper.selectPage(page, queryWrapper);
+        log.info("getStrategiesByPage - 数据库查询结果，总记录数: {}, 当前页记录数: {}", 
+                strategyDOPage.getTotal(), strategyDOPage.getRecords().size());
+        
         List<StrategyDTO> strategyDTOList = strategyDOPage.getRecords().stream()
                 .map(this::convertToDTO)
                 .collect(Collectors.toList());
-        return PageResult.build(strategyDTOList, strategyDOPage.getTotal(), pageRequest.getPageNum(), pageRequest.getPageSize());
+        
+        PageResult<StrategyDTO> result = PageResult.build(strategyDTOList, strategyDOPage.getTotal(), pageRequest.getPageNum(), pageRequest.getPageSize());
+        log.info("getStrategiesByPage - 返回分页结果，total: {}, pageNum: {}, pageSize: {}, data size: {}", 
+                result.getTotal(), result.getPageNum(), result.getPageSize(), result.getData().size());
+        
+        return result;
     }
 
     @Override

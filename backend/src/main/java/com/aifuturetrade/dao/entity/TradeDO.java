@@ -66,11 +66,6 @@ public class TradeDO implements Serializable {
     private Double pnl;
 
     /**
-     * 消息
-     */
-    private String message;
-
-    /**
      * 状态（success, failed）
      */
     private String status;

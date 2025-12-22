@@ -92,8 +92,9 @@ public class SocketIOConfig {
     @PostConstruct
     public void startServer() {
         try {
-            // 不要直接依赖server字段，而是通过获取Bean来确保实例已创建
-            SocketIOServer socketIOServer = socketIOServer();
+            // 直接使用在 socketIOServer() 方法中创建并赋值给 this.server 的实例
+            // 避免在 @PostConstruct 阶段从 applicationContext 获取 bean，从而避免循环依赖
+            SocketIOServer socketIOServer = this.server;
             
             if (socketIOServer == null) {
                 logger.warn("Socket.IO server is null, cannot start. This may be due to initialization issue.");
@@ -102,9 +103,14 @@ public class SocketIOConfig {
             }
             
             // 检查服务器是否已经启动，避免重复启动
-            if (!socketIOServer.getAllClients().isEmpty()) {
-                logger.info("Socket.IO server is already running");
-                return;
+            try {
+                if (!socketIOServer.getAllClients().isEmpty()) {
+                    logger.info("Socket.IO server is already running");
+                    return;
+                }
+            } catch (Exception e) {
+                // 如果 getAllClients() 抛出异常，说明服务器尚未完全初始化，继续启动
+                logger.debug("Could not check if server is running, proceeding with start");
             }
             
             socketIOServer.start();
@@ -121,8 +127,9 @@ public class SocketIOConfig {
     @PreDestroy
     public void stopServer() {
         try {
-            // 同样通过获取Bean来确保使用正确的实例
-            SocketIOServer socketIOServer = socketIOServer();
+            // 直接使用在 socketIOServer() 方法中创建并赋值给 this.server 的实例
+            // 避免在 @PreDestroy 阶段从 applicationContext 获取 bean，从而避免潜在的循环依赖
+            SocketIOServer socketIOServer = this.server;
             if (socketIOServer != null) {
                 socketIOServer.stop();
                 logger.info("Socket.IO server stopped");
