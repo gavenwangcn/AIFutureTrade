@@ -139,12 +139,19 @@ public class ModelServiceImpl implements ModelService {
         ModelDO modelDO = convertToDO(modelDTO);
         modelDO.setCreatedAt(LocalDateTime.now());
         modelDO.setUpdatedAt(LocalDateTime.now());
+        
         // 新建模型时，auto_buy_enabled和auto_sell_enabled默认为false（0）
         if (modelDO.getAutoBuyEnabled() == null) {
             modelDO.setAutoBuyEnabled(false);
         }
         if (modelDO.getAutoSellEnabled() == null) {
             modelDO.setAutoSellEnabled(false);
+        }
+        
+        // 验证provider_id：必须由前端传入，不能为空
+        if (modelDO.getProviderId() == null || modelDO.getProviderId().trim().isEmpty()) {
+            log.error("[ModelService] provider_id不能为空，必须由前端传入");
+            throw new IllegalArgumentException("provider_id不能为空，请在前端页面选择API提供方");
         }
         
         // 如果提供了accountAlias，从account_asset表中获取api_key和api_secret
