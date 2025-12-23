@@ -714,6 +714,138 @@ public class ModelServiceImpl implements ModelService {
     }
 
     @Override
+    public PageResult<Map<String, Object>> getTradesByPage(String modelId, PageRequest pageRequest) {
+        log.info("[ModelService] ========== 开始获取交易历史记录（分页） ==========");
+        log.info("[ModelService] modelId: {}, pageNum: {}, pageSize: {}", modelId, pageRequest.getPageNum(), pageRequest.getPageSize());
+        try {
+            // 设置默认值
+            Integer pageNum = pageRequest.getPageNum() != null && pageRequest.getPageNum() > 0 ? pageRequest.getPageNum() : 1;
+            Integer pageSize = pageRequest.getPageSize() != null && pageRequest.getPageSize() > 0 ? pageRequest.getPageSize() : 10;
+            
+            // 查询总数
+            Long total = tradeMapper.countTradesByModelId(modelId);
+            log.info("[ModelService] 交易记录总数: {}", total);
+            
+            // 使用MyBatis-Plus的Page进行分页查询
+            Page<TradeDO> page = new Page<>(pageNum, pageSize);
+            QueryWrapper<TradeDO> queryWrapper = new QueryWrapper<>();
+            queryWrapper.eq("model_id", modelId);
+            queryWrapper.orderByDesc("timestamp");
+            Page<TradeDO> tradeDOPage = tradeMapper.selectPage(page, queryWrapper);
+            
+            List<TradeDO> tradeDOList = tradeDOPage.getRecords();
+            log.info("[ModelService] 从数据库查询到 {} 条交易记录（第{}页，每页{}条）", tradeDOList.size(), pageNum, pageSize);
+            
+            List<Map<String, Object>> trades = convertTradesToMapList(tradeDOList);
+            
+            log.info("[ModelService] 转换完成，共 {} 条交易记录", trades.size());
+            log.info("[ModelService] ========== 获取交易历史记录（分页）完成 ==========");
+            
+            return PageResult.build(trades, total, pageNum, pageSize);
+        } catch (Exception e) {
+            log.error("[ModelService] 获取交易历史记录（分页）失败: {}", e.getMessage(), e);
+            return PageResult.build(new ArrayList<>(), 0L, pageRequest.getPageNum() != null ? pageRequest.getPageNum() : 1, pageRequest.getPageSize() != null ? pageRequest.getPageSize() : 10);
+        }
+    }
+    
+    /**
+     * 将交易记录DO列表转换为Map列表（提取公共逻辑）
+     */
+    private List<Map<String, Object>> convertTradesToMapList(List<TradeDO> tradeDOList) {
+        List<Map<String, Object>> trades = new ArrayList<>();
+        
+        // 获取交易记录中涉及的symbol列表
+        List<String> symbols = tradeDOList.stream()
+                .map(trade -> trade.getFuture() != null ? trade.getFuture().toUpperCase() : "")
+                .filter(s -> !s.isEmpty())
+                .distinct()
+                .collect(Collectors.toList());
+        
+        log.info("[ModelService] 提取的symbol列表: {}", symbols);
+        
+        // 获取实时价格
+        Map<String, Map<String, Object>> pricesData = new HashMap<>();
+        if (!symbols.isEmpty()) {
+            pricesData = marketService.getMarketPrices();
+        }
+        
+        // 转换并格式化交易记录
+        log.info("[ModelService] 开始转换交易记录数据");
+        for (int i = 0; i < tradeDOList.size(); i++) {
+            TradeDO tradeDO = tradeDOList.get(i);
+            log.info("[ModelService] 处理交易记录[{}]: id={}, future={}, signal={}, price={}, quantity={}, pnl={}, fee={}",
+                    i + 1, tradeDO.getId(), tradeDO.getFuture(), tradeDO.getSignal(),
+                    tradeDO.getPrice(), tradeDO.getQuantity(), tradeDO.getPnl(), tradeDO.getFee());
+            
+            Map<String, Object> trade = new HashMap<>();
+            trade.put("id", tradeDO.getId());
+            trade.put("modelId", tradeDO.getModelId());
+            trade.put("future", tradeDO.getFuture());
+            trade.put("symbol", tradeDO.getFuture()); // 兼容字段
+            trade.put("signal", tradeDO.getSignal());
+            trade.put("price", tradeDO.getPrice());
+            trade.put("quantity", tradeDO.getQuantity());
+            trade.put("pnl", tradeDO.getPnl() != null ? tradeDO.getPnl() : 0.0);
+            trade.put("fee", tradeDO.getFee() != null ? tradeDO.getFee() : 0.0);  // 添加fee字段
+            trade.put("status", tradeDO.getStatus());
+            
+            // 格式化timestamp字段为字符串（北京时间）
+            if (tradeDO.getTimestamp() != null) {
+                trade.put("timestamp", tradeDO.getTimestamp().format(DATETIME_FORMATTER));
+            } else {
+                trade.put("timestamp", "");
+            }
+            
+            // 如果是开仓交易，使用实时价格计算未实现盈亏
+            String signal = tradeDO.getSignal();
+            String symbol = tradeDO.getFuture();
+            if (symbol != null && (signal != null && (signal.equals("buy_to_enter") || signal.equals("sell_to_enter")))) {
+                if (tradeDO.getPnl() == null || tradeDO.getPnl() == 0) {
+                    // 如果数据库中的pnl为0，说明可能还没有平仓，使用实时价格计算
+                    String contractSymbol = symbol.toUpperCase();
+                    if (!contractSymbol.endsWith("USDT")) {
+                        contractSymbol = contractSymbol + "USDT";
+                    }
+                    Map<String, Object> priceInfo = pricesData.get(symbol.toUpperCase());
+                    if (priceInfo != null && priceInfo.get("price") != null) {
+                        Double currentPrice = convertToDouble(priceInfo.get("price"));
+                        if (currentPrice != null && currentPrice > 0) {
+                            trade.put("current_price", currentPrice);
+                            
+                            if (tradeDO.getPrice() != null && tradeDO.getPrice() > 0) {
+                                Double quantity = Math.abs(tradeDO.getQuantity() != null ? tradeDO.getQuantity() : 0.0);
+                                Double calculatedPnl;
+                                if (signal.equals("buy_to_enter")) {
+                                    // 开多：盈亏 = (当前价 - 开仓价) * 数量
+                                    calculatedPnl = (currentPrice - tradeDO.getPrice()) * quantity;
+                                } else {
+                                    // 开空：盈亏 = (开仓价 - 当前价) * 数量
+                                    calculatedPnl = (tradeDO.getPrice() - currentPrice) * quantity;
+                                }
+                                trade.put("pnl", calculatedPnl);
+                            }
+                        }
+                    }
+                } else {
+                    // 如果存储的pnl不为0，说明已经平仓，使用数据库中的pnl（已实现盈亏）
+                    trade.put("pnl", tradeDO.getPnl());
+                }
+            } else {
+                // 如果是平仓交易，使用数据库中的pnl（已实现盈亏）
+                trade.put("pnl", tradeDO.getPnl() != null ? tradeDO.getPnl() : 0.0);
+            }
+            
+            log.info("[ModelService] 交易记录[{}] 最终数据: id={}, symbol={}, price={}, quantity={}, pnl={}, fee={}",
+                    i + 1, trade.get("id"), trade.get("symbol"), trade.get("price"),
+                    trade.get("quantity"), trade.get("pnl"), trade.get("fee"));
+            
+            trades.add(trade);
+        }
+        
+        return trades;
+    }
+
+    @Override
     public List<Map<String, Object>> getTrades(String modelId, Integer limit) {
         log.info("[ModelService] ========== 开始获取交易历史记录 ==========");
         log.info("[ModelService] modelId: {}, limit: {}", modelId, limit);
@@ -725,95 +857,7 @@ public class ModelServiceImpl implements ModelService {
             List<TradeDO> tradeDOList = tradeMapper.selectTradesByModelId(modelId, limit);
             log.info("[ModelService] 从数据库查询到 {} 条交易记录", tradeDOList.size());
             
-            List<Map<String, Object>> trades = new ArrayList<>();
-            
-            // 获取交易记录中涉及的symbol列表
-            List<String> symbols = tradeDOList.stream()
-                    .map(trade -> trade.getFuture() != null ? trade.getFuture().toUpperCase() : "")
-                    .filter(s -> !s.isEmpty())
-                    .distinct()
-                    .collect(Collectors.toList());
-            
-            log.info("[ModelService] 提取的symbol列表: {}", symbols);
-            
-            // 获取实时价格
-            Map<String, Map<String, Object>> pricesData = new HashMap<>();
-            if (!symbols.isEmpty()) {
-                pricesData = marketService.getMarketPrices();
-            }
-            
-            // 转换并格式化交易记录
-            log.info("[ModelService] 开始转换交易记录数据");
-            for (int i = 0; i < tradeDOList.size(); i++) {
-                TradeDO tradeDO = tradeDOList.get(i);
-                log.info("[ModelService] 处理交易记录[{}]: id={}, future={}, signal={}, price={}, quantity={}, pnl={}, fee={}",
-                        i + 1, tradeDO.getId(), tradeDO.getFuture(), tradeDO.getSignal(),
-                        tradeDO.getPrice(), tradeDO.getQuantity(), tradeDO.getPnl(), tradeDO.getFee());
-                
-                Map<String, Object> trade = new HashMap<>();
-                trade.put("id", tradeDO.getId());
-                trade.put("modelId", tradeDO.getModelId());
-                trade.put("future", tradeDO.getFuture());
-                trade.put("symbol", tradeDO.getFuture()); // 兼容字段
-                trade.put("signal", tradeDO.getSignal());
-                trade.put("price", tradeDO.getPrice());
-                trade.put("quantity", tradeDO.getQuantity());
-                trade.put("pnl", tradeDO.getPnl() != null ? tradeDO.getPnl() : 0.0);
-                trade.put("fee", tradeDO.getFee() != null ? tradeDO.getFee() : 0.0);  // 添加fee字段
-                trade.put("status", tradeDO.getStatus());
-                
-                // 格式化timestamp字段为字符串（北京时间）
-                if (tradeDO.getTimestamp() != null) {
-                    trade.put("timestamp", tradeDO.getTimestamp().format(DATETIME_FORMATTER));
-                } else {
-                    trade.put("timestamp", "");
-                }
-                
-                // 如果是开仓交易，使用实时价格计算未实现盈亏
-                String signal = tradeDO.getSignal();
-                String symbol = tradeDO.getFuture();
-                if (symbol != null && (signal != null && (signal.equals("buy_to_enter") || signal.equals("sell_to_enter")))) {
-                    if (tradeDO.getPnl() == null || tradeDO.getPnl() == 0) {
-                        // 如果数据库中的pnl为0，说明可能还没有平仓，使用实时价格计算
-                        String contractSymbol = symbol.toUpperCase();
-                        if (!contractSymbol.endsWith("USDT")) {
-                            contractSymbol = contractSymbol + "USDT";
-                        }
-                        Map<String, Object> priceInfo = pricesData.get(symbol.toUpperCase());
-                        if (priceInfo != null && priceInfo.get("price") != null) {
-                            Double currentPrice = convertToDouble(priceInfo.get("price"));
-                            if (currentPrice != null && currentPrice > 0) {
-                                trade.put("current_price", currentPrice);
-                                
-                                if (tradeDO.getPrice() != null && tradeDO.getPrice() > 0) {
-                                    Double quantity = Math.abs(tradeDO.getQuantity() != null ? tradeDO.getQuantity() : 0.0);
-                                    Double calculatedPnl;
-                                    if (signal.equals("buy_to_enter")) {
-                                        // 开多：盈亏 = (当前价 - 开仓价) * 数量
-                                        calculatedPnl = (currentPrice - tradeDO.getPrice()) * quantity;
-                                    } else {
-                                        // 开空：盈亏 = (开仓价 - 当前价) * 数量
-                                        calculatedPnl = (tradeDO.getPrice() - currentPrice) * quantity;
-                                    }
-                                    trade.put("pnl", calculatedPnl);
-                                }
-                            }
-                        }
-                    } else {
-                        // 如果存储的pnl不为0，说明已经平仓，使用数据库中的pnl（已实现盈亏）
-                        trade.put("pnl", tradeDO.getPnl());
-                    }
-                } else {
-                    // 如果是平仓交易，使用数据库中的pnl（已实现盈亏）
-                    trade.put("pnl", tradeDO.getPnl() != null ? tradeDO.getPnl() : 0.0);
-                }
-                
-                log.info("[ModelService] 交易记录[{}] 最终数据: id={}, symbol={}, price={}, quantity={}, pnl={}, fee={}",
-                        i + 1, trade.get("id"), trade.get("symbol"), trade.get("price"),
-                        trade.get("quantity"), trade.get("pnl"), trade.get("fee"));
-                
-                trades.add(trade);
-            }
+            List<Map<String, Object>> trades = convertTradesToMapList(tradeDOList);
             
             log.info("[ModelService] 转换完成，共 {} 条交易记录", trades.size());
             log.info("[ModelService] ========== 获取交易历史记录完成 ==========");

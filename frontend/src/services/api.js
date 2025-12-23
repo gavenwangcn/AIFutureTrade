@@ -35,10 +35,12 @@ export const modelApi = {
   getPortfolio: (modelId) => apiGet(`/api/models/${modelId}/portfolio`),
 
   /**
-   * 获取模型交易记录
-   * 注意：后端限制查询数量为10条（从配置读取），前端只显示前5条（从配置读取）
+   * 获取模型交易记录（分页）
+   * @param {string} modelId - 模型ID
+   * @param {number} page - 页码，从1开始，默认为1
+   * @param {number} pageSize - 每页记录数，默认为10
    */
-  getTrades: (modelId, limit = 10) => apiGet(`/api/models/${modelId}/trades`, { limit }),
+  getTrades: (modelId, page = 1, pageSize = 10) => apiGet(`/api/models/${modelId}/trades`, { page, pageSize }),
 
   /**
    * 获取模型对话记录

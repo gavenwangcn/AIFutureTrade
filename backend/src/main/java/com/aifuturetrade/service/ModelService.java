@@ -82,7 +82,15 @@ public interface ModelService {
     Map<String, Object> getModelPortfolioSymbols(String modelId);
 
     /**
-     * 获取模型的交易历史记录
+     * 获取模型的交易历史记录（分页）
+     * @param modelId 模型ID（UUID格式）
+     * @param pageRequest 分页请求参数
+     * @return 分页的交易历史记录
+     */
+    PageResult<Map<String, Object>> getTradesByPage(String modelId, PageRequest pageRequest);
+    
+    /**
+     * 获取模型的交易历史记录（保留旧方法以兼容）
      * @param modelId 模型ID（UUID格式）
      * @param limit 限制数量
      * @return 交易历史记录

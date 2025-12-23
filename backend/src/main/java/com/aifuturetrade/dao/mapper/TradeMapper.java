@@ -23,5 +23,13 @@ public interface TradeMapper extends BaseMapper<TradeDO> {
      */
     @Select("select * from trades where model_id = #{modelId} order by timestamp desc limit #{limit}")
     List<TradeDO> selectTradesByModelId(@Param("modelId") String modelId, @Param("limit") Integer limit);
+    
+    /**
+     * 根据模型ID统计交易记录总数
+     * @param modelId 模型ID（UUID格式）
+     * @return 交易记录总数
+     */
+    @Select("select count(*) from trades where model_id = #{modelId}")
+    Long countTradesByModelId(@Param("modelId") String modelId);
 
 }

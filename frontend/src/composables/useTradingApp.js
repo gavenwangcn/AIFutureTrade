@@ -57,6 +57,12 @@ export function useTradingApp() {
   const trades = ref([])
   const allTrades = ref([])  // 存储所有从后端获取的交易记录
   const tradesDisplayCount = ref(5)  // 前端显示的交易记录数量（从配置读取，默认5条）
+  
+  // 分页相关状态
+  const tradesPage = ref(1)  // 当前页码
+  const tradesPageSize = ref(10)  // 每页记录数
+  const tradesTotal = ref(0)  // 总记录数
+  const tradesTotalPages = ref(0)  // 总页数
   const conversations = ref([])
   const modelPortfolioSymbols = ref([]) // 模型持仓合约列表
 const lastPortfolioSymbolsRefreshTime = ref(null) // 持仓合约列表最后刷新时间
@@ -1197,21 +1203,44 @@ let portfolioSymbolsRefreshInterval = null // 模型持仓合约列表自动刷�
   }
 
   /**
-   * 加载交易记录
-   * 后端查询10条，前端只显示前5条（可配置）
+   * 加载交易记录（分页）
+   * @param {number} page - 页码，从1开始，默认为当前页
+   * @param {number} pageSize - 每页记录数，默认为10
    */
-  const loadTrades = async () => {
+  const loadTrades = async (page = null, pageSize = null) => {
     if (!currentModelId.value) return
+    
+    // 使用传入的参数或当前状态
+    const targetPage = page !== null ? page : tradesPage.value
+    const targetPageSize = pageSize !== null ? pageSize : tradesPageSize.value
     
     loading.value.trades = true
     errors.value.trades = null
     try {
-      console.log('[TradingApp] 开始加载交易记录, modelId:', currentModelId.value)
-      const data = await modelApi.getTrades(currentModelId.value)
+      console.log('[TradingApp] 开始加载交易记录（分页）, modelId:', currentModelId.value, 'page:', targetPage, 'pageSize:', targetPageSize)
+      const data = await modelApi.getTrades(currentModelId.value, targetPage, targetPageSize)
       console.log('[TradingApp] 收到交易记录API响应:', data)
       
-      // 后端直接返回数组格式
-      const tradesList = Array.isArray(data) ? data : (data.trades || [])
+      // 后端返回分页格式：{ data: [], pageNum: 1, pageSize: 10, total: 100, totalPages: 10 }
+      let tradesList = []
+      if (data && typeof data === 'object') {
+        if (Array.isArray(data)) {
+          // 兼容旧格式：直接返回数组
+          tradesList = data
+        } else if (data.data && Array.isArray(data.data)) {
+          // 新格式：分页数据
+          tradesList = data.data
+          tradesPage.value = data.pageNum || targetPage
+          tradesPageSize.value = data.pageSize || targetPageSize
+          tradesTotal.value = data.total || 0
+          tradesTotalPages.value = data.totalPages || 0
+          console.log('[TradingApp] 分页信息: page=', tradesPage.value, 'pageSize=', tradesPageSize.value, 'total=', tradesTotal.value, 'totalPages=', tradesTotalPages.value)
+        } else if (data.trades && Array.isArray(data.trades)) {
+          // 兼容格式：{ trades: [] }
+          tradesList = data.trades
+        }
+      }
+      
       console.log('[TradingApp] 交易记录数据数量:', tradesList.length)
       console.log('[TradingApp] 交易记录原始数据:', JSON.stringify(tradesList, null, 2))
       
@@ -1261,17 +1290,30 @@ let portfolioSymbolsRefreshInterval = null // 模型持仓合约列表自动刷�
       console.log('[TradingApp] 映射完成，最终交易记录数据数量:', allTrades.value.length)
       console.log('[TradingApp] 最终交易记录数据:', JSON.stringify(allTrades.value, null, 2))
       
-      // 只显示前N条（从配置读取，默认5条）
-      trades.value = allTrades.value.slice(0, tradesDisplayCount.value)
+      // 显示当前页的所有记录
+      trades.value = allTrades.value
       console.log('[TradingApp] 显示的交易记录数量:', trades.value.length)
     } catch (error) {
       console.error('[TradingApp] Error loading trades:', error)
       errors.value.trades = error.message
       trades.value = []
       allTrades.value = []
+      tradesTotal.value = 0
+      tradesTotalPages.value = 0
     } finally {
       loading.value.trades = false
     }
+  }
+  
+  /**
+   * 切换到指定页码
+   */
+  const goToTradesPage = async (page) => {
+    if (page < 1 || (tradesTotalPages.value > 0 && page > tradesTotalPages.value)) {
+      return
+    }
+    tradesPage.value = page
+    await loadTrades(page, tradesPageSize.value)
   }
 
   /**
@@ -2473,6 +2515,12 @@ let portfolioSymbolsRefreshInterval = null // 模型持仓合约列表自动刷�
     aggregatedChartData,
     positions,
     trades,
+    // 分页相关状态
+    tradesPage,
+    tradesPageSize,
+    tradesTotal,
+    tradesTotalPages,
+    goToTradesPage,
     conversations,
     settings,
     modelPortfolioSymbols,

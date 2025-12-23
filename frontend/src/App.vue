@@ -471,38 +471,66 @@
               <i class="bi bi-arrow-repeat spin" style="font-size: 24px; color: var(--primary-color);"></i>
               <p style="margin-top: 12px; color: var(--text-secondary);">加载交易记录中...</p>
             </div>
-            <div v-else class="table-container">
-              <table class="data-table">
-                <thead>
-                  <tr>
-                    <th>时间</th>
-                    <th>币种</th>
-                    <th>操作</th>
-                    <th>数量</th>
-                    <th>价格</th>
-                    <th>盈亏</th>
-                    <th>费用</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr v-for="trade in trades" :key="trade.id">
-                    <td>{{ trade.timestamp || trade.time || '' }}</td>
-                    <td><strong>{{ trade.future || trade.symbol }}</strong></td>
-                    <td>
-                      <span :class="['badge', getSignalBadgeClass(trade.signal || trade.side)]">
-                        {{ formatSignal(trade.signal || trade.side) }}
-                      </span>
-                    </td>
-                    <td>{{ (trade.quantity || 0).toFixed(4) }}</td>
-                    <td>${{ formatPrice6(trade.price) }}</td>
-                    <td :class="getPnlClass(trade.pnl || 0, true)">{{ formatPnl(trade.pnl || 0, true) }}</td>
-                    <td>${{ formatCurrency(trade.fee || 0) }}</td>
-                  </tr>
-                  <tr v-if="trades.length === 0">
-                    <td colspan="7" class="empty-state">暂无交易记录</td>
-                  </tr>
-                </tbody>
-              </table>
+            <div v-else>
+              <div class="table-container">
+                <table class="data-table">
+                  <thead>
+                    <tr>
+                      <th>时间</th>
+                      <th>币种</th>
+                      <th>操作</th>
+                      <th>数量</th>
+                      <th>价格</th>
+                      <th>盈亏</th>
+                      <th>费用</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr v-for="trade in trades" :key="trade.id">
+                      <td>{{ trade.timestamp || trade.time || '' }}</td>
+                      <td><strong>{{ trade.future || trade.symbol }}</strong></td>
+                      <td>
+                        <span :class="['badge', getSignalBadgeClass(trade.signal || trade.side)]">
+                          {{ formatSignal(trade.signal || trade.side) }}
+                        </span>
+                      </td>
+                      <td>{{ (trade.quantity || 0).toFixed(4) }}</td>
+                      <td>${{ formatPrice6(trade.price) }}</td>
+                      <td :class="getPnlClass(trade.pnl || 0, true)">{{ formatPnl(trade.pnl || 0, true) }}</td>
+                      <td>${{ formatCurrency(trade.fee || 0) }}</td>
+                    </tr>
+                    <tr v-if="trades.length === 0">
+                      <td colspan="7" class="empty-state">暂无交易记录</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+              <!-- 分页控件 -->
+              <div v-if="tradesTotal > 0" class="pagination-container" style="margin-top: 16px; display: flex; justify-content: space-between; align-items: center;">
+                <div class="pagination-info" style="color: var(--text-secondary); font-size: 14px;">
+                  共 {{ tradesTotal }} 条记录，第 {{ tradesPage }} / {{ tradesTotalPages }} 页
+                </div>
+                <div class="pagination-controls" style="display: flex; gap: 8px;">
+                  <button 
+                    class="btn btn-sm" 
+                    :disabled="tradesPage <= 1" 
+                    @click="goToTradesPage(tradesPage - 1)"
+                    style="padding: 4px 12px; border: 1px solid var(--border-color); background: var(--bg-secondary); color: var(--text-primary); border-radius: 4px; cursor: pointer;"
+                    :style="{ opacity: tradesPage <= 1 ? 0.5 : 1, cursor: tradesPage <= 1 ? 'not-allowed' : 'pointer' }"
+                  >
+                    上一页
+                  </button>
+                  <button 
+                    class="btn btn-sm" 
+                    :disabled="tradesPage >= tradesTotalPages" 
+                    @click="goToTradesPage(tradesPage + 1)"
+                    style="padding: 4px 12px; border: 1px solid var(--border-color); background: var(--bg-secondary); color: var(--text-primary); border-radius: 4px; cursor: pointer;"
+                    :style="{ opacity: tradesPage >= tradesTotalPages ? 0.5 : 1, cursor: tradesPage >= tradesTotalPages ? 'not-allowed' : 'pointer' }"
+                  >
+                    下一页
+                  </button>
+                </div>
+              </div>
             </div>
           </div>
 
@@ -800,6 +828,11 @@ const {
   aggregatedChartData,
   positions,
   trades,
+  tradesPage,
+  tradesPageSize,
+  tradesTotal,
+  tradesTotalPages,
+  goToTradesPage,
   conversations,
   loading,
   loadPositions,

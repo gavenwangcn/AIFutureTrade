@@ -129,16 +129,23 @@ public class ModelController {
     }
 
     /**
-     * 获取模型的交易历史记录
+     * 获取模型的交易历史记录（分页）
      * @param modelId 模型ID
-     * @param limit 返回记录数限制
-     * @return 交易历史记录
+     * @param page 页码，从1开始，默认为1
+     * @param pageSize 每页记录数，默认为10
+     * @return 分页的交易历史记录
      */
     @GetMapping("/{modelId}/trades")
-    @ApiOperation("获取模型的交易历史记录")
-    public ResponseEntity<List<Map<String, Object>>> getTrades(@PathVariable String modelId, @RequestParam(defaultValue = "10") Integer limit) {
-        List<Map<String, Object>> trades = modelService.getTrades(modelId, limit);
-        return new ResponseEntity<>(trades, HttpStatus.OK);
+    @ApiOperation("获取模型的交易历史记录（分页）")
+    public ResponseEntity<PageResult<Map<String, Object>>> getTrades(
+            @PathVariable String modelId,
+            @RequestParam(defaultValue = "1") Integer page,
+            @RequestParam(defaultValue = "10") Integer pageSize) {
+        PageRequest pageRequest = new PageRequest();
+        pageRequest.setPageNum(page);
+        pageRequest.setPageSize(pageSize);
+        PageResult<Map<String, Object>> result = modelService.getTradesByPage(modelId, pageRequest);
+        return new ResponseEntity<>(result, HttpStatus.OK);
     }
 
     /**
