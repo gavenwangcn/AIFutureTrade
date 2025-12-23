@@ -123,7 +123,7 @@ class TradingEngine:
                 'error': str  # 错误信息（如果失败）
             }
         """
-        logger.info(f"[Model {self.model_id}] [卖出服务] ========== 开始执行卖出决策周期 ==========")
+        logger.debug(f"[Model {self.model_id}] [卖出服务] ========== 开始执行卖出决策周期 ==========")
         cycle_start_time = datetime.now(timezone(timedelta(hours=8)))
         
         try:
@@ -197,9 +197,9 @@ class TradingEngine:
                     current_prices
                 )
             else:
-                logger.info(f"[Model {self.model_id}] [卖出服务] [阶段2] 无持仓，跳过卖出决策处理")
+                logger.debug(f"[Model {self.model_id}] [卖出服务] [阶段2] 无持仓，跳过卖出决策处理")
             
-            logger.info(f"[Model {self.model_id}] [卖出服务] [阶段2] 卖出/平仓决策处理完成")
+            logger.debug(f"[Model {self.model_id}] [卖出服务] [阶段2] 卖出/平仓决策处理完成")
 
             # ========== 阶段3: 账户价值快照记录说明 ==========
             # 注意：账户价值快照现在在每次交易执行时立即记录（在 _execute_close, _execute_stop_loss, _execute_take_profit 等方法中）
@@ -213,8 +213,8 @@ class TradingEngine:
             # ========== 交易周期完成 ==========
             cycle_end_time = datetime.now(timezone(timedelta(hours=8)))
             cycle_duration = (cycle_end_time - cycle_start_time).total_seconds()
-            logger.info(f"[Model {self.model_id}] [卖出服务] ========== 卖出决策周期执行完成 ==========")
-            logger.info(f"[Model {self.model_id}] [卖出服务] 执行统计: "
+            logger.debug(f"[Model {self.model_id}] [卖出服务] ========== 卖出决策周期执行完成 ==========")
+            logger.debug(f"[Model {self.model_id}] [卖出服务] 执行统计: "
                         f"总耗时={cycle_duration:.2f}秒, "
                         f"执行操作数={len(executions)}, "
                         f"对话类型={conversation_prompts}")
@@ -269,7 +269,7 @@ class TradingEngine:
                 'error': str  # 错误信息（如果失败）
             }
         """
-        logger.info(f"[Model {self.model_id}] [买入服务] ========== 开始执行买入决策周期 ==========")
+        logger.debug(f"[Model {self.model_id}] [买入服务] ========== 开始执行买入决策周期 ==========")
         cycle_start_time = datetime.now(timezone(timedelta(hours=8)))
         
         try:
@@ -287,8 +287,8 @@ class TradingEngine:
             
             # 记录模型的trade_type信息
             trade_type = model.get('trade_type', 'ai')
-            logger.info(f"[Model {self.model_id}] [买入服务] 模型trade_type: {trade_type}")
-            logger.info(f"[Model {self.model_id}] [买入服务] trader类型: {type(self.trader).__name__}")
+            logger.debug(f"[Model {self.model_id}] [买入服务] 模型trade_type: {trade_type}")
+            logger.debug(f"[Model {self.model_id}] [买入服务] trader类型: {type(self.trader).__name__}")
             
             # 缓存模型的杠杆配置，避免后续重复查询数据库
             model_leverage = model.get('leverage', 10)
@@ -311,31 +311,31 @@ class TradingEngine:
             logger.debug(f"[Model {self.model_id}] [买入服务] 已缓存模型max_positions配置: {self.max_positions}")
             
             # ========== 阶段1: 初始化数据准备 ==========
-            logger.info(f"[Model {self.model_id}] [买入服务] [阶段1] 开始初始化数据准备")
+            logger.debug(f"[Model {self.model_id}] [买入服务] [阶段1] 开始初始化数据准备")
             
             # 获取模型配置（包含symbol_source）
             symbol_source = model.get('symbol_source', 'leaderboard')
-            logger.info(f"[Model {self.model_id}] [买入服务] [阶段1.1] 模型symbol_source配置: {symbol_source}")
+            logger.debug(f"[Model {self.model_id}] [买入服务] [阶段1.1] 模型symbol_source配置: {symbol_source}")
             
             # 获取当前持仓信息（先使用空价格映射，后续会更新）
             portfolio = self._get_portfolio(self.model_id, {})
             current_positions_count = len(portfolio.get('positions', []) or [])
-            logger.info(f"[Model {self.model_id}] [买入服务] [阶段1.2] 持仓信息获取完成: "
+            logger.debug(f"[Model {self.model_id}] [买入服务] [阶段1.2] 持仓信息获取完成: "
                         f"总价值=${portfolio.get('total_value', 0):.2f}, "
                         f"现金=${portfolio.get('cash', 0):.2f}, "
                         f"持仓数={current_positions_count}")
             
             # 判断持仓数量是否已达到或超过max_positions限制
             if current_positions_count >= self.max_positions:
-                logger.info(f"[Model {self.model_id}] [买入服务] [阶段1.2] 持仓数量已达到上限: "
+                logger.debug(f"[Model {self.model_id}] [买入服务] [阶段1.2] 持仓数量已达到上限: "
                             f"当前持仓数={current_positions_count}, "
                             f"最大持仓数={self.max_positions}, "
                             f"跳过后续买入决策处理，等待下一次循环")
                 # 返回成功结果，但不执行买入决策
                 cycle_end_time = datetime.now(timezone(timedelta(hours=8)))
                 cycle_duration = (cycle_end_time - cycle_start_time).total_seconds()
-                logger.info(f"[Model {self.model_id}] [买入服务] ========== 买入决策周期执行完成（已跳过,已最大数量持仓，等待下一次循环） ==========")
-                logger.info(f"[Model {self.model_id}] [买入服务] 执行统计: "
+                logger.debug(f"[Model {self.model_id}] [买入服务] ========== 买入决策周期执行完成（已跳过,已最大数量持仓，等待下一次循环） ==========")
+                logger.debug(f"[Model {self.model_id}] [买入服务] 执行统计: "
                             f"总耗时={cycle_duration:.2f}秒, "
                             f"执行操作数=0, "
                             f"跳过原因=持仓数量已达上限")
@@ -350,26 +350,26 @@ class TradingEngine:
             
             # 构建账户信息（用于AI决策）
             account_info = self._build_account_info(portfolio)
-            logger.info(f"[Model {self.model_id}] [买入服务] [阶段1.3] 账户信息构建完成: "
+            logger.debug(f"[Model {self.model_id}] [买入服务] [阶段1.3] 账户信息构建完成: "
                         f"初始资金=${account_info.get('initial_capital', 0):.2f}, "
                         f"总收益率={account_info.get('total_return', 0):.2f}%")
             
             # 获取提示词模板（仅买入约束）
             prompt_templates = self._get_prompt_templates()
-            logger.info(f"[Model {self.model_id}] [买入服务] [阶段1.4] 买入提示词模板获取完成")
+            logger.debug(f"[Model {self.model_id}] [买入服务] [阶段1.4] 买入提示词模板获取完成")
             
             # 初始化执行结果和对话记录
             executions = []
             conversation_prompts = []
-            logger.info(f"[Model {self.model_id}] [买入服务] [阶段1] 初始化完成")
+            logger.debug(f"[Model {self.model_id}] [买入服务] [阶段1] 初始化完成")
 
             # ========== 阶段2: 买入决策处理（分批多线程） ==========
-            logger.info(f"[Model {self.model_id}] [买入服务] [阶段2] 开始处理买入决策")
+            logger.debug(f"[Model {self.model_id}] [买入服务] [阶段2] 开始处理买入决策")
             
             # 步骤1: 根据symbol_source获取候选symbol并构建市场状态（仅获取价格，不获取技术指标，指标将在批次处理时按需获取）
-            logger.info(f"[Model {self.model_id}] [买入服务] [阶段2.1] 根据symbol_source获取候选symbol并构建市场状态（仅价格）...")
+            logger.debug(f"[Model {self.model_id}] [买入服务] [阶段2.1] 根据symbol_source获取候选symbol并构建市场状态（仅价格）...")
             buy_candidates, market_state = self._select_buy_candidates(portfolio, symbol_source, include_indicators=False)
-            logger.info(f"[Model {self.model_id}] [买入服务] [阶段2.1] 候选symbol选择完成: "
+            logger.debug(f"[Model {self.model_id}] [买入服务] [阶段2.1] 候选symbol选择完成: "
                         f"候选数量={len(buy_candidates)}, "
                         f"市场状态symbol数={len(market_state)}")
             
@@ -402,13 +402,13 @@ class TradingEngine:
                     'occupied': len(portfolio.get('positions', []) or []),
                     'available_cash': portfolio.get('cash', 0)
                 }
-                logger.info(f"[Model {self.model_id}] [买入服务] [阶段2.4] 约束条件构建完成: "
+                logger.debug(f"[Model {self.model_id}] [买入服务] [阶段2.4] 约束条件构建完成: "
                             f"最大持仓数={constraints['max_positions']}, "
                             f"已占用={constraints['occupied']}, "
                             f"可用现金=${constraints['available_cash']:.2f}")
                 
                 # 分批处理买入决策（顺序执行）
-                logger.info(f"[Model {self.model_id}] [买入服务] [阶段2.5] 开始分批处理买入决策（顺序执行）......")
+                logger.debug(f"[Model {self.model_id}] [买入服务] [阶段2.5] 开始分批处理买入决策（顺序执行）......")
                 self._make_batch_buy_decisions(
                     buy_candidates,
                     portfolio,
@@ -421,13 +421,13 @@ class TradingEngine:
                     current_prices,
                     symbol_source
                 )
-                logger.info(f"[Model {self.model_id}] [买入服务] [阶段2.5] 分批买入决策处理完成")
+                logger.debug(f"[Model {self.model_id}] [买入服务] [阶段2.5] 分批买入决策处理完成")
             else:
-                logger.info(f"[Model {self.model_id}] [买入服务] [阶段2] 无买入候选，跳过买入决策处理")
+                logger.debug(f"[Model {self.model_id}] [买入服务] [阶段2] 无买入候选，跳过买入决策处理")
                 # 即使没有候选，也需要更新current_prices用于后续记录账户价值
                 current_prices = {}
             
-            logger.info(f"[Model {self.model_id}] [买入服务] [阶段2] 买入决策处理完成")
+            logger.debug(f"[Model {self.model_id}] [买入服务] [阶段2] 买入决策处理完成")
 
             # ========== 阶段3: 账户价值快照记录说明 ==========
             # 注意：账户价值快照现在在每次交易执行时立即记录（在 _execute_buy, _execute_close 等方法中）
@@ -435,14 +435,14 @@ class TradingEngine:
             logger.debug(f"[Model {self.model_id}] [买入服务] [阶段3] 账户价值快照已在每次交易时记录，无需批次记录")
             
             # ========== 阶段4: 同步model_futures表数据 ==========
-            logger.info(f"[Model {self.model_id}] [买入服务] [阶段4] 同步model_futures表数据")
+            logger.debug(f"[Model {self.model_id}] [买入服务] [阶段4] 同步model_futures表数据")
             self._sync_model_futures()
             
             # ========== 交易周期完成 ==========
             cycle_end_time = datetime.now(timezone(timedelta(hours=8)))
             cycle_duration = (cycle_end_time - cycle_start_time).total_seconds()
-            logger.info(f"[Model {self.model_id}] [买入服务] ========== 买入决策周期执行完成 ==========")
-            logger.info(f"[Model {self.model_id}] [买入服务] 执行统计: "
+            logger.debug(f"[Model {self.model_id}] [买入服务] ========== 买入决策周期执行完成 ==========")
+            logger.debug(f"[Model {self.model_id}] [买入服务] 执行统计: "
                         f"总耗时={cycle_duration:.2f}秒, "
                         f"执行操作数={len(executions)}, "
                         f"对话类型={conversation_prompts}")
@@ -1242,7 +1242,7 @@ class TradingEngine:
         # 强制使用顺序执行，不使用多线程
         unit_size = group_size
         
-        logger.info(f"[Model {self.model_id}] [分批买入] 配置参数: 批次大小={batch_size}, 批次间隔={batch_interval}秒, 执行方式=顺序执行, 单元大小={unit_size}")
+        logger.debug(f"[Model {self.model_id}] [分批买入] 配置参数: 批次大小={batch_size}, 批次间隔={batch_interval}秒, 执行方式=顺序执行, 单元大小={unit_size}")
 
         # 将候选列表分批
         batches = []
@@ -1257,7 +1257,7 @@ class TradingEngine:
             logger.debug(f"[Model {self.model_id}] [分批买入] 批次列表为空，跳过处理")
             return
 
-        logger.info(f"[Model {self.model_id}] 开始分批处理买入决策: 共 {len(candidates)} 个候选, 分为 {len(batches)} 批, 每批最多 {batch_size} 个, 执行方式=顺序执行, 单元大小={unit_size}, 单元间隔={batch_interval}秒")
+        logger.debug(f"[Model {self.model_id}] 开始分批处理买入决策: 共 {len(candidates)} 个候选, 分为 {len(batches)} 批, 每批最多 {batch_size} 个, 执行方式=顺序执行, 单元大小={unit_size}, 单元间隔={batch_interval}秒")
 
         has_buy_decision = False
         batch_start_time = datetime.now(timezone(timedelta(hours=8)))
@@ -1273,7 +1273,7 @@ class TradingEngine:
             batch_num = batch_idx + 1
             batch_symbols = [c.get('symbol', 'N/A') for c in batch]
             
-            logger.info(f"[Model {self.model_id}] [分批买入] 开始处理批次 {batch_num}/{len(batches)}: symbols={batch_symbols}")
+            logger.debug(f"[Model {self.model_id}] [分批买入] 开始处理批次 {batch_num}/{len(batches)}: symbols={batch_symbols}")
             
             # 为当前批次创建只包含对应symbol的market_state子集
             batch_market_state = {}
@@ -1329,7 +1329,7 @@ class TradingEngine:
                     has_buy_decision = True
                     logger.info(f"[Model {self.model_id}] [分批买入] 批次 {batch_num}/{len(batches)} AI决策完成: 决策数={len(payload.get('decisions') or {})}")
                 else:
-                    logger.info(f"[Model {self.model_id}] [分批买入] 批次 {batch_num}/{len(batches)} 跳过或无决策")
+                    logger.debug(f"[Model {self.model_id}] [分批买入] 批次 {batch_num}/{len(batches)} 跳过或无决策")
                     
             except Exception as exc:
                 logger.error(f"[Model {self.model_id}] [分批买入] 批次 {batch_num} 处理异常: {exc}")
@@ -1342,7 +1342,7 @@ class TradingEngine:
                 group_end = batch_num
                 group_decisions = all_batch_decisions[group_start:group_end]
                 
-                logger.info(f"[Model {self.model_id}] [分批买入] 批次组 {group_start+1}-{group_end} 完成，开始统一处理决策（插入数据库和调用SDK）...")
+                logger.debug(f"[Model {self.model_id}] [分批买入] 批次组 {group_start+1}-{group_end} 完成，开始统一处理决策（插入数据库和调用SDK）...")
                 
                 # 统一处理这组批次的决策（顺序执行，不需要锁）
                 try:
@@ -1354,7 +1354,7 @@ class TradingEngine:
                         current_prices,
                         executions
                     )
-                    logger.info(f"[Model {self.model_id}] [分批买入] 批次组 {group_start+1}-{group_end} 处理完成")
+                    logger.debug(f"[Model {self.model_id}] [分批买入] 批次组 {group_start+1}-{group_end} 处理完成")
                 except Exception as e:
                     logger.error(f"[Model {self.model_id}] [分批买入] 批次组 {group_start+1}-{group_end} 处理异常: {e}", exc_info=True)
                     logger.error(f"[Model {self.model_id}] [分批买入] 批次组处理异常，但继续执行后续流程，executions当前数量: {len(executions)}")
@@ -1367,7 +1367,7 @@ class TradingEngine:
 
         batch_end_time = datetime.now(timezone(timedelta(hours=8)))
         batch_duration = (batch_end_time - batch_start_time).total_seconds()
-        logger.info(f"[Model {self.model_id}] [分批买入] 所有批次处理完成: "
+        logger.debug(f"[Model {self.model_id}] [分批买入] 所有批次处理完成: "
                     f"完成批次数={len(batches)}, "
                     f"总耗时={batch_duration:.2f}秒, "
                     f"平均每批耗时={batch_duration/len(batches):.2f}秒")
@@ -1524,8 +1524,8 @@ class TradingEngine:
                 logger.debug(f"[Model {self.model_id}] [批次组处理] 无决策数据，跳过")
                 return
             
-            logger.info(f"[Model {self.model_id}] [批次组处理] ========== 开始处理批次组决策 ==========")
-            logger.info(f"[Model {self.model_id}] [批次组处理] 批次数量: {len(group_decisions)}")
+            logger.debug(f"[Model {self.model_id}] [批次组处理] ========== 开始处理批次组决策 ==========")
+            logger.debug(f"[Model {self.model_id}] [批次组处理] 批次数量: {len(group_decisions)}")
             
             # 合并所有批次的决策和对话
             all_decisions = {}
@@ -1552,10 +1552,10 @@ class TradingEngine:
                     all_payloads.append(payload)
             
             if not all_decisions:
-                logger.info(f"[Model {self.model_id}] [批次组处理] 无有效决策，跳过执行")
+                logger.debug(f"[Model {self.model_id}] [批次组处理] 无有效决策，跳过执行")
                 return
             
-            logger.info(f"[Model {self.model_id}] [批次组处理] 合并完成: 决策数={len(all_decisions)}, 对话数={len(all_payloads)}")
+            logger.debug(f"[Model {self.model_id}] [批次组处理] 合并完成: 决策数={len(all_decisions)}, 对话数={len(all_payloads)}")
             
             # ========== 步骤1: 记录所有批次的AI对话到数据库 ==========
             logger.debug(f"[Model {self.model_id}] [批次组处理] [步骤1] 记录AI对话到数据库...")
@@ -1598,17 +1598,17 @@ class TradingEngine:
                             f"错误={result.get('error', '无')}")
             
             # 添加到执行结果列表
-            logger.info(f"[Model {self.model_id}] [批次组处理] [步骤2.3] 添加执行结果到列表（当前总数: {len(executions)}）...")
-            logger.info(f"[Model {self.model_id}] [批次组处理] [步骤2.3] batch_results详情: 数量={len(batch_results)}")
+            logger.debug(f"[Model {self.model_id}] [批次组处理] [步骤2.3] 添加执行结果到列表（当前总数: {len(executions)}）...")
+            logger.debug(f"[Model {self.model_id}] [批次组处理] [步骤2.3] batch_results详情: 数量={len(batch_results)}")
             for idx, result in enumerate(batch_results):
-                logger.info(f"[Model {self.model_id}] [批次组处理] [步骤2.3] batch_results[{idx}]: symbol={result.get('symbol')}, signal={result.get('signal')}, error={result.get('error', '无')}")
+                logger.debug(f"[Model {self.model_id}] [批次组处理] [步骤2.3] batch_results[{idx}]: symbol={result.get('symbol')}, signal={result.get('signal')}, error={result.get('error', '无')}")
             executions.extend(batch_results)
-            logger.info(f"[Model {self.model_id}] [批次组处理] [步骤2.3] 执行结果已添加（新总数: {len(executions)}）")
-            logger.info(f"[Model {self.model_id}] [批次组处理] [步骤2.3] executions列表详情:")
+            logger.debug(f"[Model {self.model_id}] [批次组处理] [步骤2.3] 执行结果已添加（新总数: {len(executions)}）")
+            logger.debug(f"[Model {self.model_id}] [批次组处理] [步骤2.3] executions列表详情:")
             for idx, exec_result in enumerate(executions):
-                logger.info(f"[Model {self.model_id}] [批次组处理] [步骤2.3] executions[{idx}]: symbol={exec_result.get('symbol')}, signal={exec_result.get('signal')}, error={exec_result.get('error', '无')}")
+                logger.debug(f"[Model {self.model_id}] [批次组处理] [步骤2.3] executions[{idx}]: symbol={exec_result.get('symbol')}, signal={exec_result.get('signal')}, error={exec_result.get('error', '无')}")
             
-            logger.info(f"[Model {self.model_id}] [批次组处理] 执行完成, 决策数: {len(all_decisions)}, 执行结果: {len(batch_results)}")
+            logger.debug(f"[Model {self.model_id}] [批次组处理] 执行完成, 决策数: {len(all_decisions)}, 执行结果: {len(batch_results)}")
             
             # ========== 步骤3: 更新portfolio和constraints ==========
             logger.debug(f"[Model {self.model_id}] [批次组处理] [步骤3] 更新portfolio和constraints...")
@@ -1639,7 +1639,7 @@ class TradingEngine:
                         f"可用现金 ${old_available_cash:.2f} -> ${constraints['available_cash']:.2f}")
             
             logger.debug(f"[Model {self.model_id}] [批次组处理] [步骤3] 状态更新完成")
-            logger.info(f"[Model {self.model_id}] [批次组处理] ========== 批次组处理完成 ==========")
+            logger.debug(f"[Model {self.model_id}] [批次组处理] ========== 批次组处理完成 ==========")
             
         except Exception as e:
             logger.error(f"[Model {self.model_id}] [批次组处理] ========== 批次组处理异常 ==========")
@@ -1694,7 +1694,7 @@ class TradingEngine:
         # 强制使用顺序执行，不使用多线程
         unit_size = group_size
         
-        logger.info(f"[Model {self.model_id}] [分批卖出] 配置参数: 批次大小={batch_size}, 批次间隔={batch_interval}秒, 执行方式=顺序执行, 单元大小={unit_size}")
+        logger.debug(f"[Model {self.model_id}] [分批卖出] 配置参数: 批次大小={batch_size}, 批次间隔={batch_interval}秒, 执行方式=顺序执行, 单元大小={unit_size}")
 
         # 将持仓列表分批
         batches = []
@@ -1709,7 +1709,7 @@ class TradingEngine:
             logger.debug(f"[Model {self.model_id}] [分批卖出] 批次列表为空，跳过处理")
             return
 
-        logger.info(f"[Model {self.model_id}] 开始分批处理卖出决策: 共 {len(positions)} 个持仓, 分为 {len(batches)} 批, 每批最多 {batch_size} 个, 执行方式=顺序执行, 单元大小={unit_size}, 单元间隔={batch_interval}秒")
+        logger.debug(f"[Model {self.model_id}] 开始分批处理卖出决策: 共 {len(positions)} 个持仓, 分为 {len(batches)} 批, 每批最多 {batch_size} 个, 执行方式=顺序执行, 单元大小={unit_size}, 单元间隔={batch_interval}秒")
 
         has_sell_decision = False
         batch_start_time = datetime.now(timezone(timedelta(hours=8)))
@@ -1725,7 +1725,7 @@ class TradingEngine:
             batch_num = batch_idx + 1
             batch_symbols = [pos.get('symbol', 'N/A') for pos in batch]
             
-            logger.info(f"[Model {self.model_id}] [分批卖出] 开始处理批次 {batch_num}/{len(batches)}: symbols={batch_symbols}")
+            logger.debug(f"[Model {self.model_id}] [分批卖出] 开始处理批次 {batch_num}/{len(batches)}: symbols={batch_symbols}")
             
             # 为当前批次创建只包含对应symbol的market_state子集
             batch_market_state = {}
@@ -1782,9 +1782,9 @@ class TradingEngine:
                     if has_actual_decision:
                         logger.info(f"[Model {self.model_id}] [分批卖出] 批次 {batch_num}/{len(batches)} AI决策完成: 决策数={len(decisions)}, 有实际执行={has_actual_decision}")
                     else:
-                        logger.info(f"[Model {self.model_id}] [分批卖出] 批次 {batch_num}/{len(batches)} AI决策完成: 决策数={len(decisions)}, 但无实际执行（仅有hold）")
+                        logger.debug(f"[Model {self.model_id}] [分批卖出] 批次 {batch_num}/{len(batches)} AI决策完成: 决策数={len(decisions)}, 但无实际执行（仅有hold）")
                 else:
-                    logger.info(f"[Model {self.model_id}] [分批卖出] 批次 {batch_num}/{len(batches)} 跳过或无决策")
+                    logger.debug(f"[Model {self.model_id}] [分批卖出] 批次 {batch_num}/{len(batches)} 跳过或无决策")
                     
             except Exception as exc:
                 logger.error(f"[Model {self.model_id}] [分批卖出] 批次 {batch_num} 处理异常: {exc}")
@@ -1797,7 +1797,7 @@ class TradingEngine:
                 group_end = batch_num
                 group_decisions = all_batch_decisions[group_start:group_end]
                 
-                logger.info(f"[Model {self.model_id}] [分批卖出] 批次组 {group_start+1}-{group_end} 完成，开始统一处理决策（插入数据库和调用SDK）...")
+                logger.debug(f"[Model {self.model_id}] [分批卖出] 批次组 {group_start+1}-{group_end} 完成，开始统一处理决策（插入数据库和调用SDK）...")
                 
                 # 统一处理这组批次的决策（顺序执行，不需要锁）
                 self._execute_batch_group_decisions_for_sell_sequential(
@@ -1808,7 +1808,7 @@ class TradingEngine:
                     executions
                 )
                 
-                logger.info(f"[Model {self.model_id}] [分批卖出] 批次组 {group_start+1}-{group_end} 处理完成")
+                logger.debug(f"[Model {self.model_id}] [分批卖出] 批次组 {group_start+1}-{group_end} 处理完成")
             
             # 如果不是最后一个批次，等待间隔时间
             if batch_num < len(batches) and batch_interval > 0:
@@ -1817,7 +1817,7 @@ class TradingEngine:
 
         batch_end_time = datetime.now(timezone(timedelta(hours=8)))
         batch_duration = (batch_end_time - batch_start_time).total_seconds()
-        logger.info(f"[Model {self.model_id}] [分批卖出] 所有批次处理完成: "
+        logger.debug(f"[Model {self.model_id}] [分批卖出] 所有批次处理完成: "
                     f"完成批次数={len(batches)}, "
                     f"总耗时={batch_duration:.2f}秒, "
                     f"平均每批耗时={batch_duration/len(batches):.2f}秒")
@@ -1826,9 +1826,9 @@ class TradingEngine:
         # hold 操作不算作实际执行的操作，不添加到对话提示中
         if has_sell_decision and 'sell' not in conversation_prompts:
             conversation_prompts.append('sell')
-            logger.info(f"[Model {self.model_id}] [分批卖出] 检测到实际卖出决策（close_position/stop_loss/take_profit），已添加到对话提示")
+            logger.debug(f"[Model {self.model_id}] [分批卖出] 检测到实际卖出决策（close_position/stop_loss/take_profit），已添加到对话提示")
         else:
-            logger.info(f"[Model {self.model_id}] [分批卖出] 所有批次卖出决策被跳过、无有效决策或仅有hold操作（无实际执行）")
+            logger.debug(f"[Model {self.model_id}] [分批卖出] 所有批次卖出决策被跳过、无有效决策或仅有hold操作（无实际执行）")
 
     def _execute_batch_group_decisions_for_sell_sequential(
         self,
@@ -1851,7 +1851,7 @@ class TradingEngine:
             logger.debug(f"[Model {self.model_id}] [卖出批次组处理] 无决策数据，跳过")
             return
         
-        logger.info(f"[Model {self.model_id}] [卖出批次组处理] 开始处理 {len(group_decisions)} 个批次的卖出决策...")
+        logger.debug(f"[Model {self.model_id}] [卖出批次组处理] 开始处理 {len(group_decisions)} 个批次的卖出决策...")
         
         # 合并所有批次的决策和对话
         all_decisions = {}
@@ -1878,10 +1878,10 @@ class TradingEngine:
                 all_payloads.append(payload)
         
         if not all_decisions:
-            logger.info(f"[Model {self.model_id}] [卖出批次组处理] 无有效卖出决策，跳过执行")
+            logger.debug(f"[Model {self.model_id}] [卖出批次组处理] 无有效卖出决策，跳过执行")
             return
         
-        logger.info(f"[Model {self.model_id}] [卖出批次组处理] 合并完成: 卖出决策数={len(all_decisions)}, 对话数={len(all_payloads)}")
+        logger.debug(f"[Model {self.model_id}] [卖出批次组处理] 合并完成: 卖出决策数={len(all_decisions)}, 对话数={len(all_payloads)}")
         
         # ========== 步骤1: 记录所有批次的AI对话到数据库 ==========
         logger.debug(f"[Model {self.model_id}] [卖出批次组处理] [步骤1] 记录AI对话到数据库...")
@@ -1928,7 +1928,7 @@ class TradingEngine:
         executions.extend(batch_results)
         logger.debug(f"[Model {self.model_id}] [卖出批次组处理] [步骤2.3] 执行结果已添加（新总数: {len(executions)}）")
         
-        logger.info(f"[Model {self.model_id}] [卖出批次组处理] 执行完成, 卖出决策数: {len(all_decisions)}, 执行结果: {len(batch_results)}")
+        logger.debug(f"[Model {self.model_id}] [卖出批次组处理] 执行完成, 卖出决策数: {len(all_decisions)}, 执行结果: {len(batch_results)}")
         
         # ========== 步骤3: 更新portfolio和account_info ==========
         logger.debug(f"[Model {self.model_id}] [卖出批次组处理] [步骤3] 更新portfolio和account_info...")
@@ -2342,9 +2342,9 @@ class TradingEngine:
 
         positions_map = {pos['symbol']: pos for pos in portfolio.get('positions', [])}
 
-        # 获取全局交易锁，确保买入和卖出服务线程不会同时执行交易操作
+            # 获取全局交易锁，确保买入和卖出服务线程不会同时执行交易操作
         with self.trading_lock:
-            logger.info(f"[Model {self.model_id}] [交易执行] 获取到交易锁，=====开始执行SDK交易决策=====")
+            logger.debug(f"[Model {self.model_id}] [交易执行] 获取到交易锁，=====开始执行SDK交易决策=====")
             
             for symbol, decision in decisions.items():
                 signal = decision.get('signal', '').lower()
