@@ -173,8 +173,33 @@ class StrategyTrader(Trader):
                     
                     if has_valid_signal:
                         logger.info(f"[StrategyTrader] [Model {effective_model_id}] 策略 {strategy_name} 返回有效决策信号")
+                        
                         # 规范化decisions中的quantity为整数
                         normalized_decisions = self._normalize_quantity_to_int(decisions)
+                        
+                        # 保存策略决策到数据库（使用规范化后的decisions）
+                        try:
+                            model_mapping = self.models_db._get_model_id_mapping()
+                            model_uuid = model_mapping.get(effective_model_id)
+                            if model_uuid:
+                                # 将normalized_decisions字典转换为列表格式
+                                decisions_list = []
+                                for symbol, decision in normalized_decisions.items():
+                                    decisions_list.append(decision)
+                                
+                                # 批量保存决策
+                                if decisions_list:
+                                    self.strategy_decisions_db.add_strategy_decisions_batch(
+                                        model_id=model_uuid,
+                                        strategy_name=strategy_name,
+                                        strategy_type='buy',
+                                        decisions=decisions_list
+                                    )
+                                    logger.info(f"[StrategyTrader] [Model {effective_model_id}] 已保存 {len(decisions_list)} 条买入决策到数据库")
+                        except Exception as e:
+                            logger.warning(f"[StrategyTrader] [Model {effective_model_id}] 保存策略决策失败: {e}")
+                            # 不影响主流程，继续返回决策结果
+                        
                         return {
                             'decisions': normalized_decisions,
                             'prompt': None,
