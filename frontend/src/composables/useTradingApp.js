@@ -2760,6 +2760,9 @@ let portfolioSymbolsRefreshInterval = null // 模型持仓合约列表自动刷�
     loadPositions,
     loadTrades,
     loadConversations,
+    loadStrategyDecisions,
+    loadConversationsOrDecisions,
+    goToStrategyDecisionsPage,
     loadModelPortfolioSymbols,
     loadSettings,
     

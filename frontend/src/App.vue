@@ -936,6 +936,8 @@ const {
   loadPositions,
   loadTrades,
   loadConversations,
+  loadStrategyDecisions,
+  loadConversationsOrDecisions,
   settings,
   loggerEnabled,
   showSettingsModal,
@@ -1041,12 +1043,30 @@ watch(activeTab, async (newTab, oldTab) => {
   
   // 根据切换到的标签加载对应的数据
   try {
+    console.log(`[App] activeTab changed: ${oldTab} -> ${newTab}`)
     if (newTab === 'positions') {
+      console.log(`[App] Loading positions data...`)
       await loadPositions()
     } else if (newTab === 'trades') {
+      console.log(`[App] Loading trades data...`)
       await loadTrades()
     } else if (newTab === 'conversations') {
-      await loadConversations()
+      // 根据模型的trade_type决定加载对话还是策略决策
+      const currentModelData = currentModel.value
+      const tradeType = currentModelData?.trade_type || currentModelData?.tradeType || 'ai'
+      console.log(`[App] ========== 切换到conversations标签 ==========`)
+      console.log(`[App] trade_type: ${tradeType}`)
+      console.log(`[App] currentModelData:`, currentModelData)
+      
+      if (tradeType === 'strategy') {
+        console.log(`[App] trade_type is 'strategy', calling loadStrategyDecisions()...`)
+        await loadStrategyDecisions()
+        console.log(`[App] loadStrategyDecisions() completed`)
+      } else {
+        console.log(`[App] trade_type is 'ai', calling loadConversations()...`)
+        await loadConversations()
+        console.log(`[App] loadConversations() completed`)
+      }
     }
   } catch (error) {
     console.error(`[App] Error loading ${newTab} data:`, error)
