@@ -1372,16 +1372,20 @@ class TradingEngine:
                 logger.info(f"[Model {self.model_id}] [分批买入] 批次组 {group_start+1}-{group_end} 完成，开始统一处理决策（插入数据库和调用SDK）...")
                 
                 # 统一处理这组批次的决策（顺序执行，不需要锁）
-                self._execute_batch_group_decisions_sequential(
-                    group_decisions,
-                    portfolio,
-                    account_info,
-                    constraints,
-                    current_prices,
-                    executions
-                )
-                
-                logger.info(f"[Model {self.model_id}] [分批买入] 批次组 {group_start+1}-{group_end} 处理完成")
+                try:
+                    self._execute_batch_group_decisions_sequential(
+                        group_decisions,
+                        portfolio,
+                        account_info,
+                        constraints,
+                        current_prices,
+                        executions
+                    )
+                    logger.info(f"[Model {self.model_id}] [分批买入] 批次组 {group_start+1}-{group_end} 处理完成")
+                except Exception as e:
+                    logger.error(f"[Model {self.model_id}] [分批买入] 批次组 {group_start+1}-{group_end} 处理异常: {e}", exc_info=True)
+                    logger.error(f"[Model {self.model_id}] [分批买入] 批次组处理异常，但继续执行后续流程，executions当前数量: {len(executions)}")
+                    # 即使批次组处理失败，也继续执行，确保阶段3能够检查executions
             
             # 如果不是最后一个批次，等待间隔时间
             if batch_num < len(batches) and batch_interval > 0:
@@ -1542,124 +1546,134 @@ class TradingEngine:
         3. 顺序执行所有决策（不使用锁，因为已经是顺序执行）
         4. 更新portfolio和constraints
         """
-        if not group_decisions:
-            logger.debug(f"[Model {self.model_id}] [批次组处理] 无决策数据，跳过")
-            return
-        
-        logger.info(f"[Model {self.model_id}] [批次组处理] 开始处理 {len(group_decisions)} 个批次的决策...")
-        
-        # 合并所有批次的决策和对话
-        all_decisions = {}
-        all_payloads = []
-        all_market_states = {}
-        
-        for batch_data in group_decisions:
-            payload = batch_data.get('payload', {})
-            decisions = payload.get('decisions') or {}
-            batch_market_state = batch_data.get('batch_market_state', {})
-            batch_num = batch_data.get('batch_num', 0)
+        try:
+            if not group_decisions:
+                logger.debug(f"[Model {self.model_id}] [批次组处理] 无决策数据，跳过")
+                return
             
-            # 合并决策
-            for symbol, decision in decisions.items():
-                if symbol not in all_decisions:
-                    all_decisions[symbol] = decision
-                    logger.debug(f"[Model {self.model_id}] [批次组处理] 批次 {batch_num} 决策: {symbol} -> {decision.get('signal')}")
+            logger.info(f"[Model {self.model_id}] [批次组处理] ========== 开始处理批次组决策 ==========")
+            logger.info(f"[Model {self.model_id}] [批次组处理] 批次数量: {len(group_decisions)}")
             
-            # 合并market_state
-            all_market_states.update(batch_market_state)
+            # 合并所有批次的决策和对话
+            all_decisions = {}
+            all_payloads = []
+            all_market_states = {}
             
-            # 保存payload用于记录对话
-            if not payload.get('skipped') and payload.get('prompt'):
-                all_payloads.append(payload)
-        
-        if not all_decisions:
-            logger.info(f"[Model {self.model_id}] [批次组处理] 无有效决策，跳过执行")
-            return
-        
-        logger.info(f"[Model {self.model_id}] [批次组处理] 合并完成: 决策数={len(all_decisions)}, 对话数={len(all_payloads)}")
-        
-        # ========== 步骤1: 记录所有批次的AI对话到数据库 ==========
-        logger.debug(f"[Model {self.model_id}] [批次组处理] [步骤1] 记录AI对话到数据库...")
-        for payload in all_payloads:
-            try:
-                self._record_ai_conversation(payload, conversation_type='buy')
-            except Exception as e:
-                logger.error(f"[Model {self.model_id}] [批次组处理] 记录AI对话失败: {e}")
-        logger.debug(f"[Model {self.model_id}] [批次组处理] [步骤1] AI对话已记录")
-        
-        # ========== 步骤2: 顺序执行所有决策 ==========
-        logger.debug(f"[Model {self.model_id}] [批次组处理] [步骤2] 开始顺序执行决策...")
-        
-        # 获取最新持仓状态
-        logger.debug(f"[Model {self.model_id}] [批次组处理] [步骤2.1] 获取最新持仓状态...")
-        latest_portfolio = self._get_portfolio(self.model_id, current_prices)
-        logger.debug(f"[Model {self.model_id}] [批次组处理] [步骤2.1] 最新持仓状态: "
-                    f"总价值=${latest_portfolio.get('total_value', 0):.2f}, "
-                    f"现金=${latest_portfolio.get('cash', 0):.2f}, "
-                    f"持仓数={len(latest_portfolio.get('positions', []) or [])}")
-        
-        # 执行所有决策（顺序执行）
-        logger.debug(f"[Model {self.model_id}] [批次组处理] [步骤2.2] 开始执行决策...")
-        execution_start = datetime.now(timezone(timedelta(hours=8)))
-        batch_results = self._execute_decisions(
-            all_decisions,
-            all_market_states,
-            latest_portfolio
-        )
-        execution_duration = (datetime.now(timezone(timedelta(hours=8))) - execution_start).total_seconds()
-        logger.debug(f"[Model {self.model_id}] [批次组处理] [步骤2.2] 决策执行完成: 耗时={execution_duration:.2f}秒, 结果数={len(batch_results)}")
-        
-        # 记录每个执行结果
-        for idx, result in enumerate(batch_results):
-            logger.debug(f"[Model {self.model_id}] [批次组处理] [步骤2.2.{idx+1}] 执行结果: "
-                        f"合约={result.get('symbol', 'N/A')}, "
-                        f"信号={result.get('signal')}, "
-                        f"数量={result.get('position_amt', 0)}, "
-                        f"价格=${result.get('price', 0):.4f}, "
-                        f"错误={result.get('error', '无')}")
-        
-        # 添加到执行结果列表
-        logger.info(f"[Model {self.model_id}] [批次组处理] [步骤2.3] 添加执行结果到列表（当前总数: {len(executions)}）...")
-        logger.info(f"[Model {self.model_id}] [批次组处理] [步骤2.3] batch_results详情: 数量={len(batch_results)}")
-        for idx, result in enumerate(batch_results):
-            logger.info(f"[Model {self.model_id}] [批次组处理] [步骤2.3] batch_results[{idx}]: symbol={result.get('symbol')}, signal={result.get('signal')}, error={result.get('error', '无')}")
-        executions.extend(batch_results)
-        logger.info(f"[Model {self.model_id}] [批次组处理] [步骤2.3] 执行结果已添加（新总数: {len(executions)}）")
-        logger.info(f"[Model {self.model_id}] [批次组处理] [步骤2.3] executions列表详情:")
-        for idx, exec_result in enumerate(executions):
-            logger.info(f"[Model {self.model_id}] [批次组处理] [步骤2.3] executions[{idx}]: symbol={exec_result.get('symbol')}, signal={exec_result.get('signal')}, error={exec_result.get('error', '无')}")
-        
-        logger.info(f"[Model {self.model_id}] [批次组处理] 执行完成, 决策数: {len(all_decisions)}, 执行结果: {len(batch_results)}")
-        
-        # ========== 步骤3: 更新portfolio和constraints ==========
-        logger.debug(f"[Model {self.model_id}] [批次组处理] [步骤3] 更新portfolio和constraints...")
-        
-        # 更新portfolio引用
-        old_cash = portfolio.get('cash', 0)
-        old_positions = len(portfolio.get('positions', []) or [])
-        portfolio.update(latest_portfolio)
-        new_cash = portfolio.get('cash', 0)
-        new_positions = len(portfolio.get('positions', []) or [])
-        logger.debug(f"[Model {self.model_id}] [批次组处理] [步骤3.1] portfolio已更新: "
-                    f"现金 ${old_cash:.2f} -> ${new_cash:.2f}, "
-                    f"持仓数 {old_positions} -> {new_positions}")
-        
-        # 更新account_info
-        updated_account_info = self._build_account_info(latest_portfolio)
-        account_info.update(updated_account_info)
-        logger.debug(f"[Model {self.model_id}] [批次组处理] [步骤3.2] account_info已更新: "
-                    f"总收益率={updated_account_info.get('total_return', 0):.2f}%")
-        
-        # 更新constraints
-        old_occupied = constraints.get('occupied', 0)
-        old_available_cash = constraints.get('available_cash', 0)
-        constraints['occupied'] = len(latest_portfolio.get('positions', []) or [])
-        constraints['available_cash'] = latest_portfolio.get('cash', 0)
-        logger.debug(f"[Model {self.model_id}] [批次组处理] [步骤3.3] constraints已更新: "
-                    f"已占用 {old_occupied} -> {constraints['occupied']}, "
-                    f"可用现金 ${old_available_cash:.2f} -> ${constraints['available_cash']:.2f}")
-        
-        logger.debug(f"[Model {self.model_id}] [批次组处理] [步骤3] 状态更新完成")
+            for batch_data in group_decisions:
+                payload = batch_data.get('payload', {})
+                decisions = payload.get('decisions') or {}
+                batch_market_state = batch_data.get('batch_market_state', {})
+                batch_num = batch_data.get('batch_num', 0)
+                
+                # 合并决策
+                for symbol, decision in decisions.items():
+                    if symbol not in all_decisions:
+                        all_decisions[symbol] = decision
+                        logger.debug(f"[Model {self.model_id}] [批次组处理] 批次 {batch_num} 决策: {symbol} -> {decision.get('signal')}")
+                
+                # 合并market_state
+                all_market_states.update(batch_market_state)
+                
+                # 保存payload用于记录对话
+                if not payload.get('skipped') and payload.get('prompt'):
+                    all_payloads.append(payload)
+            
+            if not all_decisions:
+                logger.info(f"[Model {self.model_id}] [批次组处理] 无有效决策，跳过执行")
+                return
+            
+            logger.info(f"[Model {self.model_id}] [批次组处理] 合并完成: 决策数={len(all_decisions)}, 对话数={len(all_payloads)}")
+            
+            # ========== 步骤1: 记录所有批次的AI对话到数据库 ==========
+            logger.debug(f"[Model {self.model_id}] [批次组处理] [步骤1] 记录AI对话到数据库...")
+            for payload in all_payloads:
+                try:
+                    self._record_ai_conversation(payload, conversation_type='buy')
+                except Exception as e:
+                    logger.error(f"[Model {self.model_id}] [批次组处理] 记录AI对话失败: {e}")
+            logger.debug(f"[Model {self.model_id}] [批次组处理] [步骤1] AI对话已记录")
+            
+            # ========== 步骤2: 顺序执行所有决策 ==========
+            logger.debug(f"[Model {self.model_id}] [批次组处理] [步骤2] 开始顺序执行决策...")
+            
+            # 获取最新持仓状态
+            logger.debug(f"[Model {self.model_id}] [批次组处理] [步骤2.1] 获取最新持仓状态...")
+            latest_portfolio = self._get_portfolio(self.model_id, current_prices)
+            logger.debug(f"[Model {self.model_id}] [批次组处理] [步骤2.1] 最新持仓状态: "
+                        f"总价值=${latest_portfolio.get('total_value', 0):.2f}, "
+                        f"现金=${latest_portfolio.get('cash', 0):.2f}, "
+                        f"持仓数={len(latest_portfolio.get('positions', []) or [])}")
+            
+            # 执行所有决策（顺序执行）
+            logger.debug(f"[Model {self.model_id}] [批次组处理] [步骤2.2] 开始执行决策...")
+            execution_start = datetime.now(timezone(timedelta(hours=8)))
+            batch_results = self._execute_decisions(
+                all_decisions,
+                all_market_states,
+                latest_portfolio
+            )
+            execution_duration = (datetime.now(timezone(timedelta(hours=8))) - execution_start).total_seconds()
+            logger.debug(f"[Model {self.model_id}] [批次组处理] [步骤2.2] 决策执行完成: 耗时={execution_duration:.2f}秒, 结果数={len(batch_results)}")
+            
+            # 记录每个执行结果
+            for idx, result in enumerate(batch_results):
+                logger.debug(f"[Model {self.model_id}] [批次组处理] [步骤2.2.{idx+1}] 执行结果: "
+                            f"合约={result.get('symbol', 'N/A')}, "
+                            f"信号={result.get('signal')}, "
+                            f"数量={result.get('position_amt', 0)}, "
+                            f"价格=${result.get('price', 0):.4f}, "
+                            f"错误={result.get('error', '无')}")
+            
+            # 添加到执行结果列表
+            logger.info(f"[Model {self.model_id}] [批次组处理] [步骤2.3] 添加执行结果到列表（当前总数: {len(executions)}）...")
+            logger.info(f"[Model {self.model_id}] [批次组处理] [步骤2.3] batch_results详情: 数量={len(batch_results)}")
+            for idx, result in enumerate(batch_results):
+                logger.info(f"[Model {self.model_id}] [批次组处理] [步骤2.3] batch_results[{idx}]: symbol={result.get('symbol')}, signal={result.get('signal')}, error={result.get('error', '无')}")
+            executions.extend(batch_results)
+            logger.info(f"[Model {self.model_id}] [批次组处理] [步骤2.3] 执行结果已添加（新总数: {len(executions)}）")
+            logger.info(f"[Model {self.model_id}] [批次组处理] [步骤2.3] executions列表详情:")
+            for idx, exec_result in enumerate(executions):
+                logger.info(f"[Model {self.model_id}] [批次组处理] [步骤2.3] executions[{idx}]: symbol={exec_result.get('symbol')}, signal={exec_result.get('signal')}, error={exec_result.get('error', '无')}")
+            
+            logger.info(f"[Model {self.model_id}] [批次组处理] 执行完成, 决策数: {len(all_decisions)}, 执行结果: {len(batch_results)}")
+            
+            # ========== 步骤3: 更新portfolio和constraints ==========
+            logger.debug(f"[Model {self.model_id}] [批次组处理] [步骤3] 更新portfolio和constraints...")
+            
+            # 更新portfolio引用
+            old_cash = portfolio.get('cash', 0)
+            old_positions = len(portfolio.get('positions', []) or [])
+            portfolio.update(latest_portfolio)
+            new_cash = portfolio.get('cash', 0)
+            new_positions = len(portfolio.get('positions', []) or [])
+            logger.debug(f"[Model {self.model_id}] [批次组处理] [步骤3.1] portfolio已更新: "
+                        f"现金 ${old_cash:.2f} -> ${new_cash:.2f}, "
+                        f"持仓数 {old_positions} -> {new_positions}")
+            
+            # 更新account_info
+            updated_account_info = self._build_account_info(latest_portfolio)
+            account_info.update(updated_account_info)
+            logger.debug(f"[Model {self.model_id}] [批次组处理] [步骤3.2] account_info已更新: "
+                        f"总收益率={updated_account_info.get('total_return', 0):.2f}%")
+            
+            # 更新constraints
+            old_occupied = constraints.get('occupied', 0)
+            old_available_cash = constraints.get('available_cash', 0)
+            constraints['occupied'] = len(latest_portfolio.get('positions', []) or [])
+            constraints['available_cash'] = latest_portfolio.get('cash', 0)
+            logger.debug(f"[Model {self.model_id}] [批次组处理] [步骤3.3] constraints已更新: "
+                        f"已占用 {old_occupied} -> {constraints['occupied']}, "
+                        f"可用现金 ${old_available_cash:.2f} -> ${constraints['available_cash']:.2f}")
+            
+            logger.debug(f"[Model {self.model_id}] [批次组处理] [步骤3] 状态更新完成")
+            logger.info(f"[Model {self.model_id}] [批次组处理] ========== 批次组处理完成 ==========")
+            
+        except Exception as e:
+            logger.error(f"[Model {self.model_id}] [批次组处理] ========== 批次组处理异常 ==========")
+            logger.error(f"[Model {self.model_id}] [批次组处理] 异常信息: {e}", exc_info=True)
+            logger.error(f"[Model {self.model_id}] [批次组处理] 即使发生异常，executions列表当前状态: {len(executions)} 条记录")
+            # 即使发生异常，也不抛出，让主流程继续执行，确保阶段3的账户价值快照检查能够执行
+            # 这样即使批次组处理失败，已经添加到executions的结果仍然可以被检查
 
     def _make_batch_sell_decisions(
         self,
