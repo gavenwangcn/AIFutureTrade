@@ -250,19 +250,46 @@ class PortfoliosDatabase:
             if position_side_upper not in ['LONG', 'SHORT']:
                 raise ValueError(f"position_side must be 'LONG' or 'SHORT', got: {position_side}")
             
-            # MySQL 使用唯一索引 (uk_model_symbol_side) 和 INSERT 实现去重
+            # 使用 INSERT ... ON DUPLICATE KEY UPDATE 实现 UPSERT 操作
+            # 如果记录已存在（相同的 model_id, symbol, position_side），则更新；否则插入新记录
             # 使用 UTC+8 时区时间（北京时间），转换为 naive datetime 存储
             beijing_tz = timezone(timedelta(hours=8))
             current_time = datetime.now(beijing_tz).replace(tzinfo=None)
             
+            normalized_symbol = symbol.upper()
             position_id = self._generate_id()
-            self.insert_rows(
-                self.portfolios_table,
-                [[position_id, model_uuid, symbol.upper(), position_amt, avg_price, leverage, 
-                  position_side_upper, initial_margin, unrealized_profit, current_time]],
-                ["id", "model_id", "symbol", "position_amt", "avg_price", "leverage", 
-                 "position_side", "initial_margin", "unrealized_profit", "updated_at"]
-            )
+            
+            # 使用 INSERT ... ON DUPLICATE KEY UPDATE 实现原子性的 UPSERT 操作
+            # 当唯一键 (model_id, symbol, position_side) 冲突时，更新现有记录
+            def _execute_upsert(conn):
+                cursor = conn.cursor()
+                try:
+                    sql = f"""
+                    INSERT INTO `{self.portfolios_table}` 
+                    (`id`, `model_id`, `symbol`, `position_amt`, `avg_price`, `leverage`, 
+                     `position_side`, `initial_margin`, `unrealized_profit`, `updated_at`)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    ON DUPLICATE KEY UPDATE
+                        `position_amt` = VALUES(`position_amt`),
+                        `avg_price` = VALUES(`avg_price`),
+                        `leverage` = VALUES(`leverage`),
+                        `initial_margin` = VALUES(`initial_margin`),
+                        `unrealized_profit` = VALUES(`unrealized_profit`),
+                        `updated_at` = VALUES(`updated_at`)
+                    """
+                    cursor.execute(sql, (
+                        position_id, model_uuid, normalized_symbol, position_amt, avg_price, 
+                        leverage, position_side_upper, initial_margin, unrealized_profit, current_time
+                    ))
+                    # 检查是插入还是更新
+                    if cursor.rowcount == 1:
+                        logger.debug(f"[Portfolios] Position inserted: model_id={model_uuid}, symbol={normalized_symbol}, position_side={position_side_upper}, id={position_id}")
+                    elif cursor.rowcount == 2:
+                        logger.debug(f"[Portfolios] Position updated: model_id={model_uuid}, symbol={normalized_symbol}, position_side={position_side_upper}")
+                finally:
+                    cursor.close()
+            
+            self._with_connection(_execute_upsert)
         except Exception as e:
             logger.error(f"[Portfolios] Failed to update position: {e}")
             raise

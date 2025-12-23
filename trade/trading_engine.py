@@ -1302,7 +1302,7 @@ class TradingEngine:
                             logger.error(f"[Model {self.model_id}] [分批买入] 批次 {batch_num} 获取 {symbol_upper} 技术指标失败: {e}")
                             batch_market_state[symbol_upper]['indicators'] = {'timeframes': {}}
             
-            # 调用AI决策（不立即执行）
+            # 调用决策（不立即执行）
             try:
                 payload = self._process_batch_decision_only(
                     batch,
@@ -1383,7 +1383,7 @@ class TradingEngine:
         total_batches: int
     ) -> Dict:
         """
-        处理单个批次：只获取AI决策，不执行
+        处理单个批次：只获取决策，不执行
         
         流程：
         1. 验证所有symbol的市场数据是否有效
