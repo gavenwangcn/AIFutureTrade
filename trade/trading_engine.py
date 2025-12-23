@@ -295,6 +295,11 @@ class TradingEngine:
                     'error': f"Model {self.model_id} not found"
                 }
             
+            # 记录模型的trade_type信息
+            trade_type = model.get('trade_type', 'ai')
+            logger.info(f"[Model {self.model_id}] [买入服务] 模型trade_type: {trade_type}")
+            logger.info(f"[Model {self.model_id}] [买入服务] trader类型: {type(self.trader).__name__}")
+            
             # 缓存模型的杠杆配置，避免后续重复查询数据库
             model_leverage = model.get('leverage', 10)
             try:
@@ -438,16 +443,23 @@ class TradingEngine:
             # 统一在交易周期结束时记录账户价值，适用于所有 trade_type（ai 和 strategy）
             # 确保在真实执行交易操作后，将账户信息保存到 account_value_historys 表中
             # 同时更新当前 model 的 account_values 表中的数据
+            trade_type = model.get('trade_type', 'ai')
+            logger.info(f"[Model {self.model_id}] [买入服务] [阶段3] ========== 开始检查账户价值快照 ==========")
+            logger.info(f"[Model {self.model_id}] [买入服务] [阶段3] 模型trade_type: {trade_type}")
             logger.info(f"[Model {self.model_id}] [买入服务] [阶段3] 检查是否有实际交易，executions数量={len(executions)}")
+            logger.info(f"[Model {self.model_id}] [买入服务] [阶段3] executions列表内容: {executions}")
             has_trades = self._has_actual_trades(executions)
             logger.info(f"[Model {self.model_id}] [买入服务] [阶段3] 实际交易检查结果: {has_trades}")
             if has_trades:
-                logger.info(f"[Model {self.model_id}] [买入服务] [阶段3] 检测到实际交易，开始记录账户价值快照")
+                logger.info(f"[Model {self.model_id}] [买入服务] [阶段3] ========== 检测到实际交易，开始记录账户价值快照 ==========")
                 logger.info(f"[Model {self.model_id}] [买入服务] [阶段3] 调用_record_account_snapshot方法...")
+                logger.info(f"[Model {self.model_id}] [买入服务] [阶段3] current_prices数量: {len(current_prices)}")
                 self._record_account_snapshot(current_prices)
                 logger.info(f"[Model {self.model_id}] [买入服务] [阶段3] 账户价值快照已记录到数据库")
             else:
-                logger.info(f"[Model {self.model_id}] [买入服务] [阶段3] 无实际交易，跳过账户价值快照记录")
+                logger.info(f"[Model {self.model_id}] [买入服务] [阶段3] ========== 无实际交易，跳过账户价值快照记录 ==========")
+                logger.info(f"[Model {self.model_id}] [买入服务] [阶段3] 跳过原因: _has_actual_trades返回False")
+                logger.info(f"[Model {self.model_id}] [买入服务] [阶段3] 请检查executions列表内容和_has_actual_trades方法的判断逻辑")
             
             # ========== 阶段4: 同步model_futures表数据 ==========
             logger.info(f"[Model {self.model_id}] [买入服务] [阶段4] 同步model_futures表数据")
