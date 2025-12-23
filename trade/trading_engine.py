@@ -205,12 +205,16 @@ class TradingEngine:
             # 统一在交易周期结束时记录账户价值，适用于所有 trade_type（ai 和 strategy）
             # 确保在真实执行交易操作后，将账户信息保存到 account_value_historys 表中
             # 同时更新当前 model 的 account_values 表中的数据
-            if self._has_actual_trades(executions):
+            logger.info(f"[Model {self.model_id}] [卖出服务] [阶段3] 检查是否有实际交易，executions数量={len(executions)}")
+            has_trades = self._has_actual_trades(executions)
+            logger.info(f"[Model {self.model_id}] [卖出服务] [阶段3] 实际交易检查结果: {has_trades}")
+            if has_trades:
                 logger.info(f"[Model {self.model_id}] [卖出服务] [阶段3] 检测到实际交易，开始记录账户价值快照")
+                logger.info(f"[Model {self.model_id}] [卖出服务] [阶段3] 调用_record_account_snapshot方法...")
                 self._record_account_snapshot(current_prices)
                 logger.info(f"[Model {self.model_id}] [卖出服务] [阶段3] 账户价值快照已记录到数据库")
             else:
-                logger.debug(f"[Model {self.model_id}] [卖出服务] [阶段3] 无实际交易，跳过账户价值快照记录")
+                logger.info(f"[Model {self.model_id}] [卖出服务] [阶段3] 无实际交易，跳过账户价值快照记录")
             
             # ========== 阶段4: 同步model_futures表数据 ==========
             logger.debug(f"[Model {self.model_id}] [卖出服务] [阶段4] 同步model_futures表数据")
@@ -434,12 +438,16 @@ class TradingEngine:
             # 统一在交易周期结束时记录账户价值，适用于所有 trade_type（ai 和 strategy）
             # 确保在真实执行交易操作后，将账户信息保存到 account_value_historys 表中
             # 同时更新当前 model 的 account_values 表中的数据
-            if self._has_actual_trades(executions):
+            logger.info(f"[Model {self.model_id}] [买入服务] [阶段3] 检查是否有实际交易，executions数量={len(executions)}")
+            has_trades = self._has_actual_trades(executions)
+            logger.info(f"[Model {self.model_id}] [买入服务] [阶段3] 实际交易检查结果: {has_trades}")
+            if has_trades:
                 logger.info(f"[Model {self.model_id}] [买入服务] [阶段3] 检测到实际交易，开始记录账户价值快照")
+                logger.info(f"[Model {self.model_id}] [买入服务] [阶段3] 调用_record_account_snapshot方法...")
                 self._record_account_snapshot(current_prices)
                 logger.info(f"[Model {self.model_id}] [买入服务] [阶段3] 账户价值快照已记录到数据库")
             else:
-                logger.debug(f"[Model {self.model_id}] [买入服务] [阶段3] 无实际交易，跳过账户价值快照记录")
+                logger.info(f"[Model {self.model_id}] [买入服务] [阶段3] 无实际交易，跳过账户价值快照记录")
             
             # ========== 阶段4: 同步model_futures表数据 ==========
             logger.info(f"[Model {self.model_id}] [买入服务] [阶段4] 同步model_futures表数据")
@@ -515,21 +523,26 @@ class TradingEngine:
             bool: 如果有实际交易返回True，否则返回False
         """
         if not executions:
+            logger.debug(f"[Model {self.model_id}] _has_actual_trades: executions列表为空")
             return False
         
         valid_signals = {'buy_to_enter', 'sell_to_enter', 'close_position', 'stop_loss', 'take_profit'}
         
-        for result in executions:
+        logger.debug(f"[Model {self.model_id}] _has_actual_trades: 检查 {len(executions)} 个执行结果")
+        for idx, result in enumerate(executions):
             # 跳过有错误的执行结果
             if result.get('error'):
+                logger.debug(f"[Model {self.model_id}] _has_actual_trades: 结果 {idx+1} 有错误，跳过: {result.get('error')}")
                 continue
             
             # 检查是否有有效的signal
             signal = result.get('signal', '').lower()
+            logger.debug(f"[Model {self.model_id}] _has_actual_trades: 结果 {idx+1}: signal={signal}, symbol={result.get('symbol', 'N/A')}")
             if signal in valid_signals:
-                logger.debug(f"[Model {self.model_id}] 检测到实际交易: signal={signal}, symbol={result.get('symbol', 'N/A')}")
+                logger.info(f"[Model {self.model_id}] _has_actual_trades: 检测到实际交易: signal={signal}, symbol={result.get('symbol', 'N/A')}")
                 return True
         
+        logger.debug(f"[Model {self.model_id}] _has_actual_trades: 未检测到实际交易")
         return False
     
     def _record_account_snapshot(self, current_prices: Dict) -> None:
@@ -539,33 +552,47 @@ class TradingEngine:
         Args:
             current_prices: 当前价格映射
         """
-        updated_portfolio = self._get_portfolio(self.model_id, current_prices)
-        balance = updated_portfolio.get('total_value', 0)
-        available_balance = updated_portfolio.get('cash', 0)
-        cross_wallet_balance = updated_portfolio.get('positions_value', 0)
-        
-        logger.info(f"[Model {self.model_id}] 账户价值: "
-                   f"总余额(balance)=${balance:.2f}, "
-                   f"可用余额(available_balance)=${available_balance:.2f}, "
-                   f"全仓余额(cross_wallet_balance)=${cross_wallet_balance:.2f}")
-        
-        model = self.models_db.get_model(self.model_id)
-        account_alias = model.get('account_alias', '') if model else ''
-        
-        # 获取模型ID映射和账户价值历史表名
-        model_mapping = self.models_db._get_model_id_mapping()
-        from common.database.database_init import ACCOUNT_VALUE_HISTORYS_TABLE
-        self.account_values_db.record_account_value(
-            self.model_id,
-            balance=balance,
-            available_balance=available_balance,
-            cross_wallet_balance=cross_wallet_balance,
-            account_alias=account_alias,
-            cross_un_pnl=0.0,
-            model_id_mapping=model_mapping,
-            get_model_func=self.models_db.get_model,
-            account_value_historys_table=ACCOUNT_VALUE_HISTORYS_TABLE
-        )
+        try:
+            logger.info(f"[Model {self.model_id}] [账户价值快照] 开始记录账户价值快照...")
+            
+            updated_portfolio = self._get_portfolio(self.model_id, current_prices)
+            balance = updated_portfolio.get('total_value', 0)
+            available_balance = updated_portfolio.get('cash', 0)
+            cross_wallet_balance = updated_portfolio.get('positions_value', 0)
+            
+            logger.info(f"[Model {self.model_id}] [账户价值快照] 账户价值: "
+                       f"总余额(balance)=${balance:.2f}, "
+                       f"可用余额(available_balance)=${available_balance:.2f}, "
+                       f"全仓余额(cross_wallet_balance)=${cross_wallet_balance:.2f}")
+            
+            model = self.models_db.get_model(self.model_id)
+            account_alias = model.get('account_alias', '') if model else ''
+            logger.debug(f"[Model {self.model_id}] [账户价值快照] account_alias={account_alias}")
+            
+            # 获取模型ID映射和账户价值历史表名
+            model_mapping = self.models_db._get_model_id_mapping()
+            from common.database.database_init import ACCOUNT_VALUE_HISTORYS_TABLE
+            
+            logger.info(f"[Model {self.model_id}] [账户价值快照] 准备调用record_account_value方法...")
+            logger.info(f"[Model {self.model_id}] [账户价值快照] 调用参数: model_id={self.model_id}, balance=${balance:.2f}, "
+                       f"available_balance=${available_balance:.2f}, cross_wallet_balance=${cross_wallet_balance:.2f}, "
+                       f"account_alias={account_alias}")
+            self.account_values_db.record_account_value(
+                self.model_id,
+                balance=balance,
+                available_balance=available_balance,
+                cross_wallet_balance=cross_wallet_balance,
+                account_alias=account_alias,
+                cross_un_pnl=0.0,
+                model_id_mapping=model_mapping,
+                get_model_func=self.models_db.get_model,
+                account_value_historys_table=ACCOUNT_VALUE_HISTORYS_TABLE
+            )
+            logger.info(f"[Model {self.model_id}] [账户价值快照] record_account_value方法调用完成，账户价值快照记录完成")
+        except Exception as e:
+            logger.error(f"[Model {self.model_id}] [账户价值快照] 记录账户价值快照失败: {e}", exc_info=True)
+            # 不抛出异常，避免影响主流程，但记录详细错误信息
+            raise
     
     def _sync_model_futures(self) -> None:
         """同步model_futures表数据"""

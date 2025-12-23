@@ -1371,10 +1371,18 @@ let portfolioSymbolsRefreshInterval = null // 模型持仓合约列表自动刷�
     errors.value.conversations = null
     
     const requestedModelId = currentModelId.value
+    // 获取当前模型的UUID（使用currentModel.value.id，因为这是后端返回的UUID格式）
+    const currentModelData = currentModel.value
+    const modelUuid = currentModelData?.id || requestedModelId
+    
+    console.log(`[TradingApp] Loading strategy decisions for model: requestedModelId=${requestedModelId}, modelUuid=${modelUuid}, currentModelData=`, currentModelData)
     
     try {
       const { strategyDecisionApi } = await import('../services/api.js')
-      const response = await strategyDecisionApi.getByModelId(requestedModelId, targetPage, targetPageSize)
+      // 使用modelUuid（UUID格式）而不是requestedModelId（可能是整数）
+      const response = await strategyDecisionApi.getByModelId(modelUuid, targetPage, targetPageSize)
+      
+      console.log(`[TradingApp] Strategy decisions API response:`, response)
       
       if (currentModelId.value !== requestedModelId) {
         console.log(`[TradingApp] Model changed during strategy decisions load (${requestedModelId} -> ${currentModelId.value}), ignoring response`)
@@ -1383,6 +1391,8 @@ let portfolioSymbolsRefreshInterval = null // 模型持仓合约列表自动刷�
       
       // 处理分页响应
       const decisionsList = response.data || []
+      console.log(`[TradingApp] Decisions list from response:`, decisionsList)
+      
       strategyDecisions.value = decisionsList.map(decision => ({
         id: decision.id,
         strategyName: decision.strategyName || decision.strategy_name,
@@ -1403,9 +1413,16 @@ let portfolioSymbolsRefreshInterval = null // 模型持仓合约列表自动刷�
       strategyDecisionsTotal.value = response.total || 0
       strategyDecisionsTotalPages.value = response.totalPages || 0
       
-      console.log(`[TradingApp] Loaded ${strategyDecisions.value.length} strategy decisions for model ${requestedModelId} (page ${strategyDecisionsPage.value}/${strategyDecisionsTotalPages.value}, total: ${strategyDecisionsTotal.value})`)
+      console.log(`[TradingApp] Loaded ${strategyDecisions.value.length} strategy decisions for model ${modelUuid} (page ${strategyDecisionsPage.value}/${strategyDecisionsTotalPages.value}, total: ${strategyDecisionsTotal.value})`)
     } catch (error) {
-      console.error(`[TradingApp] Error loading strategy decisions for model ${requestedModelId}:`, error)
+      console.error(`[TradingApp] Error loading strategy decisions for model ${modelUuid}:`, error)
+      console.error(`[TradingApp] Error details:`, {
+        message: error.message,
+        stack: error.stack,
+        requestedModelId,
+        modelUuid,
+        currentModelData
+      })
       errors.value.conversations = error.message
       strategyDecisions.value = []
       strategyDecisionsTotal.value = 0
