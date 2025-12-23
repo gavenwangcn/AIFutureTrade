@@ -53,6 +53,33 @@ class StrategyTrader(Trader):
         # 初始化 StrategyDecisionsDatabase 实例
         self.strategy_decisions_db = StrategyDecisionsDatabase(pool=db._pool if db and hasattr(db, '_pool') else None)
     
+    def _normalize_quantity_to_int(self, decisions: Dict) -> Dict:
+        """
+        规范化decisions中的quantity为整数
+        
+        Args:
+            decisions: 决策字典，key为交易对符号，value为决策详情
+            
+        Returns:
+            规范化后的决策字典，所有quantity字段都转换为整数
+        """
+        normalized_decisions = {}
+        for symbol, decision in decisions.items():
+            normalized_decision = decision.copy()
+            # 如果decision中有quantity字段，转换为整数
+            if 'quantity' in normalized_decision and normalized_decision['quantity'] is not None:
+                try:
+                    quantity = normalized_decision['quantity']
+                    # 转换为浮点数后再转换为整数（向下取整）
+                    normalized_decision['quantity'] = int(float(quantity))
+                    logger.debug(f"[StrategyTrader] 规范化 {symbol} 的quantity: {quantity} -> {normalized_decision['quantity']}")
+                except (ValueError, TypeError) as e:
+                    logger.warning(f"[StrategyTrader] 无法转换 {symbol} 的quantity为整数: {normalized_decision.get('quantity')}, 错误: {e}")
+                    # 如果转换失败，设置为0或保持原值（根据业务需求）
+                    normalized_decision['quantity'] = 0
+            normalized_decisions[symbol] = normalized_decision
+        return normalized_decisions
+    
     def make_buy_decision(
         self,
         candidates: List[Dict],
@@ -146,8 +173,10 @@ class StrategyTrader(Trader):
                     
                     if has_valid_signal:
                         logger.info(f"[StrategyTrader] [Model {effective_model_id}] 策略 {strategy_name} 返回有效决策信号")
+                        # 规范化decisions中的quantity为整数
+                        normalized_decisions = self._normalize_quantity_to_int(decisions)
                         return {
-                            'decisions': decisions,
+                            'decisions': normalized_decisions,
                             'prompt': None,
                             'raw_response': json.dumps(decision_result, ensure_ascii=False),
                             'cot_trace': strategy_name,
@@ -269,14 +298,17 @@ class StrategyTrader(Trader):
                     if has_valid_signal:
                         logger.info(f"[StrategyTrader] [Model {effective_model_id}] 策略 {strategy_name} 返回有效决策信号")
                         
-                        # 保存策略决策到数据库
+                        # 规范化decisions中的quantity为整数
+                        normalized_decisions = self._normalize_quantity_to_int(decisions)
+                        
+                        # 保存策略决策到数据库（使用规范化后的decisions）
                         try:
                             model_mapping = self.models_db._get_model_id_mapping()
                             model_uuid = model_mapping.get(effective_model_id)
                             if model_uuid:
-                                # 将decisions字典转换为列表格式
+                                # 将normalized_decisions字典转换为列表格式
                                 decisions_list = []
-                                for symbol, decision in decisions.items():
+                                for symbol, decision in normalized_decisions.items():
                                     decisions_list.append(decision)
                                 
                                 # 批量保存决策
@@ -293,7 +325,7 @@ class StrategyTrader(Trader):
                             # 不影响主流程，继续返回决策结果
                         
                         return {
-                            'decisions': decisions,
+                            'decisions': normalized_decisions,
                             'prompt': None,
                             'raw_response': json.dumps(decision_result, ensure_ascii=False),
                             'cot_trace': strategy_name,

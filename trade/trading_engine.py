@@ -2399,10 +2399,12 @@ class TradingEngine:
         risk_pct = min(max(risk_pct, 0.01), 0.05)
         risk_based_qty = (available_cash * risk_pct) / (price * (1 + self.trade_fee_rate))
 
-        quantity = float(quantity)
+        # 确保quantity为整数（策略返回的quantity已经是整数，这里再次确保）
+        quantity = int(float(quantity))
         if quantity <= 0 or quantity > max_affordable_qty:
-            quantity = min(max_affordable_qty, risk_based_qty if risk_based_qty > 0 else max_affordable_qty)
-
+            adjusted_qty = min(max_affordable_qty, risk_based_qty if risk_based_qty > 0 else max_affordable_qty)
+            quantity = int(adjusted_qty)  # 确保调整后的数量也是整数
+        
         if quantity <= 0:
             return {'symbol': symbol, 'error': '现金不足，无法买入'}
 
@@ -2549,7 +2551,8 @@ class TradingEngine:
 
         current_price = market_state[symbol]['price']
         entry_price = position.get('avg_price', 0)
-        position_amt = abs(position.get('position_amt', 0))
+        # 确保position_amt为整数（去除小数部分）
+        position_amt = int(abs(position.get('position_amt', 0)))
         position_side = position.get('position_side', 'LONG')
 
         # 计算毛盈亏和净盈亏
@@ -2672,7 +2675,8 @@ class TradingEngine:
             return {'symbol': symbol, 'error': 'Position not found'}
 
         current_price = market_state[symbol]['price']
-        position_amt = abs(position.get('position_amt', 0))
+        # 确保position_amt为整数（去除小数部分）
+        position_amt = int(abs(position.get('position_amt', 0)))
         position_side = position.get('position_side', 'LONG')
         
         # 获取止损价格
@@ -2789,7 +2793,8 @@ class TradingEngine:
             return {'symbol': symbol, 'error': 'Position not found'}
 
         current_price = market_state[symbol]['price']
-        position_amt = abs(position.get('position_amt', 0))
+        # 确保position_amt为整数（去除小数部分）
+        position_amt = int(abs(position.get('position_amt', 0)))
         position_side = position.get('position_side', 'LONG')
         
         # 获取止盈价格

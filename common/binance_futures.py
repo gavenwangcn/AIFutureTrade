@@ -774,6 +774,11 @@ class BinanceFuturesOrderClient(_BinanceFuturesBase):
         self.quote_asset = quote_asset.upper()
         self._client = DerivativesTradingUsdsFutures(config_rest_api=configuration)
         self._rest = self._client.rest_api
+        
+        # 缓存交易规则信息（symbol -> {stepSize, tickSize}）
+        self._symbol_precision_cache: Dict[str, Dict[str, float]] = {}
+        self._cache_timestamp: float = 0
+        self._cache_ttl: float = 3600  # 缓存1小时
 
     def get_order_book_ticker(self, symbol: Optional[str] = None) -> List[Dict[str, Any]]:
         """
@@ -1212,6 +1217,74 @@ class BinanceFuturesOrderClient(_BinanceFuturesBase):
         if quantity <= 0:
             raise ValueError(f"quantity参数必须大于0，当前值: {quantity}")
     
+    def _get_symbol_precision(self, symbol: str) -> Dict[str, float]:
+        """
+        获取交易对的精度要求（stepSize和tickSize）
+        
+        Args:
+            symbol: 交易对符号
+            
+        Returns:
+            包含stepSize和tickSize的字典
+        """
+        import time
+        
+        # 检查缓存是否有效
+        current_time = time.time()
+        if (current_time - self._cache_timestamp) < self._cache_ttl and symbol in self._symbol_precision_cache:
+            return self._symbol_precision_cache[symbol]
+        
+        try:
+            # 获取交易所信息
+            response = self._rest.exchange_information()
+            data = response.data()
+            
+            # 解析symbols列表
+            symbols_data = data.get("symbols", []) if isinstance(data, dict) else []
+            
+            # 查找目标交易对
+            symbol_upper = symbol.upper()
+            for symbol_info in symbols_data:
+                symbol_name = symbol_info.get("symbol", "")
+                if symbol_name.upper() == symbol_upper:
+                    # 提取filters
+                    filters = symbol_info.get("filters", [])
+                    step_size = None
+                    tick_size = None
+                    
+                    for filter_item in filters:
+                        filter_type = filter_item.get("filterType", "")
+                        if filter_type == "LOT_SIZE":
+                            step_size_str = filter_item.get("stepSize", "1")
+                            step_size = float(step_size_str)
+                        elif filter_type == "PRICE_FILTER":
+                            tick_size_str = filter_item.get("tickSize", "0.01")
+                            tick_size = float(tick_size_str)
+                    
+                    # 如果找到了精度信息，缓存并返回
+                    if step_size is not None or tick_size is not None:
+                        precision_info = {
+                            "stepSize": step_size if step_size is not None else 1.0,
+                            "tickSize": tick_size if tick_size is not None else 0.01
+                        }
+                        self._symbol_precision_cache[symbol] = precision_info
+                        self._cache_timestamp = current_time
+                        logger.debug(f"[Binance Futures] 获取 {symbol} 精度: stepSize={precision_info['stepSize']}, tickSize={precision_info['tickSize']}")
+                        return precision_info
+            
+            # 如果没找到，使用默认值
+            logger.warning(f"[Binance Futures] 未找到 {symbol} 的精度信息，使用默认值")
+            default_precision = {"stepSize": 1.0, "tickSize": 0.01}
+            self._symbol_precision_cache[symbol] = default_precision
+            return default_precision
+            
+        except Exception as e:
+            logger.warning(f"[Binance Futures] 获取 {symbol} 精度信息失败: {e}，使用默认值")
+            default_precision = {"stepSize": 1.0, "tickSize": 0.01}
+            if symbol not in self._symbol_precision_cache:
+                self._symbol_precision_cache[symbol] = default_precision
+            return default_precision
+    
     def _adjust_quantity_precision(self, quantity: float, symbol: str) -> float:
         """
         调整订单数量精度，确保符合 Binance 要求
@@ -1221,46 +1294,43 @@ class BinanceFuturesOrderClient(_BinanceFuturesBase):
             symbol: 交易对符号
             
         Returns:
-            调整后的数量（根据数量大小自动调整精度）
+            调整后的数量（根据stepSize精度要求）
         """
-        # 使用更保守的精度策略，避免精度错误
-        # 大多数 Binance 交易对的数量精度在 3-8 位小数之间
-        # 根据数量大小动态调整精度
-        
-        # 将数量转换为字符串，检查小数位数
-        quantity_str = f"{quantity:.10f}".rstrip('0').rstrip('.')
-        if '.' in quantity_str:
-            decimal_places = len(quantity_str.split('.')[1])
-        else:
-            decimal_places = 0
-        
-        # 根据数量大小和原始精度，选择合适的精度
-        if quantity >= 1000:
-            # 大数量，保留0-2位小数
-            precision = min(2, decimal_places)
-        elif quantity >= 100:
-            # 中等数量，保留1-3位小数
+        try:
+            # 获取交易对的stepSize
+            precision_info = self._get_symbol_precision(symbol)
+            step_size = precision_info.get("stepSize", 1.0)
+            
+            # 如果stepSize >= 1，说明数量必须是整数
+            if step_size >= 1.0:
+                return float(int(quantity / step_size) * int(step_size))
+            
+            # 计算精度位数（stepSize的小数位数）
+            step_size_str = f"{step_size:.10f}".rstrip('0').rstrip('.')
+            if '.' in step_size_str:
+                precision = len(step_size_str.split('.')[1])
+            else:
+                precision = 0
+            
+            # 根据stepSize调整数量
+            # 例如：stepSize=0.1，则数量必须是0.1的倍数
+            adjusted = round(quantity / step_size) * step_size
+            
+            # 使用计算出的精度进行四舍五入
+            return round(adjusted, precision)
+            
+        except Exception as e:
+            logger.warning(f"[Binance Futures] 调整数量精度失败: {e}，使用保守策略")
+            # 如果获取精度失败，使用保守的精度策略
+            quantity_str = f"{quantity:.10f}".rstrip('0').rstrip('.')
+            if '.' in quantity_str:
+                decimal_places = len(quantity_str.split('.')[1])
+            else:
+                decimal_places = 0
+            
+            # 使用保守的精度（最多3位小数）
             precision = min(3, decimal_places)
-        elif quantity >= 10:
-            # 中等数量，保留2-4位小数
-            precision = min(4, decimal_places)
-        elif quantity >= 1:
-            # 小数量，保留3-5位小数
-            precision = min(5, decimal_places)
-        elif quantity >= 0.1:
-            # 很小数量，保留4-6位小数
-            precision = min(6, decimal_places)
-        elif quantity >= 0.01:
-            # 非常小数量，保留5-7位小数
-            precision = min(7, decimal_places)
-        else:
-            # 极小数量，保留最多8位小数
-            precision = min(8, decimal_places)
-        
-        # 确保精度至少为0
-        precision = max(0, precision)
-        
-        return round(quantity, precision)
+            return round(quantity, precision)
     
     def _adjust_price_precision(self, price: float, symbol: str) -> float:
         """
@@ -1271,46 +1341,43 @@ class BinanceFuturesOrderClient(_BinanceFuturesBase):
             symbol: 交易对符号
             
         Returns:
-            调整后的价格（根据价格大小自动调整精度）
+            调整后的价格（根据tickSize精度要求）
         """
-        # 使用更保守的精度策略，避免精度错误
-        # 大多数 Binance 交易对的价格精度在 2-8 位小数之间
-        # 根据价格大小动态调整精度
-        
-        # 将价格转换为字符串，检查小数位数
-        price_str = f"{price:.10f}".rstrip('0').rstrip('.')
-        if '.' in price_str:
-            decimal_places = len(price_str.split('.')[1])
-        else:
-            decimal_places = 0
-        
-        # 根据价格大小和原始精度，选择合适的精度
-        if price >= 10000:
-            # 高价格，保留0-2位小数
+        try:
+            # 获取交易对的tickSize
+            precision_info = self._get_symbol_precision(symbol)
+            tick_size = precision_info.get("tickSize", 0.01)
+            
+            # 如果tickSize >= 1，说明价格必须是整数
+            if tick_size >= 1.0:
+                return float(int(price / tick_size) * int(tick_size))
+            
+            # 计算精度位数（tickSize的小数位数）
+            tick_size_str = f"{tick_size:.10f}".rstrip('0').rstrip('.')
+            if '.' in tick_size_str:
+                precision = len(tick_size_str.split('.')[1])
+            else:
+                precision = 0
+            
+            # 根据tickSize调整价格
+            # 例如：tickSize=0.01，则价格必须是0.01的倍数
+            adjusted = round(price / tick_size) * tick_size
+            
+            # 使用计算出的精度进行四舍五入
+            return round(adjusted, precision)
+            
+        except Exception as e:
+            logger.warning(f"[Binance Futures] 调整价格精度失败: {e}，使用保守策略")
+            # 如果获取精度失败，使用保守的精度策略
+            price_str = f"{price:.10f}".rstrip('0').rstrip('.')
+            if '.' in price_str:
+                decimal_places = len(price_str.split('.')[1])
+            else:
+                decimal_places = 0
+            
+            # 使用保守的精度（最多2位小数）
             precision = min(2, decimal_places)
-        elif price >= 1000:
-            # 高价格，保留1-3位小数
-            precision = min(3, decimal_places)
-        elif price >= 100:
-            # 中等价格，保留2-4位小数
-            precision = min(4, decimal_places)
-        elif price >= 10:
-            # 中等价格，保留3-5位小数
-            precision = min(5, decimal_places)
-        elif price >= 1:
-            # 低价格，保留4-6位小数
-            precision = min(6, decimal_places)
-        elif price >= 0.1:
-            # 很低价格，保留5-7位小数
-            precision = min(7, decimal_places)
-        else:
-            # 极低价格，保留最多8位小数
-            precision = min(8, decimal_places)
-        
-        # 确保精度至少为0
-        precision = max(0, precision)
-        
-        return round(price, precision)
+            return round(price, precision)
     
     def _validate_position_side(self, position_side: Optional[str]) -> Optional[str]:
         """
@@ -1387,8 +1454,9 @@ class BinanceFuturesOrderClient(_BinanceFuturesBase):
         }
         
         if quantity is not None:
-            # 调整数量精度，确保符合 Binance 要求
-            order_params["quantity"] = self._adjust_quantity_precision(quantity, formatted_symbol)
+            # 调整数量精度，确保符合 Binance 要求，然后转换为整数
+            adjusted_quantity = self._adjust_quantity_precision(quantity, formatted_symbol)
+            order_params["quantity"] = int(adjusted_quantity)  # 确保quantity是整数
         
         if close_position:
             order_params["close_position"] = True
@@ -1428,7 +1496,8 @@ class BinanceFuturesOrderClient(_BinanceFuturesBase):
         algo_params = {}
         
         if quantity is not None:
-            algo_params["quantity"] = quantity
+            # 确保quantity是整数
+            algo_params["quantity"] = int(float(quantity))
         
         if stop_price is not None:
             algo_params["trigger_price"] = stop_price

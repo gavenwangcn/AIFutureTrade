@@ -181,7 +181,7 @@ class StrategyDecisionsDatabase:
             strategy_name: 策略名称
             strategy_type: 策略类型 ('buy' 或 'sell')
             signal: 交易信号
-            quantity: 数量（可空）
+            quantity: 数量（可空，如果提供则转换为整数）
             leverage: 杠杆（可空）
             price: 期望价格（可空）
             stop_price: 触发价格（可空）
@@ -189,6 +189,10 @@ class StrategyDecisionsDatabase:
         """
         try:
             decision_id = self._generate_id()
+            
+            # 确保quantity为整数（如果提供）
+            if quantity is not None:
+                quantity = int(float(quantity))
             
             # 使用 UTC+8 时区时间（北京时间），转换为 naive datetime 存储
             beijing_tz = timezone(timedelta(hours=8))
@@ -232,6 +236,9 @@ class StrategyDecisionsDatabase:
                 decision_id = self._generate_id()
                 signal = decision.get('signal', '')
                 quantity = decision.get('quantity')
+                # 确保quantity为整数（如果提供）
+                if quantity is not None:
+                    quantity = int(float(quantity))
                 leverage = decision.get('leverage')
                 price = decision.get('price')
                 stop_price = decision.get('stop_price')
