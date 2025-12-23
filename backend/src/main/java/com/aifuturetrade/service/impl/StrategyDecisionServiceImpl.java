@@ -28,20 +28,18 @@ public class StrategyDecisionServiceImpl implements StrategyDecisionService {
 
     @Override
     public PageResult<Map<String, Object>> getDecisionsByPage(String modelId, PageRequest pageRequest) {
-        log.info("[StrategyDecisionService] ========== 开始查询策略决策 ==========");
-        log.info("[StrategyDecisionService] 输入参数: modelId={}, pageRequest={}", modelId, pageRequest);
+        log.debug("[StrategyDecisionService] 开始查询策略决策: modelId={}, pageRequest={}", modelId, pageRequest);
         
         try {
             // 设置默认值
             Integer pageNum = pageRequest.getPageNum() != null && pageRequest.getPageNum() > 0 ? pageRequest.getPageNum() : 1;
             Integer pageSize = pageRequest.getPageSize() != null && pageRequest.getPageSize() > 0 ? pageRequest.getPageSize() : 10;
             
-            log.info("[StrategyDecisionService] 分页参数: pageNum={}, pageSize={}", pageNum, pageSize);
+            log.debug("[StrategyDecisionService] 分页参数: pageNum={}, pageSize={}", pageNum, pageSize);
             
             // 查询总数
-            log.info("[StrategyDecisionService] 查询总数: modelId={}", modelId);
             Long total = strategyDecisionMapper.countDecisionsByModelId(modelId);
-            log.info("[StrategyDecisionService] 查询总数结果: total={}", total);
+            log.debug("[StrategyDecisionService] 查询总数结果: total={}", total);
             
             // 使用MyBatis-Plus的Page进行分页查询
             Page<StrategyDecisionDO> page = new Page<>(pageNum, pageSize);
@@ -49,14 +47,13 @@ public class StrategyDecisionServiceImpl implements StrategyDecisionService {
             queryWrapper.eq("model_id", modelId);
             queryWrapper.orderByDesc("created_at");
             
-            log.info("[StrategyDecisionService] 执行分页查询: modelId={}, pageNum={}, pageSize={}", modelId, pageNum, pageSize);
             Page<StrategyDecisionDO> decisionDOPage = strategyDecisionMapper.selectPage(page, queryWrapper);
             
             List<StrategyDecisionDO> decisionDOList = decisionDOPage.getRecords();
-            log.info("[StrategyDecisionService] 查询结果: 返回记录数={}, modelId={}", decisionDOList.size(), modelId);
+            log.debug("[StrategyDecisionService] 查询结果: 返回记录数={}", decisionDOList.size());
             
             if (!decisionDOList.isEmpty()) {
-                log.info("[StrategyDecisionService] 第一条DO记录示例: id={}, modelId={}, strategyName={}, symbol={}, signal={}", 
+                log.debug("[StrategyDecisionService] 第一条DO记录示例: id={}, modelId={}, strategyName={}, symbol={}, signal={}", 
                         decisionDOList.get(0).getId(), 
                         decisionDOList.get(0).getModelId(),
                         decisionDOList.get(0).getStrategyName(),
@@ -65,22 +62,20 @@ public class StrategyDecisionServiceImpl implements StrategyDecisionService {
             }
             
             List<Map<String, Object>> decisions = convertDecisionsToMapList(decisionDOList);
-            log.info("[StrategyDecisionService] 转换后的Map列表大小: {}", decisions.size());
+            log.debug("[StrategyDecisionService] 转换后的Map列表大小: {}", decisions.size());
             
             if (!decisions.isEmpty()) {
-                log.info("[StrategyDecisionService] 第一条Map记录示例: {}", decisions.get(0));
+                log.debug("[StrategyDecisionService] 第一条Map记录示例: {}", decisions.get(0));
             }
             
             PageResult<Map<String, Object>> result = PageResult.build(decisions, total, pageNum, pageSize);
-            log.info("[StrategyDecisionService] 构建分页结果: total={}, pageNum={}, pageSize={}, totalPages={}, dataSize={}", 
+            log.debug("[StrategyDecisionService] 构建分页结果: total={}, pageNum={}, pageSize={}, totalPages={}, dataSize={}", 
                     result.getTotal(), result.getPageNum(), result.getPageSize(), result.getTotalPages(), 
                     result.getData() != null ? result.getData().size() : 0);
             
-            log.info("[StrategyDecisionService] ========== 查询策略决策完成 ==========");
             return result;
         } catch (Exception e) {
-            log.error("[StrategyDecisionService] ========== 查询策略决策失败 ==========");
-            log.error("[StrategyDecisionService] 错误信息: modelId={}, pageRequest={}, error={}", 
+            log.error("[StrategyDecisionService] 查询策略决策失败: modelId={}, pageRequest={}, error={}", 
                     modelId, pageRequest, e.getMessage(), e);
             return PageResult.build(new ArrayList<>(), 0L, pageRequest.getPageNum() != null ? pageRequest.getPageNum() : 1, pageRequest.getPageSize() != null ? pageRequest.getPageSize() : 10);
         }

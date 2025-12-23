@@ -39,32 +39,31 @@ public class StrategyDecisionController {
             @ApiParam(value = "模型ID", required = true) @PathVariable String modelId,
             @ApiParam(value = "页码", required = false) @RequestParam(defaultValue = "1") Integer page,
             @ApiParam(value = "每页记录数", required = false) @RequestParam(defaultValue = "10") Integer pageSize) {
-        log.info("[StrategyDecisionController] ========== 收到查询策略决策请求 ==========");
-        log.info("[StrategyDecisionController] 请求参数: modelId={}, page={}, pageSize={}", modelId, page, pageSize);
+        log.info("[StrategyDecisionController] 查询策略决策: modelId={}, page={}, pageSize={}", modelId, page, pageSize);
         
         try {
             PageRequest pageRequest = new PageRequest();
             pageRequest.setPageNum(page);
             pageRequest.setPageSize(pageSize);
             
-            log.info("[StrategyDecisionController] 调用Service查询策略决策: modelId={}, pageRequest={}", modelId, pageRequest);
+            log.debug("[StrategyDecisionController] 调用Service查询策略决策: modelId={}, pageRequest={}", modelId, pageRequest);
             PageResult<Map<String, Object>> result = strategyDecisionService.getDecisionsByPage(modelId, pageRequest);
             
-            log.info("[StrategyDecisionController] Service返回结果: total={}, pageNum={}, pageSize={}, totalPages={}, dataSize={}", 
-                    result.getTotal(), result.getPageNum(), result.getPageSize(), result.getTotalPages(), 
-                    result.getData() != null ? result.getData().size() : 0);
+            log.info("[StrategyDecisionController] 查询成功: modelId={}, total={}, dataSize={}", 
+                    modelId, result.getTotal(), result.getData() != null ? result.getData().size() : 0);
+            
+            log.debug("[StrategyDecisionController] Service返回结果详情: pageNum={}, pageSize={}, totalPages={}", 
+                    result.getPageNum(), result.getPageSize(), result.getTotalPages());
             
             if (result.getData() != null && !result.getData().isEmpty()) {
-                log.info("[StrategyDecisionController] 第一条决策数据示例: {}", result.getData().get(0));
+                log.debug("[StrategyDecisionController] 第一条决策数据示例: {}", result.getData().get(0));
             } else {
-                log.info("[StrategyDecisionController] 查询结果为空，没有找到策略决策记录");
+                log.debug("[StrategyDecisionController] 查询结果为空，没有找到策略决策记录");
             }
             
-            log.info("[StrategyDecisionController] ========== 返回查询结果 ==========");
             return new ResponseEntity<>(result, HttpStatus.OK);
         } catch (Exception e) {
-            log.error("[StrategyDecisionController] ========== 查询策略决策失败 ==========");
-            log.error("[StrategyDecisionController] 错误信息: modelId={}, page={}, pageSize={}, error={}", 
+            log.error("[StrategyDecisionController] 查询策略决策失败: modelId={}, page={}, pageSize={}, error={}", 
                     modelId, page, pageSize, e.getMessage(), e);
             PageResult<Map<String, Object>> errorResult = PageResult.build(new java.util.ArrayList<>(), 0L, page, pageSize);
             return new ResponseEntity<>(errorResult, HttpStatus.INTERNAL_SERVER_ERROR);
