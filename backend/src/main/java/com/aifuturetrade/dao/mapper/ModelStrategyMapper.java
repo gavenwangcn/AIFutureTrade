@@ -2,6 +2,7 @@ package com.aifuturetrade.dao.mapper;
 
 import com.aifuturetrade.dao.entity.ModelStrategyDO;
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
+import org.apache.ibatis.annotations.Delete;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Select;
@@ -67,6 +68,14 @@ public interface ModelStrategyMapper extends BaseMapper<ModelStrategyDO> {
      */
     @Select("select * from model_strategy where model_id = #{modelId} and type = #{type} order by created_at desc")
     List<ModelStrategyDO> selectModelStrategiesByModelIdAndType(@Param("modelId") String modelId, @Param("type") String type);
+
+    /**
+     * 根据模型ID删除模型策略关联
+     * @param modelId 模型ID（UUID格式）
+     * @return 删除的记录数
+     */
+    @Delete("DELETE FROM model_strategy WHERE model_id = #{modelId}")
+    int deleteByModelId(@Param("modelId") String modelId);
 
 }
 

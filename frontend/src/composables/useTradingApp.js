@@ -64,6 +64,13 @@ export function useTradingApp() {
   const tradesTotal = ref(0)  // 总记录数
   const tradesTotalPages = ref(0)  // 总页数
   const conversations = ref([])
+  const strategyDecisions = ref([]) // 策略决策列表
+  const isRefreshingStrategyDecisions = ref(false) // 策略决策模块刷新状态
+  // 策略决策分页相关状态
+  const strategyDecisionsPage = ref(1)  // 当前页码
+  const strategyDecisionsPageSize = ref(10)  // 每页记录数
+  const strategyDecisionsTotal = ref(0)  // 总记录数
+  const strategyDecisionsTotalPages = ref(0)  // 总页数
   const modelPortfolioSymbols = ref([]) // 模型持仓合约列表
 const lastPortfolioSymbolsRefreshTime = ref(null) // 持仓合约列表最后刷新时间
   
@@ -1343,6 +1350,95 @@ let portfolioSymbolsRefreshInterval = null // 模型持仓合约列表自动刷�
   }
 
   /**
+   * 加载策略决策记录（分页）
+   * 只加载当前选中模型（currentModelId）的策略决策记录
+   * @param {number} page - 页码（可选，默认使用当前页码）
+   * @param {number} pageSize - 每页记录数（可选，默认使用当前每页记录数）
+   */
+  const loadStrategyDecisions = async (page = null, pageSize = null) => {
+    if (!currentModelId.value) {
+      strategyDecisions.value = []
+      strategyDecisionsTotal.value = 0
+      strategyDecisionsTotalPages.value = 0
+      return
+    }
+    
+    const targetPage = page !== null ? page : strategyDecisionsPage.value
+    const targetPageSize = pageSize !== null ? pageSize : strategyDecisionsPageSize.value
+    
+    loading.value.conversations = true
+    isRefreshingStrategyDecisions.value = true
+    errors.value.conversations = null
+    
+    const requestedModelId = currentModelId.value
+    
+    try {
+      const { strategyDecisionApi } = await import('../services/api.js')
+      const response = await strategyDecisionApi.getByModelId(requestedModelId, targetPage, targetPageSize)
+      
+      if (currentModelId.value !== requestedModelId) {
+        console.log(`[TradingApp] Model changed during strategy decisions load (${requestedModelId} -> ${currentModelId.value}), ignoring response`)
+        return
+      }
+      
+      // 处理分页响应
+      const decisionsList = response.data || []
+      strategyDecisions.value = decisionsList.map(decision => ({
+        id: decision.id,
+        strategyName: decision.strategyName || decision.strategy_name,
+        strategyType: decision.strategyType || decision.strategy_type,
+        signal: decision.signal,
+        quantity: decision.quantity,
+        leverage: decision.leverage,
+        price: decision.price,
+        stopPrice: decision.stopPrice || decision.stop_price,
+        justification: decision.justification,
+        createdAt: decision.createdAt || decision.created_at,
+        ...decision
+      }))
+      
+      // 更新分页信息
+      strategyDecisionsPage.value = response.pageNum || targetPage
+      strategyDecisionsPageSize.value = response.pageSize || targetPageSize
+      strategyDecisionsTotal.value = response.total || 0
+      strategyDecisionsTotalPages.value = response.totalPages || 0
+      
+      console.log(`[TradingApp] Loaded ${strategyDecisions.value.length} strategy decisions for model ${requestedModelId} (page ${strategyDecisionsPage.value}/${strategyDecisionsTotalPages.value}, total: ${strategyDecisionsTotal.value})`)
+    } catch (error) {
+      console.error(`[TradingApp] Error loading strategy decisions for model ${requestedModelId}:`, error)
+      errors.value.conversations = error.message
+      strategyDecisions.value = []
+      strategyDecisionsTotal.value = 0
+      strategyDecisionsTotalPages.value = 0
+    } finally {
+      loading.value.conversations = false
+      isRefreshingStrategyDecisions.value = false
+    }
+  }
+
+  /**
+   * 跳转到策略决策指定页码
+   */
+  const goToStrategyDecisionsPage = async (page) => {
+    if (page < 1 || page > strategyDecisionsTotalPages.value) return
+    await loadStrategyDecisions(page, strategyDecisionsPageSize.value)
+  }
+
+  /**
+   * 根据模型trade_type加载对话或策略决策
+   */
+  const loadConversationsOrDecisions = async () => {
+    const currentModelData = currentModel.value
+    const tradeType = currentModelData?.trade_type || currentModelData?.tradeType || 'ai'
+    
+    if (tradeType === 'strategy') {
+      await loadStrategyDecisions()
+    } else {
+      await loadConversations()
+    }
+  }
+
+  /**
    * 加载对话记录
    * 只加载当前选中模型（currentModelId）的对话记录
    * 使用settings中的conversation_limit作为查询限制
@@ -1479,7 +1575,7 @@ let portfolioSymbolsRefreshInterval = null // 模型持仓合约列表自动刷�
           loadPortfolio(),
           loadPositions(),
           loadTrades(),
-          loadConversations()
+          loadConversationsOrDecisions()
         ])
       }
       
@@ -1771,9 +1867,9 @@ let portfolioSymbolsRefreshInterval = null // 模型持仓合约列表自动刷�
               }
             })(),
             (async () => {
-              // AI对话模块
+              // AI对话模块或策略决策模块
               try {
-                await loadConversations()
+                await loadConversationsOrDecisions()
               } finally {
                 isRefreshingConversations.value = false
               }
@@ -1811,7 +1907,7 @@ let portfolioSymbolsRefreshInterval = null // 模型持仓合约列表自动刷�
       loadPortfolio(),
       loadPositions(),
       loadTrades(),
-      loadConversations(), // 加载新模型的对话数据
+      loadConversationsOrDecisions(), // 根据trade_type加载对话或策略决策数据
       loadModelPortfolioSymbols() // 立即加载一次模型持仓合约数据
     ])
     // 选择模型后启动模型持仓合约列表自动刷新
@@ -2522,6 +2618,8 @@ let portfolioSymbolsRefreshInterval = null // 模型持仓合约列表自动刷�
     tradesTotalPages,
     goToTradesPage,
     conversations,
+    strategyDecisions,
+    isRefreshingStrategyDecisions,
     settings,
     modelPortfolioSymbols,
     lastPortfolioSymbolsRefreshTime,

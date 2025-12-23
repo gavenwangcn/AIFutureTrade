@@ -420,7 +420,19 @@
               <i v-if="isRefreshingTrades" class="bi bi-arrow-repeat spin" style="margin-right: 4px;"></i>
               交易记录
             </button>
-            <button :class="['tab-btn', { active: activeTab === 'conversations' }]" @click="activeTab = 'conversations'">
+            <button 
+              v-if="currentModel && (currentModel.trade_type || currentModel.tradeType) === 'strategy'"
+              :class="['tab-btn', { active: activeTab === 'conversations' }]" 
+              @click="activeTab = 'conversations'"
+            >
+              <i v-if="isRefreshingStrategyDecisions" class="bi bi-arrow-repeat spin" style="margin-right: 4px;"></i>
+              触发交易策略
+            </button>
+            <button 
+              v-else
+              :class="['tab-btn', { active: activeTab === 'conversations' }]" 
+              @click="activeTab = 'conversations'"
+            >
               <i v-if="isRefreshingConversations" class="bi bi-arrow-repeat spin" style="margin-right: 4px;"></i>
               AI对话
             </button>
@@ -534,7 +546,83 @@
             </div>
           </div>
 
-          <div v-show="!isAggregatedView && activeTab === 'conversations'" class="tab-content active">
+          <!-- 策略决策模块（当trade_type为strategy时显示） -->
+          <div v-show="!isAggregatedView && activeTab === 'conversations' && currentModel && (currentModel.trade_type || currentModel.tradeType) === 'strategy'" class="tab-content active">
+            <div v-if="loading.conversations" class="loading-container">
+              <i class="bi bi-arrow-repeat spin" style="font-size: 24px; color: var(--primary-color);"></i>
+              <p style="margin-top: 12px; color: var(--text-secondary);">加载策略决策数据中...</p>
+            </div>
+            <div v-else class="table-container">
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th>时间</th>
+                    <th>策略名称</th>
+                    <th>策略类型</th>
+                    <th>交易信号</th>
+                    <th>数量</th>
+                    <th>杠杆</th>
+                    <th>期望价格</th>
+                    <th>触发价格</th>
+                    <th>触发理由</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="decision in strategyDecisions" :key="decision.id">
+                    <td>{{ decision.createdAt || decision.created_at || '' }}</td>
+                    <td><strong>{{ decision.strategyName || decision.strategy_name }}</strong></td>
+                    <td>
+                      <span :class="['badge', (decision.strategyType || decision.strategy_type) === 'buy' ? 'badge-long' : 'badge-short']">
+                        {{ (decision.strategyType || decision.strategy_type) === 'buy' ? '买入' : '卖出' }}
+                      </span>
+                    </td>
+                    <td>
+                      <span :class="['badge', getSignalBadgeClass(decision.signal)]">
+                        {{ formatSignal(decision.signal) }}
+                      </span>
+                    </td>
+                    <td>{{ decision.quantity ? decision.quantity.toFixed(4) : '-' }}</td>
+                    <td>{{ decision.leverage ? decision.leverage + 'x' : '-' }}</td>
+                    <td>{{ decision.price ? '$' + formatPrice6(decision.price) : '-' }}</td>
+                    <td>{{ decision.stopPrice || decision.stop_price ? '$' + formatPrice6(decision.stopPrice || decision.stop_price) : '-' }}</td>
+                    <td style="max-width: 300px; word-break: break-word;">{{ decision.justification || '-' }}</td>
+                  </tr>
+                  <tr v-if="strategyDecisions.length === 0">
+                    <td colspan="9" class="empty-state">暂无策略决策记录</td>
+                  </tr>
+                </tbody>
+              </table>
+              <!-- 分页控件 -->
+              <div v-if="strategyDecisionsTotal > 0" class="pagination-container" style="margin-top: 16px; display: flex; justify-content: space-between; align-items: center;">
+                <div class="pagination-info" style="color: var(--text-secondary); font-size: 14px;">
+                  共 {{ strategyDecisionsTotal }} 条记录，第 {{ strategyDecisionsPage }} / {{ strategyDecisionsTotalPages }} 页
+                </div>
+                <div class="pagination-controls" style="display: flex; gap: 8px;">
+                  <button 
+                    class="btn btn-sm" 
+                    :disabled="strategyDecisionsPage <= 1" 
+                    @click="goToStrategyDecisionsPage(strategyDecisionsPage - 1)"
+                    style="padding: 4px 12px; border: 1px solid var(--border-color); background: var(--bg-secondary); color: var(--text-primary); border-radius: 4px; cursor: pointer;"
+                    :style="{ opacity: strategyDecisionsPage <= 1 ? 0.5 : 1, cursor: strategyDecisionsPage <= 1 ? 'not-allowed' : 'pointer' }"
+                  >
+                    上一页
+                  </button>
+                  <button 
+                    class="btn btn-sm" 
+                    :disabled="strategyDecisionsPage >= strategyDecisionsTotalPages" 
+                    @click="goToStrategyDecisionsPage(strategyDecisionsPage + 1)"
+                    style="padding: 4px 12px; border: 1px solid var(--border-color); background: var(--bg-secondary); color: var(--text-primary); border-radius: 4px; cursor: pointer;"
+                    :style="{ opacity: strategyDecisionsPage >= strategyDecisionsTotalPages ? 0.5 : 1, cursor: strategyDecisionsPage >= strategyDecisionsTotalPages ? 'not-allowed' : 'pointer' }"
+                  >
+                    下一页
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- AI对话模块（当trade_type为ai时显示） -->
+          <div v-show="!isAggregatedView && activeTab === 'conversations' && (!currentModel || (currentModel.trade_type || currentModel.tradeType) !== 'strategy')" class="tab-content active">
             <div v-if="loading.conversations" class="loading-container">
               <i class="bi bi-arrow-repeat spin" style="font-size: 24px; color: var(--primary-color);"></i>
               <p style="margin-top: 12px; color: var(--text-secondary);">加载AI对话数据中...</p>
@@ -805,6 +893,7 @@ import { useTradingApp } from './composables/useTradingApp'
 
 const {
   currentModelId,
+  currentModel,
   models,
   isAggregatedView,
   marketPrices,
@@ -834,6 +923,13 @@ const {
   tradesTotalPages,
   goToTradesPage,
   conversations,
+  strategyDecisions,
+  isRefreshingStrategyDecisions,
+  strategyDecisionsPage,
+  strategyDecisionsPageSize,
+  strategyDecisionsTotal,
+  strategyDecisionsTotalPages,
+  goToStrategyDecisionsPage,
   loading,
   loadPositions,
   loadTrades,

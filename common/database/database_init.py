@@ -36,6 +36,7 @@ ASSET_TABLE = "asset"
 BINANCE_TRADE_LOGS_TABLE = "binance_trade_logs"
 STRATEGYS_TABLE = "strategys"
 MODEL_STRATEGY_TABLE = "model_strategy"
+STRATEGY_DECISIONS_TABLE = "strategy_decisions"
 MARKET_TICKER_TABLE = "24_market_tickers"
 
 
@@ -409,6 +410,31 @@ class DatabaseInitializer:
         self.command(ddl)
         logger.debug(f"[DatabaseInit] Ensured table {table_name} exists")
     
+    def ensure_strategy_decisions_table(self, table_name: str = "strategy_decisions"):
+        """Create strategy_decisions table if not exists (用于存储策略执行决策)"""
+        ddl = f"""
+        CREATE TABLE IF NOT EXISTS `{table_name}` (
+            `id` VARCHAR(36) PRIMARY KEY,
+            `model_id` VARCHAR(36) NOT NULL COMMENT '模型ID',
+            `strategy_name` VARCHAR(200) NOT NULL COMMENT '策略名称',
+            `strategy_type` VARCHAR(10) NOT NULL COMMENT '策略类型：buy-买，sell-卖',
+            `signal` VARCHAR(50) NOT NULL COMMENT '交易信号',
+            `quantity` DECIMAL(20, 8) COMMENT '数量',
+            `leverage` INT COMMENT '杠杆',
+            `price` DECIMAL(20, 8) COMMENT '期望价格（可空）',
+            `stop_price` DECIMAL(20, 8) COMMENT '触发价格（可空）',
+            `justification` TEXT COMMENT '触发理由（可空）',
+            `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP,
+            INDEX `idx_model_id` (`model_id`),
+            INDEX `idx_strategy_name` (`strategy_name`),
+            INDEX `idx_strategy_type` (`strategy_type`),
+            INDEX `idx_signal` (`signal`),
+            INDEX `idx_created_at` (`created_at`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+        """
+        self.command(ddl)
+        logger.debug(f"[DatabaseInit] Ensured table {table_name} exists")
+    
     # ============ 市场数据表初始化方法 ============
     
     def ensure_market_ticker_table(self, table_name: str = "24_market_tickers"):
@@ -509,6 +535,9 @@ def init_database_tables(command_func: Callable[[str], Any], table_names: dict):
     
     # Model strategy table (模型关联策略)
     initializer.ensure_model_strategy_table(table_names.get('model_strategy_table', 'model_strategy'))
+    
+    # Strategy decisions table (策略执行决策)
+    initializer.ensure_strategy_decisions_table(table_names.get('strategy_decisions_table', 'strategy_decisions'))
     
     logger.info("[DatabaseInit] MySQL business tables initialized")
 

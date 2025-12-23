@@ -377,3 +377,16 @@ export const aiProviderApi = {
   generateStrategyCode: (data) => apiPost('/api/ai/generate-strategy-code', data)
 }
 
+/**
+ * 策略决策相关 API
+ */
+export const strategyDecisionApi = {
+  /**
+   * 根据模型ID查询策略决策记录（分页）
+   * @param {string} modelId - 模型ID
+   * @param {number} page - 页码，从1开始，默认为1
+   * @param {number} pageSize - 每页记录数，默认为10
+   */
+  getByModelId: (modelId, page = 1, pageSize = 10) => apiGet(`/api/strategy-decisions/model/${modelId}`, { page, pageSize })
+}
+

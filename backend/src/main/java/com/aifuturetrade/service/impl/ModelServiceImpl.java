@@ -52,6 +52,9 @@ public class ModelServiceImpl implements ModelService {
     private ModelPromptMapper modelPromptMapper;
 
     @Autowired
+    private ModelStrategyMapper modelStrategyMapper;
+
+    @Autowired
     private AccountValueHistoryMapper accountValueHistoryMapper;
 
     @Autowired
@@ -74,6 +77,12 @@ public class ModelServiceImpl implements ModelService {
 
     @Autowired
     private MarketTickerMapper marketTickerMapper;
+
+    @Autowired
+    private BinanceTradeLogMapper binanceTradeLogMapper;
+
+    @Autowired
+    private StrategyDecisionMapper strategyDecisionMapper;
 
     @Autowired
     private com.aifuturetrade.common.api.binance.BinanceConfig binanceConfig;
@@ -130,8 +139,13 @@ public class ModelServiceImpl implements ModelService {
         ModelDO modelDO = convertToDO(modelDTO);
         modelDO.setCreatedAt(LocalDateTime.now());
         modelDO.setUpdatedAt(LocalDateTime.now());
-        modelDO.setAutoBuyEnabled(true);
-        modelDO.setAutoSellEnabled(true);
+        // 新建模型时，auto_buy_enabled和auto_sell_enabled默认为false（0）
+        if (modelDO.getAutoBuyEnabled() == null) {
+            modelDO.setAutoBuyEnabled(false);
+        }
+        if (modelDO.getAutoSellEnabled() == null) {
+            modelDO.setAutoSellEnabled(false);
+        }
         
         // 如果提供了accountAlias，从account_asset表中获取api_key和api_secret
         if (modelDO.getAccountAlias() != null && !modelDO.getAccountAlias().trim().isEmpty()) {
@@ -247,7 +261,89 @@ public class ModelServiceImpl implements ModelService {
     @Override
     @Transactional(rollbackFor = Exception.class)
     public Boolean deleteModel(String id) {
+        log.info("[ModelService] 开始删除模型及其关联数据, modelId: {}", id);
+        
+        // 按顺序删除所有关联表的数据
+        // 1. 删除账户价值历史记录
+        try {
+            int count = accountValueHistoryMapper.deleteByModelId(id);
+            log.debug("[ModelService] Deleted {} account_value_historys records for model: {}", count, id);
+        } catch (Exception e) {
+            log.warn("[ModelService] Failed to delete account_value_historys for model {}: {}", id, e.getMessage());
+        }
+        
+        // 2. 删除账户价值记录
+        try {
+            int count = accountValuesMapper.deleteByModelId(id);
+            log.debug("[ModelService] Deleted {} account_values records for model: {}", count, id);
+        } catch (Exception e) {
+            log.warn("[ModelService] Failed to delete account_values for model {}: {}", id, e.getMessage());
+        }
+        
+        // 3. 删除币安交易日志
+        try {
+            int count = binanceTradeLogMapper.deleteByModelId(id);
+            log.debug("[ModelService] Deleted {} binance_trade_logs records for model: {}", count, id);
+        } catch (Exception e) {
+            log.warn("[ModelService] Failed to delete binance_trade_logs for model {}: {}", id, e.getMessage());
+        }
+        
+        // 4. 删除对话记录
+        try {
+            int count = conversationMapper.deleteByModelId(id);
+            log.debug("[ModelService] Deleted {} conversations records for model: {}", count, id);
+        } catch (Exception e) {
+            log.warn("[ModelService] Failed to delete conversations for model {}: {}", id, e.getMessage());
+        }
+        
+        // 5. 删除模型提示词配置
+        try {
+            int count = modelPromptMapper.deleteByModelId(id);
+            log.debug("[ModelService] Deleted {} model_prompts records for model: {}", count, id);
+        } catch (Exception e) {
+            log.warn("[ModelService] Failed to delete model_prompts for model {}: {}", id, e.getMessage());
+        }
+        
+        // 6. 删除模型策略关联
+        try {
+            int count = modelStrategyMapper.deleteByModelId(id);
+            log.debug("[ModelService] Deleted {} model_strategy records for model: {}", count, id);
+        } catch (Exception e) {
+            log.warn("[ModelService] Failed to delete model_strategy for model {}: {}", id, e.getMessage());
+        }
+        
+        // 7. 删除持仓记录
+        try {
+            int count = portfolioMapper.deleteByModelId(id);
+            log.debug("[ModelService] Deleted {} portfolios records for model: {}", count, id);
+        } catch (Exception e) {
+            log.warn("[ModelService] Failed to delete portfolios for model {}: {}", id, e.getMessage());
+        }
+        
+        // 8. 删除交易记录
+        try {
+            int count = tradeMapper.deleteByModelId(id);
+            log.debug("[ModelService] Deleted {} trades records for model: {}", count, id);
+        } catch (Exception e) {
+            log.warn("[ModelService] Failed to delete trades for model {}: {}", id, e.getMessage());
+        }
+        
+        // 9. 删除策略决策记录
+        try {
+            int count = strategyDecisionMapper.deleteByModelId(id);
+            log.debug("[ModelService] Deleted {} strategy_decisions records for model: {}", count, id);
+        } catch (Exception e) {
+            log.warn("[ModelService] Failed to delete strategy_decisions for model {}: {}", id, e.getMessage());
+        }
+        
+        // 最后删除model记录本身
         int result = modelMapper.deleteById(id);
+        if (result > 0) {
+            log.info("[ModelService] Successfully deleted model: {}", id);
+        } else {
+            log.warn("[ModelService] Failed to delete model record: {}", id);
+        }
+        
         return result > 0;
     }
 

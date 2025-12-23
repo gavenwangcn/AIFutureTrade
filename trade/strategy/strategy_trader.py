@@ -18,6 +18,7 @@ from trade.trader import Trader
 from trade.strategy.strategy_code_executor import StrategyCodeExecutor
 from common.database.database_strategys import StrategysDatabase
 from common.database.database_models import ModelsDatabase
+from common.database.database_strategy_decisions import StrategyDecisionsDatabase
 
 logger = logging.getLogger(__name__)
 
@@ -49,6 +50,8 @@ class StrategyTrader(Trader):
         # 初始化 StrategysDatabase 和 ModelsDatabase 实例
         self.strategys_db = StrategysDatabase(pool=db._pool if db and hasattr(db, '_pool') else None)
         self.models_db = ModelsDatabase(pool=db._pool if db and hasattr(db, '_pool') else None)
+        # 初始化 StrategyDecisionsDatabase 实例
+        self.strategy_decisions_db = StrategyDecisionsDatabase(pool=db._pool if db and hasattr(db, '_pool') else None)
     
     def make_buy_decision(
         self,
@@ -265,6 +268,30 @@ class StrategyTrader(Trader):
                     
                     if has_valid_signal:
                         logger.info(f"[StrategyTrader] [Model {effective_model_id}] 策略 {strategy_name} 返回有效决策信号")
+                        
+                        # 保存策略决策到数据库
+                        try:
+                            model_mapping = self.models_db._get_model_id_mapping()
+                            model_uuid = model_mapping.get(effective_model_id)
+                            if model_uuid:
+                                # 将decisions字典转换为列表格式
+                                decisions_list = []
+                                for symbol, decision in decisions.items():
+                                    decisions_list.append(decision)
+                                
+                                # 批量保存决策
+                                if decisions_list:
+                                    self.strategy_decisions_db.add_strategy_decisions_batch(
+                                        model_id=model_uuid,
+                                        strategy_name=strategy_name,
+                                        strategy_type='sell',
+                                        decisions=decisions_list
+                                    )
+                                    logger.info(f"[StrategyTrader] [Model {effective_model_id}] 已保存 {len(decisions_list)} 条卖出决策到数据库")
+                        except Exception as e:
+                            logger.warning(f"[StrategyTrader] [Model {effective_model_id}] 保存策略决策失败: {e}")
+                            # 不影响主流程，继续返回决策结果
+                        
                         return {
                             'decisions': decisions,
                             'prompt': None,

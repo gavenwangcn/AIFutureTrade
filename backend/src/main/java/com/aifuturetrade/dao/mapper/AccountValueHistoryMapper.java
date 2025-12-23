@@ -2,6 +2,7 @@ package com.aifuturetrade.dao.mapper;
 
 import com.aifuturetrade.dao.entity.AccountValueHistoryDO;
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
+import org.apache.ibatis.annotations.Delete;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Select;
@@ -49,6 +50,14 @@ public interface AccountValueHistoryMapper extends BaseMapper<AccountValueHistor
             "ORDER BY timestamp DESC " +
             "LIMIT #{limit}")
     List<Map<String, Object>> selectMultiModelChartData(@Param("limit") Integer limit);
+
+    /**
+     * 根据模型ID删除账户价值历史记录
+     * @param modelId 模型ID（UUID格式）
+     * @return 删除的记录数
+     */
+    @Delete("DELETE FROM account_value_historys WHERE model_id = #{modelId}")
+    int deleteByModelId(@Param("modelId") String modelId);
 
 }
 

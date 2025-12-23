@@ -2,6 +2,7 @@ package com.aifuturetrade.dao.mapper;
 
 import com.aifuturetrade.dao.entity.TradeDO;
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
+import org.apache.ibatis.annotations.Delete;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Select;
@@ -31,5 +32,13 @@ public interface TradeMapper extends BaseMapper<TradeDO> {
      */
     @Select("select count(*) from trades where model_id = #{modelId}")
     Long countTradesByModelId(@Param("modelId") String modelId);
+
+    /**
+     * 根据模型ID删除交易记录
+     * @param modelId 模型ID（UUID格式）
+     * @return 删除的记录数
+     */
+    @Delete("DELETE FROM trades WHERE model_id = #{modelId}")
+    int deleteByModelId(@Param("modelId") String modelId);
 
 }
