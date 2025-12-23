@@ -522,27 +522,44 @@ class TradingEngine:
         Returns:
             bool: 如果有实际交易返回True，否则返回False
         """
+        logger.info(f"[Model {self.model_id}] [交易检测] ========== 开始检查是否有实际交易 ==========")
+        logger.info(f"[Model {self.model_id}] [交易检测] executions列表长度: {len(executions) if executions else 0}")
+        
         if not executions:
-            logger.debug(f"[Model {self.model_id}] _has_actual_trades: executions列表为空")
+            logger.info(f"[Model {self.model_id}] [交易检测] executions列表为空，返回False")
             return False
         
         valid_signals = {'buy_to_enter', 'sell_to_enter', 'close_position', 'stop_loss', 'take_profit'}
         
-        logger.debug(f"[Model {self.model_id}] _has_actual_trades: 检查 {len(executions)} 个执行结果")
+        logger.info(f"[Model {self.model_id}] [交易检测] 开始检查 {len(executions)} 个执行结果")
+        logger.info(f"[Model {self.model_id}] [交易检测] 有效信号列表: {valid_signals}")
+        
         for idx, result in enumerate(executions):
+            logger.info(f"[Model {self.model_id}] [交易检测] 检查结果 {idx+1}/{len(executions)}:")
+            logger.info(f"[Model {self.model_id}] [交易检测]   完整结果: {result}")
+            logger.info(f"[Model {self.model_id}] [交易检测]   symbol: {result.get('symbol', 'N/A')}")
+            logger.info(f"[Model {self.model_id}] [交易检测]   signal: {result.get('signal', 'N/A')}")
+            logger.info(f"[Model {self.model_id}] [交易检测]   error: {result.get('error', '无')}")
+            
             # 跳过有错误的执行结果
             if result.get('error'):
-                logger.debug(f"[Model {self.model_id}] _has_actual_trades: 结果 {idx+1} 有错误，跳过: {result.get('error')}")
+                logger.info(f"[Model {self.model_id}] [交易检测]   结果 {idx+1} 有错误，跳过: {result.get('error')}")
                 continue
             
             # 检查是否有有效的signal
             signal = result.get('signal', '').lower()
-            logger.debug(f"[Model {self.model_id}] _has_actual_trades: 结果 {idx+1}: signal={signal}, symbol={result.get('symbol', 'N/A')}")
+            logger.info(f"[Model {self.model_id}] [交易检测]   规范化后的signal: '{signal}'")
+            logger.info(f"[Model {self.model_id}] [交易检测]   signal是否在有效列表中: {signal in valid_signals}")
+            
             if signal in valid_signals:
-                logger.info(f"[Model {self.model_id}] _has_actual_trades: 检测到实际交易: signal={signal}, symbol={result.get('symbol', 'N/A')}")
+                logger.info(f"[Model {self.model_id}] [交易检测] ========== 检测到实际交易 ==========")
+                logger.info(f"[Model {self.model_id}] [交易检测] 实际交易详情: signal={signal}, symbol={result.get('symbol', 'N/A')}")
                 return True
+            else:
+                logger.info(f"[Model {self.model_id}] [交易检测]   结果 {idx+1} 的signal不在有效列表中")
         
-        logger.debug(f"[Model {self.model_id}] _has_actual_trades: 未检测到实际交易")
+        logger.info(f"[Model {self.model_id}] [交易检测] ========== 未检测到实际交易 ==========")
+        logger.info(f"[Model {self.model_id}] [交易检测] 所有执行结果检查完毕，未找到有效交易信号")
         return False
     
     def _record_account_snapshot(self, current_prices: Dict) -> None:
@@ -1590,9 +1607,15 @@ class TradingEngine:
                         f"错误={result.get('error', '无')}")
         
         # 添加到执行结果列表
-        logger.debug(f"[Model {self.model_id}] [批次组处理] [步骤2.3] 添加执行结果到列表（当前总数: {len(executions)}）...")
+        logger.info(f"[Model {self.model_id}] [批次组处理] [步骤2.3] 添加执行结果到列表（当前总数: {len(executions)}）...")
+        logger.info(f"[Model {self.model_id}] [批次组处理] [步骤2.3] batch_results详情: 数量={len(batch_results)}")
+        for idx, result in enumerate(batch_results):
+            logger.info(f"[Model {self.model_id}] [批次组处理] [步骤2.3] batch_results[{idx}]: symbol={result.get('symbol')}, signal={result.get('signal')}, error={result.get('error', '无')}")
         executions.extend(batch_results)
-        logger.debug(f"[Model {self.model_id}] [批次组处理] [步骤2.3] 执行结果已添加（新总数: {len(executions)}）")
+        logger.info(f"[Model {self.model_id}] [批次组处理] [步骤2.3] 执行结果已添加（新总数: {len(executions)}）")
+        logger.info(f"[Model {self.model_id}] [批次组处理] [步骤2.3] executions列表详情:")
+        for idx, exec_result in enumerate(executions):
+            logger.info(f"[Model {self.model_id}] [批次组处理] [步骤2.3] executions[{idx}]: symbol={exec_result.get('symbol')}, signal={exec_result.get('signal')}, error={exec_result.get('error', '无')}")
         
         logger.info(f"[Model {self.model_id}] [批次组处理] 执行完成, 决策数: {len(all_decisions)}, 执行结果: {len(batch_results)}")
         
