@@ -201,20 +201,10 @@ class TradingEngine:
             
             logger.info(f"[Model {self.model_id}] [卖出服务] [阶段2] 卖出/平仓决策处理完成")
 
-            # ========== 阶段3: 记录账户价值快照（仅在有实际交易时） ==========
-            # 统一在交易周期结束时记录账户价值，适用于所有 trade_type（ai 和 strategy）
-            # 确保在真实执行交易操作后，将账户信息保存到 account_value_historys 表中
-            # 同时更新当前 model 的 account_values 表中的数据
-            logger.info(f"[Model {self.model_id}] [卖出服务] [阶段3] 检查是否有实际交易，executions数量={len(executions)}")
-            has_trades = self._has_actual_trades(executions)
-            logger.info(f"[Model {self.model_id}] [卖出服务] [阶段3] 实际交易检查结果: {has_trades}")
-            if has_trades:
-                logger.info(f"[Model {self.model_id}] [卖出服务] [阶段3] 检测到实际交易，开始记录账户价值快照")
-                logger.info(f"[Model {self.model_id}] [卖出服务] [阶段3] 调用_record_account_snapshot方法...")
-                self._record_account_snapshot(current_prices)
-                logger.info(f"[Model {self.model_id}] [卖出服务] [阶段3] 账户价值快照已记录到数据库")
-            else:
-                logger.info(f"[Model {self.model_id}] [卖出服务] [阶段3] 无实际交易，跳过账户价值快照记录")
+            # ========== 阶段3: 账户价值快照记录说明 ==========
+            # 注意：账户价值快照现在在每次交易执行时立即记录（在 _execute_close, _execute_stop_loss, _execute_take_profit 等方法中）
+            # 不再在批次处理完成后统一记录，确保每次交易都有对应的账户价值快照
+            logger.debug(f"[Model {self.model_id}] [卖出服务] [阶段3] 账户价值快照已在每次交易时记录，无需批次记录")
             
             # ========== 阶段4: 同步model_futures表数据 ==========
             logger.debug(f"[Model {self.model_id}] [卖出服务] [阶段4] 同步model_futures表数据")
@@ -439,27 +429,10 @@ class TradingEngine:
             
             logger.info(f"[Model {self.model_id}] [买入服务] [阶段2] 买入决策处理完成")
 
-            # ========== 阶段3: 记录账户价值快照（仅在有实际交易时） ==========
-            # 统一在交易周期结束时记录账户价值，适用于所有 trade_type（ai 和 strategy）
-            # 确保在真实执行交易操作后，将账户信息保存到 account_value_historys 表中
-            # 同时更新当前 model 的 account_values 表中的数据
-            trade_type = model.get('trade_type', 'ai')
-            logger.info(f"[Model {self.model_id}] [买入服务] [阶段3] ========== 开始检查账户价值快照 ==========")
-            logger.info(f"[Model {self.model_id}] [买入服务] [阶段3] 模型trade_type: {trade_type}")
-            logger.info(f"[Model {self.model_id}] [买入服务] [阶段3] 检查是否有实际交易，executions数量={len(executions)}")
-            logger.info(f"[Model {self.model_id}] [买入服务] [阶段3] executions列表内容: {executions}")
-            has_trades = self._has_actual_trades(executions)
-            logger.info(f"[Model {self.model_id}] [买入服务] [阶段3] 实际交易检查结果: {has_trades}")
-            if has_trades:
-                logger.info(f"[Model {self.model_id}] [买入服务] [阶段3] ========== 检测到实际交易，开始记录账户价值快照 ==========")
-                logger.info(f"[Model {self.model_id}] [买入服务] [阶段3] 调用_record_account_snapshot方法...")
-                logger.info(f"[Model {self.model_id}] [买入服务] [阶段3] current_prices数量: {len(current_prices)}")
-                self._record_account_snapshot(current_prices)
-                logger.info(f"[Model {self.model_id}] [买入服务] [阶段3] 账户价值快照已记录到数据库")
-            else:
-                logger.info(f"[Model {self.model_id}] [买入服务] [阶段3] ========== 无实际交易，跳过账户价值快照记录 ==========")
-                logger.info(f"[Model {self.model_id}] [买入服务] [阶段3] 跳过原因: _has_actual_trades返回False")
-                logger.info(f"[Model {self.model_id}] [买入服务] [阶段3] 请检查executions列表内容和_has_actual_trades方法的判断逻辑")
+            # ========== 阶段3: 账户价值快照记录说明 ==========
+            # 注意：账户价值快照现在在每次交易执行时立即记录（在 _execute_buy, _execute_close 等方法中）
+            # 不再在批次处理完成后统一记录，确保每次交易都有对应的账户价值快照
+            logger.debug(f"[Model {self.model_id}] [买入服务] [阶段3] 账户价值快照已在每次交易时记录，无需批次记录")
             
             # ========== 阶段4: 同步model_futures表数据 ==========
             logger.info(f"[Model {self.model_id}] [买入服务] [阶段4] 同步model_futures表数据")
@@ -2575,10 +2548,23 @@ class TradingEngine:
                 [[trade_id, model_uuid, symbol.upper(), trade_signal, quantity, price, leverage, trade_side, 0, trade_fee, datetime.now(timezone(timedelta(hours=8))).replace(tzinfo=None)]],
                 ["id", "model_id", "future", "signal", "quantity", "price", "leverage", "side", "pnl", "fee", "timestamp"]
             )
+            logger.info(f"TRADE: RECORDED - Model {self.model_id} {trade_signal.upper()} {symbol}")
         except Exception as db_err:
             logger.error(f"TRADE: Add trade failed ({trade_signal.upper()}) model={self.model_id} future={symbol}: {db_err}")
             raise
+        
         self._log_trade_record(trade_signal, symbol, position_side, sdk_call_skipped, sdk_skip_reason)
+        
+        # 每次交易后立即记录账户价值快照
+        try:
+            # 从market_state中提取current_prices格式：{symbol: price_value}
+            current_prices = {s: m.get('price', 0) for s, m in market_state.items()}
+            logger.info(f"[Model {self.model_id}] [开仓交易] 交易已记录到trades表，立即记录账户价值快照")
+            self._record_account_snapshot(current_prices)
+            logger.info(f"[Model {self.model_id}] [开仓交易] 账户价值快照已记录")
+        except Exception as snapshot_err:
+            logger.error(f"[Model {self.model_id}] [开仓交易] 记录账户价值快照失败: {snapshot_err}", exc_info=True)
+            # 不抛出异常，避免影响主流程
 
         return {
             'symbol': symbol,
@@ -2709,10 +2695,22 @@ class TradingEngine:
                 [[trade_id, model_uuid, symbol.upper(), 'close_position', position_amt, current_price, leverage, side_for_trade.lower(), net_pnl, trade_fee, datetime.now(timezone(timedelta(hours=8))).replace(tzinfo=None)]],
                 ["id", "model_id", "future", "signal", "quantity", "price", "leverage", "side", "pnl", "fee", "timestamp"]
             )
+            logger.info(f"TRADE: RECORDED - Model {self.model_id} CLOSE {symbol}")
         except Exception as db_err:
             logger.error(f"TRADE: Add trade failed (CLOSE) model={self.model_id} future={symbol}: {db_err}")
             raise
         self._log_trade_record('close_position', symbol, position_side, sdk_call_skipped, sdk_skip_reason)
+        
+        # 每次交易后立即记录账户价值快照
+        try:
+            # 从market_state中提取current_prices格式：{symbol: price_value}
+            current_prices = {s: m.get('price', 0) for s, m in market_state.items()}
+            logger.info(f"[Model {self.model_id}] [平仓交易] 交易已记录到trades表，立即记录账户价值快照")
+            self._record_account_snapshot(current_prices)
+            logger.info(f"[Model {self.model_id}] [平仓交易] 账户价值快照已记录")
+        except Exception as snapshot_err:
+            logger.error(f"[Model {self.model_id}] [平仓交易] 记录账户价值快照失败: {snapshot_err}", exc_info=True)
+            # 不抛出异常，避免影响主流程
 
         return {
             'symbol': symbol,
@@ -2822,14 +2820,25 @@ class TradingEngine:
                 [[trade_id, model_uuid, symbol.upper(), 'stop_loss', position_amt, stop_price, position.get('leverage', 1), side_for_trade.lower(), 0, trade_fee, datetime.now(timezone(timedelta(hours=8))).replace(tzinfo=None)]],
                 ["id", "model_id", "future", "signal", "quantity", "price", "leverage", "side", "pnl", "fee", "timestamp"]
             )
+            if sdk_call_skipped:
+                logger.warning(f"TRADE: RECORDED (但SDK未执行) - Model {self.model_id} STOP_LOSS {symbol} | "
+                             f"⚠️ 此交易记录已保存，但实际交易未执行，请检查API密钥配置")
+            else:
+                logger.info(f"TRADE: RECORDED - Model {self.model_id} STOP_LOSS {symbol}")
         except Exception as db_err:
             logger.error(f"TRADE: Add trade failed (STOP_LOSS) model={self.model_id} symbol={symbol}: {db_err}")
             raise
-        if sdk_call_skipped:
-            logger.warning(f"TRADE: RECORDED (但SDK未执行) - Model {self.model_id} STOP_LOSS {symbol} | "
-                         f"⚠️ 此交易记录已保存，但实际交易未执行，请检查API密钥配置")
-        else:
-            logger.info(f"TRADE: RECORDED - Model {self.model_id} STOP_LOSS {symbol}")
+        
+        # 每次交易后立即记录账户价值快照
+        try:
+            # 从market_state中提取current_prices格式：{symbol: price_value}
+            current_prices = {s: m.get('price', 0) for s, m in market_state.items()}
+            logger.info(f"[Model {self.model_id}] [止损交易] 交易已记录到trades表，立即记录账户价值快照")
+            self._record_account_snapshot(current_prices)
+            logger.info(f"[Model {self.model_id}] [止损交易] 账户价值快照已记录")
+        except Exception as snapshot_err:
+            logger.error(f"[Model {self.model_id}] [止损交易] 记录账户价值快照失败: {snapshot_err}", exc_info=True)
+            # 不抛出异常，避免影响主流程
 
         return {
             'symbol': symbol,
@@ -2936,10 +2945,22 @@ class TradingEngine:
                 [[trade_id, model_uuid, symbol.upper(), 'take_profit', position_amt, stop_price, position.get('leverage', 1), side_for_trade.lower(), 0, trade_fee, datetime.now(timezone(timedelta(hours=8))).replace(tzinfo=None)]],
                 ["id", "model_id", "future", "signal", "quantity", "price", "leverage", "side", "pnl", "fee", "timestamp"]
             )
+            logger.info(f"TRADE: RECORDED - Model {self.model_id} TAKE_PROFIT {symbol}")
         except Exception as db_err:
             logger.error(f"TRADE: Add trade failed (TAKE_PROFIT) model={self.model_id} symbol={symbol}: {db_err}")
             raise
         self._log_trade_record('take_profit', symbol, position_side, sdk_call_skipped, sdk_skip_reason)
+        
+        # 每次交易后立即记录账户价值快照
+        try:
+            # 从market_state中提取current_prices格式：{symbol: price_value}
+            current_prices = {s: m.get('price', 0) for s, m in market_state.items()}
+            logger.info(f"[Model {self.model_id}] [止盈交易] 交易已记录到trades表，立即记录账户价值快照")
+            self._record_account_snapshot(current_prices)
+            logger.info(f"[Model {self.model_id}] [止盈交易] 账户价值快照已记录")
+        except Exception as snapshot_err:
+            logger.error(f"[Model {self.model_id}] [止盈交易] 记录账户价值快照失败: {snapshot_err}", exc_info=True)
+            # 不抛出异常，避免影响主流程
 
         return {
             'symbol': symbol,

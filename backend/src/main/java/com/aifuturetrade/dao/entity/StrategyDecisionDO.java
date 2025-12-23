@@ -51,11 +51,13 @@ public class StrategyDecisionDO implements Serializable {
     /**
      * 交易信号
      */
+    @TableField("`signal`")
     private String signal;
 
     /**
      * 合约名称
      */
+    @TableField("`symbol`")
     private String symbol;
 
     /**

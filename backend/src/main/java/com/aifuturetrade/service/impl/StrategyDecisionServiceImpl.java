@@ -46,6 +46,9 @@ public class StrategyDecisionServiceImpl implements StrategyDecisionService {
             QueryWrapper<StrategyDecisionDO> queryWrapper = new QueryWrapper<>();
             queryWrapper.eq("model_id", modelId);
             queryWrapper.orderByDesc("created_at");
+            // 明确指定需要查询的字段，确保保留关键字用反引号包裹
+            queryWrapper.select("id", "model_id", "strategy_name", "strategy_type", "`signal`", "`symbol`", 
+                              "quantity", "leverage", "price", "stop_price", "justification", "created_at");
             
             Page<StrategyDecisionDO> decisionDOPage = strategyDecisionMapper.selectPage(page, queryWrapper);
             
