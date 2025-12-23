@@ -28,30 +28,60 @@ public class StrategyDecisionServiceImpl implements StrategyDecisionService {
 
     @Override
     public PageResult<Map<String, Object>> getDecisionsByPage(String modelId, PageRequest pageRequest) {
+        log.info("[StrategyDecisionService] ========== 开始查询策略决策 ==========");
+        log.info("[StrategyDecisionService] 输入参数: modelId={}, pageRequest={}", modelId, pageRequest);
+        
         try {
             // 设置默认值
             Integer pageNum = pageRequest.getPageNum() != null && pageRequest.getPageNum() > 0 ? pageRequest.getPageNum() : 1;
             Integer pageSize = pageRequest.getPageSize() != null && pageRequest.getPageSize() > 0 ? pageRequest.getPageSize() : 10;
             
+            log.info("[StrategyDecisionService] 分页参数: pageNum={}, pageSize={}", pageNum, pageSize);
+            
             // 查询总数
+            log.info("[StrategyDecisionService] 查询总数: modelId={}", modelId);
             Long total = strategyDecisionMapper.countDecisionsByModelId(modelId);
-            log.debug("Strategy decisions total count for model {}: {}", modelId, total);
+            log.info("[StrategyDecisionService] 查询总数结果: total={}", total);
             
             // 使用MyBatis-Plus的Page进行分页查询
             Page<StrategyDecisionDO> page = new Page<>(pageNum, pageSize);
             QueryWrapper<StrategyDecisionDO> queryWrapper = new QueryWrapper<>();
             queryWrapper.eq("model_id", modelId);
             queryWrapper.orderByDesc("created_at");
+            
+            log.info("[StrategyDecisionService] 执行分页查询: modelId={}, pageNum={}, pageSize={}", modelId, pageNum, pageSize);
             Page<StrategyDecisionDO> decisionDOPage = strategyDecisionMapper.selectPage(page, queryWrapper);
             
             List<StrategyDecisionDO> decisionDOList = decisionDOPage.getRecords();
-            log.debug("Queried {} strategy decisions for model {} (page {}, pageSize {})", decisionDOList.size(), modelId, pageNum, pageSize);
+            log.info("[StrategyDecisionService] 查询结果: 返回记录数={}, modelId={}", decisionDOList.size(), modelId);
+            
+            if (!decisionDOList.isEmpty()) {
+                log.info("[StrategyDecisionService] 第一条DO记录示例: id={}, modelId={}, strategyName={}, symbol={}, signal={}", 
+                        decisionDOList.get(0).getId(), 
+                        decisionDOList.get(0).getModelId(),
+                        decisionDOList.get(0).getStrategyName(),
+                        decisionDOList.get(0).getSymbol(),
+                        decisionDOList.get(0).getSignal());
+            }
             
             List<Map<String, Object>> decisions = convertDecisionsToMapList(decisionDOList);
+            log.info("[StrategyDecisionService] 转换后的Map列表大小: {}", decisions.size());
             
-            return PageResult.build(decisions, total, pageNum, pageSize);
+            if (!decisions.isEmpty()) {
+                log.info("[StrategyDecisionService] 第一条Map记录示例: {}", decisions.get(0));
+            }
+            
+            PageResult<Map<String, Object>> result = PageResult.build(decisions, total, pageNum, pageSize);
+            log.info("[StrategyDecisionService] 构建分页结果: total={}, pageNum={}, pageSize={}, totalPages={}, dataSize={}", 
+                    result.getTotal(), result.getPageNum(), result.getPageSize(), result.getTotalPages(), 
+                    result.getData() != null ? result.getData().size() : 0);
+            
+            log.info("[StrategyDecisionService] ========== 查询策略决策完成 ==========");
+            return result;
         } catch (Exception e) {
-            log.error("Failed to get strategy decisions by page for model {}: {}", modelId, e.getMessage(), e);
+            log.error("[StrategyDecisionService] ========== 查询策略决策失败 ==========");
+            log.error("[StrategyDecisionService] 错误信息: modelId={}, pageRequest={}, error={}", 
+                    modelId, pageRequest, e.getMessage(), e);
             return PageResult.build(new ArrayList<>(), 0L, pageRequest.getPageNum() != null ? pageRequest.getPageNum() : 1, pageRequest.getPageSize() != null ? pageRequest.getPageSize() : 10);
         }
     }
@@ -75,8 +105,10 @@ public class StrategyDecisionServiceImpl implements StrategyDecisionService {
      * 将StrategyDecisionDO列表转换为Map列表
      */
     private List<Map<String, Object>> convertDecisionsToMapList(List<StrategyDecisionDO> decisions) {
+        log.debug("[StrategyDecisionService] 开始转换DO列表到Map列表，DO数量: {}", decisions.size());
         List<Map<String, Object>> result = new ArrayList<>();
-        for (StrategyDecisionDO decision : decisions) {
+        for (int i = 0; i < decisions.size(); i++) {
+            StrategyDecisionDO decision = decisions.get(i);
             Map<String, Object> decisionMap = new HashMap<>();
             decisionMap.put("id", decision.getId());
             decisionMap.put("modelId", decision.getModelId());
@@ -91,7 +123,12 @@ public class StrategyDecisionServiceImpl implements StrategyDecisionService {
             decisionMap.put("justification", decision.getJustification());
             decisionMap.put("createdAt", decision.getCreatedAt());
             result.add(decisionMap);
+            
+            if (i == 0) {
+                log.debug("[StrategyDecisionService] 第一条转换后的Map: {}", decisionMap);
+            }
         }
+        log.debug("[StrategyDecisionService] 转换完成，Map数量: {}", result.size());
         return result;
     }
 
