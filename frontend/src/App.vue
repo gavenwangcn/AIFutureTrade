@@ -560,6 +560,7 @@
                     <th>策略名称</th>
                     <th>策略类型</th>
                     <th>交易信号</th>
+                    <th>合约名称</th>
                     <th>数量</th>
                     <th>杠杆</th>
                     <th>期望价格</th>
@@ -581,6 +582,7 @@
                         {{ formatSignal(decision.signal) }}
                       </span>
                     </td>
+                    <td><strong>{{ decision.symbol || '-' }}</strong></td>
                     <td>{{ decision.quantity ? decision.quantity.toFixed(4) : '-' }}</td>
                     <td>{{ decision.leverage ? decision.leverage + 'x' : '-' }}</td>
                     <td>{{ decision.price ? '$' + formatPrice6(decision.price) : '-' }}</td>
@@ -588,7 +590,7 @@
                     <td style="max-width: 300px; word-break: break-word;">{{ decision.justification || '-' }}</td>
                   </tr>
                   <tr v-if="strategyDecisions.length === 0">
-                    <td colspan="9" class="empty-state">暂无策略决策记录</td>
+                    <td colspan="10" class="empty-state">暂无策略决策记录</td>
                   </tr>
                 </tbody>
               </table>

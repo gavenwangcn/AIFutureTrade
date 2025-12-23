@@ -182,10 +182,13 @@ class StrategyTrader(Trader):
                             model_mapping = self.models_db._get_model_id_mapping()
                             model_uuid = model_mapping.get(effective_model_id)
                             if model_uuid:
-                                # 将normalized_decisions字典转换为列表格式
+                                # 将normalized_decisions字典转换为列表格式，并添加symbol字段
                                 decisions_list = []
-                                for symbol, decision in normalized_decisions.items():
-                                    decisions_list.append(decision)
+                                for symbol_key, decision in normalized_decisions.items():
+                                    # 确保decision中包含symbol字段
+                                    decision_with_symbol = decision.copy()
+                                    decision_with_symbol['symbol'] = symbol_key
+                                    decisions_list.append(decision_with_symbol)
                                 
                                 # 批量保存决策
                                 if decisions_list:
@@ -331,10 +334,13 @@ class StrategyTrader(Trader):
                             model_mapping = self.models_db._get_model_id_mapping()
                             model_uuid = model_mapping.get(effective_model_id)
                             if model_uuid:
-                                # 将normalized_decisions字典转换为列表格式
+                                # 将normalized_decisions字典转换为列表格式，并添加symbol字段
                                 decisions_list = []
-                                for symbol, decision in normalized_decisions.items():
-                                    decisions_list.append(decision)
+                                for symbol_key, decision in normalized_decisions.items():
+                                    # 确保decision中包含symbol字段
+                                    decision_with_symbol = decision.copy()
+                                    decision_with_symbol['symbol'] = symbol_key
+                                    decisions_list.append(decision_with_symbol)
                                 
                                 # 批量保存决策
                                 if decisions_list:

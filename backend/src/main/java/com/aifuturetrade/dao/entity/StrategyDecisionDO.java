@@ -54,6 +54,11 @@ public class StrategyDecisionDO implements Serializable {
     private String signal;
 
     /**
+     * 合约名称
+     */
+    private String symbol;
+
+    /**
      * 数量
      */
     private BigDecimal quantity;

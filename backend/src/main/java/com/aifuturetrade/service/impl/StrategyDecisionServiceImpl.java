@@ -83,6 +83,7 @@ public class StrategyDecisionServiceImpl implements StrategyDecisionService {
             decisionMap.put("strategyName", decision.getStrategyName());
             decisionMap.put("strategyType", decision.getStrategyType());
             decisionMap.put("signal", decision.getSignal());
+            decisionMap.put("symbol", decision.getSymbol());
             decisionMap.put("quantity", decision.getQuantity());
             decisionMap.put("leverage", decision.getLeverage());
             decisionMap.put("price", decision.getPrice());

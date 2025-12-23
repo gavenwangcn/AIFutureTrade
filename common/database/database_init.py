@@ -419,6 +419,7 @@ class DatabaseInitializer:
             `strategy_name` VARCHAR(200) NOT NULL COMMENT '策略名称',
             `strategy_type` VARCHAR(10) NOT NULL COMMENT '策略类型：buy-买，sell-卖',
             `signal` VARCHAR(50) NOT NULL COMMENT '交易信号',
+            `symbol` VARCHAR(50) COMMENT '合约名称（可空）',
             `quantity` DECIMAL(20, 8) COMMENT '数量',
             `leverage` INT COMMENT '杠杆',
             `price` DECIMAL(20, 8) COMMENT '期望价格（可空）',
@@ -429,11 +430,34 @@ class DatabaseInitializer:
             INDEX `idx_strategy_name` (`strategy_name`),
             INDEX `idx_strategy_type` (`strategy_type`),
             INDEX `idx_signal` (`signal`),
+            INDEX `idx_symbol` (`symbol`),
             INDEX `idx_created_at` (`created_at`)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
         """
         self.command(ddl)
         logger.debug(f"[DatabaseInit] Ensured table {table_name} exists")
+        
+        # 检查并添加 symbol 字段（如果表已存在但字段不存在）
+        try:
+            # 检查 symbol 字段是否存在
+            check_column_sql = f"""
+            SELECT COUNT(*) FROM information_schema.COLUMNS 
+            WHERE TABLE_SCHEMA = DATABASE() 
+            AND TABLE_NAME = '{table_name}' 
+            AND COLUMN_NAME = 'symbol'
+            """
+            result = self.command(check_column_sql)
+            # 如果字段不存在，添加字段
+            if isinstance(result, list) and len(result) > 0 and result[0][0] == 0:
+                alter_sql = f"""
+                ALTER TABLE `{table_name}` 
+                ADD COLUMN `symbol` VARCHAR(50) COMMENT '合约名称（可空）' AFTER `signal`,
+                ADD INDEX `idx_symbol` (`symbol`)
+                """
+                self.command(alter_sql)
+                logger.info(f"[DatabaseInit] Added symbol column to {table_name} table")
+        except Exception as e:
+            logger.warning(f"[DatabaseInit] Failed to check/add symbol column to {table_name}: {e}")
     
     # ============ 市场数据表初始化方法 ============
     

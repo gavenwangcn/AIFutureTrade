@@ -167,6 +167,7 @@ class StrategyDecisionsDatabase:
         strategy_name: str,
         strategy_type: str,
         signal: str,
+        symbol: Optional[str] = None,
         quantity: Optional[float] = None,
         leverage: Optional[int] = None,
         price: Optional[float] = None,
@@ -181,6 +182,7 @@ class StrategyDecisionsDatabase:
             strategy_name: 策略名称
             strategy_type: 策略类型 ('buy' 或 'sell')
             signal: 交易信号
+            symbol: 合约名称（可空）
             quantity: 数量（可空，如果提供则转换为整数）
             leverage: 杠杆（可空）
             price: 期望价格（可空）
@@ -200,10 +202,10 @@ class StrategyDecisionsDatabase:
             
             self.insert_rows(
                 self.strategy_decisions_table,
-                [[decision_id, model_id, strategy_name, strategy_type, signal, quantity, leverage, price, stop_price, justification, current_time]],
-                ["id", "model_id", "strategy_name", "strategy_type", "signal", "quantity", "leverage", "price", "stop_price", "justification", "created_at"]
+                [[decision_id, model_id, strategy_name, strategy_type, signal, symbol, quantity, leverage, price, stop_price, justification, current_time]],
+                ["id", "model_id", "strategy_name", "strategy_type", "signal", "symbol", "quantity", "leverage", "price", "stop_price", "justification", "created_at"]
             )
-            logger.debug(f"[StrategyDecisions] Added strategy decision: model_id={model_id}, strategy_name={strategy_name}, signal={signal}")
+            logger.debug(f"[StrategyDecisions] Added strategy decision: model_id={model_id}, strategy_name={strategy_name}, signal={signal}, symbol={symbol}")
         except Exception as e:
             logger.error(f"[StrategyDecisions] Failed to add strategy decision: {e}")
             raise
@@ -235,6 +237,7 @@ class StrategyDecisionsDatabase:
             for decision in decisions:
                 decision_id = self._generate_id()
                 signal = decision.get('signal', '')
+                symbol = decision.get('symbol')  # 获取symbol字段
                 quantity = decision.get('quantity')
                 # 确保quantity为整数（如果提供）
                 if quantity is not None:
@@ -244,13 +247,13 @@ class StrategyDecisionsDatabase:
                 stop_price = decision.get('stop_price')
                 justification = decision.get('justification') or decision.get('reason')  # 兼容reason字段
                 
-                rows.append([decision_id, model_id, strategy_name, strategy_type, signal, quantity, leverage, price, stop_price, justification, current_time])
+                rows.append([decision_id, model_id, strategy_name, strategy_type, signal, symbol, quantity, leverage, price, stop_price, justification, current_time])
             
             if rows:
                 self.insert_rows(
                     self.strategy_decisions_table,
                     rows,
-                    ["id", "model_id", "strategy_name", "strategy_type", "signal", "quantity", "leverage", "price", "stop_price", "justification", "created_at"]
+                    ["id", "model_id", "strategy_name", "strategy_type", "signal", "symbol", "quantity", "leverage", "price", "stop_price", "justification", "created_at"]
                 )
                 logger.info(f"[StrategyDecisions] Added {len(rows)} strategy decisions: model_id={model_id}, strategy_name={strategy_name}")
         except Exception as e:
@@ -280,7 +283,7 @@ class StrategyDecisionsDatabase:
                 cursor = conn.cursor(cursors.DictCursor)
                 try:
                     sql = f"""
-                        SELECT id, model_id, strategy_name, strategy_type, signal, quantity, 
+                        SELECT id, model_id, strategy_name, strategy_type, signal, symbol, quantity, 
                                leverage, price, stop_price, justification, created_at
                         FROM {self.strategy_decisions_table}
                         WHERE model_id = %s

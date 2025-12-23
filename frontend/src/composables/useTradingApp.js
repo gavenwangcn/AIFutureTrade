@@ -1398,6 +1398,7 @@ let portfolioSymbolsRefreshInterval = null // 模型持仓合约列表自动刷�
         strategyName: decision.strategyName || decision.strategy_name,
         strategyType: decision.strategyType || decision.strategy_type,
         signal: decision.signal,
+        symbol: decision.symbol,
         quantity: decision.quantity,
         leverage: decision.leverage,
         price: decision.price,
