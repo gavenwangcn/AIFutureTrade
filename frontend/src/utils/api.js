@@ -99,10 +99,29 @@ export async function apiGet(endpoint, params = {}) {
  * POST 请求
  * @param {string} endpoint - API 端点路径
  * @param {any} data - 请求体数据
+ * @param {URLSearchParams|Record<string, any>} params - 查询参数（可选）
  * @returns {Promise<any>}
  */
-export async function apiPost(endpoint, data = {}) {
-  return apiRequest(endpoint, {
+export async function apiPost(endpoint, data = {}, params = {}) {
+  let url = endpoint
+  if (Object.keys(params).length > 0) {
+    // 过滤掉 undefined、null、空字符串和字符串 "undefined" 的参数
+    const filteredParams = {}
+    for (const [key, value] of Object.entries(params)) {
+      // 检查值是否有效（不是 undefined、null、空字符串或字符串 "undefined"）
+      if (value !== undefined && 
+          value !== null && 
+          value !== '' && 
+          String(value).toLowerCase() !== 'undefined') {
+        filteredParams[key] = value
+      }
+    }
+    if (Object.keys(filteredParams).length > 0) {
+      const searchParams = new URLSearchParams(filteredParams)
+      url = `${endpoint}?${searchParams.toString()}`
+    }
+  }
+  return apiRequest(url, {
     method: 'POST',
     body: JSON.stringify(data)
   })

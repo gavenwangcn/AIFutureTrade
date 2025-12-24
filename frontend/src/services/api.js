@@ -390,3 +390,15 @@ export const strategyDecisionApi = {
   getByModelId: (modelId, page = 1, pageSize = 10) => apiGet(`/api/strategy-decisions/model/${modelId}`, { page, pageSize })
 }
 
+/**
+ * 币安期货订单相关 API
+ */
+export const binanceFuturesOrderApi = {
+  /**
+   * 一键卖出持仓合约
+   * @param {string} modelId - 模型ID
+   * @param {string} symbol - 合约符号
+   */
+  sellPosition: (modelId, symbol) => apiPost('/api/binance-futures-order/sell-position', null, { modelId, symbol })
+}
+

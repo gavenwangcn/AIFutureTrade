@@ -940,6 +940,7 @@ body {
     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
     transition: all 0.2s ease;
     cursor: pointer;
+    position: relative;
 }
 
 .model-portfolio-symbol-item:hover {
@@ -1030,6 +1031,45 @@ body {
     font-size: 12px;
     font-weight: 500;
     color: var(--text-1);
+}
+
+/* 卖出按钮样式 */
+.sell-button {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    border: 2px solid var(--danger);
+    background: rgba(245, 63, 63, 0.1);
+    color: var(--danger);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    z-index: 10;
+    padding: 0;
+    font-size: 16px;
+    line-height: 1;
+}
+
+.sell-button:hover:not(:disabled) {
+    background: var(--danger);
+    color: white;
+    transform: scale(1.1);
+    box-shadow: 0 2px 8px rgba(245, 63, 63, 0.3);
+}
+
+.sell-button:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.sell-icon {
+    font-size: 18px;
+    line-height: 1;
 }
 
 .price-item {

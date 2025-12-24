@@ -5,7 +5,7 @@
 
 import { ref, computed, nextTick, onUnmounted } from 'vue'
 import { createSocketConnection } from '../utils/websocket.js'
-import { modelApi, marketApi, settingsApi } from '../services/api.js'
+import { modelApi, marketApi, settingsApi, binanceFuturesOrderApi } from '../services/api.js'
 import * as echarts from 'echarts'
 
 export function useTradingApp() {
@@ -1643,6 +1643,7 @@ let portfolioSymbolsRefreshInterval = null // 模型持仓合约列表自动刷�
   const isExecutingSell = ref(false)
   const isDisablingBuy = ref(false)
   const isDisablingSell = ref(false)
+  const isSellingPosition = ref(false) // 一键卖出持仓状态
   
   /**
    * 显示消息提示
@@ -1841,6 +1842,57 @@ let portfolioSymbolsRefreshInterval = null // 模型持仓合约列表自动刷�
       throw error
     } finally {
       isDisablingSell.value = false
+    }
+  }
+
+  /**
+   * 一键卖出持仓合约
+   */
+  const handleSellPosition = async (symbol) => {
+    if (!currentModelId.value) {
+      showMessage('请先选择模型', 'error')
+      return
+    }
+    
+    if (isSellingPosition.value) {
+      return // 防止重复点击
+    }
+    
+    // 确认操作
+    if (!confirm(`确认要一键市场价卖出 ${symbol} 吗？`)) {
+      return
+    }
+    
+    isSellingPosition.value = true
+    try {
+      console.log('[TradingApp] 开始一键卖出持仓合约，modelId:', currentModelId.value, 'symbol:', symbol)
+      
+      const result = await binanceFuturesOrderApi.sellPosition(currentModelId.value, symbol)
+      console.log('[TradingApp] 一键卖出成功:', result)
+      
+      if (result && result.success) {
+        showMessage(`卖出成功: ${symbol}`, 'success')
+        
+        // 刷新相关数据
+        await Promise.all([
+          loadPortfolio(),
+          loadPositions(),
+          loadModelPortfolioSymbols(),
+          loadTrades()
+        ])
+      } else {
+        const errorMsg = result?.error || '操作失败'
+        showMessage(`卖出失败: ${errorMsg}`, 'error')
+      }
+      
+      return result
+    } catch (error) {
+      console.error('[TradingApp] 一键卖出失败:', error)
+      const errorMsg = error.message || '卖出失败，请检查网络连接'
+      showMessage(`卖出失败: ${errorMsg}`, 'error')
+      throw error
+    } finally {
+      isSellingPosition.value = false
     }
   }
 
@@ -2694,10 +2746,12 @@ let portfolioSymbolsRefreshInterval = null // 模型持仓合约列表自动刷�
     isExecutingSell,
     isDisablingBuy,
     isDisablingSell,
+    isSellingPosition,
     handleExecuteBuy,
     handleExecuteSell,
     handleDisableBuy,
     handleDisableSell,
+    handleSellPosition,
     refreshLeaderboard,
     selectModel,
     showAggregatedView,

@@ -380,9 +380,8 @@
                 v-for="(item, index) in modelPortfolioSymbols" 
                 :key="item.symbol"
                 class="model-portfolio-symbol-item"
-                @click="openKlineChartFromMarket(item.symbol)"
               >
-                <div class="price-card">
+                <div class="price-card" @click="openKlineChartFromMarket(item.symbol)">
                     <div class="price-left">
                       <div class="price-symbol-large">{{ item.symbol }}</div>
                       <div class="price-contract-name">{{ item.symbol }}永续合约</div>
@@ -399,6 +398,15 @@
                       </div>
                     </div>
                   </div>
+                <!-- 卖出按钮 -->
+                <button 
+                  class="sell-button" 
+                  @click.stop="handleSellPosition(item.symbol)"
+                  :disabled="isSellingPosition"
+                  title="一键市场价卖出"
+                >
+                  <span class="sell-icon">⚪</span>
+                </button>
               </div>
             </div>
             <div v-else class="no-data-container">
@@ -1013,7 +1021,9 @@ const {
   getSignalBadgeClass,
   modelPortfolioSymbols,
   lastPortfolioSymbolsRefreshTime,
-  loadSettings
+  loadSettings,
+  isSellingPosition,
+  handleSellPosition
 } = useTradingApp()
 
 // 处理设置模态框关闭事件
