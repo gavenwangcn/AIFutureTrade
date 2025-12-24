@@ -63,7 +63,7 @@ else
 fi
 
 # 等待几秒确保所有资源已释放
-sleep 20
+sleep 5
 
 # 第二步：重新启动所有服务
 log "执行: $DOCKER_COMPOSE_CMD up -d"
