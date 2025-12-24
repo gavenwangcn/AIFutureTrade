@@ -68,7 +68,7 @@ class StrategyBaseBuy(ABC):
             Dict[str, Dict]: 决策字典，格式为：
                 {
                     "SYMBOL": {
-                        "signal": "buy_to_enter" | "sell_to_enter",
+                        "signal": "buy_to_long" | "buy_to_short",
                         "quantity": 100,
                         "leverage": 10,
                         "justification": "理由说明"

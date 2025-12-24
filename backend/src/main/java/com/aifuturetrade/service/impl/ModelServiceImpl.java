@@ -902,7 +902,7 @@ public class ModelServiceImpl implements ModelService {
             // 如果是开仓交易，使用实时价格计算未实现盈亏
             String signal = tradeDO.getSignal();
             String symbol = tradeDO.getFuture();
-            if (symbol != null && (signal != null && (signal.equals("buy_to_enter") || signal.equals("sell_to_enter")))) {
+            if (symbol != null && (signal != null && (signal.equals("buy_to_long") || signal.equals("buy_to_short")))) {
                 if (tradeDO.getPnl() == null || tradeDO.getPnl() == 0) {
                     // 如果数据库中的pnl为0，说明可能还没有平仓，使用实时价格计算
                     String contractSymbol = symbol.toUpperCase();
@@ -918,7 +918,7 @@ public class ModelServiceImpl implements ModelService {
                             if (tradeDO.getPrice() != null && tradeDO.getPrice() > 0) {
                                 Double quantity = Math.abs(tradeDO.getQuantity() != null ? tradeDO.getQuantity() : 0.0);
                                 Double calculatedPnl;
-                                if (signal.equals("buy_to_enter")) {
+                                if (signal.equals("buy_to_long")) {
                                     // 开多：盈亏 = (当前价 - 开仓价) * 数量
                                     calculatedPnl = (currentPrice - tradeDO.getPrice()) * quantity;
                                 } else {

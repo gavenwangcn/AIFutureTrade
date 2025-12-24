@@ -15,35 +15,35 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from trade.trading_engine import TradingEngine
 from common.binance_futures import BinanceFuturesOrderClient
 
-def test_buy_to_enter(engine, decisions, market_state, portfolio):
-    """测试buy_to_enter信号是否调用_execute_buy"""
-    logger.info("开始测试buy_to_enter场景...")
+def test_buy_to_long(engine, decisions, market_state, portfolio):
+    """测试buy_to_long信号是否调用_execute_trade"""
+    logger.info("开始测试buy_to_long场景...")
     
     # 调用被测试方法
     results = engine._execute_decisions(decisions, market_state, portfolio)
     
     # 验证结果
-    logger.info(f"buy_to_enter测试结果: {results}")
+    logger.info(f"buy_to_long测试结果: {results}")
     if len(results) == 1 and results[0]['symbol'] == 'BTCUSDT':
-        logger.info("buy_to_enter测试通过")
+        logger.info("buy_to_long测试通过")
     else:
-        logger.error("buy_to_enter测试失败")
+        logger.error("buy_to_long测试失败")
     
     return results
 
-def test_sell_to_enter(engine, decisions, market_state, portfolio):
-    """测试sell_to_enter信号是否调用_execute_buy"""
-    logger.info("开始测试sell_to_enter场景...")
+def test_buy_to_short(engine, decisions, market_state, portfolio):
+    """测试buy_to_short信号是否调用_execute_trade"""
+    logger.info("开始测试buy_to_short场景...")
     
     # 调用被测试方法
     results = engine._execute_decisions(decisions, market_state, portfolio)
     
     # 验证结果
-    logger.info(f"sell_to_enter测试结果: {results}")
+    logger.info(f"buy_to_short测试结果: {results}")
     if len(results) == 1 and results[0]['symbol'] == 'BTCUSDT':
-        logger.info("sell_to_enter测试通过")
+        logger.info("buy_to_short测试通过")
     else:
-        logger.error("sell_to_enter测试失败")
+        logger.error("buy_to_short测试失败")
     
     return results
 
@@ -177,19 +177,19 @@ def main():
     # 提前设置好各个场景的输入数据
     logger.info("准备测试数据...")
     
-    # buy_to_enter测试数据
-    buy_to_enter_decisions = {
+    # buy_to_long测试数据
+    buy_to_long_decisions = {
         'BTCUSDT': {
-            'signal': 'buy_to_enter',
+            'signal': 'buy_to_long',
             'quantity': 100,
             'leverage': 10,
         }
     }
     
-    # sell_to_enter测试数据
-    sell_to_enter_decisions = {
+    # buy_to_short测试数据
+    buy_to_short_decisions = {
         'BTCUSDT': {
-            'signal': 'sell_to_enter',
+            'signal': 'buy_to_short',
             'quantity': 100,
             'leverage': 10,
         }
@@ -246,10 +246,10 @@ def main():
     
     # 执行各个场景的测试
     logger.info("=" * 50)
-    test_buy_to_enter(engine, buy_to_enter_decisions, market_state, empty_portfolio)
+    test_buy_to_long(engine, buy_to_long_decisions, market_state, empty_portfolio)
     
     logger.info("=" * 50)
-    test_sell_to_enter(engine, sell_to_enter_decisions, market_state, empty_portfolio)
+    test_buy_to_short(engine, buy_to_short_decisions, market_state, empty_portfolio)
     
     logger.info("=" * 50)
     test_close_position(engine, close_position_decisions, market_state, long_portfolio)
@@ -261,7 +261,7 @@ def main():
     test_take_profit(engine, take_profit_decisions, market_state, long_portfolio)
     
     logger.info("=" * 50)
-    test_binance_client_creation(engine, buy_to_enter_decisions, market_state, empty_portfolio)
+    test_binance_client_creation(engine, buy_to_long_decisions, market_state, empty_portfolio)
     
     logger.info("=" * 50)
     logger.info("所有测试场景执行完成")

@@ -47,7 +47,7 @@ public class TradeDO implements Serializable {
     private String future;
 
     /**
-     * 交易信号（buy_to_enter, sell_to_enter, close_position, stop_loss, take_profit）
+     * 交易信号（buy_to_long, buy_to_short, close_position, stop_loss, take_profit）
      */
     @TableField("`signal`")
     private String signal;

@@ -106,7 +106,7 @@ class AITrader(Trader):
         生成买入/开仓决策
         
         基于候选交易对列表，通过LLM生成买入或开仓决策。
-        决策包括：buy_to_enter（开多）、sell_to_enter（开空）、hold（观望）。
+        决策包括：buy_to_long（开多）、buy_to_short（开空）、hold（观望）。
         
         Args:
             candidates: 候选交易对列表，每个元素包含：
@@ -139,7 +139,7 @@ class AITrader(Trader):
         
         Note:
             - 如果candidates为空，返回skipped=True的结果
-            - 决策格式：{"SYMBOL": {"signal": "buy_to_enter|sell_to_enter|hold", ...}}
+            - 决策格式：{"SYMBOL": {"signal": "buy_to_long|buy_to_short|hold", ...}}
             - 系统会根据signal自动设置position_side（LONG或SHORT）
             - constraints和constraints_text在内部从数据库获取和处理
             - market_snapshot在内部从market_state构建
@@ -396,13 +396,13 @@ class AITrader(Trader):
 
         prompt += """
 执行要求：
-1. 仅按上述候选与约束做出buy_to_enter(开多)或sell_to_enter(开空)或hold决策。
+1. 仅按上述候选与约束做出buy_to_long(开多)或buy_to_short(开空)或hold决策。
 2. 写明每个决策的依据与风控考量，必要时可保持观望。
 3. 严格按照下方 JSON 模板返回，仅包含需要动作的合约。
 
 【重要说明】
-- buy_to_enter：开多仓（做多），系统会自动设置position_side为LONG
-- sell_to_enter：开空仓（做空），系统会自动设置position_side为SHORT
+- buy_to_long：开多仓（做多），系统会自动设置position_side为LONG
+- buy_to_short：开空仓（做空），系统会自动设置position_side为SHORT
 - 不需要返回position_side字段，系统会根据signal自动确定
 
 请返回：
@@ -411,7 +411,7 @@ class AITrader(Trader):
   "cot_trace": ["推理步骤..."],
   "decisions": {
     "SYMBOL": {
-      "signal": "buy_to_enter|sell_to_enter|hold",
+      "signal": "buy_to_long|buy_to_short|hold",
       "quantity": 100,
       "leverage": 10,
       "confidence": 0.8,

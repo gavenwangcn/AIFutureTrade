@@ -145,14 +145,14 @@ class GeneratedBuyStrategy(StrategyBaseBuy):
                 # 示例：判断开仓条件
                 # if 满足开多条件:
                 #     decisions[symbol] = {
-                #         "signal": "buy_to_enter",
+                #         "signal": "buy_to_long",
                 #         "quantity": 100,
                 #         "leverage": 5,
                 #         "justification": "理由"
                 #     }
                 # elif 满足开空条件:
                 #     decisions[symbol] = {
-                #         "signal": "sell_to_enter",
+                #         "signal": "buy_to_short",
                 #         "quantity": 100,
                 #         "leverage": 5,
                 #         "justification": "理由"
@@ -223,7 +223,7 @@ klines_1h = timeframes.get('1h', {}).get('klines', [])
 ```python
 {
     "SYMBOL": {
-        "signal": "buy_to_enter" | "sell_to_enter",  # 必须
+        "signal": "buy_to_long" | "buy_to_short",  # 必须
         "quantity": 100,                              # 必须：数量
         "leverage": 5,                                # 必须：杠杆倍数
         "justification": "理由说明"                   # 必须：理由

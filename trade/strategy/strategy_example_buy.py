@@ -128,7 +128,7 @@ class ExampleBuyStrategy(StrategyBaseBuy):
                     quantity = position_value / current_price
                     
                     decisions[symbol] = {
-                        "signal": "buy_to_enter",  # 开多单
+                        "signal": "buy_to_long",  # 开多单
                         "quantity": quantity,
                         "leverage": self.LEVERAGE,
                         "justification": f"价格 {current_price:.4f} > 1.02 × MA(99) {ma99_value:.4f}，满足开多条件"
@@ -141,7 +141,7 @@ class ExampleBuyStrategy(StrategyBaseBuy):
                     quantity = position_value / current_price
                     
                     decisions[symbol] = {
-                        "signal": "sell_to_enter",  # 开空单（做空）
+                        "signal": "buy_to_short",  # 开空单（做空）
                         "quantity": quantity,
                         "leverage": self.LEVERAGE,
                         "justification": f"价格 {current_price:.4f} ≤ 0.98 × MA(99) {ma99_value:.4f}，满足开空条件"

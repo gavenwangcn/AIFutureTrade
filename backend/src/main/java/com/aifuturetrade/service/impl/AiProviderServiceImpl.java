@@ -495,7 +495,7 @@ public class AiProviderServiceImpl implements AiProviderService {
                "- 必须正确导入 StrategyBaseBuy：`from trade.strategy.strategy_template_buy import StrategyBaseBuy`\n" +
                "- 必须实现 execute_buy_decision 方法\n" +
                "- 方法必须返回 Dict[str, Dict] 格式的决策字典\n" +
-               "- 决策格式：{\"SYMBOL\": {\"signal\": \"buy_to_enter\" | \"sell_to_enter\", \"quantity\": 100, \"leverage\": 10, \"justification\": \"理由\"}}\n\n" +
+               "- 决策格式：{\"SYMBOL\": {\"signal\": \"buy_to_long\" | \"buy_to_short\", \"quantity\": 100, \"leverage\": 10, \"justification\": \"理由\"}}\n\n" +
                "### 3. 可用库\n\n" +
                "- talib: TA-Lib 技术指标库（如果可用）\n" +
                "- numpy: NumPy 数值计算库（如果可用）\n" +

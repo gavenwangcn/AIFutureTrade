@@ -167,7 +167,7 @@ class StrategyTrader(Trader):
                     has_valid_signal = False
                     for symbol, decision in decisions.items():
                         signal = decision.get('signal', '').lower()
-                        if signal in ['buy_to_enter', 'sell_to_enter']:
+                        if signal in ['buy_to_long', 'buy_to_short']:
                             has_valid_signal = True
                             break
                     

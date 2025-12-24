@@ -430,7 +430,7 @@ class TradingEngine:
             logger.debug(f"[Model {self.model_id}] [买入服务] [阶段2] 买入决策处理完成")
 
             # ========== 阶段3: 账户价值快照记录说明 ==========
-            # 注意：账户价值快照现在在每次交易执行时立即记录（在 _execute_buy, _execute_close 等方法中）
+            # 注意：账户价值快照现在在每次交易执行时立即记录（在 _execute_trade, _execute_close 等方法中）
             # 不再在批次处理完成后统一记录，确保每次交易都有对应的账户价值快照
             logger.debug(f"[Model {self.model_id}] [买入服务] [阶段3] 账户价值快照已在每次交易时记录，无需批次记录")
             
@@ -499,7 +499,7 @@ class TradingEngine:
         实际交易的定义：
         1. 没有error字段
         2. signal不是'hold'
-        3. signal是有效的交易信号（buy_to_enter, sell_to_enter, close_position, stop_loss, take_profit）
+        3. signal是有效的交易信号（buy_to_long, buy_to_short, close_position, stop_loss, take_profit）
         
         Args:
             executions: 执行结果列表
@@ -514,7 +514,7 @@ class TradingEngine:
             logger.info(f"[Model {self.model_id}] [交易检测] executions列表为空，返回False")
             return False
         
-        valid_signals = {'buy_to_enter', 'sell_to_enter', 'close_position', 'stop_loss', 'take_profit'}
+        valid_signals = {'buy_to_long', 'buy_to_short', 'close_position', 'stop_loss', 'take_profit'}
         
         logger.info(f"[Model {self.model_id}] [交易检测] 开始检查 {len(executions)} 个执行结果")
         logger.info(f"[Model {self.model_id}] [交易检测] 有效信号列表: {valid_signals}")
@@ -693,7 +693,7 @@ class TradingEngine:
         记录交易日志（公共方法）
         
         Args:
-            signal: 交易信号（如 'buy_to_enter', 'close_position'）
+            signal: 交易信号（如 'buy_to_long', 'close_position'）
             symbol: 交易对符号
             position_side: 持仓方向
             sdk_call_skipped: SDK调用是否被跳过
@@ -722,7 +722,7 @@ class TradingEngine:
         4. 如果创建失败，返回None，交易操作将跳过SDK调用（仅记录到数据库）
         
         【使用场景】
-        - _execute_buy: 调用market_trade（市场价格交易）
+        - _execute_trade: 调用market_trade（市场价格交易）
         - _execute_close: 调用close_position_trade（平仓）
         - _execute_stop_loss: 调用stop_loss_trade（止损）
         - _execute_take_profit: 调用take_profit_trade（止盈）
@@ -2321,7 +2321,7 @@ class TradingEngine:
         执行AI交易决策（线程安全）
         
         根据AI返回的signal字段，调用相应的执行方法：
-        - 'buy_to_enter' / 'sell_to_enter': 调用 _execute_buy（开仓）
+        - 'buy_to_long' / 'buy_to_short': 调用 _execute_trade（市场价交易）
         - 'close_position': 调用 _execute_close（平仓）
         - 'stop_loss': 调用 _execute_stop_loss（止损）
         - 'take_profit': 调用 _execute_take_profit（止盈）
@@ -2350,12 +2350,12 @@ class TradingEngine:
                 signal = decision.get('signal', '').lower()
 
                 try:
-                    if signal == 'buy_to_enter' or signal == 'sell_to_enter':
-                        # 【统一执行方法】buy_to_enter（开多）和sell_to_enter（开空）都调用_execute_buy方法
-                        # _execute_buy方法会根据signal自动确定position_side：
-                        # - buy_to_enter → position_side = 'LONG'
-                        # - sell_to_enter → position_side = 'SHORT'
-                        result = self._execute_buy(symbol, decision, market_state, portfolio)
+                    if signal == 'buy_to_long' or signal == 'buy_to_short':
+                        # 【统一执行方法】buy_to_long（开多）和buy_to_short（开空）都调用_execute_trade方法
+                        # _execute_trade方法会根据signal自动确定position_side：
+                        # - buy_to_long → position_side = 'LONG'
+                        # - buy_to_short → position_side = 'SHORT'
+                        result = self._execute_trade(symbol, decision, market_state, portfolio)
                     elif signal == 'close_position':
                         if symbol not in positions_map:
                             result = {'symbol': symbol, 'error': 'No position to close'}
@@ -2393,25 +2393,25 @@ class TradingEngine:
     # ============ 订单执行方法 ============
     # 执行具体的交易订单操作：开仓、平仓、止损、止盈
     
-    def _execute_buy(self, symbol: str, decision: Dict, market_state: Dict, portfolio: Dict) -> Dict:
+    def _execute_trade(self, symbol: str, decision: Dict, market_state: Dict, portfolio: Dict) -> Dict:
         """
-        执行开仓操作（统一方法，支持开多和开空）
+        执行市场价交易（统一方法，支持开多和开空）
         
         【signal与position_side的映射关系】
         根据AI模型返回的signal字段自动确定position_side：
-        - signal='buy_to_enter'（开多）→ position_side='LONG'
-        - signal='sell_to_enter'（开空）→ position_side='SHORT'
+        - signal='buy_to_long'（开多）→ position_side='LONG'
+        - signal='buy_to_short'（开空）→ position_side='SHORT'
         
         【重要说明】
         - AI模型不再返回position_side字段，只需要返回signal字段
         - 系统会根据signal自动确定position_side
-        - trades表中记录的signal字段：buy_to_enter 或 sell_to_enter
+        - trades表中记录的signal字段：buy_to_long 或 buy_to_short
         
-        【position_side的作用】
-        根据position_side的值决定：
-        - SDK调用的side参数：LONG持仓用SELL保护，SHORT持仓用BUY保护
+        【SDK接口参数说明】
+        - SDK调用的side参数：统一使用'BUY'（开多和开空都使用BUY）
+        - SDK调用的positionSide参数：根据signal自动确定（LONG或SHORT）
         - 数据库记录的position_side：根据signal自动确定
-        - trades表的side字段：LONG开仓用'buy'，SHORT开仓用'sell'
+        - trades表的side字段：统一使用'buy'（开多和开空都使用buy）
         """
         quantity = decision.get('quantity', 0)
         leverage = self._resolve_leverage(decision)
@@ -2419,17 +2419,17 @@ class TradingEngine:
         
         # 【根据signal自动确定position_side】不再从decision中获取position_side字段
         signal = decision.get('signal', '').lower()
-        if signal == 'buy_to_enter':
+        if signal == 'buy_to_long':
             position_side = 'LONG'  # 开多仓
-            trade_signal = 'buy_to_enter'  # trades表记录的signal
-        elif signal == 'sell_to_enter':
+            trade_signal = 'buy_to_long'  # trades表记录的signal
+        elif signal == 'buy_to_short':
             position_side = 'SHORT'  # 开空仓
-            trade_signal = 'sell_to_enter'  # trades表记录的signal
+            trade_signal = 'buy_to_short'  # trades表记录的signal
         else:
-            # 如果signal不是buy_to_enter或sell_to_enter，默认使用LONG（向后兼容）
-            logger.warning(f"[Model {self.model_id}] Invalid signal '{signal}' for _execute_buy, defaulting to LONG")
+            # 如果signal不是buy_to_long或buy_to_short，默认使用LONG（向后兼容）
+            logger.warning(f"[Model {self.model_id}] Invalid signal '{signal}' for _execute_trade, defaulting to LONG")
             position_side = 'LONG'
-            trade_signal = 'buy_to_enter'
+            trade_signal = 'buy_to_long'
         
         logger.info(f"[Model {self.model_id}] [开仓] {symbol} signal={signal} → position_side={position_side}")
 
@@ -2465,13 +2465,9 @@ class TradingEngine:
         if total_required > available_cash:
             return {'symbol': symbol, 'error': '可用资金不足（含手续费）'}
 
-        # 【确定SDK调用的side参数】根据position_side决定trailing stop的保护方向
-        # LONG持仓：用SELL方向来设置trailing stop（保护多仓，价格下跌时触发）
-        # SHORT持仓：用BUY方向来设置trailing stop（保护空仓，价格上涨时触发）
-        if position_side == 'LONG':
-            trailing_stop_side = 'SELL'  # 保护LONG持仓使用SELL方向
-        else:  # SHORT
-            trailing_stop_side = 'BUY'  # 保护SHORT持仓使用BUY方向
+        # 【确定SDK调用的side参数】统一使用BUY（开多和开空都使用BUY）
+        # positionSide参数会根据signal自动确定（LONG或SHORT）
+        sdk_side = 'BUY'  # 统一使用BUY
         
         # 获取交易上下文
         model_uuid, trade_id = self._get_trade_context()
@@ -2497,14 +2493,14 @@ class TradingEngine:
                 
                 # 然后执行交易
                 logger.info(f"@API@ [Model {self.model_id}] [market_trade] === 准备调用接口 ===" 
-                          f" | symbol={symbol} | side={trailing_stop_side} | position_side={position_side} | "
+                          f" | symbol={symbol} | side={sdk_side} | position_side={position_side} | "
                           f"quantity={quantity} | price={price} | leverage={leverage}")
                 
                 conversation_id = self._get_conversation_id()
                 
                 sdk_response = binance_client.market_trade(
                     symbol=symbol,
-                    side=trailing_stop_side,
+                    side=sdk_side,
                     order_type='MARKET',
                     position_side=position_side,
                     quantity=quantity,
@@ -2532,13 +2528,8 @@ class TradingEngine:
             logger.error(f"TRADE: Update position failed ({trade_signal.upper()}) model={self.model_id} future={symbol}: {db_err}")
             raise
 
-        # 【确定trades表的side字段】开仓时的side字段
-        # LONG开仓：side='buy'（开多仓）
-        # SHORT开仓：side='sell'（开空仓）
-        if position_side == 'LONG':
-            trade_side = 'buy'  # 开多仓
-        else:  # SHORT
-            trade_side = 'sell'  # 开空仓
+        # 【确定trades表的side字段】统一使用'buy'（开多和开空都使用buy）
+        trade_side = 'buy'  # 统一使用buy
         
         # 记录交易
         logger.info(f"TRADE: PENDING - Model {self.model_id} {trade_signal.upper()} {symbol} position_side={position_side} qty={quantity} price={price} fee={trade_fee}")
@@ -2568,7 +2559,7 @@ class TradingEngine:
 
         return {
             'symbol': symbol,
-            'signal': trade_signal,  # 返回实际的signal（buy_to_enter或sell_to_enter）
+            'signal': trade_signal,  # 返回实际的signal（buy_to_long或buy_to_short）
             'position_amt': quantity,
             'position_side': position_side,  # 返回position_side信息
             'price': price,
