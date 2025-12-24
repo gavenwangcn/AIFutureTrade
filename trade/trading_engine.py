@@ -555,14 +555,14 @@ class TradingEngine:
             current_prices: 当前价格映射
         """
         try:
-            logger.info(f"[Model {self.model_id}] [账户价值快照] 开始记录账户价值快照...")
+            logger.debug(f"[Model {self.model_id}] [账户价值快照] 开始记录账户价值快照...")
             
             updated_portfolio = self._get_portfolio(self.model_id, current_prices)
             balance = updated_portfolio.get('total_value', 0)
             available_balance = updated_portfolio.get('cash', 0)
             cross_wallet_balance = updated_portfolio.get('positions_value', 0)
             
-            logger.info(f"[Model {self.model_id}] [账户价值快照] 账户价值: "
+            logger.debug(f"[Model {self.model_id}] [账户价值快照] 账户价值: "
                        f"总余额(balance)=${balance:.2f}, "
                        f"可用余额(available_balance)=${available_balance:.2f}, "
                        f"全仓余额(cross_wallet_balance)=${cross_wallet_balance:.2f}")
@@ -575,8 +575,8 @@ class TradingEngine:
             model_mapping = self.models_db._get_model_id_mapping()
             from common.database.database_init import ACCOUNT_VALUE_HISTORYS_TABLE
             
-            logger.info(f"[Model {self.model_id}] [账户价值快照] 准备调用record_account_value方法...")
-            logger.info(f"[Model {self.model_id}] [账户价值快照] 调用参数: model_id={self.model_id}, balance=${balance:.2f}, "
+            logger.debug(f"[Model {self.model_id}] [账户价值快照] 准备调用record_account_value方法...")
+            logger.debug(f"[Model {self.model_id}] [账户价值快照] 调用参数: model_id={self.model_id}, balance=${balance:.2f}, "
                        f"available_balance=${available_balance:.2f}, cross_wallet_balance=${cross_wallet_balance:.2f}, "
                        f"account_alias={account_alias}")
             self.account_values_db.record_account_value(
@@ -590,7 +590,7 @@ class TradingEngine:
                 get_model_func=self.models_db.get_model,
                 account_value_historys_table=ACCOUNT_VALUE_HISTORYS_TABLE
             )
-            logger.info(f"[Model {self.model_id}] [账户价值快照] record_account_value方法调用完成，账户价值快照记录完成")
+            logger.debug(f"[Model {self.model_id}] [账户价值快照] record_account_value方法调用完成，账户价值快照记录完成")
         except Exception as e:
             logger.error(f"[Model {self.model_id}] [账户价值快照] 记录账户价值快照失败: {e}", exc_info=True)
             # 不抛出异常，避免影响主流程，但记录详细错误信息
@@ -2558,9 +2558,9 @@ class TradingEngine:
         try:
             # 从market_state中提取current_prices格式：{symbol: price_value}
             current_prices = {s: m.get('price', 0) for s, m in market_state.items()}
-            logger.info(f"[Model {self.model_id}] [开仓交易] 交易已记录到trades表，立即记录账户价值快照")
+            logger.debug(f"[Model {self.model_id}] [开仓交易] 交易已记录到trades表，立即记录账户价值快照")
             self._record_account_snapshot(current_prices)
-            logger.info(f"[Model {self.model_id}] [开仓交易] 账户价值快照已记录")
+            logger.debug(f"[Model {self.model_id}] [开仓交易] 账户价值快照已记录")
         except Exception as snapshot_err:
             logger.error(f"[Model {self.model_id}] [开仓交易] 记录账户价值快照失败: {snapshot_err}", exc_info=True)
             # 不抛出异常，避免影响主流程
@@ -2732,9 +2732,9 @@ class TradingEngine:
         try:
             # 从market_state中提取current_prices格式：{symbol: price_value}
             current_prices = {s: m.get('price', 0) for s, m in market_state.items()}
-            logger.info(f"[Model {self.model_id}] [平仓交易] 交易已记录到trades表，立即记录账户价值快照")
+            logger.debug(f"[Model {self.model_id}] [平仓交易] 交易已记录到trades表，立即记录账户价值快照")
             self._record_account_snapshot(current_prices)
-            logger.info(f"[Model {self.model_id}] [平仓交易] 账户价值快照已记录")
+            logger.debug(f"[Model {self.model_id}] [平仓交易] 账户价值快照已记录")
         except Exception as snapshot_err:
             logger.error(f"[Model {self.model_id}] [平仓交易] 记录账户价值快照失败: {snapshot_err}", exc_info=True)
             # 不抛出异常，避免影响主流程
@@ -2878,9 +2878,9 @@ class TradingEngine:
         try:
             # 从market_state中提取current_prices格式：{symbol: price_value}
             current_prices = {s: m.get('price', 0) for s, m in market_state.items()}
-            logger.info(f"[Model {self.model_id}] [平仓交易] 交易已记录到trades表，立即记录账户价值快照")
+            logger.debug(f"[Model {self.model_id}] [平仓交易] 交易已记录到trades表，立即记录账户价值快照")
             self._record_account_snapshot(current_prices)
-            logger.info(f"[Model {self.model_id}] [平仓交易] 账户价值快照已记录")
+            logger.debug(f"[Model {self.model_id}] [平仓交易] 账户价值快照已记录")
         except Exception as snapshot_err:
             logger.error(f"[Model {self.model_id}] [平仓交易] 记录账户价值快照失败: {snapshot_err}", exc_info=True)
             # 不抛出异常，避免影响主流程
@@ -3006,9 +3006,9 @@ class TradingEngine:
         try:
             # 从market_state中提取current_prices格式：{symbol: price_value}
             current_prices = {s: m.get('price', 0) for s, m in market_state.items()}
-            logger.info(f"[Model {self.model_id}] [止损交易] 交易已记录到trades表，立即记录账户价值快照")
+            logger.debug(f"[Model {self.model_id}] [止损交易] 交易已记录到trades表，立即记录账户价值快照")
             self._record_account_snapshot(current_prices)
-            logger.info(f"[Model {self.model_id}] [止损交易] 账户价值快照已记录")
+            logger.debug(f"[Model {self.model_id}] [止损交易] 账户价值快照已记录")
         except Exception as snapshot_err:
             logger.error(f"[Model {self.model_id}] [止损交易] 记录账户价值快照失败: {snapshot_err}", exc_info=True)
             # 不抛出异常，避免影响主流程
@@ -3128,9 +3128,9 @@ class TradingEngine:
         try:
             # 从market_state中提取current_prices格式：{symbol: price_value}
             current_prices = {s: m.get('price', 0) for s, m in market_state.items()}
-            logger.info(f"[Model {self.model_id}] [止盈交易] 交易已记录到trades表，立即记录账户价值快照")
+            logger.debug(f"[Model {self.model_id}] [止盈交易] 交易已记录到trades表，立即记录账户价值快照")
             self._record_account_snapshot(current_prices)
-            logger.info(f"[Model {self.model_id}] [止盈交易] 账户价值快照已记录")
+            logger.debug(f"[Model {self.model_id}] [止盈交易] 账户价值快照已记录")
         except Exception as snapshot_err:
             logger.error(f"[Model {self.model_id}] [止盈交易] 记录账户价值快照失败: {snapshot_err}", exc_info=True)
             # 不抛出异常，避免影响主流程

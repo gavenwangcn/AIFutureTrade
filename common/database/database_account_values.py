@@ -231,7 +231,7 @@ class AccountValuesDatabase:
             account_value_historys_table: 可选的账户价值历史表名
         """
         try:
-            logger.info(f"[AccountValues] [开始记录账户价值] model_id={model_id}, balance=${balance:.2f}, "
+            logger.debug(f"[AccountValues] [开始记录账户价值] model_id={model_id}, balance=${balance:.2f}, "
                        f"available_balance=${available_balance:.2f}, cross_wallet_balance=${cross_wallet_balance:.2f}, "
                        f"account_alias={account_alias}")
             
@@ -248,7 +248,7 @@ class AccountValuesDatabase:
                 logger.warning(f"[AccountValues] Model {model_id} not found for account value record")
                 return
             
-            logger.info(f"[AccountValues] [模型ID映射] model_id={model_id} -> model_uuid={model_uuid}")
+            logger.debug(f"[AccountValues] [模型ID映射] model_id={model_id} -> model_uuid={model_uuid}")
             
             # 检查是否已存在记录
             logger.debug(f"[AccountValues] [检查现有记录] 查询account_values表，model_uuid={model_uuid}")
@@ -261,9 +261,9 @@ class AccountValuesDatabase:
             """, (model_uuid,))
             
             if existing_rows:
-                logger.info(f"[AccountValues] [检查现有记录] 找到现有记录: id={existing_rows[0][0]}, account_alias={existing_rows[0][1]}")
+                logger.debug(f"[AccountValues] [检查现有记录] 找到现有记录: id={existing_rows[0][0]}, account_alias={existing_rows[0][1]}")
             else:
-                logger.info(f"[AccountValues] [检查现有记录] 未找到现有记录，将执行INSERT操作")
+                logger.debug(f"[AccountValues] [检查现有记录] 未找到现有记录，将执行INSERT操作")
             
             # 如果account_alias为空，尝试从models表获取
             if not account_alias:
@@ -271,7 +271,7 @@ class AccountValuesDatabase:
                 if existing_rows:
                     # 如果已存在记录，保留原有的account_alias
                     account_alias = existing_rows[0][1] or ''
-                    logger.info(f"[AccountValues] [处理account_alias] 从现有记录获取: account_alias={account_alias}")
+                    logger.debug(f"[AccountValues] [处理account_alias] 从现有记录获取: account_alias={account_alias}")
                 else:
                     # 如果不存在记录，从models表获取account_alias
                     logger.debug(f"[AccountValues] [处理account_alias] 从models表获取account_alias")
@@ -284,7 +284,7 @@ class AccountValuesDatabase:
                     
                     if model and model.get('account_alias'):
                         account_alias = model['account_alias']
-                        logger.info(f"[AccountValues] [处理account_alias] 从models表获取: account_alias={account_alias}")
+                        logger.debug(f"[AccountValues] [处理account_alias] 从models表获取: account_alias={account_alias}")
                     else:
                         account_alias = ''
                         logger.warning(f"[AccountValues] [处理account_alias] account_alias为空，使用空字符串")
@@ -305,7 +305,7 @@ class AccountValuesDatabase:
                 beijing_tz = timezone(timedelta(hours=8))
                 current_time = datetime.now(beijing_tz)
                 
-                logger.info(f"[AccountValues] [更新account_values表] model_id={model_id} (uuid={model_uuid}), "
+                logger.debug(f"[AccountValues] [更新account_values表] model_id={model_id} (uuid={model_uuid}), "
                            f"balance=${balance:.2f}, available_balance=${available_balance:.2f}, "
                            f"cross_wallet_balance=${cross_wallet_balance:.2f}, account_alias={final_account_alias}")
                 
@@ -319,7 +319,7 @@ class AccountValuesDatabase:
                         timestamp = %s
                     WHERE id = %s
                 """, (final_account_alias, balance, available_balance, cross_wallet_balance, cross_un_pnl, current_time, existing_id))
-                logger.info(f"[AccountValues] [更新account_values表] 成功更新记录: model_id={model_id} (id={existing_id}), "
+                logger.debug(f"[AccountValues] [更新account_values表] 成功更新记录: model_id={model_id} (id={existing_id}), "
                            f"account_alias={final_account_alias}, timestamp={current_time}")
             else:
                 # 不存在记录，执行INSERT
@@ -328,7 +328,7 @@ class AccountValuesDatabase:
                 current_time = datetime.now(beijing_tz)
                 av_id = self._generate_id()
                 
-                logger.info(f"[AccountValues] [插入account_values表] model_id={model_id} (uuid={model_uuid}), "
+                logger.debug(f"[AccountValues] [插入account_values表] model_id={model_id} (uuid={model_uuid}), "
                            f"balance=${balance:.2f}, available_balance=${available_balance:.2f}, "
                            f"cross_wallet_balance=${cross_wallet_balance:.2f}, account_alias={account_alias}")
                 
@@ -337,7 +337,7 @@ class AccountValuesDatabase:
                     [[av_id, model_uuid, account_alias, balance, available_balance, cross_wallet_balance, cross_un_pnl, current_time]],
                     ["id", "model_id", "account_alias", "balance", "available_balance", "cross_wallet_balance", "cross_un_pnl", "timestamp"]
                 )
-                logger.info(f"[AccountValues] [插入account_values表] 成功插入记录: model_id={model_id} (id={av_id}), "
+                logger.debug(f"[AccountValues] [插入account_values表] 成功插入记录: model_id={model_id} (id={av_id}), "
                            f"account_alias={account_alias}, timestamp={current_time}")
                 final_account_alias_for_history = account_alias
             
@@ -351,7 +351,7 @@ class AccountValuesDatabase:
                     beijing_tz = timezone(timedelta(hours=8))
                     current_time = datetime.now(beijing_tz)
                     
-                    logger.info(f"[AccountValues] [插入account_value_historys表] model_id={model_id} (uuid={model_uuid}), "
+                    logger.debug(f"[AccountValues] [插入account_value_historys表] model_id={model_id} (uuid={model_uuid}), "
                                f"balance=${balance:.2f}, available_balance=${available_balance:.2f}, "
                                f"cross_wallet_balance=${cross_wallet_balance:.2f}, account_alias={final_account_alias_for_history}")
                     
@@ -360,7 +360,7 @@ class AccountValuesDatabase:
                         [[history_id, model_uuid, final_account_alias_for_history, balance, available_balance, cross_wallet_balance, cross_un_pnl, current_time]],
                         ["id", "model_id", "account_alias", "balance", "available_balance", "cross_wallet_balance", "cross_un_pnl", "timestamp"]
                     )
-                    logger.info(f"[AccountValues] [插入account_value_historys表] 成功插入历史记录: model_id={model_id} (id={history_id}), "
+                    logger.debug(f"[AccountValues] [插入account_value_historys表] 成功插入历史记录: model_id={model_id} (id={history_id}), "
                                f"account_alias={final_account_alias_for_history}, timestamp={current_time}")
                 except Exception as history_err:
                     # 历史记录插入失败不影响主流程，但记录详细错误信息
@@ -371,7 +371,7 @@ class AccountValuesDatabase:
                 logger.warning(f"[AccountValues] [插入account_value_historys表] account_value_historys_table参数未提供，跳过历史记录插入: model_id={model_id}")
             
             # 记录方法执行完成
-            logger.info(f"[AccountValues] [记录账户价值完成] model_id={model_id}, "
+            logger.debug(f"[AccountValues] [记录账户价值完成] model_id={model_id}, "
                        f"account_values表操作={'UPDATE' if existing_rows else 'INSERT'}, "
                        f"account_value_historys表操作={'INSERT' if account_value_historys_table else 'SKIP'}")
         except Exception as e:
