@@ -430,7 +430,7 @@ class TradingEngine:
             logger.debug(f"[Model {self.model_id}] [买入服务] [阶段2] 买入决策处理完成")
 
             # ========== 阶段3: 账户价值快照记录说明 ==========
-            # 注意：账户价值快照现在在每次交易执行时立即记录（在 _execute_trade, _execute_close 等方法中）
+            # 注意：账户价值快照现在在每次交易执行时立即记录（在 _execute_buy, _execute_sell, _execute_close 等方法中）
             # 不再在批次处理完成后统一记录，确保每次交易都有对应的账户价值快照
             logger.debug(f"[Model {self.model_id}] [买入服务] [阶段3] 账户价值快照已在每次交易时记录，无需批次记录")
             
@@ -499,7 +499,7 @@ class TradingEngine:
         实际交易的定义：
         1. 没有error字段
         2. signal不是'hold'
-        3. signal是有效的交易信号（buy_to_long, buy_to_short, close_position, stop_loss, take_profit）
+        3. signal是有效的交易信号（buy_to_long, buy_to_short, sell_to_long, sell_to_short, close_position, stop_loss, take_profit）
         
         Args:
             executions: 执行结果列表
@@ -514,7 +514,7 @@ class TradingEngine:
             logger.info(f"[Model {self.model_id}] [交易检测] executions列表为空，返回False")
             return False
         
-        valid_signals = {'buy_to_long', 'buy_to_short', 'close_position', 'stop_loss', 'take_profit'}
+        valid_signals = {'buy_to_long', 'buy_to_short', 'sell_to_long', 'sell_to_short', 'close_position', 'stop_loss', 'take_profit'}
         
         logger.info(f"[Model {self.model_id}] [交易检测] 开始检查 {len(executions)} 个执行结果")
         logger.info(f"[Model {self.model_id}] [交易检测] 有效信号列表: {valid_signals}")
@@ -722,7 +722,8 @@ class TradingEngine:
         4. 如果创建失败，返回None，交易操作将跳过SDK调用（仅记录到数据库）
         
         【使用场景】
-        - _execute_trade: 调用market_trade（市场价格交易）
+        - _execute_buy: 调用market_trade（市场价格买入）
+        - _execute_sell: 调用market_trade（市场价格卖出/平仓）
         - _execute_close: 调用close_position_trade（平仓）
         - _execute_stop_loss: 调用stop_loss_trade（止损）
         - _execute_take_profit: 调用take_profit_trade（止盈）
@@ -2321,7 +2322,8 @@ class TradingEngine:
         执行AI交易决策（线程安全）
         
         根据AI返回的signal字段，调用相应的执行方法：
-        - 'buy_to_long' / 'buy_to_short': 调用 _execute_trade（市场价交易）
+        - 'buy_to_long' / 'buy_to_short': 调用 _execute_buy（市场价买入）
+        - 'sell_to_long' / 'sell_to_short': 调用 _execute_sell（市场价卖出/平仓）
         - 'close_position': 调用 _execute_close（平仓）
         - 'stop_loss': 调用 _execute_stop_loss（止损）
         - 'take_profit': 调用 _execute_take_profit（止盈）
@@ -2351,11 +2353,17 @@ class TradingEngine:
 
                 try:
                     if signal == 'buy_to_long' or signal == 'buy_to_short':
-                        # 【统一执行方法】buy_to_long（开多）和buy_to_short（开空）都调用_execute_trade方法
-                        # _execute_trade方法会根据signal自动确定position_side：
+                        # 【市场价买入】buy_to_long（开多）和buy_to_short（开空）都调用_execute_buy方法
+                        # _execute_buy方法会根据signal自动确定position_side：
                         # - buy_to_long → position_side = 'LONG'
                         # - buy_to_short → position_side = 'SHORT'
-                        result = self._execute_trade(symbol, decision, market_state, portfolio)
+                        result = self._execute_buy(symbol, decision, market_state, portfolio)
+                    elif signal == 'sell_to_long' or signal == 'sell_to_short':
+                        # 【市场价卖出/平仓】sell_to_long（平多）和sell_to_short（平空）都调用_execute_sell方法
+                        # _execute_sell方法会根据signal自动确定position_side：
+                        # - sell_to_long → position_side = 'LONG'（平多仓）
+                        # - sell_to_short → position_side = 'SHORT'（平空仓）
+                        result = self._execute_sell(symbol, decision, market_state, portfolio)
                     elif signal == 'close_position':
                         if symbol not in positions_map:
                             result = {'symbol': symbol, 'error': 'No position to close'}
@@ -2393,9 +2401,9 @@ class TradingEngine:
     # ============ 订单执行方法 ============
     # 执行具体的交易订单操作：开仓、平仓、止损、止盈
     
-    def _execute_trade(self, symbol: str, decision: Dict, market_state: Dict, portfolio: Dict) -> Dict:
+    def _execute_buy(self, symbol: str, decision: Dict, market_state: Dict, portfolio: Dict) -> Dict:
         """
-        执行市场价交易（统一方法，支持开多和开空）
+        执行市场价买入（统一方法，支持开多和开空）
         
         【signal与position_side的映射关系】
         根据AI模型返回的signal字段自动确定position_side：
@@ -2427,7 +2435,7 @@ class TradingEngine:
             trade_signal = 'buy_to_short'  # trades表记录的signal
         else:
             # 如果signal不是buy_to_long或buy_to_short，默认使用LONG（向后兼容）
-            logger.warning(f"[Model {self.model_id}] Invalid signal '{signal}' for _execute_trade, defaulting to LONG")
+            logger.warning(f"[Model {self.model_id}] Invalid signal '{signal}' for _execute_buy, defaulting to LONG")
             position_side = 'LONG'
             trade_signal = 'buy_to_long'
         
@@ -2566,6 +2574,180 @@ class TradingEngine:
             'leverage': leverage,
             'fee': trade_fee,
             'message': f'开仓 {symbol} {position_side} {quantity:.4f} @ ${price:.2f} (手续费: ${trade_fee:.2f})'
+        }
+
+    def _execute_sell(self, symbol: str, decision: Dict, market_state: Dict, portfolio: Dict) -> Dict:
+        """
+        执行市场价卖出/平仓（统一方法，支持平多和平空）
+        
+        【signal与position_side的映射关系】
+        根据AI模型返回的signal字段自动确定position_side：
+        - signal='sell_to_long'（平多）→ position_side='LONG'
+        - signal='sell_to_short'（平空）→ position_side='SHORT'
+        
+        【重要说明】
+        - AI模型不再返回position_side字段，只需要返回signal字段
+        - 系统会根据signal自动确定position_side
+        - trades表中记录的signal字段：sell_to_long 或 sell_to_short
+        
+        【SDK接口参数说明】
+        - SDK调用的side参数：统一使用'SELL'（平多和平空都使用SELL）
+        - SDK调用的positionSide参数：根据signal自动确定（LONG或SHORT）
+        - 数据库记录的position_side：根据signal自动确定
+        - trades表的side字段：统一使用'sell'（平多和平空都使用sell）
+        
+        【持仓检查】
+        - 必须检查是否有对应方向的持仓
+        - 如果没有持仓，返回错误信息
+        """
+        # 查找持仓信息
+        position = self._find_position(portfolio, symbol)
+        if not position:
+            return {'symbol': symbol, 'error': 'Position not found'}
+        
+        # 【根据signal自动确定position_side】不再从decision中获取position_side字段
+        signal = decision.get('signal', '').lower()
+        if signal == 'sell_to_long':
+            position_side = 'LONG'  # 平多仓
+            trade_signal = 'sell_to_long'  # trades表记录的signal
+        elif signal == 'sell_to_short':
+            position_side = 'SHORT'  # 平空仓
+            trade_signal = 'sell_to_short'  # trades表记录的signal
+        else:
+            # 如果signal不是sell_to_long或sell_to_short，默认使用LONG（向后兼容）
+            logger.warning(f"[Model {self.model_id}] Invalid signal '{signal}' for _execute_sell, defaulting to LONG")
+            position_side = 'LONG'
+            trade_signal = 'sell_to_long'
+        
+        # 检查持仓方向是否匹配
+        actual_position_side = position.get('position_side', 'LONG')
+        if actual_position_side != position_side:
+            return {'symbol': symbol, 'error': f'持仓方向不匹配：期望{position_side}，实际{actual_position_side}'}
+        
+        current_price = market_state[symbol]['price']
+        entry_price = position.get('avg_price', 0)
+        # 确保position_amt为整数（去除小数部分）
+        position_amt = int(abs(position.get('position_amt', 0)))
+        
+        if position_amt <= 0:
+            return {'symbol': symbol, 'error': '持仓数量为0，无法平仓'}
+        
+        # 计算毛盈亏和净盈亏
+        if position_side == 'LONG':
+            gross_pnl = (current_price - entry_price) * position_amt
+        else:  # SHORT
+            gross_pnl = (entry_price - current_price) * position_amt
+        
+        trade_amount = position_amt * current_price
+        trade_fee = trade_amount * self.trade_fee_rate
+        net_pnl = gross_pnl - trade_fee
+        
+        # 【确定SDK调用的side参数】统一使用SELL（平多和平空都使用SELL）
+        sdk_side = 'SELL'  # 统一使用SELL
+        
+        # 获取交易上下文
+        model_uuid, trade_id = self._get_trade_context()
+        
+        # 调用SDK执行交易
+        sdk_response = None
+        sdk_call_skipped = False
+        sdk_skip_reason = None
+        binance_client = self._create_binance_order_client()
+        if binance_client:
+            try:
+                # 首先设置杠杆（如果需要）
+                leverage = self._resolve_leverage(decision)
+                if not decision.get('leverage'):
+                    leverage = position.get('leverage', leverage)
+                
+                logger.info(f"@API@ [Model {self.model_id}] [change_initial_leverage] === 准备设置杠杆 ===" 
+                          f" | symbol={symbol} | leverage={leverage}")
+                
+                binance_client.change_initial_leverage(
+                    symbol=symbol,
+                    leverage=leverage
+                )
+                
+                logger.info(f"@API@ [Model {self.model_id}] [change_initial_leverage] === 杠杆设置成功 ===" 
+                          f" | symbol={symbol} | leverage={leverage}")
+                
+                # 然后执行交易
+                logger.info(f"@API@ [Model {self.model_id}] [market_trade] === 准备调用接口 ===" 
+                          f" | symbol={symbol} | side={sdk_side} | position_side={position_side} | "
+                          f"quantity={position_amt} | price={current_price} | leverage={leverage}")
+                
+                conversation_id = self._get_conversation_id()
+                
+                sdk_response = binance_client.market_trade(
+                    symbol=symbol,
+                    side=sdk_side,
+                    order_type='MARKET',
+                    position_side=position_side,
+                    quantity=position_amt,
+                    model_id=model_uuid,
+                    conversation_id=conversation_id,
+                    trade_id=trade_id,
+                    db=self.binance_trade_logs_db
+                )
+                
+                logger.info(f"@API@ [Model {self.model_id}] [market_trade] === 接口调用成功 ==="
+                          f" | symbol={symbol} | response={sdk_response}")
+            except Exception as sdk_err:
+                logger.error(f"@API@ [Model {self.model_id}] [market_trade] === 接口调用失败 ==="
+                           f" | symbol={symbol} | error={sdk_err}", exc_info=True)
+        else:
+            sdk_call_skipped, sdk_skip_reason = self._handle_sdk_client_error(symbol, 'market_trade')
+        
+        # 平仓：更新数据库持仓记录（将持仓数量设为0）
+        try:
+            self._close_position(self.model_id, symbol=symbol, position_side=position_side)
+        except Exception as db_err:
+            logger.error(f"TRADE: Close position failed ({trade_signal.upper()}) model={self.model_id} future={symbol}: {db_err}")
+            raise
+        
+        # 【确定trades表的side字段】统一使用'sell'（平多和平空都使用sell）
+        trade_side = 'sell'  # 统一使用sell
+        
+        # 记录交易
+        logger.info(f"TRADE: PENDING - Model {self.model_id} {trade_signal.upper()} {symbol} position_side={position_side} position_amt={position_amt} price={current_price} fee={trade_fee} net_pnl={net_pnl}")
+        try:
+            # 使用持仓中存储的杠杆值
+            leverage = self._resolve_leverage(decision)
+            if not decision.get('leverage'):
+                leverage = position.get('leverage', leverage)
+            
+            self.db.insert_rows(
+                self.db.trades_table,
+                [[trade_id, model_uuid, symbol.upper(), trade_signal, position_amt, current_price, leverage, trade_side, net_pnl, trade_fee, datetime.now(timezone(timedelta(hours=8))).replace(tzinfo=None)]],
+                ["id", "model_id", "future", "signal", "quantity", "price", "leverage", "side", "pnl", "fee", "timestamp"]
+            )
+            logger.info(f"TRADE: RECORDED - Model {self.model_id} {trade_signal.upper()} {symbol}")
+        except Exception as db_err:
+            logger.error(f"TRADE: Add trade failed ({trade_signal.upper()}) model={self.model_id} future={symbol}: {db_err}")
+            raise
+        
+        self._log_trade_record(trade_signal, symbol, position_side, sdk_call_skipped, sdk_skip_reason)
+        
+        # 每次交易后立即记录账户价值快照
+        try:
+            # 从market_state中提取current_prices格式：{symbol: price_value}
+            current_prices = {s: m.get('price', 0) for s, m in market_state.items()}
+            logger.info(f"[Model {self.model_id}] [平仓交易] 交易已记录到trades表，立即记录账户价值快照")
+            self._record_account_snapshot(current_prices)
+            logger.info(f"[Model {self.model_id}] [平仓交易] 账户价值快照已记录")
+        except Exception as snapshot_err:
+            logger.error(f"[Model {self.model_id}] [平仓交易] 记录账户价值快照失败: {snapshot_err}", exc_info=True)
+            # 不抛出异常，避免影响主流程
+        
+        return {
+            'symbol': symbol,
+            'signal': trade_signal,  # 返回实际的signal（sell_to_long或sell_to_short）
+            'position_amt': position_amt,
+            'position_side': position_side,  # 返回position_side信息
+            'price': current_price,
+            'pnl': net_pnl,
+            'fee': trade_fee,
+            'message': f'平仓 {symbol} {position_side}, 毛收益 ${gross_pnl:.2f}, 手续费 ${trade_fee:.2f}, 净收益 ${net_pnl:.2f}'
         }
 
     def _execute_close(self, symbol: str, decision: Dict, market_state: Dict, portfolio: Dict) -> Dict:

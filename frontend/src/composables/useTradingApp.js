@@ -2489,6 +2489,8 @@ let portfolioSymbolsRefreshInterval = null // 模型持仓合约列表自动刷�
     const signalMap = {
       'buy_to_long': '开多',
       'buy_to_short': '开空',
+      'sell_to_long': '平多',
+      'sell_to_short': '平空',
       'close_position': '平仓',
       'stop_loss': '止损',
       'take_profit': '止盈'
@@ -2504,6 +2506,8 @@ let portfolioSymbolsRefreshInterval = null // 模型持仓合约列表自动刷�
     const classMap = {
       'buy_to_long': 'badge-buy',
       'buy_to_short': 'badge-sell',
+      'sell_to_long': 'badge-close',
+      'sell_to_short': 'badge-close',
       'close_position': 'badge-close',
       'stop_loss': 'badge-stop',
       'take_profit': 'badge-profit'
