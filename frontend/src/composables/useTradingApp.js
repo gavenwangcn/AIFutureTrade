@@ -1363,8 +1363,10 @@ let portfolioSymbolsRefreshInterval = null // 模型持仓合约列表自动刷�
       return
     }
     
-    const targetPage = page !== null ? page : strategyDecisionsPage.value
-    const targetPageSize = pageSize !== null ? pageSize : strategyDecisionsPageSize.value
+    // 如果没有指定页码，使用当前页码；如果当前页码为0或未初始化，使用第一页
+    const targetPage = page !== null ? page : (strategyDecisionsPage.value > 0 ? strategyDecisionsPage.value : 1)
+    // 如果没有指定每页记录数，使用当前每页记录数；如果未初始化，使用默认10条
+    const targetPageSize = pageSize !== null ? pageSize : (strategyDecisionsPageSize.value > 0 ? strategyDecisionsPageSize.value : 10)
     
     loading.value.conversations = true
     isRefreshingStrategyDecisions.value = true
@@ -1476,7 +1478,8 @@ let portfolioSymbolsRefreshInterval = null // 模型持仓合约列表自动刷�
     const tradeType = currentModelData?.trade_type || currentModelData?.tradeType || 'ai'
     
     if (tradeType === 'strategy') {
-      await loadStrategyDecisions()
+      // 加载策略决策时，确保从第一页开始，每页10条
+      await loadStrategyDecisions(1, 10)
     } else {
       await loadConversations()
     }
@@ -1995,6 +1998,12 @@ let portfolioSymbolsRefreshInterval = null // 模型持仓合约列表自动刷�
     // 切换模型时，立即清空旧的对话数据和聚合图表数据，避免显示错误的数据
     conversations.value = []
     aggregatedChartData.value = [] // 清空聚合图表数据，确保只显示当前模型的数据
+    
+    // 重置策略决策分页到第一页
+    strategyDecisions.value = []
+    strategyDecisionsPage.value = 1
+    strategyDecisionsTotal.value = 0
+    strategyDecisionsTotalPages.value = 0
     
     currentModelId.value = modelId
     isAggregatedView.value = false
