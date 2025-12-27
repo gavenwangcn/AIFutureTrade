@@ -1189,7 +1189,6 @@ public class ModelServiceImpl implements ModelService {
                 updateWrapper.set("sell_batch_execution_group_size", groupSize);
             }
             
-            updateWrapper.set("updated_at", LocalDateTime.now());
             modelMapper.update(null, updateWrapper);
             
             Map<String, Object> result = new HashMap<>();
@@ -1219,7 +1218,6 @@ public class ModelServiceImpl implements ModelService {
             UpdateWrapper<ModelDO> updateWrapper = new UpdateWrapper<>();
             updateWrapper.eq("id", modelId);
             updateWrapper.set("max_positions", maxPositions);
-            updateWrapper.set("updated_at", LocalDateTime.now());
             modelMapper.update(null, updateWrapper);
             
             Map<String, Object> result = new HashMap<>();
@@ -1249,7 +1247,6 @@ public class ModelServiceImpl implements ModelService {
             UpdateWrapper<ModelDO> updateWrapper = new UpdateWrapper<>();
             updateWrapper.eq("id", modelId);
             updateWrapper.set("leverage", leverage);
-            updateWrapper.set("updated_at", LocalDateTime.now());
             modelMapper.update(null, updateWrapper);
             
             Map<String, Object> result = new HashMap<>();
@@ -1285,7 +1282,6 @@ public class ModelServiceImpl implements ModelService {
             updateWrapper.eq("id", modelId);
             updateWrapper.set("provider_id", providerId);
             updateWrapper.set("model_name", modelName.trim());
-            updateWrapper.set("updated_at", LocalDateTime.now());
             modelMapper.update(null, updateWrapper);
             
             Map<String, Object> result = new HashMap<>();
@@ -1319,7 +1315,6 @@ public class ModelServiceImpl implements ModelService {
             if (autoSellEnabled != null) {
                 updateWrapper.set("auto_sell_enabled", autoSellEnabled);
             }
-            updateWrapper.set("updated_at", LocalDateTime.now());
             modelMapper.update(null, updateWrapper);
             
             Map<String, Object> result = new HashMap<>();
