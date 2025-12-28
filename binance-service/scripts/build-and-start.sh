@@ -300,28 +300,44 @@ main() {
         # 如果用户直接按回车，默认启动
         if [[ -z "$REPLY" ]] || [[ $REPLY =~ ^[Yy]$ ]]; then
             start_service "$JAR_FILE"
-        
-        log_info "============================================"
-        log_info "构建和启动完成！"
-        log_info "============================================"
-        log_info "服务信息:"
-        log_info "  - PID文件: $BINANCE_SERVICE_DIR/binance-service.pid"
-        log_info "  - 启动日志: $BINANCE_SERVICE_DIR/logs/startup.log"
-        log_info "  - 应用日志: $BINANCE_SERVICE_DIR/logs/binance-service.log"
-        log_info ""
-        log_info "常用命令:"
-        log_info "  查看实时日志: tail -f $BINANCE_SERVICE_DIR/logs/binance-service.log"
-        log_info "  查看启动日志: tail -f $BINANCE_SERVICE_DIR/logs/startup.log"
-        log_info "  停止服务: kill \$(cat $BINANCE_SERVICE_DIR/binance-service.pid)"
-        log_info "  检查服务状态: ps -p \$(cat $BINANCE_SERVICE_DIR/binance-service.pid)"
-        log_info ""
-        
-        # 询问是否查看实时日志
-        read -p "是否查看实时应用日志? (y/n): " -n 1 -r
-        echo
-        if [[ $REPLY =~ ^[Yy]$ ]]; then
-            log_info "按 Ctrl+C 退出日志查看"
-            tail -f "$BINANCE_SERVICE_DIR/logs/binance-service.log"
+            
+            log_info "============================================"
+            log_info "构建和启动完成！"
+            log_info "============================================"
+            log_info "服务信息:"
+            log_info "  - PID文件: $BINANCE_SERVICE_DIR/binance-service.pid"
+            log_info "  - 启动日志: $BINANCE_SERVICE_DIR/logs/startup.log"
+            log_info "  - 应用日志: $BINANCE_SERVICE_DIR/logs/binance-service.log"
+            log_info ""
+            log_info "常用命令:"
+            log_info "  查看实时日志: tail -f $BINANCE_SERVICE_DIR/logs/binance-service.log"
+            log_info "  查看启动日志: tail -f $BINANCE_SERVICE_DIR/logs/startup.log"
+            log_info "  停止服务: kill \$(cat $BINANCE_SERVICE_DIR/binance-service.pid)"
+            log_info "  检查服务状态: ps -p \$(cat $BINANCE_SERVICE_DIR/binance-service.pid)"
+            log_info ""
+            
+            # 询问是否查看实时日志
+            read -p "是否查看实时应用日志? (y/n): " -n 1 -r
+            echo
+            if [[ $REPLY =~ ^[Yy]$ ]]; then
+                log_info "按 Ctrl+C 退出日志查看"
+                tail -f "$BINANCE_SERVICE_DIR/logs/binance-service.log"
+            fi
+        else
+            log_info "============================================"
+            log_info "JAR包已构建完成"
+            log_info "============================================"
+            log_info "JAR文件: $JAR_FILE"
+            log_info "手动启动命令:"
+            log_info "  cd $BINANCE_SERVICE_DIR"
+            # 读取端口配置用于显示
+            MANUAL_SERVER_PORT=$(read_server_port)
+            if [ -z "$MANUAL_SERVER_PORT" ] || [ "$MANUAL_SERVER_PORT" = "" ]; then
+                log_warn "无法读取端口配置，请设置SERVER_PORT环境变量或检查application.yml"
+                log_info "  示例: SERVER_PORT=<端口> java -Xms1g -Xmx2g -XX:+UseG1GC -jar $JAR_FILE"
+            else
+                log_info "  java -Xms1g -Xmx2g -XX:+UseG1GC -Dserver.port=$MANUAL_SERVER_PORT -jar $JAR_FILE"
+            fi
         fi
     else
         log_info "============================================"
