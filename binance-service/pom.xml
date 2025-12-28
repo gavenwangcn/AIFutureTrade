@@ -97,10 +97,23 @@
     </pluginRepositories>
 
     <dependencies>
-        <!-- Spring Boot Starter -->
+        <!-- Spring Boot Starter Web (排除Tomcat，使用Undertow) -->
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-web</artifactId>
+            <version>${spring-boot.version}</version>
+            <exclusions>
+                <!-- 排除Tomcat，使用Undertow异步IO服务器 -->
+                <exclusion>
+                    <groupId>org.springframework.boot</groupId>
+                    <artifactId>spring-boot-starter-tomcat</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+        <!-- Undertow异步IO服务器 -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-undertow</artifactId>
             <version>${spring-boot.version}</version>
         </dependency>
         <dependency>

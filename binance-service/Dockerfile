@@ -63,9 +63,18 @@ COPY --from=builder /app/target/binance-service-1.0.0.jar app.jar
 # 暴露服务端口（5004端口）
 EXPOSE 5004
 
-# 设置JVM参数
+# 设置JVM参数（高性能优化）
+# -Xms: 初始堆内存1G，-Xmx: 最大堆内存2G（允许动态调整以适应负载）
+# -XX:+UseG1GC: 使用G1垃圾收集器，适合大内存和低延迟场景
+# -XX:MaxGCPauseMillis: 最大GC暂停时间目标（毫秒）
+# -XX:+UseStringDeduplication: 字符串去重，减少内存占用
+# -XX:+OptimizeStringConcat: 优化字符串拼接
+# -XX:+UseCompressedOops: 使用压缩指针，节省内存
+# -XX:+UseCompressedClassPointers: 使用压缩类指针
+# -Djava.awt.headless=true: 无头模式，不需要图形界面
+# -Dfile.encoding=UTF-8: 文件编码
 # 添加 --add-opens 参数以解决 Java 9+ 上的反射访问警告
-ENV JAVA_OPTS="-Xms512m -Xmx1024m -Dserver.port=5004 --add-opens java.base/java.lang.invoke=ALL-UNNAMED"
+ENV JAVA_OPTS="-Xms1g -Xmx2g -XX:+UseG1GC -XX:MaxGCPauseMillis=200 -XX:+UseStringDeduplication -XX:+OptimizeStringConcat -XX:+UseCompressedOops -XX:+UseCompressedClassPointers -Djava.awt.headless=true -Dfile.encoding=UTF-8 -Dserver.port=5004 --add-opens java.base/java.lang.invoke=ALL-UNNAMED"
 
 # 启动应用
 ENTRYPOINT ["sh", "-c", "java $JAVA_OPTS -jar app.jar"]

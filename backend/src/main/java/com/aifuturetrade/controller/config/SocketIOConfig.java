@@ -17,7 +17,7 @@ import javax.annotation.PreDestroy;
  * 注意：当前实现为占位服务，不提供实际功能
  * 涨跌幅榜和K线数据已改为轮询方式，不再使用 WebSocket 推送
  * 
- * Socket.IO Java 服务器需要独立的端口，不能与 Spring Boot HTTP 服务器共用同一端口
+ * Socket.IO Java 服务器需要独立的端口，不能与 Spring Boot Undertow HTTP 服务器共用同一端口
  * 因此使用独立的端口（默认 5003），前端需要通过代理或直接连接此端口
  */
 @Configuration
@@ -39,7 +39,7 @@ public class SocketIOConfig {
         com.corundumstudio.socketio.Configuration config = new com.corundumstudio.socketio.Configuration();
         
         // 设置主机和端口
-        // 注意：netty-socketio 使用独立的 Netty 服务器，不能与 Spring Boot 的 Tomcat 共用同一端口
+        // 注意：netty-socketio 使用独立的 Netty 服务器，不能与 Spring Boot 的 Undertow 共用同一端口
         // 因此使用独立的端口（默认 5003），前端需要通过代理或直接连接此端口
         config.setHostname("0.0.0.0");
         config.setPort(socketioPort);

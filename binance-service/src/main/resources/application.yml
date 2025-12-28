@@ -5,12 +5,23 @@ spring:
     active: dev
   main:
     banner-mode: console
+    # 性能优化：禁用不必要的自动配置
+    lazy-initialization: false  # 保持快速启动，不延迟初始化
   # 修复 Springfox 与 Spring Boot 2.7+ 的兼容性问题
   mvc:
     pathmatch:
       matching-strategy: ant_path_matcher
+    # 性能优化：异步支持
+    async:
+      request-timeout: 30000  # 异步请求超时时间（毫秒）
+  # HTTP客户端配置（如果使用RestTemplate/WebClient）
+  http:
+    encoding:
+      charset: UTF-8
+      enabled: true
+      force: true
 
-# 服务器配置
+# 服务器配置（Undertow异步IO高性能优化）
 server:
   port: ${SERVER_PORT:5004}  # 默认使用5004端口，可通过环境变量SERVER_PORT覆盖
   servlet:
@@ -19,13 +30,38 @@ server:
       charset: UTF-8
       enabled: true
       force: true
-  tomcat:
-    uri-encoding: UTF-8
-    max-threads: 200
-    min-spare-threads: 10
-    connection-timeout: 30000
+  undertow:
+    # Undertow异步IO配置（高性能）
+    # IO线程数（用于处理IO操作，通常设置为CPU核心数）
+    io-threads: ${UNDERTOW_IO_THREADS:4}
+    # Worker线程数（用于处理业务逻辑，通常设置为CPU核心数 * 8）
+    worker-threads: ${UNDERTOW_WORKER_THREADS:64}
+    # 每个Worker线程的队列大小
+    worker-connections: ${UNDERTOW_WORKER_CONNECTIONS:10000}
+    # 最大连接数
+    max-connections: ${UNDERTOW_MAX_CONNECTIONS:10000}
+    # 连接超时时间（毫秒）
+    connection-timeout: ${UNDERTOW_CONNECTION_TIMEOUT:20000}
+    # 是否启用HTTP/2
+    http2-enabled: true
+    # 是否启用直接内存分配（提升性能）
+    direct-buffers: true
+    # 缓冲区大小（字节）
+    buffer-size: ${UNDERTOW_BUFFER_SIZE:16384}
+    # 是否启用压缩
+    compression-enabled: true
+    # 压缩级别（1-9，9为最高压缩率）
+    compression-level: 6
+    # 最小压缩大小（字节）
+    compression-min-size: 1024
+    # 可压缩的MIME类型
+    compressable-mime-types: application/json,application/xml,text/html,text/xml,text/plain,application/javascript
+    # 最大HTTP POST大小（字节，10MB）
+    max-http-post-size: 10485760
+    # 是否启用统计信息
+    statistics-enabled: false  # 生产环境禁用以提升性能
 
-# 日志配置
+# 日志配置（性能优化：减少日志输出）
 logging:
   level:
     root: info
@@ -33,9 +69,19 @@ logging:
     # 禁用 Spring Boot 自动配置条件评估报告日志
     org.springframework.boot.autoconfigure: WARN
     org.springframework.boot.autoconfigure.condition: WARN
-    # 降低HTTP解析错误日志级别
+    # 降低HTTP解析错误日志级别（减少日志噪音）
     org.apache.coyote.http11: WARN
     org.apache.tomcat: WARN
+    # Undertow日志级别
+    io.undertow: WARN
+    org.xnio: WARN
+    # 降低框架日志级别以提升性能
+    org.springframework: WARN
+    org.springframework.web: WARN
+    org.springframework.boot: WARN
+    # HTTP客户端日志（如果使用RestTemplate/WebClient）
+    org.springframework.web.client: WARN
+    org.apache.http: WARN
   pattern:
     console: "%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n"
     file: "%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n"

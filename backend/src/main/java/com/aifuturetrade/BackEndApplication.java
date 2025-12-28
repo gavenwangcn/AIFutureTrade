@@ -9,6 +9,8 @@ import org.springframework.scheduling.annotation.EnableScheduling;
 /**
  * AI Future Trade Java Backend Application
  * Spring Boot应用主入口类
+ * 
+ * 使用Undertow异步IO服务器，提供高性能接口服务
  */
 @SpringBootApplication
 @ComponentScan(basePackages = "com.aifuturetrade")

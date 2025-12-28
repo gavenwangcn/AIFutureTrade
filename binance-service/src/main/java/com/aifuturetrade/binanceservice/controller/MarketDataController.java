@@ -34,7 +34,7 @@ public class MarketDataController {
     @ApiOperation("获取24小时价格变动统计")
     public ResponseEntity<Map<String, Object>> get24hTicker(
             @ApiParam(value = "交易对符号列表", required = true) @RequestBody List<String> symbols) {
-        log.info("[MarketDataController] 接收到24小时统计请求: symbols={}", symbols);
+        log.debug("[MarketDataController] 接收到24小时统计请求: symbols数量={}", symbols != null ? symbols.size() : 0);
         try {
             Map<String, Map<String, Object>> result = marketDataService.get24hTicker(symbols);
             Map<String, Object> response = new HashMap<>();
@@ -57,7 +57,7 @@ public class MarketDataController {
     @ApiOperation("获取实时价格")
     public ResponseEntity<Map<String, Object>> getSymbolPrices(
             @ApiParam(value = "交易对符号列表", required = true) @RequestBody List<String> symbols) {
-        log.info("[MarketDataController] 接收到实时价格请求: symbols={}", symbols);
+        log.debug("[MarketDataController] 接收到实时价格请求: symbols数量={}", symbols != null ? symbols.size() : 0);
         try {
             Map<String, Map<String, Object>> result = marketDataService.getSymbolPrices(symbols);
             Map<String, Object> response = new HashMap<>();
@@ -84,8 +84,8 @@ public class MarketDataController {
             @ApiParam(value = "返回的K线数量", required = false) @RequestParam(required = false) Integer limit,
             @ApiParam(value = "起始时间戳（毫秒）", required = false) @RequestParam(required = false) Long startTime,
             @ApiParam(value = "结束时间戳（毫秒）", required = false) @RequestParam(required = false) Long endTime) {
-        log.info("[MarketDataController] 接收到K线数据请求: symbol={}, interval={}, limit={}, startTime={}, endTime={}", 
-                symbol, interval, limit, startTime, endTime);
+        log.debug("[MarketDataController] 接收到K线数据请求: symbol={}, interval={}, limit={}", 
+                symbol, interval, limit);
         try {
             List<Map<String, Object>> result = marketDataService.getKlines(symbol, interval, limit, startTime, endTime);
             Map<String, Object> response = new HashMap<>();
@@ -108,7 +108,7 @@ public class MarketDataController {
     @ApiOperation("格式化交易对符号")
     public ResponseEntity<Map<String, Object>> formatSymbol(
             @ApiParam(value = "基础交易对符号", required = true) @RequestParam String baseSymbol) {
-        log.info("[MarketDataController] 接收到格式化符号请求: baseSymbol={}", baseSymbol);
+        log.debug("[MarketDataController] 接收到格式化符号请求: baseSymbol={}", baseSymbol);
         try {
             String result = marketDataService.formatSymbol(baseSymbol);
             Map<String, Object> response = new HashMap<>();

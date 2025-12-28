@@ -50,7 +50,7 @@ public class MarketDataServiceImpl implements MarketDataService {
      */
     @Override
     public Map<String, Map<String, Object>> get24hTicker(List<String> symbols) {
-        log.info("[MarketDataServiceImpl] 获取24小时价格变动统计, symbols={}", symbols);
+        log.debug("[MarketDataServiceImpl] 获取24小时价格变动统计, symbols数量={}", symbols != null ? symbols.size() : 0);
         if (binanceFuturesClient == null) {
             log.error("[MarketDataServiceImpl] BinanceFuturesClient未初始化");
             return new HashMap<>();
@@ -66,7 +66,7 @@ public class MarketDataServiceImpl implements MarketDataService {
      */
     @Override
     public Map<String, Map<String, Object>> getSymbolPrices(List<String> symbols) {
-        log.info("[MarketDataServiceImpl] 获取实时价格, symbols={}", symbols);
+        log.debug("[MarketDataServiceImpl] 获取实时价格, symbols数量={}", symbols != null ? symbols.size() : 0);
         if (binanceFuturesClient == null) {
             log.error("[MarketDataServiceImpl] BinanceFuturesClient未初始化");
             return new HashMap<>();
@@ -87,8 +87,8 @@ public class MarketDataServiceImpl implements MarketDataService {
     @Override
     public List<Map<String, Object>> getKlines(String symbol, String interval, Integer limit, 
                                                Long startTime, Long endTime) {
-        log.info("[MarketDataServiceImpl] 获取K线数据, symbol={}, interval={}, limit={}, startTime={}, endTime={}", 
-                symbol, interval, limit, startTime, endTime);
+        log.debug("[MarketDataServiceImpl] 获取K线数据, symbol={}, interval={}, limit={}", 
+                symbol, interval, limit);
         if (binanceFuturesClient == null) {
             log.error("[MarketDataServiceImpl] BinanceFuturesClient未初始化");
             return List.of();

@@ -151,8 +151,26 @@ start_service() {
         log_info "从application.yml读取到服务端口: $SERVER_PORT"
     fi
     
-    # 设置JVM参数
-    JAVA_OPTS="-Xms512m -Xmx1024m -Dserver.port=$SERVER_PORT"
+    # 设置JVM参数（高性能优化）
+    # -Xms: 初始堆内存1G，-Xmx: 最大堆内存2G（允许动态调整以适应负载）
+    # -XX:+UseG1GC: 使用G1垃圾收集器，适合大内存和低延迟场景
+    # -XX:MaxGCPauseMillis: 最大GC暂停时间目标（毫秒）
+    # -XX:+UseStringDeduplication: 字符串去重，减少内存占用
+    # -XX:+OptimizeStringConcat: 优化字符串拼接
+    # -XX:+UseCompressedOops: 使用压缩指针，节省内存
+    # -XX:+UseCompressedClassPointers: 使用压缩类指针
+    # -Djava.awt.headless=true: 无头模式，不需要图形界面
+    # -Dfile.encoding=UTF-8: 文件编码
+    JAVA_OPTS="-Xms1g -Xmx2g \
+                -XX:+UseG1GC \
+                -XX:MaxGCPauseMillis=200 \
+                -XX:+UseStringDeduplication \
+                -XX:+OptimizeStringConcat \
+                -XX:+UseCompressedOops \
+                -XX:+UseCompressedClassPointers \
+                -Djava.awt.headless=true \
+                -Dfile.encoding=UTF-8 \
+                -Dserver.port=$SERVER_PORT"
     
     # 启动服务（后台运行）
     log_info "执行启动命令: java $JAVA_OPTS -jar $JAR_FILE"
