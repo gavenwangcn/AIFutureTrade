@@ -115,34 +115,55 @@ class MarketDataFetcher:
     
     def _init_futures_client(self):
         """
-        初始化币安期货客户端
+        初始化币安期货客户端配置（不再创建实例，改为每次调用时创建）
         
-        从配置文件读取API密钥和密钥，创建BinanceFuturesClient实例。
-        如果API密钥未配置，客户端将为None，部分功能将不可用。
+        从配置文件读取API密钥和密钥，保存配置信息。
+        每次REST API调用时都会创建新的BinanceFuturesClient实例，以支持代理轮询。
         
         Note:
             - API密钥从app_config读取
             - 支持测试网络（通过BINANCE_TESTNET配置）
-            - 初始化失败时记录警告日志，但不抛出异常
+            - 每次REST API调用时创建新实例，自动轮询使用不同的代理
         """
-        api_key = getattr(app_config, 'BINANCE_API_KEY', '')
-        api_secret = getattr(app_config, 'BINANCE_API_SECRET', '')
-        if not api_key or not api_secret:
+        self._futures_api_key = getattr(app_config, 'BINANCE_API_KEY', '')
+        self._futures_api_secret = getattr(app_config, 'BINANCE_API_SECRET', '')
+        self._futures_testnet = getattr(app_config, 'BINANCE_TESTNET', False)
+        
+        if not self._futures_api_key or not self._futures_api_secret:
             logger.warning('[Futures] Binance API key/secret not configured; live data unavailable')
             self._futures_client = None
             return
 
+        # 不再创建实例，改为保存配置
+        # 每次REST API调用时通过_create_futures_client()创建新实例，支持代理轮询
+        self._futures_client = True  # 标记为已配置，但实际实例在调用时创建
+        logger.info('[Futures] Binance futures client configuration initialized (will create new instance for each REST API call to support proxy rotation)')
+    
+    def _create_futures_client(self) -> Optional[BinanceFuturesClient]:
+        """
+        创建新的BinanceFuturesClient实例（支持代理轮询）
+        
+        每次调用都会创建新实例，并自动轮询使用不同的代理（如果配置了代理）。
+        这样可以确保每次REST API调用都能使用不同的代理，减少IP限流问题。
+        
+        Returns:
+            BinanceFuturesClient实例，如果配置无效则返回None
+        """
+        if not self._futures_api_key or not self._futures_api_secret:
+            return None
+        
         try:
-            self._futures_client = BinanceFuturesClient(
-                api_key=api_key,
-                api_secret=api_secret,
+            # 每次创建新实例，自动轮询代理
+            from common.binance_futures import create_binance_futures_client
+            return create_binance_futures_client(
+                api_key=self._futures_api_key,
+                api_secret=self._futures_api_secret,
                 quote_asset=self._futures_quote_asset,
-                testnet=getattr(app_config, 'BINANCE_TESTNET', False)
+                testnet=self._futures_testnet
             )
-            logger.info('[Futures] Binance futures client initialized')
         except Exception as exc:
-            logger.warning(f'[Futures] Unable to initialize Binance futures client: {exc}')
-            self._futures_client = None
+            logger.warning(f'[Futures] Unable to create Binance futures client: {exc}')
+            return None
 
     def _init_mysql_db(self):
         """
@@ -374,8 +395,12 @@ class MarketDataFetcher:
         # 从API获取实时价格数据
         if self._futures_client:
             try:
+                # 每次调用都创建新的client实例，支持代理轮询
+                client = self._create_futures_client()
+                if not client:
+                    return {}
                 # 调用get_symbol_prices方法获取实时价格
-                api_prices = self._futures_client.get_symbol_prices(formatted_symbols)
+                api_prices = client.get_symbol_prices(formatted_symbols)
                 
                 # 处理查询结果，确保返回格式与原来一致
                 result = {}
@@ -440,8 +465,12 @@ class MarketDataFetcher:
         # 从API获取实时价格数据
         if self._futures_client:
             try:
+                # 每次调用都创建新的client实例，支持代理轮询
+                client = self._create_futures_client()
+                if not client:
+                    return {}
                 # 调用get_symbol_prices方法获取实时价格
-                api_prices = self._futures_client.get_symbol_prices(formatted_contract_symbols)
+                api_prices = client.get_symbol_prices(formatted_contract_symbols)
                 
                 # 处理查询结果，确保返回格式与原来一致
                 prices = {}
@@ -494,6 +523,11 @@ class MarketDataFetcher:
         if not futures or not self._futures_client:
             return prices
 
+        # 每次调用都创建新的client实例，支持代理轮询
+        client = self._create_futures_client()
+        if not client:
+            return prices
+
         symbol_map = {}
         quote_asset = getattr(self, '_futures_quote_asset', 'USDT')
         for future in futures:
@@ -506,10 +540,10 @@ class MarketDataFetcher:
                 contract_symbol = _ensure_usdt_suffix(contract_symbol, quote_asset)
             else:
                 # 如果没有提供contract_symbol，使用format_symbol方法（该方法已实现防重复逻辑）
-                contract_symbol = self._futures_client.format_symbol(formatted_base_symbol)
+                contract_symbol = client.format_symbol(formatted_base_symbol)
             symbol_map[base_symbol] = contract_symbol.upper()
-        tickers = self._futures_client.get_24h_ticker(list(symbol_map.values()))
-        spot_prices = self._futures_client.get_symbol_prices(list(symbol_map.values()))
+        tickers = client.get_24h_ticker(list(symbol_map.values()))
+        spot_prices = client.get_symbol_prices(list(symbol_map.values()))
 
         for symbol, futures_symbol in symbol_map.items():
             payload = tickers.get(futures_symbol)
@@ -632,13 +666,18 @@ class MarketDataFetcher:
                 }
                 limit = limit_map.get(label, 120)  # 默认获取120根K线
                 
+                # 每次调用都创建新的client实例，支持代理轮询
+                client = self._create_futures_client()
+                if not client:
+                    continue
+                
                 # 构造币安API需要的交易对符号（添加计价资产后缀，如BTC -> BTCUSDT）
-                symbol_key = self._futures_client.format_symbol(symbol)
+                symbol_key = client.format_symbol(symbol)
                 
                 # 从币安期货API获取K线数据
                 # 不指定startTime和endTime时，API默认返回最新的limit根K线数据
                 # 这正好符合我们的需求：获取最新的K线数据用于指标计算
-                klines = self._futures_client.get_klines(
+                klines = client.get_klines(
                     symbol_key, 
                     interval, 
                     limit=limit
@@ -1114,16 +1153,21 @@ class MarketDataFetcher:
             logger.warning(f'[MarketData] Futures client unavailable for {symbol}')
             return {}
 
+        # 每次调用都创建新的client实例，支持代理轮询
+        client = self._create_futures_client()
+        if not client:
+            return {}
+        
         # 确保symbol以USDT结尾，防止重复添加
         quote_asset = getattr(self, '_futures_quote_asset', 'USDT')
         formatted_symbol = _ensure_usdt_suffix(symbol, quote_asset)
         
         # 格式化交易对符号（format_symbol方法也有防重复逻辑，双重保险）
-        symbol_key = self._futures_client.format_symbol(formatted_symbol)
+        symbol_key = client.format_symbol(formatted_symbol)
         
         try:
             # 获取K线数据
-            all_klines = self._futures_client.get_klines(
+            all_klines = client.get_klines(
                 symbol_key, 
                 interval, 
                 limit=limit

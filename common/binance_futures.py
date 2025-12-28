@@ -9,6 +9,7 @@
 """
 import logging
 import time
+import threading
 from datetime import datetime
 from typing import Any, Callable, Dict, List, Optional
 import common.config as app_config
@@ -45,6 +46,175 @@ except ImportError as exc:  # pragma: no cover - handled at runtime
 
 
 logger = logging.getLogger(__name__)
+
+
+# ============ Proxy轮询管理器 ============
+
+class ProxyManager:
+    """
+    Proxy轮询管理器
+    
+    用于管理多个proxy配置，实现轮询使用，减少IP限流问题。
+    只用于REST API调用，WebSocket连接不使用代理。
+    """
+    
+    def __init__(self, proxy_list: List[Dict[str, Any]]):
+        """
+        初始化Proxy管理器
+        
+        Args:
+            proxy_list: Proxy配置列表，每个元素是一个proxy配置字典
+                       格式: [{"host": "127.0.0.1", "port": 8080, "protocol": "http", "auth": {...}}]
+        """
+        self._proxy_list = proxy_list if proxy_list else []
+        self._current_index = 0
+        self._lock = threading.Lock()
+        if self._proxy_list:
+            logger.info(f"[ProxyManager] 初始化，共 {len(self._proxy_list)} 个代理配置")
+            for i, proxy in enumerate(self._proxy_list):
+                logger.info(f"[ProxyManager] 代理 {i+1}: {proxy.get('host')}:{proxy.get('port')} ({proxy.get('protocol', 'http')})")
+        else:
+            logger.info("[ProxyManager] 未配置代理，REST API将直接连接")
+    
+    def get_next_proxy(self) -> Optional[Dict[str, Any]]:
+        """
+        获取下一个proxy配置（轮询方式）
+        
+        Returns:
+            Proxy配置字典，如果没有配置则返回None
+        """
+        if not self._proxy_list:
+            return None
+        
+        with self._lock:
+            current_proxy_index = self._current_index
+            proxy = self._proxy_list[current_proxy_index]
+            self._current_index = (self._current_index + 1) % len(self._proxy_list)
+            logger.debug(f"[ProxyManager] 使用代理 {current_proxy_index + 1}/{len(self._proxy_list)}: {proxy.get('host')}:{proxy.get('port')}")
+            return proxy.copy()  # 返回副本，避免修改原始配置
+    
+    def has_proxy(self) -> bool:
+        """
+        检查是否有可用的proxy配置
+        
+        Returns:
+            如果有proxy配置返回True，否则返回False
+        """
+        return len(self._proxy_list) > 0
+
+
+# 全局Proxy管理器实例
+_proxy_manager: Optional[ProxyManager] = None
+
+
+def _get_proxy_manager() -> ProxyManager:
+    """
+    获取全局Proxy管理器实例（单例模式）
+    
+    Returns:
+        ProxyManager实例
+    """
+    global _proxy_manager
+    if _proxy_manager is None:
+        proxy_list = getattr(app_config, 'BINANCE_PROXY_LIST', [])
+        _proxy_manager = ProxyManager(proxy_list)
+    return _proxy_manager
+
+
+# ============ Client工厂方法（支持代理轮询） ============
+
+def create_binance_futures_client(
+    api_key: str,
+    api_secret: str,
+    quote_asset: str = "USDT",
+    base_path: Optional[str] = None,
+    testnet: bool = False,
+) -> 'BinanceFuturesClient':
+    """
+    创建BinanceFuturesClient实例（工厂方法）
+    
+    每次调用都会创建新实例，并自动轮询使用不同的代理（如果配置了代理）。
+    这样可以确保每次REST API调用都能使用不同的代理，减少IP限流问题。
+    
+    Args:
+        api_key: 币安API密钥
+        api_secret: 币安API密钥
+        quote_asset: 计价资产，默认为USDT
+        base_path: 自定义REST API基础路径（可选）
+        testnet: 是否使用测试网络，默认False
+    
+    Returns:
+        BinanceFuturesClient实例
+    """
+    return BinanceFuturesClient(
+        api_key=api_key,
+        api_secret=api_secret,
+        quote_asset=quote_asset,
+        base_path=base_path,
+        testnet=testnet,
+    )
+
+
+def create_binance_futures_account_client(
+    api_key: str,
+    api_secret: str,
+    quote_asset: str = "USDT",
+    base_path: Optional[str] = None,
+    testnet: bool = False,
+) -> 'BinanceFuturesAccountClient':
+    """
+    创建BinanceFuturesAccountClient实例（工厂方法）
+    
+    每次调用都会创建新实例，并自动轮询使用不同的代理（如果配置了代理）。
+    
+    Args:
+        api_key: 币安API密钥
+        api_secret: 币安API密钥
+        quote_asset: 计价资产，默认为USDT
+        base_path: 自定义REST API基础路径（可选）
+        testnet: 是否使用测试网络，默认False
+    
+    Returns:
+        BinanceFuturesAccountClient实例
+    """
+    return BinanceFuturesAccountClient(
+        api_key=api_key,
+        api_secret=api_secret,
+        quote_asset=quote_asset,
+        base_path=base_path,
+        testnet=testnet,
+    )
+
+
+def create_binance_futures_order_client(
+    api_key: str,
+    api_secret: str,
+    quote_asset: str = "USDT",
+    base_path: Optional[str] = None,
+    testnet: bool = False,
+) -> 'BinanceFuturesOrderClient':
+    """
+    创建BinanceFuturesOrderClient实例（工厂方法）
+    
+    每次调用都会创建新实例，并自动轮询使用不同的代理（如果配置了代理）。
+    
+    Args:
+        api_key: 币安API密钥
+        api_secret: 币安API密钥
+        quote_asset: 计价资产，默认为USDT
+        base_path: 自定义REST API基础路径（可选）
+        testnet: 是否使用测试网络，默认False
+    
+    Returns:
+        BinanceFuturesOrderClient实例
+    """
+    return BinanceFuturesOrderClient(
+        api_key=api_key,
+        api_secret=api_secret,
+        quote_asset=quote_asset,
+        base_path=base_path,
+        testnet=testnet,
+    )
 
 
 # ============ 基类：共享公共方法 ============
@@ -210,12 +380,31 @@ class BinanceFuturesClient(_BinanceFuturesBase):
             else DERIVATIVES_TRADING_USDS_FUTURES_REST_API_PROD_URL
         )
 
+        # 获取proxy配置（仅用于REST API，WebSocket不使用代理）
+        # 注意：WebSocket连接不使用代理，只有REST API使用代理组
+        proxy_config = None
+        proxy_enabled = getattr(app_config, 'BINANCE_PROXY_ENABLED', False)
+        if proxy_enabled:
+            proxy_manager = _get_proxy_manager()
+            if proxy_manager.has_proxy():
+                proxy_config = proxy_manager.get_next_proxy()
+                logger.debug(f"[BinanceFuturesClient] 使用代理: {proxy_config.get('host')}:{proxy_config.get('port')} ({proxy_config.get('protocol', 'http')})")
+            else:
+                logger.debug("[BinanceFuturesClient] 代理已启用但无可用代理配置，将直接连接")
+        else:
+            logger.debug("[BinanceFuturesClient] 代理未启用，REST API将直接连接")
+
         # 创建SDK配置和客户端
-        configuration = ConfigurationRestAPI(
-            api_key=api_key,
-            api_secret=api_secret,
-            base_path=rest_base,
-        )
+        config_kwargs = {
+            "api_key": api_key,
+            "api_secret": api_secret,
+            "base_path": rest_base,
+        }
+        # 如果配置了proxy，添加到配置中
+        if proxy_config:
+            config_kwargs["proxy"] = proxy_config
+        
+        configuration = ConfigurationRestAPI(**config_kwargs)
 
         self.quote_asset = quote_asset.upper()
         self._client = DerivativesTradingUsdsFutures(config_rest_api=configuration)
@@ -689,12 +878,31 @@ class BinanceFuturesAccountClient(_BinanceFuturesBase):
             else DERIVATIVES_TRADING_USDS_FUTURES_REST_API_PROD_URL
         )
 
+        # 获取proxy配置（仅用于REST API，WebSocket不使用代理）
+        # 注意：WebSocket连接不使用代理，只有REST API使用代理组
+        proxy_config = None
+        proxy_enabled = getattr(app_config, 'BINANCE_PROXY_ENABLED', False)
+        if proxy_enabled:
+            proxy_manager = _get_proxy_manager()
+            if proxy_manager.has_proxy():
+                proxy_config = proxy_manager.get_next_proxy()
+                logger.info(f"[BinanceFuturesClient] 使用代理: {proxy_config.get('host')}:{proxy_config.get('port')} ({proxy_config.get('protocol', 'http')})")
+            else:
+                logger.info("[BinanceFuturesClient] 代理已启用但无可用代理配置，将直接连接")
+        else:
+            logger.info("[BinanceFuturesClient] 代理未启用，REST API将直接连接")
+
         # 创建SDK配置和客户端
-        configuration = ConfigurationRestAPI(
-            api_key=api_key,
-            api_secret=api_secret,
-            base_path=rest_base,
-        )
+        config_kwargs = {
+            "api_key": api_key,
+            "api_secret": api_secret,
+            "base_path": rest_base,
+        }
+        # 如果配置了proxy，添加到配置中
+        if proxy_config:
+            config_kwargs["proxy"] = proxy_config
+        
+        configuration = ConfigurationRestAPI(**config_kwargs)
 
         self.quote_asset = quote_asset.upper()
         self._client = DerivativesTradingUsdsFutures(config_rest_api=configuration)
@@ -764,12 +972,31 @@ class BinanceFuturesOrderClient(_BinanceFuturesBase):
             else DERIVATIVES_TRADING_USDS_FUTURES_REST_API_PROD_URL
         )
 
+        # 获取proxy配置（仅用于REST API，WebSocket不使用代理）
+        # 注意：WebSocket连接不使用代理，只有REST API使用代理组
+        proxy_config = None
+        proxy_enabled = getattr(app_config, 'BINANCE_PROXY_ENABLED', False)
+        if proxy_enabled:
+            proxy_manager = _get_proxy_manager()
+            if proxy_manager.has_proxy():
+                proxy_config = proxy_manager.get_next_proxy()
+                logger.debug(f"[BinanceFuturesClient] 使用代理: {proxy_config.get('host')}:{proxy_config.get('port')} ({proxy_config.get('protocol', 'http')})")
+            else:
+                logger.debug("[BinanceFuturesClient] 代理已启用但无可用代理配置，将直接连接")
+        else:
+            logger.debug("[BinanceFuturesClient] 代理未启用，REST API将直接连接")
+
         # 创建SDK配置和客户端
-        configuration = ConfigurationRestAPI(
-            api_key=api_key,
-            api_secret=api_secret,
-            base_path=rest_base,
-        )
+        config_kwargs = {
+            "api_key": api_key,
+            "api_secret": api_secret,
+            "base_path": rest_base,
+        }
+        # 如果配置了proxy，添加到配置中
+        if proxy_config:
+            config_kwargs["proxy"] = proxy_config
+        
+        configuration = ConfigurationRestAPI(**config_kwargs)
 
         self.quote_asset = quote_asset.upper()
         self._client = DerivativesTradingUsdsFutures(config_rest_api=configuration)
