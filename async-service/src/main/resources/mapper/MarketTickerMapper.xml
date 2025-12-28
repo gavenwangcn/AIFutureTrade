@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.aifuturetrade.asyncservice.dao.mapper.MarketTickerMapper">
+
+    <!-- 批量插入或更新ticker数据 -->
+    <insert id="batchUpsertTickers" parameterType="java.util.List">
+        INSERT INTO `24_market_tickers` (
+            `event_time`, `symbol`, `average_price`, `last_price`, 
+            `last_trade_volume`, `high_price`, `low_price`, 
+            `base_volume`, `quote_volume`, `stats_open_time`, 
+            `stats_close_time`, `first_trade_id`, `last_trade_id`, 
+            `trade_count`, `ingestion_time`
+        ) VALUES
+        <foreach collection="tickers" item="ticker" separator=",">
+            (
+                #{ticker.eventTime}, #{ticker.symbol}, #{ticker.averagePrice}, 
+                #{ticker.lastPrice}, #{ticker.lastTradeVolume}, #{ticker.highPrice}, 
+                #{ticker.lowPrice}, #{ticker.baseVolume}, #{ticker.quoteVolume}, 
+                #{ticker.statsOpenTime}, #{ticker.statsCloseTime}, 
+                #{ticker.firstTradeId}, #{ticker.lastTradeId}, 
+                #{ticker.tradeCount}, #{ticker.ingestionTime}
+            )
+        </foreach>
+        ON DUPLICATE KEY UPDATE
+            `event_time` = VALUES(`event_time`),
+            `average_price` = VALUES(`average_price`),
+            `last_price` = VALUES(`last_price`),
+            `last_trade_volume` = VALUES(`last_trade_volume`),
+            `high_price` = VALUES(`high_price`),
+            `low_price` = VALUES(`low_price`),
+            `base_volume` = VALUES(`base_volume`),
+            `quote_volume` = VALUES(`quote_volume`),
+            `stats_open_time` = VALUES(`stats_open_time`),
+            `stats_close_time` = VALUES(`stats_close_time`),
+            `first_trade_id` = VALUES(`first_trade_id`),
+            `last_trade_id` = VALUES(`last_trade_id`),
+            `trade_count` = VALUES(`trade_count`),
+            `ingestion_time` = VALUES(`ingestion_time`)
+    </insert>
+
+</mapper>
+

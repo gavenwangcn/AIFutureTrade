@@ -573,7 +573,13 @@ class BinanceFuturesClient(_BinanceFuturesBase):
                     if result:
                         return result
                     else:
-                        logger.warning("[Binance Futures] Binance Service返回空结果，回退到SDK调用")
+                        logger.warning(
+                            "[Binance Futures] Binance Service返回空结果，回退到SDK调用 | "
+                            f"API接口: get_24h_ticker | "
+                            f"Service URL: {service_config.get('base_url')} | "
+                            f"请求参数: symbols={symbols[:10]}{'...' if len(symbols) > 10 else ''} (共{len(symbols)}个) | "
+                            f"返回结果: {result}"
+                        )
                 except Exception as e:
                     logger.warning(f"[Binance Futures] Binance Service调用失败，回退到SDK调用: {e}")
         
@@ -701,7 +707,13 @@ class BinanceFuturesClient(_BinanceFuturesBase):
                     if result:
                         return result
                     else:
-                        logger.warning("[Binance Futures] Binance Service返回空结果，回退到SDK调用")
+                        logger.warning(
+                            "[Binance Futures] Binance Service返回空结果，回退到SDK调用 | "
+                            f"API接口: get_symbol_prices | "
+                            f"Service URL: {service_config.get('base_url')} | "
+                            f"请求参数: symbols={symbols[:10]}{'...' if len(symbols) > 10 else ''} (共{len(symbols)}个) | "
+                            f"返回结果: {result}"
+                        )
                 except Exception as e:
                     logger.warning(f"[Binance Futures] Binance Service调用失败，回退到SDK调用: {e}")
         
@@ -804,7 +816,13 @@ class BinanceFuturesClient(_BinanceFuturesBase):
                     if result:
                         return result
                     else:
-                        logger.warning("[Binance Futures] Binance Service返回空结果，回退到SDK调用")
+                        logger.warning(
+                            "[Binance Futures] Binance Service返回空结果，回退到SDK调用 | "
+                            f"API接口: get_klines | "
+                            f"Service URL: {service_config.get('base_url')} | "
+                            f"请求参数: symbol={symbol}, interval={interval}, limit={limit}, startTime={startTime}, endTime={endTime} | "
+                            f"返回结果: {result} (类型: {type(result).__name__}, 长度: {len(result) if isinstance(result, (list, dict)) else 'N/A'})"
+                        )
                 except Exception as e:
                     logger.warning(f"[Binance Futures] Binance Service调用失败，回退到SDK调用: {e}")
         
