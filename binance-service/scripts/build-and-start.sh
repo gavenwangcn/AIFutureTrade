@@ -101,34 +101,36 @@ install_jdk_maven() {
 
 # 构建JAR包
 build_jar() {
-    log_info "开始构建Binance Service JAR包..."
+    log_info "开始构建Binance Service JAR包..." >&2
     cd "$BINANCE_SERVICE_DIR"
     
-    log_info "执行Maven构建命令: mvn clean package -DskipTests"
-    log_info "============================================"
+    log_info "执行Maven构建命令: mvn clean package -DskipTests" >&2
+    log_info "============================================" >&2
     
     # 清理并构建，显示输出
     if mvn clean package -DskipTests; then
-        log_info "============================================"
-        log_info "Maven构建完成"
+        log_info "============================================" >&2
+        log_info "Maven构建完成" >&2
     else
-        log_error "============================================"
-        log_error "Maven构建失败"
+        log_error "============================================" >&2
+        log_error "Maven构建失败" >&2
         exit 1
     fi
     
     # 检查JAR文件是否存在
     JAR_FILE="$BINANCE_SERVICE_DIR/target/binance-service-1.0.0.jar"
     if [ ! -f "$JAR_FILE" ]; then
-        log_error "JAR文件未找到: $JAR_FILE"
-        log_info "可用的文件:"
-        ls -lh "$BINANCE_SERVICE_DIR/target/" || true
+        log_error "JAR文件未找到: $JAR_FILE" >&2
+        log_info "可用的文件:" >&2
+        ls -lh "$BINANCE_SERVICE_DIR/target/" || true >&2
         exit 1
     fi
     
-    # 显示JAR文件信息
+    # 显示JAR文件信息（输出到stderr，避免被捕获）
     JAR_SIZE=$(ls -lh "$JAR_FILE" | awk '{print $5}')
-    log_info "JAR包构建成功: $JAR_FILE (大小: $JAR_SIZE)"
+    log_info "JAR包构建成功: $JAR_FILE (大小: $JAR_SIZE)" >&2
+    
+    # 只输出文件路径到stdout，供调用者捕获
     echo "$JAR_FILE"
 }
 
@@ -270,7 +272,29 @@ main() {
     fi
     
     # 构建JAR包
-    JAR_FILE=$(build_jar)
+    # build_jar函数会将日志输出到stderr，只将文件路径输出到stdout
+    # 使用临时文件来分离日志输出和返回值
+    TEMP_OUTPUT=$(mktemp)
+    if build_jar > "$TEMP_OUTPUT" 2>&1; then
+        # 显示所有输出（包括日志）
+        cat "$TEMP_OUTPUT"
+        # 提取最后一行（JAR文件路径）
+        JAR_FILE=$(tail -n 1 "$TEMP_OUTPUT")
+        rm -f "$TEMP_OUTPUT"
+    else
+        # 显示错误输出
+        cat "$TEMP_OUTPUT" >&2
+        rm -f "$TEMP_OUTPUT"
+        exit 1
+    fi
+    
+    # 验证JAR文件路径是否有效
+    if [ -z "$JAR_FILE" ] || [ ! -f "$JAR_FILE" ]; then
+        log_error "JAR文件路径无效或文件不存在: $JAR_FILE"
+        log_error "请检查构建日志以获取更多信息"
+        exit 1
+    fi
+    log_info "确认JAR文件: $JAR_FILE"
     
     # 检查是否在非交互模式或自动启动模式
     AUTO_START=${AUTO_START:-""}
