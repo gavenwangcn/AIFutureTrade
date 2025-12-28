@@ -134,32 +134,6 @@ build_jar() {
     echo "$JAR_FILE"
 }
 
-# 读取端口配置（从application.yml或环境变量）
-read_server_port() {
-    # 优先使用环境变量
-    if [ -n "$SERVER_PORT" ]; then
-        # 去除可能的注释和空格，只保留数字
-        echo "$SERVER_PORT" | sed 's/#.*$//' | sed 's/[^0-9]//g'
-        return
-    fi
-    
-    # 从application.yml读取
-    # 匹配格式：port: ${SERVER_PORT:5004} 或 port: 5004
-    # 去除注释，只提取数字部分
-    local port=$(grep -E "^\s*port:" "$BINANCE_SERVICE_DIR/src/main/resources/application.yml" 2>/dev/null | \
-        sed 's/.*port:\s*\(.*\)/\1/' | \
-        sed 's/#.*$//' | \
-        sed 's/\${SERVER_PORT:\([^}]*\)}/\1/' | \
-        sed 's/[^0-9]//g' | \
-        head -n 1)
-    
-    if [ -z "$port" ] || [ "$port" = "" ]; then
-        # 如果都读取不到，返回空字符串，让调用者决定默认值
-        echo ""
-    else
-        echo "$port"
-    fi
-}
 
 # 启动服务
 start_service() {
@@ -176,27 +150,7 @@ start_service() {
     # 创建logs目录
     mkdir -p "$BINANCE_SERVICE_DIR/logs"
     
-    # 读取端口配置
-    SERVER_PORT=$(read_server_port)
-    if [ -z "$SERVER_PORT" ] || [ "$SERVER_PORT" = "" ]; then
-        log_warn "无法从配置文件或环境变量读取端口配置，请检查application.yml或设置SERVER_PORT环境变量"
-        exit 1
-    fi
-    # 确保端口号是纯数字（去除任何可能的非数字字符）
-    SERVER_PORT=$(echo "$SERVER_PORT" | sed 's/[^0-9]//g')
-    # 检查端口来源
-    CONFIG_PORT=$(grep -E "^\s*port:" "$BINANCE_SERVICE_DIR/src/main/resources/application.yml" 2>/dev/null | \
-        sed 's/.*port:\s*\(.*\)/\1/' | \
-        sed 's/#.*$//' | \
-        sed 's/\${SERVER_PORT:\([^}]*\)}/\1/' | \
-        sed 's/[^0-9]//g' | \
-        head -n 1)
-    if [ -n "${SERVER_PORT}" ] && [ "$SERVER_PORT" != "$CONFIG_PORT" ]; then
-        PORT_SOURCE="环境变量"
-    else
-        PORT_SOURCE="配置文件(application.yml)"
-    fi
-    log_info "使用服务端口: $SERVER_PORT (来源: $PORT_SOURCE)"
+    log_info "所有配置从application.yml读取（可通过环境变量覆盖）"
     
     # 设置JVM参数（高性能优化）
     # -Xms: 初始堆内存1G，-Xmx: 最大堆内存2G（允许动态调整以适应负载）
@@ -208,6 +162,7 @@ start_service() {
     # -XX:+UseCompressedClassPointers: 使用压缩类指针
     # -Djava.awt.headless=true: 无头模式，不需要图形界面
     # -Dfile.encoding=UTF-8: 文件编码
+    # 注意：端口配置通过application.yml中的${SERVER_PORT:5004}自动读取，无需通过-Dserver.port传递
     JAVA_OPTS="-Xms1g -Xmx2g \
                 -XX:+UseG1GC \
                 -XX:MaxGCPauseMillis=200 \
@@ -216,8 +171,7 @@ start_service() {
                 -XX:+UseCompressedOops \
                 -XX:+UseCompressedClassPointers \
                 -Djava.awt.headless=true \
-                -Dfile.encoding=UTF-8 \
-                -Dserver.port=$SERVER_PORT"
+                -Dfile.encoding=UTF-8"
     
     # 启动服务（后台运行）
     log_info "执行启动命令: java $JAVA_OPTS -jar $JAR_FILE"
@@ -368,14 +322,8 @@ main() {
             log_info "JAR文件: $JAR_FILE"
             log_info "手动启动命令:"
             log_info "  cd $BINANCE_SERVICE_DIR"
-            # 读取端口配置用于显示
-            MANUAL_SERVER_PORT=$(read_server_port)
-            if [ -z "$MANUAL_SERVER_PORT" ] || [ "$MANUAL_SERVER_PORT" = "" ]; then
-                log_warn "无法读取端口配置，请设置SERVER_PORT环境变量或检查application.yml"
-                log_info "  示例: SERVER_PORT=<端口> java -Xms1g -Xmx2g -XX:+UseG1GC -jar $JAR_FILE"
-            else
-                log_info "  java -Xms1g -Xmx2g -XX:+UseG1GC -Dserver.port=$MANUAL_SERVER_PORT -jar $JAR_FILE"
-            fi
+            log_info "  java -Xms1g -Xmx2g -XX:+UseG1GC -jar $JAR_FILE"
+            log_info "  注意: 所有配置从application.yml读取，可通过环境变量覆盖（如SERVER_PORT）"
         fi
     else
         log_info "============================================"
@@ -384,14 +332,8 @@ main() {
         log_info "JAR文件: $JAR_FILE"
         log_info "手动启动命令:"
         log_info "  cd $BINANCE_SERVICE_DIR"
-        # 读取端口配置用于显示
-        MANUAL_SERVER_PORT=$(read_server_port)
-        if [ -z "$MANUAL_SERVER_PORT" ] || [ "$MANUAL_SERVER_PORT" = "" ]; then
-            log_warn "无法读取端口配置，请设置SERVER_PORT环境变量或检查application.yml"
-            log_info "  示例: SERVER_PORT=<端口> java -Xms1g -Xmx2g -XX:+UseG1GC -jar $JAR_FILE"
-        else
-            log_info "  java -Xms1g -Xmx2g -XX:+UseG1GC -Dserver.port=$MANUAL_SERVER_PORT -jar $JAR_FILE"
-        fi
+        log_info "  java -Xms1g -Xmx2g -XX:+UseG1GC -jar $JAR_FILE"
+        log_info "  注意: 所有配置从application.yml读取，可通过环境变量覆盖（如SERVER_PORT）"
     fi
 }
 

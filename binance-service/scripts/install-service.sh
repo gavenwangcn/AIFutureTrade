@@ -117,57 +117,10 @@ build_jar() {
     echo "$JAR_FILE"
 }
 
-# 读取端口配置（从application.yml或环境变量）
-read_server_port() {
-    # 优先使用环境变量
-    if [ -n "$SERVER_PORT" ]; then
-        # 去除可能的注释和空格，只保留数字
-        echo "$SERVER_PORT" | sed 's/#.*$//' | sed 's/[^0-9]//g'
-        return
-    fi
-    
-    # 从application.yml读取
-    # 匹配格式：port: ${SERVER_PORT:5004} 或 port: 5004
-    # 去除注释，只提取数字部分
-    local port=$(grep -E "^\s*port:" "$BINANCE_SERVICE_DIR/src/main/resources/application.yml" 2>/dev/null | \
-        sed 's/.*port:\s*\(.*\)/\1/' | \
-        sed 's/#.*$//' | \
-        sed 's/\${SERVER_PORT:\([^}]*\)}/\1/' | \
-        sed 's/[^0-9]//g' | \
-        head -n 1)
-    
-    if [ -z "$port" ] || [ "$port" = "" ]; then
-        echo ""
-    else
-        echo "$port"
-    fi
-}
-
 # 创建systemd服务文件
 create_service_file() {
     log_info "创建systemd服务文件..."
-    
-    # 读取端口配置
-    SERVER_PORT=$(read_server_port)
-    if [ -z "$SERVER_PORT" ] || [ "$SERVER_PORT" = "" ]; then
-        log_error "无法从配置文件或环境变量读取端口配置，请检查application.yml或设置SERVER_PORT环境变量"
-        exit 1
-    fi
-    # 确保端口号是纯数字（去除任何可能的非数字字符）
-    SERVER_PORT=$(echo "$SERVER_PORT" | sed 's/[^0-9]//g')
-    # 检查端口来源
-    CONFIG_PORT=$(grep -E "^\s*port:" "$BINANCE_SERVICE_DIR/src/main/resources/application.yml" 2>/dev/null | \
-        sed 's/.*port:\s*\(.*\)/\1/' | \
-        sed 's/#.*$//' | \
-        sed 's/\${SERVER_PORT:\([^}]*\)}/\1/' | \
-        sed 's/[^0-9]//g' | \
-        head -n 1)
-    if [ -n "${SERVER_PORT}" ] && [ "$SERVER_PORT" != "$CONFIG_PORT" ]; then
-        PORT_SOURCE="环境变量"
-    else
-        PORT_SOURCE="配置文件(application.yml)"
-    fi
-    log_info "检测到服务端口: $SERVER_PORT (来源: $PORT_SOURCE)"
+    log_info "所有配置从application.yml读取（可通过环境变量覆盖）"
     
     # 获取Java路径
     JAVA_PATH=$(which java)
@@ -186,7 +139,6 @@ create_service_file() {
     # 从模板文件创建服务文件，替换占位符
     sed -e "s|%BINANCE_SERVICE_DIR%|$BINANCE_SERVICE_DIR|g" \
         -e "s|%JAVA_PATH%|$JAVA_PATH|g" \
-        -e "s|%SERVER_PORT%|$SERVER_PORT|g" \
         "$SERVICE_TEMPLATE" > "$SERVICE_FILE"
     
     log_info "服务文件已创建: $SERVICE_FILE"
