@@ -101,11 +101,6 @@ BINANCE_PROXY_LIST = [
     #         "password": "proxy-password",
     #     },
     # },
-    {
-        "host": "193.134.209.95",
-        "port": 34888,
-        "protocol": "http"
-    }
 ]
 
 # 从环境变量读取代理配置（JSON格式）
