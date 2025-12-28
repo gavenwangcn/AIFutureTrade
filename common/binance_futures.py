@@ -10,6 +10,7 @@
 import logging
 import time
 import threading
+import requests
 from datetime import datetime
 from typing import Any, Callable, Dict, List, Optional
 import common.config as app_config
@@ -48,173 +49,209 @@ except ImportError as exc:  # pragma: no cover - handled at runtime
 logger = logging.getLogger(__name__)
 
 
-# ============ Proxy轮询管理器 ============
+# ============ Binance Service客户端（用于调用binance-service微服务） ============
 
-class ProxyManager:
+class BinanceServiceManager:
     """
-    Proxy轮询管理器
+    Binance Service管理器
     
-    用于管理多个proxy配置，实现轮询使用，减少IP限流问题。
-    只用于REST API调用，WebSocket连接不使用代理。
+    用于管理多个binance-service配置，实现轮询使用。
+    只用于查询symbol相关数据的接口（如实时价格、K线信息等）。
+    下单和查询账户相关的接口不使用binance-service。
     """
     
-    def __init__(self, proxy_list: List[Dict[str, Any]]):
+    def __init__(self, service_list: List[Dict[str, Any]]):
         """
-        初始化Proxy管理器
+        初始化Binance Service管理器
         
         Args:
-            proxy_list: Proxy配置列表，每个元素是一个proxy配置字典
-                       格式: [{"host": "127.0.0.1", "port": 8080, "protocol": "http", "auth": {...}}]
+            service_list: Service配置列表，每个元素是一个service配置字典
         """
-        self._proxy_list = proxy_list if proxy_list else []
+        self._service_list = service_list if service_list else []
         self._current_index = 0
         self._lock = threading.Lock()
-        if self._proxy_list:
-            logger.info(f"[ProxyManager] 初始化，共 {len(self._proxy_list)} 个代理配置")
-            for i, proxy in enumerate(self._proxy_list):
-                logger.info(f"[ProxyManager] 代理 {i+1}: {proxy.get('host')}:{proxy.get('port')} ({proxy.get('protocol', 'http')})")
+        if self._service_list:
+            logger.info(f"[BinanceServiceManager] 初始化，共 {len(self._service_list)} 个Binance Service配置")
+            for i, service in enumerate(self._service_list):
+                logger.info(f"[BinanceServiceManager] Service {i+1}: {service.get('base_url')}")
         else:
-            logger.info("[ProxyManager] 未配置代理，REST API将直接连接")
+            logger.info("[BinanceServiceManager] 未配置Binance Service，将直接调用SDK")
     
-    def get_next_proxy(self) -> Optional[Dict[str, Any]]:
+    def get_next_service(self) -> Optional[Dict[str, Any]]:
         """
-        获取下一个proxy配置（轮询方式）
+        获取下一个service配置（轮询方式）
         
         Returns:
-            Proxy配置字典，如果没有配置则返回None
+            Service配置字典，如果没有配置则返回None
         """
-        if not self._proxy_list:
+        if not self._service_list:
             return None
         
         with self._lock:
-            current_proxy_index = self._current_index
-            proxy = self._proxy_list[current_proxy_index]
-            self._current_index = (self._current_index + 1) % len(self._proxy_list)
-            logger.debug(f"[ProxyManager] 使用代理 {current_proxy_index + 1}/{len(self._proxy_list)}: {proxy.get('host')}:{proxy.get('port')}")
-            return proxy.copy()  # 返回副本，避免修改原始配置
+            current_service_index = self._current_index
+            service = self._service_list[current_service_index]
+            self._current_index = (self._current_index + 1) % len(self._service_list)
+            logger.debug(f"[BinanceServiceManager] 使用Service {current_service_index + 1}/{len(self._service_list)}: {service.get('base_url')}")
+            return service.copy()  # 返回副本，避免修改原始配置
     
-    def has_proxy(self) -> bool:
+    def has_service(self) -> bool:
         """
-        检查是否有可用的proxy配置
+        检查是否有可用的service配置
         
         Returns:
-            如果有proxy配置返回True，否则返回False
+            如果有service配置返回True，否则返回False
         """
-        return len(self._proxy_list) > 0
+        return len(self._service_list) > 0
 
 
-# 全局Proxy管理器实例
-_proxy_manager: Optional[ProxyManager] = None
+# 全局Binance Service管理器实例
+_binance_service_manager: Optional[BinanceServiceManager] = None
 
 
-def _get_proxy_manager() -> ProxyManager:
+def _get_binance_service_manager() -> BinanceServiceManager:
     """
-    获取全局Proxy管理器实例（单例模式）
+    获取全局Binance Service管理器实例（单例模式）
     
     Returns:
-        ProxyManager实例
+        BinanceServiceManager实例
     """
-    global _proxy_manager
-    if _proxy_manager is None:
-        proxy_list = getattr(app_config, 'BINANCE_PROXY_LIST', [])
-        _proxy_manager = ProxyManager(proxy_list)
-    return _proxy_manager
+    global _binance_service_manager
+    if _binance_service_manager is None:
+        service_list = getattr(app_config, 'BINANCE_SERVICE_LIST', [])
+        _binance_service_manager = BinanceServiceManager(service_list)
+    return _binance_service_manager
 
 
-# ============ Client工厂方法（支持代理轮询） ============
-
-def create_binance_futures_client(
-    api_key: str,
-    api_secret: str,
-    quote_asset: str = "USDT",
-    base_path: Optional[str] = None,
-    testnet: bool = False,
-) -> 'BinanceFuturesClient':
+class BinanceServiceClient:
     """
-    创建BinanceFuturesClient实例（工厂方法）
+    Binance Service客户端
     
-    每次调用都会创建新实例，并自动轮询使用不同的代理（如果配置了代理）。
-    这样可以确保每次REST API调用都能使用不同的代理，减少IP限流问题。
-    
-    Args:
-        api_key: 币安API密钥
-        api_secret: 币安API密钥
-        quote_asset: 计价资产，默认为USDT
-        base_path: 自定义REST API基础路径（可选）
-        testnet: 是否使用测试网络，默认False
-    
-    Returns:
-        BinanceFuturesClient实例
+    用于调用binance-service微服务的HTTP接口。
+    只用于查询symbol相关数据的接口（如实时价格、K线信息等）。
     """
-    return BinanceFuturesClient(
-        api_key=api_key,
-        api_secret=api_secret,
-        quote_asset=quote_asset,
-        base_path=base_path,
-        testnet=testnet,
-    )
-
-
-def create_binance_futures_account_client(
-    api_key: str,
-    api_secret: str,
-    quote_asset: str = "USDT",
-    base_path: Optional[str] = None,
-    testnet: bool = False,
-) -> 'BinanceFuturesAccountClient':
-    """
-    创建BinanceFuturesAccountClient实例（工厂方法）
     
-    每次调用都会创建新实例，并自动轮询使用不同的代理（如果配置了代理）。
+    def __init__(self, base_url: str, timeout: int = 30):
+        """
+        初始化Binance Service客户端
+        
+        Args:
+            base_url: Binance Service基础URL
+            timeout: 请求超时时间（秒）
+        """
+        self.base_url = base_url.rstrip('/')
+        self.timeout = timeout
+        logger.debug(f"[BinanceServiceClient] 初始化: base_url={base_url}, timeout={timeout}")
     
-    Args:
-        api_key: 币安API密钥
-        api_secret: 币安API密钥
-        quote_asset: 计价资产，默认为USDT
-        base_path: 自定义REST API基础路径（可选）
-        testnet: 是否使用测试网络，默认False
+    def _make_request(self, method: str, endpoint: str, params: Optional[Dict] = None, 
+                     data: Optional[Dict] = None) -> Optional[Dict[str, Any]]:
+        """
+        发送HTTP请求
+        
+        Args:
+            method: HTTP方法（GET, POST等）
+            endpoint: API端点
+            params: URL参数
+            data: 请求体数据
+        
+        Returns:
+            响应数据字典，如果失败返回None
+        """
+        url = f"{self.base_url}{endpoint}"
+        try:
+            if method.upper() == 'GET':
+                response = requests.get(url, params=params, timeout=self.timeout)
+            elif method.upper() == 'POST':
+                response = requests.post(url, json=data, params=params, timeout=self.timeout)
+            else:
+                logger.error(f"[BinanceServiceClient] 不支持的HTTP方法: {method}")
+                return None
+            
+            response.raise_for_status()
+            result = response.json()
+            
+            if result.get('success'):
+                return result.get('data')
+            else:
+                logger.warning(f"[BinanceServiceClient] API返回失败: {result.get('message')}")
+                return None
+        except requests.exceptions.RequestException as e:
+            logger.error(f"[BinanceServiceClient] HTTP请求失败: {e}, url={url}")
+            return None
+        except Exception as e:
+            logger.error(f"[BinanceServiceClient] 请求处理失败: {e}, url={url}")
+            return None
     
-    Returns:
-        BinanceFuturesAccountClient实例
-    """
-    return BinanceFuturesAccountClient(
-        api_key=api_key,
-        api_secret=api_secret,
-        quote_asset=quote_asset,
-        base_path=base_path,
-        testnet=testnet,
-    )
-
-
-def create_binance_futures_order_client(
-    api_key: str,
-    api_secret: str,
-    quote_asset: str = "USDT",
-    base_path: Optional[str] = None,
-    testnet: bool = False,
-) -> 'BinanceFuturesOrderClient':
-    """
-    创建BinanceFuturesOrderClient实例（工厂方法）
+    def get_24h_ticker(self, symbols: List[str]) -> Dict[str, Dict]:
+        """
+        获取24小时价格变动统计
+        
+        Args:
+            symbols: 交易对符号列表
+        
+        Returns:
+            24小时统计数据字典
+        """
+        logger.debug(f"[BinanceServiceClient] 调用get_24h_ticker: symbols={symbols}")
+        result = self._make_request('POST', '/api/market-data/24h-ticker', data=symbols)
+        return result if result else {}
     
-    每次调用都会创建新实例，并自动轮询使用不同的代理（如果配置了代理）。
+    def get_symbol_prices(self, symbols: List[str]) -> Dict[str, Dict]:
+        """
+        获取实时价格
+        
+        Args:
+            symbols: 交易对符号列表
+        
+        Returns:
+            实时价格数据字典
+        """
+        logger.debug(f"[BinanceServiceClient] 调用get_symbol_prices: symbols={symbols}")
+        result = self._make_request('POST', '/api/market-data/symbol-prices', data=symbols)
+        return result if result else {}
     
-    Args:
-        api_key: 币安API密钥
-        api_secret: 币安API密钥
-        quote_asset: 计价资产，默认为USDT
-        base_path: 自定义REST API基础路径（可选）
-        testnet: 是否使用测试网络，默认False
+    def get_klines(self, symbol: str, interval: str, limit: int = 120, 
+                   startTime: Optional[int] = None, endTime: Optional[int] = None) -> List[Dict[str, Any]]:
+        """
+        获取K线数据
+        
+        Args:
+            symbol: 交易对符号
+            interval: K线间隔
+            limit: 返回的K线数量
+            startTime: 起始时间戳（毫秒）
+            endTime: 结束时间戳（毫秒）
+        
+        Returns:
+            K线数据列表
+        """
+        logger.debug(f"[BinanceServiceClient] 调用get_klines: symbol={symbol}, interval={interval}, limit={limit}")
+        params = {
+            'symbol': symbol,
+            'interval': interval,
+            'limit': limit,
+        }
+        if startTime is not None:
+            params['startTime'] = startTime
+        if endTime is not None:
+            params['endTime'] = endTime
+        
+        result = self._make_request('GET', '/api/market-data/klines', params=params)
+        return result if result else []
     
-    Returns:
-        BinanceFuturesOrderClient实例
-    """
-    return BinanceFuturesOrderClient(
-        api_key=api_key,
-        api_secret=api_secret,
-        quote_asset=quote_asset,
-        base_path=base_path,
-        testnet=testnet,
-    )
+    def format_symbol(self, base_symbol: str) -> str:
+        """
+        格式化交易对符号
+        
+        Args:
+            base_symbol: 基础交易对符号
+        
+        Returns:
+            完整交易对符号
+        """
+        logger.debug(f"[BinanceServiceClient] 调用format_symbol: base_symbol={base_symbol}")
+        params = {'baseSymbol': base_symbol}
+        result = self._make_request('GET', '/api/market-data/format-symbol', params=params)
+        return result if result else base_symbol
 
 
 # ============ 基类：共享公共方法 ============
@@ -225,111 +262,6 @@ class _BinanceFuturesBase:
     
     所有币安期货客户端类都继承此基类，共享数据格式转换等工具方法。
     """
-    
-    def __init__(self):
-        """初始化基类，保存创建参数用于重试"""
-        self._api_key: Optional[str] = None
-        self._api_secret: Optional[str] = None
-        self._quote_asset: str = "USDT"
-        self._base_path: Optional[str] = None
-        self._testnet: bool = False
-        self._client_class_name: Optional[str] = None
-    
-    def _set_creation_params(self, api_key: str, api_secret: str, quote_asset: str = "USDT",
-                             base_path: Optional[str] = None, testnet: bool = False):
-        """保存创建参数，用于重试时重新创建client"""
-        self._api_key = api_key
-        self._api_secret = api_secret
-        self._quote_asset = quote_asset
-        self._base_path = base_path
-        self._testnet = testnet
-        self._client_class_name = self.__class__.__name__
-    
-    def _is_restricted_location_error(self, error: Exception) -> bool:
-        """
-        检测是否是地理位置限制错误
-        
-        Args:
-            error: 异常对象
-            
-        Returns:
-            如果是地理位置限制错误返回True，否则返回False
-        """
-        error_msg = str(error).lower()
-        return "restricted location" in error_msg or "eligibility" in error_msg
-    
-    def _retry_with_next_proxy(self, func: Callable, method_name: str = "", context: str = "") -> Optional[Any]:
-        """
-        使用下一个代理重试操作
-        
-        当遇到地理位置限制错误时，尝试使用下一个代理重新创建client并重试。
-        
-        Args:
-            func: 要重试的函数（lambda表达式，用于重新创建client并调用方法）
-            method_name: 方法名称，用于日志
-            context: 上下文信息，用于日志
-            
-        Returns:
-            如果重试成功返回结果，否则返回None
-        """
-        proxy_enabled = getattr(app_config, 'BINANCE_PROXY_ENABLED', False)
-        if not proxy_enabled:
-            logger.debug(f"[{self._client_class_name}] 代理未启用，无法重试")
-            return None
-        
-        proxy_manager = _get_proxy_manager()
-        if not proxy_manager.has_proxy() or len(proxy_manager._proxy_list) <= 1:
-            logger.debug(f"[{self._client_class_name}] 代理数量不足（需要至少2个），无法重试")
-            return None
-        
-        logger.info(
-            f"[{self._client_class_name}] 尝试使用下一个代理重试 {method_name} ({context})"
-        )
-        
-        try:
-            # 重新创建client实例（会自动使用下一个代理）
-            if self._client_class_name == "BinanceFuturesClient":
-                from common.binance_futures import create_binance_futures_client
-                new_client = create_binance_futures_client(
-                    api_key=self._api_key,
-                    api_secret=self._api_secret,
-                    quote_asset=self._quote_asset,
-                    base_path=self._base_path,
-                    testnet=self._testnet
-                )
-            elif self._client_class_name == "BinanceFuturesAccountClient":
-                from common.binance_futures import create_binance_futures_account_client
-                new_client = create_binance_futures_account_client(
-                    api_key=self._api_key,
-                    api_secret=self._api_secret,
-                    quote_asset=self._quote_asset,
-                    base_path=self._base_path,
-                    testnet=self._testnet
-                )
-            elif self._client_class_name == "BinanceFuturesOrderClient":
-                from common.binance_futures import create_binance_futures_order_client
-                new_client = create_binance_futures_order_client(
-                    api_key=self._api_key,
-                    api_secret=self._api_secret,
-                    quote_asset=self._quote_asset,
-                    base_path=self._base_path,
-                    testnet=self._testnet
-                )
-            else:
-                logger.warning(f"[{self._client_class_name}] 未知的client类型，无法重试")
-                return None
-            
-            # 使用新client执行操作
-            result = func()
-            logger.info(
-                f"[{self._client_class_name}] 使用下一个代理重试成功 {method_name} ({context})"
-            )
-            return result
-        except Exception as retry_exc:
-            logger.warning(
-                f"[{self._client_class_name}] 使用下一个代理重试失败 {method_name} ({context}): {retry_exc}"
-            )
-            return None
     
     def format_symbol(self, base_symbol: str) -> str:
         """
@@ -472,9 +404,6 @@ class BinanceFuturesClient(_BinanceFuturesBase):
             base_path: 自定义REST API基础路径（可选）
             testnet: 是否使用测试网络，默认False
         """
-        super().__init__()
-        self._set_creation_params(api_key, api_secret, quote_asset, base_path, testnet)
-        
         if not BINANCE_SDK_AVAILABLE:
             raise RuntimeError(
                 "Binance official futures SDK not available. Install 'binance-common' "
@@ -488,31 +417,12 @@ class BinanceFuturesClient(_BinanceFuturesBase):
             else DERIVATIVES_TRADING_USDS_FUTURES_REST_API_PROD_URL
         )
 
-        # 获取proxy配置（仅用于REST API，WebSocket不使用代理）
-        # 注意：WebSocket连接不使用代理，只有REST API使用代理组
-        proxy_config = None
-        proxy_enabled = getattr(app_config, 'BINANCE_PROXY_ENABLED', False)
-        if proxy_enabled:
-            proxy_manager = _get_proxy_manager()
-            if proxy_manager.has_proxy():
-                proxy_config = proxy_manager.get_next_proxy()
-                logger.info(f"[BinanceFuturesClient] 使用代理: {proxy_config.get('host')}:{proxy_config.get('port')} ({proxy_config.get('protocol', 'http')})")
-            else:
-                logger.info("[BinanceFuturesClient] 代理已启用但无可用代理配置，将直接连接")
-        else:
-            logger.info("[BinanceFuturesClient] 代理未启用，REST API将直接连接")
-
         # 创建SDK配置和客户端
-        config_kwargs = {
-            "api_key": api_key,
-            "api_secret": api_secret,
-            "base_path": rest_base,
-        }
-        # 如果配置了proxy，添加到配置中
-        if proxy_config:
-            config_kwargs["proxy"] = proxy_config
-        
-        configuration = ConfigurationRestAPI(**config_kwargs)
+        configuration = ConfigurationRestAPI(
+            api_key=api_key,
+            api_secret=api_secret,
+            base_path=rest_base,
+        )
 
         self.quote_asset = quote_asset.upper()
         self._client = DerivativesTradingUsdsFutures(config_rest_api=configuration)
@@ -646,6 +556,42 @@ class BinanceFuturesClient(_BinanceFuturesBase):
             
         Returns:
             字典，key为交易对符号，value为24小时统计数据
+        """
+        # 如果配置了binance-service，优先使用binance-service
+        service_enabled = getattr(app_config, 'BINANCE_SERVICE_ENABLED', False)
+        if service_enabled:
+            service_manager = _get_binance_service_manager()
+            if service_manager.has_service():
+                try:
+                    service_config = service_manager.get_next_service()
+                    service_client = BinanceServiceClient(
+                        base_url=service_config.get('base_url'),
+                        timeout=service_config.get('timeout', getattr(app_config, 'BINANCE_SERVICE_DEFAULT_TIMEOUT', 30))
+                    )
+                    logger.info(f"[Binance Futures] 使用Binance Service获取24小时统计，交易对数量: {len(symbols)}")
+                    result = service_client.get_24h_ticker(symbols)
+                    if result:
+                        return result
+                    else:
+                        logger.warning("[Binance Futures] Binance Service返回空结果，回退到SDK调用")
+                except Exception as e:
+                    logger.warning(f"[Binance Futures] Binance Service调用失败，回退到SDK调用: {e}")
+        
+        # 回退到直接调用SDK
+        logger.info(f"[Binance Futures] 开始获取24小时价格变动统计，交易对数量: {len(symbols)}")
+        
+        # 原有的SDK调用逻辑
+        return self._get_24h_ticker_from_sdk(symbols)
+    
+    def _get_24h_ticker_from_sdk(self, symbols: List[str]) -> Dict[str, Dict]:
+        """
+        获取指定交易对的24小时价格变动统计
+        
+        Args:
+            symbols: 交易对符号列表，如 ['BTCUSDT', 'ETHUSDT']
+            
+        Returns:
+            字典，key为交易对符号，value为24小时统计数据
             {
                 "symbol": "BTCUSDT",
                 "priceChange": "-94.99999800",    //24小时价格变动
@@ -739,6 +685,27 @@ class BinanceFuturesClient(_BinanceFuturesBase):
         Returns:
             字典，key为交易对符号，value为实时价格数据
         """
+        # 如果配置了binance-service，优先使用binance-service
+        service_enabled = getattr(app_config, 'BINANCE_SERVICE_ENABLED', False)
+        if service_enabled:
+            service_manager = _get_binance_service_manager()
+            if service_manager.has_service():
+                try:
+                    service_config = service_manager.get_next_service()
+                    service_client = BinanceServiceClient(
+                        base_url=service_config.get('base_url'),
+                        timeout=service_config.get('timeout', getattr(app_config, 'BINANCE_SERVICE_DEFAULT_TIMEOUT', 30))
+                    )
+                    logger.debug(f"[Binance Futures] 使用Binance Service获取实时价格，交易对数量: {len(symbols)}")
+                    result = service_client.get_symbol_prices(symbols)
+                    if result:
+                        return result
+                    else:
+                        logger.warning("[Binance Futures] Binance Service返回空结果，回退到SDK调用")
+                except Exception as e:
+                    logger.warning(f"[Binance Futures] Binance Service调用失败，回退到SDK调用: {e}")
+        
+        # 回退到直接调用SDK
         logger.debug(f"[Binance Futures] 开始获取实时价格，交易对数量: {len(symbols)}")
 
         payload: Dict[str, Dict] = {}
@@ -821,6 +788,27 @@ class BinanceFuturesClient(_BinanceFuturesBase):
         Returns:
             K线数据列表，每个元素为包含完整K线信息的字典
         """
+        # 如果配置了binance-service，优先使用binance-service
+        service_enabled = getattr(app_config, 'BINANCE_SERVICE_ENABLED', False)
+        if service_enabled:
+            service_manager = _get_binance_service_manager()
+            if service_manager.has_service():
+                try:
+                    service_config = service_manager.get_next_service()
+                    service_client = BinanceServiceClient(
+                        base_url=service_config.get('base_url'),
+                        timeout=service_config.get('timeout', getattr(app_config, 'BINANCE_SERVICE_DEFAULT_TIMEOUT', 30))
+                    )
+                    logger.info(f"[Binance Futures] 使用Binance Service获取K线数据, symbol={symbol}, interval={interval}, limit={limit}")
+                    result = service_client.get_klines(symbol, interval, limit, startTime, endTime)
+                    if result:
+                        return result
+                    else:
+                        logger.warning("[Binance Futures] Binance Service返回空结果，回退到SDK调用")
+                except Exception as e:
+                    logger.warning(f"[Binance Futures] Binance Service调用失败，回退到SDK调用: {e}")
+        
+        # 回退到直接调用SDK
         logger.info(f"[Binance Futures] 开始获取K线数据, symbol={symbol}, interval={interval}, limit={limit}, startTime={startTime}, endTime={endTime}")
 
         try:
@@ -939,50 +927,6 @@ class BinanceFuturesClient(_BinanceFuturesBase):
             return klines
 
         except Exception as exc:
-            error_msg = str(exc)
-            # 检测是否是"restricted location"错误，如果是且配置了多个代理，尝试使用下一个代理重试
-            if self._is_restricted_location_error(exc):
-                logger.warning(
-                    f"[Binance Futures] 检测到地理位置限制错误，尝试使用下一个代理重试: {error_msg}"
-                )
-                # 尝试使用下一个代理重新创建client并重试
-                # 检查是否配置了多个代理
-                proxy_enabled = getattr(app_config, 'BINANCE_PROXY_ENABLED', False)
-                if proxy_enabled:
-                    proxy_manager = _get_proxy_manager()
-                    if proxy_manager.has_proxy() and len(proxy_manager._proxy_list) > 1:
-                        try:
-                            # 重新创建client实例（会自动使用下一个代理）
-                            from common.binance_futures import create_binance_futures_client
-                            new_client = create_binance_futures_client(
-                                api_key=self._api_key,
-                                api_secret=self._api_secret,
-                                quote_asset=self._quote_asset,
-                                base_path=self._base_path,
-                                testnet=self._testnet
-                            )
-                            # 使用新client重新调用get_klines（只重试一次，避免无限递归）
-                            logger.info(
-                                f"[Binance Futures] 使用下一个代理重试get_klines: symbol={symbol}, interval={interval}, limit={limit}"
-                            )
-                            return new_client.get_klines(symbol, interval, limit, startTime, endTime)
-                        except Exception as retry_exc:
-                            # 如果重试也失败，检查是否还是restricted location错误
-                            if self._is_restricted_location_error(retry_exc):
-                                logger.warning(
-                                    f"[Binance Futures] 使用下一个代理重试仍然遇到地理位置限制错误: {retry_exc}, "
-                                    f"symbol={symbol}, interval={interval}, limit={limit}"
-                                )
-                            else:
-                                logger.warning(
-                                    f"[Binance Futures] 使用下一个代理重试失败: {retry_exc}, "
-                                    f"symbol={symbol}, interval={interval}, limit={limit}"
-                                )
-                    else:
-                        logger.warning(
-                            f"[Binance Futures] 代理数量不足（需要至少2个），无法重试地理位置限制错误"
-                        )
-            
             logger.error(
                 f"[Binance Futures] 获取K线数据失败: {exc}, "
                 f"symbol={symbol}, interval={interval}, limit={limit}",
@@ -1017,9 +961,6 @@ class BinanceFuturesAccountClient(_BinanceFuturesBase):
             base_path: 自定义REST API基础路径（可选）
             testnet: 是否使用测试网络，默认False
         """
-        super().__init__()
-        self._set_creation_params(api_key, api_secret, quote_asset, base_path, testnet)
-        
         if not BINANCE_SDK_AVAILABLE:
             raise RuntimeError(
                 "Binance official futures SDK not available. Install 'binance-common' "
@@ -1033,31 +974,12 @@ class BinanceFuturesAccountClient(_BinanceFuturesBase):
             else DERIVATIVES_TRADING_USDS_FUTURES_REST_API_PROD_URL
         )
 
-        # 获取proxy配置（仅用于REST API，WebSocket不使用代理）
-        # 注意：WebSocket连接不使用代理，只有REST API使用代理组
-        proxy_config = None
-        proxy_enabled = getattr(app_config, 'BINANCE_PROXY_ENABLED', False)
-        if proxy_enabled:
-            proxy_manager = _get_proxy_manager()
-            if proxy_manager.has_proxy():
-                proxy_config = proxy_manager.get_next_proxy()
-                logger.info(f"[BinanceFuturesClient] 使用代理: {proxy_config.get('host')}:{proxy_config.get('port')} ({proxy_config.get('protocol', 'http')})")
-            else:
-                logger.info("[BinanceFuturesClient] 代理已启用但无可用代理配置，将直接连接")
-        else:
-            logger.info("[BinanceFuturesClient] 代理未启用，REST API将直接连接")
-
         # 创建SDK配置和客户端
-        config_kwargs = {
-            "api_key": api_key,
-            "api_secret": api_secret,
-            "base_path": rest_base,
-        }
-        # 如果配置了proxy，添加到配置中
-        if proxy_config:
-            config_kwargs["proxy"] = proxy_config
-        
-        configuration = ConfigurationRestAPI(**config_kwargs)
+        configuration = ConfigurationRestAPI(
+            api_key=api_key,
+            api_secret=api_secret,
+            base_path=rest_base,
+        )
 
         self.quote_asset = quote_asset.upper()
         self._client = DerivativesTradingUsdsFutures(config_rest_api=configuration)
@@ -1114,9 +1036,6 @@ class BinanceFuturesOrderClient(_BinanceFuturesBase):
             base_path: 自定义REST API基础路径（可选）
             testnet: 是否使用测试网络，默认False
         """
-        super().__init__()
-        self._set_creation_params(api_key, api_secret, quote_asset, base_path, testnet)
-        
         if not BINANCE_SDK_AVAILABLE:
             raise RuntimeError(
                 "Binance official futures SDK not available. Install 'binance-common' "
@@ -1130,31 +1049,12 @@ class BinanceFuturesOrderClient(_BinanceFuturesBase):
             else DERIVATIVES_TRADING_USDS_FUTURES_REST_API_PROD_URL
         )
 
-        # 获取proxy配置（仅用于REST API，WebSocket不使用代理）
-        # 注意：WebSocket连接不使用代理，只有REST API使用代理组
-        proxy_config = None
-        proxy_enabled = getattr(app_config, 'BINANCE_PROXY_ENABLED', False)
-        if proxy_enabled:
-            proxy_manager = _get_proxy_manager()
-            if proxy_manager.has_proxy():
-                proxy_config = proxy_manager.get_next_proxy()
-                logger.info(f"[BinanceFuturesClient] 使用代理: {proxy_config.get('host')}:{proxy_config.get('port')} ({proxy_config.get('protocol', 'http')})")
-            else:
-                logger.info("[BinanceFuturesClient] 代理已启用但无可用代理配置，将直接连接")
-        else:
-            logger.info("[BinanceFuturesClient] 代理未启用，REST API将直接连接")
-
         # 创建SDK配置和客户端
-        config_kwargs = {
-            "api_key": api_key,
-            "api_secret": api_secret,
-            "base_path": rest_base,
-        }
-        # 如果配置了proxy，添加到配置中
-        if proxy_config:
-            config_kwargs["proxy"] = proxy_config
-        
-        configuration = ConfigurationRestAPI(**config_kwargs)
+        configuration = ConfigurationRestAPI(
+            api_key=api_key,
+            api_secret=api_secret,
+            base_path=rest_base,
+        )
 
         self.quote_asset = quote_asset.upper()
         self._client = DerivativesTradingUsdsFutures(config_rest_api=configuration)

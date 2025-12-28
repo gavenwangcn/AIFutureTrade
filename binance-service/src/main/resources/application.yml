@@ -1,0 +1,77 @@
+spring:
+  application:
+    name: binance-service
+  profiles:
+    active: dev
+  main:
+    banner-mode: console
+  # 修复 Springfox 与 Spring Boot 2.7+ 的兼容性问题
+  mvc:
+    pathmatch:
+      matching-strategy: ant_path_matcher
+
+# 服务器配置
+server:
+  port: ${SERVER_PORT:5004}  # 默认使用5004端口，可通过环境变量SERVER_PORT覆盖
+  servlet:
+    context-path: /
+    encoding:
+      charset: UTF-8
+      enabled: true
+      force: true
+  tomcat:
+    uri-encoding: UTF-8
+    max-threads: 200
+    min-spare-threads: 10
+    connection-timeout: 30000
+
+# 日志配置
+logging:
+  level:
+    root: info
+    com.aifuturetrade.binanceservice: info
+    # 禁用 Spring Boot 自动配置条件评估报告日志
+    org.springframework.boot.autoconfigure: WARN
+    org.springframework.boot.autoconfigure.condition: WARN
+    # 降低HTTP解析错误日志级别
+    org.apache.coyote.http11: WARN
+    org.apache.tomcat: WARN
+  pattern:
+    console: "%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n"
+    file: "%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n"
+  file:
+    name: logs/binance-service.log
+    max-size: 10MB
+    max-history: 7
+
+# Binance API配置（可通过环境变量覆盖）
+binance:
+    api-key: ${BINANCE_API_KEY:LBtjhBgX1RCksNJDdOoJPeDD30Z70YIGHHH9DrqjIDDkK7xcPRQcgydPxGRr6MN1}
+    secret-key: ${BINANCE_SECRET_KEY:55arJnwlytDflHv151UpHN1s32ACnJZEs86mbc79wGyeuSUJNHTDPN7jEgBbqO6I}
+    private-key-path: 
+    private-key-pass: 
+    base-url: https://api.binance.com
+    testnet: false
+    quote-asset: USDT
+    # 连接超时时间（毫秒）
+    connect-timeout: 10000
+    # 读取超时时间（毫秒）
+    read-timeout: 50000
+    # 重试次数
+    retries: 3
+    # 重试间隔时间（毫秒）
+    backoff: 200
+    # 是否启用压缩
+    compression: true
+
+# Swagger配置
+swagger:
+  enabled: true
+  title: Binance Service API
+  description: Binance Service API Documentation
+  version: 1.0.0
+  base-package: com.aifuturetrade.binanceservice.controller
+  contact:
+    name: AI Future Trade Team
+    email: contact@aifuturetrade.com
+

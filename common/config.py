@@ -84,37 +84,39 @@ BUY_DECISION_THREAD_COUNT = 1  # 买入决策API调用的并发线程数
 SELL_DECISION_THREAD_COUNT = 1  # 卖出决策API调用的并发线程数
 
 
-# ============ 代理配置 ============
+# ============ Binance Service配置 ============
 
-# 币安API代理配置（用于REST API调用，减少IP限流）
-# 支持配置多个代理，系统会自动轮询使用
-# 格式：列表，每个元素是一个代理配置字典
-# 注意：WebSocket连接不使用代理，只有REST API使用代理
-BINANCE_PROXY_LIST = [
+# Binance Service微服务配置（用于查询symbol相关数据，如实时价格、K线信息等）
+# 支持配置多个服务，系统会自动轮询使用
+# 格式：列表，每个元素是一个服务配置字典
+# 注意：下单和查询账户相关的接口不使用binance-service，只有查询symbol相关数据的接口使用
+BINANCE_SERVICE_LIST = [
     # 示例配置（请根据实际情况修改）：
     # {
-    #     "host": "127.0.0.1",
-    #     "port": 8080,
-    #     "protocol": "http",  # 或 'https'
-    #     "auth": {  # 可选，如果代理需要认证
-    #         "username": "proxy-user",
-    #         "password": "proxy-password",
-    #     },
+    #     "base_url": "http://localhost:5004",  # Binance Service基础URL
+    #     "timeout": 30,  # 请求超时时间（秒），默认30秒
+    # },
+    # {
+    #     "base_url": "http://localhost:5005",
+    #     "timeout": 30,
     # },
 ]
 
-# 从环境变量读取代理配置（JSON格式）
-# 环境变量格式：BINANCE_PROXY_LIST='[{"host":"127.0.0.1","port":8080,"protocol":"http"}]'
+# 从环境变量读取Binance Service配置（JSON格式）
+# 环境变量格式：BINANCE_SERVICE_LIST='[{"base_url":"http://localhost:5004","timeout":30}]'
 import json
-_proxy_list_env = os.getenv('BINANCE_PROXY_LIST', '')
-if _proxy_list_env:
+_binance_service_list_env = os.getenv('BINANCE_SERVICE_LIST', '')
+if _binance_service_list_env:
     try:
-        BINANCE_PROXY_LIST = json.loads(_proxy_list_env)
+        BINANCE_SERVICE_LIST = json.loads(_binance_service_list_env)
     except json.JSONDecodeError:
         pass  # 如果解析失败，使用默认值
 
-# 是否启用代理（如果BINANCE_PROXY_LIST为空，则自动禁用）
-BINANCE_PROXY_ENABLED = len(BINANCE_PROXY_LIST) > 0
+# 是否启用Binance Service（如果BINANCE_SERVICE_LIST为空，则自动禁用）
+BINANCE_SERVICE_ENABLED = len(BINANCE_SERVICE_LIST) > 0
+
+# Binance Service请求超时时间（秒），如果服务配置中没有指定，使用此默认值
+BINANCE_SERVICE_DEFAULT_TIMEOUT = 30
 
 
 # ============ 日志配置 ============

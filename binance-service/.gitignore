@@ -1,0 +1,9 @@
+target/
+logs/
+*.pid
+*.log
+binance-service.service
+.DS_Store
+.idea/
+*.iml
+

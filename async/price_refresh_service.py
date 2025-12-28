@@ -97,6 +97,7 @@ def parse_cron_interval(cron_expr: str) -> int:
 # ============ 单个Symbol刷新方法 ============
 
 async def refresh_price_for_symbol(
+    binance_client: BinanceFuturesClient,
     db: MarketTickersDatabase,
     symbol: str
 ) -> bool:
@@ -107,6 +108,7 @@ async def refresh_price_for_symbol(
     并更新24_market_tickers表中的open_price和update_price_date字段。
     
     Args:
+        binance_client: 币安期货客户端实例
         db: MySQL数据库实例
         symbol: 交易对符号（如'BTCUSDT'）
     
@@ -114,31 +116,12 @@ async def refresh_price_for_symbol(
         bool: 刷新是否成功
     
     Note:
-        - 每次调用都创建新的BinanceFuturesClient实例，支持代理轮询
         - 使用asyncio.to_thread避免阻塞事件循环
         - 兼容旧列表格式和新字典格式的K线数据
         - 如果K线数据不足或价格无效，返回False
         - update_price_date使用当前UTC+8时间
     """
     try:
-        # 每次调用都创建新的client实例，支持代理轮询
-        from common.binance_futures import create_binance_futures_client
-        import common.config as app_config
-        
-        api_key = getattr(app_config, 'BINANCE_API_KEY', '')
-        api_secret = getattr(app_config, 'BINANCE_API_SECRET', '')
-        if not api_key or not api_secret:
-            logger.warning("[PriceRefresh] Binance API key/secret not configured")
-            return False
-        
-        # 创建新的client实例（自动轮询代理）
-        binance_client = create_binance_futures_client(
-            api_key=api_key,
-            api_secret=api_secret,
-            quote_asset=getattr(app_config, 'FUTURES_QUOTE_ASSET', 'USDT'),
-            testnet=getattr(app_config, 'BINANCE_TESTNET', False)
-        )
-        
         # 获取最近两天的日K线数据（limit=2）
         # interval='1d' 表示日K线
         # 使用asyncio.to_thread避免阻塞事件循环
@@ -220,6 +203,7 @@ async def refresh_price_for_symbol(
 # ============ 批量刷新方法 ============
 
 async def refresh_prices_batch(
+    binance_client: BinanceFuturesClient,
     db: MarketTickersDatabase,
     symbols: List[str],
     max_per_minute: int = 1000
@@ -231,6 +215,7 @@ async def refresh_prices_batch(
     批次内并发刷新，批次间等待60秒以避免API限流。
     
     Args:
+        binance_client: 币安期货客户端实例
         db: MySQL数据库实例
         symbols: 需要刷新的symbol列表
         max_per_minute: 每分钟最多刷新的symbol数量（默认1000）
@@ -242,7 +227,6 @@ async def refresh_prices_batch(
             - failed: 失败数量
     
     Note:
-        - 每次调用refresh_price_for_symbol时都会创建新的BinanceFuturesClient实例，支持代理轮询
         - 批次内使用asyncio.gather并发执行，提高效率
         - 批次间等待60秒，避免API限流
         - 记录详细的批次统计和累计统计信息
@@ -281,9 +265,8 @@ async def refresh_prices_batch(
         )
         
         # 并发刷新当前批次的所有symbol
-        # 每次调用refresh_price_for_symbol时都会创建新的client实例，支持代理轮询
         tasks = [
-            refresh_price_for_symbol(db, symbol)
+            refresh_price_for_symbol(binance_client, db, symbol)
             for symbol in batch
         ]
         
@@ -375,10 +358,14 @@ async def refresh_all_prices() -> None:
         db = MarketTickersDatabase()
         logger.info("[PriceRefresh] [步骤1] 成功创建MarketTickersDatabase实例")
         
-        # 不再在函数开始时创建client实例
-        # 改为在每次调用refresh_price_for_symbol时创建新实例，支持代理轮询
-        logger.info("[PriceRefresh] [步骤1] 将使用工厂方法创建BinanceFuturesClient实例（每次REST API调用时创建，支持代理轮询）")
-        logger.info("[PriceRefresh] [步骤1] ✅ 数据库初始化完成")
+        logger.info("[PriceRefresh] [步骤1] 开始创建BinanceFuturesClient实例")
+        binance_client = BinanceFuturesClient(
+            api_key=app_config.BINANCE_API_KEY,
+            api_secret=app_config.BINANCE_API_SECRET,
+            quote_asset=getattr(app_config, 'FUTURES_QUOTE_ASSET', 'USDT')
+        )
+        logger.info("[PriceRefresh] [步骤1] 成功创建BinanceFuturesClient实例")
+        logger.info("[PriceRefresh] [步骤1] ✅ 数据库和币安客户端初始化完成")
         
         # 获取需要刷新的symbol列表
         # 使用asyncio.to_thread避免阻塞事件循环
@@ -416,6 +403,7 @@ async def refresh_all_prices() -> None:
         logger.info("[PriceRefresh] [步骤3] 开始执行批量价格刷新...")
         batch_start_time = datetime.now(timezone(timedelta(hours=8)))
         result = await refresh_prices_batch(
+            binance_client=binance_client,
             db=db,
             symbols=symbols,
             max_per_minute=max_per_minute
