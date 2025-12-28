@@ -102,11 +102,6 @@ BINANCE_PROXY_LIST = [
     #     },
     # },
     {
-        "host": "109.206.245.131",
-        "port": 4888,
-        "protocol": "http"
-    },
-    {
         "host": "193.134.209.95",
         "port": 34888,
         "protocol": "http"

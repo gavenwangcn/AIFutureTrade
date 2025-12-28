@@ -226,6 +226,111 @@ class _BinanceFuturesBase:
     所有币安期货客户端类都继承此基类，共享数据格式转换等工具方法。
     """
     
+    def __init__(self):
+        """初始化基类，保存创建参数用于重试"""
+        self._api_key: Optional[str] = None
+        self._api_secret: Optional[str] = None
+        self._quote_asset: str = "USDT"
+        self._base_path: Optional[str] = None
+        self._testnet: bool = False
+        self._client_class_name: Optional[str] = None
+    
+    def _set_creation_params(self, api_key: str, api_secret: str, quote_asset: str = "USDT",
+                             base_path: Optional[str] = None, testnet: bool = False):
+        """保存创建参数，用于重试时重新创建client"""
+        self._api_key = api_key
+        self._api_secret = api_secret
+        self._quote_asset = quote_asset
+        self._base_path = base_path
+        self._testnet = testnet
+        self._client_class_name = self.__class__.__name__
+    
+    def _is_restricted_location_error(self, error: Exception) -> bool:
+        """
+        检测是否是地理位置限制错误
+        
+        Args:
+            error: 异常对象
+            
+        Returns:
+            如果是地理位置限制错误返回True，否则返回False
+        """
+        error_msg = str(error).lower()
+        return "restricted location" in error_msg or "eligibility" in error_msg
+    
+    def _retry_with_next_proxy(self, func: Callable, method_name: str = "", context: str = "") -> Optional[Any]:
+        """
+        使用下一个代理重试操作
+        
+        当遇到地理位置限制错误时，尝试使用下一个代理重新创建client并重试。
+        
+        Args:
+            func: 要重试的函数（lambda表达式，用于重新创建client并调用方法）
+            method_name: 方法名称，用于日志
+            context: 上下文信息，用于日志
+            
+        Returns:
+            如果重试成功返回结果，否则返回None
+        """
+        proxy_enabled = getattr(app_config, 'BINANCE_PROXY_ENABLED', False)
+        if not proxy_enabled:
+            logger.debug(f"[{self._client_class_name}] 代理未启用，无法重试")
+            return None
+        
+        proxy_manager = _get_proxy_manager()
+        if not proxy_manager.has_proxy() or len(proxy_manager._proxy_list) <= 1:
+            logger.debug(f"[{self._client_class_name}] 代理数量不足（需要至少2个），无法重试")
+            return None
+        
+        logger.info(
+            f"[{self._client_class_name}] 尝试使用下一个代理重试 {method_name} ({context})"
+        )
+        
+        try:
+            # 重新创建client实例（会自动使用下一个代理）
+            if self._client_class_name == "BinanceFuturesClient":
+                from common.binance_futures import create_binance_futures_client
+                new_client = create_binance_futures_client(
+                    api_key=self._api_key,
+                    api_secret=self._api_secret,
+                    quote_asset=self._quote_asset,
+                    base_path=self._base_path,
+                    testnet=self._testnet
+                )
+            elif self._client_class_name == "BinanceFuturesAccountClient":
+                from common.binance_futures import create_binance_futures_account_client
+                new_client = create_binance_futures_account_client(
+                    api_key=self._api_key,
+                    api_secret=self._api_secret,
+                    quote_asset=self._quote_asset,
+                    base_path=self._base_path,
+                    testnet=self._testnet
+                )
+            elif self._client_class_name == "BinanceFuturesOrderClient":
+                from common.binance_futures import create_binance_futures_order_client
+                new_client = create_binance_futures_order_client(
+                    api_key=self._api_key,
+                    api_secret=self._api_secret,
+                    quote_asset=self._quote_asset,
+                    base_path=self._base_path,
+                    testnet=self._testnet
+                )
+            else:
+                logger.warning(f"[{self._client_class_name}] 未知的client类型，无法重试")
+                return None
+            
+            # 使用新client执行操作
+            result = func()
+            logger.info(
+                f"[{self._client_class_name}] 使用下一个代理重试成功 {method_name} ({context})"
+            )
+            return result
+        except Exception as retry_exc:
+            logger.warning(
+                f"[{self._client_class_name}] 使用下一个代理重试失败 {method_name} ({context}): {retry_exc}"
+            )
+            return None
+    
     def format_symbol(self, base_symbol: str) -> str:
         """
         格式化交易对符号，添加计价资产后缀
@@ -367,6 +472,9 @@ class BinanceFuturesClient(_BinanceFuturesBase):
             base_path: 自定义REST API基础路径（可选）
             testnet: 是否使用测试网络，默认False
         """
+        super().__init__()
+        self._set_creation_params(api_key, api_secret, quote_asset, base_path, testnet)
+        
         if not BINANCE_SDK_AVAILABLE:
             raise RuntimeError(
                 "Binance official futures SDK not available. Install 'binance-common' "
@@ -831,6 +939,50 @@ class BinanceFuturesClient(_BinanceFuturesBase):
             return klines
 
         except Exception as exc:
+            error_msg = str(exc)
+            # 检测是否是"restricted location"错误，如果是且配置了多个代理，尝试使用下一个代理重试
+            if self._is_restricted_location_error(exc):
+                logger.warning(
+                    f"[Binance Futures] 检测到地理位置限制错误，尝试使用下一个代理重试: {error_msg}"
+                )
+                # 尝试使用下一个代理重新创建client并重试
+                # 检查是否配置了多个代理
+                proxy_enabled = getattr(app_config, 'BINANCE_PROXY_ENABLED', False)
+                if proxy_enabled:
+                    proxy_manager = _get_proxy_manager()
+                    if proxy_manager.has_proxy() and len(proxy_manager._proxy_list) > 1:
+                        try:
+                            # 重新创建client实例（会自动使用下一个代理）
+                            from common.binance_futures import create_binance_futures_client
+                            new_client = create_binance_futures_client(
+                                api_key=self._api_key,
+                                api_secret=self._api_secret,
+                                quote_asset=self._quote_asset,
+                                base_path=self._base_path,
+                                testnet=self._testnet
+                            )
+                            # 使用新client重新调用get_klines（只重试一次，避免无限递归）
+                            logger.info(
+                                f"[Binance Futures] 使用下一个代理重试get_klines: symbol={symbol}, interval={interval}, limit={limit}"
+                            )
+                            return new_client.get_klines(symbol, interval, limit, startTime, endTime)
+                        except Exception as retry_exc:
+                            # 如果重试也失败，检查是否还是restricted location错误
+                            if self._is_restricted_location_error(retry_exc):
+                                logger.warning(
+                                    f"[Binance Futures] 使用下一个代理重试仍然遇到地理位置限制错误: {retry_exc}, "
+                                    f"symbol={symbol}, interval={interval}, limit={limit}"
+                                )
+                            else:
+                                logger.warning(
+                                    f"[Binance Futures] 使用下一个代理重试失败: {retry_exc}, "
+                                    f"symbol={symbol}, interval={interval}, limit={limit}"
+                                )
+                    else:
+                        logger.warning(
+                            f"[Binance Futures] 代理数量不足（需要至少2个），无法重试地理位置限制错误"
+                        )
+            
             logger.error(
                 f"[Binance Futures] 获取K线数据失败: {exc}, "
                 f"symbol={symbol}, interval={interval}, limit={limit}",
@@ -865,6 +1017,9 @@ class BinanceFuturesAccountClient(_BinanceFuturesBase):
             base_path: 自定义REST API基础路径（可选）
             testnet: 是否使用测试网络，默认False
         """
+        super().__init__()
+        self._set_creation_params(api_key, api_secret, quote_asset, base_path, testnet)
+        
         if not BINANCE_SDK_AVAILABLE:
             raise RuntimeError(
                 "Binance official futures SDK not available. Install 'binance-common' "
@@ -959,6 +1114,9 @@ class BinanceFuturesOrderClient(_BinanceFuturesBase):
             base_path: 自定义REST API基础路径（可选）
             testnet: 是否使用测试网络，默认False
         """
+        super().__init__()
+        self._set_creation_params(api_key, api_secret, quote_asset, base_path, testnet)
+        
         if not BINANCE_SDK_AVAILABLE:
             raise RuntimeError(
                 "Binance official futures SDK not available. Install 'binance-common' "
