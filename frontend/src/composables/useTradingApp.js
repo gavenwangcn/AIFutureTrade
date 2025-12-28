@@ -2058,11 +2058,12 @@ let portfolioSymbolsRefreshInterval = null // 模型持仓合约列表自动刷�
       pendingDeleteModelId.value = null
       showDeleteModelConfirmModal.value = false
       
-      // 如果删除的是当前选中的模型，切换到聚合视图
-      if (currentModelId.value === deletedModelId) {
+      // 先刷新模型列表
+      await loadModels()
+      
+      // 如果删除的是当前选中的模型，或者模型列表为空（删除的是最后一个模型），切换到聚合视图
+      if (currentModelId.value === deletedModelId || models.value.length === 0) {
         await showAggregatedView()
-      } else {
-        await loadModels()
       }
       
       alert('模型删除成功')
