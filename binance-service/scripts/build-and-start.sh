@@ -98,8 +98,18 @@ build_jar() {
     log_info "开始构建Binance Service JAR包..."
     cd "$BINANCE_SERVICE_DIR"
     
-    # 清理并构建
-    mvn clean package -DskipTests
+    log_info "执行Maven构建命令: mvn clean package -DskipTests"
+    log_info "============================================"
+    
+    # 清理并构建，显示输出
+    if mvn clean package -DskipTests; then
+        log_info "============================================"
+        log_info "Maven构建完成"
+    else
+        log_error "============================================"
+        log_error "Maven构建失败"
+        exit 1
+    fi
     
     # 检查JAR文件是否存在
     JAR_FILE="$BINANCE_SERVICE_DIR/target/binance-service-1.0.0.jar"
@@ -110,7 +120,9 @@ build_jar() {
         exit 1
     fi
     
-    log_info "JAR包构建成功: $JAR_FILE"
+    # 显示JAR文件信息
+    JAR_SIZE=$(ls -lh "$JAR_FILE" | awk '{print $5}')
+    log_info "JAR包构建成功: $JAR_FILE (大小: $JAR_SIZE)"
     echo "$JAR_FILE"
 }
 
@@ -131,31 +143,53 @@ start_service() {
     
     # 读取端口配置（从application.yml）
     # 匹配格式：port: ${SERVER_PORT:5004} 或 port: 5004
-    SERVER_PORT=$(grep -E "^\s*port:" "$BINANCE_SERVICE_DIR/src/main/resources/application.yml" | sed 's/.*port:\s*\(.*\)/\1/' | sed 's/\${SERVER_PORT:\([^}]*\)}/\1/' | sed 's/://g' | tr -d ' ' | head -n 1)
+    SERVER_PORT=$(grep -E "^\s*port:" "$BINANCE_SERVICE_DIR/src/main/resources/application.yml" 2>/dev/null | sed 's/.*port:\s*\(.*\)/\1/' | sed 's/\${SERVER_PORT:\([^}]*\)}/\1/' | sed 's/://g' | tr -d ' ' | head -n 1)
     if [ -z "$SERVER_PORT" ] || [ "$SERVER_PORT" = "" ]; then
         SERVER_PORT=5004
+        log_warn "无法从application.yml读取端口配置，使用默认端口: $SERVER_PORT"
+    else
+        log_info "从application.yml读取到服务端口: $SERVER_PORT"
     fi
-    
-    log_info "服务端口: $SERVER_PORT"
     
     # 设置JVM参数
     JAVA_OPTS="-Xms512m -Xmx1024m -Dserver.port=$SERVER_PORT"
     
     # 启动服务（后台运行）
+    log_info "执行启动命令: java $JAVA_OPTS -jar $JAR_FILE"
     nohup java $JAVA_OPTS -jar "$JAR_FILE" > "$BINANCE_SERVICE_DIR/logs/startup.log" 2>&1 &
     PID=$!
     
     log_info "Binance Service已启动，PID: $PID"
-    log_info "日志文件: $BINANCE_SERVICE_DIR/logs/startup.log"
-    log_info "应用日志: $BINANCE_SERVICE_DIR/logs/binance-service.log"
+    log_info "启动日志文件: $BINANCE_SERVICE_DIR/logs/startup.log"
+    log_info "应用日志文件: $BINANCE_SERVICE_DIR/logs/binance-service.log"
     
     # 等待几秒检查服务是否启动成功
-    sleep 3
-    if ps -p $PID > /dev/null; then
-        log_info "服务运行正常"
+    log_info "等待服务启动..."
+    sleep 5
+    
+    if ps -p $PID > /dev/null 2>&1; then
+        log_info "服务进程运行正常 (PID: $PID)"
         echo "$PID" > "$BINANCE_SERVICE_DIR/binance-service.pid"
+        
+        # 显示启动日志的最后几行
+        log_info "============================================"
+        log_info "启动日志（最后20行）:"
+        log_info "============================================"
+        if [ -f "$BINANCE_SERVICE_DIR/logs/startup.log" ]; then
+            tail -n 20 "$BINANCE_SERVICE_DIR/logs/startup.log" | while IFS= read -r line; do
+                echo "  $line"
+            done
+        else
+            log_warn "启动日志文件尚未创建"
+        fi
+        log_info "============================================"
     else
-        log_error "服务启动失败，请查看日志: $BINANCE_SERVICE_DIR/logs/startup.log"
+        log_error "服务启动失败，进程已退出"
+        log_error "请查看启动日志: $BINANCE_SERVICE_DIR/logs/startup.log"
+        if [ -f "$BINANCE_SERVICE_DIR/logs/startup.log" ]; then
+            log_error "启动日志内容:"
+            cat "$BINANCE_SERVICE_DIR/logs/startup.log"
+        fi
         exit 1
     fi
 }
@@ -190,18 +224,42 @@ main() {
     JAR_FILE=$(build_jar)
     
     # 询问是否启动服务
+    echo
     read -p "是否立即启动服务? (y/n): " -n 1 -r
     echo
     if [[ $REPLY =~ ^[Yy]$ ]]; then
         start_service "$JAR_FILE"
+        
         log_info "============================================"
         log_info "构建和启动完成！"
         log_info "============================================"
-        log_info "查看日志: tail -f $BINANCE_SERVICE_DIR/logs/binance-service.log"
-        log_info "停止服务: kill \$(cat $BINANCE_SERVICE_DIR/binance-service.pid)"
+        log_info "服务信息:"
+        log_info "  - PID文件: $BINANCE_SERVICE_DIR/binance-service.pid"
+        log_info "  - 启动日志: $BINANCE_SERVICE_DIR/logs/startup.log"
+        log_info "  - 应用日志: $BINANCE_SERVICE_DIR/logs/binance-service.log"
+        log_info ""
+        log_info "常用命令:"
+        log_info "  查看实时日志: tail -f $BINANCE_SERVICE_DIR/logs/binance-service.log"
+        log_info "  查看启动日志: tail -f $BINANCE_SERVICE_DIR/logs/startup.log"
+        log_info "  停止服务: kill \$(cat $BINANCE_SERVICE_DIR/binance-service.pid)"
+        log_info "  检查服务状态: ps -p \$(cat $BINANCE_SERVICE_DIR/binance-service.pid)"
+        log_info ""
+        
+        # 询问是否查看实时日志
+        read -p "是否查看实时应用日志? (y/n): " -n 1 -r
+        echo
+        if [[ $REPLY =~ ^[Yy]$ ]]; then
+            log_info "按 Ctrl+C 退出日志查看"
+            tail -f "$BINANCE_SERVICE_DIR/logs/binance-service.log"
+        fi
     else
-        log_info "JAR包已构建完成: $JAR_FILE"
-        log_info "手动启动: java -jar $JAR_FILE"
+        log_info "============================================"
+        log_info "JAR包已构建完成"
+        log_info "============================================"
+        log_info "JAR文件: $JAR_FILE"
+        log_info "手动启动命令:"
+        log_info "  cd $BINANCE_SERVICE_DIR"
+        log_info "  java -Xms512m -Xmx1024m -Dserver.port=$SERVER_PORT -jar $JAR_FILE"
     fi
 }
 
