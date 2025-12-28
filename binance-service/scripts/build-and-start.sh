@@ -138,13 +138,20 @@ build_jar() {
 read_server_port() {
     # 优先使用环境变量
     if [ -n "$SERVER_PORT" ]; then
-        echo "$SERVER_PORT"
+        # 去除可能的注释和空格，只保留数字
+        echo "$SERVER_PORT" | sed 's/#.*$//' | sed 's/[^0-9]//g'
         return
     fi
     
     # 从application.yml读取
     # 匹配格式：port: ${SERVER_PORT:5004} 或 port: 5004
-    local port=$(grep -E "^\s*port:" "$BINANCE_SERVICE_DIR/src/main/resources/application.yml" 2>/dev/null | sed 's/.*port:\s*\(.*\)/\1/' | sed 's/\${SERVER_PORT:\([^}]*\)}/\1/' | sed 's/://g' | tr -d ' ' | head -n 1)
+    # 去除注释，只提取数字部分
+    local port=$(grep -E "^\s*port:" "$BINANCE_SERVICE_DIR/src/main/resources/application.yml" 2>/dev/null | \
+        sed 's/.*port:\s*\(.*\)/\1/' | \
+        sed 's/#.*$//' | \
+        sed 's/\${SERVER_PORT:\([^}]*\)}/\1/' | \
+        sed 's/[^0-9]//g' | \
+        head -n 1)
     
     if [ -z "$port" ] || [ "$port" = "" ]; then
         # 如果都读取不到，返回空字符串，让调用者决定默认值
@@ -175,8 +182,15 @@ start_service() {
         log_warn "无法从配置文件或环境变量读取端口配置，请检查application.yml或设置SERVER_PORT环境变量"
         exit 1
     fi
+    # 确保端口号是纯数字（去除任何可能的非数字字符）
+    SERVER_PORT=$(echo "$SERVER_PORT" | sed 's/[^0-9]//g')
     # 检查端口来源
-    CONFIG_PORT=$(grep -E "^\s*port:" "$BINANCE_SERVICE_DIR/src/main/resources/application.yml" 2>/dev/null | sed 's/.*port:\s*\(.*\)/\1/' | sed 's/\${SERVER_PORT:\([^}]*\)}/\1/' | sed 's/://g' | tr -d ' ' | head -n 1)
+    CONFIG_PORT=$(grep -E "^\s*port:" "$BINANCE_SERVICE_DIR/src/main/resources/application.yml" 2>/dev/null | \
+        sed 's/.*port:\s*\(.*\)/\1/' | \
+        sed 's/#.*$//' | \
+        sed 's/\${SERVER_PORT:\([^}]*\)}/\1/' | \
+        sed 's/[^0-9]//g' | \
+        head -n 1)
     if [ -n "${SERVER_PORT}" ] && [ "$SERVER_PORT" != "$CONFIG_PORT" ]; then
         PORT_SOURCE="环境变量"
     else
