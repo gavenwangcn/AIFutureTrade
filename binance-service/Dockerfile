@@ -1,6 +1,6 @@
 # ============ Binance Service Dockerfile ============
 # Binance Service微服务
-# 使用5004端口
+# 端口可通过ARG或环境变量SERVER_PORT配置（默认从application.yml读取）
 
 # 多阶段构建：第一阶段构建JAR文件
 FROM maven:3.8.6-openjdk-17-slim AS builder
@@ -60,7 +60,13 @@ WORKDIR /app
 # 从构建阶段复制JAR文件
 COPY --from=builder /app/target/binance-service-1.0.0.jar app.jar
 
-# 暴露服务端口（5004端口）
+# 服务端口（可通过ARG传递，默认从application.yml读取）
+ARG SERVER_PORT_ARG=
+ENV SERVER_PORT=${SERVER_PORT_ARG}
+
+# 暴露服务端口
+# 注意：EXPOSE指令需要固定值，实际端口由JVM参数-Dserver.port控制
+# 如果需要修改端口，请在运行时通过环境变量SERVER_PORT设置
 EXPOSE 5004
 
 # 设置JVM参数（高性能优化）
@@ -73,9 +79,10 @@ EXPOSE 5004
 # -XX:+UseCompressedClassPointers: 使用压缩类指针
 # -Djava.awt.headless=true: 无头模式，不需要图形界面
 # -Dfile.encoding=UTF-8: 文件编码
+# -Dserver.port: 服务端口（从环境变量SERVER_PORT读取，如果没有则使用application.yml中的配置）
 # 添加 --add-opens 参数以解决 Java 9+ 上的反射访问警告
-ENV JAVA_OPTS="-Xms1g -Xmx2g -XX:+UseG1GC -XX:MaxGCPauseMillis=200 -XX:+UseStringDeduplication -XX:+OptimizeStringConcat -XX:+UseCompressedOops -XX:+UseCompressedClassPointers -Djava.awt.headless=true -Dfile.encoding=UTF-8 -Dserver.port=5004 --add-opens java.base/java.lang.invoke=ALL-UNNAMED"
+ENV JAVA_OPTS="-Xms1g -Xmx2g -XX:+UseG1GC -XX:MaxGCPauseMillis=200 -XX:+UseStringDeduplication -XX:+OptimizeStringConcat -XX:+UseCompressedOops -XX:+UseCompressedClassPointers -Djava.awt.headless=true -Dfile.encoding=UTF-8 --add-opens java.base/java.lang.invoke=ALL-UNNAMED"
 
-# 启动应用
-ENTRYPOINT ["sh", "-c", "java $JAVA_OPTS -jar app.jar"]
+# 启动应用（端口通过-Dserver.port参数传递，从环境变量SERVER_PORT读取）
+ENTRYPOINT ["sh", "-c", "java $JAVA_OPTS -Dserver.port=${SERVER_PORT:-5004} -jar app.jar"]
 

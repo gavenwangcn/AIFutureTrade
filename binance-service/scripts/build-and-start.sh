@@ -7,6 +7,12 @@
 #   1. 检查并安装JDK 17和Maven（如果需要）
 #   2. 使用mvn clean package构建JAR包
 #   3. 使用java -jar方式启动服务
+#
+# 使用方法：
+#   bash build-and-start.sh           # 交互模式，会询问是否启动
+#   bash build-and-start.sh --auto-start  # 自动启动模式
+#   bash build-and-start.sh -y        # 自动启动模式（简写）
+#   AUTO_START=true bash build-and-start.sh  # 通过环境变量控制
 # ============================================
 
 set -e  # 遇到错误立即退出
@@ -126,6 +132,26 @@ build_jar() {
     echo "$JAR_FILE"
 }
 
+# 读取端口配置（从application.yml或环境变量）
+read_server_port() {
+    # 优先使用环境变量
+    if [ -n "$SERVER_PORT" ]; then
+        echo "$SERVER_PORT"
+        return
+    fi
+    
+    # 从application.yml读取
+    # 匹配格式：port: ${SERVER_PORT:5004} 或 port: 5004
+    local port=$(grep -E "^\s*port:" "$BINANCE_SERVICE_DIR/src/main/resources/application.yml" 2>/dev/null | sed 's/.*port:\s*\(.*\)/\1/' | sed 's/\${SERVER_PORT:\([^}]*\)}/\1/' | sed 's/://g' | tr -d ' ' | head -n 1)
+    
+    if [ -z "$port" ] || [ "$port" = "" ]; then
+        # 如果都读取不到，返回空字符串，让调用者决定默认值
+        echo ""
+    else
+        echo "$port"
+    fi
+}
+
 # 启动服务
 start_service() {
     JAR_FILE="$1"
@@ -141,15 +167,20 @@ start_service() {
     # 创建logs目录
     mkdir -p "$BINANCE_SERVICE_DIR/logs"
     
-    # 读取端口配置（从application.yml）
-    # 匹配格式：port: ${SERVER_PORT:5004} 或 port: 5004
-    SERVER_PORT=$(grep -E "^\s*port:" "$BINANCE_SERVICE_DIR/src/main/resources/application.yml" 2>/dev/null | sed 's/.*port:\s*\(.*\)/\1/' | sed 's/\${SERVER_PORT:\([^}]*\)}/\1/' | sed 's/://g' | tr -d ' ' | head -n 1)
+    # 读取端口配置
+    SERVER_PORT=$(read_server_port)
     if [ -z "$SERVER_PORT" ] || [ "$SERVER_PORT" = "" ]; then
-        SERVER_PORT=5004
-        log_warn "无法从application.yml读取端口配置，使用默认端口: $SERVER_PORT"
-    else
-        log_info "从application.yml读取到服务端口: $SERVER_PORT"
+        log_warn "无法从配置文件或环境变量读取端口配置，请检查application.yml或设置SERVER_PORT环境变量"
+        exit 1
     fi
+    # 检查端口来源
+    CONFIG_PORT=$(grep -E "^\s*port:" "$BINANCE_SERVICE_DIR/src/main/resources/application.yml" 2>/dev/null | sed 's/.*port:\s*\(.*\)/\1/' | sed 's/\${SERVER_PORT:\([^}]*\)}/\1/' | sed 's/://g' | tr -d ' ' | head -n 1)
+    if [ -n "${SERVER_PORT}" ] && [ "$SERVER_PORT" != "$CONFIG_PORT" ]; then
+        PORT_SOURCE="环境变量"
+    else
+        PORT_SOURCE="配置文件(application.yml)"
+    fi
+    log_info "使用服务端口: $SERVER_PORT (来源: $PORT_SOURCE)"
     
     # 设置JVM参数（高性能优化）
     # -Xms: 初始堆内存1G，-Xmx: 最大堆内存2G（允许动态调整以适应负载）
@@ -241,12 +272,34 @@ main() {
     # 构建JAR包
     JAR_FILE=$(build_jar)
     
-    # 询问是否启动服务
-    echo
-    read -p "是否立即启动服务? (y/n): " -n 1 -r
-    echo
-    if [[ $REPLY =~ ^[Yy]$ ]]; then
+    # 检查是否在非交互模式或自动启动模式
+    AUTO_START=${AUTO_START:-""}
+    if [ "$1" = "--auto-start" ] || [ "$1" = "-y" ] || [ "$AUTO_START" = "true" ]; then
+        # 自动启动模式
+        log_info "自动启动模式：正在启动服务..."
         start_service "$JAR_FILE"
+        
+        log_info "============================================"
+        log_info "构建和启动完成！"
+        log_info "============================================"
+        log_info "服务信息:"
+        log_info "  - PID文件: $BINANCE_SERVICE_DIR/binance-service.pid"
+        log_info "  - 启动日志: $BINANCE_SERVICE_DIR/logs/startup.log"
+        log_info "  - 应用日志: $BINANCE_SERVICE_DIR/logs/binance-service.log"
+        log_info ""
+        log_info "常用命令:"
+        log_info "  查看实时日志: tail -f $BINANCE_SERVICE_DIR/logs/binance-service.log"
+        log_info "  查看启动日志: tail -f $BINANCE_SERVICE_DIR/logs/startup.log"
+        log_info "  停止服务: kill \$(cat $BINANCE_SERVICE_DIR/binance-service.pid)"
+        log_info "  检查服务状态: ps -p \$(cat $BINANCE_SERVICE_DIR/binance-service.pid)"
+    elif [ -t 0 ]; then
+        # 交互模式：有终端输入
+        echo
+        read -p "是否立即启动服务? (y/n，默认y): " -n 1 -r
+        echo
+        # 如果用户直接按回车，默认启动
+        if [[ -z "$REPLY" ]] || [[ $REPLY =~ ^[Yy]$ ]]; then
+            start_service "$JAR_FILE"
         
         log_info "============================================"
         log_info "构建和启动完成！"
@@ -277,7 +330,14 @@ main() {
         log_info "JAR文件: $JAR_FILE"
         log_info "手动启动命令:"
         log_info "  cd $BINANCE_SERVICE_DIR"
-        log_info "  java -Xms512m -Xmx1024m -Dserver.port=$SERVER_PORT -jar $JAR_FILE"
+        # 读取端口配置用于显示
+        MANUAL_SERVER_PORT=$(read_server_port)
+        if [ -z "$MANUAL_SERVER_PORT" ] || [ "$MANUAL_SERVER_PORT" = "" ]; then
+            log_warn "无法读取端口配置，请设置SERVER_PORT环境变量或检查application.yml"
+            log_info "  示例: SERVER_PORT=<端口> java -Xms1g -Xmx2g -XX:+UseG1GC -jar $JAR_FILE"
+        else
+            log_info "  java -Xms1g -Xmx2g -XX:+UseG1GC -Dserver.port=$MANUAL_SERVER_PORT -jar $JAR_FILE"
+        fi
     fi
 }
 
