@@ -96,10 +96,14 @@ BINANCE_SERVICE_LIST = [
     #     "base_url": "http://localhost:5004",  # Binance Service基础URL
     #     "timeout": 30,  # 请求超时时间（秒），默认30秒
     # },
-    # {
-    #     "base_url": "http://localhost:5005",
-    #     "timeout": 30,
-    # },
+     {
+         "base_url": "http://109.206.245.131:5004",
+         "timeout": 30,
+     },
+    {
+         "base_url": "http://193.134.209.95:35004",
+         "timeout": 30,
+     },
 ]
 
 # 从环境变量读取Binance Service配置（JSON格式）
