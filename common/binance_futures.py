@@ -388,11 +388,11 @@ class BinanceFuturesClient(_BinanceFuturesBase):
             proxy_manager = _get_proxy_manager()
             if proxy_manager.has_proxy():
                 proxy_config = proxy_manager.get_next_proxy()
-                logger.debug(f"[BinanceFuturesClient] 使用代理: {proxy_config.get('host')}:{proxy_config.get('port')} ({proxy_config.get('protocol', 'http')})")
+                logger.info(f"[BinanceFuturesClient] 使用代理: {proxy_config.get('host')}:{proxy_config.get('port')} ({proxy_config.get('protocol', 'http')})")
             else:
-                logger.debug("[BinanceFuturesClient] 代理已启用但无可用代理配置，将直接连接")
+                logger.info("[BinanceFuturesClient] 代理已启用但无可用代理配置，将直接连接")
         else:
-            logger.debug("[BinanceFuturesClient] 代理未启用，REST API将直接连接")
+            logger.info("[BinanceFuturesClient] 代理未启用，REST API将直接连接")
 
         # 创建SDK配置和客户端
         config_kwargs = {
@@ -980,11 +980,11 @@ class BinanceFuturesOrderClient(_BinanceFuturesBase):
             proxy_manager = _get_proxy_manager()
             if proxy_manager.has_proxy():
                 proxy_config = proxy_manager.get_next_proxy()
-                logger.debug(f"[BinanceFuturesClient] 使用代理: {proxy_config.get('host')}:{proxy_config.get('port')} ({proxy_config.get('protocol', 'http')})")
+                logger.info(f"[BinanceFuturesClient] 使用代理: {proxy_config.get('host')}:{proxy_config.get('port')} ({proxy_config.get('protocol', 'http')})")
             else:
-                logger.debug("[BinanceFuturesClient] 代理已启用但无可用代理配置，将直接连接")
+                logger.info("[BinanceFuturesClient] 代理已启用但无可用代理配置，将直接连接")
         else:
-            logger.debug("[BinanceFuturesClient] 代理未启用，REST API将直接连接")
+            logger.info("[BinanceFuturesClient] 代理未启用，REST API将直接连接")
 
         # 创建SDK配置和客户端
         config_kwargs = {
