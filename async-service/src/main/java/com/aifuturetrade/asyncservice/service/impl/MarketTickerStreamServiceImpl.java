@@ -1,11 +1,11 @@
 package com.aifuturetrade.asyncservice.service.impl;
 
 import com.aifuturetrade.asyncservice.dao.mapper.MarketTickerMapper;
+import com.aifuturetrade.asyncservice.entity.MarketTickerDO;
 import com.aifuturetrade.asyncservice.service.MarketTickerStreamService;
-import com.aifuturetrade.dao.entity.MarketTickerDO;
 import com.binance.connector.client.common.websocket.configuration.WebSocketClientConfiguration;
 import com.binance.connector.client.common.websocket.service.StreamBlockingQueueWrapper;
-import com.binance.connector.client.derivatives_trading_usds_futures.websocket.stream.DerivativesTradingUsdsFuturesWebSocketStreams;
+import com.binance.connector.client.derivatives_trading_usds_futures.websocket.stream.api.DerivativesTradingUsdsFuturesWebSocketStreams;
 import com.binance.connector.client.derivatives_trading_usds_futures.websocket.stream.DerivativesTradingUsdsFuturesWebSocketStreamsUtil;
 import com.binance.connector.client.derivatives_trading_usds_futures.websocket.stream.model.AllMarketTickersStreamsRequest;
 import com.binance.connector.client.derivatives_trading_usds_futures.websocket.stream.model.AllMarketTickersStreamsResponse;
@@ -400,4 +400,3 @@ public class MarketTickerStreamServiceImpl implements MarketTickerStreamService 
         return elapsedMinutes >= maxConnectionMinutes;
     }
 }
-

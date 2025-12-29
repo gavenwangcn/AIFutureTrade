@@ -1,6 +1,6 @@
 package com.aifuturetrade.asyncservice.dao.mapper;
 
-import com.aifuturetrade.dao.entity.MarketTickerDO;
+import com.aifuturetrade.asyncservice.entity.MarketTickerDO;
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
@@ -76,3 +76,4 @@ public interface MarketTickerMapper extends BaseMapper<MarketTickerDO> {
     int deleteOldTickers(@Param("cutoffDate") LocalDateTime cutoffDate);
 }
 
+

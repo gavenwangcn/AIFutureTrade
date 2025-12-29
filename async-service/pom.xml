@@ -152,28 +152,26 @@
         <!-- 先编译SDK: cd binance-connector-java-master/clients/derivatives-trading-usds-futures && mvn clean install -->
         <!-- 然后使用以下依赖配置 -->
         <dependency>
-            <groupId>com.binance.connector</groupId>
-            <artifactId>derivatives-trading-usds-futures</artifactId>
-            <version>2.2.1</version>
-            <!-- 如果SDK已安装到本地Maven仓库，使用默认scope -->
-            <!-- 如果使用本地JAR文件，取消下面的注释并使用system scope -->
-            <!--
-            <scope>system</scope>
-            <systemPath>${project.basedir}/../binance-connector-java-master/clients/derivatives-trading-usds-futures/target/derivatives-trading-usds-futures-2.2.1.jar</systemPath>
-            -->
+            <groupId>io.github.binance</groupId>
+            <artifactId>binance-derivatives-trading-usds-futures</artifactId>
+            <version>7.0.0</version>
+            <exclusions>
+                <!-- 排除 Binance SDK 中的 Jackson 依赖，使用 Spring Boot 管理的版本 -->
+                <exclusion>
+                    <groupId>com.fasterxml.jackson.core</groupId>
+                    <artifactId>jackson-core</artifactId>
+                </exclusion>
+                <exclusion>
+                    <groupId>com.fasterxml.jackson.core</groupId>
+                    <artifactId>jackson-databind</artifactId>
+                </exclusion>
+                <exclusion>
+                    <groupId>com.fasterxml.jackson.core</groupId>
+                    <artifactId>jackson-annotations</artifactId>
+                </exclusion>
+            </exclusions>
         </dependency>
         
-        <!-- 方式2: 如果SDK未安装，使用本地JAR文件（需要先编译SDK） -->
-        <!-- 取消下面的注释以使用本地JAR文件 -->
-        <!--
-        <dependency>
-            <groupId>com.binance.connector</groupId>
-            <artifactId>binance-common</artifactId>
-            <version>2.2.1</version>
-            <scope>system</scope>
-            <systemPath>${project.basedir}/../binance-connector-java-master/clients/derivatives-trading-usds-futures/target/lib/binance-common-2.2.1.jar</systemPath>
-        </dependency>
-        -->
         
         <!-- Jakarta Validation API -->
         <dependency>
@@ -248,4 +246,3 @@
         </plugins>
     </build>
 </project>
-

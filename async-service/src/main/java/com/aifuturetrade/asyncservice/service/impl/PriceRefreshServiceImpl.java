@@ -2,7 +2,9 @@ package com.aifuturetrade.asyncservice.service.impl;
 
 import com.aifuturetrade.asyncservice.dao.mapper.MarketTickerMapper;
 import com.aifuturetrade.asyncservice.service.PriceRefreshService;
-import com.aifuturetrade.common.api.binance.BinanceFuturesClient;
+import com.aifuturetrade.asyncservice.api.binance.BinanceFuturesClient;
+import com.binance.connector.client.derivatives_trading_usds_futures.rest.model.KlineCandlestickDataResponse;
+import com.binance.connector.client.derivatives_trading_usds_futures.rest.model.KlineCandlestickDataResponseItem;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -111,7 +113,7 @@ public class PriceRefreshServiceImpl implements PriceRefreshService {
     public boolean refreshPriceForSymbol(String symbol) {
         try {
             // 获取最近2天的日K线数据
-            List<Map<String, Object>> klines = binanceClient.getKlines(symbol, "1d", 2);
+            KlineCandlestickDataResponse klines = binanceClient.getKlines(symbol, "1d", 2);
             
             if (klines == null || klines.size() < 2) {
                 log.warn("[PriceRefresh] Symbol {}: 数据不足 (got {}, need 2)", 
@@ -121,7 +123,7 @@ public class PriceRefreshServiceImpl implements PriceRefreshService {
             
             // 使用昨天的收盘价作为今天的开盘价
             // klines[0] 是昨天的，klines[1] 是今天的（最新的）
-            Map<String, Object> yesterdayKline = klines.get(0);
+            KlineCandlestickDataResponseItem yesterdayKline = klines.get(0);
             Double yesterdayClosePrice = extractClosePrice(yesterdayKline);
             
             if (yesterdayClosePrice == null || yesterdayClosePrice <= 0) {
@@ -235,39 +237,66 @@ public class PriceRefreshServiceImpl implements PriceRefreshService {
     
     /**
      * 从K线数据中提取收盘价
-     * BinanceFuturesClient.getKlines()返回List<Map<String, Object>>，每个Map包含close_price字段
+     * 支持新SDK的KlineCandlestickDataResponseItem类型和旧的Map类型
      */
-    private Double extractClosePrice(Map<String, Object> kline) {
+    private Double extractClosePrice(Object klineData) {
         try {
-            if (kline == null) {
+            if (klineData == null) {
                 return null;
             }
             
-            // BinanceFuturesClient返回的Map中包含"close_price"字段（String类型）
-            Object closeObj = kline.get("close_price");
-            if (closeObj == null) {
-                // 如果没有close_price，尝试close字段
-                closeObj = kline.get("close");
-            }
-            
-            if (closeObj == null) {
-                log.warn("[PriceRefresh] Kline data missing close_price field");
+            // 处理新SDK类型 KlineCandlestickDataResponseItem (继承ArrayList<String>)
+            // 索引4是收盘价: [0]开盘时间,[1]开盘价,[2]最高价,[3]最低价,[4]收盘价,[5]成交量...
+            if (klineData instanceof KlineCandlestickDataResponseItem) {
+                KlineCandlestickDataResponseItem sdkKline = (KlineCandlestickDataResponseItem) klineData;
+                if (sdkKline.size() > 4) {
+                    String closePriceStr = sdkKline.get(4);
+                    if (closePriceStr != null && !closePriceStr.isEmpty()) {
+                        try {
+                            return Double.parseDouble(closePriceStr);
+                        } catch (NumberFormatException e) {
+                            log.warn("[PriceRefresh] Invalid close_price format in SDK kline: {}", closePriceStr);
+                        }
+                    }
+                }
                 return null;
             }
             
-            if (closeObj instanceof Number) {
-                return ((Number) closeObj).doubleValue();
-            } else if (closeObj instanceof String) {
-                try {
-                    return Double.parseDouble((String) closeObj);
-                } catch (NumberFormatException e) {
-                    log.warn("[PriceRefresh] Invalid close_price format: {}", closeObj);
+            // 处理旧的Map类型
+            if (klineData instanceof Map) {
+                @SuppressWarnings("unchecked")
+                Map<String, Object> kline = (Map<String, Object>) klineData;
+                
+                // BinanceFuturesClient返回的Map中包含"close_price"字段（String类型）
+                Object closeObj = kline.get("close_price");
+                if (closeObj == null) {
+                    // 如果没有close_price，尝试close字段
+                    closeObj = kline.get("close");
+                }
+                
+                if (closeObj == null) {
+                    log.warn("[PriceRefresh] Kline data missing close_price field");
                     return null;
                 }
-            } else {
-                log.warn("[PriceRefresh] Unexpected close_price type: {}", closeObj.getClass());
-                return null;
+                
+                if (closeObj instanceof Number) {
+                    return ((Number) closeObj).doubleValue();
+                } else if (closeObj instanceof String) {
+                    try {
+                        return Double.parseDouble((String) closeObj);
+                    } catch (NumberFormatException e) {
+                        log.warn("[PriceRefresh] Invalid close_price format: {}", closeObj);
+                        return null;
+                    }
+                } else {
+                    log.warn("[PriceRefresh] Unexpected close_price type: {}", closeObj.getClass());
+                    return null;
+                }
             }
+            
+            log.warn("[PriceRefresh] Unsupported kline data type: {}", klineData.getClass());
+            return null;
+            
         } catch (Exception e) {
             log.error("[PriceRefresh] Error extracting close price from kline", e);
             return null;

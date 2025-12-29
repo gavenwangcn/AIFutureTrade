@@ -378,7 +378,7 @@ class TradingEngine:
             # 步骤1: 根据symbol_source获取候选symbol并构建市场状态（仅获取价格，不获取技术指标，指标将在批次处理时按需获取）
             logger.debug(f"[Model {self.model_id}] [买入服务] [阶段2.1] 根据symbol_source获取候选symbol并构建市场状态（仅价格）...")
             buy_candidates, market_state = self._select_buy_candidates(portfolio, symbol_source, include_indicators=False)
-            logger.debug(f"[Model {self.model_id}] [买入服务] [阶段2.1] 候选symbol选择完成: "
+            logger.info(f"[Model {self.model_id}] [买入服务] [阶段2.1] 候选symbol选择完成: "
                         f"候选数量={len(buy_candidates)}, "
                         f"市场状态symbol数={len(market_state)}")
             
@@ -389,7 +389,7 @@ class TradingEngine:
                     market_info = market_state.get(symbol.upper() if symbol != 'N/A' else symbol, {})
                     price = market_info.get('price', candidate.get('price', 0))
                     change = market_info.get('change_24h', candidate.get('change_percent', 0))
-                    logger.debug(f"[Model {self.model_id}] [买入服务] [阶段2.1.{idx+1}] 候选: "
+                    logger.info(f"[Model {self.model_id}] [买入服务] [阶段2.1.{idx+1}] 候选: "
                                 f"{symbol}, "
                                 f"价格=${price:.4f}, "
                                 f"涨跌幅={change:.2f}%")
@@ -444,8 +444,8 @@ class TradingEngine:
             logger.debug(f"[Model {self.model_id}] [买入服务] [阶段3] 账户价值快照已在每次交易时记录，无需批次记录")
             
             # ========== 阶段4: 同步model_futures表数据 ==========
-            logger.debug(f"[Model {self.model_id}] [买入服务] [阶段4] 同步model_futures表数据")
-            self._sync_model_futures()
+            #logger.debug(f"[Model {self.model_id}] [买入服务] [阶段4] 同步model_futures表数据")
+            #self._sync_model_futures()
             
             # ========== 交易周期完成 ==========
             cycle_end_time = datetime.now(timezone(timedelta(hours=8)))
@@ -1450,7 +1450,7 @@ class TradingEngine:
                     # 打印醒目的warning日志
                     logger.warning(
                         f"@@@ [Model {self.model_id}] [批次 {batch_num}/{total_batches}] "
-                        f"@@@ SYMBOL数据验证失败，跳过AI决策询问: {symbol_upper} @@@\n"
+                        f"@@@ SYMBOL数据验证失败，跳过决策询问: {symbol_upper} @@@\n"
                         f"@@@ 错误信息: {error_msg} @@@\n"
                         f"@@@ 查询symbol: {query_symbol}, 数据源: {symbol_source_for_batch} @@@"
                     )
@@ -1459,7 +1459,7 @@ class TradingEngine:
             if not valid_candidates:
                 logger.warning(
                     f"@@@ [Model {self.model_id}] [批次 {batch_num}/{total_batches}] "
-                    f"@@@ 批次中所有symbol数据验证失败，跳过AI决策询问 @@@\n"
+                    f"@@@ 批次中所有symbol数据验证失败，跳过决策询问 @@@\n"
                     f"@@@ 无效symbol详情: {[f'{s}: {e}' for s, e in invalid_symbols]} @@@"
                 )
                 return {
@@ -2301,7 +2301,7 @@ class TradingEngine:
         """
         # 步骤1: 根据symbol_source获取候选symbol列表
         limit = getattr(app_config, 'PROMPT_MARKET_SYMBOL_LIMIT', 5)
-        candidates = self._get_candidate_symbols_by_source(symbol_source, limit=limit * 2)
+        candidates = self._get_candidate_symbols_by_source(symbol_source, limit)
         
         if not candidates:
             logger.info(f"[Model {self.model_id}] 未获取到候选symbol")

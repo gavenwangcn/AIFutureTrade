@@ -1309,7 +1309,7 @@ class MarketDataFetcher:
 
         # 如果没有可用的 MySQL 连接，返回空数据
         if not self._mysql_db:
-            logger.warning('[Leaderboard] MySQL unavailable, returning empty data')
+            logger.error('[Leaderboard] MySQL unavailable, returning empty data')
             return {'gainers': [], 'losers': []}
 
         try:
