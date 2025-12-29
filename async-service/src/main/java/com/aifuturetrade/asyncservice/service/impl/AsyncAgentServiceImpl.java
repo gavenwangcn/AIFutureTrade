@@ -52,27 +52,35 @@ public class AsyncAgentServiceImpl implements AsyncAgentService {
             t.setDaemon(true);
             return t;
         });
+        log.info("[AsyncAgentServiceImpl] 🛠️ 异步代理服务初始化完成，线程池已创建");
     }
     
     @PreDestroy
     public void destroy() {
+        log.info("[AsyncAgentServiceImpl] 🛑 收到服务销毁信号，开始清理资源...");
         stopAllTasks();
         if (executorService != null) {
+            log.info("[AsyncAgentServiceImpl] ⏳ 正在关闭线程池...");
             executorService.shutdown();
             try {
                 if (!executorService.awaitTermination(60, TimeUnit.SECONDS)) {
+                    log.warn("[AsyncAgentServiceImpl] ⚠️ 线程池未在60秒内完全关闭，强制关闭");
                     executorService.shutdownNow();
+                } else {
+                    log.info("[AsyncAgentServiceImpl] ✅ 线程池已成功关闭");
                 }
             } catch (InterruptedException e) {
+                log.error("[AsyncAgentServiceImpl] ❌ 等待线程池关闭时被中断", e);
                 executorService.shutdownNow();
                 Thread.currentThread().interrupt();
             }
         }
+        log.info("[AsyncAgentServiceImpl] 👋 服务销毁完成");
     }
     
     @Override
     public void runTask(String task, Integer durationSeconds) {
-        log.info("[AsyncAgent] 启动任务 '{}' (duration={})", task, durationSeconds);
+        log.info("[AsyncAgentServiceImpl] 🚀 收到启动任务请求: task={}, durationSeconds={}", task, durationSeconds);
         
         switch (task) {
             case "market_tickers":
@@ -88,6 +96,7 @@ public class AsyncAgentServiceImpl implements AsyncAgentService {
                 runAllTasks(durationSeconds);
                 break;
             default:
+                log.error("[AsyncAgentServiceImpl] ❌ 未知的任务类型: task={}", task);
                 throw new IllegalArgumentException(
                         "Unknown task '" + task + "'. Available: market_tickers, price_refresh, market_symbol_offline, all");
         }
@@ -95,13 +104,15 @@ public class AsyncAgentServiceImpl implements AsyncAgentService {
     
     @Override
     public void stopAllTasks() {
-        log.info("[AsyncAgent] 停止所有任务");
+        log.info("[AsyncAgentServiceImpl] 🛑 收到停止所有任务请求");
         allTasksRunning.set(false);
         
         // 停止各个任务
+        log.info("[AsyncAgentServiceImpl] 🛑 正在停止各个任务...");
         stopMarketTickersTask();
         stopPriceRefreshTask();
         stopMarketSymbolOfflineTask();
+        log.info("[AsyncAgentServiceImpl] ✅ 所有任务已停止");
     }
     
     @Override

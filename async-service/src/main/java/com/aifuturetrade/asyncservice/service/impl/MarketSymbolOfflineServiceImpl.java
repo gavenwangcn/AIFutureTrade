@@ -38,12 +38,16 @@ public class MarketSymbolOfflineServiceImpl implements MarketSymbolOfflineServic
     
     @PostConstruct
     public void init() {
-        log.info("[MarketSymbolOffline] 市场Symbol下线服务初始化完成");
+        log.info("[MarketSymbolOfflineServiceImpl] 🛠️ 市场Symbol下线服务初始化完成");
+        log.info("[MarketSymbolOfflineServiceImpl] 📅 调度Cron表达式: {}", cronExpression);
+        log.info("[MarketSymbolOfflineServiceImpl] ⏱️ 数据保留分钟数: {}", retentionMinutes);
     }
     
     @PreDestroy
     public void destroy() {
+        log.info("[MarketSymbolOfflineServiceImpl] 🛑 收到服务销毁信号，停止调度器...");
         stopScheduler();
+        log.info("[MarketSymbolOfflineServiceImpl] 👋 市场Symbol下线服务已销毁");
     }
     
     @Override
@@ -98,11 +102,11 @@ public class MarketSymbolOfflineServiceImpl implements MarketSymbolOfflineServic
         } catch (Exception e) {
             long totalDuration = java.time.Duration.between(deleteStartTime, LocalDateTime.now()).getSeconds();
             log.error("=".repeat(80));
-            log.error("[MarketSymbolOffline] ========== 异步市场Symbol下线任务执行失败 ==========");
-            log.error("[MarketSymbolOffline] 执行时间: {}", deleteStartTime);
-            log.error("[MarketSymbolOffline] 失败时间: {}", LocalDateTime.now());
-            log.error("[MarketSymbolOffline] 总耗时: {} 秒", totalDuration);
-            log.error("[MarketSymbolOffline] 错误信息: ", e);
+            log.error("[MarketSymbolOfflineServiceImpl] ========== 异步市场Symbol下线任务执行失败 ==========");
+            log.error("[MarketSymbolOfflineServiceImpl] 执行时间: {}", deleteStartTime);
+            log.error("[MarketSymbolOfflineServiceImpl] 失败时间: {}", LocalDateTime.now());
+            log.error("[MarketSymbolOfflineServiceImpl] 总耗时: {} 秒", totalDuration);
+            log.error("[MarketSymbolOfflineServiceImpl] 错误信息: ", e);
             log.error("=".repeat(80));
             return 0;
         }
