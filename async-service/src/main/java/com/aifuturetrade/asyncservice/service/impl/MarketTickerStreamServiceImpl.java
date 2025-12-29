@@ -24,6 +24,7 @@ import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
@@ -208,6 +209,7 @@ public class MarketTickerStreamServiceImpl implements MarketTickerStreamService 
     private void processStream(Integer runSeconds) {
         long startTime = System.currentTimeMillis();
         long messageCount = 0;
+        long lastMessageTime = System.currentTimeMillis();
         
         try {
             log.info("[MarketTickerStream] 📊 开始处理WebSocket流数据...");
@@ -228,16 +230,23 @@ public class MarketTickerStreamServiceImpl implements MarketTickerStreamService 
                     break;
                 }
                 
-                // 从队列中获取ticker数据（阻塞等待）
+                // 检查消息超时
+                long noMessageDuration = (System.currentTimeMillis() - lastMessageTime) / 1000;
+                if (noMessageDuration >= messageTimeout) {
+                    log.warn("[MarketTickerStream] ⏰ 消息超时: {} 秒内没有收到任何消息，重新连接...", messageTimeout);
+                    break;
+                }
+                
+                // 从队列中获取ticker数据（使用take()方法）
                 try {
                     AllMarketTickersStreamsResponse response = streamQueue.take();
-                    if (response != null) {
-                        messageCount++;
-                        if (messageCount % 100 == 0) {
-                            log.info("[MarketTickerStream] 📈 已处理 {} 条消息", messageCount);
-                        }
-                        handleMessage(response);
+                    
+                    lastMessageTime = System.currentTimeMillis();
+                    messageCount++;
+                    if (messageCount % 100 == 0) {
+                        log.info("[MarketTickerStream] 📈 已处理 {} 条消息", messageCount);
                     }
+                    handleMessage(response);
                 } catch (InterruptedException e) {
                     log.info("[MarketTickerStream] 🛑 Stream interrupted");
                     Thread.currentThread().interrupt();
