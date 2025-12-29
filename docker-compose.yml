@@ -83,15 +83,6 @@ services:
       - ASYNC_AUTO_START_ENABLED=${ASYNC_AUTO_START_ENABLED:-true}
       - ASYNC_AUTO_START_TASK=${ASYNC_AUTO_START_TASK:-all}
       - ASYNC_AUTO_START_DELAY=${ASYNC_AUTO_START_DELAY:-3}
-      # 价格刷新服务配置
-      # 注意：Python 使用5字段格式（PRICE_REFRESH_CRON），Java 使用6字段格式（PRICE_REFRESH_CRON_JAVA）
-      # Cron表达式格式：秒 分 时 日 月 周（6个字段，Spring @Scheduled要求）
-      - PRICE_REFRESH_CRON_JAVA=${PRICE_REFRESH_CRON_JAVA:-0 */5 * * *}
-      - PRICE_REFRESH_MAX_PER_MINUTE=${PRICE_REFRESH_MAX_PER_MINUTE:-1000}
-      # 市场Symbol下线服务配置
-      # Cron表达式格式：秒 分 时 日 月 周（6个字段，Spring @Scheduled要求）
-      - MARKET_SYMBOL_OFFLINE_CRON=${MARKET_SYMBOL_OFFLINE_CRON:-0 */30 * * *}
-      - MARKET_SYMBOL_RETENTION_MINUTES=${MARKET_SYMBOL_RETENTION_MINUTES:-30}
       # JVM参数
       # -Xms1g: 初始堆内存1G，-Xmx2g: 最大堆内存2G
       # -Dserver.port: 服务端口，与容器映射端口一致
@@ -131,11 +122,7 @@ services:
       - MYSQL_DATABASE=${MYSQL_DATABASE:-aifuturetrade}
       # Binance配置
       - BINANCE_API_KEY=${BINANCE_API_KEY}
-      - BINANCE_API_SECRET=${BINANCE_API_SECRET}
-      # 价格刷新服务配置
-      # Cron表达式格式：秒 分 时 日 月 周（6个字段）
-      - PRICE_REFRESH_CRON=${PRICE_REFRESH_CRON:-0 */5 * * *}
-      - PRICE_REFRESH_MAX_PER_MINUTE=${PRICE_REFRESH_MAX_PER_MINUTE:-1000}
+      - BINANCE_SECRET_KEY=${BINANCE_API_SECRET}
     restart: unless-stopped
     networks:
       - aifuturetrade-network
