@@ -163,9 +163,14 @@ class TradingEngine:
                         f"初始资金=${account_info.get('initial_capital', 0):.2f}, "
                         f"总收益率={account_info.get('total_return', 0):.2f}%")
             
-            # 获取提示词模板（仅卖出约束）
-            prompt_templates = self._get_prompt_templates()
-            logger.debug(f"[Model {self.model_id}] [卖出服务] [阶段1.5] 卖出提示词模板获取完成")
+            # 获取提示词模板（仅卖出约束）- 仅当trade_type为ai时才需要
+            trade_type = model.get('trade_type', 'ai')
+            if trade_type == 'ai':
+                prompt_templates = self._get_prompt_templates()
+                logger.debug(f"[Model {self.model_id}] [卖出服务] [阶段1.5] 卖出提示词模板获取完成")
+            else:
+                prompt_templates = {}
+                logger.debug(f"[Model {self.model_id}] [卖出服务] [阶段1.5] trade_type={trade_type}，跳过提示词模板获取")
             
             # 初始化执行结果和对话记录
             executions = []
@@ -354,9 +359,13 @@ class TradingEngine:
                         f"初始资金=${account_info.get('initial_capital', 0):.2f}, "
                         f"总收益率={account_info.get('total_return', 0):.2f}%")
             
-            # 获取提示词模板（仅买入约束）
-            prompt_templates = self._get_prompt_templates()
-            logger.debug(f"[Model {self.model_id}] [买入服务] [阶段1.4] 买入提示词模板获取完成")
+            # 获取提示词模板（仅买入约束）- 仅当trade_type为ai时才需要
+            if trade_type == 'ai':
+                prompt_templates = self._get_prompt_templates()
+                logger.debug(f"[Model {self.model_id}] [买入服务] [阶段1.4] 买入提示词模板获取完成")
+            else:
+                prompt_templates = {}
+                logger.debug(f"[Model {self.model_id}] [买入服务] [阶段1.4] trade_type={trade_type}，跳过提示词模板获取")
             
             # 初始化执行结果和对话记录
             executions = []
