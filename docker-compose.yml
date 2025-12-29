@@ -12,7 +12,7 @@
 # ==============================================================================
 # 使用说明：
 # 1. 启动MySQL服务：docker-compose -f docker-compose-mysql.yml up -d（必须先启动）
-# 2. 默认启动：docker-compose up -d（启动backend、trade、frontend和async-agent服务）
+# 2. 默认启动：docker-compose up -d（启动backend、trade、frontend、async-agent和async-service服务）
 # ==============================================================================
 # 注意：
 # - MySQL服务已拆分到 docker-compose-mysql.yml，需要先启动
@@ -51,6 +51,48 @@ services:
       # JVM参数
       # 添加 --add-opens 参数以解决 MyBatis-Plus 在 Java 9+ 上的反射访问警告
       - JAVA_OPTS=${JAVA_OPTS:--Xms512m -Xmx1024m -Dserver.port=5002 --add-opens java.base/java.lang.invoke=ALL-UNNAMED}
+    restart: unless-stopped
+    networks:
+      - aifuturetrade-network
+    # 注意：MySQL服务在docker-compose-mysql.yml中，需要先启动
+    # 如果MySQL服务未启动，请先运行：docker-compose -f docker-compose-mysql.yml up -d
+
+  # ============================================================================
+  # 异步服务（Java Spring Boot 异步服务 - 价格刷新、市场Ticker流等）
+  # ============================================================================
+  async-service:
+    build:
+      context: ./async-service
+      dockerfile: Dockerfile
+    container_name: ${ASYNC_SERVICE_CONTAINER_NAME:-aifuturetrade-async-service}
+    ports:
+      - "${ASYNC_SERVICE_PORT:-5003}:5003"  # 异步服务端口
+    environment:
+      # Spring Profile配置（生产环境）
+      - SPRING_PROFILES_ACTIVE=${SPRING_PROFILES_ACTIVE:-prod}
+      # 服务器端口配置
+      - SERVER_PORT=${ASYNC_SERVICE_PORT:-5003}
+      # MySQL配置
+      - SPRING_DATASOURCE_URL=jdbc:mysql://${MYSQL_HOST:-154.89.148.172}:${MYSQL_PORT:-32123}/${MYSQL_DATABASE:-aifuturetrade}?useSSL=false&serverTimezone=UTC&characterEncoding=utf8
+      - SPRING_DATASOURCE_USERNAME=${MYSQL_USER:-aifuturetrade}
+      - SPRING_DATASOURCE_PASSWORD=${MYSQL_PASSWORD:-aifuturetrade123}
+      # Binance配置
+      - BINANCE_API_KEY=${BINANCE_API_KEY}
+      - BINANCE_SECRET_KEY=${BINANCE_API_SECRET}
+      # 异步服务配置
+      - ASYNC_AUTO_START_ENABLED=${ASYNC_AUTO_START_ENABLED:-true}
+      - ASYNC_AUTO_START_TASK=${ASYNC_AUTO_START_TASK:-all}
+      - ASYNC_AUTO_START_DELAY=${ASYNC_AUTO_START_DELAY:-3}
+      # 价格刷新服务配置
+      - PRICE_REFRESH_CRON=${PRICE_REFRESH_CRON:-*/5 * * * *}
+      - PRICE_REFRESH_MAX_PER_MINUTE=${PRICE_REFRESH_MAX_PER_MINUTE:-1000}
+      # 市场Symbol下线服务配置
+      - MARKET_SYMBOL_OFFLINE_CRON=${MARKET_SYMBOL_OFFLINE_CRON:-*/30 * * * *}
+      - MARKET_SYMBOL_RETENTION_MINUTES=${MARKET_SYMBOL_RETENTION_MINUTES:-30}
+      # JVM参数
+      # -Xms1g: 初始堆内存1G，-Xmx2g: 最大堆内存2G
+      # -Dserver.port: 服务端口，与容器映射端口一致
+      - JAVA_OPTS=${JAVA_OPTS:--Xms1g -Xmx2g -XX:+UseG1GC -XX:MaxGCPauseMillis=200 --add-opens java.base/java.lang.invoke=ALL-UNNAMED}
     restart: unless-stopped
     networks:
       - aifuturetrade-network
