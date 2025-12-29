@@ -101,7 +101,7 @@ BINANCE_SERVICE_LIST = [
          "timeout": 30,
      },
     {
-         "base_url": "http://193.134.209.95:35004",
+         "base_url": "http://185.242.232.23:5004",
          "timeout": 30,
      },
 ]
