@@ -84,8 +84,9 @@ services:
       - ASYNC_AUTO_START_TASK=${ASYNC_AUTO_START_TASK:-all}
       - ASYNC_AUTO_START_DELAY=${ASYNC_AUTO_START_DELAY:-3}
       # 价格刷新服务配置
+      # 注意：Python 使用5字段格式（PRICE_REFRESH_CRON），Java 使用6字段格式（PRICE_REFRESH_CRON_JAVA）
       # Cron表达式格式：秒 分 时 日 月 周（6个字段，Spring @Scheduled要求）
-      - PRICE_REFRESH_CRON=${PRICE_REFRESH_CRON:-0 */5 * * *}
+      - PRICE_REFRESH_CRON_JAVA=${PRICE_REFRESH_CRON_JAVA:-0 */5 * * *}
       - PRICE_REFRESH_MAX_PER_MINUTE=${PRICE_REFRESH_MAX_PER_MINUTE:-1000}
       # 市场Symbol下线服务配置
       # Cron表达式格式：秒 分 时 日 月 周（6个字段，Spring @Scheduled要求）
