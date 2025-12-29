@@ -113,7 +113,7 @@ public class MarketSymbolOfflineServiceImpl implements MarketSymbolOfflineServic
     }
     
     @Override
-    @Scheduled(cron = "${async.market-symbol-offline.cron:*/30 * * * *}")
+    @Scheduled(cron = "${async.market-symbol-offline.cron:0 */30 * * * *}")
     public void startScheduler() {
         if (schedulerRunning.get()) {
             return;

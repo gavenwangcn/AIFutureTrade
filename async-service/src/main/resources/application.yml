@@ -115,15 +115,15 @@ async:
   
   # 价格刷新服务配置
   price-refresh:
-    # Cron表达式（默认每5分钟）
-    cron: ${PRICE_REFRESH_CRON:*/5 * * * *}
+    # Cron表达式（默认每5分钟，格式：秒 分 时 日 月 周）
+    cron: ${PRICE_REFRESH_CRON:0 */5 * * * *}
     # 每分钟最多刷新数量
     max-per-minute: ${PRICE_REFRESH_MAX_PER_MINUTE:1000}
   
   # 市场Symbol下线服务配置
   market-symbol-offline:
-    # Cron表达式（默认每30分钟）
-    cron: ${MARKET_SYMBOL_OFFLINE_CRON:*/30 * * * *}
+    # Cron表达式（默认每30分钟，格式：秒 分 时 日 月 周）
+    cron: ${MARKET_SYMBOL_OFFLINE_CRON:0 */30 * * * *}
     # 数据保留分钟数（默认30分钟）
     retention-minutes: ${MARKET_SYMBOL_RETENTION_MINUTES:30}
 

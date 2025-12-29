@@ -336,7 +336,7 @@ public class PriceRefreshServiceImpl implements PriceRefreshService {
     }
     
     @Override
-    @Scheduled(cron = "${async.price-refresh.cron:*/5 * * * *}")
+    @Scheduled(cron = "${async.price-refresh.cron:0 */5 * * * *}")
     public void startScheduler() {
         if (schedulerRunning.get()) {
             return;
