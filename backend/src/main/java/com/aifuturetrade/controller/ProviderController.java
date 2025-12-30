@@ -4,8 +4,8 @@ import com.aifuturetrade.service.ProviderService;
 import com.aifuturetrade.service.dto.ProviderDTO;
 import com.aifuturetrade.common.util.PageResult;
 import com.aifuturetrade.common.util.PageRequest;
-import io.swagger.annotations.Api;
-import io.swagger.annotations.ApiOperation;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -21,7 +21,7 @@ import java.util.Map;
  */
 @RestController
 @RequestMapping("/api/providers")
-@Api(tags = "API提供方管理")
+@Tag(name = "API提供方管理", description = "API提供方管理接口")
 public class ProviderController {
 
     @Autowired
@@ -32,7 +32,7 @@ public class ProviderController {
      * @return API提供方列表
      */
     @GetMapping
-    @ApiOperation("获取所有API提供方")
+    @Operation(summary = "获取所有API提供方")
     public ResponseEntity<List<ProviderDTO>> getAllProviders() {
         List<ProviderDTO> providers = providerService.getAllProviders();
         return new ResponseEntity<>(providers, HttpStatus.OK);
@@ -44,7 +44,7 @@ public class ProviderController {
      * @return 新增的API提供方
      */
     @PostMapping
-    @ApiOperation("添加新的API提供方")
+    @Operation(summary = "添加新的API提供方")
     public ResponseEntity<ProviderDTO> addProvider(@RequestBody ProviderDTO providerDTO) {
         ProviderDTO addedProvider = providerService.addProvider(providerDTO);
         return new ResponseEntity<>(addedProvider, HttpStatus.CREATED);
@@ -56,7 +56,7 @@ public class ProviderController {
      * @return 删除操作结果
      */
     @DeleteMapping("/{providerId}")
-    @ApiOperation("删除API提供方")
+    @Operation(summary = "删除API提供方")
     public ResponseEntity<Map<String, Object>> deleteProvider(@PathVariable String providerId) {
         Boolean deleted = providerService.deleteProvider(providerId);
         Map<String, Object> response = new HashMap<>();
@@ -77,7 +77,7 @@ public class ProviderController {
      * @return 可用模型列表
      */
     @PostMapping("/models")
-    @ApiOperation("从提供方API获取可用的模型列表")
+    @Operation(summary = "从提供方API获取可用的模型列表")
     public ResponseEntity<Map<String, Object>> fetchProviderModels(@RequestBody Map<String, String> request) {
         String apiUrl = request.get("apiUrl");
         String apiKey = request.get("apiKey");

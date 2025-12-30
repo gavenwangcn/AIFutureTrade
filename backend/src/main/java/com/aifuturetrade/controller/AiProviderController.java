@@ -2,8 +2,8 @@ package com.aifuturetrade.controller;
 
 import com.aifuturetrade.service.AiProviderService;
 import com.aifuturetrade.service.StrategyCodeTesterService;
-import io.swagger.annotations.Api;
-import io.swagger.annotations.ApiOperation;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -19,7 +19,7 @@ import java.util.Map;
  */
 @RestController
 @RequestMapping("/api/ai")
-@Api(tags = "AI提供方服务")
+@Tag(name = "AI提供方服务", description = "AI提供方服务接口")
 public class AiProviderController {
 
     @Autowired
@@ -34,7 +34,7 @@ public class AiProviderController {
      * @return 可用模型列表
      */
     @PostMapping("/models")
-    @ApiOperation("从提供方API获取可用的模型列表")
+    @Operation(summary = "从提供方API获取可用的模型列表")
     public ResponseEntity<Map<String, Object>> fetchModels(@RequestBody Map<String, String> request) {
         String providerId = request.get("providerId");
         
@@ -62,7 +62,7 @@ public class AiProviderController {
      * @return 生成的策略代码
      */
     @PostMapping("/generate-strategy-code")
-    @ApiOperation("生成策略代码")
+    @Operation(summary = "生成策略代码")
     public ResponseEntity<Map<String, Object>> generateStrategyCode(@RequestBody Map<String, String> request) {
         String providerId = request.get("providerId");
         String modelName = request.get("modelName");

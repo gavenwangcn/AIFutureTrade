@@ -4,8 +4,8 @@ import com.aifuturetrade.service.StrategyService;
 import com.aifuturetrade.service.dto.StrategyDTO;
 import com.aifuturetrade.common.util.PageResult;
 import com.aifuturetrade.common.util.PageRequest;
-import io.swagger.annotations.Api;
-import io.swagger.annotations.ApiOperation;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -23,7 +23,7 @@ import java.util.Map;
  */
 @RestController
 @RequestMapping("/api/strategies")
-@Api(tags = "策略管理")
+@Tag(name = "策略管理", description = "策略管理接口")
 public class StrategyController {
     private static final Logger logger = LoggerFactory.getLogger(StrategyController.class);
 
@@ -35,7 +35,7 @@ public class StrategyController {
      * @return 策略列表
      */
     @GetMapping
-    @ApiOperation("获取所有策略")
+    @Operation(summary = "获取所有策略")
     public ResponseEntity<List<StrategyDTO>> getAllStrategies() {
         logger.info("开始获取所有策略");
         List<StrategyDTO> strategies = strategyService.getAllStrategies();
@@ -49,7 +49,7 @@ public class StrategyController {
      * @return 策略
      */
     @GetMapping("/{id}")
-    @ApiOperation("根据ID获取策略")
+    @Operation(summary = "根据ID获取策略")
     public ResponseEntity<StrategyDTO> getStrategyById(@PathVariable String id) {
         logger.info("开始根据ID获取策略，ID: {}", id);
         StrategyDTO strategy = strategyService.getStrategyById(id);
@@ -69,7 +69,7 @@ public class StrategyController {
      * @return 策略列表
      */
     @GetMapping("/search")
-    @ApiOperation("根据条件查询策略")
+    @Operation(summary = "根据条件查询策略")
     public ResponseEntity<List<StrategyDTO>> searchStrategies(
             @RequestParam(required = false) String name,
             @RequestParam(required = false) String type) {
@@ -88,7 +88,7 @@ public class StrategyController {
      * @return 分页查询结果
      */
     @GetMapping("/page")
-    @ApiOperation("分页查询策略")
+    @Operation(summary = "分页查询策略")
     public ResponseEntity<PageResult<StrategyDTO>> getStrategiesByPage(
             @RequestParam(defaultValue = "1") Integer pageNum,
             @RequestParam(defaultValue = "10") Integer pageSize,
@@ -109,7 +109,7 @@ public class StrategyController {
      * @return 新增的策略
      */
     @PostMapping
-    @ApiOperation("添加新的策略")
+    @Operation(summary = "添加新的策略")
     public ResponseEntity<Map<String, Object>> addStrategy(@RequestBody StrategyDTO strategyDTO) {
         logger.info("开始添加新策略，策略名称: {}, 类型: {}", strategyDTO.getName(), strategyDTO.getType());
         StrategyDTO addedStrategy = strategyService.addStrategy(strategyDTO);
@@ -127,7 +127,7 @@ public class StrategyController {
      * @return 更新后的策略
      */
     @PutMapping("/{id}")
-    @ApiOperation("更新策略")
+    @Operation(summary = "更新策略")
     public ResponseEntity<Map<String, Object>> updateStrategy(
             @PathVariable String id,
             @RequestBody StrategyDTO strategyDTO) {
@@ -147,7 +147,7 @@ public class StrategyController {
      * @return 删除操作结果
      */
     @DeleteMapping("/{id}")
-    @ApiOperation("删除策略")
+    @Operation(summary = "删除策略")
     public ResponseEntity<Map<String, Object>> deleteStrategy(@PathVariable String id) {
         logger.info("开始删除策略，策略ID: {}", id);
         Boolean deleted = strategyService.deleteStrategy(id);

@@ -1,8 +1,8 @@
 package com.aifuturetrade.controller;
 
 import com.aifuturetrade.service.MarketService;
-import io.swagger.annotations.Api;
-import io.swagger.annotations.ApiOperation;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -16,7 +16,7 @@ import java.util.Map;
  */
 @RestController
 @RequestMapping("/api/market")
-@Api(tags = "市场数据管理")
+@Tag(name = "市场数据管理", description = "市场数据管理接口")
 public class MarketController {
 
     @Autowired
@@ -26,7 +26,7 @@ public class MarketController {
      * 获取当前市场价格（仅返回配置的合约信息）
      */
     @GetMapping("/prices")
-    @ApiOperation("获取当前市场价格")
+    @Operation(summary = "获取当前市场价格")
     public ResponseEntity<Map<String, Map<String, Object>>> getMarketPrices() {
         Map<String, Map<String, Object>> prices = marketService.getMarketPrices();
         return new ResponseEntity<>(prices, HttpStatus.OK);
@@ -36,7 +36,7 @@ public class MarketController {
      * 获取技术指标
      */
     @GetMapping("/indicators/{symbol}")
-    @ApiOperation("获取技术指标")
+    @Operation(summary = "获取技术指标")
     public ResponseEntity<Map<String, Object>> getMarketIndicators(@PathVariable String symbol) {
         Map<String, Object> indicators = marketService.getMarketIndicators(symbol);
         return new ResponseEntity<>(indicators, HttpStatus.OK);
@@ -46,7 +46,7 @@ public class MarketController {
      * 获取涨幅榜
      */
     @GetMapping("/leaderboard/gainers")
-    @ApiOperation("获取涨幅榜")
+    @Operation(summary = "获取涨幅榜")
     public ResponseEntity<Map<String, Object>> getMarketLeaderboardGainers(
             @RequestParam(required = false) Integer limit) {
         if (limit == null) {
@@ -60,7 +60,7 @@ public class MarketController {
      * 获取跌幅榜
      */
     @GetMapping("/leaderboard/losers")
-    @ApiOperation("获取跌幅榜")
+    @Operation(summary = "获取跌幅榜")
     public ResponseEntity<Map<String, Object>> getMarketLeaderboardLosers(
             @RequestParam(required = false) Integer limit) {
         if (limit == null) {
@@ -74,7 +74,7 @@ public class MarketController {
      * 获取涨跌幅榜（已废弃，保留以兼容旧代码）
      */
     @GetMapping("/leaderboard")
-    @ApiOperation("获取涨跌幅榜（已废弃）")
+    @Operation(summary = "获取涨跌幅榜（已废弃）")
     public ResponseEntity<Map<String, Object>> getMarketLeaderboard(
             @RequestParam(required = false) Integer limit,
             @RequestParam(required = false, defaultValue = "0") Integer force) {
@@ -90,7 +90,7 @@ public class MarketController {
      * 支持两种参数命名方式：start_time/end_time（下划线）和startTime/endTime（驼峰）
      */
     @GetMapping("/klines")
-    @ApiOperation("获取K线历史数据")
+    @Operation(summary = "获取K线历史数据")
     public ResponseEntity<List<Map<String, Object>>> getMarketKlines(
             @RequestParam String symbol,
             @RequestParam(required = false, defaultValue = "5m") String interval,

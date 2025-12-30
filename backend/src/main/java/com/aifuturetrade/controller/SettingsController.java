@@ -1,8 +1,8 @@
 package com.aifuturetrade.controller;
 
 import com.aifuturetrade.service.SettingsService;
-import io.swagger.annotations.Api;
-import io.swagger.annotations.ApiOperation;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -15,7 +15,7 @@ import java.util.Map;
  */
 @RestController
 @RequestMapping("/api/settings")
-@Api(tags = "系统设置管理")
+@Tag(name = "系统设置管理", description = "系统设置管理接口")
 public class SettingsController {
 
     @Autowired
@@ -25,7 +25,7 @@ public class SettingsController {
      * 获取系统设置
      */
     @GetMapping
-    @ApiOperation("获取系统设置")
+    @Operation(summary = "获取系统设置")
     public ResponseEntity<Map<String, Object>> getSettings() {
         Map<String, Object> settings = settingsService.getSettings();
         return new ResponseEntity<>(settings, HttpStatus.OK);
@@ -35,7 +35,7 @@ public class SettingsController {
      * 更新系统设置
      */
     @PutMapping
-    @ApiOperation("更新系统设置")
+    @Operation(summary = "更新系统设置")
     public ResponseEntity<Map<String, Object>> updateSettings(@RequestBody Map<String, Object> settingsData) {
         Map<String, Object> result = settingsService.updateSettings(settingsData);
         return new ResponseEntity<>(result, HttpStatus.OK);

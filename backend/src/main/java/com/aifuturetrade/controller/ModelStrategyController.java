@@ -2,8 +2,8 @@ package com.aifuturetrade.controller;
 
 import com.aifuturetrade.service.ModelStrategyService;
 import com.aifuturetrade.service.dto.ModelStrategyDTO;
-import io.swagger.annotations.Api;
-import io.swagger.annotations.ApiOperation;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -19,7 +19,7 @@ import java.util.Map;
  */
 @RestController
 @RequestMapping("/api/model-strategies")
-@Api(tags = "模型关联策略管理")
+@Tag(name = "模型关联策略管理", description = "模型关联策略管理接口")
 public class ModelStrategyController {
 
     @Autowired
@@ -30,7 +30,7 @@ public class ModelStrategyController {
      * @return 模型策略关联列表
      */
     @GetMapping
-    @ApiOperation("获取所有模型策略关联")
+    @Operation(summary = "获取所有模型策略关联")
     public ResponseEntity<List<ModelStrategyDTO>> getAllModelStrategies() {
         List<ModelStrategyDTO> modelStrategies = modelStrategyService.getAllModelStrategies();
         return new ResponseEntity<>(modelStrategies, HttpStatus.OK);
@@ -42,7 +42,7 @@ public class ModelStrategyController {
      * @return 模型策略关联
      */
     @GetMapping("/{id}")
-    @ApiOperation("根据ID获取模型策略关联")
+    @Operation(summary = "根据ID获取模型策略关联")
     public ResponseEntity<ModelStrategyDTO> getModelStrategyById(@PathVariable String id) {
         ModelStrategyDTO modelStrategy = modelStrategyService.getModelStrategyById(id);
         return modelStrategy != null ? new ResponseEntity<>(modelStrategy, HttpStatus.OK) : new ResponseEntity<>(HttpStatus.NOT_FOUND);
@@ -54,7 +54,7 @@ public class ModelStrategyController {
      * @return 模型策略关联列表
      */
     @GetMapping("/model/{modelId}")
-    @ApiOperation("根据模型ID获取模型策略关联")
+    @Operation(summary = "根据模型ID获取模型策略关联")
     public ResponseEntity<List<ModelStrategyDTO>> getModelStrategiesByModelId(@PathVariable String modelId) {
         List<ModelStrategyDTO> modelStrategies = modelStrategyService.getModelStrategiesByModelId(modelId);
         return new ResponseEntity<>(modelStrategies, HttpStatus.OK);
@@ -66,7 +66,7 @@ public class ModelStrategyController {
      * @return 模型策略关联列表
      */
     @GetMapping("/strategy/{strategyId}")
-    @ApiOperation("根据策略ID获取模型策略关联")
+    @Operation(summary = "根据策略ID获取模型策略关联")
     public ResponseEntity<List<ModelStrategyDTO>> getModelStrategiesByStrategyId(@PathVariable String strategyId) {
         List<ModelStrategyDTO> modelStrategies = modelStrategyService.getModelStrategiesByStrategyId(strategyId);
         return new ResponseEntity<>(modelStrategies, HttpStatus.OK);
@@ -79,7 +79,7 @@ public class ModelStrategyController {
      * @return 模型策略关联列表
      */
     @GetMapping("/model/{modelId}/type/{type}")
-    @ApiOperation("根据模型ID和类型获取模型策略关联")
+    @Operation(summary = "根据模型ID和类型获取模型策略关联")
     public ResponseEntity<List<ModelStrategyDTO>> getModelStrategiesByModelIdAndType(
             @PathVariable String modelId,
             @PathVariable String type) {
@@ -93,7 +93,7 @@ public class ModelStrategyController {
      * @return 新增的模型策略关联
      */
     @PostMapping
-    @ApiOperation("添加新的模型策略关联")
+    @Operation(summary = "添加新的模型策略关联")
     public ResponseEntity<Map<String, Object>> addModelStrategy(@RequestBody ModelStrategyDTO modelStrategyDTO) {
         try {
             ModelStrategyDTO addedModelStrategy = modelStrategyService.addModelStrategy(modelStrategyDTO);
@@ -115,7 +115,7 @@ public class ModelStrategyController {
      * @return 删除操作结果
      */
     @DeleteMapping("/{id}")
-    @ApiOperation("删除模型策略关联")
+    @Operation(summary = "删除模型策略关联")
     public ResponseEntity<Map<String, Object>> deleteModelStrategy(@PathVariable String id) {
         Boolean deleted = modelStrategyService.deleteModelStrategy(id);
         Map<String, Object> response = new HashMap<>();
@@ -138,7 +138,7 @@ public class ModelStrategyController {
      * @return 删除操作结果
      */
     @DeleteMapping("/model/{modelId}/strategy/{strategyId}/type/{type}")
-    @ApiOperation("根据模型ID、策略ID和类型删除模型策略关联")
+    @Operation(summary = "根据模型ID、策略ID和类型删除模型策略关联")
     public ResponseEntity<Map<String, Object>> deleteModelStrategyByModelIdAndStrategyIdAndType(
             @PathVariable String modelId,
             @PathVariable String strategyId,
@@ -163,7 +163,7 @@ public class ModelStrategyController {
      * @return 更新操作结果
      */
     @PutMapping("/{id}/priority")
-    @ApiOperation("更新模型策略关联的优先级")
+    @Operation(summary = "更新模型策略关联的优先级")
     public ResponseEntity<Map<String, Object>> updateModelStrategyPriority(
             @PathVariable String id,
             @RequestBody Map<String, Integer> request) {
@@ -191,7 +191,7 @@ public class ModelStrategyController {
      * @return 保存操作结果
      */
     @PostMapping("/model/{modelId}/type/{type}/batch")
-    @ApiOperation("批量保存模型策略关联")
+    @Operation(summary = "批量保存模型策略关联")
     public ResponseEntity<Map<String, Object>> batchSaveModelStrategies(
             @PathVariable String modelId,
             @PathVariable String type,

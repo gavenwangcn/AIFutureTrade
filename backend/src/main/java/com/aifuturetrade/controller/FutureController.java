@@ -4,8 +4,8 @@ import com.aifuturetrade.service.FutureService;
 import com.aifuturetrade.service.dto.FutureDTO;
 import com.aifuturetrade.common.util.PageResult;
 import com.aifuturetrade.common.util.PageRequest;
-import io.swagger.annotations.Api;
-import io.swagger.annotations.ApiOperation;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -21,7 +21,7 @@ import java.util.Map;
  */
 @RestController
 @RequestMapping("/api/futures")
-@Api(tags = "合约配置管理")
+@Tag(name = "合约配置管理", description = "合约配置管理接口")
 public class FutureController {
 
     @Autowired
@@ -32,7 +32,7 @@ public class FutureController {
      * @return 合约配置列表
      */
     @GetMapping
-    @ApiOperation("获取所有合约配置")
+    @Operation(summary = "获取所有合约配置")
     public ResponseEntity<List<FutureDTO>> listFutures() {
         List<FutureDTO> futures = futureService.getAllFutures();
         return new ResponseEntity<>(futures, HttpStatus.OK);
@@ -44,7 +44,7 @@ public class FutureController {
      * @return 新增的合约配置
      */
     @PostMapping
-    @ApiOperation("添加新的合约配置")
+    @Operation(summary = "添加新的合约配置")
     public ResponseEntity<FutureDTO> addFutureConfig(@RequestBody FutureDTO futureDTO) {
         FutureDTO addedFuture = futureService.addFuture(futureDTO);
         return new ResponseEntity<>(addedFuture, HttpStatus.CREATED);
@@ -56,7 +56,7 @@ public class FutureController {
      * @return 删除操作结果
      */
     @DeleteMapping("/{futureId}")
-    @ApiOperation("删除合约配置")
+    @Operation(summary = "删除合约配置")
     public ResponseEntity<Map<String, Object>> deleteFutureConfig(@PathVariable String futureId) {
         Boolean deleted = futureService.deleteFuture(futureId);
         Map<String, Object> response = new HashMap<>();
@@ -76,7 +76,7 @@ public class FutureController {
      * @return 合约符号列表
      */
     @GetMapping("/symbols")
-    @ApiOperation("获取所有合约符号列表")
+    @Operation(summary = "获取所有合约符号列表")
     public ResponseEntity<List<String>> getTrackedSymbols() {
         List<String> symbols = futureService.getTrackedSymbols();
         return new ResponseEntity<>(symbols, HttpStatus.OK);

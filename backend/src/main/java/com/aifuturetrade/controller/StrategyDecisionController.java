@@ -3,9 +3,9 @@ package com.aifuturetrade.controller;
 import com.aifuturetrade.service.StrategyDecisionService;
 import com.aifuturetrade.common.util.PageRequest;
 import com.aifuturetrade.common.util.PageResult;
-import io.swagger.annotations.Api;
-import io.swagger.annotations.ApiOperation;
-import io.swagger.annotations.ApiParam;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.Parameter;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
@@ -20,7 +20,7 @@ import java.util.Map;
 @Slf4j
 @RestController
 @RequestMapping("/api/strategy-decisions")
-@Api(tags = "策略决策管理")
+@Tag(name = "策略决策管理", description = "策略决策管理接口")
 public class StrategyDecisionController {
 
     @Autowired
@@ -34,11 +34,11 @@ public class StrategyDecisionController {
      * @return 分页的策略决策记录
      */
     @GetMapping("/model/{modelId}")
-    @ApiOperation("根据模型ID查询策略决策记录（分页）")
+    @Operation(summary = "根据模型ID查询策略决策记录（分页）")
     public ResponseEntity<PageResult<Map<String, Object>>> getDecisionsByModelId(
-            @ApiParam(value = "模型ID", required = true) @PathVariable String modelId,
-            @ApiParam(value = "页码", required = false) @RequestParam(defaultValue = "1") Integer page,
-            @ApiParam(value = "每页记录数", required = false) @RequestParam(defaultValue = "10") Integer pageSize) {
+            @Parameter(description = "模型ID", required = true) @PathVariable String modelId,
+            @Parameter(description = "页码", required = false) @RequestParam(defaultValue = "1") Integer page,
+            @Parameter(description = "每页记录数", required = false) @RequestParam(defaultValue = "10") Integer pageSize) {
         log.info("[StrategyDecisionController] 查询策略决策: modelId={}, page={}, pageSize={}", modelId, page, pageSize);
         
         try {

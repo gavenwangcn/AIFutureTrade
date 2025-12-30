@@ -1,8 +1,8 @@
 package com.aifuturetrade.controller;
 
 import com.aifuturetrade.service.ModelService;
-import io.swagger.annotations.Api;
-import io.swagger.annotations.ApiOperation;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -16,7 +16,7 @@ import java.util.Map;
  */
 @RestController
 @RequestMapping("/api")
-@Api(tags = "聚合投资组合")
+@Tag(name = "聚合投资组合", description = "聚合投资组合接口")
 public class AggregatedPortfolioController {
 
     @Autowired
@@ -28,7 +28,7 @@ public class AggregatedPortfolioController {
      * @return 聚合投资组合数据
      */
     @GetMapping("/aggregated/portfolio")
-    @ApiOperation("获取聚合投资组合数据")
+    @Operation(summary = "获取聚合投资组合数据")
     public ResponseEntity<Map<String, Object>> getAggregatedPortfolio() {
         Map<String, Object> result = modelService.getAggregatedPortfolio();
         return new ResponseEntity<>(result, HttpStatus.OK);
