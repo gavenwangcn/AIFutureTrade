@@ -9,6 +9,7 @@ package com.aifuturetrade.asyncservice.service.impl;
 
 import com.aifuturetrade.asyncservice.service.MarketTickerStreamTestService;
 import com.binance.connector.client.common.ApiException;
+import com.binance.connector.client.common.websocket.adapter.stream.StreamConnectionWrapper;
 import com.binance.connector.client.common.websocket.configuration.WebSocketClientConfiguration;
 import com.binance.connector.client.common.websocket.service.StreamBlockingQueueWrapper;
 import com.binance.connector.client.derivatives_trading_usds_futures.websocket.stream.DerivativesTradingUsdsFuturesWebSocketStreamsUtil;
@@ -17,6 +18,7 @@ import com.binance.connector.client.derivatives_trading_usds_futures.websocket.s
 import com.binance.connector.client.derivatives_trading_usds_futures.websocket.stream.model.AllMarketTickersStreamsResponse;
 import com.binance.connector.client.derivatives_trading_usds_futures.websocket.stream.model.AllMarketTickersStreamsResponseInner;
 import lombok.extern.slf4j.Slf4j;
+import org.eclipse.jetty.websocket.client.WebSocketClient;
 import org.springframework.stereotype.Service;
 
 import javax.annotation.PostConstruct;
@@ -86,39 +88,42 @@ public class MarketTickerStreamTestServiceImpl implements MarketTickerStreamTest
     }
     
     /**
-     * 获取API实例 - 完全按照SDK官方示例 AllMarketTickersStreamsExample.getApi()
+     * 获取API实例 - 使用MarketTickerStreamServiceImpl方式构建WebSocketClientConfiguration和WebSocketClient
      */
     @Override
     public DerivativesTradingUsdsFuturesWebSocketStreams getApi() {
         if (api == null) {
-            log.info("[MarketTickerStreamTestImpl] [SDK示例模式] 准备创建WebSocketStreams实例...");
+            log.info("[MarketTickerStreamTestImpl] [优化模式] 使用MarketTickerStreamServiceImpl方式创建WebSocketStreams实例...");
             
             try {
-                // ===== 完全按照SDK示例的getApi()方法实现 =====
-                // SDK示例代码：
-                // WebSocketClientConfiguration clientConfiguration =
-                //         DerivativesTradingUsdsFuturesWebSocketStreamsUtil.getClientConfiguration();
-                // api = new DerivativesTradingUsdsFuturesWebSocketStreams(clientConfiguration);
+                // ===== 步骤1: 创建WebSocketClientConfiguration - MarketTickerStreamServiceImpl方式 =====
+                log.info("[MarketTickerStreamTestImpl] [优化模式] 步骤1: 创建WebSocketClientConfiguration...");
+                WebSocketClientConfiguration config = new WebSocketClientConfiguration();
+                log.info("[MarketTickerStreamTestImpl] [优化模式] ✅ WebSocketClientConfiguration创建成功");
+                log.info("[MarketTickerStreamTestImpl] [优化模式] 配置URL: {}", config.getUrl());
                 
-                log.info("[MarketTickerStreamTestImpl] [SDK示例模式] 调用 DerivativesTradingUsdsFuturesWebSocketStreamsUtil.getClientConfiguration()...");
-                WebSocketClientConfiguration clientConfiguration =
-                        DerivativesTradingUsdsFuturesWebSocketStreamsUtil.getClientConfiguration();
+                // ===== 步骤2: 创建并配置WebSocketClient - MarketTickerStreamServiceImpl方式 =====
+                log.info("[MarketTickerStreamTestImpl] [优化模式] 步骤2: 创建并配置WebSocketClient...");
+                WebSocketClient webSocketClient = new WebSocketClient();
                 
-                // 最大文本消息大小已通过系统属性在 AsyncServiceApplication 中设置
-                // System.setProperty("org.eclipse.jetty.websocket.maxTextMessageSize", "204800")
-                // 币安全市场ticker数据可能较大（实际约 68KB），默认限制 65KB 不够，已设置为 200KB
-                // 注意：WebSocketClientConfiguration 类没有直接设置 maxTextMessageSize 的方法
-                // 该配置由底层的 Jetty WebSocketClient 管理，通过系统属性统一设置
+                // 设置最大文本消息大小为 200KB（币安全市场ticker数据约 68KB，默认 65KB 不够）
+                // 使用 Jetty WebSocketClient 提供的 setMaxTextMessageSize 方法
+                int maxMessageSize = 200 * 1024; // 200KB
+                webSocketClient.setMaxTextMessageSize(maxMessageSize);
+                log.info("[MarketTickerStreamTestImpl] [优化模式] ✅ 已通过 setMaxTextMessageSize 方法设置最大消息大小为 {} 字节 (200KB)", maxMessageSize);
                 
-                log.info("[MarketTickerStreamTestImpl] [SDK示例模式] 客户端配置创建成功");
-                log.info("[MarketTickerStreamTestImpl] [SDK示例模式] 配置URL: {}", clientConfiguration.getUrl());
+                // ===== 步骤3: 创建StreamConnectionWrapper - MarketTickerStreamServiceImpl方式 =====
+                log.info("[MarketTickerStreamTestImpl] [优化模式] 步骤3: 创建StreamConnectionWrapper...");
+                StreamConnectionWrapper connectionWrapper = new StreamConnectionWrapper(config, webSocketClient);
+                log.info("[MarketTickerStreamTestImpl] [优化模式] ✅ StreamConnectionWrapper创建成功");
                 
-                log.info("[MarketTickerStreamTestImpl] [SDK示例模式] 创建 DerivativesTradingUsdsFuturesWebSocketStreams 实例...");
-                api = new DerivativesTradingUsdsFuturesWebSocketStreams(clientConfiguration);
-                log.info("[MarketTickerStreamTestImpl] [SDK示例模式] WebSocketStreams实例创建成功: {}", api != null ? "实例存在" : "实例为空");
+                // ===== 步骤4: 使用StreamConnectionInterface构造函数创建WebSocket Streams实例 =====
+                log.info("[MarketTickerStreamTestImpl] [优化模式] 步骤4: 创建DerivativesTradingUsdsFuturesWebSocketStreams实例...");
+                api = new DerivativesTradingUsdsFuturesWebSocketStreams(connectionWrapper);
+                log.info("[MarketTickerStreamTestImpl] [优化模式] ✅ WebSocketStreams实例创建成功: {}", api != null ? "实例存在" : "实例为空");
                 
             } catch (Exception e) {
-                log.error("[MarketTickerStreamTestImpl] ❌ SDK示例模式创建API实例失败", e);
+                log.error("[MarketTickerStreamTestImpl] ❌ 优化模式创建API实例失败", e);
                 log.error("[MarketTickerStreamTestImpl] ❌ 创建失败异常类型: {}", e.getClass().getName());
                 log.error("[MarketTickerStreamTestImpl] ❌ 创建失败异常消息: {}", e.getMessage());
                 throw new RuntimeException("无法创建WebSocket API实例", e);
@@ -128,24 +133,24 @@ public class MarketTickerStreamTestServiceImpl implements MarketTickerStreamTest
     }
     
     /**
-     * 启动流处理 - 完全按照SDK官方示例 allMarketTickersStreamsExample() 方法
+     * 启动流处理 - 使用MarketTickerStreamServiceImpl方式
      */
     public void startStreamProcessing() throws ApiException, InterruptedException {
-        log.info("[MarketTickerStreamTestImpl] [SDK示例模式] 开始启动流处理...");
+        log.info("[MarketTickerStreamTestImpl] [优化模式] 开始启动流处理...");
         
         try {
             running.set(true);
             
-            // ===== 创建请求对象 - SDK示例方式 =====
-            log.info("[MarketTickerStreamTestImpl] [SDK示例模式] 创建 AllMarketTickersStreamsRequest 请求对象...");
+            // ===== 创建请求对象 - MarketTickerStreamServiceImpl方式 =====
+            log.info("[MarketTickerStreamTestImpl] [优化模式] 创建 AllMarketTickersStreamsRequest 请求对象...");
             AllMarketTickersStreamsRequest allMarketTickersStreamsRequest =
                     new AllMarketTickersStreamsRequest();
-            log.info("[MarketTickerStreamTestImpl] [SDK示例模式] 请求对象创建成功");
+            log.info("[MarketTickerStreamTestImpl] [优化模式] 请求对象创建成功");
             
-            // ===== 获取流响应 - SDK示例方式 =====
-            log.info("[MarketTickerStreamTestImpl] [SDK示例模式] 调用 getApi().allMarketTickersStreams() 获取流...");
+            // ===== 获取流响应 - MarketTickerStreamServiceImpl方式 =====
+            log.info("[MarketTickerStreamTestImpl] [优化模式] 调用 getApi().allMarketTickersStreams() 获取流...");
             response = getApi().allMarketTickersStreams(allMarketTickersStreamsRequest);
-            log.info("[MarketTickerStreamTestImpl] [SDK示例模式] 流响应获取成功: {}", response != null ? "响应存在" : "响应为空");
+            log.info("[MarketTickerStreamTestImpl] [优化模式] 流响应获取成功: {}", response != null ? "响应存在" : "响应为空");
             
             // ===== 启动处理线程 - SDK示例方式 =====
             log.info("[MarketTickerStreamTestImpl] [SDK示例模式] 启动流数据处理线程...");
