@@ -73,12 +73,12 @@ logger = logging.getLogger(__name__)
 db = Database()
 
 # Initialize database tables immediately when the application starts
-    # 使用统一的初始化函数，确保所有表都被正确创建
-    with app.app_context():
-        from trade.common.database.database_init import init_all_database_tables
-        # 使用 Database 的 command 方法作为初始化函数
-        init_all_database_tables(db.command)
-    logger.info("Database tables initialized")
+# 使用统一的初始化函数，确保所有表都被正确创建
+with app.app_context():
+    from trade.common.database.database_init import init_all_database_tables
+    # 使用 Database 的 command 方法作为初始化函数
+    init_all_database_tables(db.command)
+logger.info("Database tables initialized")
 
 # Initialize ModelsDatabase, ProvidersDatabase and StrategysDatabase for direct operations
 models_db = ModelsDatabase(pool=db._pool)
