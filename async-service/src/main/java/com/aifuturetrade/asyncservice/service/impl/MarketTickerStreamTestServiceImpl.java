@@ -106,6 +106,7 @@ public class MarketTickerStreamTestServiceImpl implements MarketTickerStreamTest
         if (api == null) {
             WebSocketClientConfiguration clientConfiguration =
                     DerivativesTradingUsdsFuturesWebSocketStreamsUtil.getClientConfiguration();
+                    clientConfiguration.setMessageMaxSize(75000L);
             api = new DerivativesTradingUsdsFuturesWebSocketStreams(clientConfiguration);
         }
         return api;
