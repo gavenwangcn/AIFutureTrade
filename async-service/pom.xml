@@ -192,7 +192,19 @@
                     <groupId>com.fasterxml.jackson.core</groupId>
                     <artifactId>jackson-annotations</artifactId>
                 </exclusion>
+                <!-- 排除 Gson 依赖，使用兼容版本 -->
+                <exclusion>
+                    <groupId>com.google.code.gson</groupId>
+                    <artifactId>gson</artifactId>
+                </exclusion>
             </exclusions>
+        </dependency>
+
+        <!-- 添加兼容的 Gson 版本 -->
+        <dependency>
+            <groupId>com.google.code.gson</groupId>
+            <artifactId>gson</artifactId>
+            <version>2.8.9</version>
         </dependency>
 
         <!-- 添加 Binance SDK 所需的 Jetty 依赖 -->
