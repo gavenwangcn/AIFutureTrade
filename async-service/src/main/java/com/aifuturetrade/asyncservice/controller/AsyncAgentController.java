@@ -31,8 +31,8 @@ public class AsyncAgentController {
      */
     @PostMapping("/task/{task}")
     public ResponseEntity<Map<String, Object>> startTask(
-            @PathVariable String task,
-            @RequestParam(required = false) Integer durationSeconds) {
+            @PathVariable(value = "task") String task,
+            @RequestParam(value = "durationSeconds", required = false) Integer durationSeconds) {
         
         Map<String, Object> response = new HashMap<>();
         
@@ -99,7 +99,7 @@ public class AsyncAgentController {
      * @return 响应结果
      */
     @GetMapping("/task/{task}/status")
-    public ResponseEntity<Map<String, Object>> getTaskStatus(@PathVariable String task) {
+    public ResponseEntity<Map<String, Object>> getTaskStatus(@PathVariable(value = "task") String task) {
         Map<String, Object> response = new HashMap<>();
         
         try {

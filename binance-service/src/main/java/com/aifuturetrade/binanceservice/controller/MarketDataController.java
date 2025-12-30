@@ -20,7 +20,7 @@ import java.util.Map;
  */
 @Slf4j
 @RestController
-@RequestMapping("/api/market-data")
+@RequestMapping({"/api/market-data", "/api/market"})
 @Tag(name = "市场数据管理", description = "市场数据管理接口")
 public class MarketDataController {
 
@@ -79,11 +79,11 @@ public class MarketDataController {
     @GetMapping("/klines")
     @Operation(summary = "获取K线数据")
     public ResponseEntity<Map<String, Object>> getKlines(
-            @Parameter(description = "交易对符号", required = true) @RequestParam String symbol,
-            @Parameter(description = "K线间隔", required = true) @RequestParam String interval,
-            @Parameter(description = "返回的K线数量", required = false) @RequestParam(required = false) Integer limit,
-            @Parameter(description = "起始时间戳（毫秒）", required = false) @RequestParam(required = false) Long startTime,
-            @Parameter(description = "结束时间戳（毫秒）", required = false) @RequestParam(required = false) Long endTime) {
+            @Parameter(description = "交易对符号", required = true) @RequestParam(value = "symbol") String symbol,
+            @Parameter(description = "K线间隔", required = true) @RequestParam(value = "interval") String interval,
+            @Parameter(description = "返回的K线数量", required = false) @RequestParam(value = "limit", required = false) Integer limit,
+            @Parameter(description = "起始时间戳（毫秒）", required = false) @RequestParam(value = "startTime", required = false) Long startTime,
+            @Parameter(description = "结束时间戳（毫秒）", required = false) @RequestParam(value = "endTime", required = false) Long endTime) {
         log.debug("[MarketDataController] 接收到K线数据请求: symbol={}, interval={}, limit={}", 
                 symbol, interval, limit);
         try {
@@ -107,7 +107,7 @@ public class MarketDataController {
     @GetMapping("/format-symbol")
     @Operation(summary = "格式化交易对符号")
     public ResponseEntity<Map<String, Object>> formatSymbol(
-            @Parameter(description = "基础交易对符号", required = true) @RequestParam String baseSymbol) {
+            @Parameter(description = "基础交易对符号", required = true) @RequestParam(value = "baseSymbol") String baseSymbol) {
         log.debug("[MarketDataController] 接收到格式化符号请求: baseSymbol={}", baseSymbol);
         try {
             String result = marketDataService.formatSymbol(baseSymbol);
@@ -121,6 +121,27 @@ public class MarketDataController {
             errorResponse.put("success", false);
             errorResponse.put("message", "格式化符号失败: " + e.getMessage());
             return new ResponseEntity<>(errorResponse, HttpStatus.INTERNAL_SERVER_ERROR);
+        }
+    }
+
+    /**
+     * 获取跌幅榜
+     */
+    @GetMapping("/leaderboard/losers")
+    @Operation(summary = "获取跌幅榜")
+    public ResponseEntity<Map<String, Object>> getMarketLeaderboardLosers(
+            @Parameter(description = "返回的数据条数限制", required = false) 
+            @RequestParam(value = "limit", required = false) Integer limit) {
+        log.debug("[MarketDataController] 接收到跌幅榜请求: limit={}", limit);
+        try {
+            Map<String, Object> result = marketDataService.getMarketLeaderboardLosers(limit);
+            return new ResponseEntity<>(result, HttpStatus.OK);
+        } catch (Exception e) {
+            log.error("[MarketDataController] 获取跌幅榜失败: {}", e.getMessage(), e);
+            Map<String, Object> errorResponse = new HashMap<>();
+            errorResponse.put("losers", new java.util.ArrayList<>());
+            errorResponse.put("timestamp", System.currentTimeMillis());
+            return new ResponseEntity<>(errorResponse, HttpStatus.OK);
         }
     }
 }

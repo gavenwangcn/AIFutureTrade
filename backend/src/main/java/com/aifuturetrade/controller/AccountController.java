@@ -47,7 +47,7 @@ public class AccountController {
      */
     @DeleteMapping("/{accountAlias}")
     @Operation(summary = "删除账户")
-    public ResponseEntity<Map<String, Object>> deleteAccount(@PathVariable String accountAlias) {
+    public ResponseEntity<Map<String, Object>> deleteAccount(@PathVariable(value = "accountAlias") String accountAlias) {
         Map<String, Object> result = accountService.deleteAccount(accountAlias);
         return new ResponseEntity<>(result, HttpStatus.OK);
     }

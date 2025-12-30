@@ -59,7 +59,7 @@ public class ModelController {
      */
     @GetMapping("/{modelId}")
     @Operation(summary = "根据ID获取交易模型")
-    public ResponseEntity<ModelDTO> getModelById(@PathVariable String modelId) {
+    public ResponseEntity<ModelDTO> getModelById(@PathVariable(value = "modelId") String modelId) {
         ModelDTO model = modelService.getModelById(modelId);
         if (model != null) {
             return new ResponseEntity<>(model, HttpStatus.OK);
@@ -90,7 +90,7 @@ public class ModelController {
      */
     @DeleteMapping("/{modelId}")
     @Operation(summary = "删除交易模型")
-    public ResponseEntity<Map<String, Object>> deleteModel(@PathVariable String modelId) {
+    public ResponseEntity<Map<String, Object>> deleteModel(@PathVariable(value = "modelId") String modelId) {
         Boolean deleted = modelService.deleteModel(modelId);
         Map<String, Object> response = new HashMap<>();
         if (deleted) {
@@ -111,7 +111,7 @@ public class ModelController {
      */
     @GetMapping("/{modelId}/portfolio")
     @Operation(summary = "获取模型的投资组合数据")
-    public ResponseEntity<Map<String, Object>> getPortfolio(@PathVariable String modelId) {
+    public ResponseEntity<Map<String, Object>> getPortfolio(@PathVariable(value = "modelId") String modelId) {
         Map<String, Object> portfolio = modelService.getPortfolio(modelId);
         return new ResponseEntity<>(portfolio, HttpStatus.OK);
     }
@@ -123,7 +123,7 @@ public class ModelController {
      */
     @GetMapping("/{modelId}/portfolio/symbols")
     @Operation(summary = "获取模型的持仓合约symbol列表")
-    public ResponseEntity<Map<String, Object>> getModelPortfolioSymbols(@PathVariable String modelId) {
+    public ResponseEntity<Map<String, Object>> getModelPortfolioSymbols(@PathVariable(value = "modelId") String modelId) {
         Map<String, Object> symbols = modelService.getModelPortfolioSymbols(modelId);
         return new ResponseEntity<>(symbols, HttpStatus.OK);
     }
@@ -138,9 +138,9 @@ public class ModelController {
     @GetMapping("/{modelId}/trades")
     @Operation(summary = "获取模型的交易历史记录（分页）")
     public ResponseEntity<PageResult<Map<String, Object>>> getTrades(
-            @PathVariable String modelId,
-            @RequestParam(defaultValue = "1") Integer page,
-            @RequestParam(defaultValue = "10") Integer pageSize) {
+            @PathVariable(value = "modelId") String modelId,
+            @RequestParam(value = "page", defaultValue = "1") Integer page,
+            @RequestParam(value = "pageSize", defaultValue = "10") Integer pageSize) {
         PageRequest pageRequest = new PageRequest();
         pageRequest.setPageNum(page);
         pageRequest.setPageSize(pageSize);
@@ -156,7 +156,7 @@ public class ModelController {
      */
     @GetMapping("/{modelId}/conversations")
     @Operation(summary = "获取模型的对话历史记录")
-    public ResponseEntity<List<Map<String, Object>>> getConversations(@PathVariable String modelId, @RequestParam(defaultValue = "20") Integer limit) {
+    public ResponseEntity<List<Map<String, Object>>> getConversations(@PathVariable(value = "modelId") String modelId, @RequestParam(value = "limit", defaultValue = "20") Integer limit) {
         List<Map<String, Object>> conversations = modelService.getConversations(modelId, limit);
         return new ResponseEntity<>(conversations, HttpStatus.OK);
     }
@@ -168,7 +168,7 @@ public class ModelController {
      */
     @GetMapping("/{modelId}/prompts")
     @Operation(summary = "获取模型的提示词配置")
-    public ResponseEntity<Map<String, Object>> getModelPrompts(@PathVariable String modelId) {
+    public ResponseEntity<Map<String, Object>> getModelPrompts(@PathVariable(value = "modelId") String modelId) {
         Map<String, Object> prompts = modelService.getModelPrompts(modelId);
         return new ResponseEntity<>(prompts, HttpStatus.OK);
     }
@@ -181,7 +181,7 @@ public class ModelController {
      */
     @PutMapping("/{modelId}/prompts")
     @Operation(summary = "更新模型的提示词配置")
-    public ResponseEntity<Map<String, Object>> updateModelPrompts(@PathVariable String modelId, @RequestBody Map<String, String> prompts) {
+    public ResponseEntity<Map<String, Object>> updateModelPrompts(@PathVariable(value = "modelId") String modelId, @RequestBody Map<String, String> prompts) {
         String buyPrompt = prompts.get("buy_prompt");
         String sellPrompt = prompts.get("sell_prompt");
         Map<String, Object> result = modelService.updateModelPrompts(modelId, buyPrompt, sellPrompt);
@@ -196,7 +196,7 @@ public class ModelController {
      */
     @PostMapping("/{modelId}/batch-config")
     @Operation(summary = "更新模型的批次配置")
-    public ResponseEntity<Map<String, Object>> updateModelBatchConfig(@PathVariable String modelId, @RequestBody Map<String, Object> batchConfig) {
+    public ResponseEntity<Map<String, Object>> updateModelBatchConfig(@PathVariable(value = "modelId") String modelId, @RequestBody Map<String, Object> batchConfig) {
         Map<String, Object> result = modelService.updateModelBatchConfig(modelId, batchConfig);
         return new ResponseEntity<>(result, HttpStatus.OK);
     }
@@ -209,7 +209,7 @@ public class ModelController {
      */
     @PostMapping("/{modelId}/max_positions")
     @Operation(summary = "更新模型的最大持仓数量")
-    public ResponseEntity<Map<String, Object>> updateModelMaxPositions(@PathVariable String modelId, @RequestBody Map<String, Object> requestBody) {
+    public ResponseEntity<Map<String, Object>> updateModelMaxPositions(@PathVariable(value = "modelId") String modelId, @RequestBody Map<String, Object> requestBody) {
         Integer maxPositions = ((Number) requestBody.get("max_positions")).intValue();
         Map<String, Object> result = modelService.updateModelMaxPositions(modelId, maxPositions);
         return new ResponseEntity<>(result, HttpStatus.OK);
@@ -223,7 +223,7 @@ public class ModelController {
      */
     @PostMapping("/{modelId}/leverage")
     @Operation(summary = "更新模型的杠杆倍数")
-    public ResponseEntity<Map<String, Object>> updateModelLeverage(@PathVariable String modelId, @RequestBody Map<String, Object> requestBody) {
+    public ResponseEntity<Map<String, Object>> updateModelLeverage(@PathVariable(value = "modelId") String modelId, @RequestBody Map<String, Object> requestBody) {
         Integer leverage = ((Number) requestBody.get("leverage")).intValue();
         Map<String, Object> result = modelService.updateModelLeverage(modelId, leverage);
         return new ResponseEntity<>(result, HttpStatus.OK);
@@ -237,7 +237,7 @@ public class ModelController {
      */
     @PutMapping("/{modelId}/provider")
     @Operation(summary = "更新模型的API提供方和模型名称")
-    public ResponseEntity<Map<String, Object>> updateModelProvider(@PathVariable String modelId, @RequestBody Map<String, Object> requestBody) {
+    public ResponseEntity<Map<String, Object>> updateModelProvider(@PathVariable(value = "modelId") String modelId, @RequestBody Map<String, Object> requestBody) {
         String providerId = (String) requestBody.get("provider_id");
         String modelName = (String) requestBody.get("model_name");
         Map<String, Object> result = modelService.updateModelProvider(modelId, providerId, modelName);
@@ -255,7 +255,7 @@ public class ModelController {
      */
     @PostMapping("/{modelId}/auto-trading")
     @Operation(summary = "设置模型的自动交易开关")
-    public ResponseEntity<Map<String, Object>> setModelAutoTrading(@PathVariable String modelId, @RequestBody Map<String, Object> requestBody) {
+    public ResponseEntity<Map<String, Object>> setModelAutoTrading(@PathVariable(value = "modelId") String modelId, @RequestBody Map<String, Object> requestBody) {
         Boolean autoBuyEnabled;
         Boolean autoSellEnabled;
         
@@ -303,7 +303,7 @@ public class ModelController {
      */
     @PostMapping("/{modelId}/execute")
     @Operation(summary = "手动执行一次交易周期（同时执行买入和卖出）")
-    public ResponseEntity<Map<String, Object>> executeTrading(@PathVariable String modelId) {
+    public ResponseEntity<Map<String, Object>> executeTrading(@PathVariable(value = "modelId") String modelId) {
         Map<String, Object> result = modelService.executeTrading(modelId);
         return new ResponseEntity<>(result, HttpStatus.OK);
     }
@@ -315,7 +315,7 @@ public class ModelController {
      */
     @PostMapping("/{modelId}/execute-buy")
     @Operation(summary = "手动执行一次买入交易周期")
-    public ResponseEntity<Map<String, Object>> executeBuyTrading(@PathVariable String modelId) {
+    public ResponseEntity<Map<String, Object>> executeBuyTrading(@PathVariable(value = "modelId") String modelId) {
         Map<String, Object> result = modelService.executeBuyTrading(modelId);
         return new ResponseEntity<>(result, HttpStatus.OK);
     }
@@ -327,7 +327,7 @@ public class ModelController {
      */
     @PostMapping("/{modelId}/execute-sell")
     @Operation(summary = "手动执行一次卖出交易周期")
-    public ResponseEntity<Map<String, Object>> executeSellTrading(@PathVariable String modelId) {
+    public ResponseEntity<Map<String, Object>> executeSellTrading(@PathVariable(value = "modelId") String modelId) {
         Map<String, Object> result = modelService.executeSellTrading(modelId);
         return new ResponseEntity<>(result, HttpStatus.OK);
     }
@@ -339,7 +339,7 @@ public class ModelController {
      */
     @PostMapping("/{modelId}/disable-buy")
     @Operation(summary = "禁用模型的自动买入功能")
-    public ResponseEntity<Map<String, Object>> disableBuyTrading(@PathVariable String modelId) {
+    public ResponseEntity<Map<String, Object>> disableBuyTrading(@PathVariable(value = "modelId") String modelId) {
         Map<String, Object> result = modelService.disableBuyTrading(modelId);
         return new ResponseEntity<>(result, HttpStatus.OK);
     }
@@ -351,7 +351,7 @@ public class ModelController {
      */
     @PostMapping("/{modelId}/disable-sell")
     @Operation(summary = "禁用模型的自动卖出功能")
-    public ResponseEntity<Map<String, Object>> disableSellTrading(@PathVariable String modelId) {
+    public ResponseEntity<Map<String, Object>> disableSellTrading(@PathVariable(value = "modelId") String modelId) {
         Map<String, Object> result = modelService.disableSellTrading(modelId);
         return new ResponseEntity<>(result, HttpStatus.OK);
     }
@@ -369,11 +369,11 @@ public class ModelController {
     @GetMapping("/{modelId}/strategy-config")
     @Operation(summary = "获取模型策略配置数据")
     public ResponseEntity<Map<String, Object>> getModelStrategyConfig(
-            @PathVariable String modelId,
-            @RequestParam(required = false) String name,
-            @RequestParam(required = false) String type,
-            @RequestParam(defaultValue = "1") Integer pageNum,
-            @RequestParam(defaultValue = "10") Integer pageSize) {
+            @PathVariable(value = "modelId") String modelId,
+            @RequestParam(value = "name", required = false) String name,
+            @RequestParam(value = "type", required = false) String type,
+            @RequestParam(value = "pageNum", defaultValue = "1") Integer pageNum,
+            @RequestParam(value = "pageSize", defaultValue = "10") Integer pageSize) {
         // 过滤掉 "undefined" 字符串，转换为 null
         if (name != null && ("undefined".equalsIgnoreCase(name) || name.trim().isEmpty())) {
             name = null;
@@ -412,7 +412,7 @@ public class ModelController {
     @PostMapping("/{modelId}/strategy-config")
     @Operation(summary = "批量保存模型策略配置")
     public ResponseEntity<Map<String, Object>> saveModelStrategyConfig(
-            @PathVariable String modelId,
+            @PathVariable(value = "modelId") String modelId,
             @RequestBody Map<String, Object> requestBody) {
         try {
             @SuppressWarnings("unchecked")

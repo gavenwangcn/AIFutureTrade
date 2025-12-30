@@ -36,9 +36,9 @@ public class StrategyDecisionController {
     @GetMapping("/model/{modelId}")
     @Operation(summary = "根据模型ID查询策略决策记录（分页）")
     public ResponseEntity<PageResult<Map<String, Object>>> getDecisionsByModelId(
-            @Parameter(description = "模型ID", required = true) @PathVariable String modelId,
-            @Parameter(description = "页码", required = false) @RequestParam(defaultValue = "1") Integer page,
-            @Parameter(description = "每页记录数", required = false) @RequestParam(defaultValue = "10") Integer pageSize) {
+            @Parameter(description = "模型ID", required = true) @PathVariable(value = "modelId") String modelId,
+            @Parameter(description = "页码", required = false) @RequestParam(value = "page", defaultValue = "1") Integer page,
+            @Parameter(description = "每页记录数", required = false) @RequestParam(value = "pageSize", defaultValue = "10") Integer pageSize) {
         log.info("[StrategyDecisionController] 查询策略决策: modelId={}, page={}, pageSize={}", modelId, page, pageSize);
         
         try {

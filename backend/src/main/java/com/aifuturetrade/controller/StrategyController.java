@@ -50,7 +50,7 @@ public class StrategyController {
      */
     @GetMapping("/{id}")
     @Operation(summary = "根据ID获取策略")
-    public ResponseEntity<StrategyDTO> getStrategyById(@PathVariable String id) {
+    public ResponseEntity<StrategyDTO> getStrategyById(@PathVariable(value = "id") String id) {
         logger.info("开始根据ID获取策略，ID: {}", id);
         StrategyDTO strategy = strategyService.getStrategyById(id);
         if (strategy != null) {
@@ -71,8 +71,8 @@ public class StrategyController {
     @GetMapping("/search")
     @Operation(summary = "根据条件查询策略")
     public ResponseEntity<List<StrategyDTO>> searchStrategies(
-            @RequestParam(required = false) String name,
-            @RequestParam(required = false) String type) {
+            @RequestParam(value = "name", required = false) String name,
+            @RequestParam(value = "type", required = false) String type) {
         logger.info("开始根据条件查询策略，名称: {}, 类型: {}", name, type);
         List<StrategyDTO> strategies = strategyService.getStrategiesByCondition(name, type);
         logger.info("根据条件查询策略成功，共 {} 条记录", strategies.size());
@@ -90,10 +90,10 @@ public class StrategyController {
     @GetMapping("/page")
     @Operation(summary = "分页查询策略")
     public ResponseEntity<PageResult<StrategyDTO>> getStrategiesByPage(
-            @RequestParam(defaultValue = "1") Integer pageNum,
-            @RequestParam(defaultValue = "10") Integer pageSize,
-            @RequestParam(required = false) String name,
-            @RequestParam(required = false) String type) {
+            @RequestParam(value = "pageNum", defaultValue = "1") Integer pageNum,
+            @RequestParam(value = "pageSize", defaultValue = "10") Integer pageSize,
+            @RequestParam(value = "name", required = false) String name,
+            @RequestParam(value = "type", required = false) String type) {
         logger.info("开始分页查询策略，页码: {}, 每页大小: {}, 名称: {}, 类型: {}", pageNum, pageSize, name, type);
         PageRequest pageRequest = new PageRequest();
         pageRequest.setPageNum(pageNum);
@@ -129,7 +129,7 @@ public class StrategyController {
     @PutMapping("/{id}")
     @Operation(summary = "更新策略")
     public ResponseEntity<Map<String, Object>> updateStrategy(
-            @PathVariable String id,
+            @PathVariable(value = "id") String id,
             @RequestBody StrategyDTO strategyDTO) {
         logger.info("开始更新策略，策略ID: {}", id);
         strategyDTO.setId(id);
@@ -148,7 +148,7 @@ public class StrategyController {
      */
     @DeleteMapping("/{id}")
     @Operation(summary = "删除策略")
-    public ResponseEntity<Map<String, Object>> deleteStrategy(@PathVariable String id) {
+    public ResponseEntity<Map<String, Object>> deleteStrategy(@PathVariable(value = "id") String id) {
         logger.info("开始删除策略，策略ID: {}", id);
         Boolean deleted = strategyService.deleteStrategy(id);
         Map<String, Object> response = new HashMap<>();

@@ -37,7 +37,7 @@ public class MarketController {
      */
     @GetMapping("/indicators/{symbol}")
     @Operation(summary = "获取技术指标")
-    public ResponseEntity<Map<String, Object>> getMarketIndicators(@PathVariable String symbol) {
+    public ResponseEntity<Map<String, Object>> getMarketIndicators(@PathVariable(value = "symbol") String symbol) {
         Map<String, Object> indicators = marketService.getMarketIndicators(symbol);
         return new ResponseEntity<>(indicators, HttpStatus.OK);
     }
@@ -48,7 +48,7 @@ public class MarketController {
     @GetMapping("/leaderboard/gainers")
     @Operation(summary = "获取涨幅榜")
     public ResponseEntity<Map<String, Object>> getMarketLeaderboardGainers(
-            @RequestParam(required = false) Integer limit) {
+            @RequestParam(value = "limit", required = false) Integer limit) {
         if (limit == null) {
             limit = 10;
         }
@@ -62,7 +62,7 @@ public class MarketController {
     @GetMapping("/leaderboard/losers")
     @Operation(summary = "获取跌幅榜")
     public ResponseEntity<Map<String, Object>> getMarketLeaderboardLosers(
-            @RequestParam(required = false) Integer limit) {
+            @RequestParam(value = "limit", required = false) Integer limit) {
         if (limit == null) {
             limit = 10;
         }
@@ -76,8 +76,8 @@ public class MarketController {
     @GetMapping("/leaderboard")
     @Operation(summary = "获取涨跌幅榜（已废弃）")
     public ResponseEntity<Map<String, Object>> getMarketLeaderboard(
-            @RequestParam(required = false) Integer limit,
-            @RequestParam(required = false, defaultValue = "0") Integer force) {
+            @RequestParam(value = "limit", required = false) Integer limit,
+            @RequestParam(value = "force", required = false, defaultValue = "0") Integer force) {
         if (limit == null) {
             limit = 10;
         }
@@ -92,13 +92,13 @@ public class MarketController {
     @GetMapping("/klines")
     @Operation(summary = "获取K线历史数据")
     public ResponseEntity<List<Map<String, Object>>> getMarketKlines(
-            @RequestParam String symbol,
-            @RequestParam(required = false, defaultValue = "5m") String interval,
-            @RequestParam(required = false) Integer limit,
-            @RequestParam(required = false) String start_time,
-            @RequestParam(required = false) String end_time,
-            @RequestParam(required = false) String startTime,
-            @RequestParam(required = false) String endTime) {
+            @RequestParam(value = "symbol") String symbol,
+            @RequestParam(value = "interval", required = false, defaultValue = "5m") String interval,
+            @RequestParam(value = "limit", required = false) Integer limit,
+            @RequestParam(value = "start_time", required = false) String start_time,
+            @RequestParam(value = "end_time", required = false) String end_time,
+            @RequestParam(value = "startTime", required = false) String startTime,
+            @RequestParam(value = "endTime", required = false) String endTime) {
         // 优先使用下划线命名（前端使用），如果没有则使用驼峰命名
         String startTimeParam = start_time != null ? start_time : startTime;
         String endTimeParam = end_time != null ? end_time : endTime;

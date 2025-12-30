@@ -110,5 +110,23 @@ public class MarketDataServiceImpl implements MarketDataService {
         }
         return binanceFuturesClient.formatSymbol(baseSymbol);
     }
+
+    /**
+     * 获取跌幅榜
+     * 注意：binance-service 主要提供币安 API 调用功能
+     * 跌幅榜数据应该从数据库获取，建议使用 backend 服务的 /api/market/leaderboard/losers 端点
+     * 这里返回空数据以避免错误
+     * 
+     * @param limit 返回的数据条数限制，可选
+     * @return 跌幅榜数据
+     */
+    @Override
+    public Map<String, Object> getMarketLeaderboardLosers(Integer limit) {
+        log.warn("[MarketDataServiceImpl] getMarketLeaderboardLosers 被调用，但 binance-service 不提供此功能，建议使用 backend 服务");
+        Map<String, Object> result = new HashMap<>();
+        result.put("losers", new java.util.ArrayList<>());
+        result.put("timestamp", System.currentTimeMillis());
+        return result;
+    }
 }
 

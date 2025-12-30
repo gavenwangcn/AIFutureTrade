@@ -2,8 +2,6 @@ package com.aifuturetrade.controller;
 
 import com.aifuturetrade.service.FutureService;
 import com.aifuturetrade.service.dto.FutureDTO;
-import com.aifuturetrade.common.util.PageResult;
-import com.aifuturetrade.common.util.PageRequest;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -57,7 +55,7 @@ public class FutureController {
      */
     @DeleteMapping("/{futureId}")
     @Operation(summary = "删除合约配置")
-    public ResponseEntity<Map<String, Object>> deleteFutureConfig(@PathVariable String futureId) {
+    public ResponseEntity<Map<String, Object>> deleteFutureConfig(@PathVariable(value = "futureId") String futureId) {
         Boolean deleted = futureService.deleteFuture(futureId);
         Map<String, Object> response = new HashMap<>();
         if (deleted) {

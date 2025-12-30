@@ -43,7 +43,7 @@ public class ModelStrategyController {
      */
     @GetMapping("/{id}")
     @Operation(summary = "根据ID获取模型策略关联")
-    public ResponseEntity<ModelStrategyDTO> getModelStrategyById(@PathVariable String id) {
+    public ResponseEntity<ModelStrategyDTO> getModelStrategyById(@PathVariable(value = "id") String id) {
         ModelStrategyDTO modelStrategy = modelStrategyService.getModelStrategyById(id);
         return modelStrategy != null ? new ResponseEntity<>(modelStrategy, HttpStatus.OK) : new ResponseEntity<>(HttpStatus.NOT_FOUND);
     }
@@ -55,7 +55,7 @@ public class ModelStrategyController {
      */
     @GetMapping("/model/{modelId}")
     @Operation(summary = "根据模型ID获取模型策略关联")
-    public ResponseEntity<List<ModelStrategyDTO>> getModelStrategiesByModelId(@PathVariable String modelId) {
+    public ResponseEntity<List<ModelStrategyDTO>> getModelStrategiesByModelId(@PathVariable(value = "modelId") String modelId) {
         List<ModelStrategyDTO> modelStrategies = modelStrategyService.getModelStrategiesByModelId(modelId);
         return new ResponseEntity<>(modelStrategies, HttpStatus.OK);
     }
@@ -67,7 +67,7 @@ public class ModelStrategyController {
      */
     @GetMapping("/strategy/{strategyId}")
     @Operation(summary = "根据策略ID获取模型策略关联")
-    public ResponseEntity<List<ModelStrategyDTO>> getModelStrategiesByStrategyId(@PathVariable String strategyId) {
+    public ResponseEntity<List<ModelStrategyDTO>> getModelStrategiesByStrategyId(@PathVariable(value = "strategyId") String strategyId) {
         List<ModelStrategyDTO> modelStrategies = modelStrategyService.getModelStrategiesByStrategyId(strategyId);
         return new ResponseEntity<>(modelStrategies, HttpStatus.OK);
     }
@@ -81,8 +81,8 @@ public class ModelStrategyController {
     @GetMapping("/model/{modelId}/type/{type}")
     @Operation(summary = "根据模型ID和类型获取模型策略关联")
     public ResponseEntity<List<ModelStrategyDTO>> getModelStrategiesByModelIdAndType(
-            @PathVariable String modelId,
-            @PathVariable String type) {
+            @PathVariable(value = "modelId") String modelId,
+            @PathVariable(value = "type") String type) {
         List<ModelStrategyDTO> modelStrategies = modelStrategyService.getModelStrategiesByModelIdAndType(modelId, type);
         return new ResponseEntity<>(modelStrategies, HttpStatus.OK);
     }
@@ -116,7 +116,7 @@ public class ModelStrategyController {
      */
     @DeleteMapping("/{id}")
     @Operation(summary = "删除模型策略关联")
-    public ResponseEntity<Map<String, Object>> deleteModelStrategy(@PathVariable String id) {
+    public ResponseEntity<Map<String, Object>> deleteModelStrategy(@PathVariable(value = "id") String id) {
         Boolean deleted = modelStrategyService.deleteModelStrategy(id);
         Map<String, Object> response = new HashMap<>();
         if (deleted) {
@@ -140,9 +140,9 @@ public class ModelStrategyController {
     @DeleteMapping("/model/{modelId}/strategy/{strategyId}/type/{type}")
     @Operation(summary = "根据模型ID、策略ID和类型删除模型策略关联")
     public ResponseEntity<Map<String, Object>> deleteModelStrategyByModelIdAndStrategyIdAndType(
-            @PathVariable String modelId,
-            @PathVariable String strategyId,
-            @PathVariable String type) {
+            @PathVariable(value = "modelId") String modelId,
+            @PathVariable(value = "strategyId") String strategyId,
+            @PathVariable(value = "type") String type) {
         Boolean deleted = modelStrategyService.deleteModelStrategyByModelIdAndStrategyIdAndType(modelId, strategyId, type);
         Map<String, Object> response = new HashMap<>();
         if (deleted) {
@@ -165,7 +165,7 @@ public class ModelStrategyController {
     @PutMapping("/{id}/priority")
     @Operation(summary = "更新模型策略关联的优先级")
     public ResponseEntity<Map<String, Object>> updateModelStrategyPriority(
-            @PathVariable String id,
+            @PathVariable(value = "id") String id,
             @RequestBody Map<String, Integer> request) {
         try {
             Integer priority = request.get("priority");
@@ -193,8 +193,8 @@ public class ModelStrategyController {
     @PostMapping("/model/{modelId}/type/{type}/batch")
     @Operation(summary = "批量保存模型策略关联")
     public ResponseEntity<Map<String, Object>> batchSaveModelStrategies(
-            @PathVariable String modelId,
-            @PathVariable String type,
+            @PathVariable(value = "modelId") String modelId,
+            @PathVariable(value = "type") String type,
             @RequestBody Map<String, Object> request) {
         try {
             @SuppressWarnings("unchecked")

@@ -2,8 +2,6 @@ package com.aifuturetrade.controller;
 
 import com.aifuturetrade.service.ProviderService;
 import com.aifuturetrade.service.dto.ProviderDTO;
-import com.aifuturetrade.common.util.PageResult;
-import com.aifuturetrade.common.util.PageRequest;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -57,7 +55,7 @@ public class ProviderController {
      */
     @DeleteMapping("/{providerId}")
     @Operation(summary = "删除API提供方")
-    public ResponseEntity<Map<String, Object>> deleteProvider(@PathVariable String providerId) {
+    public ResponseEntity<Map<String, Object>> deleteProvider(@PathVariable(value = "providerId") String providerId) {
         Boolean deleted = providerService.deleteProvider(providerId);
         Map<String, Object> response = new HashMap<>();
         if (deleted) {

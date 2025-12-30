@@ -27,8 +27,8 @@ public class BinanceFuturesOrderController {
     @PostMapping("/sell-position")
     @Operation(summary = "一键卖出持仓合约")
     public ResponseEntity<Map<String, Object>> sellPosition(
-            @RequestParam String modelId,
-            @RequestParam String symbol) {
+            @RequestParam(value = "modelId") String modelId,
+            @RequestParam(value = "symbol") String symbol) {
         try {
             Map<String, Object> result = binanceFuturesOrderService.sellPosition(modelId, symbol);
             return new ResponseEntity<>(result, HttpStatus.OK);

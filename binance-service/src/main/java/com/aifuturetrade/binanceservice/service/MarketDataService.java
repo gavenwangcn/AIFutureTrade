@@ -45,4 +45,12 @@ public interface MarketDataService {
      * @return 完整交易对符号
      */
     String formatSymbol(String baseSymbol);
+
+    /**
+     * 获取跌幅榜
+     * 
+     * @param limit 返回的数据条数限制，可选
+     * @return 跌幅榜数据
+     */
+    Map<String, Object> getMarketLeaderboardLosers(Integer limit);
 }
