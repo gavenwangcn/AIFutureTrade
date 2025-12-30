@@ -2,7 +2,6 @@ package com.aifuturetrade.asyncservice.service.impl;
 
 import com.aifuturetrade.asyncservice.service.AsyncAgentService;
 import com.aifuturetrade.asyncservice.service.MarketSymbolOfflineService;
-import com.aifuturetrade.asyncservice.service.MarketTickerStreamService;
 import com.aifuturetrade.asyncservice.service.PriceRefreshService;
 import com.aifuturetrade.asyncservice.service.MarketTickerStreamTestService;
 import lombok.extern.slf4j.Slf4j;
@@ -32,10 +31,6 @@ import java.util.concurrent.atomic.AtomicReference;
 @Slf4j
 @Service
 public class AsyncAgentServiceImpl implements AsyncAgentService {
-    
-    // 市场Ticker流服务（生产）
-    @Autowired(required = false)
-    private MarketTickerStreamService marketTickerStreamService;
     
     // 市场Ticker流测试服务（独立加载）
     @Autowired(required = false)
@@ -68,11 +63,7 @@ public class AsyncAgentServiceImpl implements AsyncAgentService {
             return t;
         });
         
-        // 记录所有可用服务
-        if (marketTickerStreamService != null) {
-            log.info("[AsyncAgentServiceImpl] ✅ MarketTickerStreamService 已加载: {}", 
-                    marketTickerStreamService.getClass().getSimpleName());
-        }
+
         if (marketTickerStreamTestService != null) {
             log.info("[AsyncAgentServiceImpl] ✅ MarketTickerStreamTestService 已加载: {}", 
                     marketTickerStreamTestService.getClass().getSimpleName());
@@ -109,9 +100,6 @@ public class AsyncAgentServiceImpl implements AsyncAgentService {
         log.info("[AsyncAgentServiceImpl] 🚀 收到启动任务请求: task={}, durationSeconds={}", task, durationSeconds);
         
         switch (task) {
-            case "market_tickers":
-                runMarketTickersTask(durationSeconds);
-                break;
             case "market_tickers_test":
                 runMarketTickersTestTask(durationSeconds);
                 break;
@@ -148,8 +136,6 @@ public class AsyncAgentServiceImpl implements AsyncAgentService {
     @Override
     public boolean isTaskRunning(String task) {
         switch (task) {
-            case "market_tickers":
-                return marketTickerStreamService != null && marketTickerStreamService.isRunning();
             case "market_tickers_test":
                 return marketTickerStreamTestService != null && marketTickerStreamTestService.isRunning();
             case "price_refresh":
@@ -163,48 +149,7 @@ public class AsyncAgentServiceImpl implements AsyncAgentService {
         }
     }
     
-    /**
-     * 运行市场Ticker流任务
-     */
-    private void runMarketTickersTask(Integer durationSeconds) {
-        // 检查是否有可用的MarketTickerStreamService
-        if (marketTickerStreamService == null) {
-            log.error("[AsyncAgentServiceImpl] ❌ 没有可用的MarketTickerStreamService实现");
-            return;
-        }
-        
-        Future<?> existingTask = marketTickersTask.get();
-        if (existingTask != null && !existingTask.isDone()) {
-            log.warn("[AsyncAgentServiceImpl] Market tickers task is already running");
-            return;
-        }
-        
-        log.info("[AsyncAgentServiceImpl] 🎯 启动MarketTickerStream服务: {}", 
-                marketTickerStreamService.getClass().getSimpleName());
-        
-        Future<?> task = executorService.submit(() -> {
-            try {
-                marketTickerStreamService.startStream(durationSeconds);
-            } catch (Exception e) {
-                log.error("[AsyncAgentServiceImpl] Market tickers task error", e);
-            }
-        });
-        
-        marketTickersTask.set(task);
-    }
     
-    /**
-     * 停止市场Ticker流任务
-     */
-    private void stopMarketTickersTask() {
-        Future<?> task = marketTickersTask.getAndSet(null);
-        if (task != null && !task.isDone()) {
-            task.cancel(true);
-            if (marketTickerStreamService != null) {
-                marketTickerStreamService.stopStream();
-            }
-        }
-    }
     
     /**
      * 运行价格刷新任务
