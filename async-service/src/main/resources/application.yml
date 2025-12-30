@@ -112,12 +112,7 @@ async:
     message-timeout: 30
     # 数据库操作超时（秒）
     db-operation-timeout: 20
-    # 测试模式：是否使用测试服务（默认false）
-    test-mode: ${MARKET_TICKER_TEST_MODE:true}
-  
-  # 价格刷新服务配置
-  price-refresh:
-    # Cron表达式（每5分钟执行，格式：秒 分 时 日 月 周）
+    # 价格刷新服务配置
     cron: "0 */5 * * * *"
     # 每分钟最多刷新数量
     max-per-minute: 1000
