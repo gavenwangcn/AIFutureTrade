@@ -176,32 +176,77 @@ public class MarketTickerStreamServiceImpl implements MarketTickerStreamService 
         try {
             log.info("[MarketTickerStream] [DEBUG] 开始 runStreamOnce 方法，runSeconds={}", runSeconds);
             
-            // 创建WebSocket配置
+            // 1. 获取 WebSocket 配置
             log.info("[MarketTickerStream] [DEBUG] 开始获取 WebSocket 配置...");
-            WebSocketClientConfiguration config = DerivativesTradingUsdsFuturesWebSocketStreamsUtil.getClientConfiguration();
-            log.info("[MarketTickerStream] [DEBUG] WebSocket 配置获取成功: {}", config != null ? "配置对象不为空" : "配置对象为空");
+            WebSocketClientConfiguration config = null;
+            try {
+                config = DerivativesTradingUsdsFuturesWebSocketStreamsUtil.getClientConfiguration();
+                log.info("[MarketTickerStream] [DEBUG] WebSocket 配置获取成功: {}", config != null ? "配置对象不为空" : "配置对象为空");
+                
+                if (config != null) {
+                    log.info("[MarketTickerStream] [DEBUG] 配置详情: url={}", config.getUrl());
+                }
+            } catch (Exception configException) {
+                log.error("[MarketTickerStream] ❌ WebSocket 配置获取失败: {}", configException.getClass().getName());
+                log.error("[MarketTickerStream] ❌ 配置获取异常消息: {}", configException.getMessage());
+                log.error("[MarketTickerStream] ❌ 配置获取异常堆栈:", configException);
+                throw configException;
+            }
             
+            if (config == null) {
+                log.error("[MarketTickerStream] ❌ WebSocket 配置为空");
+                throw new RuntimeException("WebSocket configuration is null");
+            }
+            
+            // 2. 初始化 WebSocket Streams - 修复：使用正确的类进行实例化
             log.info("[MarketTickerStream] [DEBUG] 开始初始化 WebSocket Streams...");
-            webSocketStreams = new DerivativesTradingUsdsFuturesWebSocketStreams(config);
-            log.info("[MarketTickerStream] [DEBUG] WebSocket Streams 初始化成功: {}", webSocketStreams != null ? "Streams对象不为空" : "Streams对象为空");
+            try {
+                webSocketStreams = new DerivativesTradingUsdsFuturesWebSocketStreams(config);
+                log.info("[MarketTickerStream] [DEBUG] WebSocket Streams 初始化成功: {}", webSocketStreams != null ? "Streams对象不为空" : "Streams对象为空");
+            } catch (Exception streamsException) {
+                log.error("[MarketTickerStream] ❌ WebSocket Streams 初始化失败: {}", streamsException.getClass().getName());
+                log.error("[MarketTickerStream] ❌ Streams初始化异常消息: {}", streamsException.getMessage());
+                log.error("[MarketTickerStream] ❌ Streams初始化异常堆栈:", streamsException);
+                throw streamsException;
+            }
             
-            // 订阅全市场ticker流
-            log.info("[MarketTickerStream] [DEBUG] 开始创建 AllMarketTickersStreamsRequest...");
-            AllMarketTickersStreamsRequest request = new AllMarketTickersStreamsRequest();
-            log.info("[MarketTickerStream] [DEBUG] Request 创建成功: {}", request != null ? "Request对象不为空" : "Request对象为空");
+            if (webSocketStreams == null) {
+                log.error("[MarketTickerStream] ❌ WebSocket Streams 初始化失败: 对象为空");
+                throw new RuntimeException("WebSocket streams initialization failed");
+            }
             
+            // 3. 创建请求对象
+            log.info("[MarketTickerStream] [DEBUG] 开始创建请求对象...");
+            AllMarketTickersStreamsRequest request = null;
+            try {
+                request = new AllMarketTickersStreamsRequest();
+                log.info("[MarketTickerStream] [DEBUG] Request 创建成功: {}", request != null ? "Request对象不为空" : "Request对象为空");
+            } catch (Exception requestException) {
+                log.error("[MarketTickerStream] ❌ Request 创建失败: {}", requestException.getClass().getName());
+                log.error("[MarketTickerStream] ❌ Request创建异常消息: {}", requestException.getMessage());
+                throw requestException;
+            }
+            
+            // 4. 订阅全市场Ticker流 - 使用正确的API方法
             log.info("[MarketTickerStream] 📡 正在订阅全市场Ticker流...");
             log.info("[MarketTickerStream] [DEBUG] 开始调用 webSocketStreams.allMarketTickersStreams(request)...");
             
-            streamQueue = webSocketStreams.allMarketTickersStreams(request);
-            log.info("[MarketTickerStream] [DEBUG] allMarketTickersStreams 调用成功，streamQueue: {}", streamQueue != null ? "队列不为空" : "队列为空");
+            try {
+                streamQueue = webSocketStreams.allMarketTickersStreams(request);
+                log.info("[MarketTickerStream] [DEBUG] allMarketTickersStreams 调用成功，streamQueue: {}", streamQueue != null ? "队列不为空" : "队列为空");
+            } catch (Exception wsException) {
+                log.error("[MarketTickerStream] ❌ WebSocket 订阅失败: {}", wsException.getClass().getName());
+                log.error("[MarketTickerStream] ❌ WebSocket 订阅异常消息: {}", wsException.getMessage());
+                log.error("[MarketTickerStream] ❌ WebSocket 订阅异常堆栈:", wsException);
+                throw wsException;
+            }
             
-            // 记录连接创建时间
+            // 5. 记录连接创建时间
             connectionCreationTime = LocalDateTime.now();
             log.info("[MarketTickerStream] ✅ WebSocket连接已建立, 开始处理流数据...");
             log.info("[MarketTickerStream] [DEBUG] connectionCreationTime: {}", connectionCreationTime);
             
-            // 处理流数据
+            // 6. 处理流数据
             log.info("[MarketTickerStream] [DEBUG] 开始调用 processStream 方法...");
             processStream(runSeconds);
             log.info("[MarketTickerStream] [DEBUG] processStream 方法执行完成");
@@ -212,6 +257,8 @@ public class MarketTickerStreamServiceImpl implements MarketTickerStreamService 
             log.error("[MarketTickerStream] ❌ 异常消息: {}", e.getMessage());
             log.error("[MarketTickerStream] ❌ 异常堆栈:", e);
             throw e; // 重新抛出异常，让上层处理
+        } finally {
+            log.info("[MarketTickerStream] [DEBUG] 进入 finally 块，设置 running=false");
         }
     }
     
