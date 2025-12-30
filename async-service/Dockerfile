@@ -73,9 +73,11 @@ EXPOSE 5003
 # -XX:+UseCompressedClassPointers: 使用压缩类指针
 # -Djava.awt.headless=true: 无头模式，不需要图形界面
 # -Dfile.encoding=UTF-8: 文件编码
+# -Dorg.eclipse.jetty.websocket.maxTextMessageSize=204800: Jetty WebSocket 最大文本消息大小（200KB）
+#   币安全市场ticker数据可能较大（实际约 68KB），默认限制 65KB 不够，设置为 200KB
 # 添加 --add-opens 参数以解决 Java 9+ 上的反射访问警告
 # 注意：所有服务配置（包括端口）都从application.yml读取，可通过环境变量覆盖
-ENV JAVA_OPTS="-Xms1g -Xmx2g -XX:+UseG1GC -XX:MaxGCPauseMillis=200 -XX:+UseStringDeduplication -XX:+OptimizeStringConcat -XX:+UseCompressedOops -XX:+UseCompressedClassPointers -Djava.awt.headless=true -Dfile.encoding=UTF-8 --add-opens java.base/java.lang.invoke=ALL-UNNAMED"
+ENV JAVA_OPTS="-Xms1g -Xmx2g -XX:+UseG1GC -XX:MaxGCPauseMillis=200 -XX:+UseStringDeduplication -XX:+OptimizeStringConcat -XX:+UseCompressedOops -XX:+UseCompressedClassPointers -Djava.awt.headless=true -Dfile.encoding=UTF-8 -Dorg.eclipse.jetty.websocket.maxTextMessageSize=204800 --add-opens java.base/java.lang.invoke=ALL-UNNAMED"
 
 # 启动应用（所有配置从application.yml读取，可通过环境变量覆盖）
 ENTRYPOINT ["sh", "-c", "java $JAVA_OPTS -jar app.jar"]

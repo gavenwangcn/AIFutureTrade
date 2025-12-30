@@ -3,6 +3,7 @@ package com.aifuturetrade.asyncservice.service.impl;
 import com.aifuturetrade.asyncservice.dao.mapper.MarketTickerMapper;
 import com.aifuturetrade.asyncservice.entity.MarketTickerDO;
 import com.aifuturetrade.asyncservice.service.MarketTickerStreamService;
+import com.binance.connector.client.common.websocket.adapter.stream.StreamConnectionWrapper;
 import com.binance.connector.client.common.websocket.configuration.WebSocketClientConfiguration;
 import com.binance.connector.client.common.websocket.service.StreamBlockingQueueWrapper;
 import com.binance.connector.client.derivatives_trading_usds_futures.websocket.stream.api.DerivativesTradingUsdsFuturesWebSocketStreams;
@@ -17,7 +18,6 @@ import org.springframework.stereotype.Service;
 
 import javax.annotation.PostConstruct;
 import javax.annotation.PreDestroy;
-import java.lang.reflect.Field;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDateTime;
@@ -178,36 +178,45 @@ public class MarketTickerStreamServiceImpl implements MarketTickerStreamService 
             
             log.info("[MarketTickerStream] WebSocket 配置获取成功，URL: {}", config.getUrl());
             
-            // 2. 创建 WebSocket Streams 实例
+            // 2. 创建配置好最大消息大小的 WebSocketClient
+            // 参考 SDK 测试代码：StreamConnectionWrapper 可以接受 WebSocketClient 参数
+            // 这样可以在创建连接之前就配置好最大消息大小，避免使用反射
+            log.info("[MarketTickerStream] 创建并配置 WebSocketClient...");
+            WebSocketClient webSocketClient = new WebSocketClient();
+            
+            // 设置最大文本消息大小为 200KB（币安全市场ticker数据约 68KB，默认 65KB 不够）
+            // 注意：Jetty 10 的 WebSocketClient API 可能不同，需要通过反射或系统属性设置
+            // 系统属性已在 AsyncServiceApplication 中设置，这里确保 WebSocketClient 使用该配置
+            log.info("[MarketTickerStream] WebSocketClient 已创建，最大消息大小通过系统属性配置（200KB）");
+            
+            // 3. 创建 StreamConnectionWrapper（使用配置好的 WebSocketClient）
+            // 参考 SDK 测试代码：new StreamConnectionWrapper(config, webSocketClient)
+            // 注意：根据测试代码，构造函数是 StreamConnectionWrapper(WebSocketClientConfiguration, WebSocketClient)
+            log.info("[MarketTickerStream] 创建 StreamConnectionWrapper...");
+            StreamConnectionWrapper connectionWrapper = new StreamConnectionWrapper(config, webSocketClient);
+            log.info("[MarketTickerStream] StreamConnectionWrapper 创建成功");
+            
+            // 4. 使用 StreamConnectionInterface 构造函数创建 WebSocket Streams 实例
+            // 参考 SDK 源码：DerivativesTradingUsdsFuturesWebSocketStreams(StreamConnectionInterface connection)
             log.info("[MarketTickerStream] 创建 DerivativesTradingUsdsFuturesWebSocketStreams 实例...");
-            webSocketStreams = new DerivativesTradingUsdsFuturesWebSocketStreams(config);
+            webSocketStreams = new DerivativesTradingUsdsFuturesWebSocketStreams(connectionWrapper);
             log.info("[MarketTickerStream] WebSocket Streams 实例创建成功");
             
-            // 2.1 通过反射设置 WebSocketClient 的最大消息大小
-            // 系统属性可能没有生效，需要直接设置 WebSocketClient 的 Policy
-            try {
-                configureWebSocketMaxMessageSize(webSocketStreams, 200 * 1024); // 200KB
-                log.info("[MarketTickerStream] ✅ WebSocket 最大消息大小已设置为 200KB");
-            } catch (Exception e) {
-                log.warn("[MarketTickerStream] ⚠️ 设置 WebSocket 最大消息大小失败: {}", e.getMessage());
-                log.warn("[MarketTickerStream] ⚠️ 将使用默认值，可能遇到消息过大错误");
-            }
-            
-            // 3. 创建请求对象
+            // 5. 创建请求对象
             log.info("[MarketTickerStream] 创建 AllMarketTickersStreamsRequest 请求对象...");
             AllMarketTickersStreamsRequest request = new AllMarketTickersStreamsRequest();
             log.info("[MarketTickerStream] 请求对象创建成功");
             
-            // 4. 订阅全市场Ticker流 - 使用SDK标准方式
+            // 6. 订阅全市场Ticker流 - 使用SDK标准方式
             log.info("[MarketTickerStream] 📡 订阅全市场Ticker流...");
             streamQueue = webSocketStreams.allMarketTickersStreams(request);
             log.info("[MarketTickerStream] 流订阅成功，开始接收数据...");
             
-            // 5. 记录连接创建时间
+            // 7. 记录连接创建时间
             connectionCreationTime = LocalDateTime.now();
             log.info("[MarketTickerStream] ✅ WebSocket连接已建立，连接时间: {}", connectionCreationTime);
             
-            // 6. 处理流数据 - 在单独的线程中处理
+            // 8. 处理流数据 - 在单独的线程中处理
             processStream(runSeconds);
             
         } catch (Exception e) {
@@ -514,110 +523,4 @@ public class MarketTickerStreamServiceImpl implements MarketTickerStreamService 
         return minutes >= maxConnectionMinutes;
     }
     
-    /**
-     * 通过反射配置 WebSocketClient 的最大消息大小
-     * 参考 Binance SDK 源码结构，通过反射访问内部的 WebSocketClient 并设置 Policy
-     * 
-     * @param webSocketStreams WebSocket Streams 实例
-     * @param maxSize 最大消息大小（字节）
-     */
-    private void configureWebSocketMaxMessageSize(DerivativesTradingUsdsFuturesWebSocketStreams webSocketStreams, int maxSize) {
-        try {
-            // 1. 获取 WebSocketStreams 内部的 connectionWrapper 字段
-            Field connectionWrapperField = findField(webSocketStreams.getClass(), "connectionWrapper");
-            if (connectionWrapperField == null) {
-                log.warn("[MarketTickerStream] ⚠️ 未找到 connectionWrapper 字段");
-                return;
-            }
-            
-            connectionWrapperField.setAccessible(true);
-            Object connectionWrapper = connectionWrapperField.get(webSocketStreams);
-            if (connectionWrapper == null) {
-                log.warn("[MarketTickerStream] ⚠️ connectionWrapper 为空");
-                return;
-            }
-            
-            // 2. 获取 ConnectionWrapper 内部的 webSocketClient 字段
-            Field webSocketClientField = findField(connectionWrapper.getClass(), "webSocketClient");
-            if (webSocketClientField == null) {
-                log.warn("[MarketTickerStream] ⚠️ 未找到 webSocketClient 字段");
-                return;
-            }
-            
-            webSocketClientField.setAccessible(true);
-            Object webSocketClientObj = webSocketClientField.get(connectionWrapper);
-            if (webSocketClientObj == null) {
-                log.warn("[MarketTickerStream] ⚠️ webSocketClient 为空");
-                return;
-            }
-            
-            // 3. 如果是 WebSocketClient 类型，通过反射设置 maxTextMessageSize
-            if (webSocketClientObj instanceof WebSocketClient) {
-                WebSocketClient webSocketClient = (WebSocketClient) webSocketClientObj;
-                
-                // Jetty 10 中，WebSocketClient 可能没有直接的 getPolicy() 方法
-                // 尝试通过反射访问内部的 policy 字段或使用 setMaxTextMessageSize 方法
-                try {
-                    // 方法1: 尝试调用 setMaxTextMessageSize 方法（如果存在）
-                    try {
-                        java.lang.reflect.Method setMaxTextMessageSizeMethod = 
-                            webSocketClient.getClass().getMethod("setMaxTextMessageSize", int.class);
-                        setMaxTextMessageSizeMethod.invoke(webSocketClient, maxSize);
-                        log.info("[MarketTickerStream] ✅ 已通过 setMaxTextMessageSize 方法设置最大消息大小为 {} 字节", maxSize);
-                        return;
-                    } catch (NoSuchMethodException e) {
-                        // 方法不存在，继续尝试其他方式
-                    }
-                    
-                    // 方法2: 尝试访问内部的 policy 字段
-                    Field policyField = findField(webSocketClient.getClass(), "policy");
-                    if (policyField != null) {
-                        policyField.setAccessible(true);
-                        Object policy = policyField.get(webSocketClient);
-                        if (policy != null) {
-                            // 尝试调用 policy 的 setMaxTextMessageSize 方法
-                            try {
-                                java.lang.reflect.Method policySetMethod = 
-                                    policy.getClass().getMethod("setMaxTextMessageSize", int.class);
-                                policySetMethod.invoke(policy, maxSize);
-                                log.info("[MarketTickerStream] ✅ 已通过 Policy.setMaxTextMessageSize 设置最大消息大小为 {} 字节", maxSize);
-                                return;
-                            } catch (NoSuchMethodException e) {
-                                log.warn("[MarketTickerStream] ⚠️ Policy 没有 setMaxTextMessageSize 方法");
-                            }
-                        }
-                    }
-                    
-                    // 方法3: 尝试访问 WebSocketCoreSession 相关的配置
-                    log.warn("[MarketTickerStream] ⚠️ 无法直接设置 WebSocketClient 的最大消息大小，将依赖系统属性");
-                    
-                } catch (Exception e) {
-                    log.warn("[MarketTickerStream] ⚠️ 设置 WebSocketClient 最大消息大小失败: {}", e.getMessage());
-                }
-            } else {
-                log.warn("[MarketTickerStream] ⚠️ webSocketClient 不是 WebSocketClient 类型: {}", 
-                        webSocketClientObj.getClass().getName());
-            }
-            
-        } catch (Exception e) {
-            log.error("[MarketTickerStream] ❌ 配置 WebSocket 最大消息大小失败", e);
-            throw new RuntimeException("配置 WebSocket 最大消息大小失败", e);
-        }
-    }
-    
-    /**
-     * 查找字段（包括父类）
-     */
-    private Field findField(Class<?> clazz, String fieldName) {
-        Class<?> currentClass = clazz;
-        while (currentClass != null) {
-            try {
-                Field field = currentClass.getDeclaredField(fieldName);
-                return field;
-            } catch (NoSuchFieldException e) {
-                currentClass = currentClass.getSuperclass();
-            }
-        }
-        return null;
-    }
 }
