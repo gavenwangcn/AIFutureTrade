@@ -16,6 +16,7 @@ import org.springframework.stereotype.Service;
 
 import javax.annotation.PostConstruct;
 import javax.annotation.PreDestroy;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
@@ -105,16 +106,22 @@ public class MarketTickerStreamServiceImpl implements MarketTickerStreamService 
             try {
                 if (runSeconds != null) {
                     // 如果指定了运行时长，只运行一次
+                    log.info("[MarketTickerStream] [DEBUG] 开始单次运行模式，运行时长: {} 秒", runSeconds);
                     runStreamOnce(runSeconds);
+                    log.info("[MarketTickerStream] [DEBUG] 单次运行完成");
                 } else {
                     // 无限运行，每30分钟自动重连
+                    log.info("[MarketTickerStream] [DEBUG] 开始持续运行模式");
                     long startTime = System.currentTimeMillis();
                     while (running.get()) {
                         try {
                             reconnectCount++;
                             log.info("[MarketTickerStream] 🔗 [重连 {}] 开始建立WebSocket连接...", reconnectCount);
+                            log.info("[MarketTickerStream] [DEBUG] 调用 runStreamOnce 开始，当前 running.get()={}", running.get());
+                            
                             runStreamOnce(null);
                             reconnectCount = 0; // 重置重连计数
+                            log.info("[MarketTickerStream] [DEBUG] runStreamOnce 正常返回，重连计数已重置");
                             
                             // 检查是否达到运行时长限制
                             if (runSeconds != null) {
@@ -134,8 +141,10 @@ public class MarketTickerStreamServiceImpl implements MarketTickerStreamService 
                             Thread.currentThread().interrupt();
                             break;
                         } catch (Exception e) {
-                            log.error("[MarketTickerStream] ❌ Stream error: {}", e.getMessage(), e);
+                            log.error("[MarketTickerStream] ❌ Stream error in main loop: {}", e.getMessage(), e);
+                            log.error("[MarketTickerStream] ❌ 异常类型: {}, 异常消息: {}", e.getClass().getName(), e.getMessage());
                             reconnectCount++;
+                            
                             // 等待一段时间后重连
                             try {
                                 log.info("[MarketTickerStream] ⏳ [重连 {}] 等待5秒后重新连接...", reconnectCount);
@@ -146,10 +155,14 @@ public class MarketTickerStreamServiceImpl implements MarketTickerStreamService 
                             }
                         }
                     }
+                    log.info("[MarketTickerStream] [DEBUG] 持续运行循环结束，当前 running.get()={}", running.get());
                 }
             } catch (Exception e) {
-                log.error("[MarketTickerStream] ❌ Stream processing error", e);
+                log.error("[MarketTickerStream] ❌ Stream processing error in outer catch", e);
+                log.error("[MarketTickerStream] ❌ 外层异常类型: {}, 异常消息: {}", e.getClass().getName(), e.getMessage());
+                log.error("[MarketTickerStream] ❌ 外层异常详细堆栈:", e);
             } finally {
+                log.info("[MarketTickerStream] [DEBUG] 进入 finally 块，设置 running=false");
                 running.set(false);
                 log.info("[MarketTickerStream] 🏁 WebSocket流服务已停止");
             }
@@ -160,21 +173,46 @@ public class MarketTickerStreamServiceImpl implements MarketTickerStreamService 
      * 运行一次流连接（最多30分钟）
      */
     private void runStreamOnce(Integer runSeconds) throws Exception {
-        // 创建WebSocket配置
-        WebSocketClientConfiguration config = DerivativesTradingUsdsFuturesWebSocketStreamsUtil.getClientConfiguration();
-        webSocketStreams = new DerivativesTradingUsdsFuturesWebSocketStreams(config);
-        
-        // 订阅全市场ticker流
-        AllMarketTickersStreamsRequest request = new AllMarketTickersStreamsRequest();
-        log.info("[MarketTickerStream] 📡 正在订阅全市场Ticker流...");
-        streamQueue = webSocketStreams.allMarketTickersStreams(request);
-        
-        // 记录连接创建时间
-        connectionCreationTime = LocalDateTime.now();
-        log.info("[MarketTickerStream] ✅ WebSocket连接已建立, 开始处理流数据...");
-        
-        // 处理流数据
-        processStream(runSeconds);
+        try {
+            log.info("[MarketTickerStream] [DEBUG] 开始 runStreamOnce 方法，runSeconds={}", runSeconds);
+            
+            // 创建WebSocket配置
+            log.info("[MarketTickerStream] [DEBUG] 开始获取 WebSocket 配置...");
+            WebSocketClientConfiguration config = DerivativesTradingUsdsFuturesWebSocketStreamsUtil.getClientConfiguration();
+            log.info("[MarketTickerStream] [DEBUG] WebSocket 配置获取成功: {}", config != null ? "配置对象不为空" : "配置对象为空");
+            
+            log.info("[MarketTickerStream] [DEBUG] 开始初始化 WebSocket Streams...");
+            webSocketStreams = new DerivativesTradingUsdsFuturesWebSocketStreams(config);
+            log.info("[MarketTickerStream] [DEBUG] WebSocket Streams 初始化成功: {}", webSocketStreams != null ? "Streams对象不为空" : "Streams对象为空");
+            
+            // 订阅全市场ticker流
+            log.info("[MarketTickerStream] [DEBUG] 开始创建 AllMarketTickersStreamsRequest...");
+            AllMarketTickersStreamsRequest request = new AllMarketTickersStreamsRequest();
+            log.info("[MarketTickerStream] [DEBUG] Request 创建成功: {}", request != null ? "Request对象不为空" : "Request对象为空");
+            
+            log.info("[MarketTickerStream] 📡 正在订阅全市场Ticker流...");
+            log.info("[MarketTickerStream] [DEBUG] 开始调用 webSocketStreams.allMarketTickersStreams(request)...");
+            
+            streamQueue = webSocketStreams.allMarketTickersStreams(request);
+            log.info("[MarketTickerStream] [DEBUG] allMarketTickersStreams 调用成功，streamQueue: {}", streamQueue != null ? "队列不为空" : "队列为空");
+            
+            // 记录连接创建时间
+            connectionCreationTime = LocalDateTime.now();
+            log.info("[MarketTickerStream] ✅ WebSocket连接已建立, 开始处理流数据...");
+            log.info("[MarketTickerStream] [DEBUG] connectionCreationTime: {}", connectionCreationTime);
+            
+            // 处理流数据
+            log.info("[MarketTickerStream] [DEBUG] 开始调用 processStream 方法...");
+            processStream(runSeconds);
+            log.info("[MarketTickerStream] [DEBUG] processStream 方法执行完成");
+            
+        } catch (Exception e) {
+            log.error("[MarketTickerStream] ❌ runStreamOnce 方法执行异常", e);
+            log.error("[MarketTickerStream] ❌ 异常类型: {}", e.getClass().getName());
+            log.error("[MarketTickerStream] ❌ 异常消息: {}", e.getMessage());
+            log.error("[MarketTickerStream] ❌ 异常堆栈:", e);
+            throw e; // 重新抛出异常，让上层处理
+        }
     }
     
     @Override
@@ -209,11 +247,15 @@ public class MarketTickerStreamServiceImpl implements MarketTickerStreamService 
         long startTime = System.currentTimeMillis();
         long messageCount = 0;
         
+        log.info("[MarketTickerStream] [DEBUG] processStream 方法开始，runSeconds={}, startTime={}", runSeconds, startTime);
+        
         try {
             log.info("[MarketTickerStream] 📊 开始处理WebSocket流数据...");
             
             // SDK设计理念：使用take()进行无限循环获取数据
             while (running.get()) {
+                log.debug("[MarketTickerStream] [DEBUG] while循环开始，当前 running.get()={}, messageCount={}", running.get(), messageCount);
+                
                 // 检查运行时长限制
                 if (runSeconds != null) {
                     long elapsed = (System.currentTimeMillis() - startTime) / 1000;
@@ -230,29 +272,40 @@ public class MarketTickerStreamServiceImpl implements MarketTickerStreamService 
                 }
                 
                 // 从队列中获取ticker数据（遵循SDK最佳实践）
+                log.debug("[MarketTickerStream] [DEBUG] 开始从队列获取数据...");
                 try {
+                    log.debug("[MarketTickerStream] [DEBUG] 调用 streamQueue.take()，当前队列: {}", streamQueue != null ? "队列存在" : "队列为空");
                     AllMarketTickersStreamsResponse response = streamQueue.take();
+                    log.debug("[MarketTickerStream] [DEBUG] 从队列获取到数据: {}", response != null ? "有数据" : "空数据");
                     
                     messageCount++;
                     if (messageCount % 100 == 0) {
                         log.info("[MarketTickerStream] 📈 已处理 {} 条消息", messageCount);
                     }
                     handleMessage(response);
+                    log.debug("[MarketTickerStream] [DEBUG] 消息处理完成");
                 } catch (InterruptedException e) {
                     log.info("[MarketTickerStream] 🛑 Stream interrupted");
                     Thread.currentThread().interrupt();
                     break;
                 } catch (Exception e) {
                     log.error("[MarketTickerStream] ❌ Error processing message", e);
+                    log.error("[MarketTickerStream] ❌ 消息处理异常类型: {}, 异常消息: {}", e.getClass().getName(), e.getMessage());
                     // 继续处理，不中断流
                 }
+                log.debug("[MarketTickerStream] [DEBUG] while循环继续");
             }
+            
+            log.info("[MarketTickerStream] [DEBUG] processStream while循环结束");
+            
         } catch (Exception e) {
             log.error("[MarketTickerStream] ❌ Stream processing error", e);
+            log.error("[MarketTickerStream] ❌ processStream异常类型: {}, 异常消息: {}", e.getClass().getName(), e.getMessage());
         } finally {
             long totalTime = (System.currentTimeMillis() - startTime) / 1000;
             log.info("[MarketTickerStream] 🏁 Stream processing finished: 总计处理 {} 条消息, 运行 {} 秒", 
                     messageCount, totalTime);
+            log.info("[MarketTickerStream] [DEBUG] processStream finally块完成");
         }
     }
     
@@ -440,7 +493,13 @@ public class MarketTickerStreamServiceImpl implements MarketTickerStreamService 
             return false;
         }
         
-        long elapsedMinutes = java.time.Duration.between(connectionCreationTime, LocalDateTime.now()).toMinutes();
-        return elapsedMinutes >= maxConnectionMinutes;
+        LocalDateTime now = LocalDateTime.now();
+        Duration duration = Duration.between(connectionCreationTime, now);
+        long minutes = duration.toMinutes();
+        
+        log.debug("[MarketTickerStream] [DEBUG] 连接时长检查: 当前时间={}, 连接创建时间={}, 已运行 {} 分钟", 
+                 now, connectionCreationTime, minutes);
+        
+        return minutes >= maxConnectionMinutes;
     }
 }
