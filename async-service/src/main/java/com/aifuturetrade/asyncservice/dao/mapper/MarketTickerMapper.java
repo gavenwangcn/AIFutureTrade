@@ -76,4 +76,4 @@ public interface MarketTickerMapper extends BaseMapper<MarketTickerDO> {
     int deleteOldTickers(@Param("cutoffDate") LocalDateTime cutoffDate);
 }
 
-
+
