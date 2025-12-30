@@ -102,7 +102,7 @@ public class MarketTickerStreamServiceImpl implements MarketTickerStreamService 
         if (api == null) {
             WebSocketClientConfiguration clientConfiguration =
                     DerivativesTradingUsdsFuturesWebSocketStreamsUtil.getClientConfiguration();
-            //clientConfiguration.setMessageMaxSize(webSocketConfig.getMaxTextMessageSize());
+            clientConfiguration.setMessageMaxSize(webSocketConfig.getMaxTextMessageSize());
             api = new DerivativesTradingUsdsFuturesWebSocketStreams(clientConfiguration);
         }
         return api;
