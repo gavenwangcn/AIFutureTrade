@@ -178,16 +178,17 @@ public class MarketTickerStreamServiceImpl implements MarketTickerStreamService 
             
             log.info("[MarketTickerStream] WebSocket 配置获取成功，URL: {}", config.getUrl());
             
-            // 2. 创建配置好最大消息大小的 WebSocketClient
+            // 2. 创建并配置 WebSocketClient（设置最大消息大小为 200KB）
             // 参考 SDK 测试代码：StreamConnectionWrapper 可以接受 WebSocketClient 参数
-            // 这样可以在创建连接之前就配置好最大消息大小，避免使用反射
+            // 使用 SDK 提供的 setMaxTextMessageSize 方法直接配置，无需反射
             log.info("[MarketTickerStream] 创建并配置 WebSocketClient...");
             WebSocketClient webSocketClient = new WebSocketClient();
             
             // 设置最大文本消息大小为 200KB（币安全市场ticker数据约 68KB，默认 65KB 不够）
-            // 注意：Jetty 10 的 WebSocketClient API 可能不同，需要通过反射或系统属性设置
-            // 系统属性已在 AsyncServiceApplication 中设置，这里确保 WebSocketClient 使用该配置
-            log.info("[MarketTickerStream] WebSocketClient 已创建，最大消息大小通过系统属性配置（200KB）");
+            // 使用 Jetty WebSocketClient 提供的 setMaxTextMessageSize 方法
+            int maxMessageSize = 200 * 1024; // 200KB
+            webSocketClient.setMaxTextMessageSize(maxMessageSize);
+            log.info("[MarketTickerStream] ✅ 已通过 setMaxTextMessageSize 方法设置最大消息大小为 {} 字节 (200KB)", maxMessageSize);
             
             // 3. 创建 StreamConnectionWrapper（使用配置好的 WebSocketClient）
             // 参考 SDK 测试代码：new StreamConnectionWrapper(config, webSocketClient)
