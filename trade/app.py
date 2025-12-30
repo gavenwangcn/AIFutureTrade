@@ -12,17 +12,17 @@ from flask_cors import CORS
 import os
 import threading
 from trade.trading_engine import TradingEngine
-from market.market_data import MarketDataFetcher
+from trade.market.market_data import MarketDataFetcher
 from trade.ai.ai_trader import AITrader
 from trade.strategy.strategy_trader import StrategyTrader
-from common.database.database_basic import Database
-from common.database.database_models import ModelsDatabase
-from common.database.database_providers import ProvidersDatabase
-from common.database.database_strategys import StrategysDatabase
-from common.version import __version__
+from trade.common.database.database_basic import Database
+from trade.common.database.database_models import ModelsDatabase
+from trade.common.database.database_providers import ProvidersDatabase
+from trade.common.database.database_strategys import StrategysDatabase
+from trade.common.version import __version__
 from trade.trading_loop import trading_buy_loop, trading_sell_loop
 
-import common.config as app_config
+import trade.common.config as app_config
 import logging
 import sys
 
@@ -73,11 +73,11 @@ logger = logging.getLogger(__name__)
 db = Database()
 
 # Initialize database tables immediately when the application starts
-# 使用统一的初始化函数，确保所有表都被正确创建
-with app.app_context():
-    from common.database.database_init import init_all_database_tables
-    # 使用 Database 的 command 方法作为初始化函数
-    init_all_database_tables(db.command)
+    # 使用统一的初始化函数，确保所有表都被正确创建
+    with app.app_context():
+        from trade.common.database.database_init import init_all_database_tables
+        # 使用 Database 的 command 方法作为初始化函数
+        init_all_database_tables(db.command)
     logger.info("Database tables initialized")
 
 # Initialize ModelsDatabase, ProvidersDatabase and StrategysDatabase for direct operations

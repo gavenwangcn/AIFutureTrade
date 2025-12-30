@@ -16,9 +16,9 @@ import logging
 from typing import Dict, List, Optional
 from trade.trader import Trader
 from trade.strategy.strategy_code_executor import StrategyCodeExecutor
-from common.database.database_strategys import StrategysDatabase
-from common.database.database_models import ModelsDatabase
-from common.database.database_strategy_decisions import StrategyDecisionsDatabase
+from trade.common.database.database_strategys import StrategysDatabase
+from trade.common.database.database_models import ModelsDatabase
+from trade.common.database.database_strategy_decisions import StrategyDecisionsDatabase
 
 logger = logging.getLogger(__name__)
 

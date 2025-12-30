@@ -25,17 +25,17 @@ import logging
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
-import common.config as app_config
+import trade.common.config as app_config
 from trade.ai.prompt_defaults import DEFAULT_BUY_CONSTRAINTS, DEFAULT_SELL_CONSTRAINTS, PROMPT_JSON_OUTPUT_SUFFIX
-from common.binance_futures import BinanceFuturesOrderClient
-from common.database.database_model_prompts import ModelPromptsDatabase
-from common.database.database_models import ModelsDatabase
-from common.database.database_portfolios import PortfoliosDatabase
-from common.database.database_conversations import ConversationsDatabase
-from common.database.database_account_values import AccountValuesDatabase
-from common.database.database_futures import FuturesDatabase
-from common.database.database_account_asset import AccountAssetDatabase
-from common.database.database_binance_trade_logs import BinanceTradeLogsDatabase
+from trade.common.binance_futures import BinanceFuturesOrderClient
+from trade.common.database.database_model_prompts import ModelPromptsDatabase
+from trade.common.database.database_models import ModelsDatabase
+from trade.common.database.database_portfolios import PortfoliosDatabase
+from trade.common.database.database_conversations import ConversationsDatabase
+from trade.common.database.database_account_values import AccountValuesDatabase
+from trade.common.database.database_futures import FuturesDatabase
+from trade.common.database.database_account_asset import AccountAssetDatabase
+from trade.common.database.database_binance_trade_logs import BinanceTradeLogsDatabase
 
 logger = logging.getLogger(__name__)
 
@@ -582,7 +582,7 @@ class TradingEngine:
             
             # 获取模型ID映射和账户价值历史表名
             model_mapping = self.models_db._get_model_id_mapping()
-            from common.database.database_init import ACCOUNT_VALUE_HISTORYS_TABLE
+            from trade.common.database.database_init import ACCOUNT_VALUE_HISTORYS_TABLE
             
             logger.debug(f"[Model {self.model_id}] [账户价值快照] 准备调用record_account_value方法...")
             logger.debug(f"[Model {self.model_id}] [账户价值快照] 调用参数: model_id={self.model_id}, balance=${balance:.2f}, "

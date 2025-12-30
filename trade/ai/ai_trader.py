@@ -20,16 +20,16 @@ import logging
 from typing import Dict, Optional, Tuple, List
 from openai import OpenAI, APIConnectionError, APIError
 from trade.trader import Trader
-from common.database.database_model_prompts import ModelPromptsDatabase
-from common.database.database_models import ModelsDatabase
-from common.database.database_providers import ProvidersDatabase
-from common.database.database_conversations import ConversationsDatabase
+from trade.common.database.database_model_prompts import ModelPromptsDatabase
+from trade.common.database.database_models import ModelsDatabase
+from trade.common.database.database_providers import ProvidersDatabase
+from trade.common.database.database_conversations import ConversationsDatabase
 
 logger = logging.getLogger(__name__)
 
 # 导入market_data模块用于计算指标
 try:
-    from market.market_data import MarketDataFetcher
+    from trade.market.market_data import MarketDataFetcher
     MARKET_DATA_AVAILABLE = True
 except ImportError:
     MARKET_DATA_AVAILABLE = False

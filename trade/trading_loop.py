@@ -7,10 +7,10 @@
 import time
 import logging
 from datetime import datetime, timezone, timedelta
-import common.config as app_config
-from common.database.database_models import ModelsDatabase
-from common.database.database_settings import SettingsDatabase
-from common.database.database_strategys import StrategysDatabase
+import trade.common.config as app_config
+from trade.common.database.database_models import ModelsDatabase
+from trade.common.database.database_settings import SettingsDatabase
+from trade.common.database.database_strategys import StrategysDatabase
 
 logger = logging.getLogger(__name__)
 
