@@ -53,9 +53,9 @@ logging:
     root: info
     com.aifuturetrade.asyncservice: info
     # 详细日志配置 - 便于排查问题
-    com.aifuturetrade.asyncservice.service.impl.PriceRefreshServiceImpl: info
+    com.aifuturetrade.asyncservice.service.impl.PriceRefreshServiceImpl: warn
     com.aifuturetrade.asyncservice.service.impl.MarketTickerStreamServiceImpl: info
-    com.aifuturetrade.asyncservice.service.impl.MarketSymbolOfflineServiceImpl: info
+    com.aifuturetrade.asyncservice.service.impl.MarketSymbolOfflineServiceImpl: warn
     com.aifuturetrade.asyncservice.service.impl.AsyncAgentServiceImpl: info
     com.aifuturetrade.asyncservice.api.binance: info
     com.aifuturetrade.asyncservice.dao.mapper: info
@@ -106,8 +106,8 @@ async:
   websocket:
     # WebSocket消息大小配置（字节）
     # 币安市场ticker数据实际约68KB，默认限制65KB不够
-    max-text-message-size: ${ASYNC_WEBSOCKET_MAX_TEXT_MESSAGE_SIZE:204800}  # 200KB
-    max-binary-message-size: ${ASYNC_WEBSOCKET_MAX_BINARY_MESSAGE_SIZE:204800}  # 200KB
+    max-text-message-size: ${ASYNC_WEBSOCKET_MAX_TEXT_MESSAGE_SIZE:80000}  # 200KB
+    max-binary-message-size: ${ASYNC_WEBSOCKET_MAX_BINARY_MESSAGE_SIZE:80000}  # 200KB
     # WebSocket客户端配置
     client:
       # 连接超时时间（毫秒）

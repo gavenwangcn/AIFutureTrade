@@ -59,8 +59,6 @@ public class MarketTickerStreamServiceImpl implements MarketTickerStreamService 
     public MarketTickerStreamServiceImpl(WebSocketConfig webSocketConfig, MarketTickerMapper marketTickerMapper) {
         this.webSocketConfig = webSocketConfig;
         this.marketTickerMapper = marketTickerMapper;
-        log.info("[MarketTickerStreamService] 注入WebSocket配置: maxTextMessageSize={} bytes", 
-                webSocketConfig.getMaxTextMessageSize());
     }
     
     /**
@@ -102,7 +100,7 @@ public class MarketTickerStreamServiceImpl implements MarketTickerStreamService 
         if (api == null) {
             WebSocketClientConfiguration clientConfiguration =
                     DerivativesTradingUsdsFuturesWebSocketStreamsUtil.getClientConfiguration();
-            clientConfiguration.setMessageMaxSize(webSocketConfig.getMaxTextMessageSize());
+            clientConfiguration.setMessageMaxSize(80000L);
             api = new DerivativesTradingUsdsFuturesWebSocketStreams(clientConfiguration);
         }
         return api;
