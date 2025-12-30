@@ -198,15 +198,35 @@ public class MarketTickerStreamServiceImpl implements MarketTickerStreamService 
                 throw new RuntimeException("WebSocket configuration is null");
             }
             
-            // 2. 初始化 WebSocket Streams - 修复：使用正确的类进行实例化
+            // 2. 初始化 WebSocket Streams - 增强异常处理
             log.info("[MarketTickerStream] [DEBUG] 开始初始化 WebSocket Streams...");
             try {
+                log.info("[MarketTickerStream] [DEBUG] 准备创建 DerivativesTradingUsdsFuturesWebSocketStreams 实例...");
+                log.info("[MarketTickerStream] [DEBUG] 配置对象信息: url={}", 
+                         config.getUrl());
+                
                 webSocketStreams = new DerivativesTradingUsdsFuturesWebSocketStreams(config);
                 log.info("[MarketTickerStream] [DEBUG] WebSocket Streams 初始化成功: {}", webSocketStreams != null ? "Streams对象不为空" : "Streams对象为空");
             } catch (Exception streamsException) {
                 log.error("[MarketTickerStream] ❌ WebSocket Streams 初始化失败: {}", streamsException.getClass().getName());
                 log.error("[MarketTickerStream] ❌ Streams初始化异常消息: {}", streamsException.getMessage());
+                log.error("[MarketTickerStream] ❌ Streams初始化异常原因: {}", streamsException.getCause() != null ? streamsException.getCause().getMessage() : "无具体原因");
                 log.error("[MarketTickerStream] ❌ Streams初始化异常堆栈:", streamsException);
+                
+                // 尝试诊断常见问题
+                if (streamsException.getMessage() != null) {
+                    String msg = streamsException.getMessage().toLowerCase();
+                    if (msg.contains("classnotfound") || msg.contains("noclassdeffound")) {
+                        log.error("[MarketTickerStream] 🔍 诊断: 可能是依赖类缺失，请检查Maven依赖是否正确安装");
+                    } else if (msg.contains("no such method") || msg.contains("method not found")) {
+                        log.error("[MarketTickerStream] 🔍 诊断: 可能是API方法不匹配，请检查Binance SDK版本");
+                    } else if (msg.contains("connection") || msg.contains("network")) {
+                        log.error("[MarketTickerStream] 🔍 诊断: 可能是网络连接问题，请检查网络连接");
+                    } else if (msg.contains("timeout")) {
+                        log.error("[MarketTickerStream] 🔍 诊断: 可能是连接超时，请检查网络延迟");
+                    }
+                }
+                
                 throw streamsException;
             }
             
