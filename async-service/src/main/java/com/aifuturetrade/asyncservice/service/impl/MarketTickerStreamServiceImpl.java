@@ -348,7 +348,7 @@ public class MarketTickerStreamServiceImpl implements MarketTickerStreamService 
                 marketTickerMapper.batchUpsertTickers(normalizedTickers);
                 long duration = System.currentTimeMillis() - startTime;
                 log.debug("[MarketTickerStreamService] Successfully completed batchUpsertTickers in {} ms", duration);
-                log.debug("[MarketTickerStreamService] ✅ 成功同步{}个ticker数据到数据库（耗时{}ms）", normalizedCount, duration);
+                log.info("[MarketTickerStreamService] ✅ 成功同步{}个ticker数据到数据库（耗时{}ms）", normalizedCount, duration);
             } catch (Exception e) {
                 log.error("[MarketTickerStreamService] Error during batchUpsertTickers: {}", e.getMessage(), e);
                 log.error("[MarketTickerStreamService] ❌ 批量同步ticker数据到数据库失败", e);
