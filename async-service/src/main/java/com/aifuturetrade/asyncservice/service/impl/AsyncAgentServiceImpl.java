@@ -4,7 +4,7 @@ import com.aifuturetrade.asyncservice.service.AsyncAgentService;
 import com.aifuturetrade.asyncservice.service.MarketSymbolOfflineService;
 import com.aifuturetrade.asyncservice.service.MarketTickerStreamService;
 import com.aifuturetrade.asyncservice.service.PriceRefreshService;
-import com.aifuturetrade.asyncservice.service.impl.MarketTickerStreamTestService;
+import com.aifuturetrade.asyncservice.service.MarketTickerStreamTestService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
