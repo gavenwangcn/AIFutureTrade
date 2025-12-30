@@ -17,12 +17,12 @@ public class WebSocketConfig {
     /**
      * 最大文本消息大小（字节）
      */
-    private Long maxTextMessageSize = 80000L; // 200KB
+    private Long maxTextMessageSize = 80000L; 
     
     /**
      * 最大二进制消息大小（字节）
      */
-    private Long maxBinaryMessageSize = 80000L; // 200KB
+    private Long maxBinaryMessageSize = 80000L; 
     
     /**
      * WebSocket客户端配置
