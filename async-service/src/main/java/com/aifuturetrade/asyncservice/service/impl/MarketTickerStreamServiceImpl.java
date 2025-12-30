@@ -181,6 +181,13 @@ public class MarketTickerStreamServiceImpl implements MarketTickerStreamService 
             WebSocketClientConfiguration config = null;
             try {
                 config = DerivativesTradingUsdsFuturesWebSocketStreamsUtil.getClientConfiguration();
+                
+                // 最大文本消息大小已通过系统属性在 AsyncServiceApplication 中设置
+                // System.setProperty("org.eclipse.jetty.websocket.maxTextMessageSize", "204800")
+                // 币安全市场ticker数据可能较大（实际约 68KB），默认限制 65KB 不够，已设置为 200KB
+                // 注意：WebSocketClientConfiguration 类没有直接设置 maxTextMessageSize 的方法
+                // 该配置由底层的 Jetty WebSocketClient 管理，通过系统属性统一设置
+                
                 log.info("[MarketTickerStream] [DEBUG] WebSocket 配置获取成功: {}", config != null ? "配置对象不为空" : "配置对象为空");
                 
                 if (config != null) {

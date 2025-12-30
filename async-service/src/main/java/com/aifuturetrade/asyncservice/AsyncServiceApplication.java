@@ -22,6 +22,11 @@ import org.springframework.scheduling.annotation.EnableScheduling;
 public class AsyncServiceApplication {
 
     public static void main(String[] args) {
+        // 设置 Jetty WebSocket 最大文本消息大小为 200KB
+        // 币安全市场ticker数据可能较大（实际约 68KB），默认限制 65KB 不够
+        // 通过系统属性设置，确保在创建 WebSocket 客户端之前生效
+        System.setProperty("org.eclipse.jetty.websocket.maxTextMessageSize", String.valueOf(200 * 1024));
+        
         SpringApplication.run(AsyncServiceApplication.class, args);
     }
 

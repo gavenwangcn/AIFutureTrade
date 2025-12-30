@@ -15,6 +15,7 @@ import com.binance.connector.client.derivatives_trading_usds_futures.websocket.s
 import com.binance.connector.client.derivatives_trading_usds_futures.websocket.stream.api.DerivativesTradingUsdsFuturesWebSocketStreams;
 import com.binance.connector.client.derivatives_trading_usds_futures.websocket.stream.model.AllMarketTickersStreamsRequest;
 import com.binance.connector.client.derivatives_trading_usds_futures.websocket.stream.model.AllMarketTickersStreamsResponse;
+import com.binance.connector.client.derivatives_trading_usds_futures.websocket.stream.model.AllMarketTickersStreamsResponseInner;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
@@ -102,6 +103,13 @@ public class MarketTickerStreamTestServiceImpl implements MarketTickerStreamTest
                 log.info("[MarketTickerStreamTestImpl] [SDK示例模式] 调用 DerivativesTradingUsdsFuturesWebSocketStreamsUtil.getClientConfiguration()...");
                 WebSocketClientConfiguration clientConfiguration =
                         DerivativesTradingUsdsFuturesWebSocketStreamsUtil.getClientConfiguration();
+                
+                // 最大文本消息大小已通过系统属性在 AsyncServiceApplication 中设置
+                // System.setProperty("org.eclipse.jetty.websocket.maxTextMessageSize", "204800")
+                // 币安全市场ticker数据可能较大（实际约 68KB），默认限制 65KB 不够，已设置为 200KB
+                // 注意：WebSocketClientConfiguration 类没有直接设置 maxTextMessageSize 的方法
+                // 该配置由底层的 Jetty WebSocketClient 管理，通过系统属性统一设置
+                
                 log.info("[MarketTickerStreamTestImpl] [SDK示例模式] 客户端配置创建成功");
                 log.info("[MarketTickerStreamTestImpl] [SDK示例模式] 配置URL: {}", clientConfiguration.getUrl());
                 
@@ -156,25 +164,101 @@ public class MarketTickerStreamTestServiceImpl implements MarketTickerStreamTest
                     // }
                     
                     log.info("[MarketTickerStreamTestImpl] [SDK示例模式] 开始进入数据处理循环...");
+                    log.info("[MarketTickerStreamTestImpl] [SDK示例模式] 等待接收WebSocket消息...");
                     int messageCount = 0;
+                    long startTime = System.currentTimeMillis();
                     
                     while (running.get()) {
                         try {
-                            log.debug("[MarketTickerStreamTestImpl] [SDK示例模式] 调用 response.take() 等待数据...");
+                            // 使用 take() 阻塞等待数据，这是SDK示例的标准方式
                             AllMarketTickersStreamsResponse tickerResponse = response.take();
                             
                             messageCount++;
-                            log.info("[MarketTickerStreamTestImpl] 📊 [SDK示例模式] 收到第 {} 条数据: {}", 
-                                    messageCount, tickerResponse != null ? "有数据" : "空数据");
+                            long currentTime = System.currentTimeMillis();
+                            long elapsedSeconds = (currentTime - startTime) / 1000;
                             
-                            // 按照SDK示例打印数据
-                            if (messageCount <= 5) {
-                                // 前5条数据详细打印
-                                log.info("[MarketTickerStreamTestImpl] 📈 [SDK示例模式] 数据详情 (第{}条): {}", 
-                                        messageCount, tickerResponse);
-                            } else if (messageCount % 100 == 0) {
-                                // 每100条数据打印一次统计
-                                log.info("[MarketTickerStreamTestImpl] 📊 [SDK示例模式] 已处理 {} 条数据", messageCount);
+                            // 每条消息都打印基本信息
+                            if (tickerResponse != null) {
+                                // 打印消息统计信息
+                                log.info("[MarketTickerStreamTestImpl] ========== 收到第 {} 条消息 (运行 {} 秒) ==========", 
+                                        messageCount, elapsedSeconds);
+                                
+                                // AllMarketTickersStreamsResponse 继承自 ArrayList<AllMarketTickersStreamsResponseInner>
+                                // 可以直接使用 List 的方法访问数据
+                                int tickerCount = tickerResponse.size();
+                                log.info("[MarketTickerStreamTestImpl] 📈 包含 {} 个交易对的ticker数据", tickerCount);
+                                
+                                if (tickerCount > 0) {
+                                    // 打印前10个ticker的详细信息
+                                    int printCount = Math.min(10, tickerCount);
+                                    log.info("[MarketTickerStreamTestImpl] ┌─────────────────────────────────────────────────────────────────────────────────────────────┐");
+                                    log.info("[MarketTickerStreamTestImpl] │ 序号 │ 交易对    │ 最新价      │ 涨跌额      │ 涨跌幅      │ 成交量        │ 成交额        │");
+                                    log.info("[MarketTickerStreamTestImpl] ├─────┼───────────┼─────────────┼─────────────┼─────────────┼───────────────┼───────────────┤");
+                                    
+                                    for (int i = 0; i < printCount; i++) {
+                                        AllMarketTickersStreamsResponseInner ticker = tickerResponse.get(i);
+                                        
+                                        // 提取关键字段
+                                        String symbol = ticker.getsLowerCase() != null ? ticker.getsLowerCase() : "N/A";
+                                        String lastPrice = ticker.getcLowerCase() != null ? ticker.getcLowerCase() : "N/A";
+                                        String priceChange = ticker.getpLowerCase() != null ? ticker.getpLowerCase() : "N/A";
+                                        String priceChangePercent = ticker.getP() != null ? ticker.getP() + "%" : "N/A";
+                                        String volume = ticker.getvLowerCase() != null ? ticker.getvLowerCase() : "N/A";
+                                        String quoteVolume = ticker.getqLowerCase() != null ? ticker.getqLowerCase() : "N/A";
+                                        
+                                        // 格式化字符串，确保对齐
+                                        String symbolStr = symbol.length() > 9 ? symbol.substring(0, 9) : String.format("%-9s", symbol);
+                                        String lastPriceStr = lastPrice.length() > 11 ? lastPrice.substring(0, 11) : String.format("%-11s", lastPrice);
+                                        String priceChangeStr = priceChange.length() > 11 ? priceChange.substring(0, 11) : String.format("%-11s", priceChange);
+                                        String priceChangePercentStr = priceChangePercent.length() > 11 ? priceChangePercent.substring(0, 11) : String.format("%-11s", priceChangePercent);
+                                        String volumeStr = volume.length() > 13 ? volume.substring(0, 13) : String.format("%-13s", volume);
+                                        String quoteVolumeStr = quoteVolume.length() > 13 ? quoteVolume.substring(0, 13) : String.format("%-13s", quoteVolume);
+                                        
+                                        log.info(String.format("[MarketTickerStreamTestImpl] │ %3d │ %-9s │ %-11s │ %-11s │ %-11s │ %-13s │ %-13s │", 
+                                                i + 1, symbolStr, lastPriceStr, priceChangeStr, 
+                                                priceChangePercentStr, volumeStr, quoteVolumeStr));
+                                    }
+                                    log.info("[MarketTickerStreamTestImpl] └─────────────────────────────────────────────────────────────────────────────────────────────┘");
+                                    
+                                    if (tickerCount > printCount) {
+                                        log.info("[MarketTickerStreamTestImpl]   ... 还有 {} 个ticker未显示", tickerCount - printCount);
+                                    }
+                                    
+                                    // 打印第一个ticker的完整信息作为示例
+                                    if (messageCount <= 5 && tickerCount > 0) {
+                                        AllMarketTickersStreamsResponseInner firstTicker = tickerResponse.get(0);
+                                        log.info("[MarketTickerStreamTestImpl] 📊 第一个Ticker完整信息:");
+                                        log.info("[MarketTickerStreamTestImpl]   - Symbol (s): {}", firstTicker.getsLowerCase());
+                                        log.info("[MarketTickerStreamTestImpl]   - Event Time (E): {}", firstTicker.getE());
+                                        log.info("[MarketTickerStreamTestImpl]   - Price Change (p): {}", firstTicker.getpLowerCase());
+                                        log.info("[MarketTickerStreamTestImpl]   - Price Change % (P): {}", firstTicker.getP());
+                                        log.info("[MarketTickerStreamTestImpl]   - Weighted Avg Price (w): {}", firstTicker.getwLowerCase());
+                                        log.info("[MarketTickerStreamTestImpl]   - Last Price (c): {}", firstTicker.getcLowerCase());
+                                        log.info("[MarketTickerStreamTestImpl]   - Last Qty (Q): {}", firstTicker.getQ());
+                                        log.info("[MarketTickerStreamTestImpl]   - Open Price (o): {}", firstTicker.getoLowerCase());
+                                        log.info("[MarketTickerStreamTestImpl]   - High Price (h): {}", firstTicker.gethLowerCase());
+                                        log.info("[MarketTickerStreamTestImpl]   - Low Price (l): {}", firstTicker.getlLowerCase());
+                                        log.info("[MarketTickerStreamTestImpl]   - Volume (v): {}", firstTicker.getvLowerCase());
+                                        log.info("[MarketTickerStreamTestImpl]   - Quote Volume (q): {}", firstTicker.getqLowerCase());
+                                        log.info("[MarketTickerStreamTestImpl]   - Open Time (O): {}", firstTicker.getO());
+                                        log.info("[MarketTickerStreamTestImpl]   - Close Time (C): {}", firstTicker.getC());
+                                        log.info("[MarketTickerStreamTestImpl]   - First Trade ID (F): {}", firstTicker.getF());
+                                        log.info("[MarketTickerStreamTestImpl]   - Last Trade ID (L): {}", firstTicker.getL());
+                                        log.info("[MarketTickerStreamTestImpl]   - Trade Count (n): {}", firstTicker.getnLowerCase());
+                                    }
+                                } else {
+                                    log.warn("[MarketTickerStreamTestImpl] ⚠️ 响应中不包含任何ticker数据");
+                                }
+                                
+                                // 前10条消息详细打印，之后每10条打印一次摘要
+                                if (messageCount <= 10) {
+                                    log.info("[MarketTickerStreamTestImpl] ✅ [详细模式] 第 {} 条消息处理完成", messageCount);
+                                } else if (messageCount % 10 == 0) {
+                                    log.info("[MarketTickerStreamTestImpl] ✅ [摘要模式] 已处理 {} 条消息 (运行 {} 秒, 平均 {} 个ticker/条)", 
+                                            messageCount, elapsedSeconds, tickerCount);
+                                }
+                            } else {
+                                log.warn("[MarketTickerStreamTestImpl] ⚠️ 收到空响应 (第 {} 条)", messageCount);
                             }
                             
                         } catch (InterruptedException e) {
@@ -185,6 +269,7 @@ public class MarketTickerStreamTestServiceImpl implements MarketTickerStreamTest
                             log.error("[MarketTickerStreamTestImpl] ❌ [SDK示例模式] 数据处理异常", e);
                             log.error("[MarketTickerStreamTestImpl] ❌ 异常类型: {}, 异常消息: {}", 
                                     e.getClass().getName(), e.getMessage());
+                            log.error("[MarketTickerStreamTestImpl] ❌ 异常堆栈:", e);
                             // 继续处理，不中断流
                         }
                     }
