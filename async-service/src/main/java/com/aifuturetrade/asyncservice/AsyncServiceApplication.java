@@ -25,7 +25,14 @@ public class AsyncServiceApplication {
         // 设置 Jetty WebSocket 最大文本消息大小为 200KB
         // 币安全市场ticker数据可能较大（实际约 68KB），默认限制 65KB 不够
         // 通过系统属性设置，确保在创建 WebSocket 客户端之前生效
-        System.setProperty("org.eclipse.jetty.websocket.maxTextMessageSize", String.valueOf(200 * 1024));
+        // 注意：需要设置多个可能的属性名，因为不同版本的 Jetty 可能使用不同的属性名
+        int maxMessageSize = 200 * 1024; // 200KB
+        System.setProperty("org.eclipse.jetty.websocket.maxTextMessageSize", String.valueOf(maxMessageSize));
+        System.setProperty("jetty.websocket.maxTextMessageSize", String.valueOf(maxMessageSize));
+        System.setProperty("websocket.maxTextMessageSize", String.valueOf(maxMessageSize));
+        
+        // 同时设置 JVM 参数（如果通过命令行启动，也可以通过 -D 参数设置）
+        // -Dorg.eclipse.jetty.websocket.maxTextMessageSize=204800
         
         SpringApplication.run(AsyncServiceApplication.class, args);
     }

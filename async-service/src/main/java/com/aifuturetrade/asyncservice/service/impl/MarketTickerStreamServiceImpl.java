@@ -11,11 +11,13 @@ import com.binance.connector.client.derivatives_trading_usds_futures.websocket.s
 import com.binance.connector.client.derivatives_trading_usds_futures.websocket.stream.model.AllMarketTickersStreamsResponse;
 import com.binance.connector.client.derivatives_trading_usds_futures.websocket.stream.model.AllMarketTickersStreamsResponseInner;
 import lombok.extern.slf4j.Slf4j;
+import org.eclipse.jetty.websocket.client.WebSocketClient;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import javax.annotation.PostConstruct;
 import javax.annotation.PreDestroy;
+import java.lang.reflect.Field;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDateTime;
@@ -106,35 +108,28 @@ public class MarketTickerStreamServiceImpl implements MarketTickerStreamService 
             try {
                 if (runSeconds != null) {
                     // 如果指定了运行时长，只运行一次
-                    log.info("[MarketTickerStream] [DEBUG] 开始单次运行模式，运行时长: {} 秒", runSeconds);
-                    runStreamOnce(runSeconds);
-                    log.info("[MarketTickerStream] [DEBUG] 单次运行完成");
+                    log.info("[MarketTickerStream] 开始单次运行模式，运行时长: {} 秒", runSeconds);
+                    startStreamProcessing(runSeconds);
+                    log.info("[MarketTickerStream] 单次运行完成");
                 } else {
                     // 无限运行，每30分钟自动重连
-                    log.info("[MarketTickerStream] [DEBUG] 开始持续运行模式");
-                    long startTime = System.currentTimeMillis();
+                    log.info("[MarketTickerStream] 开始持续运行模式（自动重连）");
                     while (running.get()) {
                         try {
                             reconnectCount++;
                             log.info("[MarketTickerStream] 🔗 [重连 {}] 开始建立WebSocket连接...", reconnectCount);
-                            log.info("[MarketTickerStream] [DEBUG] 调用 runStreamOnce 开始，当前 running.get()={}", running.get());
                             
-                            runStreamOnce(null);
+                            // 启动流处理（会自动在30分钟后重连）
+                            startStreamProcessing(null);
+                            
                             reconnectCount = 0; // 重置重连计数
-                            log.info("[MarketTickerStream] [DEBUG] runStreamOnce 正常返回，重连计数已重置");
-                            
-                            // 检查是否达到运行时长限制
-                            if (runSeconds != null) {
-                                long elapsed = (System.currentTimeMillis() - startTime) / 1000;
-                                if (elapsed >= runSeconds) {
-                                    log.info("[MarketTickerStream] ⏹️ 达到运行时长限制 {} 秒，停止流服务", runSeconds);
-                                    break;
-                                }
-                            }
+                            log.info("[MarketTickerStream] 连接正常结束，准备重连");
                             
                             // 等待一段时间后重连
-                            log.info("[MarketTickerStream] ⏳ 等待 {} 秒后重新连接...", reconnectDelay);
-                            Thread.sleep(reconnectDelay * 1000L);
+                            if (running.get()) {
+                                log.info("[MarketTickerStream] ⏳ 等待 {} 秒后重新连接...", reconnectDelay);
+                                Thread.sleep(reconnectDelay * 1000L);
+                            }
                             
                         } catch (InterruptedException e) {
                             log.info("[MarketTickerStream] 🛑 WebSocket连接被中断");
@@ -146,23 +141,23 @@ public class MarketTickerStreamServiceImpl implements MarketTickerStreamService 
                             reconnectCount++;
                             
                             // 等待一段时间后重连
-                            try {
-                                log.info("[MarketTickerStream] ⏳ [重连 {}] 等待5秒后重新连接...", reconnectCount);
-                                Thread.sleep(5000);
-                            } catch (InterruptedException ie) {
-                                Thread.currentThread().interrupt();
-                                break;
+                            if (running.get()) {
+                                try {
+                                    log.info("[MarketTickerStream] ⏳ [重连 {}] 等待5秒后重新连接...", reconnectCount);
+                                    Thread.sleep(5000);
+                                } catch (InterruptedException ie) {
+                                    Thread.currentThread().interrupt();
+                                    break;
+                                }
                             }
                         }
                     }
-                    log.info("[MarketTickerStream] [DEBUG] 持续运行循环结束，当前 running.get()={}", running.get());
+                    log.info("[MarketTickerStream] 持续运行循环结束");
                 }
             } catch (Exception e) {
                 log.error("[MarketTickerStream] ❌ Stream processing error in outer catch", e);
                 log.error("[MarketTickerStream] ❌ 外层异常类型: {}, 异常消息: {}", e.getClass().getName(), e.getMessage());
-                log.error("[MarketTickerStream] ❌ 外层异常详细堆栈:", e);
             } finally {
-                log.info("[MarketTickerStream] [DEBUG] 进入 finally 块，设置 running=false");
                 running.set(false);
                 log.info("[MarketTickerStream] 🏁 WebSocket流服务已停止");
             }
@@ -170,122 +165,55 @@ public class MarketTickerStreamServiceImpl implements MarketTickerStreamService 
     }
     
     /**
-     * 运行一次流连接（最多30分钟）
+     * 启动流处理 - 参考SDK官方示例实现
+     * 完全按照 MarketTickerStreamTestServiceImpl 的方式构建和启动流
      */
-    private void runStreamOnce(Integer runSeconds) throws Exception {
+    private void startStreamProcessing(Integer runSeconds) throws Exception {
+        log.info("[MarketTickerStream] 开始启动流处理...");
+        
         try {
-            log.info("[MarketTickerStream] [DEBUG] 开始 runStreamOnce 方法，runSeconds={}", runSeconds);
-            
             // 1. 获取 WebSocket 配置
-            log.info("[MarketTickerStream] [DEBUG] 开始获取 WebSocket 配置...");
-            WebSocketClientConfiguration config = null;
+            log.info("[MarketTickerStream] 获取 WebSocket 配置...");
+            WebSocketClientConfiguration config = DerivativesTradingUsdsFuturesWebSocketStreamsUtil.getClientConfiguration();
+            
+            log.info("[MarketTickerStream] WebSocket 配置获取成功，URL: {}", config.getUrl());
+            
+            // 2. 创建 WebSocket Streams 实例
+            log.info("[MarketTickerStream] 创建 DerivativesTradingUsdsFuturesWebSocketStreams 实例...");
+            webSocketStreams = new DerivativesTradingUsdsFuturesWebSocketStreams(config);
+            log.info("[MarketTickerStream] WebSocket Streams 实例创建成功");
+            
+            // 2.1 通过反射设置 WebSocketClient 的最大消息大小
+            // 系统属性可能没有生效，需要直接设置 WebSocketClient 的 Policy
             try {
-                config = DerivativesTradingUsdsFuturesWebSocketStreamsUtil.getClientConfiguration();
-                
-                // 最大文本消息大小已通过系统属性在 AsyncServiceApplication 中设置
-                // System.setProperty("org.eclipse.jetty.websocket.maxTextMessageSize", "204800")
-                // 币安全市场ticker数据可能较大（实际约 68KB），默认限制 65KB 不够，已设置为 200KB
-                // 注意：WebSocketClientConfiguration 类没有直接设置 maxTextMessageSize 的方法
-                // 该配置由底层的 Jetty WebSocketClient 管理，通过系统属性统一设置
-                
-                log.info("[MarketTickerStream] [DEBUG] WebSocket 配置获取成功: {}", config != null ? "配置对象不为空" : "配置对象为空");
-                
-                if (config != null) {
-                    log.info("[MarketTickerStream] [DEBUG] 配置详情: url={}", config.getUrl());
-                }
-            } catch (Exception configException) {
-                log.error("[MarketTickerStream] ❌ WebSocket 配置获取失败: {}", configException.getClass().getName());
-                log.error("[MarketTickerStream] ❌ 配置获取异常消息: {}", configException.getMessage());
-                log.error("[MarketTickerStream] ❌ 配置获取异常堆栈:", configException);
-                throw configException;
-            }
-            
-            if (config == null) {
-                log.error("[MarketTickerStream] ❌ WebSocket 配置为空");
-                throw new RuntimeException("WebSocket configuration is null");
-            }
-            
-            // 2. 初始化 WebSocket Streams - 增强异常处理
-            log.info("[MarketTickerStream] [DEBUG] 开始初始化 WebSocket Streams...");
-            try {
-                log.info("[MarketTickerStream] [DEBUG] 准备创建 DerivativesTradingUsdsFuturesWebSocketStreams 实例...");
-                log.info("[MarketTickerStream] [DEBUG] 配置对象信息: url={}", 
-                         config.getUrl());
-                
-                webSocketStreams = new DerivativesTradingUsdsFuturesWebSocketStreams(config);
-                log.info("[MarketTickerStream] [DEBUG] WebSocket Streams 初始化成功: {}", webSocketStreams != null ? "Streams对象不为空" : "Streams对象为空");
-            } catch (Exception streamsException) {
-                log.error("[MarketTickerStream] ❌ WebSocket Streams 初始化失败: {}", streamsException.getClass().getName());
-                log.error("[MarketTickerStream] ❌ Streams初始化异常消息: {}", streamsException.getMessage());
-                log.error("[MarketTickerStream] ❌ Streams初始化异常原因: {}", streamsException.getCause() != null ? streamsException.getCause().getMessage() : "无具体原因");
-                log.error("[MarketTickerStream] ❌ Streams初始化异常堆栈:", streamsException);
-                
-                // 尝试诊断常见问题
-                if (streamsException.getMessage() != null) {
-                    String msg = streamsException.getMessage().toLowerCase();
-                    if (msg.contains("classnotfound") || msg.contains("noclassdeffound")) {
-                        log.error("[MarketTickerStream] 🔍 诊断: 可能是依赖类缺失，请检查Maven依赖是否正确安装");
-                    } else if (msg.contains("no such method") || msg.contains("method not found")) {
-                        log.error("[MarketTickerStream] 🔍 诊断: 可能是API方法不匹配，请检查Binance SDK版本");
-                    } else if (msg.contains("connection") || msg.contains("network")) {
-                        log.error("[MarketTickerStream] 🔍 诊断: 可能是网络连接问题，请检查网络连接");
-                    } else if (msg.contains("timeout")) {
-                        log.error("[MarketTickerStream] 🔍 诊断: 可能是连接超时，请检查网络延迟");
-                    }
-                }
-                
-                throw streamsException;
-            }
-            
-            if (webSocketStreams == null) {
-                log.error("[MarketTickerStream] ❌ WebSocket Streams 初始化失败: 对象为空");
-                throw new RuntimeException("WebSocket streams initialization failed");
+                configureWebSocketMaxMessageSize(webSocketStreams, 200 * 1024); // 200KB
+                log.info("[MarketTickerStream] ✅ WebSocket 最大消息大小已设置为 200KB");
+            } catch (Exception e) {
+                log.warn("[MarketTickerStream] ⚠️ 设置 WebSocket 最大消息大小失败: {}", e.getMessage());
+                log.warn("[MarketTickerStream] ⚠️ 将使用默认值，可能遇到消息过大错误");
             }
             
             // 3. 创建请求对象
-            log.info("[MarketTickerStream] [DEBUG] 开始创建请求对象...");
-            AllMarketTickersStreamsRequest request = null;
-            try {
-                request = new AllMarketTickersStreamsRequest();
-                log.info("[MarketTickerStream] [DEBUG] Request 创建成功: {}", request != null ? "Request对象不为空" : "Request对象为空");
-            } catch (Exception requestException) {
-                log.error("[MarketTickerStream] ❌ Request 创建失败: {}", requestException.getClass().getName());
-                log.error("[MarketTickerStream] ❌ Request创建异常消息: {}", requestException.getMessage());
-                throw requestException;
-            }
+            log.info("[MarketTickerStream] 创建 AllMarketTickersStreamsRequest 请求对象...");
+            AllMarketTickersStreamsRequest request = new AllMarketTickersStreamsRequest();
+            log.info("[MarketTickerStream] 请求对象创建成功");
             
-            // 4. 订阅全市场Ticker流 - 使用正确的API方法
-            log.info("[MarketTickerStream] 📡 正在订阅全市场Ticker流...");
-            log.info("[MarketTickerStream] [DEBUG] 开始调用 webSocketStreams.allMarketTickersStreams(request)...");
-            
-            try {
-                streamQueue = webSocketStreams.allMarketTickersStreams(request);
-                log.info("[MarketTickerStream] [DEBUG] allMarketTickersStreams 调用成功，streamQueue: {}", streamQueue != null ? "队列不为空" : "队列为空");
-            } catch (Exception wsException) {
-                log.error("[MarketTickerStream] ❌ WebSocket 订阅失败: {}", wsException.getClass().getName());
-                log.error("[MarketTickerStream] ❌ WebSocket 订阅异常消息: {}", wsException.getMessage());
-                log.error("[MarketTickerStream] ❌ WebSocket 订阅异常堆栈:", wsException);
-                throw wsException;
-            }
+            // 4. 订阅全市场Ticker流 - 使用SDK标准方式
+            log.info("[MarketTickerStream] 📡 订阅全市场Ticker流...");
+            streamQueue = webSocketStreams.allMarketTickersStreams(request);
+            log.info("[MarketTickerStream] 流订阅成功，开始接收数据...");
             
             // 5. 记录连接创建时间
             connectionCreationTime = LocalDateTime.now();
-            log.info("[MarketTickerStream] ✅ WebSocket连接已建立, 开始处理流数据...");
-            log.info("[MarketTickerStream] [DEBUG] connectionCreationTime: {}", connectionCreationTime);
+            log.info("[MarketTickerStream] ✅ WebSocket连接已建立，连接时间: {}", connectionCreationTime);
             
-            // 6. 处理流数据
-            log.info("[MarketTickerStream] [DEBUG] 开始调用 processStream 方法...");
+            // 6. 处理流数据 - 在单独的线程中处理
             processStream(runSeconds);
-            log.info("[MarketTickerStream] [DEBUG] processStream 方法执行完成");
             
         } catch (Exception e) {
-            log.error("[MarketTickerStream] ❌ runStreamOnce 方法执行异常", e);
-            log.error("[MarketTickerStream] ❌ 异常类型: {}", e.getClass().getName());
-            log.error("[MarketTickerStream] ❌ 异常消息: {}", e.getMessage());
-            log.error("[MarketTickerStream] ❌ 异常堆栈:", e);
-            throw e; // 重新抛出异常，让上层处理
-        } finally {
-            log.info("[MarketTickerStream] [DEBUG] 进入 finally 块，设置 running=false");
+            log.error("[MarketTickerStream] ❌ 启动流处理失败", e);
+            log.error("[MarketTickerStream] ❌ 异常类型: {}, 异常消息: {}", e.getClass().getName(), e.getMessage());
+            throw e;
         }
     }
     
@@ -315,71 +243,80 @@ public class MarketTickerStreamServiceImpl implements MarketTickerStreamService 
     }
     
     /**
-     * 处理WebSocket流数据 - 优化版本，遵循SDK最佳实践
+     * 处理WebSocket流数据 - 参考SDK官方示例实现
+     * 完全按照 MarketTickerStreamTestServiceImpl 的方式处理数据
      */
     private void processStream(Integer runSeconds) {
         long startTime = System.currentTimeMillis();
         long messageCount = 0;
         
-        log.info("[MarketTickerStream] [DEBUG] processStream 方法开始，runSeconds={}, startTime={}", runSeconds, startTime);
+        log.info("[MarketTickerStream] 📊 开始处理WebSocket流数据...");
+        log.info("[MarketTickerStream] 等待接收WebSocket消息...");
         
         try {
-            log.info("[MarketTickerStream] 📊 开始处理WebSocket流数据...");
-            
             // SDK设计理念：使用take()进行无限循环获取数据
+            // 参考 MarketTickerStreamTestServiceImpl 的实现方式
             while (running.get()) {
-                log.debug("[MarketTickerStream] [DEBUG] while循环开始，当前 running.get()={}, messageCount={}", running.get(), messageCount);
-                
-                // 检查运行时长限制
-                if (runSeconds != null) {
-                    long elapsed = (System.currentTimeMillis() - startTime) / 1000;
-                    if (elapsed >= runSeconds) {
-                        log.info("[MarketTickerStream] ⏹️ 达到运行时长限制 {} 秒，停止流服务", runSeconds);
+                try {
+                    // 检查运行时长限制
+                    if (runSeconds != null) {
+                        long elapsed = (System.currentTimeMillis() - startTime) / 1000;
+                        if (elapsed >= runSeconds) {
+                            log.info("[MarketTickerStream] ⏹️ 达到运行时长限制 {} 秒，停止流服务", runSeconds);
+                            break;
+                        }
+                    }
+                    
+                    // 检查连接时长限制（30分钟）
+                    if (shouldReconnect()) {
+                        log.info("[MarketTickerStream] 🔄 连接达到 {} 分钟限制，需要重新连接", maxConnectionMinutes);
                         break;
                     }
-                }
-                
-                // 检查连接时长限制（30分钟）
-                if (shouldReconnect()) {
-                    log.info("[MarketTickerStream] 🔄 连接达到 {} 分钟限制，需要重新连接", maxConnectionMinutes);
-                    break;
-                }
-                
-                // 从队列中获取ticker数据（遵循SDK最佳实践）
-                log.debug("[MarketTickerStream] [DEBUG] 开始从队列获取数据...");
-                try {
-                    log.debug("[MarketTickerStream] [DEBUG] 调用 streamQueue.take()，当前队列: {}", streamQueue != null ? "队列存在" : "队列为空");
+                    
+                    // 使用 take() 阻塞等待数据，这是SDK示例的标准方式
                     AllMarketTickersStreamsResponse response = streamQueue.take();
-                    log.debug("[MarketTickerStream] [DEBUG] 从队列获取到数据: {}", response != null ? "有数据" : "空数据");
                     
                     messageCount++;
-                    if (messageCount % 100 == 0) {
-                        log.info("[MarketTickerStream] 📈 已处理 {} 条消息", messageCount);
+                    long elapsedSeconds = (System.currentTimeMillis() - startTime) / 1000;
+                    
+                    // 处理消息
+                    if (response != null) {
+                        // AllMarketTickersStreamsResponse 继承自 ArrayList<AllMarketTickersStreamsResponseInner>
+                        // 可以直接使用 List 的方法访问数据
+                        int tickerCount = response.size();
+                        
+                        if (messageCount % 100 == 0 || messageCount <= 10) {
+                            log.info("[MarketTickerStream] 📈 收到第 {} 条消息 (运行 {} 秒), 包含 {} 个ticker数据", 
+                                    messageCount, elapsedSeconds, tickerCount);
+                        }
+                        
+                        // 处理并存储ticker数据
+                        handleMessage(response);
+                        
+                    } else {
+                        log.warn("[MarketTickerStream] ⚠️ 收到空响应 (第 {} 条)", messageCount);
                     }
-                    handleMessage(response);
-                    log.debug("[MarketTickerStream] [DEBUG] 消息处理完成");
+                    
                 } catch (InterruptedException e) {
-                    log.info("[MarketTickerStream] 🛑 Stream interrupted");
+                    log.info("[MarketTickerStream] 🛑 流处理被中断");
                     Thread.currentThread().interrupt();
                     break;
                 } catch (Exception e) {
-                    log.error("[MarketTickerStream] ❌ Error processing message", e);
-                    log.error("[MarketTickerStream] ❌ 消息处理异常类型: {}, 异常消息: {}", e.getClass().getName(), e.getMessage());
+                    log.error("[MarketTickerStream] ❌ 数据处理异常", e);
+                    log.error("[MarketTickerStream] ❌ 异常类型: {}, 异常消息: {}", 
+                            e.getClass().getName(), e.getMessage());
                     // 继续处理，不中断流
                 }
-                log.debug("[MarketTickerStream] [DEBUG] while循环继续");
             }
-            
-            log.info("[MarketTickerStream] [DEBUG] processStream while循环结束");
             
         } catch (Exception e) {
             log.error("[MarketTickerStream] ❌ Stream processing error", e);
-            log.error("[MarketTickerStream] ❌ processStream异常类型: {}, 异常消息: {}", e.getClass().getName(), e.getMessage());
+            log.error("[MarketTickerStream] ❌ processStream异常类型: {}, 异常消息: {}", 
+                    e.getClass().getName(), e.getMessage());
         } finally {
             long totalTime = (System.currentTimeMillis() - startTime) / 1000;
             log.info("[MarketTickerStream] 🏁 Stream processing finished: 总计处理 {} 条消息, 运行 {} 秒", 
                     messageCount, totalTime);
-            log.info("[MarketTickerStream] [DEBUG] processStream finally块完成");
         }
     }
     
@@ -575,5 +512,112 @@ public class MarketTickerStreamServiceImpl implements MarketTickerStreamService 
                  now, connectionCreationTime, minutes);
         
         return minutes >= maxConnectionMinutes;
+    }
+    
+    /**
+     * 通过反射配置 WebSocketClient 的最大消息大小
+     * 参考 Binance SDK 源码结构，通过反射访问内部的 WebSocketClient 并设置 Policy
+     * 
+     * @param webSocketStreams WebSocket Streams 实例
+     * @param maxSize 最大消息大小（字节）
+     */
+    private void configureWebSocketMaxMessageSize(DerivativesTradingUsdsFuturesWebSocketStreams webSocketStreams, int maxSize) {
+        try {
+            // 1. 获取 WebSocketStreams 内部的 connectionWrapper 字段
+            Field connectionWrapperField = findField(webSocketStreams.getClass(), "connectionWrapper");
+            if (connectionWrapperField == null) {
+                log.warn("[MarketTickerStream] ⚠️ 未找到 connectionWrapper 字段");
+                return;
+            }
+            
+            connectionWrapperField.setAccessible(true);
+            Object connectionWrapper = connectionWrapperField.get(webSocketStreams);
+            if (connectionWrapper == null) {
+                log.warn("[MarketTickerStream] ⚠️ connectionWrapper 为空");
+                return;
+            }
+            
+            // 2. 获取 ConnectionWrapper 内部的 webSocketClient 字段
+            Field webSocketClientField = findField(connectionWrapper.getClass(), "webSocketClient");
+            if (webSocketClientField == null) {
+                log.warn("[MarketTickerStream] ⚠️ 未找到 webSocketClient 字段");
+                return;
+            }
+            
+            webSocketClientField.setAccessible(true);
+            Object webSocketClientObj = webSocketClientField.get(connectionWrapper);
+            if (webSocketClientObj == null) {
+                log.warn("[MarketTickerStream] ⚠️ webSocketClient 为空");
+                return;
+            }
+            
+            // 3. 如果是 WebSocketClient 类型，通过反射设置 maxTextMessageSize
+            if (webSocketClientObj instanceof WebSocketClient) {
+                WebSocketClient webSocketClient = (WebSocketClient) webSocketClientObj;
+                
+                // Jetty 10 中，WebSocketClient 可能没有直接的 getPolicy() 方法
+                // 尝试通过反射访问内部的 policy 字段或使用 setMaxTextMessageSize 方法
+                try {
+                    // 方法1: 尝试调用 setMaxTextMessageSize 方法（如果存在）
+                    try {
+                        java.lang.reflect.Method setMaxTextMessageSizeMethod = 
+                            webSocketClient.getClass().getMethod("setMaxTextMessageSize", int.class);
+                        setMaxTextMessageSizeMethod.invoke(webSocketClient, maxSize);
+                        log.info("[MarketTickerStream] ✅ 已通过 setMaxTextMessageSize 方法设置最大消息大小为 {} 字节", maxSize);
+                        return;
+                    } catch (NoSuchMethodException e) {
+                        // 方法不存在，继续尝试其他方式
+                    }
+                    
+                    // 方法2: 尝试访问内部的 policy 字段
+                    Field policyField = findField(webSocketClient.getClass(), "policy");
+                    if (policyField != null) {
+                        policyField.setAccessible(true);
+                        Object policy = policyField.get(webSocketClient);
+                        if (policy != null) {
+                            // 尝试调用 policy 的 setMaxTextMessageSize 方法
+                            try {
+                                java.lang.reflect.Method policySetMethod = 
+                                    policy.getClass().getMethod("setMaxTextMessageSize", int.class);
+                                policySetMethod.invoke(policy, maxSize);
+                                log.info("[MarketTickerStream] ✅ 已通过 Policy.setMaxTextMessageSize 设置最大消息大小为 {} 字节", maxSize);
+                                return;
+                            } catch (NoSuchMethodException e) {
+                                log.warn("[MarketTickerStream] ⚠️ Policy 没有 setMaxTextMessageSize 方法");
+                            }
+                        }
+                    }
+                    
+                    // 方法3: 尝试访问 WebSocketCoreSession 相关的配置
+                    log.warn("[MarketTickerStream] ⚠️ 无法直接设置 WebSocketClient 的最大消息大小，将依赖系统属性");
+                    
+                } catch (Exception e) {
+                    log.warn("[MarketTickerStream] ⚠️ 设置 WebSocketClient 最大消息大小失败: {}", e.getMessage());
+                }
+            } else {
+                log.warn("[MarketTickerStream] ⚠️ webSocketClient 不是 WebSocketClient 类型: {}", 
+                        webSocketClientObj.getClass().getName());
+            }
+            
+        } catch (Exception e) {
+            log.error("[MarketTickerStream] ❌ 配置 WebSocket 最大消息大小失败", e);
+            throw new RuntimeException("配置 WebSocket 最大消息大小失败", e);
+        }
+    }
+    
+    /**
+     * 查找字段（包括父类）
+     */
+    private Field findField(Class<?> clazz, String fieldName) {
+        Class<?> currentClass = clazz;
+        while (currentClass != null) {
+            try {
+                Field field = currentClass.getDeclaredField(fieldName);
+                return field;
+            } catch (NoSuchFieldException e) {
+                currentClass = currentClass.getSuperclass();
+            }
+        }
+        return null;
     }
 }
