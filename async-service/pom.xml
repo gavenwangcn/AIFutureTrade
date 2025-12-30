@@ -230,10 +230,24 @@
         </dependency>
 
         <!-- MyBatis Plus (兼容 Spring Boot 3.x 和 JDK 17) -->
+        <!-- 注意：MyBatis Plus 3.5.5 与 Spring Boot 3.2.0 存在兼容性问题 -->
+        <!-- 需要排除 mybatis-spring 并单独引入 3.0.3 版本以修复 factoryBeanObjectType 错误 -->
         <dependency>
             <groupId>com.baomidou</groupId>
             <artifactId>mybatis-plus-boot-starter</artifactId>
             <version>${mybatis-plus.version}</version>
+            <exclusions>
+                <exclusion>
+                    <groupId>org.mybatis</groupId>
+                    <artifactId>mybatis-spring</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+        <!-- 单独引入 mybatis-spring 3.0.3 以修复 Spring Boot 3.2.0 兼容性问题 -->
+        <dependency>
+            <groupId>org.mybatis</groupId>
+            <artifactId>mybatis-spring</artifactId>
+            <version>3.0.3</version>
         </dependency>
 
         <!-- MySQL Driver (使用新坐标) -->
