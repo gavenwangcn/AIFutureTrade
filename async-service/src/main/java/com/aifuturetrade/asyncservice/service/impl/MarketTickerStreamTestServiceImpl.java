@@ -125,7 +125,7 @@ public class MarketTickerStreamTestServiceImpl implements MarketTickerStreamTest
                 int maxMessageSize = webSocketConfig.getMaxTextMessageSize(); // 从配置文件读取
                 webSocketClient.setMaxTextMessageSize(maxMessageSize);
                 webSocketClient.setMaxBinaryMessageSize(maxMessageSize);
-                config.setMessageMaxSize(Long.valueOf(maxMessageSize));
+                //config.setMessageMaxSize(Long.valueOf(maxMessageSize));
                 log.info("[MarketTickerStreamTestImpl] [优化模式] ✅ 已通过 setMaxTextMessageSize 方法设置最大消息大小为 {} 字节 ({})", 
                         maxMessageSize, formatBytes(maxMessageSize));
                 
