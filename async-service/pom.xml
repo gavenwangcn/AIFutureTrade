@@ -33,73 +33,15 @@
                 <type>pom</type>
                 <scope>import</scope>
             </dependency>
-            <!-- 明确指定 Jetty 版本，确保 Binance SDK 所需的 HttpUpgrader$Factory 类可用 -->
-            <!-- Jetty 10.0.18 包含 HttpUpgrader$Factory 类，且 websocket 模块可用 -->
-            <!-- 注意：Jetty 10+ 使用 Jakarta EE 9+ API，但 Binance SDK 已适配 -->
+            <!-- 使用 Jetty BOM 统一管理 Jetty 版本，确保所有模块版本一致 -->
+            <!-- Jetty 11.0.20 包含 HttpUpgrader$Factory 类，且所有模块在 Maven 仓库中可用 -->
+            <!-- 注意：Jetty 11+ 使用 Jakarta EE 9+ API，但 Binance SDK 已适配 -->
             <dependency>
                 <groupId>org.eclipse.jetty</groupId>
-                <artifactId>jetty-client</artifactId>
-                <version>10.0.18</version>
-            </dependency>
-            <dependency>
-                <groupId>org.eclipse.jetty</groupId>
-                <artifactId>jetty-util</artifactId>
-                <version>10.0.18</version>
-            </dependency>
-            <dependency>
-                <groupId>org.eclipse.jetty</groupId>
-                <artifactId>jetty-http</artifactId>
-                <version>10.0.18</version>
-            </dependency>
-            <dependency>
-                <groupId>org.eclipse.jetty</groupId>
-                <artifactId>jetty-io</artifactId>
-                <version>10.0.18</version>
-            </dependency>
-            <dependency>
-                <groupId>org.eclipse.jetty</groupId>
-                <artifactId>jetty-webapp</artifactId>
-                <version>10.0.18</version>
-            </dependency>
-            <dependency>
-                <groupId>org.eclipse.jetty</groupId>
-                <artifactId>jetty-xml</artifactId>
-                <version>10.0.18</version>
-            </dependency>
-            <dependency>
-                <groupId>org.eclipse.jetty</groupId>
-                <artifactId>jetty-security</artifactId>
-                <version>10.0.18</version>
-            </dependency>
-            <dependency>
-                <groupId>org.eclipse.jetty</groupId>
-                <artifactId>jetty-servlet</artifactId>
-                <version>10.0.18</version>
-            </dependency>
-            <dependency>
-                <groupId>org.eclipse.jetty.websocket</groupId>
-                <artifactId>websocket-client</artifactId>
-                <version>10.0.18</version>
-            </dependency>
-            <dependency>
-                <groupId>org.eclipse.jetty.websocket</groupId>
-                <artifactId>websocket-common</artifactId>
-                <version>10.0.18</version>
-            </dependency>
-            <dependency>
-                <groupId>org.eclipse.jetty.websocket</groupId>
-                <artifactId>websocket-api</artifactId>
-                <version>10.0.18</version>
-            </dependency>
-            <dependency>
-                <groupId>org.eclipse.jetty.websocket</groupId>
-                <artifactId>websocket-server</artifactId>
-                <version>10.0.18</version>
-            </dependency>
-            <dependency>
-                <groupId>org.eclipse.jetty.websocket</groupId>
-                <artifactId>websocket-servlet</artifactId>
-                <version>10.0.18</version>
+                <artifactId>jetty-bom</artifactId>
+                <version>11.0.20</version>
+                <type>pom</type>
+                <scope>import</scope>
             </dependency>
         </dependencies>
     </dependencyManagement>
@@ -240,60 +182,13 @@
             </exclusions>
         </dependency>
 
-        <!-- 添加Binance SDK所需的Jetty依赖 -->
-        <!-- Binance SDK 7.0.0 需要 Jetty 10.x 或更高版本（HttpUpgrader$Factory 在 Jetty 10+ 中引入） -->
-        <!-- 版本已在 dependencyManagement 中统一管理为 10.0.18 -->
+        <!-- 添加 Binance SDK 所需的 Jetty 依赖 -->
+        <!-- 显式添加 jetty-client 以确保包含 HttpUpgrader$Factory 类（在 Jetty 11+ 中引入） -->
+        <!-- 其他 Jetty 模块由 Binance SDK 的 binance-common 传递依赖提供 -->
+        <!-- 版本通过 dependencyManagement 中的 jetty-bom 统一管理为 11.0.20 -->
         <dependency>
             <groupId>org.eclipse.jetty</groupId>
             <artifactId>jetty-client</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>org.eclipse.jetty</groupId>
-            <artifactId>jetty-util</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>org.eclipse.jetty</groupId>
-            <artifactId>jetty-http</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>org.eclipse.jetty</groupId>
-            <artifactId>jetty-io</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>org.eclipse.jetty</groupId>
-            <artifactId>jetty-webapp</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>org.eclipse.jetty</groupId>
-            <artifactId>jetty-xml</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>org.eclipse.jetty</groupId>
-            <artifactId>jetty-security</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>org.eclipse.jetty</groupId>
-            <artifactId>jetty-servlet</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>org.eclipse.jetty.websocket</groupId>
-            <artifactId>websocket-client</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>org.eclipse.jetty.websocket</groupId>
-            <artifactId>websocket-common</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>org.eclipse.jetty.websocket</groupId>
-            <artifactId>websocket-api</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>org.eclipse.jetty.websocket</groupId>
-            <artifactId>websocket-server</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>org.eclipse.jetty.websocket</groupId>
-            <artifactId>websocket-servlet</artifactId>
         </dependency>
         
         <!-- Jakarta Validation API -->
