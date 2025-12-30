@@ -13,14 +13,20 @@
     <description>AI Future Trade Async Service - 异步同步服务</description>
 
     <properties>
-        <java.version>11</java.version>
-        <spring-boot.version>2.7.18</spring-boot.version>
-        <mybatis-plus.version>3.5.3.1</mybatis-plus.version>
+        <java.version>17</java.version>
+        <spring-boot.version>3.2.0</spring-boot.version>
+        <mybatis-plus.version>3.5.5</mybatis-plus.version>
         <mysql.version>8.0.33</mysql.version>
         <lombok.version>1.18.30</lombok.version>
-        <junit.version>5.9.3</junit.version>
-        <maven.compiler.source>11</maven.compiler.source>
-        <maven.compiler.target>11</maven.compiler.target>
+        <junit.version>5.10.1</junit.version>
+        <gson.version>2.12.1</gson.version>
+        <jetty.version>11.0.25</jetty.version>
+        <jackson.version>2.19.0</jackson.version>
+        <jakarta.validation.version>3.1.1</jakarta.validation.version>
+        <hibernate.validator.version>7.0.5.Final</hibernate.validator.version>
+        <slf4j.version>2.0.13</slf4j.version>
+        <maven.compiler.source>17</maven.compiler.source>
+        <maven.compiler.target>17</maven.compiler.target>
     </properties>
 
     <!-- 使用 Spring Boot 的依赖管理来统一版本 -->
@@ -33,28 +39,107 @@
                 <type>pom</type>
                 <scope>import</scope>
             </dependency>
-            <!-- 明确指定 Jetty 模块版本，确保优先级最高，覆盖所有传递依赖 -->
-            <!-- Jetty 10.0.18 包含 HttpUpgrader$Factory 类（在 Jetty 10.0.0+ 中引入） -->
-            <!-- 注意：Jetty 10+ 使用 Jakarta EE 9+ API，但 Binance SDK 已适配 -->
+            <!-- ========== Binance SDK 依赖版本对齐 ========== -->
+            <!-- 所有版本必须与 Binance SDK (binance-common-2.2.1) 使用的版本完全一致 -->
+            
+            <!-- Jetty 11.0.25 - 与 Binance SDK 完全对齐 -->
+            <!-- 注意：Jetty 11+ 使用 Jakarta EE 9+ API，与 Spring Boot 3.x 兼容 -->
             <dependency>
                 <groupId>org.eclipse.jetty</groupId>
                 <artifactId>jetty-client</artifactId>
-                <version>10.0.18</version>
+                <version>${jetty.version}</version>
             </dependency>
             <dependency>
                 <groupId>org.eclipse.jetty</groupId>
                 <artifactId>jetty-util</artifactId>
-                <version>10.0.18</version>
+                <version>${jetty.version}</version>
             </dependency>
             <dependency>
                 <groupId>org.eclipse.jetty</groupId>
                 <artifactId>jetty-http</artifactId>
-                <version>10.0.18</version>
+                <version>${jetty.version}</version>
             </dependency>
             <dependency>
                 <groupId>org.eclipse.jetty</groupId>
                 <artifactId>jetty-io</artifactId>
-                <version>10.0.18</version>
+                <version>${jetty.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.eclipse.jetty</groupId>
+                <artifactId>jetty-alpn-client</artifactId>
+                <version>${jetty.version}</version>
+            </dependency>
+            <!-- WebSocket 相关模块 -->
+            <dependency>
+                <groupId>org.eclipse.jetty.websocket</groupId>
+                <artifactId>websocket-core-client</artifactId>
+                <version>${jetty.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.eclipse.jetty.websocket</groupId>
+                <artifactId>websocket-core-common</artifactId>
+                <version>${jetty.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.eclipse.jetty.websocket</groupId>
+                <artifactId>websocket-jetty-api</artifactId>
+                <version>${jetty.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.eclipse.jetty.websocket</groupId>
+                <artifactId>websocket-jetty-client</artifactId>
+                <version>${jetty.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.eclipse.jetty.websocket</groupId>
+                <artifactId>websocket-jetty-common</artifactId>
+                <version>${jetty.version}</version>
+            </dependency>
+            
+            <!-- Gson 2.12.1 - 与 Binance SDK 完全对齐 -->
+            <dependency>
+                <groupId>com.google.code.gson</groupId>
+                <artifactId>gson</artifactId>
+                <version>${gson.version}</version>
+            </dependency>
+            
+            <!-- Jackson 2.19.0 - 与 Binance SDK 完全对齐 -->
+            <!-- 注意：Spring Boot 3.2.0 默认使用 Jackson 2.16.x，但为了与 SDK 对齐，我们强制使用 2.19.0 -->
+            <dependency>
+                <groupId>com.fasterxml.jackson.core</groupId>
+                <artifactId>jackson-core</artifactId>
+                <version>${jackson.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.fasterxml.jackson.core</groupId>
+                <artifactId>jackson-databind</artifactId>
+                <version>${jackson.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.fasterxml.jackson.core</groupId>
+                <artifactId>jackson-annotations</artifactId>
+                <version>${jackson.version}</version>
+            </dependency>
+            
+            <!-- Jakarta Validation 3.1.1 - 与 Binance SDK 完全对齐 -->
+            <dependency>
+                <groupId>jakarta.validation</groupId>
+                <artifactId>jakarta.validation-api</artifactId>
+                <version>${jakarta.validation.version}</version>
+            </dependency>
+            
+            <!-- Hibernate Validator 7.0.5.Final - 与 Binance SDK 完全对齐 -->
+            <dependency>
+                <groupId>org.hibernate.validator</groupId>
+                <artifactId>hibernate-validator</artifactId>
+                <version>${hibernate.validator.version}</version>
+            </dependency>
+            
+            <!-- SLF4J 2.0.13 - 与 Binance SDK 完全对齐 -->
+            <dependency>
+                <groupId>org.slf4j</groupId>
+                <artifactId>slf4j-api</artifactId>
+                <version>${slf4j.version}</version>
             </dependency>
         </dependencies>
     </dependencyManagement>
@@ -144,23 +229,18 @@
             <version>${spring-boot.version}</version>
         </dependency>
 
-        <!-- MyBatis Plus -->
+        <!-- MyBatis Plus (兼容 Spring Boot 3.x 和 JDK 17) -->
         <dependency>
             <groupId>com.baomidou</groupId>
             <artifactId>mybatis-plus-boot-starter</artifactId>
             <version>${mybatis-plus.version}</version>
         </dependency>
-        <dependency>
-            <groupId>com.baomidou</groupId>
-            <artifactId>mybatis-plus-extension</artifactId>
-            <version>${mybatis-plus.version}</version>
-        </dependency>
 
-        <!-- MySQL Driver -->
+        <!-- MySQL Driver (使用新坐标) -->
         <dependency>
-            <groupId>mysql</groupId>
-            <artifactId>mysql-connector-java</artifactId>
-            <version>${mysql.version}</version>
+            <groupId>com.mysql</groupId>
+            <artifactId>mysql-connector-j</artifactId>
+            <version>8.2.0</version>
         </dependency>
         
         <!-- Druid Connection Pool -->
@@ -171,45 +251,19 @@
         </dependency>
 
         <!-- Binance API Client -->
-        <!-- 方式1: 使用本地编译的SDK（推荐） -->
-        <!-- 先编译SDK: cd binance-connector-java-master/clients/derivatives-trading-usds-futures && mvn clean install -->
-        <!-- 然后使用以下依赖配置 -->
+        <!-- 版本：7.0.0，依赖 binance-common-2.2.1 -->
+        <!-- 注意：不排除任何依赖，让 dependencyManagement 统一管理版本，确保与 SDK 完全对齐 -->
         <dependency>
             <groupId>io.github.binance</groupId>
             <artifactId>binance-derivatives-trading-usds-futures</artifactId>
             <version>7.0.0</version>
-            <exclusions>
-                <!-- 排除 Binance SDK 中的 Jackson 依赖，使用 Spring Boot 管理的版本 -->
-                <exclusion>
-                    <groupId>com.fasterxml.jackson.core</groupId>
-                    <artifactId>jackson-core</artifactId>
-                </exclusion>
-                <exclusion>
-                    <groupId>com.fasterxml.jackson.core</groupId>
-                    <artifactId>jackson-databind</artifactId>
-                </exclusion>
-                <exclusion>
-                    <groupId>com.fasterxml.jackson.core</groupId>
-                    <artifactId>jackson-annotations</artifactId>
-                </exclusion>
-                <!-- 排除 Gson 依赖，使用兼容版本 -->
-                <exclusion>
-                    <groupId>com.google.code.gson</groupId>
-                    <artifactId>gson</artifactId>
-                </exclusion>
-            </exclusions>
-        </dependency>
-
-        <!-- 添加兼容的 Gson 版本 -->
-        <dependency>
-            <groupId>com.google.code.gson</groupId>
-            <artifactId>gson</artifactId>
-            <version>2.8.9</version>
+            <!-- 不排除任何依赖，通过 dependencyManagement 统一版本管理 -->
+            <!-- 这样可以确保所有传递依赖的版本与 SDK 完全一致 -->
         </dependency>
 
         <!-- 添加 Binance SDK 所需的 Jetty 依赖 -->
         <!-- 显式添加核心 Jetty 模块，确保包含 HttpUpgrader$Factory 类（在 Jetty 10.0.0+ 中引入） -->
-        <!-- 版本在 dependencyManagement 中明确指定为 10.0.18，确保优先级最高 -->
+        <!-- 版本在 dependencyManagement 中明确指定为 11.0.25（与 Binance SDK 完全对齐），确保优先级最高，支持 JDK 17 -->
         <!-- websocket 模块由 Binance SDK 的传递依赖提供，但版本会被 dependencyManagement 统一管理 -->
         <dependency>
             <groupId>org.eclipse.jetty</groupId>
@@ -228,17 +282,7 @@
             <artifactId>jetty-io</artifactId>
         </dependency>
         
-        <!-- Jakarta Validation API -->
-        <dependency>
-            <groupId>jakarta.validation</groupId>
-            <artifactId>jakarta.validation-api</artifactId>
-            <version>3.0.2</version>
-        </dependency>
-        <dependency>
-            <groupId>org.hibernate.validator</groupId>
-            <artifactId>hibernate-validator</artifactId>
-            <version>7.0.5.Final</version>
-        </dependency>
+        <!-- Jakarta Validation API (Spring Boot 3.x 已包含，无需单独指定) -->
 
         <!-- Lombok -->
         <dependency>

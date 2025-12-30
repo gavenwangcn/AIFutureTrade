@@ -3,7 +3,7 @@
 # 所有配置从application.yml读取，可通过环境变量覆盖
 
 # 多阶段构建：第一阶段构建JAR文件
-FROM maven:3.8.6-openjdk-11-slim AS builder
+FROM maven:3.9.6-eclipse-temurin-17 AS builder
 
 WORKDIR /app
 
@@ -52,7 +52,7 @@ RUN echo "=== Verifying JAR file ===" && \
     fi
 
 # 第二阶段：运行阶段
-FROM eclipse-temurin:11-jre
+FROM eclipse-temurin:17-jre
 
 # 设置工作目录
 WORKDIR /app
