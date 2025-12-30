@@ -1,12 +1,12 @@
 """
-策略数据表操作模�?- strategys �?model_strategy �?
+Strategy database table operation module - strategys table and model_strategy table
 
-本模块提供策略数据的增删改查操作，包括：
-1. 策略查询
-2. 模型策略关联查询
+This module provides CRUD operations for strategy data, including:
+1. Strategy queries
+2. Model-strategy association queries
 
-主要组件�?
-- StrategysDatabase: 策略数据操作�?
+Main components:
+- StrategysDatabase: Strategy data operations
 """
 
 import logging
@@ -20,17 +20,17 @@ logger = logging.getLogger(__name__)
 
 class StrategysDatabase:
     """
-    策略数据操作�?
+    Strategy data operations
     
-    封装strategys和model_strategy表的所有数据库操作�?
+    Encapsulates all database operations for strategys and model_strategy tables.
     """
     
     def __init__(self, pool=None):
         """
-        初始化策略数据库操作�?
+        Initialize strategy database operations
         
         Args:
-            pool: 可选的数据库连接池，如果不提供则创建新的连接池
+            pool: Optional database connection pool, if not provided, create a new connection pool
         """
         if pool is None:
             self._pool = create_pooled_db(
@@ -82,27 +82,27 @@ class StrategysDatabase:
                     'valueerror'
                 ]) or (isinstance(e, pymysql.err.MySQLError) and e.args[0] == 1213)
                 
-                # 如果已获取连接，需要处理连接（关闭�?
-                # 无论什么异常，都要确保连接被正确释放，防止连接泄露
+                # If connection has been acquired, need to handle connection (close it)
+                # Regardless of exception type, ensure connection is properly released to prevent connection leak
                 if connection_acquired and conn:
                     try:
-                        # 回滚事务
+                        # Rollback transaction
                         try:
                             conn.rollback()
                         except Exception as rollback_error:
                             logger.debug(f"[Strategys] Error rolling back transaction: {rollback_error}")
                         
-                        # 对于所有错误，关闭连接，DBUtils会自动处理损坏的连接
+                        # For all errors, close connection, DBUtils will automatically handle damaged connections
                         try:
                             conn.close()
                         except Exception as close_error:
                             logger.debug(f"[Strategys] Error closing connection: {close_error}")
                         finally:
-                            # 确保连接引用被清除，即使关闭失败也要标记为已处理
+                            # Ensure connection reference is cleared, mark as processed even if close fails
                             conn = None
                     except Exception as close_error:
                         logger.error(f"[Strategys] Critical error closing failed connection: {close_error}")
-                        # 即使发生异常，也要清除连接引�?
+                        # Even if exception occurs, clear connection reference
                         conn = None
                 
                 if attempt < max_retries - 1:
@@ -172,28 +172,28 @@ class StrategysDatabase:
     
     def get_model_strategies(self, model_id: str, strategy_type: str) -> List[Dict]:
         """
-        获取模型关联的策略列表（按优先级和创建时间排序）
+        Get list of strategies associated with a model (sorted by priority and creation time)
         
         Args:
-            model_id: 模型ID（UUID字符串）
-            strategy_type: 策略类型�?buy' �?'sell'
+            model_id: Model ID (UUID string)
+            strategy_type: Strategy type, 'buy' or 'sell'
         
         Returns:
-            List[Dict]: 策略列表，每个元素包含：
-                - id: 关联ID
-                - model_id: 模型ID
-                - strategy_id: 策略ID
-                - type: 策略类型
-                - priority: 优先�?
-                - created_at: 创建时间
-                - strategy_name: 策略名称
-                - strategy_code: 策略代码
-                - strategy_context: 策略上下�?
+            List[Dict]: Strategy list, each element contains:
+                - id: Association ID
+                - model_id: Model ID
+                - strategy_id: Strategy ID
+                - type: Strategy type
+                - priority: Priority
+                - created_at: Creation time
+                - strategy_name: Strategy name
+                - strategy_code: Strategy code
+                - strategy_context: Strategy context
         """
         try:
             model_uuid = model_id
             
-            # 查询model_strategy表，关联strategys表获取策略详�?
+            # Query model_strategy table, join with strategys table to get strategy details
             sql = f"""
                 SELECT 
                     ms.id,
@@ -236,29 +236,29 @@ class StrategysDatabase:
     def get_model_strategies_by_int_id(self, model_id: int, strategy_type: str, 
                                       model_id_mapping: Dict[int, str] = None) -> List[Dict]:
         """
-        获取模型关联的策略列表（按优先级和创建时间排序）
+        Get list of strategies associated with a model (sorted by priority and creation time)
         
-        此方法接受整�?model_id，内部转换为 UUID 字符串后调用 get_model_strategies�?
+        This method accepts an integer model_id, internally converts it to UUID string and calls get_model_strategies.
         
         Args:
-            model_id: 模型ID（整数）
-            strategy_type: 策略类型�?buy' �?'sell'
-            model_id_mapping: 可选的模型ID映射字典，如果不提供则从数据库查�?
+            model_id: Model ID (integer)
+            strategy_type: Strategy type, 'buy' or 'sell'
+            model_id_mapping: Optional model ID mapping dictionary, if not provided, query from database
         
         Returns:
-            List[Dict]: 策略列表，每个元素包含：
-                - id: 关联ID
-                - model_id: 模型ID
-                - strategy_id: 策略ID
-                - type: 策略类型
-                - priority: 优先�?
-                - created_at: 创建时间
-                - strategy_name: 策略名称
-                - strategy_code: 策略代码
-                - strategy_context: 策略上下�?
+            List[Dict]: Strategy list, each element contains:
+                - id: Association ID
+                - model_id: Model ID
+                - strategy_id: Strategy ID
+                - type: Strategy type
+                - priority: Priority
+                - created_at: Creation time
+                - strategy_name: Strategy name
+                - strategy_code: Strategy code
+                - strategy_context: Strategy context
         """
         try:
-            # 如果没有提供映射，从数据库查�?
+            # If mapping not provided, query from database
             if model_id_mapping is None:
                 rows = self.query(f"SELECT id FROM models")
                 model_id_mapping = {}
@@ -272,7 +272,7 @@ class StrategysDatabase:
                 logger.warning(f"[Strategys] Model {model_id} not found in mapping, cannot get strategies")
                 return []
             
-            # 调用接受 UUID 字符串的方法
+            # Call method that accepts UUID string
             return self.get_model_strategies(model_uuid, strategy_type)
         except Exception as e:
             logger.error(f"[Strategys] Failed to get model strategies by int ID: {e}")

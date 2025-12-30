@@ -1,28 +1,28 @@
 """
-基础数据库操作模�?- MySQL实现
+Basic database operation module - MySQL implementation
 
-本模块提供Database类，封装所有业务数据的MySQL数据库操作，包括�?
-1. 提供商管理：LLM提供商的增删改查
-2. 模型管理：交易模型的增删改查、配置管�?
-3. 投资组合管理：持仓、账户价值记�?
-4. 交易记录：交易历史的记录和查�?
-5. 对话记录：AI对话历史的记录和查询
-6. 合约配置：期货合约配置管�?
-7. 账户资产：账户资产信息管�?
-8. 提示词管理：模型买卖提示词配�?
+This module provides the Database class, which encapsulates all MySQL database operations for business data, including:
+1. Provider management: CRUD operations for LLM providers
+2. Model management: CRUD operations and configuration management for trading models
+3. Portfolio management: Position tracking and account value recording
+4. Trade records: Recording and querying trade history
+5. Conversation records: Recording and querying AI conversation history
+6. Contract configuration: Futures contract configuration management
+7. Account assets: Account asset information management
+8. Prompt management: Model buy/sell prompt configuration
 
-主要组件�?
-- Database: 基础数据库操作封装类
+Main components:
+- Database: Basic database operation encapsulation class
 
-使用场景�?
-- 后端API：为所有业务API提供数据访问
-- 交易引擎：trading_engine模块使用Database管理模型、持仓、交易记�?
-- 前端展示：通过后端API间接使用Database查询数据
+Usage scenarios:
+- Backend API: Provides data access for all business APIs
+- Trading engine: The trading_engine module uses Database to manage models, positions, and trade records
+- Frontend display: Uses Database indirectly through backend APIs to query data
 
-注意�?
-- 使用MySQL连接池管理数据库连接
-- 所有表结构在init_db()中自动创�?
-- UUID和整数ID之间的转换用于兼容�?
+Notes:
+- Uses MySQL connection pool to manage database connections
+- All table structures are automatically created in init_db()
+- UUID and integer ID conversion for compatibility
 """
 import logging
 import time
@@ -57,7 +57,7 @@ def create_pooled_db(
     blocking: bool = True
 ) -> PooledDB:
     """
-    创建DBUtils连接�?
+    Create DBUtils connection pool
     
     Args:
         host: MySQL host
@@ -74,7 +74,7 @@ def create_pooled_db(
         DBUtils PooledDB instance
     """
     def _create_connection():
-        """创建单个连接的工厂函�?""
+        """Factory function to create a single connection"""
         return pymysql.connect(
             host=host,
             port=port,
@@ -90,38 +90,38 @@ def create_pooled_db(
         creator=_create_connection,
         mincached=mincached,
         maxconnections=maxconnections,
-        maxshared=maxconnections,  # 最大共享连接数
-        maxcached=maxconnections,  # 最大缓存连接数
+        maxshared=maxconnections,  # Maximum number of shared connections
+        maxcached=maxconnections,  # Maximum number of cached connections
         blocking=blocking,
-        maxusage=None,  # 每个连接的最大使用次数，None表示无限�?
-        setsession=None,  # 设置会话的SQL语句列表
-        reset=True,  # 连接归还时重�?
-        failures=None,  # 失败重试次数
-        ping=1,  # 在获取连接时ping数据库（1=每次获取时ping�?
+        maxusage=None,  # Maximum usage count per connection, None means unlimited
+        setsession=None,  # SQL statement list for session setup
+        reset=True,  # Reset connection when returned
+        failures=None,  # Number of retry attempts on failure
+        ping=1,  # Ping database when acquiring connection (1=ping on every acquisition)
     )
 
 
 class Database:
     """
-    基础数据库操作封装类
+    Basic database operation encapsulation class
     
-    封装所有业务数据的MySQL数据库操作，包括提供商、模型、投资组合、交易记录等�?
-    使用连接池管理数据库连接，支持高并发访问�?
+    Encapsulates all MySQL database operations for business data, including providers, models, portfolios, trade records, etc.
+    Uses connection pool to manage database connections, supporting high concurrency access.
     
-    主要功能�?
-    - 提供商管理：LLM提供商的查询（增删改已迁移到Java后端�?
-    - 模型管理：交易模型的查询和配置（增删改已迁移到Java后端�?
-    - 投资组合管理：持仓更新、账户价值记录、投资组合查询（账户价值记录已迁移�?database_account_values.AccountValuesDatabase�?
-    - 交易记录：交易历史的记录和查询（已迁移到 database_trades.TradesDatabase�?
-    - 对话记录：AI对话历史的记录和查询（已迁移�?database_conversations.ConversationsDatabase�?
-    - 账户价值历史：账户价值历史查询（已迁移到 database_account_value_historys.AccountValueHistorysDatabase�?
-    - 合约配置：期货合约配置查询（增删改已迁移到Java后端�?
-    - 账户资产：账户资产信息查询（增删改已迁移到Java后端�?
-    - 提示词管理：模型买卖提示词配�?
+    Main features:
+    - Provider management: Query LLM providers (CRUD operations migrated to Java backend)
+    - Model management: Query and configure trading models (CRUD operations migrated to Java backend)
+    - Portfolio management: Position updates, account value recording, portfolio queries (account value recording migrated to database_account_values.AccountValuesDatabase)
+    - Trade records: Recording and querying trade history (migrated to database_trades.TradesDatabase)
+    - Conversation records: Recording and querying AI conversation history (migrated to database_conversations.ConversationsDatabase)
+    - Account value history: Query account value history (migrated to database_account_value_historys.AccountValueHistorysDatabase)
+    - Contract configuration: Query futures contract configuration (CRUD operations migrated to Java backend)
+    - Account assets: Query account asset information (CRUD operations migrated to Java backend)
+    - Prompt management: Model buy/sell prompt configuration
     
-    使用示例�?
+    Usage example:
         db = Database()
-        db.init_db()  # 初始化所有表
+        db.init_db()  # Initialize all tables
         from trade.common.database.database_models import ModelsDatabase
         from trade.common.database.database_portfolios import PortfoliosDatabase
         from trade.common.database.database_trades import TradesDatabase
@@ -140,23 +140,23 @@ class Database:
         conversations_db.add_conversation(model_id, user_prompt, ai_response)
         account_values_db.record_account_value(model_id, balance, available_balance, cross_wallet_balance)
         history = account_value_historys_db.get_account_value_history(model_id, limit=100)
-        db.close()  # 显式关闭连接池，释放资源
+        db.close()  # Explicitly close connection pool, release resources
     
-    注意�?
-        - 已从ClickHouse迁移到MySQL，保持方法签名和返回值格式兼�?
+    Notes:
+        - Migrated from ClickHouse to MySQL, maintaining method signatures and return value format compatibility
     """
     
     def __init__(self):
         """
-        初始化数据库连接
+        Initialize database connection
         
         Note:
-            - 创建MySQL连接池（最�?个连接，最�?0个连接）
-            - 定义所有业务表的表�?
-            - 不自动初始化表结构，需要调用init_db()方法
-            - 使用配置文件中的MySQL连接信息
+            - Create MySQL connection pool (minimum 15 connections, maximum 100 connections)
+            - Define table names for all business tables
+            - Does not automatically initialize table structure, need to call init_db() method
+            - Uses MySQL connection information from configuration file
         """
-        # 使用 DBUtils 连接�?
+        # Use DBUtils connection pool
         self._pool = create_pooled_db(
             host=app_config.MYSQL_HOST,
             port=app_config.MYSQL_PORT,
@@ -169,7 +169,7 @@ class Database:
             blocking=True
         )
         
-        # 表名定义（从 database_init.py 导入常量�?
+        # Table name definitions (import constants from database_init.py)
         self.providers_table = PROVIDERS_TABLE
         self.models_table = MODELS_TABLE
         self.portfolios_table = PORTFOLIOS_TABLE
@@ -190,16 +190,16 @@ class Database:
     
     def close(self) -> None:
         """
-        关闭数据库连接池，释放所有资�?
+        Close database connection pool, release all resources
         
-        调用此方法将关闭连接池中的所有活跃连接，确保资源被正确释放�?
-        在不再需要数据库连接时，应显式调用此方法�?
+        Calling this method will close all active connections in the pool, ensuring resources are properly released.
+        Should explicitly call this method when database connections are no longer needed.
         """
         if hasattr(self, '_pool') and self._pool:
             try:
-                # DBUtils连接池会自动管理连接，这里只需要关闭连接池
-                # 注意：DBUtils的PooledDB没有close_all方法，连接会在对象销毁时自动关闭
-                # 但我们可以通过删除引用来触发清�?
+                # DBUtils connection pool automatically manages connections, here we just need to close the pool
+                # Note: DBUtils PooledDB does not have close_all method, connections will be automatically closed when object is destroyed
+                # But we can trigger cleanup by deleting the reference
                 self._pool = None
                 logger.info("[Database] Connection pool closed successfully")
             except Exception as e:
@@ -207,60 +207,60 @@ class Database:
     
     def __del__(self) -> None:
         """
-        析构方法，确保连接池资源被释�?
+        Destructor method, ensures connection pool resources are released
         
-        当Database实例被垃圾回收时，会自动调用此方法关闭连接池�?
-        为了确保资源被及时释放，建议显式调用close()方法�?
+        When Database instance is garbage collected, this method will be automatically called to close the connection pool.
+        To ensure resources are released in time, it is recommended to explicitly call close() method.
         """
         self.close()
     
     def _with_connection(self, func: Callable, *args, **kwargs) -> Any:
         """Execute a function with a MySQL connection from the pool.
         
-        支持自动重试机制，当遇到网络错误时会自动重试（最�?次）�?
+        Supports automatic retry mechanism, will automatically retry when encountering network errors (up to 3 times).
         
         Args:
-            func: 要执行的函数
-            *args: 传递给函数的位置参�?
-            **kwargs: 传递给函数的关键字参数
+            func: Function to execute
+            *args: Positional arguments to pass to the function
+            **kwargs: Keyword arguments to pass to the function
         
         Returns:
-            函数执行结果
+            Function execution result
         
         Raises:
-            Exception: 如果重试3次后仍然失败，抛出最后一个异�?
+            Exception: If still fails after 3 retries, raises the last exception
         """
         max_retries = 3
-        retry_delay = 0.5  # 初始重试延迟（秒�?
+        retry_delay = 0.5  # Initial retry delay (seconds)
         
         for attempt in range(max_retries):
             conn = None
             connection_acquired = False
             try:
-                # 使用DBUtils连接池获取连�?
+                # Use DBUtils connection pool to acquire connection
                 conn = self._pool.connection()
                 if not conn:
                     raise Exception("Failed to acquire MySQL connection")
                 connection_acquired = True
                 
-                # 执行函数
+                # Execute function
                 result = func(conn, *args, **kwargs)
                 
-                # 成功执行，提交事�?
+                # Successfully executed, commit transaction
                 conn.commit()
-                # DBUtils会自动管理连接，使用完毕后会自动归还，不需要手动release
-                conn = None  # 标记已处理，避免 finally 中重复处�?
+                # DBUtils automatically manages connections, will automatically return after use, no need to manually release
+                conn = None  # Mark as processed, avoid duplicate handling in finally block
                 return result
                 
             except Exception as e:
-                # 记录错误信息
+                # Record error information
                 error_type = type(e).__name__
                 error_msg = str(e)
                 
-                # 判断是否为网�?协议错误或死锁错误，需要重�?
-                # 包括 "Packet sequence number wrong" 错误，这通常表示连接状态不一�?
-                # 包括 MySQL 死锁错误 (1213)，这是一种需要重试的资源竞争错误
-                # 包括 "read of closed file" 错误，这通常表示底层连接已关�?
+                # Determine if it is a network/protocol error or deadlock error, needs retry
+                # Includes "Packet sequence number wrong" error, which usually indicates connection state inconsistency
+                # Includes MySQL deadlock error (1213), which is a resource contention error that needs retry
+                # Includes "read of closed file" error, which usually indicates underlying connection is closed
                 is_network_error = any(keyword in error_msg.lower() for keyword in [
                     'connection', 'broken', 'lost', 'timeout', 'reset', 'gone away',
                     'operationalerror', 'interfaceerror', 'packet sequence', 'internalerror',
@@ -270,69 +270,69 @@ class Database:
                     'valueerror'
                 ]) or (isinstance(e, pymysql.err.MySQLError) and e.args[0] == 1213)
                 
-                # 如果已获取连接，需要处理连接（关闭�?
-                # 无论什么异常，都要确保连接被正确释放，防止连接泄露
+                # If connection has been acquired, need to handle connection (close it)
+                # Regardless of exception type, ensure connection is properly released to prevent connection leak
                 if connection_acquired and conn:
                     try:
-                        # 回滚事务
+                        # Rollback transaction
                         try:
                             conn.rollback()
                         except Exception as rollback_error:
                             logger.debug(f"[Database] Error rolling back transaction: {rollback_error}")
                         
-                        # 对于所有错误，关闭连接，DBUtils会自动处理损坏的连接
+                        # For all errors, close connection, DBUtils will automatically handle damaged connections
                         try:
                             conn.close()
                         except Exception as close_error:
                             logger.debug(f"[Database] Error closing connection: {close_error}")
                         finally:
-                            # 确保连接引用被清除，即使关闭失败也要标记为已处理
+                            # Ensure connection reference is cleared, mark as processed even if close fails
                             conn = None
                     except Exception as close_error:
                         logger.error(f"[Database] Critical error closing failed connection: {close_error}")
-                        # 即使发生异常，也要清除连接引�?
+                        # Even if exception occurs, clear connection reference
                         conn = None
                 
-                # 判断是否需要重�?
+                # Determine if retry is needed
                 if attempt < max_retries - 1:
-                    # 只有网络错误才重�?
+                    # Only retry for network errors
                     if not is_network_error:
-                        # 非网络错误不重试，直接抛�?
+                        # Non-network errors don't retry, raise directly
                         raise
                     
-                    # 计算等待时间
-                    # 为死锁错误使用特殊的重试策略（更长的初始延迟和更慢的增长�?
+                    # Calculate wait time
+                    # Use special retry strategy for deadlock errors (longer initial delay and slower growth)
                     is_deadlock = (isinstance(e, pymysql.err.MySQLError) and e.args[0] == 1213) or 'deadlock' in error_msg.lower()
                     if is_deadlock:
-                        # 死锁错误：初始延�?秒，增长因子1.5（更慢的增长�?
+                        # Deadlock error: initial delay 1 second, growth factor 1.5 (slower growth)
                         wait_time = 1.0 * (1.5 ** attempt)
                         logger.warning(
                             f"[Database] Deadlock error on attempt {attempt + 1}/{max_retries}: "
                             f"{error_type}: {error_msg}. Retrying in {wait_time:.2f} seconds..."
                         )
                     else:
-                        # 其他网络错误使用指数退避策�?
+                        # Other network errors use exponential backoff strategy
                         wait_time = retry_delay * (2 ** attempt)
                         logger.warning(
                             f"[Database] Network error on attempt {attempt + 1}/{max_retries}: "
                             f"{error_type}: {error_msg}. Retrying in {wait_time:.2f} seconds..."
                         )
                     
-                    # 等待后重�?
+                    # Wait then retry
                     time.sleep(wait_time)
                     continue
                 else:
-                    # 已达到最大重试次数，抛出异常
+                    # Maximum retry count reached, raise exception
                     logger.error(
                         f"[Database] Failed after {max_retries} attempts: "
                         f"{error_type}: {error_msg}"
                     )
                     raise
             finally:
-                # 确保连接被正确处理（双重保险�?
+                # Ensure connection is properly handled (double insurance)
                 if connection_acquired and conn:
                     try:
-                        # 如果连接还没有被处理，尝试关闭它
+                        # If connection hasn't been handled, try to close it
                         logger.warning(
                             f"[Database] Connection not closed in finally block, closing it"
                         )
@@ -341,7 +341,7 @@ class Database:
                             conn.close()
                         except Exception:
                             pass
-                        # DBUtils会自动处理连接，不需要手动管理连接计�?
+                        # DBUtils automatically handles connections, no need to manually manage connection count
                     except Exception as final_error:
                         logger.debug(f"[Database] Error in finally block: {final_error}")
     
@@ -361,15 +361,15 @@ class Database:
     def query(self, sql: str, params: tuple = None, as_dict: bool = False) -> List:
         """Execute a query and return results.
         
-        注意：MySQL 支持参数化查询，使用 %s 作为占位符�?
+        Note: MySQL supports parameterized queries, use %s as placeholder.
         
         Args:
-            sql: SQL查询语句
-            params: 查询参数元组
-            as_dict: 是否返回字典格式（默认False，返回元组列表以保持兼容性）
+            sql: SQL query statement
+            params: Query parameter tuple
+            as_dict: Whether to return dictionary format (default False, returns tuple list for compatibility)
         
         Returns:
-            List: 查询结果列表，如果as_dict=True则返回字典列表，否则返回元组列表
+            List: Query result list, returns dictionary list if as_dict=True, otherwise returns tuple list
         """
         def _execute_query(conn):
             if as_dict:
@@ -382,10 +382,10 @@ class Database:
                 else:
                     cursor.execute(sql)
                 rows = cursor.fetchall()
-                # 如果使用字典游标，直接返回字典列�?
+                # If using dictionary cursor, directly return dictionary list
                 if as_dict:
                     return [dict(row) for row in rows] if rows else []
-                # 否则转换为元组列表以保持兼容�?
+                # Otherwise convert to tuple list for compatibility
                 if rows and isinstance(rows[0], dict):
                     return [tuple(row.values()) for row in rows]
                 return rows
@@ -401,25 +401,25 @@ class Database:
         def _execute_insert(conn):
             cursor = conn.cursor()
             try:
-                # 构建INSERT语句
+                # Build INSERT statement
                 columns_str = ', '.join([f"`{col}`" for col in column_names])
                 placeholders = ', '.join(['%s'] * len(column_names))
                 sql = f"INSERT INTO `{table}` ({columns_str}) VALUES ({placeholders})"
                 
-                # 批量插入
+                # Batch insert
                 cursor.executemany(sql, rows)
             finally:
                 cursor.close()
         
         self._with_connection(_execute_insert)
     
-    # ============ 初始化方�?============
+    # ============ Initialization methods ============
     
     def init_db(self):
         """Initialize database tables - only CREATE TABLE IF NOT EXISTS, no migration logic"""
         logger.info("[Database] Initializing MySQL tables...")
         
-        # 使用统一的表初始化模�?
+        # Use unified table initialization module
         table_names = {
             'providers_table': self.providers_table,
             'models_table': self.models_table,
@@ -446,21 +446,21 @@ class Database:
         
         logger.info("[Database] MySQL tables initialized")
     
-    # 表初始化方法已移�?common/database/database_init.py
+    # Table initialization methods have been moved to common/database/database_init.py
     
-    # 表初始化方法已移�?common/database/database_init.py
+    # Table initialization methods have been moved to common/database/database_init.py
     
     def _init_default_settings(self):
         """Initialize default settings if none exist"""
         try:
-            # 检查是否有设置记录
+            # Check if settings records exist
             result = self.query(f"SELECT COUNT(*) as cnt FROM `{self.settings_table}`")
             if result and result[0][0] == 0:
-                # 使用 UTC+8 时区时间（北京时间），转换为 naive datetime 存储
+                # Use UTC+8 timezone (Beijing time), convert to naive datetime for storage
                 beijing_tz = timezone(timedelta(hours=8))
                 current_time = datetime.now(beijing_tz).replace(tzinfo=None)
                 
-                # 插入默认设置
+                # Insert default settings
                 settings_id = str(uuid.uuid4())
                 self.insert_rows(
                     self.settings_table,
@@ -474,6 +474,5 @@ class Database:
     def _generate_id(self) -> str:
         """Generate a unique ID (UUID)"""
         return str(uuid.uuid4())
-    
 
 

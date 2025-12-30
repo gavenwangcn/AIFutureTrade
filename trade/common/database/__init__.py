@@ -1,24 +1,24 @@
 """
-数据库操作模块包
+Database operation module package
 
-本包包含所有数据库相关的操作模块，包括�?
-- database_basic: 基础数据库操作和连接�?
-- database_init: 数据库表初始�?
-- database_account: 账户数据操作
-- database_market_tickers: 市场行情数据操作
-- database_model_prompts: 模型提示词数据操�?
-- database_settings: 系统设置数据操作
-- database_strategys: 策略数据操作
+This package contains all database-related operation modules, including:
+- database_basic: Basic database operations and connection management
+- database_init: Database table initialization
+- database_account: Account data operations
+- database_market_tickers: Market ticker data operations
+- database_model_prompts: Model prompt data operations
+- database_settings: System settings data operations
+- database_strategys: Strategy data operations
 """
 
-# 导出主要类和函数，保持向后兼�?
+# Export main classes and functions, maintain backward compatibility
 from .database_basic import Database, create_pooled_db
 from .database_init import (
     init_database_tables,
     init_market_tables,
     init_all_database_tables,
     DatabaseInitializer,
-    # 表名常量
+    # Table name constants
     PROVIDERS_TABLE,
     MODELS_TABLE,
     PORTFOLIOS_TABLE,
@@ -63,4 +63,3 @@ __all__ = [
     'MODEL_STRATEGY_TABLE',
     'MARKET_TICKER_TABLE',
 ]
-

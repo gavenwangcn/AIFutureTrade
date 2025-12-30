@@ -1,10 +1,10 @@
 """
-账户价值历史数据表操作模块 - account_value_historys �?
+Account value history database table operation module - account_value_historys table
 
-本模块提供账户价值历史数据的增删改查操作�?
+This module provides CRUD operations for account value history data.
 
-主要组件�?
-- AccountValueHistorysDatabase: 账户价值历史数据操作类
+Main components:
+- AccountValueHistorysDatabase: Account value history data operations class
 """
 
 import logging
@@ -19,17 +19,17 @@ logger = logging.getLogger(__name__)
 
 class AccountValueHistorysDatabase:
     """
-    账户价值历史数据操作类
+    Account value history data operations class
     
-    封装account_value_historys表的所有数据库操作�?
+    Encapsulates all database operations for the account_value_historys table.
     """
     
     def __init__(self, pool=None):
         """
-        初始化账户价值历史数据库操作�?
+        Initialize account value history database operations
         
         Args:
-            pool: 可选的数据库连接池，如果不提供则创建新的连接池
+            pool: Optional database connection pool, if not provided, create a new connection pool
         """
         if pool is None:
             self._pool = create_pooled_db(
@@ -80,27 +80,27 @@ class AccountValueHistorysDatabase:
                     'valueerror'
                 ]) or (isinstance(e, pymysql.err.MySQLError) and e.args[0] == 1213)
                 
-                # 如果已获取连接，需要处理连接（关闭�?
-                # 无论什么异常，都要确保连接被正确释放，防止连接泄露
+                # If connection has been acquired, need to handle connection (close it)
+                # Regardless of exception type, ensure connection is properly released to prevent connection leak
                 if connection_acquired and conn:
                     try:
-                        # 回滚事务
+                        # Rollback transaction
                         try:
                             conn.rollback()
                         except Exception as rollback_error:
                             logger.debug(f"[AccountValueHistorys] Error rolling back transaction: {rollback_error}")
                         
-                        # 对于所有错误，关闭连接，DBUtils会自动处理损坏的连接
+                        # For all errors, close connection, DBUtils will automatically handle damaged connections
                         try:
                             conn.close()
                         except Exception as close_error:
                             logger.debug(f"[AccountValueHistorys] Error closing connection: {close_error}")
                         finally:
-                            # 确保连接引用被清除，即使关闭失败也要标记为已处理
+                            # Ensure connection reference is cleared, mark as processed even if close fails
                             conn = None
                     except Exception as close_error:
                         logger.error(f"[AccountValueHistorys] Critical error closing failed connection: {close_error}")
-                        # 即使发生异常，也要清除连接引�?
+                        # Even if exception occurs, clear connection reference
                         conn = None
                 
                 if attempt < max_retries - 1:
@@ -159,7 +159,7 @@ class AccountValueHistorysDatabase:
         if isinstance(timestamp, str):
             return timestamp
         if hasattr(timestamp, 'strftime'):
-            # 如果是datetime对象，转换为字符串（假设已经是UTC+8时区�?
+            # If it's a datetime object, convert to string (assume it's already UTC+8 timezone)
             return timestamp.strftime('%Y-%m-%d %H:%M:%S')
         return str(timestamp)
     
@@ -192,17 +192,17 @@ class AccountValueHistorysDatabase:
         Get account value history for a specific model
         
         Args:
-            model_id: 模型ID（整数）
-            limit: 返回记录数限�?
-            model_id_mapping: 可选的模型ID映射字典
+            model_id: Model ID (integer)
+            limit: Return record limit
+            model_id_mapping: Optional model ID mapping dictionary
         
         Returns:
-            账户价值历史记录列表，包含新字段名�?
-            - accountAlias: 账户唯一识别�?
-            - balance: 总余�?
-            - availableBalance: 下单可用余额
-            - crossWalletBalance: 全仓余额
-            - crossUnPnl: 全仓持仓未实现盈�?
+            Account value history record list, contains new field names:
+            - accountAlias: Account unique identifier
+            - balance: Total balance
+            - availableBalance: Order available balance
+            - crossWalletBalance: Cross wallet balance
+            - crossUnPnl: Cross position unrealized P&L
         """
         try:
             if model_id_mapping is None:
@@ -218,8 +218,8 @@ class AccountValueHistorysDatabase:
                 logger.warning(f"[AccountValueHistorys] Model {model_id} UUID not found in mapping")
                 return []
             
-            # 【修改】从 account_value_historys 表查询历史记录（用于图表显示�?
-            # 使用参数化查询确保只查询当前模型的数�?
+            # [Modified] Query history records from account_value_historys table (for chart display)
+            # Use parameterized query to ensure only query current model's data
             rows = self.query(f"""
                 SELECT id, model_id, account_alias, balance, available_balance, 
                        cross_wallet_balance, cross_un_pnl, timestamp
@@ -232,7 +232,7 @@ class AccountValueHistorysDatabase:
                       "cross_wallet_balance", "cross_un_pnl", "timestamp"]
             results = self._rows_to_dicts(rows, columns)
             
-            # 转换为驼峰命名格式，并将timestamp转换为字符串格式（UTC+8时间�?
+            # Convert to camelCase naming format, and convert timestamp to string format (UTC+8 time)
             formatted_results = []
             for result in results:
                 timestamp_str = self._format_timestamp_to_string(result.get("timestamp"))
@@ -251,4 +251,3 @@ class AccountValueHistorysDatabase:
         except Exception as e:
             logger.error(f"[AccountValueHistorys] Failed to get account value history for model {model_id}: {e}")
             return []
-

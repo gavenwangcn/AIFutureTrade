@@ -1,10 +1,10 @@
 """
-策略决策数据表操作模�?- strategy_decisions �?
+Strategy decision database table operation module - strategy_decisions table
 
-本模块提供策略决策的增删改查操作�?
+This module provides CRUD operations for strategy decisions.
 
-主要组件�?
-- StrategyDecisionsDatabase: 策略决策数据操作�?
+Main components:
+- StrategyDecisionsDatabase: Strategy decision data operations
 """
 
 import logging
@@ -21,17 +21,17 @@ logger = logging.getLogger(__name__)
 
 class StrategyDecisionsDatabase:
     """
-    策略决策数据操作�?
+    Strategy decision data operations
     
-    封装strategy_decisions表的所有数据库操作�?
+    Encapsulates all database operations for the strategy_decisions table.
     """
     
     def __init__(self, pool=None):
         """
-        初始化策略决策数据库操作�?
+        Initialize strategy decision database operations
         
         Args:
-            pool: 可选的数据库连接池，如果不提供则创建新的连接池
+            pool: Optional database connection pool, if not provided, create a new connection pool
         """
         if pool is None:
             self._pool = create_pooled_db(
@@ -175,28 +175,28 @@ class StrategyDecisionsDatabase:
         justification: Optional[str] = None
     ):
         """
-        添加策略决策记录
+        Add strategy decision record
         
         Args:
-            model_id: 模型ID (UUID字符�?
-            strategy_name: 策略名称
-            strategy_type: 策略类型 ('buy' �?'sell')
-            signal: 交易信号
-            symbol: 合约名称（可空）
-            quantity: 数量（可空，如果提供则转换为整数�?
-            leverage: 杠杆（可空）
-            price: 期望价格（可空）
-            stop_price: 触发价格（可空）
-            justification: 触发理由（可空）
+            model_id: Model ID (UUID string)
+            strategy_name: Strategy name
+            strategy_type: Strategy type ('buy' or 'sell')
+            signal: Trading signal
+            symbol: Contract name (optional)
+            quantity: Quantity (optional, if provided will be converted to integer)
+            leverage: Leverage (optional)
+            price: Expected price (optional)
+            stop_price: Trigger price (optional)
+            justification: Trigger reason (optional)
         """
         try:
             decision_id = self._generate_id()
             
-            # 确保quantity为整数（如果提供�?
+            # Ensure quantity is integer (if provided)
             if quantity is not None:
                 quantity = int(float(quantity))
             
-            # 使用 UTC+8 时区时间（北京时间），转换为 naive datetime 存储
+            # Use UTC+8 timezone (Beijing time), convert to naive datetime for storage
             beijing_tz = timezone(timedelta(hours=8))
             current_time = datetime.now(beijing_tz).replace(tzinfo=None)
             
@@ -218,13 +218,13 @@ class StrategyDecisionsDatabase:
         decisions: List[Dict]
     ):
         """
-        批量添加策略决策记录
+        Batch add strategy decision records
         
         Args:
-            model_id: 模型ID (UUID字符�?
-            strategy_name: 策略名称
-            strategy_type: 策略类型 ('buy' �?'sell')
-            decisions: 决策列表，每个决策是一个字典，包含 signal, quantity, leverage, price, stop_price, justification 等字�?
+            model_id: Model ID (UUID string)
+            strategy_name: Strategy name
+            strategy_type: Strategy type ('buy' or 'sell')
+            decisions: Decision list, each decision is a dictionary containing signal, quantity, leverage, price, stop_price, justification and other fields
         """
         try:
             if not decisions:
@@ -237,15 +237,15 @@ class StrategyDecisionsDatabase:
             for decision in decisions:
                 decision_id = self._generate_id()
                 signal = decision.get('signal', '')
-                symbol = decision.get('symbol')  # 获取symbol字段
+                symbol = decision.get('symbol')  # Get symbol field
                 quantity = decision.get('quantity')
-                # 确保quantity为整数（如果提供�?
+                # Ensure quantity is integer (if provided)
                 if quantity is not None:
                     quantity = int(float(quantity))
                 leverage = decision.get('leverage')
                 price = decision.get('price')
                 stop_price = decision.get('stop_price')
-                justification = decision.get('justification') or decision.get('reason')  # 兼容reason字段
+                justification = decision.get('justification') or decision.get('reason')  # Compatible with reason field
                 
                 rows.append([decision_id, model_id, strategy_name, strategy_type, signal, symbol, quantity, leverage, price, stop_price, justification, current_time])
             
@@ -267,15 +267,15 @@ class StrategyDecisionsDatabase:
         order_by: str = "created_at DESC"
     ) -> List[Dict]:
         """
-        根据模型ID查询策略决策记录
+        Query strategy decision records by model ID
         
         Args:
-            model_id: 模型ID (UUID字符�?
-            limit: 限制返回数量（可选）
-            order_by: 排序方式（默认按创建时间倒序�?
+            model_id: Model ID (UUID string)
+            limit: Limit number of results (optional)
+            order_by: Sort order (default by creation time descending)
         
         Returns:
-            策略决策记录列表
+            Strategy decision record list
         """
         try:
             def _execute_query(conn):

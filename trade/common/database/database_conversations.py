@@ -1,10 +1,10 @@
 """
-对话记录数据表操作模�?- conversations �?
+Conversation record database table operation module - conversations table
 
-本模块提供对话记录的增删改查操作�?
+This module provides CRUD operations for conversation records.
 
-主要组件�?
-- ConversationsDatabase: 对话记录数据操作�?
+Main components:
+- ConversationsDatabase: Conversation record data operations
 """
 
 import logging
@@ -22,17 +22,17 @@ logger = logging.getLogger(__name__)
 
 class ConversationsDatabase:
     """
-    对话记录数据操作�?
+    Conversation record data operations
     
-    封装conversations表的所有数据库操作�?
+    Encapsulates all database operations for the conversations table.
     """
     
     def __init__(self, pool=None):
         """
-        初始化对话记录数据库操作�?
+        Initialize conversation record database operations
         
         Args:
-            pool: 可选的数据库连接池，如果不提供则创建新的连接池
+            pool: Optional database connection pool, if not provided, create a new connection pool
         """
         if pool is None:
             self._pool = create_pooled_db(
@@ -83,27 +83,27 @@ class ConversationsDatabase:
                     'valueerror'
                 ]) or (isinstance(e, pymysql.err.MySQLError) and e.args[0] == 1213)
                 
-                # 如果已获取连接，需要处理连接（关闭�?
-                # 无论什么异常，都要确保连接被正确释放，防止连接泄露
+                # If connection has been acquired, need to handle connection (close it)
+                # Regardless of exception type, ensure connection is properly released to prevent connection leak
                 if connection_acquired and conn:
                     try:
-                        # 回滚事务
+                        # Rollback transaction
                         try:
                             conn.rollback()
                         except Exception as rollback_error:
                             logger.debug(f"[Conversations] Error rolling back transaction: {rollback_error}")
                         
-                        # 对于所有错误，关闭连接，DBUtils会自动处理损坏的连接
+                        # For all errors, close connection, DBUtils will automatically handle damaged connections
                         try:
                             conn.close()
                         except Exception as close_error:
                             logger.debug(f"[Conversations] Error closing connection: {close_error}")
                         finally:
-                            # 确保连接引用被清除，即使关闭失败也要标记为已处理
+                            # Ensure connection reference is cleared, mark as processed even if close fails
                             conn = None
                     except Exception as close_error:
                         logger.error(f"[Conversations] Critical error closing failed connection: {close_error}")
-                        # 即使发生异常，也要清除连接引�?
+                        # Even if exception occurs, clear connection reference
                         conn = None
                 
                 if attempt < max_retries - 1:
@@ -176,16 +176,16 @@ class ConversationsDatabase:
         Add conversation record
         
         Args:
-            model_id: 模型ID（整数）
-            user_prompt: 用户提示�?
-            ai_response: AI响应
-            cot_trace: 思维链追踪（可选）
-            tokens: token使用数量（可选，默认0�?
-            conversation_type: 对话类型�?buy'（买入决策）�?'sell'（卖出决策），可�?
-            model_id_mapping: 可选的模型ID映射字典
+            model_id: Model ID (integer)
+            user_prompt: User prompt
+            ai_response: AI response
+            cot_trace: Chain of thought trace (optional)
+            tokens: Token usage count (optional, default 0)
+            conversation_type: Conversation type, 'buy' (buy decision) or 'sell' (sell decision), optional
+            model_id_mapping: Optional model ID mapping dictionary
         
         Returns:
-            conversation_id (str): 对话记录的ID（UUID字符串），如果失败则返回None
+            conversation_id (str): Conversation record ID (UUID string), returns None if failed
         """
         try:
             if model_id_mapping is None:
@@ -201,17 +201,17 @@ class ConversationsDatabase:
                 logger.warning(f"[Conversations] Model {model_id} not found for conversation record")
                 return None
             
-            # 验证conversation_type�?
+            # Validate conversation_type
             if conversation_type and conversation_type not in ['buy', 'sell']:
                 logger.warning(f"[Conversations] Invalid conversation_type '{conversation_type}', must be 'buy' or 'sell'. Setting to None.")
                 conversation_type = None
             
-            # 使用 UTC+8 时区时间（北京时间），转换为 naive datetime 存储
+            # Use UTC+8 timezone (Beijing time), convert to naive datetime for storage
             beijing_tz = timezone(timedelta(hours=8))
             current_time = datetime.now(beijing_tz).replace(tzinfo=None)
             
             conv_id = self._generate_id()
-            # 如果conversation_type为None，插入NULL而不是空字符�?
+            # If conversation_type is None, insert NULL instead of empty string
             type_value = conversation_type if conversation_type else None
             self.insert_rows(
                 self.conversations_table,
@@ -245,4 +245,3 @@ class ConversationsDatabase:
             finally:
                 cursor.close()
         return self._with_connection(_execute_query)
-

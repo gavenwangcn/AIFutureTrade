@@ -1,14 +1,14 @@
 """
-市场行情数据表操作模�?- 24_market_tickers �?
+市场行情数据表操作模块 - 24_market_tickers 表
 
 本模块提供市场行情数据的增删改查操作，包括：
-1. 行情数据更新和插入（upsert�?
+1. 行情数据更新和插入（upsert）
 2. 开盘价更新
-3. 涨跌榜查�?
+3. 涨跌榜查询
 4. 数据清理
 
-主要组件�?
-- MarketTickersDatabase: 市场行情数据操作�?
+主要组件：
+- MarketTickersDatabase: 市场行情数据操作类
 """
 
 import logging
@@ -96,14 +96,14 @@ def _to_beijing_datetime(value: Any) -> Optional[datetime]:
 
 class MarketTickersDatabase:
     """
-    市场行情数据操作�?
+    市场行情数据操作类
     
-    封装24_market_tickers表的所有数据库操作�?
+    封装24_market_tickers表的所有数据库操作。
     """
     
     def __init__(self, pool=None):
         """
-        初始化市场行情数据库操作�?
+        初始化市场行情数据库操作类
         
         Args:
             pool: 可选的数据库连接池，如果不提供则创建新的连接池
@@ -157,7 +157,7 @@ class MarketTickersDatabase:
                     'valueerror'
                 ]) or (isinstance(e, pymysql.err.MySQLError) and e.args[0] == 1213)
                 
-                # 如果已获取连接，需要处理连接（关闭�?
+                # 如果已获取连接，需要处理连接（关闭）
                 # 无论什么异常，都要确保连接被正确释放，防止连接泄露
                 if connection_acquired and conn:
                     try:
@@ -177,7 +177,7 @@ class MarketTickersDatabase:
                             conn = None
                     except Exception as close_error:
                         logger.error(f"[MarketTickers] Critical error closing failed connection: {close_error}")
-                        # 即使发生异常，也要清除连接引�?
+                        # 即使发生异常，也要清除连接引用
                         conn = None
                 
                 if attempt < max_retries - 1:
@@ -222,7 +222,7 @@ class MarketTickersDatabase:
                         logger.debug(f"[MarketTickers] Error in finally block: {final_error}")
     
     def get_existing_symbol_data(self, symbols: List[str]) -> Dict[str, Dict[str, Any]]:
-        """获取数据库中已存在交易对的最新数据�?""
+        """获取数据库中已存在交易对的最新数据。"""
         if not symbols:
             return {}
         
@@ -278,7 +278,7 @@ class MarketTickersDatabase:
             return {}
     
     def upsert_market_tickers(self, rows: Iterable[Dict[str, Any]]) -> None:
-        """更新或插入市场行情数据（upsert操作）�?""
+        """更新或插入市场行情数据（upsert操作）。"""
         logger.info("[MarketTickers] Starting upsert_market_tickers")
         
         if not rows:
@@ -287,7 +287,7 @@ class MarketTickersDatabase:
         
         rows_list = list(rows)
         usdt_rows = [row for row in rows_list if row.get("symbol", "").endswith("USDT")]
-        logger.info("[MarketTickers] �?d条总数据中筛选出%d条USDT交易对数�?, len(rows_list), len(usdt_rows))
+        logger.info("[MarketTickers] 从%d条总数据中筛选出%d条USDT交易对数据", len(rows_list), len(usdt_rows))
         
         if not usdt_rows:
             logger.debug("[MarketTickers] No USDT symbols to upsert")
@@ -305,10 +305,10 @@ class MarketTickersDatabase:
             
             if "open_price" in normalized:
                 del normalized["open_price"]
-                logger.debug("[MarketTickers] 移除�?s的open_price字段", symbol)
+                logger.debug("[MarketTickers] 移除了%s的open_price字段", symbol)
             if "update_price_date" in normalized:
                 del normalized["update_price_date"]
-                logger.debug("[MarketTickers] 移除�?s的update_price_date字段", symbol)
+                logger.debug("[MarketTickers] 移除了%s的update_price_date字段", symbol)
             
             normalized["event_time"] = _to_beijing_datetime(normalized.get("event_time"))
             normalized["stats_open_time"] = _to_beijing_datetime(normalized.get("stats_open_time"))
@@ -456,7 +456,7 @@ class MarketTickersDatabase:
                         field_value = normalized.get(field)
                         if field_value is None:
                             normalized[field] = datetime.now(timezone(timedelta(hours=8)))
-                            logger.debug("[MarketTickers] 设置%s.%s为当前时�?, symbol, field)
+                            logger.debug("[MarketTickers] 设置%s.%s为当前时间", symbol, field)
                         elif isinstance(field_value, datetime) and field_value.tzinfo is not None:
                             normalized[field] = field_value.astimezone(timezone.utc).replace(tzinfo=None)
                             logger.debug("[MarketTickers] 转换%s.%s为naive datetime", symbol, field)
@@ -476,7 +476,7 @@ class MarketTickersDatabase:
                     if not existing_symbol_data:
                         insert_open_price = 0.0
                         insert_update_price_date = None
-                        logger.debug("[MarketTickers] 设置%s的open_price�?.0（新插入�?, symbol)
+                        logger.debug("[MarketTickers] 设置%s的open_price为0.0（新插入）", symbol)
                     
                     insert_params = (
                         normalized.get("event_time"),
@@ -572,7 +572,7 @@ class MarketTickersDatabase:
         logger.debug("[MarketTickers] Upsert completed: %d total symbols processed", len(processed_rows))
     
     def update_open_price(self, symbol: str, open_price: float, update_date: datetime) -> bool:
-        """更新指定symbol的open_price和update_price_date�?""
+        """更新指定symbol的open_price和update_price_date。"""
         update_data = [{
             'symbol': symbol,
             'open_price': open_price
@@ -581,7 +581,7 @@ class MarketTickersDatabase:
         return results[0] if results else False
     
     def update_open_price_batch(self, update_data: List[Dict[str, Any]], batch_size: int = 100) -> List[bool]:
-        """批量更新多个symbol的open_price和update_price_date�?""
+        """批量更新多个symbol的open_price和update_price_date。"""
         if not update_data:
             return []
             
@@ -676,7 +676,7 @@ class MarketTickersDatabase:
             return [False] * len(update_data)
     
     def get_symbols_needing_price_refresh(self) -> List[str]:
-        """获取需要刷新价格的symbol列表�?""
+        """获取需要刷新价格的symbol列表。"""
         try:
             one_hour_ago = datetime.now(timezone(timedelta(hours=8))) - timedelta(hours=1)
             
@@ -719,7 +719,7 @@ class MarketTickersDatabase:
             return []
     
     def count_old_tickers(self, cutoff_date: datetime) -> int:
-        """统计需要删除的过期ticker记录数量�?""
+        """统计需要删除的过期ticker记录数量。"""
         try:
             query = f"""
             SELECT COUNT(*) FROM `{self.market_ticker_table}`
@@ -754,7 +754,7 @@ class MarketTickersDatabase:
             return 0
     
     def delete_old_tickers(self, cutoff_date: datetime) -> int:
-        """删除过期的ticker记录�?""
+        """删除过期的ticker记录。"""
         try:
             query = f"""
             DELETE FROM `{self.market_ticker_table}`
@@ -786,7 +786,7 @@ class MarketTickersDatabase:
             return 0
     
     def get_gainers_from_tickers(self, limit: int = 10) -> List[Dict[str, Any]]:
-        """�?24_market_tickers 表获取涨幅榜数据�?""
+        """从 24_market_tickers 表获取涨幅榜数据。"""
         try:
             query = f"""
             SELECT 
@@ -845,7 +845,7 @@ class MarketTickersDatabase:
             return []
     
     def get_losers_from_tickers(self, limit: int = 10) -> List[Dict[str, Any]]:
-        """�?24_market_tickers 表获取跌幅榜数据�?""
+        """从 24_market_tickers 表获取跌幅榜数据。"""
         try:
             query = f"""
             SELECT 
@@ -904,7 +904,7 @@ class MarketTickersDatabase:
             return []
     
     def get_leaderboard_from_tickers(self, limit: int = 10) -> Dict[str, List[Dict[str, Any]]]:
-        """�?24_market_tickers 表获取涨幅榜和跌幅榜数据（一次查询）�?""
+        """从 24_market_tickers 表获取涨幅榜和跌幅榜数据（一次查询）。"""
         try:
             query = f"""
             (SELECT 
@@ -1116,4 +1116,3 @@ class MarketTickersDatabase:
             return self._with_connection(_execute_command)
         initializer = DatabaseInitializer(_command)
         initializer.ensure_market_ticker_table(self.market_ticker_table)
-

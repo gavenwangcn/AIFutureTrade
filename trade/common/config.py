@@ -1,100 +1,100 @@
 """
-系统配置文件模块
+System configuration file module
 
-本模块提供系统运行所需的所有配置项，包括数据库连接、API密钥、服务参数等。
-所有配置项都支持通过环境变量覆盖默认值。
+This module provides all configuration items required for system operation, including database connections, API keys, service parameters, etc.
+All configuration items support overriding default values through environment variables.
 
-配置分类：
-1. 数据库配置：MySQL连接信息
-2. 币安API配置：API密钥、交易模式、市场数据配置
-3. 异步服务配置：价格刷新、Symbol下线等定时任务配置
-4. 交易配置：自动交易、交易间隔、费率等配置
-5. AI决策配置：AI交易决策相关的并发和批处理配置
-6. 日志配置：日志级别、格式、日期格式配置
+Configuration categories:
+1. Database configuration: MySQL connection information
+2. Binance API configuration: API keys, trading mode, market data configuration
+3. Async service configuration: Price refresh, Symbol offline and other scheduled task configurations
+4. Trading configuration: Auto trading, trading interval, fee rate and other configurations
+5. AI decision configuration: Concurrency and batch processing configurations related to AI trading decisions
+6. Logging configuration: Log level, format, date format configuration
 
-使用方式：
+Usage:
     import trade.common.config as app_config
     mysql_host = app_config.MYSQL_HOST
     api_key = app_config.BINANCE_API_KEY
 
-环境变量：
-    所有配置项都支持通过环境变量覆盖，格式：配置项名称（大写）
-    例如：MYSQL_HOST、BINANCE_API_KEY、PRICE_REFRESH_CRON 等
+Environment variables:
+    All configuration items support overriding through environment variables, format: configuration item name (uppercase)
+    For example: MYSQL_HOST, BINANCE_API_KEY, PRICE_REFRESH_CRON, etc.
 
-注意：
-    - 敏感信息（如API密钥、数据库密码）建议通过环境变量设置，不要硬编码
-    - 生产环境配置建议通过docker-compose.yml或环境变量文件管理
+Notes:
+    - Sensitive information (such as API keys, database passwords) should be set through environment variables, do not hardcode
+    - Production environment configuration is recommended to be managed through docker-compose.yml or environment variable files
 """
 import os
 
-# ============ MySQL数据库配置 ============
+# ============ MySQL Database Configuration ============
 
-# MySQL连接配置
-MYSQL_HOST = os.getenv('MYSQL_HOST', 'localhost')  # MySQL服务器地址
-MYSQL_PORT = int(os.getenv('MYSQL_PORT', '32123'))  # MySQL服务器端口
-MYSQL_USER = os.getenv('MYSQL_USER', 'aifuturetrade')  # MySQL用户名
-MYSQL_PASSWORD = os.getenv('MYSQL_PASSWORD', 'aifuturetrade123')  # MySQL密码
-MYSQL_DATABASE = os.getenv('MYSQL_DATABASE', 'aifuturetrade')  # MySQL数据库名
-
-
-
-# ============ 币安API配置 ============
-
-# 币安API密钥配置
-BINANCE_API_KEY = os.getenv('BINANCE_API_KEY', 'eric')  # 币安API密钥
-BINANCE_API_SECRET = os.getenv('BINANCE_API_SECRET', '55arJnwlytDflHv151UpHN1s32ACnJZEs86mbc79wGyeuSUJNHTDPN7jEgBbqO6I')  # 币安API密钥
-FUTURES_QUOTE_ASSET = 'USDT'  # 期货计价资产，固定为USDT
-
-# 币安交易模式配置
-BINANCE_TRADE_MODE = os.getenv('BINANCE_TRADE_MODE', 'test').lower()  # 交易模式：'test'（测试接口，默认）或 'real'（真实交易接口）
-BINANCE_TESTNET = os.getenv('BINANCE_TESTNET', '0').lower() in {'1', 'true', 'yes'}  # 是否使用测试网络
-
-# 币安市场数据配置
-FUTURES_TOP_GAINERS_LIMIT = 5  # 涨幅榜返回的交易对数量限制
-FUTURES_TOP_GAINERS_REFRESH = 30  # 涨幅榜刷新间隔（秒），可根据部署需求调整
-FUTURES_KLINE_LIMIT = 300  # K线数据获取的最大数量限制
-FUTURES_LEADERBOARD_REFRESH = 5  # 涨跌幅榜前端轮询刷新间隔（秒）
-FUTURES_MARKET_PRICES_REFRESH = int(os.getenv('FUTURES_MARKET_PRICES_REFRESH', '10'))  # 市场行情价格前端轮询刷新间隔（秒），默认10秒
-
-# ============ 异步服务配置 ============
-
-# 价格刷新服务配置
-PRICE_REFRESH_CRON = os.getenv('PRICE_REFRESH_CRON', '*/5 * * * *')  # Cron表达式，默认每5分钟执行一次
-PRICE_REFRESH_MAX_PER_MINUTE = int(os.getenv('PRICE_REFRESH_MAX_PER_MINUTE', '1000'))  # 每分钟最多刷新的symbol数量
-
-# 市场Symbol下线服务配置
-MARKET_SYMBOL_OFFLINE_CRON = os.getenv('MARKET_SYMBOL_OFFLINE_CRON', '*/30 * * * *')  # Cron表达式，默认每20分钟执行一次
-MARKET_SYMBOL_RETENTION_MINUTES = int(os.getenv('MARKET_SYMBOL_RETENTION_MINUTES', '30'))  # Ticker数据保留分钟数，默认15分钟
-
-# ============ 交易配置 ============
-
-AUTO_TRADING = True  # 是否启用自动交易（默认启用）
-TRADING_INTERVAL = 5  # 交易执行间隔（秒）
-TRADE_FEE_RATE = 0.002  # 交易费率：0.2%（双向收费）
-
-# 交易记录显示配置
-TRADES_DISPLAY_COUNT = int(os.getenv('TRADES_DISPLAY_COUNT', '5'))  # 前端显示的交易记录数量，默认5条
-TRADES_QUERY_LIMIT = int(os.getenv('TRADES_QUERY_LIMIT', '5'))  # 后端查询的交易记录数量，默认5条
+# MySQL connection configuration
+MYSQL_HOST = os.getenv('MYSQL_HOST', 'localhost')  # MySQL server address
+MYSQL_PORT = int(os.getenv('MYSQL_PORT', '32123'))  # MySQL server port
+MYSQL_USER = os.getenv('MYSQL_USER', 'aifuturetrade')  # MySQL username
+MYSQL_PASSWORD = os.getenv('MYSQL_PASSWORD', 'aifuturetrade123')  # MySQL password
+MYSQL_DATABASE = os.getenv('MYSQL_DATABASE', 'aifuturetrade')  # MySQL database name
 
 
-# ============ AI交易决策配置 ============
 
-PROMPT_MARKET_SYMBOL_LIMIT = 3  # 每次调用AI模型时处理的市场合约数量
-BUY_DECISION_THREAD_COUNT = 1  # 买入决策API调用的并发线程数
-SELL_DECISION_THREAD_COUNT = 1  # 卖出决策API调用的并发线程数
+# ============ Binance API Configuration ============
+
+# Binance API key configuration
+BINANCE_API_KEY = os.getenv('BINANCE_API_KEY', 'eric')  # Binance API key
+BINANCE_API_SECRET = os.getenv('BINANCE_API_SECRET', '55arJnwlytDflHv151UpHN1s32ACnJZEs86mbc79wGyeuSUJNHTDPN7jEgBbqO6I')  # Binance API secret
+FUTURES_QUOTE_ASSET = 'USDT'  # Futures quote asset, fixed as USDT
+
+# Binance trading mode configuration
+BINANCE_TRADE_MODE = os.getenv('BINANCE_TRADE_MODE', 'test').lower()  # Trading mode: 'test' (test interface, default) or 'real' (real trading interface)
+BINANCE_TESTNET = os.getenv('BINANCE_TESTNET', '0').lower() in {'1', 'true', 'yes'}  # Whether to use testnet
+
+# Binance market data configuration
+FUTURES_TOP_GAINERS_LIMIT = 5  # Limit on number of trading pairs returned in top gainers list
+FUTURES_TOP_GAINERS_REFRESH = 30  # Top gainers list refresh interval (seconds), can be adjusted according to deployment needs
+FUTURES_KLINE_LIMIT = 300  # Maximum limit for K-line data retrieval
+FUTURES_LEADERBOARD_REFRESH = 5  # Frontend polling refresh interval for gain/loss leaderboard (seconds)
+FUTURES_MARKET_PRICES_REFRESH = int(os.getenv('FUTURES_MARKET_PRICES_REFRESH', '10'))  # Frontend polling refresh interval for market price quotes (seconds), default 10 seconds
+
+# ============ Async Service Configuration ============
+
+# Price refresh service configuration
+PRICE_REFRESH_CRON = os.getenv('PRICE_REFRESH_CRON', '*/5 * * * *')  # Cron expression, default execution every 5 minutes
+PRICE_REFRESH_MAX_PER_MINUTE = int(os.getenv('PRICE_REFRESH_MAX_PER_MINUTE', '1000'))  # Maximum number of symbols refreshed per minute
+
+# Market Symbol offline service configuration
+MARKET_SYMBOL_OFFLINE_CRON = os.getenv('MARKET_SYMBOL_OFFLINE_CRON', '*/30 * * * *')  # Cron expression, default execution every 30 minutes
+MARKET_SYMBOL_RETENTION_MINUTES = int(os.getenv('MARKET_SYMBOL_RETENTION_MINUTES', '30'))  # Ticker data retention minutes, default 30 minutes
+
+# ============ Trading Configuration ============
+
+AUTO_TRADING = True  # Whether to enable auto trading (enabled by default)
+TRADING_INTERVAL = 5  # Trading execution interval (seconds)
+TRADE_FEE_RATE = 0.002  # Trading fee rate: 0.2% (bidirectional fee)
+
+# Trade record display configuration
+TRADES_DISPLAY_COUNT = int(os.getenv('TRADES_DISPLAY_COUNT', '5'))  # Number of trade records displayed on frontend, default 5
+TRADES_QUERY_LIMIT = int(os.getenv('TRADES_QUERY_LIMIT', '5'))  # Number of trade records queried on backend, default 5
 
 
-# ============ Binance Service配置 ============
+# ============ AI Trading Decision Configuration ============
 
-# Binance Service微服务配置（用于查询symbol相关数据，如实时价格、K线信息等）
-# 支持配置多个服务，系统会自动轮询使用
-# 格式：列表，每个元素是一个服务配置字典
-# 注意：下单和查询账户相关的接口不使用binance-service，只有查询symbol相关数据的接口使用
+PROMPT_MARKET_SYMBOL_LIMIT = 3  # Number of market contracts processed each time AI model is called
+BUY_DECISION_THREAD_COUNT = 1  # Number of concurrent threads for buy decision API calls
+SELL_DECISION_THREAD_COUNT = 1  # Number of concurrent threads for sell decision API calls
+
+
+# ============ Binance Service Configuration ============
+
+# Binance Service microservice configuration (used for querying symbol-related data, such as real-time prices, K-line information, etc.)
+# Supports configuring multiple services, system will automatically poll and use them
+# Format: list, each element is a service configuration dictionary
+# Note: Order placement and account query related interfaces do not use binance-service, only symbol-related data query interfaces use it
 BINANCE_SERVICE_LIST = [
-    # 示例配置（请根据实际情况修改）：
+    # Example configuration (please modify according to actual situation):
     # {
-    #     "base_url": "http://localhost:5004",  # Binance Service基础URL
-    #     "timeout": 30,  # 请求超时时间（秒），默认30秒
+    #     "base_url": "http://localhost:5004",  # Binance Service base URL
+    #     "timeout": 30,  # Request timeout (seconds), default 30 seconds
     # },
      {
          "base_url": "http://109.206.245.131:5004",
@@ -106,27 +106,27 @@ BINANCE_SERVICE_LIST = [
      },
 ]
 
-# 从环境变量读取Binance Service配置（JSON格式）
-# 环境变量格式：BINANCE_SERVICE_LIST='[{"base_url":"http://localhost:5004","timeout":30}]'
+# Read Binance Service configuration from environment variables (JSON format)
+# Environment variable format: BINANCE_SERVICE_LIST='[{"base_url":"http://localhost:5004","timeout":30}]'
 import json
 _binance_service_list_env = os.getenv('BINANCE_SERVICE_LIST', '')
 if _binance_service_list_env:
     try:
         BINANCE_SERVICE_LIST = json.loads(_binance_service_list_env)
     except json.JSONDecodeError:
-        pass  # 如果解析失败，使用默认值
+        pass  # If parsing fails, use default value
 
-# 是否启用Binance Service（如果BINANCE_SERVICE_LIST为空，则自动禁用）
+# Whether to enable Binance Service (automatically disabled if BINANCE_SERVICE_LIST is empty)
 BINANCE_SERVICE_ENABLED = len(BINANCE_SERVICE_LIST) > 0
 
-# Binance Service请求超时时间（秒），如果服务配置中没有指定，使用此默认值
+# Binance Service request timeout (seconds), if not specified in service configuration, use this default value
 BINANCE_SERVICE_DEFAULT_TIMEOUT = 30
 
 
-# ============ 日志配置 ============
+# ============ Logging Configuration ============
 
-# 日志级别: DEBUG, INFO, WARNING, ERROR, CRITICAL
-# 默认级别为 INFO
-LOG_LEVEL = 'INFO'  # 可选值: DEBUG, INFO, WARNING, ERROR, CRITICAL
-LOG_FORMAT = '%(asctime)s - %(name)s - %(levelname)s - %(message)s'  # 日志格式
-LOG_DATE_FORMAT = '%Y-%m-%d %H:%M:%S'  # 日志日期格式
+# Log level: DEBUG, INFO, WARNING, ERROR, CRITICAL
+# Default level is INFO
+LOG_LEVEL = 'INFO'  # Optional values: DEBUG, INFO, WARNING, ERROR, CRITICAL
+LOG_FORMAT = '%(asctime)s - %(name)s - %(levelname)s - %(message)s'  # Log format
+LOG_DATE_FORMAT = '%Y-%m-%d %H:%M:%S'  # Log date format

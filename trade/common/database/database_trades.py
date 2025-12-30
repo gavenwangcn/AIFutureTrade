@@ -1,10 +1,10 @@
 """
-交易记录数据表操作模�?- trades �?
+Trade record database table operation module - trades table
 
-本模块提供交易记录的增删改查操作�?
+This module provides CRUD operations for trade records.
 
-主要组件�?
-- TradesDatabase: 交易记录数据操作�?
+Main components:
+- TradesDatabase: Trade record data operations
 """
 
 import logging
@@ -21,17 +21,17 @@ logger = logging.getLogger(__name__)
 
 class TradesDatabase:
     """
-    交易记录数据操作�?
+    Trade record data operations
     
-    封装trades表的所有数据库操作�?
+    Encapsulates all database operations for the trades table.
     """
     
     def __init__(self, pool=None):
         """
-        初始化交易记录数据库操作�?
+        Initialize trade record database operations
         
         Args:
-            pool: 可选的数据库连接池，如果不提供则创建新的连接池
+            pool: Optional database connection pool, if not provided, create a new connection pool
         """
         if pool is None:
             self._pool = create_pooled_db(
@@ -82,27 +82,27 @@ class TradesDatabase:
                     'valueerror'
                 ]) or (isinstance(e, pymysql.err.MySQLError) and e.args[0] == 1213)
                 
-                # 如果已获取连接，需要处理连接（关闭�?
-                # 无论什么异常，都要确保连接被正确释放，防止连接泄露
+                # If connection has been acquired, need to handle connection (close it)
+                # Regardless of exception type, ensure connection is properly released to prevent connection leak
                 if connection_acquired and conn:
                     try:
-                        # 回滚事务
+                        # Rollback transaction
                         try:
                             conn.rollback()
                         except Exception as rollback_error:
                             logger.debug(f"[Trades] Error rolling back transaction: {rollback_error}")
                         
-                        # 对于所有错误，关闭连接，DBUtils会自动处理损坏的连接
+                        # For all errors, close connection, DBUtils will automatically handle damaged connections
                         try:
                             conn.close()
                         except Exception as close_error:
                             logger.debug(f"[Trades] Error closing connection: {close_error}")
                         finally:
-                            # 确保连接引用被清除，即使关闭失败也要标记为已处理
+                            # Ensure connection reference is cleared, mark as processed even if close fails
                             conn = None
                     except Exception as close_error:
                         logger.error(f"[Trades] Critical error closing failed connection: {close_error}")
-                        # 即使发生异常，也要清除连接引�?
+                        # Even if exception occurs, clear connection reference
                         conn = None
                 
                 if attempt < max_retries - 1:
@@ -174,16 +174,16 @@ class TradesDatabase:
         Add trade record with fee
         
         Args:
-            model_id: 模型ID
-            future: 交易对符�?
-            signal: 交易信号
-            quantity: 数量
-            price: 价格
-            leverage: 杠杆倍数
-            side: 方向（long/short�?
-            pnl: 盈亏
-            fee: 手续�?
-            model_id_mapping: 可选的模型ID映射字典
+            model_id: Model ID
+            future: Trading pair symbol
+            signal: Trading signal
+            quantity: Quantity
+            price: Price
+            leverage: Leverage multiplier
+            side: Direction (long/short)
+            pnl: Profit and loss
+            fee: Transaction fee
+            model_id_mapping: Optional model ID mapping dictionary
         """
         try:
             if model_id_mapping is None:
@@ -199,7 +199,7 @@ class TradesDatabase:
                 logger.warning(f"[Trades] Model {model_id} not found for trade record")
                 return
             
-            # 使用 UTC+8 时区时间（北京时间），转换为 naive datetime 存储
+            # Use UTC+8 timezone (Beijing time), convert to naive datetime for storage
             beijing_tz = timezone(timedelta(hours=8))
             current_time = datetime.now(beijing_tz).replace(tzinfo=None)
             
@@ -235,4 +235,3 @@ class TradesDatabase:
             finally:
                 cursor.close()
         return self._with_connection(_execute_query)
-

@@ -1,10 +1,10 @@
 """
-账户资产数据表操作模�?- account_asset �?
+Account asset database table operation module - account_asset table
 
-本模块提供账户资产数据的增删改查操作�?
+This module provides CRUD operations for account asset data.
 
-主要组件�?
-- AccountAssetDatabase: 账户资产数据操作�?
+Main components:
+- AccountAssetDatabase: Account asset data operations
 """
 
 import logging
@@ -19,17 +19,17 @@ logger = logging.getLogger(__name__)
 
 class AccountAssetDatabase:
     """
-    账户资产数据操作�?
+    Account asset data operations
     
-    封装account_asset表的所有数据库操作�?
+    Encapsulates all database operations for the account_asset table.
     """
     
     def __init__(self, pool=None):
         """
-        初始化账户资产数据库操作�?
+        Initialize account asset database operations
         
         Args:
-            pool: 可选的数据库连接池，如果不提供则创建新的连接池
+            pool: Optional database connection pool, if not provided, create a new connection pool
         """
         if pool is None:
             self._pool = create_pooled_db(
@@ -80,27 +80,27 @@ class AccountAssetDatabase:
                     'valueerror'
                 ]) or (isinstance(e, pymysql.err.MySQLError) and e.args[0] == 1213)
                 
-                # 如果已获取连接，需要处理连接（关闭�?
-                # 无论什么异常，都要确保连接被正确释放，防止连接泄露
+                # If connection has been acquired, need to handle connection (close it)
+                # Regardless of exception type, ensure connection is properly released to prevent connection leak
                 if connection_acquired and conn:
                     try:
-                        # 回滚事务
+                        # Rollback transaction
                         try:
                             conn.rollback()
                         except Exception as rollback_error:
                             logger.debug(f"[AccountAsset] Error rolling back transaction: {rollback_error}")
                         
-                        # 对于所有错误，关闭连接，DBUtils会自动处理损坏的连接
+                        # For all errors, close connection, DBUtils will automatically handle damaged connections
                         try:
                             conn.close()
                         except Exception as close_error:
                             logger.debug(f"[AccountAsset] Error closing connection: {close_error}")
                         finally:
-                            # 确保连接引用被清除，即使关闭失败也要标记为已处理
+                            # Ensure connection reference is cleared, mark as processed even if close fails
                             conn = None
                     except Exception as close_error:
                         logger.error(f"[AccountAsset] Critical error closing failed connection: {close_error}")
-                        # 即使发生异常，也要清除连接引�?
+                        # Even if exception occurs, clear connection reference
                         conn = None
                 
                 if attempt < max_retries - 1:
@@ -173,14 +173,14 @@ class AccountAssetDatabase:
     
     def get_account_asset(self, account_alias: str) -> Optional[Dict]:
         """
-        获取账户资产信息（最新记录）
+        Get account asset information (latest record)
         
         Args:
-            account_alias: 账户唯一识别�?
+            account_alias: Account unique identifier
             
         Returns:
-            账户资产信息字典，如果不存在则返回None
-            返回格式包含字段映射�?
+            Account asset information dictionary, returns None if not found
+            Return format includes field mapping:
             - balance: total_wallet_balance
             - cross_wallet_balance: total_cross_wallet_balance
             - available_balance: available_balance
@@ -207,7 +207,7 @@ class AccountAssetDatabase:
                       "available_balance", "max_withdraw_amount", "update_time", "created_at"]
             result = self._row_to_dict(rows[0], columns)
             
-            # 返回标准格式，字段映射为AI需要的格式
+            # Return standard format, field mapping to format needed by AI
             return {
                 "account_alias": result["account_alias"],
                 "balance": float(result["total_wallet_balance"]) if result["total_wallet_balance"] is not None else 0.0,
@@ -218,4 +218,3 @@ class AccountAssetDatabase:
         except Exception as e:
             logger.error(f"[AccountAsset] Failed to get account asset {account_alias}: {e}")
             return None
-

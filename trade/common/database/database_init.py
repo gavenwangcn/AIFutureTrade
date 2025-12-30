@@ -1,14 +1,14 @@
 """
-数据库表初始化模�?
+Database table initialization module
 
-本模块包含所有数据库表的创建逻辑，从 database_basic.py 中抽离出来�?
-统一管理所有表�?DDL 语句，便于维护和版本控制�?
+This module contains all database table creation logic, extracted from database_basic.py.
+Unified management of all table DDL statements for easy maintenance and version control.
 
-主要功能�?
-- 业务表初始化：providers, models, portfolios, trades �?
-    - 市场数据表初始化：market_tickers �?
-- 统一的初始化接口：init_database_tables() �?init_market_tables()
-- 表名定义：所有业务表的表名常�?
+Main functions:
+- Business table initialization: providers, models, portfolios, trades, etc.
+    - Market data table initialization: market_tickers, etc.
+- Unified initialization interface: init_database_tables() and init_market_tables()
+- Table name definitions: table name constants for all business tables
 """
 
 import logging
@@ -18,8 +18,8 @@ from typing import Callable, Any
 
 logger = logging.getLogger(__name__)
 
-# ============ 表名定义 ============
-# 所有业务表的表名常量，统一管理
+# ============ Table Name Definitions ============
+# Table name constants for all business tables, unified management
 PROVIDERS_TABLE = "providers"
 MODELS_TABLE = "models"
 PORTFOLIOS_TABLE = "portfolios"
@@ -42,21 +42,21 @@ MARKET_TICKER_TABLE = "24_market_tickers"
 
 class DatabaseInitializer:
     """
-    数据库表初始化器
+    Database table initializer
     
-    封装所有表的创建逻辑，可以被 Database �?MarketTickersDatabase 类使用�?
+    Encapsulates all table creation logic, can be used by Database and MarketTickersDatabase classes.
     """
     
     def __init__(self, command_func: Callable[[str], Any]):
         """
-        初始化数据库初始化器
+        Initialize database initializer
         
         Args:
-            command_func: 执行SQL命令的函数，接受SQL字符串作为参�?
+            command_func: Function to execute SQL commands, accepts SQL string as parameter
         """
         self.command = command_func
     
-    # ============ 业务表初始化方法 ============
+    # ============ Business Table Initialization Methods ============
     
     def ensure_providers_table(self, table_name: str = "providers"):
         """Create providers table if not exists"""
@@ -99,7 +99,7 @@ class DatabaseInitializer:
             `account_alias` VARCHAR(100),
             `is_virtual` TINYINT UNSIGNED DEFAULT 0,
             `symbol_source` VARCHAR(50) DEFAULT 'leaderboard',
-            `trade_type` VARCHAR(20) DEFAULT 'strategy' COMMENT '交易类型：ai-使用AI交易，strategy-使用策略交易',
+            `trade_type` VARCHAR(20) DEFAULT 'strategy' COMMENT 'Trade type: ai-use AI trading, strategy-use strategy trading',
             `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP,
             INDEX `idx_provider_id` (`provider_id`),
             INDEX `idx_account_alias` (`account_alias`),
@@ -194,7 +194,7 @@ class DatabaseInitializer:
         logger.debug(f"[DatabaseInit] Ensured table {table_name} exists")
     
     def ensure_account_value_historys_table(self, table_name: str = "account_value_historys"):
-        """Create account_value_historys table if not exists (用于账户价值历史图�?"""
+        """Create account_value_historys table if not exists (for account value history charts)"""
         ddl = f"""
         CREATE TABLE IF NOT EXISTS `{table_name}` (
             `id` VARCHAR(36) PRIMARY KEY,
@@ -354,10 +354,10 @@ class DatabaseInitializer:
             `trade_id` VARCHAR(36),
             `type` VARCHAR(10) NOT NULL COMMENT 'test or real',
             `method_name` VARCHAR(50) NOT NULL COMMENT 'stop_loss_trade, take_profit_trade, market_trade, close_position_trade',
-            `param` JSON COMMENT '所有调用接口的入参数，JSON格式存储',
-            `response_context` JSON COMMENT '接口返回的内容，JSON格式',
-            `response_type` VARCHAR(10) COMMENT '接口返回状态码�?00, 4XX, 5XX�?,
-            `error_context` TEXT COMMENT '接口返回状态不�?00时记录相关的返回错误信息',
+            `param` JSON COMMENT 'All input parameters for calling interface, stored in JSON format',
+            `response_context` JSON COMMENT 'Content returned by interface, JSON format',
+            `response_type` VARCHAR(10) COMMENT 'Interface return status code, such as 200, 4XX, 5XX, etc.',
+            `error_context` TEXT COMMENT 'When interface return status is not 200, record related return error information',
             `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP,
             INDEX `idx_model_id` (`model_id`),
             INDEX `idx_conversation_id` (`conversation_id`),
@@ -377,7 +377,7 @@ class DatabaseInitializer:
         CREATE TABLE IF NOT EXISTS `{table_name}` (
             `id` VARCHAR(36) PRIMARY KEY,
             `name` VARCHAR(200) NOT NULL,
-            `type` VARCHAR(10) DEFAULT 'buy' COMMENT '策略类型：buy-买，sell-�?,
+            `type` VARCHAR(10) DEFAULT 'buy' COMMENT 'Strategy type: buy-buy, sell-sell',
             `strategy_context` TEXT,
             `strategy_code` TEXT,
             `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -391,14 +391,14 @@ class DatabaseInitializer:
         logger.debug(f"[DatabaseInit] Ensured table {table_name} exists")
     
     def ensure_model_strategy_table(self, table_name: str = "model_strategy"):
-        """Create model_strategy table if not exists (用于模型关联策略信息管理)"""
+        """Create model_strategy table if not exists (for model associated strategy information management)"""
         ddl = f"""
         CREATE TABLE IF NOT EXISTS `{table_name}` (
             `id` VARCHAR(36) PRIMARY KEY,
             `model_id` VARCHAR(36) NOT NULL,
             `strategy_id` VARCHAR(36) NOT NULL,
-            `type` VARCHAR(10) NOT NULL COMMENT '策略类型：buy-买，sell-�?,
-            `priority` INT DEFAULT 0 COMMENT '策略优先级，数字越大优先级越�?,
+            `type` VARCHAR(10) NOT NULL COMMENT 'Strategy type: buy-buy, sell-sell',
+            `priority` INT DEFAULT 0 COMMENT 'Strategy priority, larger number means higher priority',
             `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP,
             UNIQUE KEY `uk_model_strategy_type` (`model_id`, `strategy_id`, `type`),
             INDEX `idx_model_id` (`model_id`),
@@ -411,20 +411,20 @@ class DatabaseInitializer:
         logger.debug(f"[DatabaseInit] Ensured table {table_name} exists")
     
     def ensure_strategy_decisions_table(self, table_name: str = "strategy_decisions"):
-        """Create strategy_decisions table if not exists (用于存储策略执行决策)"""
+        """Create strategy_decisions table if not exists (for storing strategy execution decisions)"""
         ddl = f"""
         CREATE TABLE IF NOT EXISTS `{table_name}` (
             `id` VARCHAR(36) PRIMARY KEY,
-            `model_id` VARCHAR(36) NOT NULL COMMENT '模型ID',
-            `strategy_name` VARCHAR(200) NOT NULL COMMENT '策略名称',
-            `strategy_type` VARCHAR(10) NOT NULL COMMENT '策略类型：buy-买，sell-�?,
-            `signal` VARCHAR(50) NOT NULL COMMENT '交易信号',
-            `symbol` VARCHAR(50) COMMENT '合约名称（可空）',
-            `quantity` DECIMAL(20, 8) COMMENT '数量',
-            `leverage` INT COMMENT '杠杆',
-            `price` DECIMAL(20, 8) COMMENT '期望价格（可空）',
-            `stop_price` DECIMAL(20, 8) COMMENT '触发价格（可空）',
-            `justification` TEXT COMMENT '触发理由（可空）',
+            `model_id` VARCHAR(36) NOT NULL COMMENT 'Model ID',
+            `strategy_name` VARCHAR(200) NOT NULL COMMENT 'Strategy name',
+            `strategy_type` VARCHAR(10) NOT NULL COMMENT 'Strategy type: buy-buy, sell-sell',
+            `signal` VARCHAR(50) NOT NULL COMMENT 'Trading signal',
+            `symbol` VARCHAR(50) COMMENT 'Contract name (nullable)',
+            `quantity` DECIMAL(20, 8) COMMENT 'Quantity',
+            `leverage` INT COMMENT 'Leverage',
+            `price` DECIMAL(20, 8) COMMENT 'Expected price (nullable)',
+            `stop_price` DECIMAL(20, 8) COMMENT 'Trigger price (nullable)',
+            `justification` TEXT COMMENT 'Trigger reason (nullable)',
             `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP,
             INDEX `idx_model_id` (`model_id`),
             INDEX `idx_strategy_name` (`strategy_name`),
@@ -437,9 +437,9 @@ class DatabaseInitializer:
         self.command(ddl)
         logger.debug(f"[DatabaseInit] Ensured table {table_name} exists")
         
-        # 检查并添加 symbol 字段（如果表已存在但字段不存在）
+        # Check and add symbol field (if table exists but field doesn't exist)
         try:
-            # 检�?symbol 字段是否存在
+            # Check if symbol field exists
             check_column_sql = f"""
             SELECT COUNT(*) FROM information_schema.COLUMNS 
             WHERE TABLE_SCHEMA = DATABASE() 
@@ -447,11 +447,11 @@ class DatabaseInitializer:
             AND COLUMN_NAME = 'symbol'
             """
             result = self.command(check_column_sql)
-            # 如果字段不存在，添加字段
+            # If field doesn't exist, add field
             if isinstance(result, list) and len(result) > 0 and result[0][0] == 0:
                 alter_sql = f"""
                 ALTER TABLE `{table_name}` 
-                ADD COLUMN `symbol` VARCHAR(50) COMMENT '合约名称（可空）' AFTER `signal`,
+                ADD COLUMN `symbol` VARCHAR(50) COMMENT 'Contract name (nullable)' AFTER `signal`,
                 ADD INDEX `idx_symbol` (`symbol`)
                 """
                 self.command(alter_sql)
@@ -459,7 +459,7 @@ class DatabaseInitializer:
         except Exception as e:
             logger.warning(f"[DatabaseInit] Failed to check/add symbol column to {table_name}: {e}")
     
-    # ============ 市场数据表初始化方法 ============
+    # ============ Market Data Table Initialization Methods ============
     
     def ensure_market_ticker_table(self, table_name: str = "24_market_tickers"):
         """Create the 24h market ticker table if it does not exist."""
@@ -494,22 +494,22 @@ class DatabaseInitializer:
         self.command(ddl)
         logger.info("[DatabaseInit] Ensured table %s exists", table_name)
     
-    # ensure_market_klines_table �?ensure_market_data_agent_table 方法已删除，相关表不再使�?
+    # ensure_market_klines_table and ensure_market_data_agent_table methods have been deleted, related tables are no longer used
 
 
 def init_database_tables(command_func: Callable[[str], Any], table_names: dict):
     """
-    初始化所有业务数据库�?
+    Initialize all business database tables
     
     Args:
-        command_func: 执行SQL命令的函�?
-        table_names: 表名字典，包含所有业务表的表�?
+        command_func: Function to execute SQL commands
+        table_names: Table name dictionary, contains table names for all business tables
     """
     logger.info("[DatabaseInit] Initializing MySQL business tables...")
     
     initializer = DatabaseInitializer(command_func)
     
-    # Providers table (API提供�?
+    # Providers table (API provider)
     initializer.ensure_providers_table(table_names.get('providers_table', 'providers'))
     
     # Models table
@@ -524,10 +524,10 @@ def init_database_tables(command_func: Callable[[str], Any], table_names: dict):
     # Conversations table
     initializer.ensure_conversations_table(table_names.get('conversations_table', 'conversations'))
     
-    # Account values table (用于当前值，支持UPDATE/INSERT)
+    # Account values table (for current value, supports UPDATE/INSERT)
     initializer.ensure_account_values_table(table_names.get('account_values_table', 'account_values'))
     
-    # Account value historys table (用于历史记录，只INSERT)
+    # Account value historys table (for history records, INSERT only)
     initializer.ensure_account_value_historys_table(table_names.get('account_value_historys_table', 'account_value_historys'))
     
     # Settings table
@@ -557,10 +557,10 @@ def init_database_tables(command_func: Callable[[str], Any], table_names: dict):
     # Strategy table
     initializer.ensure_strategy_table(table_names.get('strategy_table', 'strategys'))
     
-    # Model strategy table (模型关联策略)
+    # Model strategy table (model associated strategy)
     initializer.ensure_model_strategy_table(table_names.get('model_strategy_table', 'model_strategy'))
     
-    # Strategy decisions table (策略执行决策)
+    # Strategy decisions table (strategy execution decisions)
     initializer.ensure_strategy_decisions_table(table_names.get('strategy_decisions_table', 'strategy_decisions'))
     
     logger.info("[DatabaseInit] MySQL business tables initialized")
@@ -568,12 +568,12 @@ def init_database_tables(command_func: Callable[[str], Any], table_names: dict):
 
 def init_market_tables(command_func: Callable[[str], Any], table_config: dict):
     """
-    初始化所有市场数据表
+    Initialize all market data tables
     
     Args:
-        command_func: 执行SQL命令的函�?
-        table_config: 表配置字典，包含�?
-            - market_ticker_table: ticker表名
+        command_func: Function to execute SQL commands
+        table_config: Table configuration dictionary, contains:
+            - market_ticker_table: ticker table name
     """
     logger.info("[DatabaseInit] Initializing MySQL market tables...")
     
@@ -587,16 +587,16 @@ def init_market_tables(command_func: Callable[[str], Any], table_config: dict):
 
 def init_all_database_tables(command_func: Callable[[str, tuple], Any]):
     """
-    初始化所有数据库表（业务�?+ 市场数据表）
+    Initialize all database tables (business tables + market data tables)
     
-    这是一个统一的初始化函数，用于系统启动时初始化所有表�?
+    This is a unified initialization function for initializing all tables when the system starts.
     
     Args:
-        command_func: 执行SQL命令的函数，接受SQL字符串和参数元组
+        command_func: Function to execute SQL commands, accepts SQL string and parameter tuple
     """
     logger.info("[DatabaseInit] Initializing all database tables...")
     
-    # 构建表名字典（使用常量）
+    # Build table name dictionary (using constants)
     table_names = {
         'providers_table': PROVIDERS_TABLE,
         'models_table': MODELS_TABLE,
@@ -616,14 +616,13 @@ def init_all_database_tables(command_func: Callable[[str, tuple], Any]):
         'model_strategy_table': MODEL_STRATEGY_TABLE,
     }
     
-    # 初始化业务表
+    # Initialize business tables
     init_database_tables(command_func, table_names)
     
-    # 初始化市场数据表
+    # Initialize market data tables
     table_config = {
         'market_ticker_table': MARKET_TICKER_TABLE,
     }
     init_market_tables(command_func, table_config)
     
     logger.info("[DatabaseInit] All database tables initialized successfully")
-

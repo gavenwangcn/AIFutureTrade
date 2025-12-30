@@ -1,6 +1,6 @@
 """
-账户管理数据库操作模�?
-提供账户相关的数据库操作，包括添加、删除、查询等功能
+Account management database operations module
+Provides account-related database operations, including add, delete, query and other functions
 """
 from __future__ import annotations
 
@@ -13,14 +13,14 @@ logger = logging.getLogger(__name__)
 
 
 class AccountDatabase:
-    """账户管理数据库操作类"""
+    """Account management database operations class"""
     
     def __init__(self, auto_init_tables: bool = True):
         """
-        初始化账户数据库操作�?
+        Initialize account database operations
         
         Args:
-            auto_init_tables: 是否自动初始化表结构，默认True（注意：表结构在database_basic.py中统一管理�?
+            auto_init_tables: Whether to automatically initialize table structure, default True (Note: table structure is managed uniformly in database_basic.py)
         """
         self.db = Database()
         self.account_asset_table = "account_asset"
@@ -35,17 +35,17 @@ class AccountDatabase:
         asset_list: List[Dict[str, Any]]
     ) -> str:
         """
-        添加账户信息
+        Add account information
         
         Args:
-            account_name: 账户中文名称（必填）
-            api_key: API密钥
-            api_secret: API密钥
-            account_asset_data: get_account返回的账户资产汇总数据（已解析，包含totalInitialMargin等字段）
-            asset_list: get_account返回的assets数组（已解析，不包含positions�?
+            account_name: Account Chinese name (required)
+            api_key: API key
+            api_secret: API secret
+            account_asset_data: Account asset summary data returned by get_account (parsed, contains totalInitialMargin and other fields)
+            asset_list: Assets array returned by get_account (parsed, does not include positions)
             
         Returns:
-            account_alias字符串（自生成）
+            account_alias string (auto-generated)
         """
         import hashlib
         import time
@@ -53,15 +53,15 @@ class AccountDatabase:
         if not account_name or not account_name.strip():
             raise ValueError("account_name is required and cannot be empty")
         
-        # 生成account_alias：使用api_key的前8�?+ 时间戳后6�?
+        # Generate account_alias: use first 8 characters of api_key hash + last 6 characters of timestamp
         api_key_hash = hashlib.md5(api_key.encode()).hexdigest()[:8]
         timestamp_suffix = str(int(time.time()))[-6:]
         account_alias = f"{api_key_hash}_{timestamp_suffix}"
         
-        # 获取当前时间戳（毫秒�?
+        # Get current timestamp (milliseconds)
         update_time = int(datetime.now(timezone.utc).timestamp() * 1000)
         
-        # 插入account_asset表（包含account_name、api_key和api_secret�?
+        # Insert into account_asset table (includes account_name, api_key and api_secret)
         account_asset_insert = f"""
         INSERT INTO `{self.account_asset_table}` 
         (`account_alias`, `account_name`, `api_key`, `api_secret`, `total_initial_margin`, `total_maint_margin`, `total_wallet_balance`, 
@@ -109,12 +109,12 @@ class AccountDatabase:
             )
         )
         
-        # 先删除该账户的所有asset记录，再插入新的
+        # First delete all asset records for this account, then insert new ones
         self.db.command(f"DELETE FROM `{self.asset_table}` WHERE `account_alias` = %s", (account_alias,))
         
-        # 插入asset表（每个资产一条记录）
+        # Insert into asset table (one record per asset)
         if asset_list:
-            # 使用insert_rows方法批量插入
+            # Use insert_rows method for batch insert
             asset_rows = []
             for asset_item in asset_list:
                 asset_rows.append([
@@ -147,18 +147,18 @@ class AccountDatabase:
     
     def delete_account(self, account_alias: str) -> bool:
         """
-        删除账户信息（级联删除asset表的数据�?
+        Delete account information (cascade delete asset table data)
         
         Args:
-            account_alias: 账户唯一标识
+            account_alias: Account unique identifier
             
         Returns:
-            是否删除成功
+            Whether deletion was successful
         """
         try:
-            # 先删除asset表的数据（由于外键CASCADE，删除account_asset会自动删除asset表的数据�?
+            # First delete asset table data (due to foreign key CASCADE, deleting account_asset will automatically delete asset table data)
             self.db.command(f"DELETE FROM `{self.asset_table}` WHERE `account_alias` = %s", (account_alias,))
-            # 删除account_asset表的数据
+            # Delete account_asset table data
             self.db.command(f"DELETE FROM `{self.account_asset_table}` WHERE `account_alias` = %s", (account_alias,))
             logger.info(f"[AccountDatabase] Account deleted successfully: account_alias={account_alias}")
             return True
@@ -168,10 +168,10 @@ class AccountDatabase:
     
     def get_all_accounts(self) -> List[Dict[str, Any]]:
         """
-        查询所有账户信�?
+        Query all account information
         
         Returns:
-            账户信息列表，包含total_wallet_balance（总余额）、total_cross_wallet_balance（全仓余额）、available_balance（下单可用余额）等字�?
+            Account information list, contains total_wallet_balance (total balance), total_cross_wallet_balance (cross wallet balance), available_balance (order available balance) and other fields
         """
         try:
             query = f"""
@@ -198,4 +198,3 @@ class AccountDatabase:
         except Exception as e:
             logger.error(f"[AccountDatabase] Failed to get all accounts: {e}")
             raise
-

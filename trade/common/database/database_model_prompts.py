@@ -1,10 +1,10 @@
 """
-模型提示词数据表操作模块 - model_prompts �?
+Model prompt database table operation module - model_prompts table
 
-本模块提供模型提示词配置的增删改查操作�?
+This module provides CRUD operations for model prompt configuration.
 
-主要组件�?
-- ModelPromptsDatabase: 模型提示词数据操作类
+Main components:
+- ModelPromptsDatabase: Model prompt data operations class
 """
 
 import logging
@@ -20,17 +20,17 @@ logger = logging.getLogger(__name__)
 
 class ModelPromptsDatabase:
     """
-    模型提示词数据操作类
+    Model prompt data operations class
     
-    封装model_prompts表的所有数据库操作�?
+    Encapsulates all database operations for the model_prompts table.
     """
     
     def __init__(self, pool=None):
         """
-        初始化模型提示词数据库操作类
+        Initialize model prompt database operations class
         
         Args:
-            pool: 可选的数据库连接池，如果不提供则创建新的连接池
+            pool: Optional database connection pool, if not provided, create a new connection pool
         """
         if pool is None:
             self._pool = create_pooled_db(
@@ -81,27 +81,27 @@ class ModelPromptsDatabase:
                     'valueerror'
                 ]) or (isinstance(e, pymysql.err.MySQLError) and e.args[0] == 1213)
                 
-                # 如果已获取连接，需要处理连接（关闭�?
-                # 无论什么异常，都要确保连接被正确释放，防止连接泄露
+                # If connection has been acquired, need to handle connection (close it)
+                # Regardless of exception type, ensure connection is properly released to prevent connection leak
                 if connection_acquired and conn:
                     try:
-                        # 回滚事务
+                        # Rollback transaction
                         try:
                             conn.rollback()
                         except Exception as rollback_error:
                             logger.debug(f"[ModelPrompts] Error rolling back transaction: {rollback_error}")
                         
-                        # 对于所有错误，关闭连接，DBUtils会自动处理损坏的连接
+                        # For all errors, close connection, DBUtils will automatically handle damaged connections
                         try:
                             conn.close()
                         except Exception as close_error:
                             logger.debug(f"[ModelPrompts] Error closing connection: {close_error}")
                         finally:
-                            # 确保连接引用被清除，即使关闭失败也要标记为已处理
+                            # Ensure connection reference is cleared, mark as processed even if close fails
                             conn = None
                     except Exception as close_error:
                         logger.error(f"[ModelPrompts] Critical error closing failed connection: {close_error}")
-                        # 即使发生异常，也要清除连接引�?
+                        # Even if exception occurs, clear connection reference
                         conn = None
                 
                 if attempt < max_retries - 1:
@@ -181,16 +181,16 @@ class ModelPromptsDatabase:
         Get model prompt configuration
         
         Args:
-            model_id: 模型ID（整数）
-            model_id_mapping: 可选的模型ID映射字典，如果不提供则从数据库查�?
+            model_id: Model ID (integer)
+            model_id_mapping: Optional model ID mapping dictionary, if not provided, query from database
         
         Returns:
-            模型提示词配置字典，如果不存在则返回None
+            Model prompt configuration dictionary, returns None if not found
         """
         try:
-            # 如果没有提供映射，需要从数据库查询（这里简化处理，实际应该由调用方提供�?
+            # If mapping not provided, need to query from database (simplified handling here, should actually be provided by caller)
             if model_id_mapping is None:
-                # 查询所有模型ID
+                # Query all model IDs
                 rows = self.query(f"SELECT id FROM models")
                 model_id_mapping = {}
                 for row in rows:
@@ -213,7 +213,7 @@ class ModelPromptsDatabase:
             
             columns = ["id", "model_id", "buy_prompt", "sell_prompt", "updated_at"]
             result = self._row_to_dict(rows[0], columns)
-            result['model_id'] = model_id  # 转换�?int ID
+            result['model_id'] = model_id  # Convert to int ID
             return result
         except Exception as e:
             logger.error(f"[ModelPrompts] Failed to get model prompt for model {model_id}: {e}")
@@ -225,13 +225,13 @@ class ModelPromptsDatabase:
         Insert or update model prompt configuration
         
         Args:
-            model_id: 模型ID（整数）
-            buy_prompt: 买入提示�?
-            sell_prompt: 卖出提示�?
-            model_id_mapping: 可选的模型ID映射字典
+            model_id: Model ID (integer)
+            buy_prompt: Buy prompt
+            sell_prompt: Sell prompt
+            model_id_mapping: Optional model ID mapping dictionary
         
         Returns:
-            bool: 是否成功
+            bool: Whether successful
         """
         try:
             if model_id_mapping is None:
@@ -246,7 +246,7 @@ class ModelPromptsDatabase:
             if not model_uuid:
                 return False
             
-            # MySQL使用 INSERT ... ON DUPLICATE KEY UPDATE
+            # MySQL uses INSERT ... ON DUPLICATE KEY UPDATE
             prompt_id = str(uuid.uuid4())
             buy_prompt_value = buy_prompt.strip() if buy_prompt and buy_prompt.strip() else ''
             sell_prompt_value = sell_prompt.strip() if sell_prompt and sell_prompt.strip() else ''
@@ -274,4 +274,3 @@ class ModelPromptsDatabase:
         except Exception as e:
             logger.error(f"[ModelPrompts] Failed to upsert model prompt for model {model_id}: {e}")
             return False
-

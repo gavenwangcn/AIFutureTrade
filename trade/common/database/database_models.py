@@ -1,10 +1,10 @@
 """
-模型数据表操作模�?- models �?
+Model database table operation module - models table
 
-本模块提供模型数据的增删改查操作�?
+This module provides CRUD operations for model data.
 
-主要组件�?
-- ModelsDatabase: 模型数据操作�?
+Main components:
+- ModelsDatabase: Model data operations
 """
 
 import logging
@@ -19,17 +19,17 @@ logger = logging.getLogger(__name__)
 
 class ModelsDatabase:
     """
-    模型数据操作�?
+    Model data operations
     
-    封装models表的所有数据库操作�?
+    Encapsulates all database operations for the models table.
     """
     
     def __init__(self, pool=None):
         """
-        初始化模型数据库操作�?
+        Initialize model database operations
         
         Args:
-            pool: 可选的数据库连接池，如果不提供则创建新的连接池
+            pool: Optional database connection pool, if not provided, create a new connection pool
         """
         if pool is None:
             self._pool = create_pooled_db(
@@ -81,27 +81,27 @@ class ModelsDatabase:
                     'valueerror'
                 ]) or (isinstance(e, pymysql.err.MySQLError) and e.args[0] == 1213)
                 
-                # 如果已获取连接，需要处理连接（关闭�?
-                # 无论什么异常，都要确保连接被正确释放，防止连接泄露
+                # If connection has been acquired, need to handle connection (close it)
+                # Regardless of exception type, ensure connection is properly released to prevent connection leak
                 if connection_acquired and conn:
                     try:
-                        # 回滚事务
+                        # Rollback transaction
                         try:
                             conn.rollback()
                         except Exception as rollback_error:
                             logger.debug(f"[Models] Error rolling back transaction: {rollback_error}")
                         
-                        # 对于所有错误，关闭连接，DBUtils会自动处理损坏的连接
+                        # For all errors, close connection, DBUtils will automatically handle damaged connections
                         try:
                             conn.close()
                         except Exception as close_error:
                             logger.debug(f"[Models] Error closing connection: {close_error}")
                         finally:
-                            # 确保连接引用被清除，即使关闭失败也要标记为已处理
+                            # Ensure connection reference is cleared, mark as processed even if close fails
                             conn = None
                     except Exception as close_error:
                         logger.error(f"[Models] Critical error closing failed connection: {close_error}")
-                        # 即使发生异常，也要清除连接引�?
+                        # Even if exception occurs, clear connection reference
                         conn = None
                 
                 if attempt < max_retries - 1:
@@ -226,10 +226,10 @@ class ModelsDatabase:
         Get model information
         
         Args:
-            model_id: 模型ID（整数）
+            model_id: Model ID (integer)
         
         Returns:
-            模型信息字典，如果不存在则返回None
+            Model information dictionary, returns None if not found
         """
         try:
             model_mapping = self._get_model_id_mapping()
@@ -237,7 +237,7 @@ class ModelsDatabase:
             if not model_uuid:
                 return None
             
-            # 查询 model 和关联的 provider
+            # Query model and associated provider
             rows = self.query(f"""
                 SELECT m.id, m.name, m.provider_id, m.model_name, m.initial_capital, 
                        m.leverage, m.auto_buy_enabled, m.auto_sell_enabled, m.max_positions, 
@@ -260,7 +260,7 @@ class ModelsDatabase:
                       "account_alias", "is_virtual", "symbol_source", "created_at",
                       "api_key", "api_secret", "api_url", "provider_type"]
             result = self._row_to_dict(rows[0], columns)
-            # 转换 ID �?int 以保持兼容�?
+            # Convert ID to int to maintain compatibility
             result['id'] = model_id
             if result.get('provider_id'):
                 provider_mapping = self._get_provider_id_mapping()
@@ -268,20 +268,20 @@ class ModelsDatabase:
                     if puuid == result['provider_id']:
                         result['provider_id'] = pid
                         break
-            # 【兼容性处理】确保symbol_source有默认�?
+            # [Compatibility handling] Ensure symbol_source has default value
             if not result.get('symbol_source'):
                 result['symbol_source'] = 'leaderboard'
-            # 【兼容性处理】确保is_virtual有默认�?
+            # [Compatibility handling] Ensure is_virtual has default value
             if result.get('is_virtual') is None:
                 result['is_virtual'] = False
             else:
                 result['is_virtual'] = bool(result.get('is_virtual', 0))
-            # 【兼容性处理】确保auto_buy_enabled和auto_sell_enabled有默认�?
+            # [Compatibility handling] Ensure auto_buy_enabled and auto_sell_enabled have default values
             if result.get('auto_buy_enabled') is None:
                 result['auto_buy_enabled'] = 1
             if result.get('auto_sell_enabled') is None:
                 result['auto_sell_enabled'] = 1
-            # 【兼容性处理】确保批次配置字段有默认�?
+            # [Compatibility handling] Ensure batch configuration fields have default values
             if result.get('buy_batch_size') is None:
                 result['buy_batch_size'] = 1
             if result.get('buy_batch_execution_interval') is None:
@@ -304,7 +304,7 @@ class ModelsDatabase:
         Get all trading models
         
         Returns:
-            所有模型信息列�?
+            List of all model information
         """
         try:
             rows = self.query(f"""
@@ -325,7 +325,7 @@ class ModelsDatabase:
                       "account_alias", "is_virtual", "symbol_source", "created_at", "provider_name"]
             results = self._rows_to_dicts(rows, columns)
             
-            # 转换 ID �?int 以保持兼容�?
+            # Convert ID to int to maintain compatibility
             provider_mapping = self._get_provider_id_mapping()
             for result in results:
                 result['id'] = self._uuid_to_int(result['id'])
@@ -334,27 +334,27 @@ class ModelsDatabase:
                         if puuid == result['provider_id']:
                             result['provider_id'] = pid
                             break
-                # 【兼容性处理】确保symbol_source有默认�?
+                # [Compatibility handling] Ensure symbol_source has default value
                 if not result.get('symbol_source'):
                     result['symbol_source'] = 'leaderboard'
-                # 【兼容性处理】确保is_virtual有默认�?
+                # [Compatibility handling] Ensure is_virtual has default value
                 if result.get('is_virtual') is None:
                     result['is_virtual'] = False
-                # 【兼容性处理】确保max_positions有默认�?
+                # [Compatibility handling] Ensure max_positions has default value
                 if result.get('max_positions') is None:
                     result['max_positions'] = 3
-                # 【兼容性处理】确保auto_buy_enabled和auto_sell_enabled有默认�?
+                # [Compatibility handling] Ensure auto_buy_enabled and auto_sell_enabled have default values
                 if result.get('auto_buy_enabled') is None:
                     result['auto_buy_enabled'] = 1
                 if result.get('auto_sell_enabled') is None:
                     result['auto_sell_enabled'] = 1
-                # 【兼容性处理】确保批次配置字段有默认�?
+                # [Compatibility handling] Ensure batch configuration fields have default values
                 if result.get('buy_batch_size') is None:
                     result['buy_batch_size'] = 1
                 if result.get('buy_batch_execution_interval') is None:
                     result['buy_batch_execution_interval'] = 60
                 if result.get('buy_batch_execution_group_size') is None:
-                    result['buy_batch_execution_group_size'] = 1
+                    result['buy_batch_size'] = 1
                 if result.get('sell_batch_size') is None:
                     result['sell_batch_size'] = 1
                 if result.get('sell_batch_execution_interval') is None:
@@ -373,7 +373,7 @@ class ModelsDatabase:
         Check auto buy flag for a model
         
         Args:
-            model_id: 模型ID（整数）
+            model_id: Model ID (integer)
         
         Returns:
             bool: True if auto_buy_enabled is 1, False if 0 or model not found
@@ -402,7 +402,7 @@ class ModelsDatabase:
         Check auto sell flag for a model
         
         Args:
-            model_id: 模型ID（整数）
+            model_id: Model ID (integer)
         
         Returns:
             bool: True if auto_sell_enabled is 1, False if 0 or model not found
@@ -431,11 +431,11 @@ class ModelsDatabase:
         Enable or disable auto buy for a model
         
         Args:
-            model_id: 模型ID（整数）
-            enabled: 是否启用
+            model_id: Model ID (integer)
+            enabled: Whether to enable
         
         Returns:
-            bool: 是否成功
+            bool: Whether successful
         """
         try:
             model_mapping = self._get_model_id_mapping()
@@ -459,11 +459,11 @@ class ModelsDatabase:
         Enable or disable auto sell for a model
         
         Args:
-            model_id: 模型ID（整数）
-            enabled: 是否启用
+            model_id: Model ID (integer)
+            enabled: Whether to enable
         
         Returns:
-            bool: 是否成功
+            bool: Whether successful
         """
         try:
             model_mapping = self._get_model_id_mapping()
@@ -487,11 +487,11 @@ class ModelsDatabase:
         Update model leverage
         
         Args:
-            model_id: 模型ID（整数）
-            leverage: 杠杆倍数
+            model_id: Model ID (integer)
+            leverage: Leverage multiplier
         
         Returns:
-            bool: 是否成功
+            bool: Whether successful
         """
         try:
             model_mapping = self._get_model_id_mapping()
@@ -513,19 +513,19 @@ class ModelsDatabase:
                                buy_batch_size: int = None, buy_batch_execution_interval: int = None, buy_batch_execution_group_size: int = None,
                                sell_batch_size: int = None, sell_batch_execution_interval: int = None, sell_batch_execution_group_size: int = None) -> bool:
         """
-        Update model batch configuration (批次配置)
+        Update model batch configuration
         
         Args:
-            model_id: 模型ID（整数）
-            buy_batch_size: 买入批次大小
-            buy_batch_execution_interval: 买入批次执行间隔（秒�?
-            buy_batch_execution_group_size: 买入批次执行组大�?
-            sell_batch_size: 卖出批次大小
-            sell_batch_execution_interval: 卖出批次执行间隔（秒�?
-            sell_batch_execution_group_size: 卖出批次执行组大�?
+            model_id: Model ID (integer)
+            buy_batch_size: Buy batch size
+            buy_batch_execution_interval: Buy batch execution interval (seconds)
+            buy_batch_execution_group_size: Buy batch execution group size
+            sell_batch_size: Sell batch size
+            sell_batch_execution_interval: Sell batch execution interval (seconds)
+            sell_batch_execution_group_size: Sell batch execution group size
         
         Returns:
-            bool: 是否成功
+            bool: Whether successful
         """
         try:
             model_mapping = self._get_model_id_mapping()
@@ -533,7 +533,7 @@ class ModelsDatabase:
             if not model_uuid:
                 return False
             
-            # 构建更新字段列表
+            # Build update field list
             updates = []
             params = []
             
@@ -568,7 +568,7 @@ class ModelsDatabase:
                 params.append(sell_batch_execution_group_size)
             
             if not updates:
-                return True  # 没有需要更新的字段
+                return True  # No fields to update
             
             params.append(model_uuid)
             sql = f"""
@@ -585,14 +585,14 @@ class ModelsDatabase:
     
     def set_model_max_positions(self, model_id: int, max_positions: int) -> bool:
         """
-        Update model max_positions (最大持仓数�?
+        Update model max_positions (maximum number of positions)
         
         Args:
-            model_id: 模型ID（整数）
-            max_positions: 最大持仓数�?
+            model_id: Model ID (integer)
+            max_positions: Maximum number of positions
         
         Returns:
-            bool: 是否成功
+            bool: Whether successful
         """
         try:
             model_mapping = self._get_model_id_mapping()
@@ -600,7 +600,7 @@ class ModelsDatabase:
             if not model_uuid:
                 return False
             
-            # 验证 max_positions �?
+            # Validate max_positions
             if not isinstance(max_positions, int) or max_positions < 1:
                 logger.error(f"[Models] Invalid max_positions value: {max_positions}, must be >= 1")
                 return False
@@ -621,12 +621,12 @@ class ModelsDatabase:
         Update model provider_id and model_name
         
         Args:
-            model_id: 模型ID（整数）
-            provider_id: 新的API提供方ID（整数）
-            model_name: 新的模型名称（字符串�?
+            model_id: Model ID (integer)
+            provider_id: New API provider ID (integer)
+            model_name: New model name (string)
         
         Returns:
-            bool: 更新是否成功
+            bool: Whether update was successful
         """
         try:
             model_mapping = self._get_model_id_mapping()
@@ -635,7 +635,7 @@ class ModelsDatabase:
                 logger.warning(f"[Models] Model {model_id} UUID not found")
                 return False
             
-            # 获取 provider UUID
+            # Get provider UUID
             provider_mapping = self._get_provider_id_mapping()
             provider_uuid = provider_mapping.get(provider_id)
             if not provider_uuid:
@@ -653,4 +653,3 @@ class ModelsDatabase:
         except Exception as e:
             logger.error(f"[Models] Failed to update provider and model_name for model {model_id}: {e}")
             return False
-

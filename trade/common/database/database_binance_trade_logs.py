@@ -1,10 +1,10 @@
 """
-币安交易日志数据表操作模�?- binance_trade_logs �?
+Binance trade logs database table operation module - binance_trade_logs table
 
-本模块提供币安交易日志的增删改查操作�?
+This module provides CRUD operations for Binance trade logs.
 
-主要组件�?
-- BinanceTradeLogsDatabase: 币安交易日志数据操作�?
+Main components:
+- BinanceTradeLogsDatabase: Binance trade logs data operations
 """
 
 import logging
@@ -22,17 +22,17 @@ logger = logging.getLogger(__name__)
 
 class BinanceTradeLogsDatabase:
     """
-    币安交易日志数据操作�?
+    Binance trade logs data operations
     
-    封装binance_trade_logs表的所有数据库操作�?
+    Encapsulates all database operations for the binance_trade_logs table.
     """
     
     def __init__(self, pool=None):
         """
-        初始化币安交易日志数据库操作�?
+        Initialize Binance trade logs database operations
         
         Args:
-            pool: 可选的数据库连接池，如果不提供则创建新的连接池
+            pool: Optional database connection pool, if not provided, create a new connection pool
         """
         if pool is None:
             self._pool = create_pooled_db(
@@ -83,27 +83,27 @@ class BinanceTradeLogsDatabase:
                     'valueerror'
                 ]) or (isinstance(e, pymysql.err.MySQLError) and e.args[0] == 1213)
                 
-                # 如果已获取连接，需要处理连接（关闭�?
-                # 无论什么异常，都要确保连接被正确释放，防止连接泄露
+                # If connection has been acquired, need to handle connection (close it)
+                # Regardless of exception type, ensure connection is properly released to prevent connection leak
                 if connection_acquired and conn:
                     try:
-                        # 回滚事务
+                        # Rollback transaction
                         try:
                             conn.rollback()
                         except Exception as rollback_error:
                             logger.debug(f"[BinanceTradeLogs] Error rolling back transaction: {rollback_error}")
                         
-                        # 对于所有错误，关闭连接，DBUtils会自动处理损坏的连接
+                        # For all errors, close connection, DBUtils will automatically handle damaged connections
                         try:
                             conn.close()
                         except Exception as close_error:
                             logger.debug(f"[BinanceTradeLogs] Error closing connection: {close_error}")
                         finally:
-                            # 确保连接引用被清除，即使关闭失败也要标记为已处理
+                            # Ensure connection reference is cleared, mark as processed even if close fails
                             conn = None
                     except Exception as close_error:
                         logger.error(f"[BinanceTradeLogs] Critical error closing failed connection: {close_error}")
-                        # 即使发生异常，也要清除连接引�?
+                        # Even if exception occurs, clear connection reference
                         conn = None
                 
                 if attempt < max_retries - 1:
@@ -173,27 +173,27 @@ class BinanceTradeLogsDatabase:
                               param: Optional[Dict[str, Any]] = None, response_context: Optional[Dict[str, Any]] = None,
                               response_type: Optional[str] = None, error_context: Optional[str] = None):
         """
-        添加币安交易日志记录
+        Add Binance trade log record
         
         Args:
-            model_id: 模型ID (UUID字符�?
-            conversation_id: 对话ID (UUID字符�?
-            trade_id: 交易ID (UUID字符�?
-            type: 接口类型�?test' �?'real'
-            method_name: 方法名称，如 'stop_loss_trade', 'take_profit_trade' �?
-            param: 调用接口的入参，字典格式
-            response_context: 接口返回的内容，字典格式
-            response_type: 接口返回状态码，如 '200', '4XX', '5XX' �?
-            error_context: 接口返回状态不�?00时记录相关的返回错误信息
+            model_id: Model ID (UUID string)
+            conversation_id: Conversation ID (UUID string)
+            trade_id: Trade ID (UUID string)
+            type: Interface type, 'test' or 'real'
+            method_name: Method name, such as 'stop_loss_trade', 'take_profit_trade', etc.
+            param: Input parameters for calling interface, dictionary format
+            response_context: Content returned by interface, dictionary format
+            response_type: Interface return status code, such as '200', '4XX', '5XX', etc.
+            error_context: When interface return status is not 200, record related return error information
         """
         try:
             log_id = self._generate_id()
             
-            # 将字典转换为JSON字符�?
+            # Convert dictionary to JSON string
             param_json = json.dumps(param) if param else None
             response_json = json.dumps(response_context) if response_context else None
             
-            # 使用 UTC+8 时区时间（北京时间），转换为 naive datetime 存储
+            # Use UTC+8 timezone (Beijing time), convert to naive datetime for storage
             beijing_tz = timezone(timedelta(hours=8))
             current_time = datetime.now(beijing_tz).replace(tzinfo=None)
             
@@ -204,5 +204,4 @@ class BinanceTradeLogsDatabase:
             )
         except Exception as e:
             logger.error(f"[BinanceTradeLogs] Failed to add binance trade log: {e}")
-            # 不抛出异常，避免影响主流�?
-
+            # Don't throw exception, avoid affecting main flow

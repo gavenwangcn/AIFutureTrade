@@ -4,8 +4,8 @@ eventlet.monkey_patch()
 
 """
 Flask application for AI Futures Trading System - Trading Service
-交易服务：只保留交易循环执行功能，其他API已迁移到Java后端
-启动时立即加载交易循环，不等待请求
+Trading service: Only retains trading loop execution functionality, other APIs have been migrated to Java backend
+Load trading loop immediately on startup, do not wait for requests
 """
 from flask import Flask, request, jsonify
 from flask_cors import CORS
@@ -29,7 +29,7 @@ import sys
 # ============ Application Initialization ============
 
 app = Flask(__name__)
-# CORS配置：允许前端服务访问
+# CORS configuration: Allow frontend service access
 CORS(app, resources={
     r"/api/*": {
         "origins": "*",
@@ -43,7 +43,7 @@ CORS(app, resources={
 # ============ Logging Configuration ============
 
 def get_log_level():
-    """从配置获取日志级别，默认为 INFO"""
+    """Get log level from configuration, default is INFO"""
     log_level_str = getattr(app_config, 'LOG_LEVEL', 'INFO').upper()
     log_level_map = {
         'DEBUG': logging.DEBUG,
@@ -73,10 +73,10 @@ logger = logging.getLogger(__name__)
 db = Database()
 
 # Initialize database tables immediately when the application starts
-# 使用统一的初始化函数，确保所有表都被正确创建
+# Use unified initialization function to ensure all tables are created correctly
 with app.app_context():
     from trade.common.database.database_init import init_all_database_tables
-    # 使用 Database 的 command 方法作为初始化函数
+    # Use Database's command method as initialization function
     init_all_database_tables(db.command)
 logger.info("Database tables initialized")
 
@@ -94,30 +94,30 @@ TRADE_FEE_RATE = getattr(app_config, 'TRADE_FEE_RATE', 0.002)
 
 def check_strategy_exists(model_id: int, strategy_type: str):
     """
-    检查模型是否存在指定类型的策略配置
+    Check if model has strategy configuration of specified type
     
     Args:
-        model_id: 模型ID（整数）
-        strategy_type: 策略类型，'buy' 或 'sell'
+        model_id: Model ID (integer)
+        strategy_type: Strategy type, 'buy' or 'sell'
     
     Returns:
-        tuple[bool, str]: (是否存在策略, 错误消息)
+        tuple[bool, str]: (Whether strategy exists, error message)
     """
     try:
         model = models_db.get_model(model_id)
         if not model:
             return False, f"Model {model_id} not found"
         
-        # 只对 trade_type='strategy' 的模型进行策略检查
+        # Only check strategy for models with trade_type='strategy'
         trade_type = model.get('trade_type', 'strategy')
         if trade_type != 'strategy':
-            # 非策略类型的模型不需要检查策略
+            # Non-strategy type models don't need strategy check
             return True, None
         
-        # 获取模型ID映射
+        # Get model ID mapping
         model_mapping = models_db._get_model_id_mapping()
         
-        # 查询策略
+        # Query strategy
         strategies = strategys_db.get_model_strategies_by_int_id(
             model_id, 
             strategy_type, 
@@ -141,15 +141,15 @@ def init_trading_engine_for_model(model_id: int):
         logger.warning(f"Model {model_id} not found, cannot initialize trading engine")
         return None, 'Model not found'
 
-    # 获取trade_type，默认为'strategy'
+    # Get trade_type, default is 'strategy'
     trade_type = model.get('trade_type', 'strategy')
     if trade_type not in ['ai', 'strategy']:
         logger.warning(f"Model {model_id} has invalid trade_type '{trade_type}', defaulting to 'strategy'")
         trade_type = 'strategy'
     
-    # 根据trade_type创建对应的trader
+    # Create corresponding trader based on trade_type
     if trade_type == 'ai':
-        # 使用AI交易，需要provider信息
+        # Use AI trading, need provider information
         provider = providers_db.get_provider(model['provider_id'])
         if not provider:
             logger.warning(f"Provider not found for model {model_id}, cannot initialize AITrader")
@@ -163,10 +163,10 @@ def init_trading_engine_for_model(model_id: int):
             api_url=provider['api_url'],
             model_name=model['model_name'],
             db=db,
-            market_fetcher=market_fetcher  # 传递market_fetcher用于计算指标
+            market_fetcher=market_fetcher  # Pass market_fetcher for indicator calculation
         )
     else:
-        # 使用策略交易（默认）
+        # Use strategy trading (default)
         logger.info(f"Creating StrategyTrader instance for model {model_id}")
         
         trader = StrategyTrader(

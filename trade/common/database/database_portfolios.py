@@ -1,10 +1,10 @@
 """
-投资组合数据表操作模�?- portfolios �?
+Portfolio database table operation module - portfolios table
 
-本模块提供投资组合数据的增删改查操作�?
+This module provides CRUD operations for portfolio data.
 
-主要组件�?
-- PortfoliosDatabase: 投资组合数据操作�?
+Main components:
+- PortfoliosDatabase: Portfolio data operations
 """
 
 import logging
@@ -21,17 +21,17 @@ logger = logging.getLogger(__name__)
 
 class PortfoliosDatabase:
     """
-    投资组合数据操作�?
+    Portfolio data operations
     
-    封装portfolios表的所有数据库操作�?
+    Encapsulates all database operations for the portfolios table.
     """
     
     def __init__(self, pool=None):
         """
-        初始化投资组合数据库操作�?
+        Initialize portfolio database operations
         
         Args:
-            pool: 可选的数据库连接池，如果不提供则创建新的连接池
+            pool: Optional database connection pool, if not provided, create a new connection pool
         """
         if pool is None:
             self._pool = create_pooled_db(
@@ -83,27 +83,27 @@ class PortfoliosDatabase:
                     'valueerror'
                 ]) or (isinstance(e, pymysql.err.MySQLError) and e.args[0] == 1213)
                 
-                # 如果已获取连接，需要处理连接（关闭�?
-                # 无论什么异常，都要确保连接被正确释放，防止连接泄露
+                # If connection has been acquired, need to handle connection (close it)
+                # Regardless of exception type, ensure connection is properly released to prevent connection leak
                 if connection_acquired and conn:
                     try:
-                        # 回滚事务
+                        # Rollback transaction
                         try:
                             conn.rollback()
                         except Exception as rollback_error:
                             logger.debug(f"[Portfolios] Error rolling back transaction: {rollback_error}")
                         
-                        # 对于所有错误，关闭连接，DBUtils会自动处理损坏的连接
+                        # For all errors, close connection, DBUtils will automatically handle damaged connections
                         try:
                             conn.close()
                         except Exception as close_error:
                             logger.debug(f"[Portfolios] Error closing connection: {close_error}")
                         finally:
-                            # 确保连接引用被清除，即使关闭失败也要标记为已处理
+                            # Ensure connection reference is cleared, mark as processed even if close fails
                             conn = None
                     except Exception as close_error:
                         logger.error(f"[Portfolios] Critical error closing failed connection: {close_error}")
-                        # 即使发生异常，也要清除连接引�?
+                        # Even if exception occurs, clear connection reference
                         conn = None
                 
                 if attempt < max_retries - 1:
@@ -220,19 +220,19 @@ class PortfoliosDatabase:
         Update position
         
         Args:
-            model_id: 模型ID
-            symbol: 交易对符号（如BTCUSDT�?
-            position_amt: 持仓数量
-            avg_price: 平均价格
-            leverage: 杠杆倍数
-            position_side: 持仓方向�?LONG'（多）或'SHORT'（空�?
-            initial_margin: 持仓所需起始保证金（基于最新标记价格）
-            unrealized_profit: 持仓未实现盈�?
-            model_id_mapping: 可选的模型ID映射字典
+            model_id: Model ID
+            symbol: Trading pair symbol (e.g., BTCUSDT)
+            position_amt: Position amount
+            avg_price: Average price
+            leverage: Leverage multiplier
+            position_side: Position direction, 'LONG' (long) or 'SHORT' (short)
+            initial_margin: Initial margin required for position (based on latest mark price)
+            unrealized_profit: Unrealized profit of position
+            model_id_mapping: Optional model ID mapping dictionary
         """
         try:
             if model_id_mapping is None:
-                # 如果没有提供映射，需要从数据库查�?
+                # If mapping not provided, need to query from database
                 rows = self.query(f"SELECT id FROM models")
                 model_id_mapping = {}
                 for row in rows:
@@ -245,22 +245,22 @@ class PortfoliosDatabase:
                 logger.warning(f"[Portfolios] Model {model_id} not found for position update")
                 return
             
-            # 规范化position_side
+            # Normalize position_side
             position_side_upper = position_side.upper()
             if position_side_upper not in ['LONG', 'SHORT']:
                 raise ValueError(f"position_side must be 'LONG' or 'SHORT', got: {position_side}")
             
-            # 使用 INSERT ... ON DUPLICATE KEY UPDATE 实现 UPSERT 操作
-            # 如果记录已存在（相同�?model_id, symbol, position_side），则更新；否则插入新记�?
-            # 使用 UTC+8 时区时间（北京时间），转换为 naive datetime 存储
+            # Use INSERT ... ON DUPLICATE KEY UPDATE to implement UPSERT operation
+            # If record exists (same model_id, symbol, position_side), update; otherwise insert new record
+            # Use UTC+8 timezone (Beijing time), convert to naive datetime for storage
             beijing_tz = timezone(timedelta(hours=8))
             current_time = datetime.now(beijing_tz).replace(tzinfo=None)
             
             normalized_symbol = symbol.upper()
             position_id = self._generate_id()
             
-            # 使用 INSERT ... ON DUPLICATE KEY UPDATE 实现原子性的 UPSERT 操作
-            # 当唯一�?(model_id, symbol, position_side) 冲突时，更新现有记录
+            # Use INSERT ... ON DUPLICATE KEY UPDATE to implement atomic UPSERT operation
+            # When unique key (model_id, symbol, position_side) conflicts, update existing record
             def _execute_upsert(conn):
                 cursor = conn.cursor()
                 try:
@@ -281,7 +281,7 @@ class PortfoliosDatabase:
                         position_id, model_uuid, normalized_symbol, position_amt, avg_price, 
                         leverage, position_side_upper, initial_margin, unrealized_profit, current_time
                     ))
-                    # 检查是插入还是更新
+                    # Check if insert or update
                     if cursor.rowcount == 1:
                         logger.debug(f"[Portfolios] Position inserted: model_id={model_uuid}, symbol={normalized_symbol}, position_side={position_side_upper}, id={position_id}")
                     elif cursor.rowcount == 2:
@@ -302,14 +302,14 @@ class PortfoliosDatabase:
         Get portfolio with positions and P&L
         
         Args:
-            model_id: 模型ID
-            current_prices: 当前价格字典
-            model_id_mapping: 可选的模型ID映射字典
-            get_model_func: 可选的获取模型信息的函�?
-            trades_table: 可选的交易表名
+            model_id: Model ID
+            current_prices: Current price dictionary
+            model_id_mapping: Optional model ID mapping dictionary
+            get_model_func: Optional function to get model information
+            trades_table: Optional trades table name
         
         Returns:
-            投资组合信息字典
+            Portfolio information dictionary
         """
         try:
             if model_id_mapping is None:
@@ -335,7 +335,7 @@ class PortfoliosDatabase:
                     'unrealized_pnl': 0
                 }
             
-            # 获取持仓
+            # Get positions
             rows = self.query(f"""
                 SELECT * FROM {self.portfolios_table}
                 WHERE model_id = '{model_uuid}' AND position_amt != 0
@@ -344,11 +344,11 @@ class PortfoliosDatabase:
                       "position_side", "initial_margin", "unrealized_profit", "updated_at"]
             positions = self._rows_to_dicts(rows, columns)
             
-            # 获取初始资金
+            # Get initial capital
             if get_model_func:
                 model = get_model_func(model_id)
             else:
-                # 如果没有提供函数，从数据库查�?
+                # If function not provided, query from database
                 from .database_models import ModelsDatabase
                 models_db = ModelsDatabase(pool=self._pool)
                 model = models_db.get_model(model_id)
@@ -368,7 +368,7 @@ class PortfoliosDatabase:
                 }
             initial_capital = model['initial_capital']
             
-            # 计算已实现盈亏（需要从trades表查询）
+            # Calculate realized P&L (need to query from trades table)
             if trades_table:
                 pnl_rows = self.query(f"""
                     SELECT COALESCE(SUM(pnl), 0) as total_pnl 
@@ -377,7 +377,7 @@ class PortfoliosDatabase:
                 """)
                 realized_pnl = float(pnl_rows[0][0]) if pnl_rows and pnl_rows[0][0] is not None else 0.0
             else:
-                # 如果没有提供trades_table，从trades表查�?
+                # If trades_table not provided, query from trades table
                 from .database_init import TRADES_TABLE
                 pnl_rows = self.query(f"""
                     SELECT COALESCE(SUM(pnl), 0) as total_pnl 
@@ -386,10 +386,10 @@ class PortfoliosDatabase:
                 """)
                 realized_pnl = float(pnl_rows[0][0]) if pnl_rows and pnl_rows[0][0] is not None else 0.0
             
-            # 计算已用保证金（优先使用initial_margin字段，如果没有则使用传统计算方式�?
+            # Calculate margin used (prefer initial_margin field, if not available use traditional calculation)
             margin_used = sum([p.get('initial_margin', 0) or (abs(p['position_amt']) * p['avg_price'] / p['leverage']) for p in positions])
             
-            # 计算未实现盈亏（优先使用unrealized_profit字段，如果没有则计算�?
+            # Calculate unrealized P&L (prefer unrealized_profit field, if not available calculate)
             unrealized_pnl = 0
             if current_prices:
                 for pos in positions:
@@ -397,14 +397,14 @@ class PortfoliosDatabase:
                     if symbol in current_prices:
                         current_price = current_prices[symbol]
                         entry_price = pos['avg_price']
-                        position_amt = abs(pos['position_amt'])  # 使用绝对�?
+                        position_amt = abs(pos['position_amt'])  # Use absolute value
                         pos['current_price'] = current_price
                         
-                        # 优先使用数据库中的unrealized_profit字段
+                        # Prefer unrealized_profit field from database
                         if pos.get('unrealized_profit') is not None and pos['unrealized_profit'] != 0:
                             pos_pnl = pos['unrealized_profit']
                         else:
-                            # 如果没有，则计算
+                            # If not available, calculate
                             if pos['position_side'] == 'LONG':
                                 pos_pnl = (current_price - entry_price) * position_amt
                             else:  # SHORT
@@ -414,13 +414,13 @@ class PortfoliosDatabase:
                         unrealized_pnl += pos_pnl
                     else:
                         pos['current_price'] = None
-                        # 使用数据库中的unrealized_profit字段
+                        # Use unrealized_profit field from database
                         pos['pnl'] = pos.get('unrealized_profit', 0)
                         unrealized_pnl += pos.get('unrealized_profit', 0)
             else:
                 for pos in positions:
                     pos['current_price'] = None
-                    # 使用数据库中的unrealized_profit字段
+                    # Use unrealized_profit field from database
                     pos['pnl'] = pos.get('unrealized_profit', 0)
                     unrealized_pnl += pos.get('unrealized_profit', 0)
             
@@ -449,10 +449,10 @@ class PortfoliosDatabase:
         Close position and clean up futures universe if unused
         
         Args:
-            model_id: 模型ID
-            symbol: 交易对符号（如BTCUSDT�?
-            position_side: 持仓方向�?LONG'（多）或'SHORT'（空�?
-            model_id_mapping: 可选的模型ID映射字典
+            model_id: Model ID
+            symbol: Trading pair symbol (e.g., BTCUSDT)
+            position_side: Position direction, 'LONG' (long) or 'SHORT' (short)
+            model_id_mapping: Optional model ID mapping dictionary
         """
         try:
             if model_id_mapping is None:
@@ -472,18 +472,18 @@ class PortfoliosDatabase:
             if position_side_upper not in ['LONG', 'SHORT']:
                 raise ValueError(f"position_side must be 'LONG' or 'SHORT', got: {position_side}")
             
-            # 使用 MySQL �?DELETE FROM 语法
+            # Use MySQL DELETE FROM syntax
             delete_sql = f"DELETE FROM {self.portfolios_table} WHERE model_id = '{model_uuid}' AND symbol = '{normalized_symbol}' AND position_side = '{position_side_upper}'"
             logger.debug(f"[Portfolios] Executing SQL: {delete_sql}")
             self.command(delete_sql)
             
-            # 检查是否还有其他持�?
+            # Check if there are other positions
             remaining_rows = self.query(f"""
                 SELECT COUNT(*) as cnt FROM {self.portfolios_table}
                 WHERE symbol = '{normalized_symbol}' AND position_amt != 0
             """)
             if remaining_rows and remaining_rows[0][0] == 0:
-                # 删除 futures 表中的记录（使用 MySQL �?DELETE FROM 语法�?
+                # Delete record from futures table (use MySQL DELETE FROM syntax)
                 delete_futures_sql = f"DELETE FROM {self.futures_table} WHERE symbol = '{normalized_symbol}'"
                 logger.debug(f"[Portfolios] Executing SQL: {delete_futures_sql}")
                 self.command(delete_futures_sql)
@@ -493,17 +493,17 @@ class PortfoliosDatabase:
     
     def get_model_held_symbols(self, model_id: int, model_id_mapping: Dict[int, str] = None) -> List[str]:
         """
-        获取模型当前持仓的期货合约symbol列表（去重）
+        Get list of futures contract symbols currently held by model (deduplicated)
         
-        从portfolios表中通过关联model_id获取当前有持仓的symbol（position_amt != 0），
-        用于卖出服务获取市场状态�?
+        Get symbols with positions (position_amt != 0) from portfolios table by associating model_id,
+        used by sell service to get market status.
         
         Args:
-            model_id: 模型ID
-            model_id_mapping: 可选的模型ID映射字典
+            model_id: Model ID
+            model_id_mapping: Optional model ID mapping dictionary
         
         Returns:
-            List[str]: 当前持仓的合约symbol列表（如 ['BTC', 'ETH']�?
+            List[str]: List of contract symbols currently held (e.g., ['BTC', 'ETH'])
         """
         try:
             if model_id_mapping is None:
@@ -516,8 +516,8 @@ class PortfoliosDatabase:
                 logger.warning(f"[Portfolios] Model {model_id} UUID not found")
                 return []
             
-            # 从portfolios表获取当前模型有持仓的去重symbol合约（position_amt != 0�?
-            # 使用参数化查询，避免SQL注入
+            # Get deduplicated symbol contracts with positions from portfolios table (position_amt != 0)
+            # Use parameterized query to avoid SQL injection
             rows = self.query(f"""
                 SELECT DISTINCT symbol
                 FROM `{self.portfolios_table}`
@@ -530,4 +530,3 @@ class PortfoliosDatabase:
         except Exception as e:
             logger.error(f"[Portfolios] Failed to get model held symbols for model {model_id}: {e}")
             return []
-

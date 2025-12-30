@@ -1,10 +1,10 @@
 """
-API提供商数据表操作模块 - providers �?
+API provider database table operation module - providers table
 
-本模块提供API提供商数据的增删改查操作�?
+This module provides CRUD operations for API provider data.
 
-主要组件�?
-- ProvidersDatabase: API提供商数据操作类
+Main components:
+- ProvidersDatabase: API provider data operations class
 """
 
 import logging
@@ -19,17 +19,17 @@ logger = logging.getLogger(__name__)
 
 class ProvidersDatabase:
     """
-    API提供商数据操作类
+    API provider data operations class
     
-    封装providers表的所有数据库操作�?
+    Encapsulates all database operations for the providers table.
     """
     
     def __init__(self, pool=None):
         """
-        初始化API提供商数据库操作�?
+        Initialize API provider database operations
         
         Args:
-            pool: 可选的数据库连接池，如果不提供则创建新的连接池
+            pool: Optional database connection pool, if not provided, create a new connection pool
         """
         if pool is None:
             self._pool = create_pooled_db(
@@ -80,27 +80,27 @@ class ProvidersDatabase:
                     'valueerror'
                 ]) or (isinstance(e, pymysql.err.MySQLError) and e.args[0] == 1213)
                 
-                # 如果已获取连接，需要处理连接（关闭�?
-                # 无论什么异常，都要确保连接被正确释放，防止连接泄露
+                # If connection has been acquired, need to handle connection (close it)
+                # Regardless of exception type, ensure connection is properly released to prevent connection leak
                 if connection_acquired and conn:
                     try:
-                        # 回滚事务
+                        # Rollback transaction
                         try:
                             conn.rollback()
                         except Exception as rollback_error:
                             logger.debug(f"[Providers] Error rolling back transaction: {rollback_error}")
                         
-                        # 对于所有错误，关闭连接，DBUtils会自动处理损坏的连接
+                        # For all errors, close connection, DBUtils will automatically handle damaged connections
                         try:
                             conn.close()
                         except Exception as close_error:
                             logger.debug(f"[Providers] Error closing connection: {close_error}")
                         finally:
-                            # 确保连接引用被清除，即使关闭失败也要标记为已处理
+                            # Ensure connection reference is cleared, mark as processed even if close fails
                             conn = None
                     except Exception as close_error:
                         logger.error(f"[Providers] Critical error closing failed connection: {close_error}")
-                        # 即使发生异常，也要清除连接引�?
+                        # Even if exception occurs, clear connection reference
                         conn = None
                 
                 if attempt < max_retries - 1:
@@ -179,30 +179,29 @@ class ProvidersDatabase:
         """
         Get provider information
         
-        注意：provider_id 参数类型�?int（兼容性），但实际查询时需要使�?String
-        这里需要先查找匹配�?provider
+        Note: provider_id parameter type is int (for compatibility), but actual query needs to use String
+        Here we need to first find matching provider
         
         Args:
-            provider_id: 提供商ID（整数）
+            provider_id: Provider ID (integer)
         
         Returns:
-            提供商信息字典，如果不存在则返回None
+            Provider information dictionary, returns None if not found
         """
         try:
-            # 由于原接口使�?int ID，我们需要查找所�?providers 并匹�?
-            # 这是一个兼容性处理，实际应该使用 UUID
+            # Since original interface uses int ID, we need to find all providers and match
+            # This is a compatibility handling, should actually use UUID
             rows = self.query(f"SELECT * FROM {self.providers_table} ORDER BY created_at DESC")
             columns = ["id", "name", "api_url", "api_key", "models", "provider_type", "created_at"]
             
             for row in rows:
                 row_dict = self._row_to_dict(row, columns)
-                # 检�?hash 是否匹配
+                # Check if hash matches
                 if self._uuid_to_int(row_dict['id']) == provider_id:
-                    # 转换 ID �?int 以保持兼容�?
+                    # Convert ID to int to maintain compatibility
                     row_dict['id'] = provider_id
                     return row_dict
             return None
         except Exception as e:
             logger.error(f"[Providers] Failed to get provider {provider_id}: {e}")
             return None
-

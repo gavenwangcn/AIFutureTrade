@@ -1,10 +1,10 @@
 """
-期货合约配置数据表操作模�?- futures �?
+Futures contract configuration database table operation module - futures table
 
-本模块提供期货合约配置数据的增删改查操作�?
+This module provides CRUD operations for futures contract configuration data.
 
-主要组件�?
-- FuturesDatabase: 期货合约配置数据操作�?
+Main components:
+- FuturesDatabase: Futures contract configuration data operations
 """
 
 import logging
@@ -20,17 +20,17 @@ logger = logging.getLogger(__name__)
 
 class FuturesDatabase:
     """
-    期货合约配置数据操作�?
+    Futures contract configuration data operations
     
-    封装futures表的所有数据库操作�?
+    Encapsulates all database operations for the futures table.
     """
     
     def __init__(self, pool=None):
         """
-        初始化期货合约配置数据库操作�?
+        Initialize futures contract configuration database operations
         
         Args:
-            pool: 可选的数据库连接池，如果不提供则创建新的连接池
+            pool: Optional database connection pool, if not provided, create a new connection pool
         """
         if pool is None:
             self._pool = create_pooled_db(
@@ -83,27 +83,27 @@ class FuturesDatabase:
                     'valueerror'
                 ]) or (isinstance(e, pymysql.err.MySQLError) and e.args[0] == 1213)
                 
-                # 如果已获取连接，需要处理连接（关闭�?
-                # 无论什么异常，都要确保连接被正确释放，防止连接泄露
+                # If connection has been acquired, need to handle connection (close it)
+                # Regardless of exception type, ensure connection is properly released to prevent connection leak
                 if connection_acquired and conn:
                     try:
-                        # 回滚事务
+                        # Rollback transaction
                         try:
                             conn.rollback()
                         except Exception as rollback_error:
                             logger.debug(f"[Futures] Error rolling back transaction: {rollback_error}")
                         
-                        # 对于所有错误，关闭连接，DBUtils会自动处理损坏的连接
+                        # For all errors, close connection, DBUtils will automatically handle damaged connections
                         try:
                             conn.close()
                         except Exception as close_error:
                             logger.debug(f"[Futures] Error closing connection: {close_error}")
                         finally:
-                            # 确保连接引用被清除，即使关闭失败也要标记为已处理
+                            # Ensure connection reference is cleared, mark as processed even if close fails
                             conn = None
                     except Exception as close_error:
                         logger.error(f"[Futures] Critical error closing failed connection: {close_error}")
-                        # 即使发生异常，也要清除连接引�?
+                        # Even if exception occurs, clear connection reference
                         conn = None
                 
                 if attempt < max_retries - 1:
@@ -217,7 +217,7 @@ class FuturesDatabase:
         Get future configurations
         
         Returns:
-            List[Dict]: 期货配置列表，每个元素包含symbol、contract_symbol、name、exchange、link、sort_order字段
+            List[Dict]: Futures configuration list, each element contains symbol, contract_symbol, name, exchange, link, sort_order fields
         """
         try:
             rows = self.query(f"""
@@ -233,19 +233,19 @@ class FuturesDatabase:
     
     def sync_model_futures_from_portfolio(self, model_id: int) -> bool:
         """
-        从portfolios表同步去重的future信息到model_future�?
+        Sync deduplicated future information from portfolios table to model_futures table
         
-        此方法会�?
-        1. 从portfolios表获取当前模型所有交易过的去重future合约（包括已平仓的）
-        2. 将这些合约信息同步到model_futures表（包括增、删对比操作�?
-        3. 对于新增的合约，从全局futures表获取完整信�?
-        4. 对于不再在portfolios表中出现的合约，从model_futures表移�?
+        This method will:
+        1. Get all distinct future contracts traded by the current model from portfolios table (including closed positions)
+        2. Sync these contract information to model_futures table (including add and delete comparison operations)
+        3. For newly added contracts, get complete information from global futures table
+        4. For contracts no longer appearing in portfolios table, remove from model_futures table
         
         Args:
-            model_id: 模型ID
+            model_id: Model ID
         
         Returns:
-            bool: 是否同步成功
+            bool: Whether sync was successful
         """
         try:
             logger.info(f"[Futures] Starting sync_model_futures_from_portfolio for model {model_id}")
@@ -258,8 +258,8 @@ class FuturesDatabase:
                 logger.error(f"[Futures] Model {model_id} not found in mapping")
                 return False
             
-            # 1. 从portfolios表获取当前模型所有交易过的去重symbol合约（包括已平仓的）
-            # 使用参数化查询，避免SQL注入
+            # 1. Get all distinct symbol contracts traded by current model from portfolios table (including closed positions)
+            # Use parameterized query to avoid SQL injection
             rows = self.query(f"""
                 SELECT DISTINCT symbol
                 FROM `{self.portfolios_table}`
@@ -270,7 +270,7 @@ class FuturesDatabase:
             portfolio_symbols = [row[0] for row in rows] if rows else []
             logger.info(f"[Futures] Found {len(portfolio_symbols)} distinct symbols in portfolios table for model {model_id}: {portfolio_symbols}")
             
-            # 2. 获取当前model_futures表中的合约列�?
+            # 2. Get current contract list in model_futures table
             rows = self.query(f"""
                 SELECT id, model_id, symbol
                 FROM `{self.model_futures_table}`
@@ -288,7 +288,7 @@ class FuturesDatabase:
             current_symbols = {future['symbol']: future for future in current_model_futures}
             logger.info(f"[Futures] Found {len(current_symbols)} symbols in model_futures table for model {model_id}: {list(current_symbols.keys())}")
             
-            # 3. 确定需要添加和删除的合约（对比操作�?
+            # 3. Determine contracts to add and delete (comparison operation)
             symbols_to_add = set(portfolio_symbols) - set(current_symbols.keys())
             symbols_to_delete = set(current_symbols.keys()) - set(portfolio_symbols)
             
@@ -296,22 +296,22 @@ class FuturesDatabase:
                        f"to_add={len(symbols_to_add)} {list(symbols_to_add)}, "
                        f"to_delete={len(symbols_to_delete)} {list(symbols_to_delete)}")
             
-            # 4. 添加新合约到model_futures�?
+            # 4. Add new contracts to model_futures table
             if symbols_to_add:
                 logger.info(f"[Futures] Adding {len(symbols_to_add)} new futures to model_futures table for model {model_id}")
                 
-                # 从全局futures表获取合约的完整信息
-                # 使用参数化查询，处理单个和多个元素的情况
+                # Get complete contract information from global futures table
+                # Use parameterized query, handle single and multiple element cases
                 symbols_list = list(symbols_to_add)
                 if len(symbols_list) == 1:
-                    # 单个元素时使�?= 而不�?IN
+                    # Use = instead of IN for single element
                     futures_info = self.query(f"""
                         SELECT symbol, contract_symbol, name, exchange, link
                         FROM `{self.futures_table}`
                         WHERE symbol = %s
                     """, (symbols_list[0],))
                 else:
-                    # 多个元素时使�?IN，使用参数化查询
+                    # Use IN for multiple elements, use parameterized query
                     placeholders = ', '.join(['%s'] * len(symbols_list))
                     futures_info = self.query(f"""
                         SELECT symbol, contract_symbol, name, exchange, link
@@ -319,7 +319,7 @@ class FuturesDatabase:
                         WHERE symbol IN ({placeholders})
                     """, tuple(symbols_list))
                 
-                # 构建futures字典
+                # Build futures dictionary
                 futures_dict = {}
                 for row in futures_info:
                     futures_dict[row[0]] = {
@@ -330,10 +330,10 @@ class FuturesDatabase:
                         'link': row[4] or ''
                     }
                 
-                # 为每个需要添加的合约生成记录
+                # Generate records for each contract to add
                 added_count = 0
                 for symbol in symbols_to_add:
-                    # 如果全局表中没有该合约信息，创建默认信息
+                    # If contract information not found in global table, create default information
                     if symbol not in futures_dict:
                         futures_dict[symbol] = {
                             'symbol': symbol,
@@ -344,10 +344,10 @@ class FuturesDatabase:
                         }
                         logger.warning(f"[Futures] Future {symbol} not found in global futures table, using default values")
                     
-                    # 生成唯一ID
+                    # Generate unique ID
                     future_id = self._generate_id()
                     
-                    # 插入到model_futures�?
+                    # Insert into model_futures table
                     try:
                         self.insert_rows(
                             self.model_futures_table,
@@ -360,18 +360,18 @@ class FuturesDatabase:
                         logger.debug(f"[Futures] Added future {symbol} to model {model_id} in model_futures table")
                     except Exception as insert_error:
                         logger.error(f"[Futures] Failed to insert future {symbol} for model {model_id}: {insert_error}")
-                        # 继续处理其他合约，不中断整个流程
+                        # Continue processing other contracts, don't interrupt entire process
                         continue
                 
                 logger.info(f"[Futures] Successfully added {added_count}/{len(symbols_to_add)} futures to model_futures table for model {model_id}")
             else:
                 logger.info(f"[Futures] No new futures to add for model {model_id}")
             
-            # 5. 从model_futures表删除不再在portfolios表中出现的合�?
+            # 5. Delete contracts from model_futures table that no longer appear in portfolios table
             if symbols_to_delete:
                 logger.info(f"[Futures] Deleting {len(symbols_to_delete)} futures from model_futures table for model {model_id}")
                 
-                # 使用参数化查询删�?
+                # Use parameterized query to delete
                 for symbol in symbols_to_delete:
                     try:
                         self.command(f"""
@@ -381,7 +381,7 @@ class FuturesDatabase:
                         logger.debug(f"[Futures] Deleted future {symbol} from model {model_id} in model_futures table")
                     except Exception as delete_error:
                         logger.error(f"[Futures] Failed to delete future {symbol} for model {model_id}: {delete_error}")
-                        # 继续处理其他合约，不中断整个流程
+                        # Continue processing other contracts, don't interrupt entire process
                         continue
                 
                 logger.info(f"[Futures] Successfully deleted {len(symbols_to_delete)} futures from model_futures table for model {model_id}")
@@ -397,4 +397,3 @@ class FuturesDatabase:
             import traceback
             logger.error(f"[Futures] Error stack: {traceback.format_exc()}")
             return False
-
