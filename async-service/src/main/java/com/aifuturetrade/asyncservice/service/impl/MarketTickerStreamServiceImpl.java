@@ -24,7 +24,6 @@ import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
-import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
@@ -204,16 +203,16 @@ public class MarketTickerStreamServiceImpl implements MarketTickerStreamService 
     }
     
     /**
-     * 处理WebSocket流数据
+     * 处理WebSocket流数据 - 优化版本，遵循SDK最佳实践
      */
     private void processStream(Integer runSeconds) {
         long startTime = System.currentTimeMillis();
         long messageCount = 0;
-        long lastMessageTime = System.currentTimeMillis();
         
         try {
             log.info("[MarketTickerStream] 📊 开始处理WebSocket流数据...");
             
+            // SDK设计理念：使用take()进行无限循环获取数据
             while (running.get()) {
                 // 检查运行时长限制
                 if (runSeconds != null) {
@@ -230,18 +229,10 @@ public class MarketTickerStreamServiceImpl implements MarketTickerStreamService 
                     break;
                 }
                 
-                // 检查消息超时
-                long noMessageDuration = (System.currentTimeMillis() - lastMessageTime) / 1000;
-                if (noMessageDuration >= messageTimeout) {
-                    log.warn("[MarketTickerStream] ⏰ 消息超时: {} 秒内没有收到任何消息，重新连接...", messageTimeout);
-                    break;
-                }
-                
-                // 从队列中获取ticker数据（使用take()方法）
+                // 从队列中获取ticker数据（遵循SDK最佳实践）
                 try {
                     AllMarketTickersStreamsResponse response = streamQueue.take();
                     
-                    lastMessageTime = System.currentTimeMillis();
                     messageCount++;
                     if (messageCount % 100 == 0) {
                         log.info("[MarketTickerStream] 📈 已处理 {} 条消息", messageCount);
