@@ -152,8 +152,8 @@ public class MarketTickerStreamTestServiceImpl implements MarketTickerStreamTest
             response = getApi().allMarketTickersStreams(allMarketTickersStreamsRequest);
             log.info("[MarketTickerStreamTestImpl] [优化模式] 流响应获取成功: {}", response != null ? "响应存在" : "响应为空");
             
-            // ===== 启动处理线程 - SDK示例方式 =====
-            log.info("[MarketTickerStreamTestImpl] [SDK示例模式] 启动流数据处理线程...");
+            // ===== 启动处理线程 - MarketTickerStreamServiceImpl方式 =====
+            log.info("[MarketTickerStreamTestImpl] [优化模式] 启动流数据处理线程...");
             streamExecutor = Executors.newSingleThreadExecutor(r -> {
                 Thread t = new Thread(r, "MarketTickerTestStream");
                 t.setDaemon(true);
@@ -162,20 +162,15 @@ public class MarketTickerStreamTestServiceImpl implements MarketTickerStreamTest
             
             streamExecutor.submit(() -> {
                 try {
-                    // ===== 完全按照SDK示例的while循环处理数据 =====
-                    // SDK示例代码：
-                    // while (true) {
-                    //     System.out.println(response.take());
-                    // }
-                    
-                    log.info("[MarketTickerStreamTestImpl] [SDK示例模式] 开始进入数据处理循环...");
-                    log.info("[MarketTickerStreamTestImpl] [SDK示例模式] 等待接收WebSocket消息...");
+                    // ===== 使用MarketTickerStreamServiceImpl方式的while循环处理数据 =====
+                    log.info("[MarketTickerStreamTestImpl] [优化模式] 开始进入数据处理循环...");
+                    log.info("[MarketTickerStreamTestImpl] [优化模式] 等待接收WebSocket消息...");
                     int messageCount = 0;
                     long startTime = System.currentTimeMillis();
                     
                     while (running.get()) {
                         try {
-                            // 使用 take() 阻塞等待数据，这是SDK示例的标准方式
+                            // 使用 take() 阻塞等待数据
                             AllMarketTickersStreamsResponse tickerResponse = response.take();
                             
                             messageCount++;
@@ -267,11 +262,11 @@ public class MarketTickerStreamTestServiceImpl implements MarketTickerStreamTest
                             }
                             
                         } catch (InterruptedException e) {
-                            log.info("[MarketTickerStreamTestImpl] 🛑 [SDK示例模式] 流处理被中断");
+                            log.info("[MarketTickerStreamTestImpl] 🛑 [优化模式] 流处理被中断");
                             Thread.currentThread().interrupt();
                             break;
                         } catch (Exception e) {
-                            log.error("[MarketTickerStreamTestImpl] ❌ [SDK示例模式] 数据处理异常", e);
+                            log.error("[MarketTickerStreamTestImpl] ❌ [优化模式] 数据处理异常", e);
                             log.error("[MarketTickerStreamTestImpl] ❌ 异常类型: {}, 异常消息: {}", 
                                     e.getClass().getName(), e.getMessage());
                             log.error("[MarketTickerStreamTestImpl] ❌ 异常堆栈:", e);
@@ -279,14 +274,14 @@ public class MarketTickerStreamTestServiceImpl implements MarketTickerStreamTest
                         }
                     }
                     
-                    log.info("[MarketTickerStreamTestImpl] 🏁 [SDK示例模式] 数据处理循环结束，总计处理 {} 条数据", messageCount);
+                    log.info("[MarketTickerStreamTestImpl] 🏁 [优化模式] 数据处理循环结束，总计处理 {} 条数据", messageCount);
                     
                 } catch (Exception e) {
-                    log.error("[MarketTickerStreamTestImpl] ❌ [SDK示例模式] 流处理线程异常", e);
+                    log.error("[MarketTickerStreamTestImpl] ❌ [优化模式] 流处理线程异常", e);
                 }
             });
             
-            log.info("[MarketTickerStreamTestImpl] ✅ [SDK示例模式] 流处理启动成功");
+            log.info("[MarketTickerStreamTestImpl] ✅ [优化模式] 流处理启动成功");
             
         } catch (Exception e) {
             log.error("[MarketTickerStreamTestImpl] ❌ [SDK示例模式] 启动流处理失败", e);
