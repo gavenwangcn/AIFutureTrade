@@ -122,10 +122,10 @@ public class MarketTickerStreamTestServiceImpl implements MarketTickerStreamTest
                 
                 // 设置最大文本消息大小为 200KB（币安市场ticker数据约 68KB，默认 65KB 不够）
                 // 使用 Jetty WebSocketClient 提供的 setMaxTextMessageSize 方法
-                int maxMessageSize = webSocketConfig.getMaxTextMessageSize(); // 从配置文件读取
+                long maxMessageSize = webSocketConfig.getMaxTextMessageSize(); // 从配置文件读取
                 webSocketClient.setMaxTextMessageSize(maxMessageSize);
                 webSocketClient.setMaxBinaryMessageSize(maxMessageSize);
-                //config.setMessageMaxSize(Long.valueOf(maxMessageSize));
+                config.setMessageMaxSize(maxMessageSize);
                 log.info("[MarketTickerStreamTestImpl] [优化模式] ✅ 已通过 setMaxTextMessageSize 方法设置最大消息大小为 {} 字节 ({})", 
                         maxMessageSize, formatBytes(maxMessageSize));
                 
@@ -379,7 +379,7 @@ public class MarketTickerStreamTestServiceImpl implements MarketTickerStreamTest
     /**
      * 格式化字节大小显示
      */
-    private String formatBytes(int bytes) {
+    private String formatBytes(long bytes) {
         if (bytes < 1024) {
             return bytes + "B";
         } else if (bytes < 1024 * 1024) {
