@@ -138,7 +138,7 @@ public class AsyncAgentServiceImpl implements AsyncAgentService {
         
         // 停止各个任务
         log.info("[AsyncAgentServiceImpl] 🛑 正在停止各个任务...");
-        stopMarketTickersTask();
+        //stopMarketTickersTask();
         stopMarketTickersTestTask();  // 停止测试服务
         stopPriceRefreshTask();
         stopMarketSymbolOfflineTask();
@@ -273,7 +273,7 @@ public class AsyncAgentServiceImpl implements AsyncAgentService {
         log.info("[AsyncAgentServiceImpl] 启动所有服务: market_tickers, market_tickers_test, price_refresh, market_symbol_offline");
         
         // 启动所有任务
-        runMarketTickersTask(durationSeconds);
+        //runMarketTickersTask(durationSeconds);
         runMarketTickersTestTask(durationSeconds);  // 启动测试服务
         
         // 价格刷新和Symbol下线服务通过定时任务自动运行

@@ -107,19 +107,30 @@ public class MarketTickerStreamTestServiceImpl implements MarketTickerStreamTest
             try {
                 // ===== 步骤1: 创建WebSocketClientConfiguration - MarketTickerStreamServiceImpl方式 =====
                 log.info("[MarketTickerStreamTestImpl] [优化模式] 步骤1: 创建WebSocketClientConfiguration...");
-                WebSocketClientConfiguration config = DerivativesTradingUsdsFuturesWebSocketStreamsUtil.getClientConfiguration();
+                WebSocketClientConfiguration config = new WebSocketClientConfiguration();
                 log.info("[MarketTickerStreamTestImpl] [优化模式] ✅ WebSocketClientConfiguration创建成功");
                 log.info("[MarketTickerStreamTestImpl] [优化模式] 配置URL: {}", config.getUrl());
+                
+                // ===== 步骤2: 创建并配置WebSocketClient - MarketTickerStreamServiceImpl方式 =====
+                log.info("[MarketTickerStreamTestImpl] [优化模式] 步骤2: 创建并配置WebSocketClient...");
+                WebSocketClient webSocketClient = new WebSocketClient();
+                
                 // 设置最大文本消息大小为 200KB（币安市场ticker数据约 68KB，默认 65KB 不够）
                 // 使用 Jetty WebSocketClient 提供的 setMaxTextMessageSize 方法
                 int maxMessageSize = webSocketConfig.getMaxTextMessageSize(); // 从配置文件读取
-                config.setMessageMaxSize(Long.valueOf(maxMessageSize));
+                webSocketClient.setMaxTextMessageSize(maxMessageSize);
+                webSocketClient.setMaxBinaryMessageSize(maxMessageSize);
                 log.info("[MarketTickerStreamTestImpl] [优化模式] ✅ 已通过 setMaxTextMessageSize 方法设置最大消息大小为 {} 字节 ({})", 
                         maxMessageSize, formatBytes(maxMessageSize));
                 
+                // ===== 步骤3: 创建StreamConnectionWrapper - MarketTickerStreamServiceImpl方式 =====
+                log.info("[MarketTickerStreamTestImpl] [优化模式] 步骤3: 创建StreamConnectionWrapper...");
+                StreamConnectionWrapper connectionWrapper = new StreamConnectionWrapper(config, webSocketClient);
+                log.info("[MarketTickerStreamTestImpl] [优化模式] ✅ StreamConnectionWrapper创建成功");
+                
                 // ===== 步骤4: 使用StreamConnectionInterface构造函数创建WebSocket Streams实例 =====
                 log.info("[MarketTickerStreamTestImpl] [优化模式] 步骤4: 创建DerivativesTradingUsdsFuturesWebSocketStreams实例...");
-                api = new DerivativesTradingUsdsFuturesWebSocketStreams(config);
+                api = new DerivativesTradingUsdsFuturesWebSocketStreams(connectionWrapper);
                 log.info("[MarketTickerStreamTestImpl] [优化模式] ✅ WebSocketStreams实例创建成功: {}", api != null ? "实例存在" : "实例为空");
                 
             } catch (Exception e) {
@@ -265,11 +276,27 @@ public class MarketTickerStreamTestServiceImpl implements MarketTickerStreamTest
                             log.info("[MarketTickerStreamTestImpl] 🛑 [优化模式] 流处理被中断");
                             Thread.currentThread().interrupt();
                             break;
+                        } catch (NullPointerException e) {
+                            log.warn("[MarketTickerStreamTestImpl] ⚠️ [优化模式] 检测到空指针异常，可能收到空消息，跳过处理", e);
+                            // 记录异常信息但不中断流
+                            log.debug("[MarketTickerStreamTestImpl] 异常详情: 消息={}, 堆栈={}", 
+                                    e.getMessage() != null ? e.getMessage() : "null", e.getStackTrace());
                         } catch (Exception e) {
                             log.error("[MarketTickerStreamTestImpl] ❌ [优化模式] 数据处理异常", e);
                             log.error("[MarketTickerStreamTestImpl] ❌ 异常类型: {}, 异常消息: {}", 
                                     e.getClass().getName(), e.getMessage());
                             log.error("[MarketTickerStreamTestImpl] ❌ 异常堆栈:", e);
+                            
+                            // 针对特定异常类型的处理
+                            if (e instanceof com.binance.connector.client.common.ApiException) {
+                                com.binance.connector.client.common.ApiException apiEx = (com.binance.connector.client.common.ApiException) e;
+                                if (apiEx.getMessage() != null && apiEx.getMessage().contains("NullPointerException")) {
+                                    log.warn("[MarketTickerStreamTestImpl] ⚠️ [优化模式] 检测到WebSocket SDK内部空指针异常，继续处理", apiEx);
+                                } else {
+                                    log.error("[MarketTickerStreamTestImpl] ❌ [优化模式] API异常，停止流", apiEx);
+                                    break; // 严重的API异常需要停止流
+                                }
+                            }
                             // 继续处理，不中断流
                         }
                     }
