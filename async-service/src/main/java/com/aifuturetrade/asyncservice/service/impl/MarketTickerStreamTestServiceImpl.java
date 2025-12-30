@@ -107,31 +107,19 @@ public class MarketTickerStreamTestServiceImpl implements MarketTickerStreamTest
             try {
                 // ===== 步骤1: 创建WebSocketClientConfiguration - MarketTickerStreamServiceImpl方式 =====
                 log.info("[MarketTickerStreamTestImpl] [优化模式] 步骤1: 创建WebSocketClientConfiguration...");
-                WebSocketClientConfiguration config = new WebSocketClientConfiguration();
+                WebSocketClientConfiguration config = DerivativesTradingUsdsFuturesWebSocketStreamsUtil.getClientConfiguration();
                 log.info("[MarketTickerStreamTestImpl] [优化模式] ✅ WebSocketClientConfiguration创建成功");
                 log.info("[MarketTickerStreamTestImpl] [优化模式] 配置URL: {}", config.getUrl());
-                
-                // ===== 步骤2: 创建并配置WebSocketClient - MarketTickerStreamServiceImpl方式 =====
-                log.info("[MarketTickerStreamTestImpl] [优化模式] 步骤2: 创建并配置WebSocketClient...");
-                WebSocketClient webSocketClient = new WebSocketClient();
-                
                 // 设置最大文本消息大小为 200KB（币安市场ticker数据约 68KB，默认 65KB 不够）
                 // 使用 Jetty WebSocketClient 提供的 setMaxTextMessageSize 方法
                 int maxMessageSize = webSocketConfig.getMaxTextMessageSize(); // 从配置文件读取
-                webSocketClient.setMaxTextMessageSize(maxMessageSize);
-                webSocketClient.setMaxBinaryMessageSize(maxMessageSize);
                 config.setMessageMaxSize(Long.valueOf(maxMessageSize));
                 log.info("[MarketTickerStreamTestImpl] [优化模式] ✅ 已通过 setMaxTextMessageSize 方法设置最大消息大小为 {} 字节 ({})", 
                         maxMessageSize, formatBytes(maxMessageSize));
                 
-                // ===== 步骤3: 创建StreamConnectionWrapper - MarketTickerStreamServiceImpl方式 =====
-                log.info("[MarketTickerStreamTestImpl] [优化模式] 步骤3: 创建StreamConnectionWrapper...");
-                StreamConnectionWrapper connectionWrapper = new StreamConnectionWrapper(config, webSocketClient);
-                log.info("[MarketTickerStreamTestImpl] [优化模式] ✅ StreamConnectionWrapper创建成功");
-                
                 // ===== 步骤4: 使用StreamConnectionInterface构造函数创建WebSocket Streams实例 =====
                 log.info("[MarketTickerStreamTestImpl] [优化模式] 步骤4: 创建DerivativesTradingUsdsFuturesWebSocketStreams实例...");
-                api = new DerivativesTradingUsdsFuturesWebSocketStreams(connectionWrapper);
+                api = new DerivativesTradingUsdsFuturesWebSocketStreams(config);
                 log.info("[MarketTickerStreamTestImpl] [优化模式] ✅ WebSocketStreams实例创建成功: {}", api != null ? "实例存在" : "实例为空");
                 
             } catch (Exception e) {
