@@ -48,6 +48,8 @@ public class MarketTickerStreamTestServiceImpl implements MarketTickerStreamTest
     // ===== SDK示例中的核心组件 =====
     private final WebSocketConfig webSocketConfig;
     private DerivativesTradingUsdsFuturesWebSocketStreams api;
+    private static final String BASE_URL = "wss://fstream.binance.com";
+    private static final boolean HAS_TIME_UNIT = false;
     private StreamBlockingQueueWrapper<AllMarketTickersStreamsResponse> response;
     private ExecutorService streamExecutor;
     private final AtomicBoolean running = new AtomicBoolean(false);
@@ -108,6 +110,9 @@ public class MarketTickerStreamTestServiceImpl implements MarketTickerStreamTest
                 // ===== 步骤1: 创建WebSocketClientConfiguration - MarketTickerStreamServiceImpl方式 =====
                 log.info("[MarketTickerStreamTestImpl] [优化模式] 步骤1: 创建WebSocketClientConfiguration...");
                 WebSocketClientConfiguration config = new WebSocketClientConfiguration();
+                if (!HAS_TIME_UNIT) {config.setTimeUnit(null);}
+                config.setUrl(BASE_URL + "/stream");
+                config.setAutoLogon(false);
                 log.info("[MarketTickerStreamTestImpl] [优化模式] ✅ WebSocketClientConfiguration创建成功");
                 log.info("[MarketTickerStreamTestImpl] [优化模式] 配置URL: {}", config.getUrl());
                 
@@ -120,6 +125,7 @@ public class MarketTickerStreamTestServiceImpl implements MarketTickerStreamTest
                 int maxMessageSize = webSocketConfig.getMaxTextMessageSize(); // 从配置文件读取
                 webSocketClient.setMaxTextMessageSize(maxMessageSize);
                 webSocketClient.setMaxBinaryMessageSize(maxMessageSize);
+                config.setMessageMaxSize(Long.valueOf(maxMessageSize));
                 log.info("[MarketTickerStreamTestImpl] [优化模式] ✅ 已通过 setMaxTextMessageSize 方法设置最大消息大小为 {} 字节 ({})", 
                         maxMessageSize, formatBytes(maxMessageSize));
                 
