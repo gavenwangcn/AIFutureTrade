@@ -5,6 +5,9 @@ import com.aifuturetrade.asyncservice.service.MarketSymbolOfflineService;
 import com.aifuturetrade.asyncservice.service.MarketTickerStreamService;
 import com.aifuturetrade.asyncservice.service.PriceRefreshService;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import javax.annotation.PostConstruct;
@@ -20,12 +23,28 @@ import java.util.concurrent.atomic.AtomicReference;
  * 异步代理服务实现
  * 
  * 统一管理和调度各种后台异步任务服务。
+ * 
+ * 支持的服务：
+ * - MarketTickerStreamService: 市场Ticker流服务（可配置为使用测试服务）
+ * - PriceRefreshService: 价格刷新服务
+ * - MarketSymbolOfflineService: 市场Symbol下线服务
  */
 @Slf4j
 @Service
 public class AsyncAgentServiceImpl implements AsyncAgentService {
     
-    private final MarketTickerStreamService marketTickerStreamService;
+    // 通过配置注入不同的MarketTickerStreamService实现
+    @Autowired(required = false)
+    @Qualifier("marketTickerStreamService")
+    private MarketTickerStreamService marketTickerStreamService;
+    
+    @Autowired(required = false)
+    @Qualifier("marketTickerStreamTestService")
+    private MarketTickerStreamService marketTickerStreamTestService;
+    
+    // 实际使用的MarketTickerStreamService实例
+    private MarketTickerStreamService activeMarketTickerStreamService;
+    
     private final PriceRefreshService priceRefreshService;
     private final MarketSymbolOfflineService marketSymbolOfflineService;
     
@@ -35,6 +54,10 @@ public class AsyncAgentServiceImpl implements AsyncAgentService {
     private final AtomicReference<Future<?>> marketSymbolOfflineTask = new AtomicReference<>();
     
     private final AtomicBoolean allTasksRunning = new AtomicBoolean(false);
+    
+    // 配置：是否使用测试服务（默认false）
+    @Value("${async.market-ticker.test-mode:false}")
+    private boolean useTestService;
     
     public AsyncAgentServiceImpl(
             MarketTickerStreamService marketTickerStreamService,
@@ -52,7 +75,25 @@ public class AsyncAgentServiceImpl implements AsyncAgentService {
             t.setDaemon(true);
             return t;
         });
-        log.info("[AsyncAgentServiceImpl] 🛠️ 异步代理服务初始化完成，线程池已创建");
+        
+        // 根据配置选择使用的MarketTickerStreamService实现
+        if (useTestService) {
+            activeMarketTickerStreamService = marketTickerStreamTestService;
+            log.info("[AsyncAgentServiceImpl] 🎯 配置为测试模式，使用 MarketTickerStreamTestService");
+        } else {
+            activeMarketTickerStreamService = marketTickerStreamService;
+            log.info("[AsyncAgentServiceImpl] � 配置为生产模式，使用 MarketTickerStreamServiceImpl");
+        }
+        
+        // 验证选择的服务的可用性
+        if (activeMarketTickerStreamService != null) {
+            log.info("[AsyncAgentServiceImpl] ✅ 选中的MarketTickerStreamService实例: {}", 
+                    activeMarketTickerStreamService.getClass().getSimpleName());
+        } else {
+            log.warn("[AsyncAgentServiceImpl] ⚠️ 警告：未找到可用的MarketTickerStreamService实现");
+        }
+        
+        log.info("[AsyncAgentServiceImpl] �🛠️ 异步代理服务初始化完成，线程池已创建");
     }
     
     @PreDestroy
@@ -119,7 +160,7 @@ public class AsyncAgentServiceImpl implements AsyncAgentService {
     public boolean isTaskRunning(String task) {
         switch (task) {
             case "market_tickers":
-                return marketTickerStreamService.isRunning();
+                return activeMarketTickerStreamService != null && activeMarketTickerStreamService.isRunning();
             case "price_refresh":
                 return priceRefreshService != null; // 价格刷新服务通过定时任务运行
             case "market_symbol_offline":
@@ -135,17 +176,30 @@ public class AsyncAgentServiceImpl implements AsyncAgentService {
      * 运行市场Ticker流任务
      */
     private void runMarketTickersTask(Integer durationSeconds) {
-        Future<?> existingTask = marketTickersTask.get();
-        if (existingTask != null && !existingTask.isDone()) {
-            log.warn("[AsyncAgent] Market tickers task is already running");
+        // 检查是否有可用的MarketTickerStreamService
+        if (activeMarketTickerStreamService == null) {
+            log.error("[AsyncAgentServiceImpl] ❌ 没有可用的MarketTickerStreamService实现");
+            log.error("[AsyncAgentServiceImpl] ❌ 当前配置: useTestService={}, 原始服务={}, 测试服务={}", 
+                    useTestService, 
+                    marketTickerStreamService != null ? "可用" : "不可用",
+                    marketTickerStreamTestService != null ? "可用" : "不可用");
             return;
         }
         
+        Future<?> existingTask = marketTickersTask.get();
+        if (existingTask != null && !existingTask.isDone()) {
+            log.warn("[AsyncAgentServiceImpl] Market tickers task is already running");
+            return;
+        }
+        
+        log.info("[AsyncAgentServiceImpl] 🎯 启动MarketTickerStream服务: {}", 
+                activeMarketTickerStreamService.getClass().getSimpleName());
+        
         Future<?> task = executorService.submit(() -> {
             try {
-                marketTickerStreamService.startStream(durationSeconds);
+                activeMarketTickerStreamService.startStream(durationSeconds);
             } catch (Exception e) {
-                log.error("[AsyncAgent] Market tickers task error", e);
+                log.error("[AsyncAgentServiceImpl] Market tickers task error", e);
             }
         });
         
@@ -159,7 +213,9 @@ public class AsyncAgentServiceImpl implements AsyncAgentService {
         Future<?> task = marketTickersTask.getAndSet(null);
         if (task != null && !task.isDone()) {
             task.cancel(true);
-            marketTickerStreamService.stopStream();
+            if (activeMarketTickerStreamService != null) {
+                activeMarketTickerStreamService.stopStream();
+            }
         }
     }
     
@@ -170,9 +226,13 @@ public class AsyncAgentServiceImpl implements AsyncAgentService {
         // 价格刷新服务通过定时任务自动运行，这里可以手动触发一次
         executorService.submit(() -> {
             try {
-                priceRefreshService.refreshAllPrices();
+                if (priceRefreshService != null) {
+                    priceRefreshService.refreshAllPrices();
+                } else {
+                    log.warn("[AsyncAgentServiceImpl] PriceRefreshService is null");
+                }
             } catch (Exception e) {
-                log.error("[AsyncAgent] Price refresh task error", e);
+                log.error("[AsyncAgentServiceImpl] Price refresh task error", e);
             }
         });
     }
@@ -181,7 +241,9 @@ public class AsyncAgentServiceImpl implements AsyncAgentService {
      * 停止价格刷新任务
      */
     private void stopPriceRefreshTask() {
-        priceRefreshService.stopScheduler();
+        if (priceRefreshService != null) {
+            priceRefreshService.stopScheduler();
+        }
     }
     
     /**
@@ -191,9 +253,13 @@ public class AsyncAgentServiceImpl implements AsyncAgentService {
         // Symbol下线服务通过定时任务自动运行，这里可以手动触发一次
         executorService.submit(() -> {
             try {
-                marketSymbolOfflineService.deleteOldSymbols();
+                if (marketSymbolOfflineService != null) {
+                    marketSymbolOfflineService.deleteOldSymbols();
+                } else {
+                    log.warn("[AsyncAgentServiceImpl] MarketSymbolOfflineService is null");
+                }
             } catch (Exception e) {
-                log.error("[AsyncAgent] Market symbol offline task error", e);
+                log.error("[AsyncAgentServiceImpl] Market symbol offline task error", e);
             }
         });
     }
@@ -202,7 +268,9 @@ public class AsyncAgentServiceImpl implements AsyncAgentService {
      * 停止市场Symbol下线任务
      */
     private void stopMarketSymbolOfflineTask() {
-        marketSymbolOfflineService.stopScheduler();
+        if (marketSymbolOfflineService != null) {
+            marketSymbolOfflineService.stopScheduler();
+        }
     }
     
     /**
@@ -210,12 +278,12 @@ public class AsyncAgentServiceImpl implements AsyncAgentService {
      */
     private void runAllTasks(Integer durationSeconds) {
         if (allTasksRunning.get()) {
-            log.warn("[AsyncAgent] All tasks are already running");
+            log.warn("[AsyncAgentServiceImpl] All tasks are already running");
             return;
         }
         
         allTasksRunning.set(true);
-        log.info("[AsyncAgent] 启动所有服务: market_tickers, price_refresh, market_symbol_offline");
+        log.info("[AsyncAgentServiceImpl] 启动所有服务: market_tickers, price_refresh, market_symbol_offline");
         
         // 启动所有任务
         runMarketTickersTask(durationSeconds);
@@ -238,5 +306,38 @@ public class AsyncAgentServiceImpl implements AsyncAgentService {
             });
         }
     }
+    
+    /**
+     * 获取当前使用的MarketTickerStreamService实现类型
+     */
+    public String getActiveMarketTickerServiceType() {
+        if (activeMarketTickerStreamService == null) {
+            return "无";
+        }
+        return activeMarketTickerStreamService.getClass().getSimpleName();
+    }
+    
+    /**
+     * 切换到测试服务模式
+     */
+    public void switchToTestMode() {
+        if (marketTickerStreamTestService != null) {
+            activeMarketTickerStreamService = marketTickerStreamTestService;
+            log.info("[AsyncAgentServiceImpl] 🔄 已切换到测试服务模式");
+        } else {
+            log.error("[AsyncAgentServiceImpl] ❌ 测试服务不可用");
+        }
+    }
+    
+    /**
+     * 切换到生产服务模式
+     */
+    public void switchToProductionMode() {
+        if (marketTickerStreamService != null) {
+            activeMarketTickerStreamService = marketTickerStreamService;
+            log.info("[AsyncAgentServiceImpl] 🔄 已切换到生产服务模式");
+        } else {
+            log.error("[AsyncAgentServiceImpl] ❌ 生产服务不可用");
+        }
+    }
 }
-

@@ -112,6 +112,8 @@ async:
     message-timeout: 30
     # 数据库操作超时（秒）
     db-operation-timeout: 20
+    # 测试模式：是否使用测试服务（默认false）
+    test-mode: ${MARKET_TICKER_TEST_MODE:true}
   
   # 价格刷新服务配置
   price-refresh:
@@ -126,5 +128,3 @@ async:
     cron: "0 */30 * * * *"
     # 数据保留分钟数
     retention-minutes: 30
-
-
