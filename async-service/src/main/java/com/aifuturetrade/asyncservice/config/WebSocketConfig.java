@@ -2,14 +2,15 @@ package com.aifuturetrade.asyncservice.config;
 
 import lombok.Data;
 import org.springframework.boot.context.properties.ConfigurationProperties;
-import org.springframework.stereotype.Component;
 
 /**
  * WebSocket配置属性类
  * 从application.yml中读取WebSocket相关配置
+ * 
+ * 注意：不使用 @Component，而是通过 @EnableConfigurationProperties 在 AsyncServiceApplication 中启用
+ * 这样可以避免重复创建 bean（@Component 和 @EnableConfigurationProperties 会创建两个 bean）
  */
 @Data
-@Component
 @ConfigurationProperties(prefix = "async.websocket")
 public class WebSocketConfig {
     

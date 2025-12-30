@@ -6,9 +6,7 @@ spring:
   # 禁用调试模式（这会禁用自动配置条件评估报告）
   main:
     banner-mode: console
-  # 修复 Springfox 与 Spring Boot 2.7+ 的兼容性问题
-  # Spring Boot 2.7+ 默认使用 PathPatternParser，但 Springfox 2.9.2 不支持
-  # 需要强制使用 AntPathMatcher
+  # SpringDoc OpenAPI 配置（替代 Springfox Swagger，兼容 Spring Boot 3.x）
   mvc:
     pathmatch:
       matching-strategy: ant_path_matcher

@@ -16,7 +16,7 @@
         <java.version>17</java.version>
         <spring-boot.version>3.2.0</spring-boot.version>
         <lombok.version>1.18.30</lombok.version>
-        <swagger.version>2.9.2</swagger.version>
+        <springdoc.version>2.3.0</springdoc.version>
         <junit.version>5.10.1</junit.version>
         <gson.version>2.12.1</gson.version>
         <jetty.version>11.0.25</jetty.version>
@@ -254,16 +254,11 @@
             <optional>true</optional>
         </dependency>
 
-        <!-- Swagger -->
+        <!-- SpringDoc OpenAPI (替代 Springfox Swagger，兼容 Spring Boot 3.x) -->
         <dependency>
-            <groupId>io.springfox</groupId>
-            <artifactId>springfox-swagger2</artifactId>
-            <version>${swagger.version}</version>
-        </dependency>
-        <dependency>
-            <groupId>io.springfox</groupId>
-            <artifactId>springfox-swagger-ui</artifactId>
-            <version>${swagger.version}</version>
+            <groupId>org.springdoc</groupId>
+            <artifactId>springdoc-openapi-starter-webmvc-ui</artifactId>
+            <version>${springdoc.version}</version>
         </dependency>
 
         <!-- JUnit -->

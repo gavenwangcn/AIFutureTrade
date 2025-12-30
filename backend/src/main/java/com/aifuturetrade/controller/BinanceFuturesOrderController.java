@@ -1,8 +1,8 @@
 package com.aifuturetrade.controller;
 
 import com.aifuturetrade.service.BinanceFuturesOrderService;
-import io.swagger.annotations.Api;
-import io.swagger.annotations.ApiOperation;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -15,7 +15,7 @@ import java.util.Map;
  */
 @RestController
 @RequestMapping("/api/binance-futures-order")
-@Api(tags = "币安期货订单")
+@Tag(name = "币安期货订单", description = "币安期货订单管理接口")
 public class BinanceFuturesOrderController {
 
     @Autowired
@@ -25,7 +25,7 @@ public class BinanceFuturesOrderController {
      * 一键卖出持仓合约
      */
     @PostMapping("/sell-position")
-    @ApiOperation("一键卖出持仓合约")
+    @Operation(summary = "一键卖出持仓合约")
     public ResponseEntity<Map<String, Object>> sellPosition(
             @RequestParam String modelId,
             @RequestParam String symbol) {

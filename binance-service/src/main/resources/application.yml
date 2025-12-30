@@ -7,7 +7,7 @@ spring:
     banner-mode: console
     # 性能优化：禁用不必要的自动配置
     lazy-initialization: false  # 保持快速启动，不延迟初始化
-  # 修复 Springfox 与 Spring Boot 2.7+ 的兼容性问题
+  # SpringDoc OpenAPI 配置（替代 Springfox Swagger，兼容 Spring Boot 3.x）
   mvc:
     pathmatch:
       matching-strategy: ant_path_matcher
