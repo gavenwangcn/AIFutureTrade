@@ -102,6 +102,31 @@ async:
   # 启动延迟（秒），确保所有Bean初始化完成（默认3秒）
   auto-start-delay: ${ASYNC_AUTO_START_DELAY:3}
   
+  # WebSocket配置
+  websocket:
+    # WebSocket消息大小配置（字节）
+    # 币安市场ticker数据实际约68KB，默认限制65KB不够
+    max-text-message-size: ${ASYNC_WEBSOCKET_MAX_TEXT_MESSAGE_SIZE:204800}  # 200KB
+    max-binary-message-size: ${ASYNC_WEBSOCKET_MAX_BINARY_MESSAGE_SIZE:204800}  # 200KB
+    # WebSocket客户端配置
+    client:
+      # 连接超时时间（毫秒）
+      connect-timeout: ${ASYNC_WEBSOCKET_CONNECT_TIMEOUT:10000}
+      # 读取超时时间（毫秒）
+      read-timeout: ${ASYNC_WEBSOCKET_READ_TIMEOUT:60000}
+      # 写入超时时间（毫秒）
+      write-timeout: ${ASYNC_WEBSOCKET_WRITE_TIMEOUT:10000}
+      # 缓冲区大小（字节）
+      buffer-size: ${ASYNC_WEBSOCKET_BUFFER_SIZE:8192}
+    # Jetty特定配置
+    jetty:
+      # 是否启用WebSocket压缩
+      compression-enabled: ${ASYNC_WEBSOCKET_COMPRESSION_ENABLED:true}
+      # 压缩最小大小（字节）
+      compression-min-size: ${ASYNC_WEBSOCKET_COMPRESSION_MIN_SIZE:1024}
+      # 最大压缩输入大小（字节）
+      compression-max-input-size: ${ASYNC_WEBSOCKET_COMPRESSION_MAX_INPUT_SIZE:1048576}  # 1MB
+
   # 市场Ticker流配置
   market-ticker:
     # WebSocket连接最大时长（分钟），币安限制30分钟

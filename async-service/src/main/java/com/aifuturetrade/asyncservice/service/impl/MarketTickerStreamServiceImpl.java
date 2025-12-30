@@ -1,5 +1,6 @@
 package com.aifuturetrade.asyncservice.service.impl;
 
+import com.aifuturetrade.asyncservice.config.WebSocketConfig;
 import com.aifuturetrade.asyncservice.dao.mapper.MarketTickerMapper;
 import com.aifuturetrade.asyncservice.entity.MarketTickerDO;
 import com.aifuturetrade.asyncservice.service.MarketTickerStreamService;
@@ -13,6 +14,7 @@ import com.binance.connector.client.derivatives_trading_usds_futures.websocket.s
 import com.binance.connector.client.derivatives_trading_usds_futures.websocket.stream.model.AllMarketTickersStreamsResponseInner;
 import lombok.extern.slf4j.Slf4j;
 import org.eclipse.jetty.websocket.client.WebSocketClient;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
@@ -40,6 +42,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 public class MarketTickerStreamServiceImpl implements MarketTickerStreamService {
     
     private final MarketTickerMapper marketTickerMapper;
+    private final WebSocketConfig webSocketConfig;
     
     @Value("${async.market-ticker.max-connection-minutes:30}")
     private int maxConnectionMinutes;
@@ -60,8 +63,11 @@ public class MarketTickerStreamServiceImpl implements MarketTickerStreamService 
     private final AtomicBoolean running = new AtomicBoolean(false);
     private LocalDateTime connectionCreationTime;
     
-    public MarketTickerStreamServiceImpl(MarketTickerMapper marketTickerMapper) {
+    public MarketTickerStreamServiceImpl(MarketTickerMapper marketTickerMapper, WebSocketConfig webSocketConfig) {
         this.marketTickerMapper = marketTickerMapper;
+        this.webSocketConfig = webSocketConfig;
+        log.info("[MarketTickerStream] 注入WebSocket配置: maxTextMessageSize={} bytes", 
+                webSocketConfig.getMaxTextMessageSize());
     }
     
     @PostConstruct
@@ -172,11 +178,11 @@ public class MarketTickerStreamServiceImpl implements MarketTickerStreamService 
         log.info("[MarketTickerStream] 开始启动流处理...");
         
         try {
-            // 1. 获取 WebSocket 配置
-            log.info("[MarketTickerStream] 获取 WebSocket 配置...");
-            WebSocketClientConfiguration config = DerivativesTradingUsdsFuturesWebSocketStreamsUtil.getClientConfiguration();
+            // 1. 创建 WebSocketClientConfiguration
+            log.info("[MarketTickerStream] 创建 WebSocketClientConfiguration...");
+            WebSocketClientConfiguration config = new WebSocketClientConfiguration();
             
-            log.info("[MarketTickerStream] WebSocket 配置获取成功，URL: {}", config.getUrl());
+            log.info("[MarketTickerStream] WebSocket 配置创建成功，URL: {}", config.getUrl());
             
             // 2. 创建并配置 WebSocketClient（设置最大消息大小为 200KB）
             // 参考 SDK 测试代码：StreamConnectionWrapper 可以接受 WebSocketClient 参数
@@ -184,11 +190,12 @@ public class MarketTickerStreamServiceImpl implements MarketTickerStreamService 
             log.info("[MarketTickerStream] 创建并配置 WebSocketClient...");
             WebSocketClient webSocketClient = new WebSocketClient();
             
-            // 设置最大文本消息大小为 200KB（币安全市场ticker数据约 68KB，默认 65KB 不够）
+            // 设置最大文本消息大小为 200KB（币安市场ticker数据约 68KB，默认 65KB 不够）
             // 使用 Jetty WebSocketClient 提供的 setMaxTextMessageSize 方法
-            int maxMessageSize = 200 * 1024; // 200KB
+            int maxMessageSize = webSocketConfig.getMaxTextMessageSize(); // 从配置文件读取
             webSocketClient.setMaxTextMessageSize(maxMessageSize);
-            log.info("[MarketTickerStream] ✅ 已通过 setMaxTextMessageSize 方法设置最大消息大小为 {} 字节 (200KB)", maxMessageSize);
+            log.info("[MarketTickerStream] ✅ 已通过 setMaxTextMessageSize 方法设置最大消息大小为 {} 字节 ({})", 
+                    maxMessageSize, formatBytes(maxMessageSize));
             
             // 3. 创建 StreamConnectionWrapper（使用配置好的 WebSocketClient）
             // 参考 SDK 测试代码：new StreamConnectionWrapper(config, webSocketClient)
@@ -315,6 +322,7 @@ public class MarketTickerStreamServiceImpl implements MarketTickerStreamService 
                     log.error("[MarketTickerStream] ❌ 数据处理异常", e);
                     log.error("[MarketTickerStream] ❌ 异常类型: {}, 异常消息: {}", 
                             e.getClass().getName(), e.getMessage());
+                    log.error("[MarketTickerStream] ❌ 异常堆栈:", e);
                     // 继续处理，不中断流
                 }
             }
@@ -327,6 +335,19 @@ public class MarketTickerStreamServiceImpl implements MarketTickerStreamService 
             long totalTime = (System.currentTimeMillis() - startTime) / 1000;
             log.info("[MarketTickerStream] 🏁 Stream processing finished: 总计处理 {} 条消息, 运行 {} 秒", 
                     messageCount, totalTime);
+        }
+    }
+    
+    /**
+     * 格式化字节大小显示
+     */
+    private String formatBytes(int bytes) {
+        if (bytes < 1024) {
+            return bytes + "B";
+        } else if (bytes < 1024 * 1024) {
+            return String.format("%.1fKB", bytes / 1024.0);
+        } else {
+            return String.format("%.1fMB", bytes / (1024.0 * 1024.0));
         }
     }
     

@@ -7,6 +7,7 @@
 
 package com.aifuturetrade.asyncservice.service.impl;
 
+import com.aifuturetrade.asyncservice.config.WebSocketConfig;
 import com.aifuturetrade.asyncservice.service.MarketTickerStreamTestService;
 import com.binance.connector.client.common.ApiException;
 import com.binance.connector.client.common.websocket.adapter.stream.StreamConnectionWrapper;
@@ -19,6 +20,7 @@ import com.binance.connector.client.derivatives_trading_usds_futures.websocket.s
 import com.binance.connector.client.derivatives_trading_usds_futures.websocket.stream.model.AllMarketTickersStreamsResponseInner;
 import lombok.extern.slf4j.Slf4j;
 import org.eclipse.jetty.websocket.client.WebSocketClient;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import javax.annotation.PostConstruct;
@@ -44,10 +46,17 @@ import java.util.concurrent.atomic.AtomicBoolean;
 public class MarketTickerStreamTestServiceImpl implements MarketTickerStreamTestService {
     
     // ===== SDK示例中的核心组件 =====
+    private final WebSocketConfig webSocketConfig;
     private DerivativesTradingUsdsFuturesWebSocketStreams api;
     private StreamBlockingQueueWrapper<AllMarketTickersStreamsResponse> response;
     private ExecutorService streamExecutor;
     private final AtomicBoolean running = new AtomicBoolean(false);
+    
+    public MarketTickerStreamTestServiceImpl(WebSocketConfig webSocketConfig) {
+        this.webSocketConfig = webSocketConfig;
+        log.info("[MarketTickerStreamTestImpl] 注入WebSocket配置: maxTextMessageSize={} bytes", 
+                webSocketConfig.getMaxTextMessageSize());
+    }
     
     /**
      * 初始化方法 - 按照SDK示例实现
@@ -106,11 +115,14 @@ public class MarketTickerStreamTestServiceImpl implements MarketTickerStreamTest
                 log.info("[MarketTickerStreamTestImpl] [优化模式] 步骤2: 创建并配置WebSocketClient...");
                 WebSocketClient webSocketClient = new WebSocketClient();
                 
-                // 设置最大文本消息大小为 200KB（币安全市场ticker数据约 68KB，默认 65KB 不够）
+                // 设置最大文本消息大小为 200KB（币安市场ticker数据约 68KB，默认 65KB 不够）
                 // 使用 Jetty WebSocketClient 提供的 setMaxTextMessageSize 方法
-                int maxMessageSize = 200 * 1024; // 200KB
+                int maxMessageSize = webSocketConfig.getMaxTextMessageSize(); // 从配置文件读取
                 webSocketClient.setMaxTextMessageSize(maxMessageSize);
-                log.info("[MarketTickerStreamTestImpl] [优化模式] ✅ 已通过 setMaxTextMessageSize 方法设置最大消息大小为 {} 字节 (200KB)", maxMessageSize);
+                webSocketClient.setMaxBinaryMessageSize(maxMessageSize);
+                config.setMessageMaxSize(Long.valueOf(maxMessageSize));
+                log.info("[MarketTickerStreamTestImpl] [优化模式] ✅ 已通过 setMaxTextMessageSize 方法设置最大消息大小为 {} 字节 ({})", 
+                        maxMessageSize, formatBytes(maxMessageSize));
                 
                 // ===== 步骤3: 创建StreamConnectionWrapper - MarketTickerStreamServiceImpl方式 =====
                 log.info("[MarketTickerStreamTestImpl] [优化模式] 步骤3: 创建StreamConnectionWrapper...");
@@ -341,5 +353,18 @@ public class MarketTickerStreamTestServiceImpl implements MarketTickerStreamTest
     @Override
     public boolean isRunning() {
         return running.get();
+    }
+    
+    /**
+     * 格式化字节大小显示
+     */
+    private String formatBytes(int bytes) {
+        if (bytes < 1024) {
+            return bytes + "B";
+        } else if (bytes < 1024 * 1024) {
+            return String.format("%.1fKB", bytes / 1024.0);
+        } else {
+            return String.format("%.1fMB", bytes / (1024.0 * 1024.0));
+        }
     }
 }
