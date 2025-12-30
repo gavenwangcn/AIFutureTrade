@@ -80,7 +80,8 @@ public class PriceRefreshServiceImpl implements PriceRefreshService {
     public RefreshResult refreshAllPrices() {
         log.info("=".repeat(80));
         log.info("[PriceRefresh] ========== 开始执行异步价格刷新任务 ==========");
-        log.info("[PriceRefresh] 执行时间: {}", LocalDateTime.now());
+        // 使用UTC+8时区时间（与数据库时区一致）
+        log.info("[PriceRefresh] 执行时间: {}", LocalDateTime.now(java.time.ZoneOffset.ofHours(8)));
         log.info("[PriceRefresh] Cron表达式: {}", cronExpression);
         log.info("[PriceRefresh] 每分钟最大刷新数量: {}", maxPerMinute);
         log.info("=".repeat(80));
@@ -156,8 +157,10 @@ public class PriceRefreshServiceImpl implements PriceRefreshService {
             }
             
             // 更新open_price和update_price_date
-            LocalDateTime updateDate = LocalDateTime.now();
-            log.info("[PriceRefresh] 🗄️  Symbol {}: 开始更新数据库 open_price = {}, update_price_date = {}", 
+            // 参考Python版本的逻辑：使用UTC+8时间作为update_price_date
+            // 注意：updateOpenPrice方法内部会使用当前UTC+8时间，传入的updateDate参数会被忽略（为了兼容性仍然传递）
+            LocalDateTime updateDate = LocalDateTime.now(java.time.ZoneOffset.ofHours(8));
+            log.info("[PriceRefresh] 🗄️  Symbol {}: 开始更新数据库 open_price = {}, update_price_date = {} (UTC+8)", 
                     symbol, yesterdayClosePrice, updateDate);
             
             int updated = marketTickerMapper.updateOpenPrice(symbol, yesterdayClosePrice, updateDate);

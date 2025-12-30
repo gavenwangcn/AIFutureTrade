@@ -10,8 +10,9 @@ spring:
       matching-strategy: ant_path_matcher
   
   # 数据库配置（可通过环境变量覆盖）
+  # 注意：serverTimezone设置为Asia/Shanghai（UTC+8），确保所有时间字段都使用UTC+8时区
   datasource:
-    url: ${SPRING_DATASOURCE_URL:jdbc:mysql://154.89.148.172:32123/aifuturetrade?useSSL=false&serverTimezone=UTC&characterEncoding=utf8}
+    url: ${SPRING_DATASOURCE_URL:jdbc:mysql://154.89.148.172:32123/aifuturetrade?useSSL=false&serverTimezone=Asia/Shanghai&characterEncoding=utf8}
     username: ${SPRING_DATASOURCE_USERNAME:aifuturetrade}
     password: ${SPRING_DATASOURCE_PASSWORD:aifuturetrade123}
     driver-class-name: com.mysql.cj.jdbc.Driver
@@ -106,9 +107,11 @@ async:
   websocket:
     # WebSocket消息大小配置（字节）
     # 币安市场ticker数据实际约68KB，默认限制65KB不够
-    max-text-message-size: ${ASYNC_WEBSOCKET_MAX_TEXT_MESSAGE_SIZE:80000}  # 200KB
-    max-binary-message-size: ${ASYNC_WEBSOCKET_MAX_BINARY_MESSAGE_SIZE:80000}  # 200KB
+    max-text-message-size: ${ASYNC_WEBSOCKET_MAX_TEXT_MESSAGE_SIZE:150000}  # 200KB
+    max-binary-message-size: ${ASYNC_WEBSOCKET_MAX_BINARY_MESSAGE_SIZE:150000}  # 200KB
     # WebSocket客户端配置
+
+    
     client:
       # 连接超时时间（毫秒）
       connect-timeout: ${ASYNC_WEBSOCKET_CONNECT_TIMEOUT:10000}

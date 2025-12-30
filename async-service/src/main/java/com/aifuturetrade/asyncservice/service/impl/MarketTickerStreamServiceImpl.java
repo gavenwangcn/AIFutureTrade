@@ -2,6 +2,7 @@ package com.aifuturetrade.asyncservice.service.impl;
 
 import com.aifuturetrade.asyncservice.config.WebSocketConfig;
 import com.aifuturetrade.asyncservice.dao.mapper.MarketTickerMapper;
+import com.aifuturetrade.asyncservice.entity.ExistingSymbolData;
 import com.aifuturetrade.asyncservice.entity.MarketTickerDO;
 import com.aifuturetrade.asyncservice.service.MarketTickerStreamService;
 import com.binance.connector.client.common.websocket.configuration.WebSocketClientConfiguration;
@@ -19,9 +20,12 @@ import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import java.time.Instant;
 import java.time.LocalDateTime;
-import java.time.ZoneId;
+import java.time.ZoneOffset;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
@@ -100,7 +104,7 @@ public class MarketTickerStreamServiceImpl implements MarketTickerStreamService 
         if (api == null) {
             WebSocketClientConfiguration clientConfiguration =
                     DerivativesTradingUsdsFuturesWebSocketStreamsUtil.getClientConfiguration();
-            clientConfiguration.setMessageMaxSize(80000L);
+            clientConfiguration.setMessageMaxSize(webSocketConfig.getMaxTextMessageSize());
             api = new DerivativesTradingUsdsFuturesWebSocketStreams(clientConfiguration);
         }
         return api;
@@ -290,7 +294,9 @@ public class MarketTickerStreamServiceImpl implements MarketTickerStreamService 
      * 参考Python版本的_handle_message实现：
      * 1. 从AllMarketTickersStreamsResponse中提取ticker数据列表
      * 2. 标准化每个ticker数据（参考_normalize_ticker）
-     * 3. 批量插入/更新到数据库（使用batchUpsertTickers）
+     * 3. 筛选USDT交易对
+     * 4. 查询现有数据并计算price_change等字段
+     * 5. 批量插入/更新到数据库（使用batchUpsertTickers）
      * 
      * @param tickerResponse SDK返回的AllMarketTickersStreamsResponse对象
      */
@@ -310,45 +316,198 @@ public class MarketTickerStreamServiceImpl implements MarketTickerStreamService 
             log.debug("[MarketTickerStreamService] Extracted {} tickers from message", tickerCount);
             log.debug("[MarketTickerStreamService] 提取到{}个ticker数据", tickerCount);
             
-            // 标准化ticker数据
-            List<MarketTickerDO> normalizedTickers = new ArrayList<>();
+            // 步骤1: 标准化ticker数据
+            List<MarketTickerDO> allNormalizedTickers = new ArrayList<>();
             for (AllMarketTickersStreamsResponseInner inner : tickerResponse) {
                 MarketTickerDO tickerDO = normalizeTicker(inner);
                 if (tickerDO != null) {
-                    normalizedTickers.add(tickerDO);
+                    allNormalizedTickers.add(tickerDO);
                 }
             }
             
-            if (normalizedTickers.isEmpty()) {
+            if (allNormalizedTickers.isEmpty()) {
                 log.debug("[MarketTickerStreamService] 没有有效的ticker数据，跳过数据库操作");
                 log.info("[MarketTickerStreamService] No tickers to process");
                 return;
             }
             
-            int normalizedCount = normalizedTickers.size();
-            log.debug("[MarketTickerStreamService] Normalized {} tickers for database upsert", normalizedCount);
-            log.debug("[MarketTickerStreamService] 标准化了{}个ticker数据，准备批量同步到数据库", normalizedCount);
+            // 步骤2: 筛选USDT交易对（参考Python版本的逻辑）
+            List<MarketTickerDO> usdtTickers = allNormalizedTickers.stream()
+                    .filter(t -> t.getSymbol() != null && t.getSymbol().endsWith("USDT"))
+                    .collect(Collectors.toList());
+            
+            log.info("[MarketTickerStreamService] 从{}条总数据中筛选出{}条USDT交易对数据", 
+                    allNormalizedTickers.size(), usdtTickers.size());
+            
+            if (usdtTickers.isEmpty()) {
+                log.debug("[MarketTickerStreamService] No USDT symbols to upsert");
+                return;
+            }
+            
+            // 步骤3: 查询现有数据（参考Python版本的get_existing_symbol_data）
+            List<String> symbols = usdtTickers.stream()
+                    .map(MarketTickerDO::getSymbol)
+                    .collect(Collectors.toList());
+            
+            log.debug("[MarketTickerStreamService] Querying existing data for {} symbols", symbols.size());
+            List<ExistingSymbolData> existingDataList = marketTickerMapper.getExistingSymbolData(symbols);
+            
+            // 转换为Map便于查找
+            Map<String, ExistingSymbolData> existingDataMap = new HashMap<>();
+            for (ExistingSymbolData data : existingDataList) {
+                existingDataMap.put(data.getSymbol(), data);
+            }
+            log.debug("[MarketTickerStreamService] Retrieved existing data for {} symbols", existingDataMap.size());
+            
+            // 步骤4: 计算price_change等字段并准备最终数据（参考Python版本的逻辑）
+            List<MarketTickerDO> finalTickers = new ArrayList<>();
+            for (MarketTickerDO ticker : usdtTickers) {
+                String symbol = ticker.getSymbol();
+                ExistingSymbolData existingData = existingDataMap.get(symbol);
+                
+                // 获取当前last_price
+                Double currentLastPrice = ticker.getLastPrice();
+                if (currentLastPrice == null) {
+                    currentLastPrice = 0.0;
+                }
+                
+                // 获取existing_open_price（参考Python版本的逻辑）
+                // Python版本逻辑：
+                // if open_price_raw == 0.0 and update_price_date is None:
+                //     open_price = None
+                // else:
+                //     open_price = open_price_raw if open_price_raw is not None else None
+                Double existingOpenPrice = null;
+                LocalDateTime existingUpdatePriceDate = null;
+                if (existingData != null) {
+                    Double openPriceRaw = existingData.getOpenPrice();
+                    LocalDateTime updatePriceDate = existingData.getUpdatePriceDate();
+                    
+                    // 如果open_price为0.0且update_price_date为null，则表示不存在（open_price应该为None/null）
+                    if (openPriceRaw != null && openPriceRaw == 0.0 && updatePriceDate == null) {
+                        existingOpenPrice = null; // 表示不存在
+                    } else if (openPriceRaw != null) {
+                        existingOpenPrice = openPriceRaw;
+                    }
+                    existingUpdatePriceDate = updatePriceDate;
+                    
+                    log.debug("[MarketTickerStreamService] Existing data for {}: open_price={}, update_price_date={}", 
+                            symbol, existingOpenPrice, existingUpdatePriceDate);
+                }
+                
+                // 计算price_change等字段（参考Python版本的逻辑）
+                if (existingOpenPrice != null && existingOpenPrice != 0.0 && currentLastPrice != 0.0) {
+                    try {
+                        double priceChange = currentLastPrice - existingOpenPrice;
+                        double priceChangePercent = (priceChange / existingOpenPrice) * 100.0;
+                        String side = priceChangePercent >= 0 ? "gainer" : "loser";
+                        String changePercentText = String.format("%.2f%%", priceChangePercent);
+                        
+                        log.debug("[MarketTickerStreamService] Calculated price change for {}: {} ({:.2f}%)", 
+                                symbol, priceChange, priceChangePercent);
+                        
+                        ticker.setPriceChange(priceChange);
+                        ticker.setPriceChangePercent(priceChangePercent);
+                        ticker.setSide(side);
+                        ticker.setChangePercentText(changePercentText);
+                        ticker.setOpenPrice(existingOpenPrice);
+                        ticker.setUpdatePriceDate(existingUpdatePriceDate);
+                    } catch (Exception e) {
+                        log.warn("[MarketTickerStreamService] Failed to calculate price change for symbol {}: {}", symbol, e.getMessage());
+                        ticker.setPriceChange(0.0);
+                        ticker.setPriceChangePercent(0.0);
+                        ticker.setSide("");
+                        ticker.setChangePercentText("");
+                        ticker.setOpenPrice(existingOpenPrice != null ? existingOpenPrice : 0.0);
+                        ticker.setUpdatePriceDate(existingUpdatePriceDate);
+                    }
+                } else {
+                    log.debug("[MarketTickerStreamService] Not calculating price change for {}", symbol);
+                    ticker.setPriceChange(0.0);
+                    ticker.setPriceChangePercent(0.0);
+                    ticker.setSide("");
+                    ticker.setChangePercentText("");
+                    // 参考Python版本的逻辑：
+                    // 如果不存在existing_symbol_data，则open_price设为0.0，update_price_date设为null
+                    // 如果存在existing_symbol_data，则使用existing_open_price和existing_update_price_date
+                    if (existingData == null) {
+                        ticker.setOpenPrice(0.0);
+                        ticker.setUpdatePriceDate(null);
+                        log.debug("[MarketTickerStreamService] 设置{}的open_price为0.0（新插入）", symbol);
+                    } else {
+                        ticker.setOpenPrice(existingOpenPrice != null ? existingOpenPrice : 0.0);
+                        ticker.setUpdatePriceDate(existingUpdatePriceDate);
+                    }
+                }
+                
+                // 参考Python版本的逻辑：在INSERT时，如果不存在existing_symbol_data，则open_price=0.0，update_price_date=NULL
+                // 如果存在existing_symbol_data，则使用existing_open_price和existing_update_price_date
+                // 参考Python版本：insert_open_price和insert_update_price_date的处理
+                if (existingData == null) {
+                    // 新插入：open_price=0.0，update_price_date=NULL（参考Python版本：if not existing_symbol_data）
+                    ticker.setOpenPrice(0.0);
+                    ticker.setUpdatePriceDate(null);
+                }
+                // 如果存在existing_symbol_data，则使用上面已设置的值（existing_open_price和existing_update_price_date）
+                
+                // 设置默认值（参考Python版本的逻辑）
+                if (ticker.getPriceChange() == null) ticker.setPriceChange(0.0);
+                if (ticker.getPriceChangePercent() == null) ticker.setPriceChangePercent(0.0);
+                if (ticker.getSide() == null) ticker.setSide("");
+                if (ticker.getChangePercentText() == null) ticker.setChangePercentText("");
+                if (ticker.getAveragePrice() == null) ticker.setAveragePrice(0.0);
+                if (ticker.getLastPrice() == null) ticker.setLastPrice(0.0);
+                if (ticker.getLastTradeVolume() == null) ticker.setLastTradeVolume(0.0);
+                if (ticker.getOpenPrice() == null) ticker.setOpenPrice(0.0);
+                if (ticker.getHighPrice() == null) ticker.setHighPrice(0.0);
+                if (ticker.getLowPrice() == null) ticker.setLowPrice(0.0);
+                if (ticker.getBaseVolume() == null) ticker.setBaseVolume(0.0);
+                if (ticker.getQuoteVolume() == null) ticker.setQuoteVolume(0.0);
+                if (ticker.getFirstTradeId() == null) ticker.setFirstTradeId(0L);
+                if (ticker.getLastTradeId() == null) ticker.setLastTradeId(0L);
+                if (ticker.getTradeCount() == null) ticker.setTradeCount(0L);
+                
+                // 转换时区为北京时区（UTC+8）（参考Python版本的_to_beijing_datetime）
+                if (ticker.getEventTime() != null) {
+                    ticker.setEventTime(toBeijingDateTime(ticker.getEventTime()));
+                }
+                if (ticker.getStatsOpenTime() != null) {
+                    ticker.setStatsOpenTime(toBeijingDateTime(ticker.getStatsOpenTime()));
+                }
+                if (ticker.getStatsCloseTime() != null) {
+                    ticker.setStatsCloseTime(toBeijingDateTime(ticker.getStatsCloseTime()));
+                }
+                
+                // ingestion_time使用当前北京时区时间
+                ticker.setIngestionTime(LocalDateTime.now(ZoneOffset.ofHours(8)));
+                
+                finalTickers.add(ticker);
+            }
+            
+            int finalCount = finalTickers.size();
+            log.debug("[MarketTickerStreamService] Normalized {} tickers for database upsert", finalCount);
+            log.debug("[MarketTickerStreamService] 标准化了{}个ticker数据，准备批量同步到数据库", finalCount);
             
             // 记录部分关键数据用于调试（前3个作为样本）
-            if (normalizedTickers.size() > 0) {
-                int sampleSize = Math.min(3, normalizedTickers.size());
-                List<MarketTickerDO> sample = normalizedTickers.subList(0, sampleSize);
+            if (finalTickers.size() > 0) {
+                int sampleSize = Math.min(3, finalTickers.size());
+                List<MarketTickerDO> sample = finalTickers.subList(0, sampleSize);
                 log.debug("[MarketTickerStreamService] Normalized data sample (first {}): {}", sampleSize, 
                         sample.stream()
-                                .map(t -> String.format("symbol=%s, lastPrice=%s, highPrice=%s, lowPrice=%s", 
-                                        t.getSymbol(), t.getLastPrice(), t.getHighPrice(), t.getLowPrice()))
+                                .map(t -> String.format("symbol=%s, lastPrice=%s, openPrice=%s, priceChangePercent=%s", 
+                                        t.getSymbol(), t.getLastPrice(), t.getOpenPrice(), t.getPriceChangePercent()))
                                 .reduce((a, b) -> a + "; " + b)
                                 .orElse(""));
             }
             
-            // 批量插入/更新到数据库
+            // 步骤5: 批量插入/更新到数据库
             try {
-                log.debug("[MarketTickerStreamService] Calling batchUpsertTickers for {} symbols", normalizedCount);
+                log.debug("[MarketTickerStreamService] Calling batchUpsertTickers for {} symbols", finalCount);
                 long startTime = System.currentTimeMillis();
-                marketTickerMapper.batchUpsertTickers(normalizedTickers);
+                marketTickerMapper.batchUpsertTickers(finalTickers);
                 long duration = System.currentTimeMillis() - startTime;
                 log.debug("[MarketTickerStreamService] Successfully completed batchUpsertTickers in {} ms", duration);
-                log.info("[MarketTickerStreamService] ✅ 成功同步{}个ticker数据到数据库（耗时{}ms）", normalizedCount, duration);
+                log.info("[MarketTickerStreamService] ✅ 成功同步{}个ticker数据到数据库（耗时{}ms）", finalCount, duration);
             } catch (Exception e) {
                 log.error("[MarketTickerStreamService] Error during batchUpsertTickers: {}", e.getMessage(), e);
                 log.error("[MarketTickerStreamService] ❌ 批量同步ticker数据到数据库失败", e);
@@ -359,6 +518,33 @@ public class MarketTickerStreamServiceImpl implements MarketTickerStreamService 
         } catch (Exception e) {
             log.error("[MarketTickerStreamService] Unexpected error in message handling: {}", e.getMessage(), e);
             log.error("[MarketTickerStreamService] ❌ 处理ticker消息时出错", e);
+        }
+    }
+    
+    /**
+     * 将时间转换为北京时区（UTC+8）
+     * 参考Python版本的_to_beijing_datetime实现
+     * 
+     * Python版本的逻辑：
+     * 1. 先将naive datetime转换为UTC（假设输入是UTC）
+     * 2. 转换为北京时区（UTC+8）
+     * 3. 返回naive datetime（去掉时区信息）
+     * 
+     * @param dateTime 原始时间（假设为UTC naive datetime）
+     * @return 北京时区时间（naive datetime）
+     */
+    private LocalDateTime toBeijingDateTime(LocalDateTime dateTime) {
+        if (dateTime == null) {
+            return null;
+        }
+        try {
+            // 假设输入是UTC时间（naive datetime），先转换为UTC Instant
+            Instant instant = dateTime.atZone(ZoneOffset.UTC).toInstant();
+            // 转换为北京时区（UTC+8）
+            return LocalDateTime.ofInstant(instant, ZoneOffset.ofHours(8));
+        } catch (Exception e) {
+            log.warn("[MarketTickerStreamService] Failed to convert to Beijing time: {}", e.getMessage());
+            return dateTime;
         }
     }
     
@@ -396,10 +582,12 @@ public class MarketTickerStreamServiceImpl implements MarketTickerStreamService 
             MarketTickerDO tickerDO = new MarketTickerDO();
             
             // 事件时间（E字段，毫秒时间戳）
+            // 注意：币安返回的时间戳是UTC时间，后续会在handleMessage中转换为北京时区
             Long eventTimeMs = inner.getE();
             if (eventTimeMs != null && eventTimeMs > 0) {
+                // 先转换为UTC时间
                 tickerDO.setEventTime(LocalDateTime.ofInstant(
-                    Instant.ofEpochMilli(eventTimeMs), ZoneId.systemDefault()));
+                    Instant.ofEpochMilli(eventTimeMs), ZoneOffset.UTC));
             }
             
             // 交易对符号（s字段，小写）
@@ -480,17 +668,19 @@ public class MarketTickerStreamServiceImpl implements MarketTickerStreamService 
             }
             
             // 统计开始时间（O字段，毫秒时间戳）
+            // 注意：币安返回的时间戳是UTC时间，后续会在handleMessage中转换为北京时区
             Long oValue = inner.getO();
             if (oValue != null && oValue > 0) {
                 tickerDO.setStatsOpenTime(LocalDateTime.ofInstant(
-                    Instant.ofEpochMilli(oValue), ZoneId.systemDefault()));
+                    Instant.ofEpochMilli(oValue), ZoneOffset.UTC));
             }
             
             // 统计结束时间（C字段，毫秒时间戳）
+            // 注意：币安返回的时间戳是UTC时间，后续会在handleMessage中转换为北京时区
             Long cValueLong = inner.getC();
             if (cValueLong != null && cValueLong > 0) {
                 tickerDO.setStatsCloseTime(LocalDateTime.ofInstant(
-                    Instant.ofEpochMilli(cValueLong), ZoneId.systemDefault()));
+                    Instant.ofEpochMilli(cValueLong), ZoneOffset.UTC));
             }
             
             // 第一笔交易ID（F字段）
@@ -511,18 +701,18 @@ public class MarketTickerStreamServiceImpl implements MarketTickerStreamService 
                 tickerDO.setTradeCount(nValue);
             }
             
-            // 数据摄入时间（当前时间）
-            tickerDO.setIngestionTime(LocalDateTime.now());
+            // 数据摄入时间（当前时间，将在handleMessage中设置为北京时区）
+            // 这里先不设置，在handleMessage中统一处理
             
             // 记录标准化后的数据（仅关键字段）
             log.debug("[MarketTickerStreamService] Normalized ticker data for {}: symbol={}, eventTime={}, " +
                     "averagePrice={}, lastPrice={}, highPrice={}, lowPrice={}, baseVolume={}, quoteVolume={}, " +
-                    "tradeCount={}, ingestionTime={}", 
+                    "tradeCount={}", 
                     symbol, tickerDO.getSymbol(), tickerDO.getEventTime(), 
                     tickerDO.getAveragePrice(), tickerDO.getLastPrice(), 
                     tickerDO.getHighPrice(), tickerDO.getLowPrice(), 
                     tickerDO.getBaseVolume(), tickerDO.getQuoteVolume(), 
-                    tickerDO.getTradeCount(), tickerDO.getIngestionTime());
+                    tickerDO.getTradeCount());
             
             return tickerDO;
             
