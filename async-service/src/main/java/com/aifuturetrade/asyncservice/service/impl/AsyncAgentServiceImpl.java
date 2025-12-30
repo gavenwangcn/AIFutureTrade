@@ -60,10 +60,8 @@ public class AsyncAgentServiceImpl implements AsyncAgentService {
     private boolean useTestService;
     
     public AsyncAgentServiceImpl(
-            MarketTickerStreamService marketTickerStreamService,
             PriceRefreshService priceRefreshService,
             MarketSymbolOfflineService marketSymbolOfflineService) {
-        this.marketTickerStreamService = marketTickerStreamService;
         this.priceRefreshService = priceRefreshService;
         this.marketSymbolOfflineService = marketSymbolOfflineService;
     }
@@ -78,11 +76,19 @@ public class AsyncAgentServiceImpl implements AsyncAgentService {
         
         // 根据配置选择使用的MarketTickerStreamService实现
         if (useTestService) {
-            activeMarketTickerStreamService = marketTickerStreamTestService;
-            log.info("[AsyncAgentServiceImpl] 🎯 配置为测试模式，使用 MarketTickerStreamTestService");
+            if (marketTickerStreamTestService != null) {
+                activeMarketTickerStreamService = marketTickerStreamTestService;
+                log.info("[AsyncAgentServiceImpl] 🎯 配置为测试模式，使用 MarketTickerStreamTestService");
+            } else {
+                log.warn("[AsyncAgentServiceImpl] ⚠️ 配置为测试模式，但 MarketTickerStreamTestService 不可用");
+            }
         } else {
-            activeMarketTickerStreamService = marketTickerStreamService;
-            log.info("[AsyncAgentServiceImpl] � 配置为生产模式，使用 MarketTickerStreamServiceImpl");
+            if (marketTickerStreamService != null) {
+                activeMarketTickerStreamService = marketTickerStreamService;
+                log.info("[AsyncAgentServiceImpl] 🔥 配置为生产模式，使用 MarketTickerStreamServiceImpl");
+            } else {
+                log.warn("[AsyncAgentServiceImpl] ⚠️ 配置为生产模式，但 MarketTickerStreamServiceImpl 不可用");
+            }
         }
         
         // 验证选择的服务的可用性
@@ -93,7 +99,7 @@ public class AsyncAgentServiceImpl implements AsyncAgentService {
             log.warn("[AsyncAgentServiceImpl] ⚠️ 警告：未找到可用的MarketTickerStreamService实现");
         }
         
-        log.info("[AsyncAgentServiceImpl] �🛠️ 异步代理服务初始化完成，线程池已创建");
+        log.info("[AsyncAgentServiceImpl] 🛠️ 异步代理服务初始化完成，线程池已创建");
     }
     
     @PreDestroy
