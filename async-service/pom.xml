@@ -33,15 +33,28 @@
                 <type>pom</type>
                 <scope>import</scope>
             </dependency>
-            <!-- 使用 Jetty BOM 统一管理 Jetty 版本，确保所有模块版本一致 -->
-            <!-- Jetty 11.0.20 包含 HttpUpgrader$Factory 类，且所有模块在 Maven 仓库中可用 -->
-            <!-- 注意：Jetty 11+ 使用 Jakarta EE 9+ API，但 Binance SDK 已适配 -->
+            <!-- 明确指定 Jetty 模块版本，确保优先级最高，覆盖所有传递依赖 -->
+            <!-- Jetty 10.0.18 包含 HttpUpgrader$Factory 类（在 Jetty 10.0.0+ 中引入） -->
+            <!-- 注意：Jetty 10+ 使用 Jakarta EE 9+ API，但 Binance SDK 已适配 -->
             <dependency>
                 <groupId>org.eclipse.jetty</groupId>
-                <artifactId>jetty-bom</artifactId>
-                <version>11.0.20</version>
-                <type>pom</type>
-                <scope>import</scope>
+                <artifactId>jetty-client</artifactId>
+                <version>10.0.18</version>
+            </dependency>
+            <dependency>
+                <groupId>org.eclipse.jetty</groupId>
+                <artifactId>jetty-util</artifactId>
+                <version>10.0.18</version>
+            </dependency>
+            <dependency>
+                <groupId>org.eclipse.jetty</groupId>
+                <artifactId>jetty-http</artifactId>
+                <version>10.0.18</version>
+            </dependency>
+            <dependency>
+                <groupId>org.eclipse.jetty</groupId>
+                <artifactId>jetty-io</artifactId>
+                <version>10.0.18</version>
             </dependency>
         </dependencies>
     </dependencyManagement>
@@ -183,12 +196,24 @@
         </dependency>
 
         <!-- 添加 Binance SDK 所需的 Jetty 依赖 -->
-        <!-- 显式添加 jetty-client 以确保包含 HttpUpgrader$Factory 类（在 Jetty 11+ 中引入） -->
-        <!-- 其他 Jetty 模块由 Binance SDK 的 binance-common 传递依赖提供 -->
-        <!-- 版本通过 dependencyManagement 中的 jetty-bom 统一管理为 11.0.20 -->
+        <!-- 显式添加核心 Jetty 模块，确保包含 HttpUpgrader$Factory 类（在 Jetty 10.0.0+ 中引入） -->
+        <!-- 版本在 dependencyManagement 中明确指定为 10.0.18，确保优先级最高 -->
+        <!-- websocket 模块由 Binance SDK 的传递依赖提供，但版本会被 dependencyManagement 统一管理 -->
         <dependency>
             <groupId>org.eclipse.jetty</groupId>
             <artifactId>jetty-client</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.eclipse.jetty</groupId>
+            <artifactId>jetty-util</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.eclipse.jetty</groupId>
+            <artifactId>jetty-http</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.eclipse.jetty</groupId>
+            <artifactId>jetty-io</artifactId>
         </dependency>
         
         <!-- Jakarta Validation API -->
