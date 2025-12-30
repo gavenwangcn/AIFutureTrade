@@ -12,7 +12,9 @@
 # ==============================================================================
 # 使用说明：
 # 1. 启动MySQL服务：docker-compose -f docker-compose-mysql.yml up -d（必须先启动）
-# 2. 默认启动：docker-compose up -d（启动backend、trade、frontend、async-agent和async-service服务）
+# 2. 默认启动：docker-compose up -d（启动backend、trade、frontend、async-service服务）
+# 3. 启动包含async-agent的完整服务：docker-compose --profile async-agent up -d
+# 4. 禁用async-agent：docker-compose --profile no-async-agent up -d
 # ==============================================================================
 # 注意：
 # - MySQL服务已拆分到 docker-compose-mysql.yml，需要先启动
@@ -156,7 +158,14 @@ services:
   # ============================================================================
   # 异步代理服务（后台数据同步）
   # ============================================================================
+  # 配置开关：通过 profiles 控制是否启用此服务
+  # 使用说明：
+  #   - 默认不启动此服务
+  #   - 启动包含async-agent：docker-compose --profile async-agent up -d
+  #   - 在.env文件中设置 ASYNC_AGENT_ENABLED=true 可以启用此服务
   async-agent:
+    profiles:
+      - async-agent
     build:
       context: .
       dockerfile: Dockerfile
@@ -174,7 +183,9 @@ services:
       - MYSQL_DATABASE=${MYSQL_DATABASE:-aifuturetrade}
       # Binance配置
       - BINANCE_API_KEY=${BINANCE_API_KEY}
-      - BINANCE_API_SECRET=${BINANCE_API_SECRET}
+      - BINANCE_SECRET_KEY=${BINANCE_API_SECRET}
+      # 服务启用控制
+      - ASYNC_AGENT_ENABLED=${ASYNC_AGENT_ENABLED:-true}
     # 注意：MySQL服务在docker-compose-mysql.yml中，需要先启动
     # 如果MySQL服务未启动，请先运行：docker-compose -f docker-compose-mysql.yml up -d
     restart: unless-stopped
