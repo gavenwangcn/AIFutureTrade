@@ -132,27 +132,41 @@ public class PriceRefreshServiceImpl implements PriceRefreshService {
             log.info("[PriceRefresh] 📊 Symbol {}: 获取K线数据完成, 返回 {} 条记录", 
                     symbol, klines != null ? klines.size() : 0);
             
-            if (klines == null || klines.size() < 2) {
-                log.warn("[PriceRefresh] ⚠️ Symbol {}: 数据不足 (got {}, need 2)", 
-                        symbol, klines != null ? klines.size() : 0);
+            if (klines == null || klines.isEmpty()) {
+                log.warn("[PriceRefresh] ⚠️ Symbol {}: 没有K线数据", symbol);
                 return false;
             }
             
-            // 记录K线数据详情
-            KlineCandlestickDataResponseItem yesterdayKline = klines.get(0);
-            KlineCandlestickDataResponseItem todayKline = klines.get(1);
-            log.info("[PriceRefresh] 📈 Symbol {}: 昨天K线数据 - openTime={}, open={}, close={}", 
-                    symbol, yesterdayKline.get(0), yesterdayKline.get(1), yesterdayKline.get(4));
-            log.info("[PriceRefresh] 📈 Symbol {}: 今天K线数据 - openTime={}, open={}, close={}", 
-                    symbol, todayKline.get(0), todayKline.get(1), todayKline.get(4));
+            Double openPrice = null;
+            String priceSource = "";
             
-            // 使用昨天的收盘价作为今天的开盘价
-            Double yesterdayClosePrice = extractClosePrice(yesterdayKline);
+            if (klines.size() == 1) {
+                // 如果只有1条K线，使用这条K线的开盘价
+                KlineCandlestickDataResponseItem singleKline = klines.get(0);
+                log.info("[PriceRefresh] 📈 Symbol {}: 只有1条K线数据 - openTime={}, open={}, close={}", 
+                        symbol, singleKline.get(0), singleKline.get(1), singleKline.get(4));
+                
+                openPrice = extractOpenPrice(singleKline);
+                priceSource = "单条K线的开盘价";
+                
+                log.info("[PriceRefresh] 💰 Symbol {}: 提取的{} = {}", symbol, priceSource, openPrice);
+            } else {
+                // 如果有2条或更多K线，使用第一条（昨天）的收盘价作为今天的开盘价
+                KlineCandlestickDataResponseItem yesterdayKline = klines.get(0);
+                KlineCandlestickDataResponseItem todayKline = klines.get(1);
+                log.info("[PriceRefresh] 📈 Symbol {}: 昨天K线数据 - openTime={}, open={}, close={}", 
+                        symbol, yesterdayKline.get(0), yesterdayKline.get(1), yesterdayKline.get(4));
+                log.info("[PriceRefresh] 📈 Symbol {}: 今天K线数据 - openTime={}, open={}, close={}", 
+                        symbol, todayKline.get(0), todayKline.get(1), todayKline.get(4));
+                
+                openPrice = extractClosePrice(yesterdayKline);
+                priceSource = "昨天收盘价";
+                
+                log.info("[PriceRefresh] 💰 Symbol {}: 提取的{} = {}", symbol, priceSource, openPrice);
+            }
             
-            log.info("[PriceRefresh] 💰 Symbol {}: 提取的昨天收盘价 = {}", symbol, yesterdayClosePrice);
-            
-            if (yesterdayClosePrice == null || yesterdayClosePrice <= 0) {
-                log.warn("[PriceRefresh] ⚠️ Symbol {}: 无效的收盘价: {}", symbol, yesterdayClosePrice);
+            if (openPrice == null || openPrice <= 0) {
+                log.warn("[PriceRefresh] ⚠️ Symbol {}: 无效的价格: {}", symbol, openPrice);
                 return false;
             }
             
@@ -160,13 +174,14 @@ public class PriceRefreshServiceImpl implements PriceRefreshService {
             // 参考Python版本的逻辑：使用UTC+8时间作为update_price_date
             // 注意：updateOpenPrice方法内部会使用当前UTC+8时间，传入的updateDate参数会被忽略（为了兼容性仍然传递）
             LocalDateTime updateDate = LocalDateTime.now(java.time.ZoneOffset.ofHours(8));
-            log.info("[PriceRefresh] 🗄️  Symbol {}: 开始更新数据库 open_price = {}, update_price_date = {} (UTC+8)", 
-                    symbol, yesterdayClosePrice, updateDate);
+            log.info("[PriceRefresh] 🗄️  Symbol {}: 开始更新数据库 open_price = {} ({}), update_price_date = {} (UTC+8)", 
+                    symbol, openPrice, priceSource, updateDate);
             
-            int updated = marketTickerMapper.updateOpenPrice(symbol, yesterdayClosePrice, updateDate);
+            int updated = marketTickerMapper.updateOpenPrice(symbol, openPrice, updateDate);
             
             if (updated > 0) {
-                log.info("[PriceRefresh] ✅ Symbol {}: 成功更新数据库, 影响行数: {}", symbol, updated);
+                log.info("[PriceRefresh] ✅ Symbol {}: 成功更新数据库 ({} = {}), 影响行数: {}", 
+                        symbol, priceSource, openPrice, updated);
                 return true;
             } else {
                 log.warn("[PriceRefresh] ❌ Symbol {}: 更新open_price失败, 影响行数: {}", symbol, updated);
@@ -268,6 +283,77 @@ public class PriceRefreshServiceImpl implements PriceRefreshService {
                 failedCount, (total > 0 ? failedCount * 100.0 / total : 0), totalCost);
         
         return new RefreshResult(total, successCount, failedCount);
+    }
+    
+    /**
+     * 从K线数据中提取开盘价
+     * 支持新SDK的KlineCandlestickDataResponseItem类型和旧的Map类型
+     * 
+     * @param klineData K线数据对象
+     * @return 开盘价，如果提取失败返回null
+     */
+    private Double extractOpenPrice(Object klineData) {
+        try {
+            if (klineData == null) {
+                return null;
+            }
+            
+            // 处理新SDK类型 KlineCandlestickDataResponseItem (继承ArrayList<String>)
+            // 索引1是开盘价: [0]开盘时间,[1]开盘价,[2]最高价,[3]最低价,[4]收盘价,[5]成交量...
+            if (klineData instanceof KlineCandlestickDataResponseItem) {
+                KlineCandlestickDataResponseItem sdkKline = (KlineCandlestickDataResponseItem) klineData;
+                if (sdkKline.size() > 1) {
+                    String openPriceStr = sdkKline.get(1);
+                    if (openPriceStr != null && !openPriceStr.isEmpty()) {
+                        try {
+                            return Double.parseDouble(openPriceStr);
+                        } catch (NumberFormatException e) {
+                            log.warn("[PriceRefresh] Invalid open_price format in SDK kline: {}", openPriceStr);
+                        }
+                    }
+                }
+                return null;
+            }
+            
+            // 处理旧的Map类型
+            if (klineData instanceof Map) {
+                @SuppressWarnings("unchecked")
+                Map<String, Object> kline = (Map<String, Object>) klineData;
+                
+                // BinanceFuturesClient返回的Map中包含"open_price"字段（String类型）
+                Object openObj = kline.get("open_price");
+                if (openObj == null) {
+                    // 如果没有open_price，尝试open字段
+                    openObj = kline.get("open");
+                }
+                
+                if (openObj == null) {
+                    log.warn("[PriceRefresh] Kline data missing open_price field");
+                    return null;
+                }
+                
+                if (openObj instanceof Number) {
+                    return ((Number) openObj).doubleValue();
+                } else if (openObj instanceof String) {
+                    try {
+                        return Double.parseDouble((String) openObj);
+                    } catch (NumberFormatException e) {
+                        log.warn("[PriceRefresh] Invalid open_price format: {}", openObj);
+                        return null;
+                    }
+                } else {
+                    log.warn("[PriceRefresh] Unexpected open_price type: {}", openObj.getClass());
+                    return null;
+                }
+            }
+            
+            log.warn("[PriceRefresh] Unsupported kline data type: {}", klineData.getClass());
+            return null;
+            
+        } catch (Exception e) {
+            log.error("[PriceRefresh] Error extracting open price from kline", e);
+            return null;
+        }
     }
     
     /**
