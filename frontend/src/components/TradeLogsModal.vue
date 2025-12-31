@@ -482,18 +482,16 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .trade-logs-modal {
-  width: 33.33%;
-  max-width: 600px;
-  min-width: 400px;
-  height: 33.33vh;
-  max-height: 500px;
-  min-height: 300px;
+  width: 66.66%;
+  max-width: 1200px;
+  min-width: 800px;
+  height: 66.66vh;
+  max-height: 1000px;
+  min-height: 600px;
   display: flex;
   flex-direction: column;
-  margin: auto;
+  margin: 0;
   position: relative;
-  top: 50%;
-  transform: translateY(-50%);
 }
 
 .modal-body {
@@ -508,7 +506,7 @@ onBeforeUnmount(() => {
   flex-direction: column;
   flex: 1;
   overflow: hidden;
-  min-height: 150px;
+  min-height: 400px;
 }
 
 .log-dialog-header {
@@ -533,46 +531,125 @@ onBeforeUnmount(() => {
 .log-controls-header {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: 12px;
   align-items: center;
   width: 100%;
+  padding: 8px 0;
 }
 
 .log-controls-header .btn {
-  height: 28px;
-  padding: 4px 12px;
-  font-size: 12px;
+  height: 40px;
+  padding: 10px 20px;
+  font-size: 14px;
+  font-weight: 500;
+  border-radius: 6px;
+  transition: all 0.2s ease;
+  cursor: pointer;
+  border: 1px solid transparent;
+  white-space: nowrap;
+}
+
+.log-controls-header .btn:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+}
+
+.log-controls-header .btn:active:not(:disabled) {
+  transform: translateY(0);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.1);
+}
+
+.log-controls-header .btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }
 
 .log-status {
   display: flex;
-  gap: 6px;
+  gap: 8px;
   align-items: center;
-  margin-left: 12px;
+  margin-left: 16px;
+  padding: 8px 16px;
+  background-color: #f5f7fa;
+  border-radius: 6px;
+  font-size: 14px;
 }
 
 .status-connected {
   font-weight: 600;
   color: #67c23a;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.status-connected::before {
+  content: '';
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background-color: #67c23a;
+  display: inline-block;
+  animation: pulse 2s infinite;
 }
 
 .status-disconnected {
   font-weight: 600;
   color: #f56c6c;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.status-disconnected::before {
+  content: '';
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background-color: #f56c6c;
+  display: inline-block;
+}
+
+@keyframes pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
 }
 
 .log-search-container {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: 12px;
   align-items: center;
   margin-left: auto;
 }
 
+.log-search-container input {
+  height: 40px;
+  padding: 8px 12px;
+  font-size: 14px;
+  border-radius: 6px;
+  border: 1px solid #dcdfe6;
+  transition: border-color 0.2s ease;
+}
+
+.log-search-container input:focus {
+  outline: none;
+  border-color: #409eff;
+  box-shadow: 0 0 0 2px rgba(64, 158, 255, 0.1);
+}
+
 .search-info {
-  font-size: 12px;
-  color: #909399;
-  margin: 0 4px;
+  font-size: 14px;
+  color: #606266;
+  margin: 0 8px;
+  padding: 6px 12px;
+  background-color: #f0f2f5;
+  border-radius: 4px;
+  font-weight: 500;
 }
 
 .log-content {

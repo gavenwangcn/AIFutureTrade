@@ -237,7 +237,14 @@ public class DockerLogServiceImpl implements DockerLogService {
 
                     @Override
                     public void onError(Throwable throwable) {
-                        logger.error("日志流错误", throwable);
+                        // 使用 try-catch 包装日志记录，避免 logback 类加载问题
+                        try {
+                            logger.error("日志流错误", throwable);
+                        } catch (Exception logError) {
+                            // 如果日志记录失败，使用 System.err 输出
+                            System.err.println("日志流错误: " + throwable.getMessage());
+                            throwable.printStackTrace();
+                        }
                         String errorMsg = throwable.getMessage();
                         if (errorMsg == null) {
                             errorMsg = throwable.getClass().getSimpleName();
