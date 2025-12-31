@@ -482,12 +482,18 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .trade-logs-modal {
-  width: 95%;
-  max-width: 95%;
-  height: 95vh;
-  max-height: 95vh;
+  width: 33.33%;
+  max-width: 600px;
+  min-width: 400px;
+  height: 33.33vh;
+  max-height: 500px;
+  min-height: 300px;
   display: flex;
   flex-direction: column;
+  margin: auto;
+  position: relative;
+  top: 50%;
+  transform: translateY(-50%);
 }
 
 .modal-body {
@@ -500,9 +506,9 @@ onBeforeUnmount(() => {
 .log-container {
   display: flex;
   flex-direction: column;
-  height: calc(95vh - 120px);
   flex: 1;
   overflow: hidden;
+  min-height: 150px;
 }
 
 .log-dialog-header {

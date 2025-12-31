@@ -200,8 +200,13 @@ trade:
   market-symbol-retention-minutes: 30  # Ticker数据保留分钟数
 
 # Docker配置（可通过环境变量覆盖）
+# 注意：
+#   - Windows系统: 使用 tcp://localhost:2375（需要在Docker Desktop中启用TCP端口）
+#   - Linux/Mac系统: 使用 unix:///var/run/docker.sock（默认）
+#   - 如果backend在Docker容器中运行，需要挂载 /var/run/docker.sock 到容器内
+#   - 代码会自动检测操作系统并选择默认连接方式
 docker:
-  host: ${DOCKER_HOST:unix:///var/run/docker.sock}  # Docker主机地址，默认本地Docker
+  host: ${DOCKER_HOST:unix:///var/run/docker.sock}  # Docker主机地址，容器内使用Unix socket
   container-name: ${DOCKER_CONTAINER_NAME:aifuturetrade-trade}  # 交易日志容器名称
 
 # Swagger配置

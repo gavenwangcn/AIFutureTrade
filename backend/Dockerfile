@@ -78,6 +78,10 @@ WORKDIR /app
 # 注意：如果构建失败，可以检查 target 目录中的实际文件名
 COPY --from=builder /app/target/java-backend-1.0.0.jar app.jar
 
+# 注意：Docker socket 挂载在 docker-compose.yml 中配置
+# 容器需要访问 /var/run/docker.sock 来查询其他容器日志
+# 权限由挂载的 socket 文件决定，通常需要 docker 组权限
+
 # 暴露服务端口（5002端口供前端调用）
 EXPOSE 5002
 
