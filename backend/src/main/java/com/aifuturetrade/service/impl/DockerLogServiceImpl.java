@@ -47,40 +47,98 @@ public class DockerLogServiceImpl implements DockerLogService {
             // 创建Docker客户端配置
             DefaultDockerClientConfig.Builder configBuilder = DefaultDockerClientConfig.createDefaultConfigBuilder();
             
+            // 检测操作系统类型
+            String osName = System.getProperty("os.name", "").toLowerCase();
+            boolean isWindows = osName.contains("win");
+            
             // 根据dockerHost配置设置Docker URI
             String finalDockerHost = dockerHost;
             if (dockerHost == null || dockerHost.trim().isEmpty()) {
-                // 默认使用Unix socket
-                finalDockerHost = "unix:///var/run/docker.sock";
-            } else if (!dockerHost.startsWith("unix://") && 
-                       !dockerHost.startsWith("tcp://") && 
-                       !dockerHost.startsWith("http://") && 
-                       !dockerHost.startsWith("https://")) {
-                // 如果不是标准格式，默认使用Unix socket
-                logger.warn("Docker host格式不正确: {}, 使用默认Unix socket", dockerHost);
-                finalDockerHost = "unix:///var/run/docker.sock";
+                // 根据操作系统选择默认连接方式
+                if (isWindows) {
+                    // Windows系统使用TCP连接
+                    finalDockerHost = "tcp://localhost:2375";
+                    logger.info("检测到Windows系统，使用默认TCP连接: {}", finalDockerHost);
+                } else {
+                    // Linux/Mac系统使用Unix socket
+                    finalDockerHost = "unix:///var/run/docker.sock";
+                    logger.info("检测到Linux/Mac系统，使用默认Unix socket: {}", finalDockerHost);
+                }
+            } else {
+                // 规范化Unix socket路径
+                if (dockerHost.startsWith("unix://")) {
+                    if (isWindows) {
+                        logger.warn("Windows系统不支持Unix socket，请使用TCP连接（如: tcp://localhost:2375）");
+                        // Windows上强制使用TCP
+                        finalDockerHost = "tcp://localhost:2375";
+                    } else {
+                        // 确保Unix socket格式正确：unix:///path/to/socket（三个斜杠）
+                        String path = dockerHost.substring(7); // 移除 "unix://"
+                        if (!path.startsWith("/")) {
+                            // 如果路径不是以/开头，添加/
+                            path = "/" + path;
+                        }
+                        finalDockerHost = "unix://" + path;
+                        logger.info("使用Unix socket连接: {}", finalDockerHost);
+                    }
+                } else if (dockerHost.startsWith("tcp://") || 
+                          dockerHost.startsWith("http://") || 
+                          dockerHost.startsWith("https://")) {
+                    // TCP/HTTP连接
+                    finalDockerHost = dockerHost;
+                    logger.info("使用TCP/HTTP连接: {}", finalDockerHost);
+                } else {
+                    // 如果不是标准格式，根据操作系统选择
+                    if (isWindows) {
+                        // Windows上尝试作为TCP连接
+                        if (dockerHost.contains(":")) {
+                            finalDockerHost = "tcp://" + dockerHost;
+                        } else {
+                            finalDockerHost = "tcp://" + dockerHost + ":2375";
+                        }
+                        logger.warn("Docker host格式不明确: {}, 在Windows上尝试作为TCP连接: {}", dockerHost, finalDockerHost);
+                    } else {
+                        // Linux/Mac上尝试作为Unix socket路径
+                        String path = dockerHost.trim();
+                        if (!path.startsWith("/")) {
+                            path = "/" + path;
+                        }
+                        finalDockerHost = "unix://" + path;
+                        logger.warn("Docker host格式不明确: {}, 尝试作为Unix socket路径: {}", dockerHost, finalDockerHost);
+                    }
+                }
             }
             
+            // 设置Docker主机地址
             configBuilder.withDockerHost(finalDockerHost);
             DefaultDockerClientConfig config = configBuilder.build();
+            
+            logger.info("Docker客户端配置 - Host: {}", config.getDockerHost());
 
             // 创建Docker HTTP客户端
             // 注意：对于Unix socket，ApacheDockerHttpClient会自动处理
-            ApacheDockerHttpClient.Builder httpClientBuilder = new ApacheDockerHttpClient.Builder()
-                    .dockerHost(config.getDockerHost())
-                    .sslConfig(config.getSSLConfig());
-            
-            // 设置连接池大小（如果方法存在）
             try {
-                httpClientBuilder.maxConnections(100);
+                ApacheDockerHttpClient.Builder httpClientBuilder = new ApacheDockerHttpClient.Builder()
+                        .dockerHost(config.getDockerHost())
+                        .sslConfig(config.getSSLConfig());
+                
+                // 设置连接池大小（如果方法存在）
+                try {
+                    httpClientBuilder.maxConnections(100);
+                } catch (Exception e) {
+                    logger.debug("无法设置maxConnections，使用默认值: {}", e.getMessage());
+                }
+                
+                ApacheDockerHttpClient httpClient = httpClientBuilder.build();
+                
+                // 创建Docker客户端
+                dockerClient = DockerClientImpl.getInstance(config, httpClient);
+                
+                logger.info("Docker HTTP客户端创建成功");
             } catch (Exception e) {
-                logger.debug("无法设置maxConnections，使用默认值");
+                logger.error("创建Docker HTTP客户端失败: {}", e.getMessage(), e);
+                throw new RuntimeException("创建Docker HTTP客户端失败: " + e.getMessage(), e);
             }
-            
-            ApacheDockerHttpClient httpClient = httpClientBuilder.build();
-
-            // 创建Docker客户端
-            dockerClient = DockerClientImpl.getInstance(config, httpClient);
 
             // 测试连接
             try {
