@@ -10,6 +10,7 @@ import org.springframework.stereotype.Service;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
@@ -32,6 +33,13 @@ public class MarketSymbolOfflineServiceImpl implements MarketSymbolOfflineServic
     
     private final AtomicBoolean schedulerRunning = new AtomicBoolean(false);
     
+    /**
+     * 获取UTC+8时区的当前时间
+     */
+    private LocalDateTime getBeijingTime() {
+        return LocalDateTime.now(ZoneOffset.ofHours(8));
+    }
+    
     public MarketSymbolOfflineServiceImpl(MarketTickerMapper marketTickerMapper) {
         this.marketTickerMapper = marketTickerMapper;
     }
@@ -52,7 +60,7 @@ public class MarketSymbolOfflineServiceImpl implements MarketSymbolOfflineServic
     
     @Override
     public long deleteOldSymbols() {
-        LocalDateTime deleteStartTime = LocalDateTime.now();
+        LocalDateTime deleteStartTime = getBeijingTime();
         log.info("=".repeat(80));
         log.info("[MarketSymbolOffline] ========== 开始执行异步市场Symbol下线任务 ==========");
         log.info("[MarketSymbolOffline] 执行时间: {}", deleteStartTime);
@@ -60,7 +68,7 @@ public class MarketSymbolOfflineServiceImpl implements MarketSymbolOfflineServic
         
         try {
             // 计算截止日期
-            LocalDateTime cutoffDate = LocalDateTime.now().minusMinutes(retentionMinutes);
+            LocalDateTime cutoffDate = getBeijingTime().minusMinutes(retentionMinutes);
             log.info("[MarketSymbolOffline] [步骤1] 计算截止日期: 当前时间 - {} 分钟 = {}", 
                     retentionMinutes, cutoffDate);
             
@@ -83,13 +91,14 @@ public class MarketSymbolOfflineServiceImpl implements MarketSymbolOfflineServic
             int deletedCount = marketTickerMapper.deleteOldTickers(cutoffDate);
             
             // 计算总耗时
-            long totalDuration = java.time.Duration.between(deleteStartTime, LocalDateTime.now()).getSeconds();
+            LocalDateTime endTime = getBeijingTime();
+            long totalDuration = java.time.Duration.between(deleteStartTime, endTime).getSeconds();
             
             // 输出详细统计信息
             log.info("=".repeat(80));
             log.info("[MarketSymbolOffline] ========== 异步市场Symbol下线任务执行完成 ==========");
             log.info("[MarketSymbolOffline] 执行时间: {}", deleteStartTime);
-            log.info("[MarketSymbolOffline] 完成时间: {}", LocalDateTime.now());
+            log.info("[MarketSymbolOffline] 完成时间: {}", endTime);
             log.info("[MarketSymbolOffline] 总耗时: {} 秒 ({} 分钟)", totalDuration, totalDuration / 60.0);
             log.info("[MarketSymbolOffline] 统计信息:");
             log.info("[MarketSymbolOffline]   - 保留分钟: {} 分钟", retentionMinutes);
@@ -100,11 +109,12 @@ public class MarketSymbolOfflineServiceImpl implements MarketSymbolOfflineServic
             return deletedCount;
             
         } catch (Exception e) {
-            long totalDuration = java.time.Duration.between(deleteStartTime, LocalDateTime.now()).getSeconds();
+            LocalDateTime errorTime = getBeijingTime();
+            long totalDuration = java.time.Duration.between(deleteStartTime, errorTime).getSeconds();
             log.error("=".repeat(80));
             log.error("[MarketSymbolOfflineServiceImpl] ========== 异步市场Symbol下线任务执行失败 ==========");
             log.error("[MarketSymbolOfflineServiceImpl] 执行时间: {}", deleteStartTime);
-            log.error("[MarketSymbolOfflineServiceImpl] 失败时间: {}", LocalDateTime.now());
+            log.error("[MarketSymbolOfflineServiceImpl] 失败时间: {}", errorTime);
             log.error("[MarketSymbolOfflineServiceImpl] 总耗时: {} 秒", totalDuration);
             log.error("[MarketSymbolOfflineServiceImpl] 错误信息: ", e);
             log.error("=".repeat(80));

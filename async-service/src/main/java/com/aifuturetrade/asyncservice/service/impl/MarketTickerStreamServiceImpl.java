@@ -5,6 +5,7 @@ import com.aifuturetrade.asyncservice.dao.mapper.MarketTickerMapper;
 import com.aifuturetrade.asyncservice.entity.ExistingSymbolData;
 import com.aifuturetrade.asyncservice.entity.MarketTickerDO;
 import com.aifuturetrade.asyncservice.service.MarketTickerStreamService;
+import com.binance.connector.client.common.websocket.adapter.stream.StreamConnectionWrapper;
 import com.binance.connector.client.common.websocket.configuration.WebSocketClientConfiguration;
 import com.binance.connector.client.common.websocket.service.StreamBlockingQueueWrapper;
 import com.binance.connector.client.derivatives_trading_usds_futures.websocket.stream.DerivativesTradingUsdsFuturesWebSocketStreamsUtil;
@@ -33,6 +34,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 import org.eclipse.jetty.websocket.api.exceptions.MessageTooLargeException;
 import org.eclipse.jetty.websocket.api.exceptions.WebSocketException;
+import org.eclipse.jetty.websocket.client.WebSocketClient;
 
 /**
  * 市场Ticker流服务实现
@@ -42,7 +44,7 @@ import org.eclipse.jetty.websocket.api.exceptions.WebSocketException;
  * 
  * 主要特性：
  * - 使用SDK泛型类解析数据（不使用反射）
- * - 自动重连：每30分钟自动重新建立连接（币安WebSocket连接限制）
+ * - 简化的异常处理：仅对MessageTooLargeException进行特殊处理
  * - 批量同步：使用batchUpsertTickers批量插入/更新数据
  * - 异常处理：完善的错误处理和日志记录
  */
@@ -56,11 +58,6 @@ public class MarketTickerStreamServiceImpl implements MarketTickerStreamService 
     private StreamBlockingQueueWrapper<AllMarketTickersStreamsResponse> response;
     private ExecutorService streamExecutor;
     private final AtomicBoolean running = new AtomicBoolean(false);
-    
-    // 连接生命周期管理
-    private LocalDateTime connectionCreationTime;
-    // 最大连接时长：30分钟（0.5小时）
-    private static final double MAX_CONNECTION_HOURS = 0.5;
     
     // 动态调整的最大消息大小（初始值为配置值，遇到MessageTooLargeException时自动增加）
     private final AtomicLong currentMaxMessageSize;
@@ -117,63 +114,22 @@ public class MarketTickerStreamServiceImpl implements MarketTickerStreamService 
             // 使用动态调整的最大消息大小
             long maxSize = currentMaxMessageSize.get();
             clientConfiguration.setMessageMaxSize(maxSize);
-            api = new DerivativesTradingUsdsFuturesWebSocketStreams(clientConfiguration);
+            clientConfiguration.setReconnectBatchSize(365);
+            WebSocketClient webSocketClient = new WebSocketClient();
+            StreamConnectionWrapper connectionWrapper = new StreamConnectionWrapper(clientConfiguration, webSocketClient);
+            api = new DerivativesTradingUsdsFuturesWebSocketStreams(connectionWrapper);
             log.info("[MarketTickerStreamService] 创建API实例，最大消息大小: {} bytes", maxSize);
         }
         return api;
     }
     
     /**
-     * 重新创建API实例（用于处理MessageTooLargeException后重建连接）
+     * 重新创建API实例（用于处理MessageTooLargeException后调整消息大小）
      */
     private void recreateApi() {
         log.info("[MarketTickerStreamService] 🔄 重新创建API实例...");
         api = null; // 强制重新创建
         getApi(); // 触发重新创建
-    }
-    
-    /**
-     * 检测是否为Jetty WebSocket异常
-     * 检查异常类型或异常链中是否包含org.eclipse.jetty.websocket.api.exceptions包下的异常
-     * 
-     * @param e 异常对象
-     * @return true如果是Jetty WebSocket异常，false otherwise
-     */
-    private boolean isJettyWebSocketException(Exception e) {
-        // 检查异常类型
-        if (e instanceof WebSocketException) {
-            return true;
-        }
-        
-        // 检查异常类名是否属于org.eclipse.jetty.websocket.api.exceptions包
-        String className = e.getClass().getName();
-        if (className.startsWith("org.eclipse.jetty.websocket.api.exceptions.")) {
-            return true;
-        }
-        
-        // 检查异常消息中是否包含相关关键词
-        String errorMessage = e.getMessage() != null ? e.getMessage() : "";
-        String lowerMessage = errorMessage.toLowerCase();
-        if (lowerMessage.contains("org.eclipse.jetty.websocket.api.exceptions") ||
-            lowerMessage.contains("websocket exception") ||
-            lowerMessage.contains("websocket error")) {
-            return true;
-        }
-        
-        // 检查异常链中是否包含Jetty WebSocket异常
-        Throwable cause = e.getCause();
-        while (cause != null) {
-            if (cause instanceof WebSocketException) {
-                return true;
-            }
-            String causeClassName = cause.getClass().getName();
-            if (causeClassName.startsWith("org.eclipse.jetty.websocket.api.exceptions.")) {
-                return true;
-            }
-            cause = cause.getCause();
-        }
-        
-        return false;
     }
     
     /**
@@ -222,21 +178,17 @@ public class MarketTickerStreamServiceImpl implements MarketTickerStreamService 
             long configuredSize = currentMaxMessageSize.get();
             
             // 尝试从异常消息中提取实际大小
-            // 格式: "Text message too large: (actual) 81,563 > (configured max text message size) 80,000"
             try {
-                // 方法1: 从 "(actual) 81,563" 中提取（更准确）
                 if (errorMessage.contains("(actual)")) {
                     String[] parts = errorMessage.split("\\(actual\\)");
                     if (parts.length > 1) {
                         String sizePart = parts[1].trim();
-                        // 提取数字部分（可能包含逗号，如 "81,563"）
                         String sizeStr = sizePart.replaceAll("[^0-9]", "");
                         if (!sizeStr.isEmpty()) {
                             actualSize = Long.parseLong(sizeStr);
                         }
                     }
                 }
-                // 方法2: 如果方法1失败，尝试从 ">" 分割
                 if (actualSize == 0 && errorMessage.contains(">")) {
                     String[] parts = errorMessage.split(">");
                     if (parts.length > 0) {
@@ -254,7 +206,7 @@ public class MarketTickerStreamServiceImpl implements MarketTickerStreamService 
                 log.debug("[MarketTickerStreamService] 无法从异常消息中解析实际消息大小: {}", errorMessage, parseEx);
             }
             
-            // 计算新的最大消息大小：实际大小 + 20% 缓冲，但至少增加10KB
+            // 计算新的最大消息大小：实际大小 + 20% 缓冲
             long newMaxSize;
             if (actualSize > 0) {
                 newMaxSize = (long) (actualSize * 1.2); // 增加20%缓冲
@@ -289,57 +241,39 @@ public class MarketTickerStreamServiceImpl implements MarketTickerStreamService 
     }
     
     /**
-     * 处理所有Jetty WebSocket异常
-     * 当检测到org.eclipse.jetty.websocket.api.exceptions包下的任何异常时，重建连接
+     * 简化异常处理
+     * 处理MessageTooLargeException，其他异常记录日志但不重连
      * 
      * @param e 异常对象
-     * @return true如果检测到Jetty WebSocket异常并已处理，false otherwise
+     * @return true如果处理了MessageTooLargeException，false otherwise
      */
-    private boolean handleJettyWebSocketException(Exception e) {
-        if (!isJettyWebSocketException(e)) {
-            return false;
+    private boolean handleException(Exception e) {
+        // 特殊处理MessageTooLargeException：增加消息大小
+        if (e instanceof MessageTooLargeException || 
+            (e.getMessage() != null && e.getMessage().toLowerCase().contains("message too large"))) {
+            return handleMessageTooLargeException(e);
         }
         
+        // 检查异常链中是否包含MessageTooLargeException
+        Throwable cause = e.getCause();
+        while (cause != null) {
+            if (cause instanceof MessageTooLargeException || 
+                (cause.getMessage() != null && cause.getMessage().toLowerCase().contains("message too large"))) {
+                return handleMessageTooLargeException(new Exception(cause));
+            }
+            cause = cause.getCause();
+        }
+        
+        // 其他异常只记录日志，不进行重连
         String errorMessage = e.getMessage() != null ? e.getMessage() : "";
         String exceptionType = e.getClass().getSimpleName();
+        log.warn("[MarketTickerStreamService] ⚠️ 处理异常: {} - {}", exceptionType, errorMessage);
         
-        log.warn("[MarketTickerStreamService] ⚠️ 检测到Jetty WebSocket异常: {} - {}", exceptionType, errorMessage);
-        
-        // 特殊处理MessageTooLargeException：增加消息大小
-        if (e instanceof MessageTooLargeException) {
-            // 调用handleMessageTooLargeException处理增加消息大小的逻辑
-            if (handleMessageTooLargeException(e)) {
-                // handleMessageTooLargeException已经处理了增加消息大小和重建API的逻辑
-                return true;
-            }
-        } else {
-            // 检查异常链中是否包含MessageTooLargeException
-            Throwable cause = e.getCause();
-            while (cause != null) {
-                if (cause instanceof MessageTooLargeException) {
-                    if (handleMessageTooLargeException(new Exception(cause))) {
-                        return true;
-                    }
-                }
-                cause = cause.getCause();
-            }
-        }
-        
-        // 对于其他Jetty WebSocket异常，直接重建连接
-        log.info("[MarketTickerStreamService] 🔄 由于Jetty WebSocket异常（{}），将重新建立连接", exceptionType);
-        
-        // 重新创建API实例（使用当前配置）
-        recreateApi();
-        
-        return true;
+        return false;
     }
     
     /**
      * 启动ticker流服务
-     * 
-     * 参考Python版本的run_market_ticker_stream实现：
-     * - 如果指定了runSeconds，只运行一次
-     * - 如果未指定runSeconds，会无限循环运行，每次连接30分钟后自动重连
      */
     @Override
     public void startStream(Integer runSeconds) throws Exception {
@@ -363,13 +297,7 @@ public class MarketTickerStreamServiceImpl implements MarketTickerStreamService 
         // 提交流处理任务
         streamExecutor.submit(() -> {
             try {
-                if (runSeconds != null) {
-                    // 如果指定了运行时间，只运行一次
-                    streamOnce(runSeconds);
-                } else {
-                    // 无限运行，每次连接30分钟后自动重连
-                    streamWithAutoReconnect();
-                }
+                streamOnce(runSeconds);
             } catch (Exception e) {
                 log.error("[MarketTickerStreamService] ❌ 流处理异常", e);
             } finally {
@@ -381,27 +309,34 @@ public class MarketTickerStreamServiceImpl implements MarketTickerStreamService 
     }
     
     /**
-     * 运行一次流（指定时长）
+     * 运行流处理
      */
-    private void streamOnce(int runSeconds) throws Exception {
-        log.info("[MarketTickerStreamService] 📡 开始单次流处理（运行{}秒）", runSeconds);
+    private void streamOnce(Integer runSeconds) throws Exception {
+        log.info("[MarketTickerStreamService] 📡 开始流处理（运行{}秒）", 
+                runSeconds != null ? runSeconds : "无限");
         
         try {
-            // 记录连接创建时间
-            connectionCreationTime = LocalDateTime.now();
-            log.debug("[MarketTickerStreamService] Creating new WebSocket connection");
+            log.debug("[MarketTickerStreamService] Creating WebSocket connection");
             
             // 创建请求并获取流
             AllMarketTickersStreamsRequest request = new AllMarketTickersStreamsRequest();
             response = getApi().allMarketTickersStreams(request);
             log.info("[MarketTickerStreamService] ✅ WebSocket连接已建立");
-            log.debug("[MarketTickerStreamService] Connection created at: {}", connectionCreationTime);
             
-            // 计算结束时间
-            long endTime = System.currentTimeMillis() + (runSeconds * 1000L);
+            // 计算结束时间（如果指定了运行时间）
+            Long endTime = null;
+            if (runSeconds != null) {
+                endTime = System.currentTimeMillis() + (runSeconds * 1000L);
+            }
             
             // 循环接收数据
-            while (running.get() && System.currentTimeMillis() < endTime) {
+            while (running.get()) {
+                // 检查是否超时
+                if (endTime != null && System.currentTimeMillis() >= endTime) {
+                    log.info("[MarketTickerStreamService] ⏰ 运行时间到达限制，停止流处理");
+                    break;
+                }
+                
                 try {
                     AllMarketTickersStreamsResponse tickerResponse = response.take();
                     handleMessage(tickerResponse);
@@ -410,22 +345,21 @@ public class MarketTickerStreamServiceImpl implements MarketTickerStreamService 
                     Thread.currentThread().interrupt();
                     break;
                 } catch (Exception e) {
-                    // 检查是否为Jetty WebSocket异常（包括MessageTooLargeException）
-                    if (handleJettyWebSocketException(e)) {
-                        // 如果处理了Jetty WebSocket异常，需要重新建立连接
-                        log.info("[MarketTickerStreamService] 🔄 由于Jetty WebSocket异常，将重新建立连接");
+                    // 处理MessageTooLargeException，其他异常记录日志但不重连
+                    if (handleException(e)) {
+                        log.info("[MarketTickerStreamService] 🔧 已调整消息大小，重新创建连接");
                         // 重新创建请求并获取流
                         request = new AllMarketTickersStreamsRequest();
                         response = getApi().allMarketTickersStreams(request);
                         log.info("[MarketTickerStreamService] ✅ WebSocket连接已重新建立");
                     } else {
                         log.error("[MarketTickerStreamService] ❌ 处理消息时出错", e);
-                        // 继续处理下一条消息
+                        // 继续处理下一条消息，不进行重连
                     }
                 }
             }
             
-            log.info("[MarketTickerStreamService] ✅ 单次流处理完成");
+            log.info("[MarketTickerStreamService] ✅ 流处理完成");
             
         } catch (Exception e) {
             log.error("[MarketTickerStreamService] ❌ 流处理失败", e);
@@ -433,113 +367,9 @@ public class MarketTickerStreamServiceImpl implements MarketTickerStreamService 
         }
     }
     
-    /**
-     * 无限运行流（自动重连）
-     * 
-     * 参考Python版本的实现：每次连接30分钟后自动重连
-     */
-    private void streamWithAutoReconnect() throws Exception {
-        log.info("[MarketTickerStreamService] 📡 开始自动重连流处理");
-        
-        while (running.get()) {
-            try {
-                // 记录连接创建时间
-                connectionCreationTime = LocalDateTime.now();
-                log.debug("[MarketTickerStreamService] Creating new WebSocket connection");
-                log.info("[MarketTickerStreamService] 🔄 创建新的WebSocket连接");
-                
-                // 创建请求并获取流
-                AllMarketTickersStreamsRequest request = new AllMarketTickersStreamsRequest();
-                response = getApi().allMarketTickersStreams(request);
-                log.info("[MarketTickerStreamService] ✅ WebSocket连接已建立");
-                log.debug("[MarketTickerStreamService] Connection created at: {}", connectionCreationTime);
-                
-                // 循环接收数据，直到需要重连
-                while (running.get() && !shouldReconnect()) {
-                    try {
-                        AllMarketTickersStreamsResponse tickerResponse = response.take();
-                        handleMessage(tickerResponse);
-                    } catch (InterruptedException e) {
-                        log.warn("[MarketTickerStreamService] ⚠️ 流处理被中断");
-                        Thread.currentThread().interrupt();
-                        return;
-                    } catch (Exception e) {
-                        // 检查是否为Jetty WebSocket异常（包括MessageTooLargeException）
-                        if (handleJettyWebSocketException(e)) {
-                            // 如果处理了Jetty WebSocket异常，需要重新建立连接
-                            log.info("[MarketTickerStreamService] 🔄 由于Jetty WebSocket异常，将重新建立连接");
-                            break; // 跳出内层循环，进入外层循环重新建立连接
-                        } else {
-                            log.error("[MarketTickerStreamService] ❌ 处理消息时出错", e);
-                            // 继续处理下一条消息
-                        }
-                    }
-                }
-                
-                // 检查是否需要重连
-                if (shouldReconnect()) {
-                    log.debug("[MarketTickerStreamService] Connection reached 30-minute limit, reconnecting...");
-                    log.info("[MarketTickerStreamService] 🔄 连接已达到30分钟限制，准备重连...");
-                    // 等待一小段时间后重连，避免快速重连循环
-                    Thread.sleep(5000);
-                }
-                
-            } catch (InterruptedException e) {
-                log.warn("[MarketTickerStreamService] ⚠️ 流处理被中断");
-                Thread.currentThread().interrupt();
-                break;
-            } catch (Exception e) {
-                // 检查是否为Jetty WebSocket异常（包括MessageTooLargeException）
-                if (handleJettyWebSocketException(e)) {
-                    // 如果处理了Jetty WebSocket异常，等待3秒后重新建立连接
-                    log.info("[MarketTickerStreamService] 🔄 由于Jetty WebSocket异常，3秒后重新建立连接");
-                    try {
-                        Thread.sleep(3000);
-                    } catch (InterruptedException ie) {
-                        Thread.currentThread().interrupt();
-                        break;
-                    }
-                } else {
-                    log.error("[MarketTickerStreamService] Streaming error: {}", e.getMessage(), e);
-                    log.error("[MarketTickerStreamService] ❌ 流处理异常，5秒后重连...", e);
-                    // 等待5秒后重连，避免快速重连循环
-                    try {
-                        Thread.sleep(5000);
-                    } catch (InterruptedException ie) {
-                        Thread.currentThread().interrupt();
-                        break;
-                    }
-                }
-            }
-        }
-        
-        log.info("[MarketTickerStreamService] ✅ 自动重连流处理结束");
-    }
+
     
-    /**
-     * 检查是否需要重新连接
-     * 
-     * 币安WebSocket连接有30分钟的限制，超过30分钟需要重新建立连接。
-     * 
-     * @return true如果需要重新连接，否则返回false
-     */
-    private boolean shouldReconnect() {
-        if (connectionCreationTime == null) {
-            log.debug("[MarketTickerStreamService] Connection creation time not recorded, no reconnect needed");
-            return false;
-        }
-        long elapsedSeconds = java.time.Duration.between(connectionCreationTime, LocalDateTime.now()).getSeconds();
-        double elapsedHours = elapsedSeconds / 3600.0;
-        boolean needReconnect = elapsedHours >= MAX_CONNECTION_HOURS;
-        if (needReconnect) {
-            log.debug("[MarketTickerStreamService] Connection elapsed time: {} hours (limit: {} hours), reconnect needed", 
-                    elapsedHours, MAX_CONNECTION_HOURS);
-        } else {
-            log.debug("[MarketTickerStreamService] Connection elapsed time: {} hours (limit: {} hours), no reconnect needed", 
-                    elapsedHours, MAX_CONNECTION_HOURS);
-        }
-        return needReconnect;
-    }
+
     
     /**
      * 处理WebSocket接收到的ticker消息
