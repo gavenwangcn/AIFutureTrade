@@ -46,6 +46,7 @@
               placeholder="搜索日志内容"
               style="width: 200px; margin-right: 8px"
               @keyup.enter="() => performSearch(true)"
+              @input="() => { if (searchKeyword.trim()) performSearch(false) }"
             />
             <button
               class="btn btn-secondary btn-sm"
@@ -66,6 +67,7 @@
             </span>
             <button
               class="btn btn-secondary btn-sm"
+              :class="{ 'btn-active': totalMatches > 0 && currentMatchIndex >= 0 }"
               :disabled="totalMatches === 0"
               @click="goToPreviousMatch"
             >
@@ -73,6 +75,7 @@
             </button>
             <button
               class="btn btn-secondary btn-sm"
+              :class="{ 'btn-active': totalMatches > 0 && currentMatchIndex >= 0 }"
               :disabled="totalMatches === 0"
               @click="goToNextMatch"
             >
@@ -216,33 +219,57 @@ const highlightSearchKeyword = (message, originalIndex) => {
   // 首先转换ANSI颜色代码为HTML
   let processedMessage = convertAnsiToHtml(message)
 
-  if (!searchKeyword.value.trim()) {
+  const keyword = searchKeyword.value.trim()
+  
+  if (!keyword) {
     return processedMessage
   }
-
-  const keyword = searchKeyword.value
-  const keywordRegex = new RegExp(
-    `(${keyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`,
-    'gi'
-  )
-
-  const currentMatch =
-    currentMatchIndex.value >= 0 &&
-    searchMatches.value[currentMatchIndex.value] === originalIndex
-
-  const highlightClass = currentMatch
-    ? 'search-highlight-current'
-    : 'search-highlight'
-
+  
+  // 检查原始消息是否包含关键词（不区分大小写）
   if (!message.toLowerCase().includes(keyword.toLowerCase())) {
     return processedMessage
   }
 
-  // 在已转换的HTML中高亮关键词（需要处理可能包含HTML标签的情况）
-  return processedMessage.replace(
-    keywordRegex,
-    `<span class="${highlightClass}">$1</span>`
-  )
+  // 检查是否是当前匹配项
+  const isCurrentMatch = 
+    currentMatchIndex.value >= 0 &&
+    searchMatches.value.length > 0 &&
+    searchMatches.value[currentMatchIndex.value] === originalIndex
+
+  const highlightClass = isCurrentMatch
+    ? 'search-highlight-current'
+    : 'search-highlight'
+
+  // 转义特殊字符用于正则表达式
+  const escapedKeyword = keyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  const keywordRegex = new RegExp(`(${escapedKeyword})`, 'gi')
+  
+  // 使用占位符方法：这是最可靠的方法
+  // 1. 用唯一占位符替换所有HTML标签
+  const tagPlaceholders = []
+  let placeholderIndex = 0
+  const htmlTagRegex = /<[^>]+>/g
+  
+  const textOnly = processedMessage.replace(htmlTagRegex, (tag) => {
+    const placeholder = `__HTML_TAG_PLACEHOLDER_${placeholderIndex}__`
+    tagPlaceholders[placeholderIndex] = tag
+    placeholderIndex++
+    return placeholder
+  })
+  
+  // 2. 在纯文本中高亮关键词（不区分大小写匹配）
+  const highlightedText = textOnly.replace(keywordRegex, (match) => {
+    return `<span class="${highlightClass}">${match}</span>`
+  })
+  
+  // 3. 恢复HTML标签
+  let finalResult = highlightedText
+  for (let i = 0; i < tagPlaceholders.length; i++) {
+    const placeholder = `__HTML_TAG_PLACEHOLDER_${i}__`
+    finalResult = finalResult.replace(placeholder, tagPlaceholders[i])
+  }
+  
+  return finalResult
 }
 
 // 开始日志流
@@ -370,26 +397,29 @@ const scrollToMatch = (originalIndex) => {
 
 // 执行搜索
 const performSearch = (forceFirstMatch = false) => {
-  if (!searchKeyword.value.trim()) {
+  const keyword = searchKeyword.value.trim()
+  
+  if (!keyword) {
     searchMatches.value = []
     currentMatchIndex.value = -1
     totalMatches.value = 0
     return
   }
 
-  const keyword = searchKeyword.value.toLowerCase()
+  const keywordLower = keyword.toLowerCase()
 
   let currentMatchContent = ''
   if (currentMatchIndex.value >= 0 && searchMatches.value.length > 0) {
     const currentLineIndex = searchMatches.value[currentMatchIndex.value]
-    if (currentLineIndex < logMessages.value.length) {
+    if (currentLineIndex >= 0 && currentLineIndex < logMessages.value.length) {
       currentMatchContent = logMessages.value[currentLineIndex]
     }
   }
 
+  // 查找所有匹配项
   const matches = []
   logMessages.value.forEach((message, index) => {
-    if (message.toLowerCase().includes(keyword)) {
+    if (message.toLowerCase().includes(keywordLower)) {
       matches.push(index)
     }
   })
@@ -402,18 +432,20 @@ const performSearch = (forceFirstMatch = false) => {
     return
   }
 
+  // 确定新的匹配索引
   let newMatchIndex = 0
   if (forceFirstMatch) {
     newMatchIndex = 0
-  } else if (currentMatchContent) {
+  } else if (currentMatchContent && currentMatchIndex.value >= 0) {
+    // 尝试保持当前匹配项
     const sameContentIndex = matches.findIndex(
       index => logMessages.value[index] === currentMatchContent
     )
     if (sameContentIndex >= 0) {
       newMatchIndex = sameContentIndex
     } else {
-      const prevIndex =
-        searchMatches.value[currentMatchIndex.value] ?? matches[0]
+      // 找到最接近的匹配项
+      const prevIndex = searchMatches.value[currentMatchIndex.value] ?? matches[0]
       let closestIdx = 0
       let minDistance = Math.abs(matches[0] - prevIndex)
       for (let i = 1; i < matches.length; i++) {
@@ -428,7 +460,11 @@ const performSearch = (forceFirstMatch = false) => {
   }
 
   currentMatchIndex.value = newMatchIndex
-  scrollToMatch(matches[newMatchIndex])
+  
+  // 滚动到匹配项
+  if (matches[newMatchIndex] !== undefined) {
+    scrollToMatch(matches[newMatchIndex])
+  }
 }
 
 // 上一个匹配
@@ -482,9 +518,9 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .trade-logs-modal {
-  width: 66.66%;
-  max-width: 1200px;
-  min-width: 800px;
+  width: 88.9%;
+  max-width: 1600px;
+  min-width: 1000px;
   height: 66.66vh;
   max-height: 1000px;
   min-height: 600px;
@@ -712,20 +748,41 @@ onBeforeUnmount(() => {
   color: #909399;
 }
 
-/* 搜索高亮 */
+/* 搜索高亮 - 更明显的样式 */
 .search-highlight {
-  padding: 0 2px;
-  color: #fff;
-  background: rgba(247, 186, 29, 0.4);
-  border-radius: 2px;
+  padding: 2px 4px;
+  color: #fff !important;
+  background: rgba(247, 186, 29, 0.8) !important;
+  border-radius: 3px;
+  font-weight: 600;
+  box-shadow: 0 1px 3px rgba(247, 186, 29, 0.5);
 }
 
 .search-highlight-current {
-  padding: 0 2px;
-  color: #fff;
-  background: rgba(64, 158, 255, 0.6);
-  border-radius: 2px;
-  box-shadow: 0 0 0 1px rgba(64, 158, 255, 0.8);
+  padding: 2px 4px;
+  color: #fff !important;
+  background: rgba(64, 158, 255, 0.9) !important;
+  border-radius: 3px;
+  font-weight: 700;
+  box-shadow: 0 0 0 2px rgba(64, 158, 255, 1), 0 2px 6px rgba(64, 158, 255, 0.6);
+  animation: highlight-pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes highlight-pulse {
+  0%, 100% {
+    box-shadow: 0 0 0 2px rgba(64, 158, 255, 1), 0 2px 6px rgba(64, 158, 255, 0.6);
+  }
+  50% {
+    box-shadow: 0 0 0 3px rgba(64, 158, 255, 0.8), 0 2px 8px rgba(64, 158, 255, 0.8);
+  }
+}
+
+/* 按钮激活状态 */
+.btn-active {
+  background: rgba(64, 158, 255, 0.1) !important;
+  border-color: #409eff !important;
+  color: #409eff !important;
+  font-weight: 600;
 }
 
 /* 确保ANSI颜色样式正确显示 */
