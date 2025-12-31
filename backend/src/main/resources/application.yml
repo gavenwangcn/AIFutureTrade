@@ -199,6 +199,11 @@ trade:
   market-symbol-offline-cron: "0 */30 * * * *"  # 每30分钟执行一次
   market-symbol-retention-minutes: 30  # Ticker数据保留分钟数
 
+# Docker配置（可通过环境变量覆盖）
+docker:
+  host: ${DOCKER_HOST:unix:///var/run/docker.sock}  # Docker主机地址，默认本地Docker
+  container-name: ${DOCKER_CONTAINER_NAME:aifuturetrade-trade}  # 交易日志容器名称
+
 # Swagger配置
 swagger:
   enabled: true

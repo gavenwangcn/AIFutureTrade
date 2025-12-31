@@ -125,6 +125,9 @@
               <div class="model-header">
                 <div class="model-name">{{ model.name || `模型 #${model.id}` }}</div>
                 <div class="model-actions" @click.stop>
+                  <button class="model-action-btn" @click="handleOpenTradeLogsModal(model.id, model.name || `模型 #${model.id}`)" title="交易日志">
+                    <i class="bi bi-file-text"></i>
+                  </button>
                   <button class="model-action-btn" @click="handleOpenStrategyConfigModal(model.id, model.name || `模型 #${model.id}`)" title="策略配置">
                     <i class="bi bi-diagram-3"></i>
                   </button>
@@ -742,6 +745,14 @@
       @close="showStrategyConfigModal = false"
       @saved="handleRefresh"
     />
+
+    <TradeLogsModal
+      :visible="showTradeLogsModal"
+      :modelId="pendingTradeLogsModelId"
+      :modelName="tradeLogsModelName"
+      @update:visible="showTradeLogsModal = $event"
+      @close="showTradeLogsModal = false"
+    />
     
     <!-- 模型设置模态框（合并杠杆和最大持仓数量） -->
     <div v-if="showModelSettingsModal" class="modal show" @click.self="showModelSettingsModal = false">
@@ -899,6 +910,7 @@ import ApiProviderModal from './components/ApiProviderModal.vue'
 import AccountModal from './components/AccountModal.vue'
 import AddModelModal from './components/AddModelModal.vue'
 import ModelStrategyConfigModal from './components/ModelStrategyConfigModal.vue'
+import TradeLogsModal from './components/TradeLogsModal.vue'
 import { useTradingApp } from './composables/useTradingApp'
 
 const {
@@ -1037,6 +1049,9 @@ const showKlineChart = ref(false)
 const klineChartSymbol = ref('BTCUSDT')
 const klineChartInterval = ref('5m')
 const activeTab = ref('positions')
+const showTradeLogsModal = ref(false)
+const pendingTradeLogsModelId = ref(null)
+const tradeLogsModelName = ref('')
 const tempLeverage = ref(10) // 临时杠杆值
 
 // 监听标签切换，动态重新加载数据
@@ -1127,6 +1142,12 @@ const handleDeleteModel = (modelId, modelName) => {
 
 const handleOpenStrategyConfigModal = (modelId, modelName) => {
   openStrategyConfigModal(modelId, modelName)
+}
+
+const handleOpenTradeLogsModal = (modelId, modelName) => {
+  showTradeLogsModal.value = true
+  pendingTradeLogsModelId.value = modelId
+  tradeLogsModelName.value = modelName
 }
 
 const openKlineChartFromMarket = (symbol, contractSymbol) => {
