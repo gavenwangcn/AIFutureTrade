@@ -841,6 +841,19 @@ class TradingEngine:
                 # 如果SDK获取失败，返回空字典，后续会跳过这些symbol
         else:
             logger.warning(f"[Model {self.model_id}] market_fetcher不可用，无法从SDK获取实时价格")
+        
+        # ⚠️ 重要：从24_market_tickers表获取24小时成交额信息
+        # 使用database模块的get_symbol_volumes方法获取成交额
+        volume_data = {}
+        if self.market_fetcher and self.market_fetcher._mysql_db:
+            try:
+                volume_data = self.market_fetcher._mysql_db.get_symbol_volumes(formatted_symbols)
+                logger.debug(f"[Model {self.model_id}] 从24_market_tickers表获取到 {len(volume_data)} 个交易对的成交额信息")
+            except Exception as e:
+                logger.warning(f"[Model {self.model_id}] 从24_market_tickers表获取成交额失败: {e}", exc_info=True)
+                # 如果数据库查询失败，volume_data保持为空字典，后续使用默认值0.0
+        else:
+            logger.debug(f"[Model {self.model_id}] market_fetcher或_mysql_db不可用，无法从数据库获取成交额")
 
         for original_symbol in symbols:
             # 获取价格信息（从SDK获取的实时价格）
@@ -853,7 +866,22 @@ class TradingEngine:
                 logger.warning(f"[Model {self.model_id}] 无法获取 {original_symbol} 的实时价格（从SDK）")
                 continue
             
+            # 合并价格信息和成交额信息
             market_state[original_symbol] = price_info.copy()
+            
+            # 从数据库获取的成交额信息覆盖默认值0.0
+            # 优先使用从24_market_tickers表获取的成交额，如果没有则使用price_info中的值
+            # get_symbol_volumes返回Dict[str, float]，直接是成交额数值
+            quote_volume_value = volume_data.get(formatted_symbol, 0.0)
+            if quote_volume_value == 0.0:
+                quote_volume_value = price_info.get('daily_volume', price_info.get('quote_volume', 0.0))
+            daily_volume_value = quote_volume_value  # daily_volume和quote_volume使用相同的值
+            
+            market_state[original_symbol]['quote_volume'] = quote_volume_value
+            market_state[original_symbol]['daily_volume'] = daily_volume_value
+            
+            if quote_volume_value > 0:
+                logger.debug(f"[Model {self.model_id}] {original_symbol} 成交额: {quote_volume_value}")
             # 获取K线数据（不计算指标）
             # 注意：include_indicators 参数已废弃，但保留以兼容旧代码
             # 现在只获取klines，指标由ai_trader内部按需计算
@@ -2259,6 +2287,19 @@ class TradingEngine:
         else:
             logger.warning(f"[Model {self.model_id}] market_fetcher不可用，无法从SDK获取实时价格")
         
+        # ⚠️ 重要：从24_market_tickers表获取24小时成交额信息
+        # 使用database模块的get_symbol_volumes方法获取成交额
+        volume_data = {}
+        if self.market_fetcher and self.market_fetcher._mysql_db:
+            try:
+                volume_data = self.market_fetcher._mysql_db.get_symbol_volumes(symbol_list)
+                logger.debug(f"[Model {self.model_id}] 从24_market_tickers表获取到 {len(volume_data)} 个交易对的成交额信息")
+            except Exception as e:
+                logger.warning(f"[Model {self.model_id}] 从24_market_tickers表获取成交额失败: {e}", exc_info=True)
+                # 如果数据库查询失败，volume_data保持为空字典，后续使用默认值0.0
+        else:
+            logger.debug(f"[Model {self.model_id}] market_fetcher或_mysql_db不可用，无法从数据库获取成交额")
+        
         # 为每个候选symbol构建市场状态
         for candidate in candidates:
             symbol = candidate.get('symbol')
@@ -2299,6 +2340,13 @@ class TradingEngine:
             merged_data = self._merge_timeframe_data(query_symbol)
             timeframes_data = merged_data.get(query_symbol, {}) if merged_data else {}
             
+            # 从数据库获取的成交额信息覆盖默认值0.0
+            # 优先使用从24_market_tickers表获取的成交额，如果没有则使用price_info或candidate中的值
+            quote_volume_value = volume_data.get(contract_symbol, 0.0)
+            if quote_volume_value == 0.0:
+                quote_volume_value = price_info.get('daily_volume', candidate.get('quote_volume', 0))
+            daily_volume_value = quote_volume_value  # daily_volume和quote_volume使用相同的值
+            
             # 构建市场状态条目（只包含klines，不包含indicators）
             market_state[symbol_upper] = {
                 'price': price_info.get('price', candidate.get('price', candidate.get('last_price', 0))),
@@ -2306,11 +2354,14 @@ class TradingEngine:
                 'exchange': candidate.get('exchange', 'BINANCE_FUTURES'),
                 'contract_symbol': candidate.get('contract_symbol') or f"{symbol}USDT",
                 'change_24h': price_info.get('change_24h', candidate.get('change_percent', 0)),
-                'daily_volume': price_info.get('daily_volume', candidate.get('quote_volume', 0)),
-                'quote_volume': price_info.get('daily_volume', candidate.get('quote_volume', 0)),
+                'daily_volume': daily_volume_value,
+                'quote_volume': quote_volume_value,
                 'indicators': {'timeframes': timeframes_data} if timeframes_data else {},  # 只包含klines
                 'source': symbol_source
             }
+            
+            if quote_volume_value > 0:
+                logger.debug(f"[Model {self.model_id}] {symbol} 成交额: {quote_volume_value}")
         
         logger.info(f"[Model {self.model_id}] 为 {len(market_state)} 个候选symbol构建了市场状态信息")
         return market_state

@@ -277,6 +277,56 @@ class MarketTickersDatabase:
             logger.warning("[MarketTickers] Failed to get existing symbol data: %s", e)
             return {}
     
+    def get_symbol_volumes(self, symbols: List[str]) -> Dict[str, float]:
+        """
+        获取指定交易对的24小时成交额（quote_volume）
+        
+        Args:
+            symbols: 交易对符号列表，如 ['BTCUSDT', 'ETHUSDT']
+            
+        Returns:
+            Dict[str, float]: 交易对符号到成交额的映射，如 {'BTCUSDT': 1234567.89, 'ETHUSDT': 987654.32}
+        """
+        if not symbols:
+            return {}
+        
+        try:
+            placeholders = ', '.join(['%s'] * len(symbols))
+            query = f"""
+            SELECT 
+                symbol,
+                quote_volume
+            FROM `{self.market_ticker_table}`
+            WHERE symbol IN ({placeholders})
+            """
+            
+            def _execute_query(conn):
+                cursor = conn.cursor()
+                try:
+                    cursor.execute(query, symbols)
+                    return cursor.fetchall()
+                finally:
+                    cursor.close()
+            
+            result = self._with_connection(_execute_query)
+            
+            volume_data = {}
+            for row in result:
+                if isinstance(row, dict):
+                    symbol = row['symbol']
+                    quote_volume = row.get('quote_volume', 0.0)
+                else:
+                    symbol = row[0] if len(row) > 0 else None
+                    quote_volume = float(row[1]) if len(row) > 1 and row[1] is not None else 0.0
+                
+                if symbol:
+                    volume_data[symbol.upper()] = quote_volume
+            
+            return volume_data
+        except Exception as e:
+            logger.warning("[MarketTickers] Failed to get symbol volumes: %s", e)
+            return {}
+    
     def upsert_market_tickers(self, rows: Iterable[Dict[str, Any]]) -> None:
         """更新或插入市场行情数据（upsert操作）。"""
         logger.info("[MarketTickers] Starting upsert_market_tickers")
