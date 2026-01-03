@@ -98,6 +98,10 @@ class GeneratedBuyStrategy(StrategyBaseBuy):
             base_volume = symbol_state.get('base_volume', 0)  # 24小时成交量（基础资产）
             quote_volume = symbol_state.get('quote_volume', 0)  # 24小时成交额（计价资产，如USDT）
             
+            # 获取涨跌榜来源信息（可用于策略判断）
+            source = symbol_state.get('source', '')  # 数据源类型：'leaderboard'（涨跌榜）或 'future'（市场行情交易对）
+            leaderboard_source = symbol_state.get('leaderboard_source')  # 涨跌榜来源：'gainers'（涨幅榜）或 'losers'（跌幅榜），仅当 source='leaderboard' 时存在
+            
             # 获取技术指标数据
             indicators = symbol_state.get('indicators', {})
             timeframes = indicators.get('timeframes', {})
@@ -308,13 +312,15 @@ class GeneratedBuyStrategy(StrategyBaseBuy):
 
 **买入决策使用 market_state：**
 ```python
-# market_state 格式: {"BTC": {"price": float, "base_volume": float, "quote_volume": float, "indicators": {"timeframes": {"1h": {"klines": [...]}}, "4h": {...}, ...}}}
+# market_state 格式: {"BTC": {"price": float, "base_volume": float, "quote_volume": float, "source": str, "leaderboard_source": str, "indicators": {"timeframes": {"1h": {"klines": [...]}}, "4h": {...}, ...}}}
 
 # 买入决策中获取数据：
 symbol_state = market_state.get(symbol, {})
 current_price = symbol_state.get('price', 0)  # 或从 candidate.get('price') 获取
 base_volume = symbol_state.get('base_volume', 0)  # 24小时成交量（基础资产，如BTC数量）
 quote_volume = symbol_state.get('quote_volume', 0)  # 24小时成交额（计价资产，如USDT金额）
+source = symbol_state.get('source', '')  # 数据源类型：'leaderboard'（涨跌榜）或 'future'（配置的交易对）
+leaderboard_source = symbol_state.get('leaderboard_source')  # 涨跌榜来源：'gainers'（涨幅榜）或 'losers'（跌幅榜），仅当 source='leaderboard' 时存在
 indicators = symbol_state.get('indicators', {})
 timeframes = indicators.get('timeframes', {})
 klines_1h = timeframes.get('1h', {}).get('klines', [])
@@ -329,6 +335,18 @@ klines_1h = timeframes.get('1h', {}).get('klines', [])
   - 可以使用 `base_volume` 判断交易活跃度（成交量越大，流动性越好）
   - 可以使用 `quote_volume` 判断资金流入流出（成交额越大，资金参与度越高）
   - 可以在策略逻辑中使用这些字段进行过滤或排序，例如：只考虑成交额大于某个阈值的交易对
+
+**⚠️ 重要：涨跌榜来源字段说明：**
+- **`source`**：数据源类型，值为 `'leaderboard'`（涨跌榜）或 `'future'`（配置的交易对）
+- **`leaderboard_source`**：涨跌榜来源，仅当 `source='leaderboard'` 时存在
+  - 值为 `'gainers'`：表示该交易对来自涨幅榜（24小时涨幅为正）
+  - 值为 `'losers'`：表示该交易对来自跌幅榜（24小时涨幅为负）
+  - 值为 `None`：表示该交易对不是来自涨跌榜（source 不为 'leaderboard'）
+- **使用场景**：
+  - 可以使用 `leaderboard_source` 判断交易对是来自涨幅榜还是跌幅榜
+  - 可以在策略逻辑中根据涨跌榜来源采用不同的交易策略
+  - 例如：对涨幅榜的交易对采用追涨策略，对跌幅榜的交易对采用抄底策略
+  - 示例代码：`if leaderboard_source == 'gainers': # 涨幅榜逻辑 elif leaderboard_source == 'losers': # 跌幅榜逻辑`
 
 **注意：**
 - 买入决策中，当前价格可以从 `candidate.get('price')` 获取，也可以从 `market_state[symbol]['price']` 获取

@@ -2179,12 +2179,27 @@ class TradingEngine:
                 limit = max(1, int(limit))
                 leaderboard = self.market_fetcher.get_leaderboard(limit=limit)
                 
-                # 合并涨幅榜和跌幅榜
+                # 合并涨幅榜和跌幅榜，并标记来源
                 gainers = leaderboard.get('gainers') or []
                 losers = leaderboard.get('losers') or []
-                entries = gainers[:limit] + losers[:limit]
                 
-                logger.info(f"[Model {self.model_id}] 从涨跌榜获取到 {len(entries)} 个候选symbol")
+                # 为涨幅榜的每个entry添加来源标记
+                gainers_with_source = []
+                for entry in gainers[:limit]:
+                    entry_copy = entry.copy() if isinstance(entry, dict) else {'symbol': entry}
+                    entry_copy['leaderboard_source'] = 'gainers'  # 标记为涨幅榜
+                    gainers_with_source.append(entry_copy)
+                
+                # 为跌幅榜的每个entry添加来源标记
+                losers_with_source = []
+                for entry in losers[:limit]:
+                    entry_copy = entry.copy() if isinstance(entry, dict) else {'symbol': entry}
+                    entry_copy['leaderboard_source'] = 'losers'  # 标记为跌幅榜
+                    losers_with_source.append(entry_copy)
+                
+                entries = gainers_with_source + losers_with_source
+                
+                logger.info(f"[Model {self.model_id}] 从涨跌榜获取到 {len(entries)} 个候选symbol（涨幅榜: {len(gainers_with_source)}, 跌幅榜: {len(losers_with_source)}）")
                 return entries
             except Exception as exc:
                 logger.warning(f"[Model {self.model_id}] 获取涨跌榜候选symbol失败: {exc}")
@@ -2362,7 +2377,8 @@ class TradingEngine:
                 'base_volume': base_volume_value,  # 24小时成交量（基础资产）
                 'quote_volume': quote_volume_value,  # 24小时成交额（计价资产，如USDT）
                 'indicators': {'timeframes': timeframes_data} if timeframes_data else {},  # 只包含klines
-                'source': symbol_source
+                'source': symbol_source,
+                'leaderboard_source': candidate.get('leaderboard_source')  # 涨跌榜来源：'gainers'（涨幅榜）或 'losers'（跌幅榜），仅当 source='leaderboard' 时存在
             }
             
             if quote_volume_value > 0 or base_volume_value > 0:
