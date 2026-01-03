@@ -94,6 +94,10 @@ class GeneratedBuyStrategy(StrategyBaseBuy):
             if not symbol_state:
                 continue
             
+            # 获取成交量和成交额信息（可用于过滤或排序）
+            base_volume = symbol_state.get('base_volume', 0)  # 24小时成交量（基础资产）
+            quote_volume = symbol_state.get('quote_volume', 0)  # 24小时成交额（计价资产，如USDT）
+            
             # 获取技术指标数据
             indicators = symbol_state.get('indicators', {})
             timeframes = indicators.get('timeframes', {})
@@ -304,17 +308,27 @@ class GeneratedBuyStrategy(StrategyBaseBuy):
 
 **买入决策使用 market_state：**
 ```python
-# market_state 格式: {"BTC": {"price": float, "indicators": {"timeframes": {"1h": {"klines": [...]}}, "4h": {...}, ...}}}
+# market_state 格式: {"BTC": {"price": float, "base_volume": float, "quote_volume": float, "indicators": {"timeframes": {"1h": {"klines": [...]}}, "4h": {...}, ...}}}
 
 # 买入决策中获取数据：
 symbol_state = market_state.get(symbol, {})
 current_price = symbol_state.get('price', 0)  # 或从 candidate.get('price') 获取
+base_volume = symbol_state.get('base_volume', 0)  # 24小时成交量（基础资产，如BTC数量）
+quote_volume = symbol_state.get('quote_volume', 0)  # 24小时成交额（计价资产，如USDT金额）
 indicators = symbol_state.get('indicators', {})
 timeframes = indicators.get('timeframes', {})
 klines_1h = timeframes.get('1h', {}).get('klines', [])
 
 # klines 格式: [{'open': float, 'high': float, 'low': float, 'close': float, 'volume': float}, ...]
 ```
+
+**⚠️ 重要：成交量和成交额字段说明：**
+- **`base_volume`**：24小时成交量，单位为基础资产（如BTC、ETH等），表示24小时内成交的基础资产数量
+- **`quote_volume`**：24小时成交额，单位为计价资产（如USDT），表示24小时内成交的计价资产金额
+- **使用场景**：
+  - 可以使用 `base_volume` 判断交易活跃度（成交量越大，流动性越好）
+  - 可以使用 `quote_volume` 判断资金流入流出（成交额越大，资金参与度越高）
+  - 可以在策略逻辑中使用这些字段进行过滤或排序，例如：只考虑成交额大于某个阈值的交易对
 
 **注意：**
 - 买入决策中，当前价格可以从 `candidate.get('price')` 获取，也可以从 `market_state[symbol]['price']` 获取

@@ -189,7 +189,7 @@ class AITrader(Trader):
                     'symbol': symbol,
                     'contract_symbol': state_info.get('contract_symbol', f"{symbol}USDT"),
                     'price': state_info.get('price', 0),
-                    'quote_volume': state_info.get('quote_volume', state_info.get('daily_volume', 0)),
+                    'quote_volume': state_info.get('quote_volume', 0),
                     'change_percent': state_info.get('change_24h', 0),
                     'timeframes': timeframes_data
                 }

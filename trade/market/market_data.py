@@ -331,7 +331,6 @@ class MarketDataFetcher:
                             'change_percent': float(row[2].rstrip('%')) if row[2] and row[2] != 'N/A' else 0.0,
                             'change_24h': float(row[2].rstrip('%')) if row[2] and row[2] != 'N/A' else 0.0,
                             'quote_volume': float(row[3]) if row[3] is not None else 0.0,
-                            'daily_volume': float(row[3]) if row[3] is not None else 0.0,
                             'event_time': row[4] if row[4] is not None else now,
                             'source': 'database',
                             'price_date': now.strftime('%Y-%m-%d'),
@@ -398,7 +397,6 @@ class MarketDataFetcher:
                         'change_percent': 0.0,
                         'change_24h': 0.0,  # 兼容前端使用的字段名
                         'quote_volume': 0.0,
-                        'daily_volume': 0.0,  # 兼容前端使用的字段名
                         'event_time': now,
                         'source': 'api',
                         'price_date': now.strftime('%Y-%m-%d'),
@@ -462,7 +460,6 @@ class MarketDataFetcher:
                         'change_percent': 0.0,
                         'change_percent_text': '0.00%',
                         'quote_volume': 0.0,
-                        'daily_volume': 0.0,  # 同时提供daily_volume字段以便兼容
                         'event_time': now,
                         'source': 'api'
                     }
@@ -532,8 +529,7 @@ class MarketDataFetcher:
                 'name': future_meta.get('name', symbol),
                 'exchange': future_meta.get('exchange', 'BINANCE_FUTURES'),
                 'change_24h': change_percent,
-                'daily_volume': quote_volume,
-                'quote_volume': quote_volume,  # 同时提供quote_volume字段以便兼容
+                'quote_volume': quote_volume,
                 'timeframes': {}  # 不再实时生成，只在 AI 交易时计算
             }
 

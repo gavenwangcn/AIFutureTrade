@@ -869,19 +869,21 @@ class TradingEngine:
             # 合并价格信息和成交额信息
             market_state[original_symbol] = price_info.copy()
             
-            # 从数据库获取的成交额信息覆盖默认值0.0
-            # 优先使用从24_market_tickers表获取的成交额，如果没有则使用price_info中的值
-            # get_symbol_volumes返回Dict[str, float]，直接是成交额数值
-            quote_volume_value = volume_data.get(formatted_symbol, 0.0)
+            # 从数据库获取的成交量和成交额信息覆盖默认值0.0
+            # 优先使用从24_market_tickers表获取的数据，如果没有则使用price_info中的值
+            # get_symbol_volumes返回Dict[str, Dict[str, float]]，包含base_volume和quote_volume
+            volume_info = volume_data.get(formatted_symbol, {})
+            base_volume_value = volume_info.get('base_volume', 0.0) if volume_info else 0.0
+            quote_volume_value = volume_info.get('quote_volume', 0.0) if volume_info else 0.0
+            
             if quote_volume_value == 0.0:
-                quote_volume_value = price_info.get('daily_volume', price_info.get('quote_volume', 0.0))
-            daily_volume_value = quote_volume_value  # daily_volume和quote_volume使用相同的值
+                quote_volume_value = price_info.get('quote_volume', 0.0)
             
-            market_state[original_symbol]['quote_volume'] = quote_volume_value
-            market_state[original_symbol]['daily_volume'] = daily_volume_value
+            market_state[original_symbol]['base_volume'] = base_volume_value  # 24小时成交量（基础资产）
+            market_state[original_symbol]['quote_volume'] = quote_volume_value  # 24小时成交额（计价资产，如USDT）
             
-            if quote_volume_value > 0:
-                logger.debug(f"[Model {self.model_id}] {original_symbol} 成交额: {quote_volume_value}")
+            if quote_volume_value > 0 or base_volume_value > 0:
+                logger.debug(f"[Model {self.model_id}] {original_symbol} 成交量: {base_volume_value}, 成交额: {quote_volume_value}")
             # 获取K线数据（不计算指标）
             # 注意：include_indicators 参数已废弃，但保留以兼容旧代码
             # 现在只获取klines，指标由ai_trader内部按需计算
@@ -2340,12 +2342,15 @@ class TradingEngine:
             merged_data = self._merge_timeframe_data(query_symbol)
             timeframes_data = merged_data.get(query_symbol, {}) if merged_data else {}
             
-            # 从数据库获取的成交额信息覆盖默认值0.0
-            # 优先使用从24_market_tickers表获取的成交额，如果没有则使用price_info或candidate中的值
-            quote_volume_value = volume_data.get(contract_symbol, 0.0)
+            # 从数据库获取的成交量和成交额信息覆盖默认值0.0
+            # 优先使用从24_market_tickers表获取的数据，如果没有则使用price_info或candidate中的值
+            # get_symbol_volumes返回Dict[str, Dict[str, float]]，包含base_volume和quote_volume
+            volume_info = volume_data.get(contract_symbol, {})
+            base_volume_value = volume_info.get('base_volume', 0.0) if volume_info else 0.0
+            quote_volume_value = volume_info.get('quote_volume', 0.0) if volume_info else 0.0
+            
             if quote_volume_value == 0.0:
-                quote_volume_value = price_info.get('daily_volume', candidate.get('quote_volume', 0))
-            daily_volume_value = quote_volume_value  # daily_volume和quote_volume使用相同的值
+                quote_volume_value = price_info.get('quote_volume', candidate.get('quote_volume', 0))
             
             # 构建市场状态条目（只包含klines，不包含indicators）
             market_state[symbol_upper] = {
@@ -2354,14 +2359,14 @@ class TradingEngine:
                 'exchange': candidate.get('exchange', 'BINANCE_FUTURES'),
                 'contract_symbol': candidate.get('contract_symbol') or f"{symbol}USDT",
                 'change_24h': price_info.get('change_24h', candidate.get('change_percent', 0)),
-                'daily_volume': daily_volume_value,
-                'quote_volume': quote_volume_value,
+                'base_volume': base_volume_value,  # 24小时成交量（基础资产）
+                'quote_volume': quote_volume_value,  # 24小时成交额（计价资产，如USDT）
                 'indicators': {'timeframes': timeframes_data} if timeframes_data else {},  # 只包含klines
                 'source': symbol_source
             }
             
-            if quote_volume_value > 0:
-                logger.debug(f"[Model {self.model_id}] {symbol} 成交额: {quote_volume_value}")
+            if quote_volume_value > 0 or base_volume_value > 0:
+                logger.debug(f"[Model {self.model_id}] {symbol} 成交量: {base_volume_value}, 成交额: {quote_volume_value}")
         
         logger.info(f"[Model {self.model_id}] 为 {len(market_state)} 个候选symbol构建了市场状态信息")
         return market_state

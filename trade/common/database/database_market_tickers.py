@@ -277,15 +277,16 @@ class MarketTickersDatabase:
             logger.warning("[MarketTickers] Failed to get existing symbol data: %s", e)
             return {}
     
-    def get_symbol_volumes(self, symbols: List[str]) -> Dict[str, float]:
+    def get_symbol_volumes(self, symbols: List[str]) -> Dict[str, Dict[str, float]]:
         """
-        获取指定交易对的24小时成交额（quote_volume）
+        获取指定交易对的24小时成交量和成交额（base_volume 和 quote_volume）
         
         Args:
             symbols: 交易对符号列表，如 ['BTCUSDT', 'ETHUSDT']
             
         Returns:
-            Dict[str, float]: 交易对符号到成交额的映射，如 {'BTCUSDT': 1234567.89, 'ETHUSDT': 987654.32}
+            Dict[str, Dict[str, float]]: 交易对符号到成交量和成交额的映射
+            格式：{'BTCUSDT': {'base_volume': 1234.56, 'quote_volume': 1234567.89}, ...}
         """
         if not symbols:
             return {}
@@ -295,6 +296,7 @@ class MarketTickersDatabase:
             query = f"""
             SELECT 
                 symbol,
+                base_volume,
                 quote_volume
             FROM `{self.market_ticker_table}`
             WHERE symbol IN ({placeholders})
@@ -314,13 +316,18 @@ class MarketTickersDatabase:
             for row in result:
                 if isinstance(row, dict):
                     symbol = row['symbol']
+                    base_volume = row.get('base_volume', 0.0)
                     quote_volume = row.get('quote_volume', 0.0)
                 else:
                     symbol = row[0] if len(row) > 0 else None
-                    quote_volume = float(row[1]) if len(row) > 1 and row[1] is not None else 0.0
+                    base_volume = float(row[1]) if len(row) > 1 and row[1] is not None else 0.0
+                    quote_volume = float(row[2]) if len(row) > 2 and row[2] is not None else 0.0
                 
                 if symbol:
-                    volume_data[symbol.upper()] = quote_volume
+                    volume_data[symbol.upper()] = {
+                        'base_volume': base_volume,
+                        'quote_volume': quote_volume
+                    }
             
             return volume_data
         except Exception as e:
