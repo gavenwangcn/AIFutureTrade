@@ -2754,10 +2754,8 @@ class TradingEngine:
         binance_client = self._create_binance_order_client()
         if binance_client:
             try:
-                # 首先设置杠杆（如果需要）
+                # 首先设置杠杆（使用 _resolve_leverage 解析，优先使用 decision 中的 leverage，否则使用模型配置的 leverage）
                 leverage = self._resolve_leverage(decision)
-                if not decision.get('leverage'):
-                    leverage = position.get('leverage', leverage)
                 
                 logger.info(f"@API@ [Model {self.model_id}] [change_initial_leverage] === 准备设置杠杆 ===" 
                           f" | symbol={symbol} | leverage={leverage}")
@@ -2807,13 +2805,11 @@ class TradingEngine:
         # 【确定trades表的side字段】统一使用'sell'（平多和平空都使用sell）
         trade_side = 'sell'  # 统一使用sell
         
-        # 记录交易
+        # 记录交易（使用 _resolve_leverage 解析，优先使用 decision 中的 leverage，否则使用模型配置的 leverage）
         logger.info(f"TRADE: PENDING - Model {self.model_id} {trade_signal.upper()} {symbol} position_side={position_side} position_amt={position_amt} price={current_price} fee={trade_fee} net_pnl={net_pnl}")
         try:
-            # 使用持仓中存储的杠杆值
+            # 使用 _resolve_leverage 解析杠杆（优先使用 decision 中的 leverage，否则使用模型配置的 leverage）
             leverage = self._resolve_leverage(decision)
-            if not decision.get('leverage'):
-                leverage = position.get('leverage', leverage)
             
             self.db.insert_rows(
                 self.db.trades_table,
@@ -2953,14 +2949,11 @@ class TradingEngine:
             logger.error(f"TRADE: Close position failed model={self.model_id} future={symbol}: {db_err}")
             raise
         
-        # 记录交易
+        # 记录交易（使用 _resolve_leverage 解析，优先使用 decision 中的 leverage，否则使用模型配置的 leverage）
         logger.info(f"TRADE: PENDING - Model {self.model_id} CLOSE {symbol} position_side={position_side} position_amt={position_amt} price={current_price} fee={trade_fee} net_pnl={net_pnl}")
         try:
-            # 使用与开仓时一致的逻辑获取杠杆值
+            # 使用 _resolve_leverage 解析杠杆（优先使用 decision 中的 leverage，否则使用模型配置的 leverage）
             leverage = self._resolve_leverage(decision)
-            # 如果AI没有返回杠杆值，使用持仓中存储的杠杆值
-            if not decision.get('leverage'):
-                leverage = position.get('leverage', leverage)
                 
             self.db.insert_rows(
                 self.db.trades_table,
