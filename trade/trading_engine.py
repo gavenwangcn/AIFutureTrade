@@ -829,14 +829,31 @@ class TradingEngine:
             formatted_symbols.append(formatted_symbol)
             symbol_mapping[formatted_symbol] = symbol
         
-        # 使用 get_current_prices 从API获取实时价格数据
-        prices = self.market_fetcher.get_current_prices(formatted_symbols)
+        # ⚠️ 重要：使用 get_current_prices 从SDK获取实时价格数据，而不是从数据库获取
+        prices = {}
+        if self.market_fetcher:
+            try:
+                # get_current_prices接受symbol列表，返回的字典key是传入的symbol（即formatted_symbols）
+                prices = self.market_fetcher.get_current_prices(formatted_symbols)
+                logger.debug(f"[Model {self.model_id}] 从SDK获取到 {len(prices)} 个交易对的实时价格")
+            except Exception as e:
+                logger.error(f"[Model {self.model_id}] 从SDK获取实时价格失败: {e}", exc_info=True)
+                # 如果SDK获取失败，返回空字典，后续会跳过这些symbol
+        else:
+            logger.warning(f"[Model {self.model_id}] market_fetcher不可用，无法从SDK获取实时价格")
 
         for original_symbol in symbols:
-            # 尝试用原始symbol和格式化后的symbol查询价格
-            price_info = prices.get(original_symbol) or prices.get(symbol_mapping.get(original_symbol.upper(), original_symbol.upper()))
-            if price_info:
-                market_state[original_symbol] = price_info.copy()
+            # 获取价格信息（从SDK获取的实时价格）
+            # get_current_prices返回的字典key是传入的symbol（即formatted_symbols中的值）
+            # 所以需要用格式化后的symbol来查询
+            formatted_symbol = symbol_mapping.get(original_symbol.upper()) or (original_symbol.upper() if original_symbol.upper().endswith('USDT') else f"{original_symbol.upper()}USDT")
+            price_info = prices.get(formatted_symbol)
+            
+            if not price_info:
+                logger.warning(f"[Model {self.model_id}] 无法获取 {original_symbol} 的实时价格（从SDK）")
+                continue
+            
+            market_state[original_symbol] = price_info.copy()
             # 获取K线数据（不计算指标）
             # 注意：include_indicators 参数已废弃，但保留以兼容旧代码
             # 现在只获取klines，指标由ai_trader内部按需计算
@@ -917,13 +934,13 @@ class TradingEngine:
     
     def _merge_timeframe_data(self, symbol: str) -> Dict:
         """
-        合并7个时间周期的K线数据（不计算指标）
+        合并8个时间周期的K线数据（不计算指标），包括：1m, 5m, 15m, 30m, 1h, 4h, 1d, 1w
         
         Args:
             symbol: 交易对符号（如 'BTC' 或 'BTCUSDT'）
             
         Returns:
-            Dict: 合并后的数据格式 {symbol: {1m: {klines: [...]}, 5m: {klines: [...]}, ...}}
+            Dict: 合并后的数据格式 {symbol: {1m: {klines: [...]}, 5m: {klines: [...]}, 30m: {klines: [...]}, ...}}
             只包含klines数据，不包含indicators
         """
         # 确保symbol以USDT结尾，防止重复添加
@@ -933,11 +950,12 @@ class TradingEngine:
         else:
             formatted_symbol = symbol_upper
         
-        # 获取7个时间周期的数据
+        # 获取8个时间周期的数据（包括30m）
         timeframe_methods = {
             '1m': self.market_fetcher.get_market_data_1m,
             '5m': self.market_fetcher.get_market_data_5m,
             '15m': self.market_fetcher.get_market_data_15m,
+            '30m': self.market_fetcher.get_market_data_30m,
             '1h': self.market_fetcher.get_market_data_1h,
             '4h': self.market_fetcher.get_market_data_4h,
             '1d': self.market_fetcher.get_market_data_1d,
@@ -2222,8 +2240,24 @@ class TradingEngine:
         if not symbol_list:
             return market_state
         
-        # 获取价格数据
-        prices = self.market_fetcher.get_prices(symbol_list)
+        # ⚠️ 重要：从SDK获取实时价格，而不是从数据库获取
+        # 使用get_current_prices方法从SDK获取实时价格
+        prices = {}
+        if self.market_fetcher:
+            try:
+                # 使用get_current_prices_by_contract方法，因为symbol_list已经是contract_symbol格式
+                prices = self.market_fetcher.get_current_prices_by_contract(symbol_list)
+                logger.debug(f"[Model {self.model_id}] 从SDK获取到 {len(prices)} 个交易对的实时价格")
+                
+                # 如果get_current_prices_by_contract返回空，尝试使用get_current_prices
+                if not prices:
+                    prices = self.market_fetcher.get_current_prices(symbol_list)
+                    logger.debug(f"[Model {self.model_id}] 使用get_current_prices获取到 {len(prices)} 个交易对的实时价格")
+            except Exception as e:
+                logger.error(f"[Model {self.model_id}] 从SDK获取实时价格失败: {e}", exc_info=True)
+                # 如果SDK获取失败，返回空字典，后续会跳过这些候选
+        else:
+            logger.warning(f"[Model {self.model_id}] market_fetcher不可用，无法从SDK获取实时价格")
         
         # 为每个候选symbol构建市场状态
         for candidate in candidates:
@@ -2250,13 +2284,13 @@ class TradingEngine:
             
             # 统一使用contract_symbol作为查询key和技术指标查询的symbol
             query_symbol = contract_symbol  # 用于获取技术指标
-            price_key = contract_symbol  # 用于查询价格（与24_market_tickers表的symbol字段格式一致）
+            price_key = contract_symbol  # 用于查询价格（与SDK返回的symbol格式一致）
             
-            # 获取价格信息
+            # 获取价格信息（从SDK获取的实时价格）
             price_info = prices.get(price_key, {})
             
             if not price_info:
-                logger.warning(f"[Model {self.model_id}] 无法获取 {symbol} 的实时价格")
+                logger.warning(f"[Model {self.model_id}] 无法获取 {symbol} 的实时价格（从SDK）")
                 continue
             
             # 获取K线数据（不计算指标）

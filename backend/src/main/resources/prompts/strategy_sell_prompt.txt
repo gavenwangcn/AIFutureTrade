@@ -108,13 +108,15 @@ class GeneratedSellStrategy(StrategyBaseSell):
             # 3. 如果满足条件，添加到 decisions 字典中
             
             # ⚠️ 重要：技术指标计算示例（必须遵循此模式）
-            # 获取K线数据（优先使用1h，其次4h，最后15m）
+            # 获取K线数据（优先使用1h，其次4h，然后30m，最后15m）
+            # ⚠️ 重要：可以使用 30m（30分钟）K线数据
             klines_data = None
-            for tf in ['1h', '4h', '15m']:
+            for tf in ['1h', '4h', '30m', '15m']:
                 tf_data = timeframes.get(tf, {})
                 klines = tf_data.get('klines', [])
                 if len(klines) >= 99:
                     klines_data = klines
+                    self.log.info(f"{symbol} 使用 {tf} 时间周期的K线数据，共 {len(klines)} 根")
                     break
             
             if not klines_data or len(klines_data) < 99:
@@ -132,6 +134,22 @@ class GeneratedSellStrategy(StrategyBaseSell):
             
             # 转换为numpy数组（np已经在执行环境中预加载，无需import）
             close_array = np.array(close_prices, dtype=float)
+            
+            # 提取 high、low 数组（用于计算 KDJ 等需要 OHLC 数据的指标）
+            high_prices = []
+            low_prices = []
+            for kline in klines_data:
+                high = kline.get('high', 0)
+                low = kline.get('low', 0)
+                if isinstance(high, (int, float)) and high > 0 and isinstance(low, (int, float)) and low > 0:
+                    high_prices.append(float(high))
+                    low_prices.append(float(low))
+            
+            if len(high_prices) < 99 or len(low_prices) < 99:
+                continue  # 有效数据不足
+            
+            high_array = np.array(high_prices, dtype=float)
+            low_array = np.array(low_prices, dtype=float)
             
             # 计算MA(99)（必须检查返回值，talib已经在执行环境中预加载，无需import）
             # ⚠️ 重要：在计算指标值后必须输出日志，便于排查问题
@@ -152,6 +170,44 @@ class GeneratedSellStrategy(StrategyBaseSell):
             except Exception as e:
                 self.log.error(f"{symbol} MA(99) 计算失败: {e}，跳过")
                 continue  # 计算失败，跳过
+            
+            # 计算EMA指标（示例：EMA5, EMA20, EMA60, EMA99）
+            # ⚠️ 重要：EMA 对价格变化更敏感，适合捕捉短期趋势
+            ema_values = {}
+            for ema_period in [5, 20, 60, 99]:
+                try:
+                    if len(close_array) >= ema_period:
+                        ema_result = talib.EMA(close_array, timeperiod=ema_period)
+                        if len(ema_result) > 0 and not np.isnan(ema_result[-1]) and ema_result[-1] > 0:
+                            ema_values[f'ema{ema_period}'] = float(ema_result[-1])
+                            self.log.info(f"{symbol} EMA({ema_period})={ema_values[f'ema{ema_period}']:.4f}")
+                except Exception as e:
+                    self.log.warning(f"{symbol} EMA({ema_period}) 计算失败: {e}")
+            
+            # 计算KDJ指标（需要 high、low、close 三个数组）
+            # ⚠️ 重要：KDJ 需要 high、low、close 三个数组，不能只用 close 数组
+            kdj_values = {}
+            try:
+                if len(close_array) >= 9:  # KDJ 至少需要 9 根 K 线
+                    # talib.STOCH 返回 slowk (K值) 和 slowd (D值)
+                    slowk, slowd = talib.STOCH(
+                        high_array, low_array, close_array,
+                        fastk_period=9,      # 快速K周期
+                        slowk_period=3,      # 慢速K周期
+                        slowk_matype=0,     # K值移动平均类型（0=SMA）
+                        slowd_period=3,     # D值周期
+                        slowd_matype=0      # D值移动平均类型（0=SMA）
+                    )
+                    if len(slowk) > 0 and len(slowd) > 0:
+                        k_value = float(slowk[-1]) if not np.isnan(slowk[-1]) else 0.0
+                        d_value = float(slowd[-1]) if not np.isnan(slowd[-1]) else 0.0
+                        j_value = 3 * k_value - 2 * d_value  # J值计算公式
+                        kdj_values['k'] = k_value
+                        kdj_values['d'] = d_value
+                        kdj_values['j'] = j_value
+                        self.log.info(f"{symbol} KDJ指标计算完成: K={k_value:.2f}, D={d_value:.2f}, J={j_value:.2f}")
+            except Exception as e:
+                self.log.warning(f"{symbol} KDJ 计算失败: {e}")
             
             # 建议使用 try-except 处理异常，确保异常时继续处理下一个position
             try:
@@ -208,13 +264,34 @@ class GeneratedSellStrategy(StrategyBaseSell):
 - 可以通过 `self.get_available_libraries()` 方法获取所有可用库列表
 - 建议使用 `try-except` 包装库的导入和使用，确保代码健壮性
 
-- 使用 `talib.SMA()` 计算移动平均线
-- 使用 `talib.RSI()` 计算 RSI 指标
-- 使用 `talib.MACD()` 计算 MACD 指标
-- 等等
+**支持的指标类型：**
+- **移动平均线（MA）**：使用 `talib.SMA()` 计算简单移动平均线
+  - 示例：`ma5 = talib.SMA(close_array, timeperiod=5)`
+  - 常用周期：5, 20, 60, 99
+
+- **指数移动平均线（EMA）**：使用 `talib.EMA()` 计算指数移动平均线
+  - 示例：`ema5 = talib.EMA(close_array, timeperiod=5)`
+  - 常用周期：5, 20, 60, 99
+  - **⚠️ 重要：EMA 对价格变化更敏感，适合捕捉短期趋势**
+
+- **KDJ 指标**：使用 `talib.STOCH()` 计算随机指标（KDJ）
+  - 示例：`slowk, slowd = talib.STOCH(high_array, low_array, close_array, fastk_period=9, slowk_period=3, slowk_matype=0, slowd_period=3, slowd_matype=0)`
+  - 返回值：`slowk` 是 K 值，`slowd` 是 D 值，J 值需要计算：`j_value = 3 * slowk[-1] - 2 * slowd[-1]`
+  - **⚠️ 重要：KDJ 需要 high、low、close 三个数组，不能只用 close 数组**
+
+- **RSI 指标**：使用 `talib.RSI()` 计算相对强弱指数
+  - 示例：`rsi = talib.RSI(close_array, timeperiod=14)`
+
+- **MACD 指标**：使用 `talib.MACD()` 计算指数平滑异同移动平均线
+  - 示例：`macd, signal, histogram = talib.MACD(close_array, fastperiod=12, slowperiod=26, signalperiod=9)`
+
+**⚠️ 重要：所有指标计算后必须使用 self.log.info() 输出指标名称和计算值，便于排查问题**
 
 **⚠️ 技术指标计算注意事项（关键）：**
-1. **K线数据提取**：必须从 `market_state[symbol]['indicators']['timeframes']['1h']` 或 `'4h'`、`'15m'` 等获取
+1. **K线数据提取**：必须从 `market_state[symbol]['indicators']['timeframes']['1h']` 或 `'4h'`、`'30m'`、`'15m'` 等获取
+   - **支持的时间周期**：`'1m'`, `'5m'`, `'15m'`, `'30m'`, `'1h'`, `'4h'`, `'1d'`, `'1w'`
+   - **⚠️ 重要：可以使用 30m（30分钟）K线数据，从 `timeframes.get('30m', {})` 获取**
+   - **优先顺序建议**：优先使用 `'1h'`，其次 `'4h'`，然后 `'30m'`，最后 `'15m'`
 2. **数据验证**：必须检查K线数据是否足够（至少99根），必须检查价格数据是否有效（> 0）
 3. **numpy数组处理**：
    - 建议先使用列表收集有效的收盘价：`close_prices = [kline.get('close', 0) for kline in klines if isinstance(kline.get('close', 0), (int, float)) and kline.get('close', 0) > 0]`
@@ -319,7 +396,10 @@ klines_1h = timeframes.get('1h', {}).get('klines', [])
 - **异常处理**：建议使用 try-except 包装主要逻辑，确保异常时返回空字典
 
 **⚠️ 技术指标计算注意事项（关键）：**
-1. **K线数据提取**：必须从 `market_state[symbol]['indicators']['timeframes']['1h']` 或 `'4h'`、`'15m'` 等获取
+1. **K线数据提取**：必须从 `market_state[symbol]['indicators']['timeframes']['1h']` 或 `'4h'`、`'30m'`、`'15m'` 等获取
+   - **支持的时间周期**：`'1m'`, `'5m'`, `'15m'`, `'30m'`, `'1h'`, `'4h'`, `'1d'`, `'1w'`
+   - **⚠️ 重要：可以使用 30m（30分钟）K线数据，从 `timeframes.get('30m', {})` 获取**
+   - **优先顺序建议**：优先使用 `'1h'`，其次 `'4h'`，然后 `'30m'`，最后 `'15m'`
 2. **数据验证**：必须检查K线数据是否足够（至少99根），必须检查价格数据是否有效（> 0）
 3. **numpy数组处理**：
    - 建议先使用列表收集有效的收盘价：`close_prices = [kline.get('close', 0) for kline in klines if isinstance(kline.get('close', 0), (int, float)) and kline.get('close', 0) > 0]`

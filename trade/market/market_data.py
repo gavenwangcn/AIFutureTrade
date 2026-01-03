@@ -602,6 +602,7 @@ class MarketDataFetcher:
             '1d': '1d',   # 日线：观察中期趋势和重要支撑阻力
             '4h': '4h',   # 4小时线：日内短线交易的重要参考
             '1h': '1h',   # 1小时线：短线交易的主要依据
+            '30m': '30m', # 30分钟线：中短期交易的重要参考
             '15m': '15m', # 15分钟线：捕捉短期波动和入场点
             '5m': '5m',   # 5分钟线：超短线交易的精确参考
             '1m': '1m'    # 1分钟线：极短线交易的微观信号
@@ -626,6 +627,7 @@ class MarketDataFetcher:
                     '1d': 120,   # 日线：获取120天数据（约4个月）
                     '4h': 120,   # 4小时线：获取120根4小时K线（约20天）
                     '1h': 120,   # 1小时线：获取120根1小时K线（约5天）
+                    '30m': 120,  # 30分钟线：获取120根30分钟K线（约2.5天）
                     '15m': 120,  # 15分钟线：获取120根15分钟K线（约1.25天）
                     '5m': 120,   # 5分钟线：获取120根5分钟K线（约10小时）
                     '1m': 120    # 1分钟线：获取120根1分钟K线（约2小时）
@@ -1236,6 +1238,18 @@ class MarketDataFetcher:
             市场数据字典，包含symbol、timeframe、klines、indicators和metadata字段
         """
         return self._get_market_data_by_interval(symbol, '15m', limit=300, return_count=300)
+
+    def get_market_data_30m(self, symbol: str) -> Dict:
+        """
+        获取30分钟时间周期的市场数据
+        
+        Args:
+            symbol: 交易对符号（如 'BTC'）
+            
+        Returns:
+            市场数据字典，包含symbol、timeframe、klines、indicators和metadata字段
+        """
+        return self._get_market_data_by_interval(symbol, '30m', limit=300, return_count=300)
 
     def get_market_data_1h(self, symbol: str) -> Dict:
         """
