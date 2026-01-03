@@ -107,8 +107,8 @@ async:
   websocket:
     # WebSocket消息大小配置（字节）
     # 币安市场ticker数据实际约68KB，默认限制65KB不够
-    max-text-message-size: ${ASYNC_WEBSOCKET_MAX_TEXT_MESSAGE_SIZE:150000}  # 200KB
-    max-binary-message-size: ${ASYNC_WEBSOCKET_MAX_BINARY_MESSAGE_SIZE:150000}  # 200KB
+    max-text-message-size: ${ASYNC_WEBSOCKET_MAX_TEXT_MESSAGE_SIZE:204800}  # 200KB
+    max-binary-message-size: ${ASYNC_WEBSOCKET_MAX_BINARY_MESSAGE_SIZE:204800}  # 200KB
     # WebSocket客户端配置
 
     

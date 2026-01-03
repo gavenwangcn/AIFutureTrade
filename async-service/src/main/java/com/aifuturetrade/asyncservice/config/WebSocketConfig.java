@@ -17,7 +17,7 @@ public class WebSocketConfig {
     /**
      * 最大文本消息大小（字节）
      */
-    private Long maxTextMessageSize = 150000L; 
+    private Long maxTextMessageSize = 204800L; 
     
     /**
      * 最大二进制消息大小（字节）

@@ -33,7 +33,6 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 import org.eclipse.jetty.websocket.api.exceptions.MessageTooLargeException;
-import org.eclipse.jetty.websocket.api.exceptions.WebSocketException;
 import org.eclipse.jetty.websocket.client.WebSocketClient;
 
 /**
@@ -52,7 +51,6 @@ import org.eclipse.jetty.websocket.client.WebSocketClient;
 @Service("marketTickerStreamService")
 public class MarketTickerStreamServiceImpl implements MarketTickerStreamService {
     
-    private final WebSocketConfig webSocketConfig;
     private final MarketTickerMapper marketTickerMapper;
     private DerivativesTradingUsdsFuturesWebSocketStreams api;
     private StreamBlockingQueueWrapper<AllMarketTickersStreamsResponse> response;
@@ -64,7 +62,6 @@ public class MarketTickerStreamServiceImpl implements MarketTickerStreamService 
     
     @Autowired
     public MarketTickerStreamServiceImpl(WebSocketConfig webSocketConfig, MarketTickerMapper marketTickerMapper) {
-        this.webSocketConfig = webSocketConfig;
         this.marketTickerMapper = marketTickerMapper;
         // 初始化当前最大消息大小为配置值
         this.currentMaxMessageSize = new AtomicLong(webSocketConfig.getMaxTextMessageSize());
@@ -136,104 +133,107 @@ public class MarketTickerStreamServiceImpl implements MarketTickerStreamService 
      * 检测并处理MessageTooLargeException
      * 如果检测到此异常，自动增加最大消息大小并重新创建API实例
      * 
-     * @param e 异常对象
+     * @param e 异常对象（可以是Exception或Throwable）
      * @return true如果检测到MessageTooLargeException并已处理，false otherwise
      */
-    private boolean handleMessageTooLargeException(Exception e) {
-        // 检查异常类型或消息中是否包含MessageTooLargeException相关信息
-        boolean isMessageTooLarge = false;
-        String errorMessage = e.getMessage() != null ? e.getMessage() : "";
-        
-        // 检查异常类型
-        if (e instanceof MessageTooLargeException) {
-            isMessageTooLarge = true;
-        } else {
-            // 检查异常消息中是否包含相关关键词
-            String lowerMessage = errorMessage.toLowerCase();
-            if (lowerMessage.contains("messagetoolargeexception") || 
-                lowerMessage.contains("text message too large") ||
-                lowerMessage.contains("message too large")) {
-                isMessageTooLarge = true;
-            }
+    private boolean handleMessageTooLargeException(Throwable e) {
+        // 只判断是否为MessageTooLargeException异常
+        if (!(e instanceof MessageTooLargeException)) {
+            return false;
         }
         
-        // 检查异常链中是否包含MessageTooLargeException
-        if (!isMessageTooLarge && e.getCause() != null) {
-            Throwable cause = e.getCause();
-            if (cause instanceof MessageTooLargeException) {
-                isMessageTooLarge = true;
-            } else {
-                String causeMessage = cause.getMessage() != null ? cause.getMessage().toLowerCase() : "";
-                if (causeMessage.contains("messagetoolargeexception") || 
-                    causeMessage.contains("text message too large") ||
-                    causeMessage.contains("message too large")) {
-                    isMessageTooLarge = true;
+        MessageTooLargeException mte = (MessageTooLargeException) e;
+        String errorMessage = mte.getMessage() != null ? mte.getMessage() : "";
+        
+        // 从异常消息中提取实际消息大小（如果可能）
+        long actualSize = 0;
+        long configuredSize = currentMaxMessageSize.get();
+        
+        // 尝试从异常消息中提取实际大小
+        try {
+            if (errorMessage.contains("(actual)")) {
+                String[] parts = errorMessage.split("\\(actual\\)");
+                if (parts.length > 1) {
+                    String sizePart = parts[1].trim();
+                    String sizeStr = sizePart.replaceAll("[^0-9]", "");
+                    if (!sizeStr.isEmpty()) {
+                        actualSize = Long.parseLong(sizeStr);
+                    }
                 }
             }
-        }
-        
-        if (isMessageTooLarge) {
-            // 从异常消息中提取实际消息大小（如果可能）
-            long actualSize = 0;
-            long configuredSize = currentMaxMessageSize.get();
-            
-            // 尝试从异常消息中提取实际大小
-            try {
-                if (errorMessage.contains("(actual)")) {
-                    String[] parts = errorMessage.split("\\(actual\\)");
-                    if (parts.length > 1) {
-                        String sizePart = parts[1].trim();
-                        String sizeStr = sizePart.replaceAll("[^0-9]", "");
+            if (actualSize == 0 && errorMessage.contains(">")) {
+                String[] parts = errorMessage.split(">");
+                if (parts.length > 0) {
+                    String actualPart = parts[0];
+                    String[] actualParts = actualPart.split("\\(");
+                    if (actualParts.length > 1) {
+                        String sizeStr = actualParts[1].replaceAll("[^0-9]", "");
                         if (!sizeStr.isEmpty()) {
                             actualSize = Long.parseLong(sizeStr);
                         }
                     }
                 }
-                if (actualSize == 0 && errorMessage.contains(">")) {
-                    String[] parts = errorMessage.split(">");
-                    if (parts.length > 0) {
-                        String actualPart = parts[0];
-                        String[] actualParts = actualPart.split("\\(");
-                        if (actualParts.length > 1) {
-                            String sizeStr = actualParts[1].replaceAll("[^0-9]", "");
-                            if (!sizeStr.isEmpty()) {
-                                actualSize = Long.parseLong(sizeStr);
-                            }
-                        }
-                    }
-                }
-            } catch (Exception parseEx) {
-                log.debug("[MarketTickerStreamService] 无法从异常消息中解析实际消息大小: {}", errorMessage, parseEx);
             }
-            
-            // 计算新的最大消息大小：实际大小 + 20% 缓冲
-            long newMaxSize;
-            if (actualSize > 0) {
-                newMaxSize = (long) (actualSize * 1.2); // 增加20%缓冲
-            } else {
-                newMaxSize = configuredSize + 20000; // 增加20KB
-            }
-            
-            // 限制最大值为500KB，避免无限增长
-            long maxAllowedSize = 500 * 1024; // 500KB
-            if (newMaxSize > maxAllowedSize) {
-                newMaxSize = maxAllowedSize;
-                log.warn("[MarketTickerStreamService] ⚠️ 新计算的最大消息大小 {} bytes 超过限制 {} bytes，使用限制值", 
-                        newMaxSize, maxAllowedSize);
-            }
-            
-            log.warn("[MarketTickerStreamService] ⚠️ 检测到MessageTooLargeException: {}", errorMessage);
-            log.warn("[MarketTickerStreamService] 📊 当前最大消息大小: {} bytes, 实际消息大小: {} bytes", 
-                    configuredSize, actualSize > 0 ? actualSize : "未知");
-            log.info("[MarketTickerStreamService] 🔧 将最大消息大小从 {} bytes 增加到 {} bytes", 
-                    configuredSize, newMaxSize);
-            
-            // 更新最大消息大小
-            currentMaxMessageSize.set(newMaxSize);
-            
-            // 重新创建API实例
-            recreateApi();
-            
+        } catch (Exception parseEx) {
+            log.info("[MarketTickerStreamService] 无法从异常消息中解析实际消息大小: {}", errorMessage, parseEx);
+        }
+        
+        // 计算新的最大消息大小：实际大小 + 20% 缓冲
+        long newMaxSize;
+        if (actualSize > 0) {
+            newMaxSize = (long) (actualSize * 1.2); // 增加20%缓冲
+        } else {
+            newMaxSize = configuredSize + 20000; // 增加20KB
+        }
+        
+        // 限制最大值为500KB，避免无限增长
+        long maxAllowedSize = 500 * 1024; // 500KB
+        if (newMaxSize > maxAllowedSize) {
+            newMaxSize = maxAllowedSize;
+            log.warn("[MarketTickerStreamService] ⚠️ 新计算的最大消息大小 {} bytes 超过限制 {} bytes，使用限制值", 
+                    newMaxSize, maxAllowedSize);
+        }
+        
+        log.warn("[MarketTickerStreamService] ⚠️ 检测到MessageTooLargeException: {}", errorMessage);
+        log.warn("[MarketTickerStreamService] 📊 当前最大消息大小: {} bytes, 实际消息大小: {} bytes", 
+                configuredSize, actualSize > 0 ? actualSize : "未知");
+        log.info("[MarketTickerStreamService] 🔧 将最大消息大小从 {} bytes 增加到 {} bytes", 
+                configuredSize, newMaxSize);
+        
+        // 更新最大消息大小
+        currentMaxMessageSize.set(newMaxSize);
+        
+        // 重新创建API实例
+        recreateApi();
+        
+        return true;
+    }
+    
+    /**
+     * 检查异常是否是 org.eclipse.jetty.websocket.api.exceptions 包下的异常
+     * 
+     * @param e 异常对象
+     * @return true如果是WebSocket异常，false otherwise
+     */
+    private boolean isWebSocketException(Throwable e) {
+        if (e == null) {
+            return false;
+        }
+        
+        // 检查异常类型
+        Class<?> exceptionClass = e.getClass();
+        String className = exceptionClass.getName();
+        
+        // 检查是否是 org.eclipse.jetty.websocket.api.exceptions 包下的异常
+        if (className.startsWith("org.eclipse.jetty.websocket.api.exceptions.")) {
+            return true;
+        }
+        
+        // 检查异常消息中是否包含WebSocket相关关键词
+        String errorMessage = e.getMessage() != null ? e.getMessage().toLowerCase() : "";
+        if (errorMessage.contains("websocket") || 
+            errorMessage.contains("message too large") ||
+            errorMessage.contains("messagetoolargeexception")) {
             return true;
         }
         
@@ -241,25 +241,82 @@ public class MarketTickerStreamServiceImpl implements MarketTickerStreamService 
     }
     
     /**
-     * 简化异常处理
-     * 处理MessageTooLargeException，其他异常记录日志但不重连
+     * 处理WebSocket异常并重新建立连接
      * 
      * @param e 异常对象
-     * @return true如果处理了MessageTooLargeException，false otherwise
+     * @return true如果处理了WebSocket异常并重新建立了连接，false otherwise
      */
-    private boolean handleException(Exception e) {
-        // 特殊处理MessageTooLargeException：增加消息大小
-        if (e instanceof MessageTooLargeException || 
-            (e.getMessage() != null && e.getMessage().toLowerCase().contains("message too large"))) {
+    private boolean handleWebSocketException(Exception e) {
+        // 检查是否是MessageTooLargeException，需要特殊处理（调整消息大小）
+        if (e instanceof MessageTooLargeException) {
+            log.error("[MarketTickerStreamService] ❌ 捕获到MessageTooLargeException异常，将调整消息大小并重新建立连接", e);
             return handleMessageTooLargeException(e);
         }
         
         // 检查异常链中是否包含MessageTooLargeException
         Throwable cause = e.getCause();
         while (cause != null) {
-            if (cause instanceof MessageTooLargeException || 
-                (cause.getMessage() != null && cause.getMessage().toLowerCase().contains("message too large"))) {
-                return handleMessageTooLargeException(new Exception(cause));
+            if (cause instanceof MessageTooLargeException) {
+                log.error("[MarketTickerStreamService] ❌ 在异常链中检测到MessageTooLargeException，将调整消息大小并重新建立连接", cause);
+                // 直接处理MessageTooLargeException，不需要再封装
+                return handleMessageTooLargeException(cause);
+            }
+            cause = cause.getCause();
+        }
+        
+        // 其他WebSocket异常，直接重新建立连接
+        log.error("[MarketTickerStreamService] ❌ 捕获到WebSocket异常，将重新建立连接", e);
+        return reconnectStream();
+    }
+    
+    /**
+     * 重新建立WebSocket连接
+     * 
+     * @return true如果成功重新建立连接，false otherwise
+     */
+    private boolean reconnectStream() {
+        try {
+            log.info("[MarketTickerStreamService] 🔄 开始重新建立WebSocket连接...");
+            
+            // 重新创建API实例（使用当前的最大消息大小）
+            recreateApi();
+            
+            // 重新创建请求并获取流
+            AllMarketTickersStreamsRequest request = new AllMarketTickersStreamsRequest();
+            response = getApi().allMarketTickersStreams(request);
+            
+            log.info("[MarketTickerStreamService] ✅ WebSocket连接已重新建立");
+            return true;
+        } catch (Exception e) {
+            log.error("[MarketTickerStreamService] ❌ 重新建立WebSocket连接失败", e);
+            return false;
+        }
+    }
+    
+    /**
+     * 异常处理
+     * 处理所有 org.eclipse.jetty.websocket.api.exceptions 包下的异常，并重新建立连接
+     * 
+     * @param e 异常对象
+     * @return true如果处理了WebSocket异常并重新建立了连接，false otherwise
+     */
+    private boolean handleException(Exception e) {
+        // 检查是否是WebSocket异常
+        if (isWebSocketException(e)) {
+            log.warn("[MarketTickerStreamService] ⚠️ 检测到WebSocket异常: {} - {}", 
+                    e.getClass().getSimpleName(), 
+                    e.getMessage() != null ? e.getMessage() : "");
+            return handleWebSocketException(e);
+        }
+        
+        // 检查异常链中是否包含WebSocket异常
+        Throwable cause = e.getCause();
+        while (cause != null) {
+            if (isWebSocketException(cause)) {
+                log.warn("[MarketTickerStreamService] ⚠️ 在异常链中检测到WebSocket异常: {} - {}", 
+                        cause.getClass().getSimpleName(), 
+                        cause.getMessage() != null ? cause.getMessage() : "");
+                return handleWebSocketException(new Exception(cause));
             }
             cause = cause.getCause();
         }
@@ -345,16 +402,13 @@ public class MarketTickerStreamServiceImpl implements MarketTickerStreamService 
                     Thread.currentThread().interrupt();
                     break;
                 } catch (Exception e) {
-                    // 处理MessageTooLargeException，其他异常记录日志但不重连
+                    // 处理所有WebSocket异常（包括MessageTooLargeException），并重新建立连接
                     if (handleException(e)) {
-                        log.info("[MarketTickerStreamService] 🔧 已调整消息大小，重新创建连接");
-                        // 重新创建请求并获取流
-                        request = new AllMarketTickersStreamsRequest();
-                        response = getApi().allMarketTickersStreams(request);
-                        log.info("[MarketTickerStreamService] ✅ WebSocket连接已重新建立");
+                        // handleException已经处理了重连逻辑，这里只需要记录日志
+                        log.info("[MarketTickerStreamService] 🔧 已处理WebSocket异常并重新建立连接，继续处理消息");
                     } else {
-                        log.error("[MarketTickerStreamService] ❌ 处理消息时出错", e);
-                        // 继续处理下一条消息，不进行重连
+                        log.error("[MarketTickerStreamService] ❌ 处理消息时出错（非WebSocket异常）", e);
+                        // 非WebSocket异常，继续处理下一条消息，不进行重连
                     }
                 }
             }
