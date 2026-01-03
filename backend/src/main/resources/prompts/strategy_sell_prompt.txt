@@ -70,6 +70,9 @@ class GeneratedSellStrategy(StrategyBaseSell):
         # 获取当前持仓
         positions = portfolio.get('positions', []) or []
         
+        # ⚠️ 重要：必须使用 self.log.info() 输出关键执行日志
+        self.log.info(f"开始执行卖出决策，当前持仓数量: {len(positions)}")
+        
         # 遍历持仓
         for position in positions:
             symbol = position.get('symbol', '').upper()
@@ -131,22 +134,38 @@ class GeneratedSellStrategy(StrategyBaseSell):
             close_array = np.array(close_prices, dtype=float)
             
             # 计算MA(99)（必须检查返回值，talib已经在执行环境中预加载，无需import）
+            # ⚠️ 重要：在计算指标值后必须输出日志，便于排查问题
             try:
                 ma99 = talib.SMA(close_array, timeperiod=99)
                 if len(ma99) == 0:
+                    self.log.warning(f"{symbol} MA(99) 计算结果为空，跳过")
                     continue  # 计算结果为空
                 if np.isnan(ma99[-1]):
+                    self.log.warning(f"{symbol} MA(99) 结果为NaN，跳过")
                     continue  # 结果为NaN
                 ma99_value = float(ma99[-1])
                 if ma99_value <= 0:
+                    self.log.warning(f"{symbol} MA(99) 值无效: {ma99_value}，跳过")
                     continue  # 结果无效
-            except Exception:
+                # ⚠️ 重要：计算指标值后必须输出日志，包含指标名称和计算值
+                self.log.info(f"{symbol} 技术指标计算完成: MA(99)={ma99_value:.4f}")
+            except Exception as e:
+                self.log.error(f"{symbol} MA(99) 计算失败: {e}，跳过")
                 continue  # 计算失败，跳过
             
             # 建议使用 try-except 处理异常，确保异常时继续处理下一个position
             try:
+                # ⚠️ 重要：必须使用 self.log.info() 输出关键执行日志
+                self.log.info(f"处理持仓 {symbol}，持仓方向: {position_side}，持仓数量: {position_amt}，当前价格: {current_price}，MA(99): {ma99_value}")
+                
+                # ⚠️ 重要：在进行指标值判断时，必须输出判断条件和结果，便于排查问题
                 # 示例：判断平仓条件
+                # 计算判断条件值（如：current_price < 0.98 * ma99_value）
+                # condition_value = current_price / ma99_value
+                # self.log.info(f"{symbol} 多单平仓条件判断: 价格/MA(99)={condition_value:.4f}, 阈值=0.98, 结果={condition_value < 0.98}")
+                # 
                 # if position_side == 'LONG' and 满足多单平仓条件:
+                #     self.log.info(f"{symbol} 多单满足平仓条件（价格={current_price:.4f} < 0.98*MA(99)={0.98*ma99_value:.4f}），准备平仓")
                 #     decisions[symbol] = {
                 #         "signal": "close_position",  # 或 "stop_loss" 或 "take_profit"
                 #         "quantity": position_amt,
@@ -155,7 +174,9 @@ class GeneratedSellStrategy(StrategyBaseSell):
                 #         "leverage": position.get('leverage', 5),
                 #         "justification": "理由"
                 #     }
+                #     self.log.info(f"{symbol} 平仓决策已添加: signal={decisions[symbol]['signal']}, quantity={decisions[symbol]['quantity']}")
                 # elif position_side == 'SHORT' and 满足空单平仓条件:
+                #     self.log.info(f"{symbol} 空单满足平仓条件（价格={current_price:.4f} > 1.02*MA(99)={1.02*ma99_value:.4f}），准备平仓")
                 #     decisions[symbol] = {
                 #         "signal": "close_position",  # 或 "stop_loss" 或 "take_profit"
                 #         "quantity": position_amt,
@@ -164,12 +185,17 @@ class GeneratedSellStrategy(StrategyBaseSell):
                 #         "leverage": position.get('leverage', 5),
                 #         "justification": "理由"
                 #     }
+                #     self.log.info(f"{symbol} 平仓决策已添加: signal={decisions[symbol]['signal']}, quantity={decisions[symbol]['quantity']}")
+                # else:
+                #     self.log.info(f"{symbol} 不满足任何平仓条件，跳过")
             except Exception as e:
                 # 处理单个position时发生异常，继续处理下一个
+                self.log.error(f"处理 {symbol} 时发生异常: {e}")
                 continue
         
         # ⚠️ 重要：必须返回decisions字典，不能返回None，即使没有决策也要返回空字典{}
         # 必须确保所有代码路径都返回decisions，不能有任何路径返回None
+        self.log.info(f"卖出决策执行完成，共生成 {len(decisions)} 个决策")
         return decisions
 ```
 
@@ -199,9 +225,17 @@ class GeneratedSellStrategy(StrategyBaseSell):
    - 必须检查数组是否为空：`if len(ma99) == 0: continue`
    - 必须检查是否为NaN：`if np.isnan(ma99[-1]): continue`
    - 必须检查值是否有效：`ma99_value = float(ma99[-1]); if ma99_value <= 0: continue`
-5. **异常处理**：
+   - **⚠️ 重要：计算指标值后必须使用 self.log.info() 输出指标名称和计算值，便于排查问题**
+5. **指标值判断时的日志输出（关键）**：
+   - **在进行指标值判断时（如 if current_price < 0.98 * ma99_value），必须输出判断条件和结果**
+   - **必须输出：指标值、判断阈值、判断结果（True/False）**
+   - **示例**：`self.log.info(f"{symbol} 多单平仓条件判断: 价格={current_price:.4f}, MA(99)={ma99_value:.4f}, 阈值=0.98, 比值={current_price/ma99_value:.4f}, 结果={current_price < 0.98 * ma99_value}")`
+   - **如果满足条件，输出满足条件的具体数值和原因**
+   - **如果不满足条件，输出不满足的原因和具体数值**
+6. **异常处理**：
    - 在循环内部使用 try-except 处理单个position的异常，确保一个失败不影响其他
    - 在方法外层使用 try-except 确保即使发生异常也返回decisions字典
+   - **异常时必须使用 self.log.error() 输出异常信息**
 
 ### 3. 技术指标数据获取方式（统一使用 market_state）
 
@@ -244,6 +278,13 @@ klines_1h = timeframes.get('1h', {}).get('klines', [])
 - 必须正确导入 StrategyBaseSell：`from trade.strategy.strategy_template_sell import StrategyBaseSell`
 - **必须确保方法始终返回字典**：不能返回 None，不能有未定义的返回值
 - **必须使用 try-except 处理异常**：确保即使发生异常也能返回空字典而不是抛出异常
+- **⚠️ 必须使用日志输出关键执行信息**：
+  - 使用 `self.log.info()` 输出关键执行日志（log.info 级别）
+  - 在方法开始时输出：持仓数量、开始执行等信息
+  - 在处理每个持仓时输出：交易对符号、持仓方向、持仓数量、当前价格、技术指标值等关键信息
+  - 在生成决策时输出：决策类型（平仓/止损/止盈）、数量、触发价格等关键信息
+  - 在方法结束时输出：决策总数、执行完成等信息
+  - 在异常时使用 `self.log.warning()` 或 `self.log.error()` 输出异常信息
 
 ### 6. 策略实现要求
 
@@ -289,9 +330,17 @@ klines_1h = timeframes.get('1h', {}).get('klines', [])
    - 必须检查数组是否为空：`if len(ma99) == 0: continue`
    - 必须检查是否为NaN：`if np.isnan(ma99[-1]): continue`
    - 必须检查值是否有效：`ma99_value = float(ma99[-1]); if ma99_value <= 0: continue`
-5. **异常处理**：
+   - **⚠️ 重要：计算指标值后必须使用 self.log.info() 输出指标名称和计算值，便于排查问题**
+5. **指标值判断时的日志输出（关键）**：
+   - **在进行指标值判断时（如 if current_price < 0.98 * ma99_value），必须输出判断条件和结果**
+   - **必须输出：指标值、判断阈值、判断结果（True/False）**
+   - **示例**：`self.log.info(f"{symbol} 多单平仓条件判断: 价格={current_price:.4f}, MA(99)={ma99_value:.4f}, 阈值=0.98, 比值={current_price/ma99_value:.4f}, 结果={current_price < 0.98 * ma99_value}")`
+   - **如果满足条件，输出满足条件的具体数值和原因**
+   - **如果不满足条件，输出不满足的原因和具体数值**
+6. **异常处理**：
    - 在循环内部使用 try-except 处理单个position的异常，确保一个失败不影响其他
    - 在方法外层使用 try-except 确保即使发生异常也返回decisions字典
+   - **异常时必须使用 self.log.error() 输出异常信息**
 
 ## 请根据提供的 strategy_context 生成完整的卖出策略代码：
 

@@ -132,15 +132,24 @@ class StrategyCodeTesterSell:
         if methods_result['passed']:
             logger.debug(f"[StrategyCodeTesterSell] [测试5] ✓ 方法实现检查通过")
         
-        # ============ 测试6: 执行测试（使用模拟数据） ============
-        logger.debug(f"[StrategyCodeTesterSell] [测试6] 执行测试...")
+        # ============ 测试6: 日志功能检查 ============
+        logger.debug(f"[StrategyCodeTesterSell] [测试6] 日志功能检查...")
+        logging_result = self._test_logging(strategy_code)
+        test_results['logging'] = logging_result
+        if not logging_result['passed']:
+            warnings.extend(logging_result['warnings'])  # 日志检查失败只产生警告，不阻止测试通过
+        if logging_result['passed']:
+            logger.debug(f"[StrategyCodeTesterSell] [测试6] ✓ 日志功能检查通过")
+        
+        # ============ 测试7: 执行测试（使用模拟数据） ============
+        logger.debug(f"[StrategyCodeTesterSell] [测试7] 执行测试...")
         execution_result = self._test_execution(strategy_code, strategy_name)
         test_results['execution'] = execution_result
         if not execution_result['passed']:
             errors.extend(execution_result['errors'])
         warnings.extend(execution_result['warnings'])
         if execution_result['passed']:
-            logger.debug(f"[StrategyCodeTesterSell] [测试6] ✓ 执行测试通过")
+            logger.debug(f"[StrategyCodeTesterSell] [测试7] ✓ 执行测试通过")
         
         # ============ 汇总结果 ============
         passed = len(errors) == 0
@@ -359,6 +368,40 @@ class StrategyCodeTesterSell:
             'errors': errors,
             'warnings': warnings,
             'message': '方法检查完成'
+        }
+    
+    def _test_logging(self, strategy_code: str) -> Dict:
+        """测试日志功能使用情况"""
+        warnings = []
+        
+        try:
+            # 检查代码中是否使用了 self.log.info() 或 self.log.warning() 等日志方法
+            has_log_info = 'self.log.info' in strategy_code
+            has_log_warning = 'self.log.warning' in strategy_code
+            has_log_error = 'self.log.error' in strategy_code
+            has_log_debug = 'self.log.debug' in strategy_code
+            
+            # 检查是否使用了日志（至少使用一种日志级别）
+            has_any_logging = has_log_info or has_log_warning or has_log_error or has_log_debug
+            
+            if not has_any_logging:
+                warnings.append("建议在策略代码中使用 self.log.info() 输出关键执行日志，便于调试和监控")
+            elif not has_log_info:
+                warnings.append("建议在策略代码中使用 self.log.info() 输出关键执行信息（当前未使用 log.info）")
+            else:
+                # 统计日志使用次数
+                log_info_count = strategy_code.count('self.log.info')
+                if log_info_count < 2:
+                    warnings.append(f"建议在策略代码中使用更多 self.log.info() 输出关键执行信息（当前仅使用 {log_info_count} 次）")
+        
+        except Exception as e:
+            warnings.append(f"日志功能检查异常: {str(e)}")
+        
+        return {
+            'passed': True,  # 日志检查不阻止测试通过，只产生警告
+            'errors': [],
+            'warnings': warnings,
+            'message': '日志功能检查完成'
         }
     
     def _test_execution(self, strategy_code: str, strategy_name: str) -> Dict:

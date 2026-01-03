@@ -101,8 +101,8 @@ class StrategyCodeExecutor:
             self.allowed_modules['pandas'] = pd
             self.allowed_modules['pd'] = pd
         
-        # 默认允许的模块
-        default_allowed = ['math', 'datetime', 'json', 'time', 'random']
+        # 默认允许的模块（包括 logging）
+        default_allowed = ['math', 'datetime', 'json', 'time', 'random', 'logging']
         if allow_imports:
             default_allowed.extend(allow_imports)
         

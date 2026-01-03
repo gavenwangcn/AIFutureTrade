@@ -8,9 +8,11 @@ Strategy Code Template - 买入策略代码模板基类
 1. AI 生成的买入策略代码应该继承 StrategyBaseBuy
 2. 实现 execute_buy_decision() 方法
 3. 系统会实例化策略类并调用相应方法
+4. 使用 self.log.info() 输出关键执行日志
 """
 from abc import ABC, abstractmethod
 from typing import Dict, List
+import logging
 
 
 class StrategyBaseBuy(ABC):
@@ -24,9 +26,28 @@ class StrategyBaseBuy(ABC):
         class MyBuyStrategy(StrategyBaseBuy):
             def execute_buy_decision(self, candidates, portfolio, account_info, 
                                     market_state):
+                # 使用日志输出关键信息
+                self.log.info("开始执行买入决策")
                 # 实现买入决策逻辑
+                self.log.info(f"处理候选交易对数量: {len(candidates)}")
                 return {"SYMBOL": {...}}
     """
+    
+    def __init__(self):
+        """初始化策略基类，设置日志记录器"""
+        # 创建日志记录器，使用类名作为logger名称
+        logger_name = f"{self.__class__.__module__}.{self.__class__.__name__}"
+        self.log = logging.getLogger(logger_name)
+        # 如果logger没有处理器，添加一个控制台处理器
+        if not self.log.handlers:
+            handler = logging.StreamHandler()
+            formatter = logging.Formatter(
+                '%(asctime)s [%(levelname)s] %(name)s - %(message)s',
+                datefmt='%Y-%m-%d %H:%M:%S'
+            )
+            handler.setFormatter(formatter)
+            self.log.addHandler(handler)
+            self.log.setLevel(logging.INFO)
     
     @abstractmethod
     def execute_buy_decision(

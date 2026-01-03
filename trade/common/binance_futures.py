@@ -811,7 +811,7 @@ class BinanceFuturesClient(_BinanceFuturesBase):
                         base_url=service_config.get('base_url'),
                         timeout=service_config.get('timeout', getattr(app_config, 'BINANCE_SERVICE_DEFAULT_TIMEOUT', 30))
                     )
-                    logger.info(f"[Binance Futures] 使用Binance Service获取K线数据, symbol={symbol}, interval={interval}, limit={limit}")
+                    logger.debug(f"[Binance Futures] 使用Binance Service获取K线数据, symbol={symbol}, interval={interval}, limit={limit}")
                     result = service_client.get_klines(symbol, interval, limit, startTime, endTime)
                     if result:
                         return result
