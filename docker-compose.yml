@@ -152,7 +152,7 @@ services:
       - GUNICORN_KEEPALIVE=${GUNICORN_KEEPALIVE:-5}
       - GUNICORN_MAX_REQUESTS=${GUNICORN_MAX_REQUESTS:-1000}
       # MySQL配置
-      - MYSQL_HOST=${MYSQL_HOST:-193.134.209.95}
+      - MYSQL_HOST=${MYSQL_HOST:-154.89.148.172}
       - MYSQL_PORT=${MYSQL_PORT:-32123}
       - MYSQL_USER=${MYSQL_USER:-aifuturetrade}
       - MYSQL_PASSWORD=${MYSQL_PASSWORD:-aifuturetrade123}
@@ -170,20 +170,25 @@ services:
   # 说明：
   # 1. 此服务仅用于构建镜像，不自动启动容器
   # 2. 后续由 Java Backend 服务通过 Docker API 动态创建容器
-  # 3. 构建镜像：docker-compose build model-buy
-  # 4. 或使用 profile：docker-compose --profile model-images build
+  # 3. 使用以下命令来构建但不启动容器：
+  #    - docker-compose up --build -d --scale model-buy=0 --scale model-sell=0
+  #    - 或使用脚本: ./scripts/docker-compose-up.sh (Linux/Mac)
+  #    - 或使用脚本: scripts\docker-compose-up.bat (Windows)
+  # 4. 或者使用 docker-compose build model-buy 来只构建镜像
   # ============================================================================
   model-buy:
     build:
       context: .
       dockerfile: trade/Dockerfile
+    image: aifuturetrade-model-buy:latest  # 明确指定镜像名称，与后端配置一致
     # 不设置 container_name，因为容器由 Java Backend 动态创建
     # 不设置 ports，因为容器由 Java Backend 动态创建时指定
+    # 不设置 restart，确保容器不会自动重启
     environment:
       # MODEL_ID 由 Java Backend 在创建容器时动态设置
       - MODEL_ID=${MODEL_ID:-1}
       # MySQL配置
-      - MYSQL_HOST=${MYSQL_HOST:-193.134.209.95}
+      - MYSQL_HOST=${MYSQL_HOST:-154.89.148.172}
       - MYSQL_PORT=${MYSQL_PORT:-32123}
       - MYSQL_USER=${MYSQL_USER:-aifuturetrade}
       - MYSQL_PASSWORD=${MYSQL_PASSWORD:-aifuturetrade123}
@@ -193,9 +198,6 @@ services:
       - BINANCE_SECRET_KEY=${BINANCE_API_SECRET}
     # 覆盖 CMD，使用 model_start_buy.py 启动
     command: ["python", "-m", "trade.start.model_start_buy"]
-    # 使用 profile，默认不启动
-    profiles:
-      - model-images
     networks:
       - aifuturetrade-network
 
@@ -205,20 +207,25 @@ services:
   # 说明：
   # 1. 此服务仅用于构建镜像，不自动启动容器
   # 2. 后续由 Java Backend 服务通过 Docker API 动态创建容器
-  # 3. 构建镜像：docker-compose build model-sell
-  # 4. 或使用 profile：docker-compose --profile model-images build
+  # 3. 使用以下命令来构建但不启动容器：
+  #    - docker-compose up --build -d --scale model-buy=0 --scale model-sell=0
+  #    - 或使用脚本: ./scripts/docker-compose-up.sh (Linux/Mac)
+  #    - 或使用脚本: scripts\docker-compose-up.bat (Windows)
+  # 4. 或者使用 docker-compose build model-sell 来只构建镜像
   # ============================================================================
   model-sell:
     build:
       context: .
       dockerfile: trade/Dockerfile
+    image: aifuturetrade-model-sell:latest  # 明确指定镜像名称，与后端配置一致
     # 不设置 container_name，因为容器由 Java Backend 动态创建
     # 不设置 ports，因为容器由 Java Backend 动态创建时指定
+    # 不设置 restart，确保容器不会自动重启
     environment:
       # MODEL_ID 由 Java Backend 在创建容器时动态设置
       - MODEL_ID=${MODEL_ID:-1}
       # MySQL配置
-      - MYSQL_HOST=${MYSQL_HOST:-193.134.209.95}
+      - MYSQL_HOST=${MYSQL_HOST:-154.89.148.172}
       - MYSQL_PORT=${MYSQL_PORT:-32123}
       - MYSQL_USER=${MYSQL_USER:-aifuturetrade}
       - MYSQL_PASSWORD=${MYSQL_PASSWORD:-aifuturetrade123}
@@ -228,9 +235,6 @@ services:
       - BINANCE_SECRET_KEY=${BINANCE_API_SECRET}
     # 覆盖 CMD，使用 model_start_sell.py 启动
     command: ["python", "-m", "trade.start.model_start_sell"]
-    # 使用 profile，默认不启动
-    profiles:
-      - model-images
     networks:
       - aifuturetrade-network
 
