@@ -14,6 +14,7 @@ import com.binance.connector.client.derivatives_trading_usds_futures.rest.model.
 import com.binance.connector.client.derivatives_trading_usds_futures.rest.model.Ticker24hrPriceChangeStatisticsResponse2Inner;
 import lombok.extern.slf4j.Slf4j;
 
+import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -315,8 +316,9 @@ public class BinanceFuturesClient extends BinanceFuturesBase {
             Long calculatedEndTime = endTime;
             
             if (calculatedStartTime == null || calculatedEndTime == null) {
-                // endTime 取当前时间
-                calculatedEndTime = System.currentTimeMillis();
+                // endTime 取UTC+8当前时间
+                // 使用UTC+8时区获取当前时间，然后转换为时间戳
+                calculatedEndTime = java.time.ZonedDateTime.now(java.time.ZoneOffset.ofHours(8)).toInstant().toEpochMilli();
                 
                 // 验证和转换limit参数（Binance API限制：1-1000）
                 Long defaultLimit = ("1d".equals(interval) || "1w".equals(interval)) ? 99L : 499L;
