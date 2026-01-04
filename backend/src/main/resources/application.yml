@@ -208,6 +208,18 @@ trade:
 docker:
   host: ${DOCKER_HOST:unix:///var/run/docker.sock}  # Docker主机地址，容器内使用Unix socket
   container-name: ${DOCKER_CONTAINER_NAME:aifuturetrade-trade}  # 交易日志容器名称
+  network: ${DOCKER_NETWORK:aifuturetrade-network}  # Docker网络名称
+  image:
+    buy: ${DOCKER_IMAGE_BUY:aifuturetrade-model-buy}  # 模型买入容器镜像名称
+    sell: ${DOCKER_IMAGE_SELL:aifuturetrade-model-sell}  # 模型卖出容器镜像名称
+
+# MySQL配置（用于传递给模型容器）
+mysql:
+  host: ${MYSQL_HOST:193.134.209.95}
+  port: ${MYSQL_PORT:32123}
+  user: ${MYSQL_USER:aifuturetrade}
+  password: ${MYSQL_PASSWORD:aifuturetrade123}
+  database: ${MYSQL_DATABASE:aifuturetrade}
 
 # Swagger配置
 swagger:

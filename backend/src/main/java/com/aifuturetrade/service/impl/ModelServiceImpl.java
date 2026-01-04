@@ -70,10 +70,37 @@ public class ModelServiceImpl implements ModelService {
     private FutureMapper futureMapper;
 
     @Autowired
-    private TradeServiceClient tradeServiceClient;
-
-    @Autowired
     private AccountAssetMapper accountAssetMapper;
+    
+    @Autowired
+    private com.aifuturetrade.service.DockerContainerService dockerContainerService;
+    
+    @Value("${docker.image.buy:aifuturetrade-model-buy}")
+    private String modelBuyImageName;
+    
+    @Value("${docker.image.sell:aifuturetrade-model-sell}")
+    private String modelSellImageName;
+    
+    @Value("${mysql.host:154.89.148.172}")
+    private String mysqlHost;
+    
+    @Value("${mysql.port:32123}")
+    private String mysqlPort;
+    
+    @Value("${mysql.user:aifuturetrade}")
+    private String mysqlUser;
+    
+    @Value("${mysql.password:aifuturetrade123}")
+    private String mysqlPassword;
+    
+    @Value("${mysql.database:aifuturetrade}")
+    private String mysqlDatabase;
+    
+    @Value("${binance.api.key:}")
+    private String binanceApiKey;
+    
+    @Value("${binance.api.secret:}")
+    private String binanceApiSecret;
 
     @Autowired
     private MarketTickerMapper marketTickerMapper;
@@ -1493,18 +1520,18 @@ public class ModelServiceImpl implements ModelService {
                 return result;
             }
 
-            // 启用自动交易
+            // 启用自动交易（同时启用买入和卖出）
             setModelAutoTrading(modelId, true, true);
 
-            // 调用trade服务执行买入和卖出
-            Map<String, Object> buyResult = tradeServiceClient.executeBuyTrading(modelId);
-            Map<String, Object> sellResult = tradeServiceClient.executeSellTrading(modelId);
+            // 调用更新后的方法（只更新数据库字段）
+            Map<String, Object> buyResult = executeBuyTrading(modelId);
+            Map<String, Object> sellResult = executeSellTrading(modelId);
 
             // 合并结果
             result.put("success", true);
             result.put("buy_result", buyResult);
             result.put("sell_result", sellResult);
-            result.put("message", "Trading execution completed");
+            result.put("message", "Auto trading enabled for model");
             
             return result;
         } catch (Exception e) {
@@ -1516,8 +1543,9 @@ public class ModelServiceImpl implements ModelService {
     }
 
     @Override
+    @Transactional(rollbackFor = Exception.class)
     public Map<String, Object> executeBuyTrading(String modelId) {
-        log.debug("[ModelService] 执行买入交易周期, modelId={}", modelId);
+        log.debug("[ModelService] 启用模型自动买入, modelId={}", modelId);
         try {
             // 检查模型是否存在
             ModelDTO model = getModelById(modelId);
@@ -1528,10 +1556,57 @@ public class ModelServiceImpl implements ModelService {
                 return errorResult;
             }
 
-            // 调用trade服务执行买入
-            return tradeServiceClient.executeBuyTrading(modelId);
+            // 设置 auto_buy_enabled = true
+            Map<String, Object> result = setModelAutoTrading(modelId, true, null);
+            
+            // 构建容器名称：buy-{modelId}
+            String containerName = "buy-" + modelId;
+            
+            // 检查容器是否已存在且运行中
+            if (dockerContainerService.isContainerRunning(containerName)) {
+                log.info("容器已存在且运行中: {}", containerName);
+                result.put("containerName", containerName);
+                result.put("containerStatus", "already_running");
+                result.put("message", "Auto buy enabled for model, container already running");
+                return result;
+            }
+            
+            // 如果容器存在但未运行，删除它
+            if (!dockerContainerService.removeContainer(containerName)) {
+                log.warn("删除旧容器失败，但继续创建新容器: {}", containerName);
+            }
+            
+            // 准备环境变量
+            Map<String, String> envVars = new HashMap<>();
+            envVars.put("MODEL_ID", modelId);
+            envVars.put("MYSQL_HOST", mysqlHost);
+            envVars.put("MYSQL_PORT", mysqlPort);
+            envVars.put("MYSQL_USER", mysqlUser);
+            envVars.put("MYSQL_PASSWORD", mysqlPassword);
+            envVars.put("MYSQL_DATABASE", mysqlDatabase);
+            if (binanceApiKey != null && !binanceApiKey.isEmpty()) {
+                envVars.put("BINANCE_API_KEY", binanceApiKey);
+            }
+            if (binanceApiSecret != null && !binanceApiSecret.isEmpty()) {
+                envVars.put("BINANCE_SECRET_KEY", binanceApiSecret);
+            }
+            
+            // 启动模型买入容器
+            Map<String, Object> containerResult = dockerContainerService.startModelBuyContainer(
+                    modelId, modelBuyImageName, envVars);
+            
+            // 合并结果
+            result.putAll(containerResult);
+            if (containerResult.get("success") != null && (Boolean) containerResult.get("success")) {
+                result.put("message", "Auto buy enabled for model, container started successfully");
+            } else {
+                result.put("message", "Auto buy enabled for model, but container start failed: " + 
+                           containerResult.get("error"));
+            }
+            
+            return result;
         } catch (Exception e) {
-            log.error("[ModelService] 执行买入交易失败: {}", e.getMessage(), e);
+            log.error("[ModelService] 启用模型自动买入失败: {}", e.getMessage(), e);
             Map<String, Object> errorResult = new HashMap<>();
             errorResult.put("success", false);
             errorResult.put("error", e.getMessage());
@@ -1540,8 +1615,9 @@ public class ModelServiceImpl implements ModelService {
     }
 
     @Override
+    @Transactional(rollbackFor = Exception.class)
     public Map<String, Object> executeSellTrading(String modelId) {
-        log.debug("[ModelService] 执行卖出交易周期, modelId={}", modelId);
+        log.debug("[ModelService] 启用模型自动卖出, modelId={}", modelId);
         try {
             // 检查模型是否存在
             ModelDTO model = getModelById(modelId);
@@ -1552,10 +1628,57 @@ public class ModelServiceImpl implements ModelService {
                 return errorResult;
             }
 
-            // 调用trade服务执行卖出
-            return tradeServiceClient.executeSellTrading(modelId);
+            // 设置 auto_sell_enabled = true
+            Map<String, Object> result = setModelAutoTrading(modelId, null, true);
+            
+            // 构建容器名称：sell-{modelId}
+            String containerName = "sell-" + modelId;
+            
+            // 检查容器是否已存在且运行中
+            if (dockerContainerService.isContainerRunning(containerName)) {
+                log.info("容器已存在且运行中: {}", containerName);
+                result.put("containerName", containerName);
+                result.put("containerStatus", "already_running");
+                result.put("message", "Auto sell enabled for model, container already running");
+                return result;
+            }
+            
+            // 如果容器存在但未运行，删除它
+            if (!dockerContainerService.removeContainer(containerName)) {
+                log.warn("删除旧容器失败，但继续创建新容器: {}", containerName);
+            }
+            
+            // 准备环境变量
+            Map<String, String> envVars = new HashMap<>();
+            envVars.put("MODEL_ID", modelId);
+            envVars.put("MYSQL_HOST", mysqlHost);
+            envVars.put("MYSQL_PORT", mysqlPort);
+            envVars.put("MYSQL_USER", mysqlUser);
+            envVars.put("MYSQL_PASSWORD", mysqlPassword);
+            envVars.put("MYSQL_DATABASE", mysqlDatabase);
+            if (binanceApiKey != null && !binanceApiKey.isEmpty()) {
+                envVars.put("BINANCE_API_KEY", binanceApiKey);
+            }
+            if (binanceApiSecret != null && !binanceApiSecret.isEmpty()) {
+                envVars.put("BINANCE_SECRET_KEY", binanceApiSecret);
+            }
+            
+            // 启动模型卖出容器
+            Map<String, Object> containerResult = dockerContainerService.startModelSellContainer(
+                    modelId, modelSellImageName, envVars);
+            
+            // 合并结果
+            result.putAll(containerResult);
+            if (containerResult.get("success") != null && (Boolean) containerResult.get("success")) {
+                result.put("message", "Auto sell enabled for model, container started successfully");
+            } else {
+                result.put("message", "Auto sell enabled for model, but container start failed: " + 
+                           containerResult.get("error"));
+            }
+            
+            return result;
         } catch (Exception e) {
-            log.error("[ModelService] 执行卖出交易失败: {}", e.getMessage(), e);
+            log.error("[ModelService] 启用模型自动卖出失败: {}", e.getMessage(), e);
             Map<String, Object> errorResult = new HashMap<>();
             errorResult.put("success", false);
             errorResult.put("error", e.getMessage());
@@ -1564,8 +1687,9 @@ public class ModelServiceImpl implements ModelService {
     }
 
     @Override
+    @Transactional(rollbackFor = Exception.class)
     public Map<String, Object> disableBuyTrading(String modelId) {
-        log.debug("[ModelService] 禁用自动买入, modelId={}", modelId);
+        log.debug("[ModelService] 禁用模型自动买入, modelId={}", modelId);
         try {
             // 检查模型是否存在
             ModelDTO model = getModelById(modelId);
@@ -1576,10 +1700,12 @@ public class ModelServiceImpl implements ModelService {
                 return errorResult;
             }
 
-            // 调用trade服务禁用自动买入
-            return tradeServiceClient.disableBuyTrading(modelId);
+            // 设置 auto_buy_enabled = false
+            Map<String, Object> result = setModelAutoTrading(modelId, false, null);
+            result.put("message", "Auto buy disabled for model");
+            return result;
         } catch (Exception e) {
-            log.error("[ModelService] 禁用自动买入失败: {}", e.getMessage(), e);
+            log.error("[ModelService] 禁用模型自动买入失败: {}", e.getMessage(), e);
             Map<String, Object> errorResult = new HashMap<>();
             errorResult.put("success", false);
             errorResult.put("error", e.getMessage());
@@ -1588,8 +1714,9 @@ public class ModelServiceImpl implements ModelService {
     }
 
     @Override
+    @Transactional(rollbackFor = Exception.class)
     public Map<String, Object> disableSellTrading(String modelId) {
-        log.debug("[ModelService] 禁用自动卖出, modelId={}", modelId);
+        log.debug("[ModelService] 禁用模型自动卖出, modelId={}", modelId);
         try {
             // 检查模型是否存在
             ModelDTO model = getModelById(modelId);
@@ -1600,10 +1727,12 @@ public class ModelServiceImpl implements ModelService {
                 return errorResult;
             }
 
-            // 调用trade服务禁用自动卖出
-            return tradeServiceClient.disableSellTrading(modelId);
+            // 设置 auto_sell_enabled = false
+            Map<String, Object> result = setModelAutoTrading(modelId, null, false);
+            result.put("message", "Auto sell disabled for model");
+            return result;
         } catch (Exception e) {
-            log.error("[ModelService] 禁用自动卖出失败: {}", e.getMessage(), e);
+            log.error("[ModelService] 禁用模型自动卖出失败: {}", e.getMessage(), e);
             Map<String, Object> errorResult = new HashMap<>();
             errorResult.put("success", false);
             errorResult.put("error", e.getMessage());

@@ -193,6 +193,11 @@ public class DockerLogServiceImpl implements DockerLogService {
 
     @Override
     public CompletableFuture<Void> streamLogs(String sessionId, Consumer<String> logConsumer) {
+        return streamLogs(sessionId, containerName, logConsumer);
+    }
+
+    @Override
+    public CompletableFuture<Void> streamLogs(String sessionId, String containerName, Consumer<String> logConsumer) {
         CompletableFuture<Void> future = new CompletableFuture<>();
 
         executorService.submit(() -> {

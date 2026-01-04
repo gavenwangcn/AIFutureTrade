@@ -36,6 +36,17 @@ from trade.common.database.database_account_values import AccountValuesDatabase
 from trade.common.database.database_futures import FuturesDatabase
 from trade.common.database.database_account_asset import AccountAssetDatabase
 from trade.common.database.database_binance_trade_logs import BinanceTradeLogsDatabase
+from trade.trading.trading_utils import (
+    parse_signal_to_position_side,
+    get_side_for_trade,
+    calculate_quantity_with_risk,
+    validate_position_for_trade,
+    calculate_trade_requirements,
+    calculate_pnl,
+    extract_prices_from_market_state
+)
+from trade.trading.market_data_manager import MarketDataManager
+from trade.trading.batch_decision_processor import BatchDecisionProcessor
 
 logger = logging.getLogger(__name__)
 
@@ -102,6 +113,46 @@ class TradingEngine:
         # 确保每次交易都使用最新的 model 表中的 api_key 和 api_secret
         # 这样每个model可以使用不同的API账户进行交易，且每次都是最新的凭证
 
+    def _init_managers(self) -> None:
+        """
+        初始化辅助管理器
+        
+        创建MarketDataManager和BatchDecisionProcessor实例，用于封装相关逻辑。
+        """
+        # 初始化市场数据管理器
+        self.market_data_manager = MarketDataManager(
+            model_id=self.model_id,
+            market_fetcher=self.market_fetcher,
+            merge_timeframe_data_func=self._merge_timeframe_data,
+            validate_symbol_market_data_func=self._validate_symbol_market_data,
+            get_portfolio_func=self._get_portfolio,
+            build_account_info_func=self._build_account_info,
+            get_symbol_volumes_func=self._get_symbol_volumes
+        )
+        
+        # 初始化批量决策处理器
+        self.batch_decision_processor = BatchDecisionProcessor(
+            model_id=self.model_id,
+            execute_decisions_func=self._execute_decisions,
+            record_ai_conversation_func=self._record_ai_conversation,
+            get_portfolio_func=self._get_portfolio,
+            build_account_info_func=self._build_account_info
+        )
+    
+    def _get_symbol_volumes(self, symbol_list: List[str]) -> Dict[str, Dict[str, float]]:
+        """
+        获取symbol的成交量和成交额（工具方法，供MarketDataManager使用）
+        
+        Args:
+            symbol_list: symbol列表
+        
+        Returns:
+            Dict[str, Dict[str, float]]: {symbol: {'base_volume': float, 'quote_volume': float}}
+        """
+        from trade.common.database.database_market_tickers import MarketTickersDatabase
+        volumes_db = MarketTickersDatabase(pool=self.db._pool if hasattr(self.db, '_pool') else None)
+        return volumes_db.get_symbol_volumes(symbol_list)
+    
     # ============ 主交易周期方法 ============
     # 提供完整的交易周期执行流程，包括买入和卖出决策
 
@@ -353,7 +404,7 @@ class TradingEngine:
                     'skip_reason': f'持仓数量已达上限: {current_positions_count}/{self.max_positions}'
                 }
             
-            # 构建账户信息（用于AI决策）
+            # 构建账户信息（用于决策）
             account_info = self._build_account_info(portfolio)
             logger.debug(f"[Model {self.model_id}] [买入服务] [阶段1.3] 账户信息构建完成: "
                         f"初始资金=${account_info.get('initial_capital', 0):.2f}, "
@@ -1353,34 +1404,10 @@ class TradingEngine:
                     logger.error(f"[Model {self.model_id}] [分批买入] 批次 {batch_num} 重新获取portfolio和account_info失败: {e}")
                     # 继续使用当前值，不中断流程
             
-            # 为当前批次创建只包含对应symbol的market_state子集
-            batch_market_state = {}
-            for symbol in batch_symbols:
-                if symbol != 'N/A':
-                    symbol_upper = symbol.upper()
-                    if symbol_upper in market_state:
-                        batch_market_state[symbol_upper] = market_state[symbol_upper].copy()
-                        
-                        market_info = market_state[symbol_upper]
-                        symbol_source_for_batch = market_info.get('source', 'leaderboard')
-                        
-                        if symbol_source_for_batch == 'future':
-                            query_symbol = market_info.get('contract_symbol') or f"{symbol}USDT"
-                        else:
-                            query_symbol = symbol_upper
-                        
-                        try:
-                            logger.debug(f"[Model {self.model_id}] [分批买入] 批次 {batch_num} 正在获取 {symbol_upper} ({query_symbol}) 的技术指标...")
-                            merged_data = self._merge_timeframe_data(query_symbol)
-                            timeframes_data = merged_data.get(query_symbol, {}) if merged_data else {}
-                            
-                            if timeframes_data:
-                                batch_market_state[symbol_upper]['indicators'] = {'timeframes': timeframes_data}
-                            else:
-                                batch_market_state[symbol_upper]['indicators'] = {'timeframes': {}}
-                        except Exception as e:
-                            logger.error(f"[Model {self.model_id}] [分批买入] 批次 {batch_num} 获取 {symbol_upper} 技术指标失败: {e}")
-                            batch_market_state[symbol_upper]['indicators'] = {'timeframes': {}}
+            # 使用市场数据管理器为当前批次创建market_state子集
+            batch_market_state = self.market_data_manager.build_batch_market_state(
+                batch_symbols, market_state, batch_num
+            )
             
             # 调用决策（不立即执行）
             try:
@@ -1434,16 +1461,12 @@ class TradingEngine:
                     )
                     logger.debug(f"[Model {self.model_id}] [分批买入] 批次组 {group_start+1}-{group_end} 处理完成")
                     
-                    # 重新获取最新的portfolio和account_info，确保后续批次使用最新数据
+                    # 使用市场数据管理器重新获取最新的portfolio和account_info
                     logger.debug(f"[Model {self.model_id}] [分批买入] 重新获取最新的portfolio和account_info...")
                     try:
-                        updated_portfolio = self._get_portfolio(self.model_id, current_prices)
-                        portfolio.update(updated_portfolio)
-                        updated_account_info = self._build_account_info(updated_portfolio)
-                        account_info.update(updated_account_info)
-                        # 同时更新constraints
-                        constraints['occupied'] = len(updated_portfolio.get('positions', []) or [])
-                        constraints['available_cash'] = updated_portfolio.get('cash', 0)
+                        self.market_data_manager.refresh_portfolio_and_account_info(
+                            portfolio, account_info, constraints, current_prices
+                        )
                         logger.debug(f"[Model {self.model_id}] [分批买入] portfolio和account_info已更新: "
                                     f"现金=${portfolio.get('cash', 0):.2f}, "
                                     f"持仓数={len(portfolio.get('positions', []) or [])}, "
@@ -1655,29 +1678,11 @@ class TradingEngine:
             logger.debug(f"[Model {self.model_id}] [批次组处理] ========== 开始处理批次组决策 ==========")
             logger.debug(f"[Model {self.model_id}] [批次组处理] 批次数量: {len(group_decisions)}")
             
-            # 合并所有批次的决策和对话
-            all_decisions = {}
-            all_payloads = []
-            all_market_states = {}
-            
-            for batch_data in group_decisions:
-                payload = batch_data.get('payload', {})
-                decisions = payload.get('decisions') or {}
-                batch_market_state = batch_data.get('batch_market_state', {})
-                batch_num = batch_data.get('batch_num', 0)
-                
-                # 合并决策
-                for symbol, decision in decisions.items():
-                    if symbol not in all_decisions:
-                        all_decisions[symbol] = decision
-                        logger.debug(f"[Model {self.model_id}] [批次组处理] 批次 {batch_num} 决策: {symbol} -> {decision.get('signal')}")
-                
-                # 合并market_state
-                all_market_states.update(batch_market_state)
-                
-                # 保存payload用于记录对话
-                if not payload.get('skipped') and payload.get('prompt'):
-                    all_payloads.append(payload)
+            # 使用批量决策处理器合并决策
+            merged = self.batch_decision_processor.merge_group_decisions(group_decisions)
+            all_decisions = merged['decisions']
+            all_payloads = merged['payloads']
+            all_market_states = merged['market_states']
             
             if not all_decisions:
                 logger.debug(f"[Model {self.model_id}] [批次组处理] 无有效决策，跳过执行")
@@ -1686,87 +1691,20 @@ class TradingEngine:
             logger.debug(f"[Model {self.model_id}] [批次组处理] 合并完成: 决策数={len(all_decisions)}, 对话数={len(all_payloads)}")
             
             # ========== 步骤1: 记录所有批次的AI对话到数据库 ==========
-            logger.debug(f"[Model {self.model_id}] [批次组处理] [步骤1] 记录AI对话到数据库...")
-            for payload in all_payloads:
-                try:
-                    self._record_ai_conversation(payload, conversation_type='buy')
-                except Exception as e:
-                    logger.error(f"[Model {self.model_id}] [批次组处理] 记录AI对话失败: {e}")
-            logger.debug(f"[Model {self.model_id}] [批次组处理] [步骤1] AI对话已记录")
+            self.batch_decision_processor.record_conversations(all_payloads, conversation_type='buy')
             
             # ========== 步骤2: 顺序执行所有决策 ==========
-            logger.debug(f"[Model {self.model_id}] [批次组处理] [步骤2] 开始顺序执行决策...")
-            
-            # 获取最新持仓状态
-            logger.debug(f"[Model {self.model_id}] [批次组处理] [步骤2.1] 获取最新持仓状态...")
-            latest_portfolio = self._get_portfolio(self.model_id, current_prices)
-            logger.debug(f"[Model {self.model_id}] [批次组处理] [步骤2.1] 最新持仓状态: "
-                        f"总价值=${latest_portfolio.get('total_value', 0):.2f}, "
-                        f"现金=${latest_portfolio.get('cash', 0):.2f}, "
-                        f"持仓数={len(latest_portfolio.get('positions', []) or [])}")
-            
-            # 执行所有决策（顺序执行）
-            logger.debug(f"[Model {self.model_id}] [批次组处理] [步骤2.2] 开始执行决策...")
-            execution_start = datetime.now(timezone(timedelta(hours=8)))
-            batch_results = self._execute_decisions(
-                all_decisions,
-                all_market_states,
-                latest_portfolio
+            batch_results = self.batch_decision_processor.execute_decisions(
+                all_decisions, all_market_states, current_prices, executions
             )
-            execution_duration = (datetime.now(timezone(timedelta(hours=8))) - execution_start).total_seconds()
-            logger.debug(f"[Model {self.model_id}] [批次组处理] [步骤2.2] 决策执行完成: 耗时={execution_duration:.2f}秒, 结果数={len(batch_results)}")
-            
-            # 记录每个执行结果
-            for idx, result in enumerate(batch_results):
-                logger.debug(f"[Model {self.model_id}] [批次组处理] [步骤2.2.{idx+1}] 执行结果: "
-                            f"合约={result.get('symbol', 'N/A')}, "
-                            f"信号={result.get('signal')}, "
-                            f"数量={result.get('position_amt', 0)}, "
-                            f"价格=${result.get('price', 0):.4f}, "
-                            f"错误={result.get('error', '无')}")
-            
-            # 添加到执行结果列表
-            logger.debug(f"[Model {self.model_id}] [批次组处理] [步骤2.3] 添加执行结果到列表（当前总数: {len(executions)}）...")
-            logger.debug(f"[Model {self.model_id}] [批次组处理] [步骤2.3] batch_results详情: 数量={len(batch_results)}")
-            for idx, result in enumerate(batch_results):
-                logger.debug(f"[Model {self.model_id}] [批次组处理] [步骤2.3] batch_results[{idx}]: symbol={result.get('symbol')}, signal={result.get('signal')}, error={result.get('error', '无')}")
-            executions.extend(batch_results)
-            logger.debug(f"[Model {self.model_id}] [批次组处理] [步骤2.3] 执行结果已添加（新总数: {len(executions)}）")
-            logger.debug(f"[Model {self.model_id}] [批次组处理] [步骤2.3] executions列表详情:")
-            for idx, exec_result in enumerate(executions):
-                logger.debug(f"[Model {self.model_id}] [批次组处理] [步骤2.3] executions[{idx}]: symbol={exec_result.get('symbol')}, signal={exec_result.get('signal')}, error={exec_result.get('error', '无')}")
             
             logger.debug(f"[Model {self.model_id}] [批次组处理] 执行完成, 决策数: {len(all_decisions)}, 执行结果: {len(batch_results)}")
             
             # ========== 步骤3: 更新portfolio和constraints ==========
-            logger.debug(f"[Model {self.model_id}] [批次组处理] [步骤3] 更新portfolio和constraints...")
+            self.batch_decision_processor.update_portfolio_and_account_info(
+                portfolio, account_info, constraints, current_prices
+            )
             
-            # 更新portfolio引用
-            old_cash = portfolio.get('cash', 0)
-            old_positions = len(portfolio.get('positions', []) or [])
-            portfolio.update(latest_portfolio)
-            new_cash = portfolio.get('cash', 0)
-            new_positions = len(portfolio.get('positions', []) or [])
-            logger.debug(f"[Model {self.model_id}] [批次组处理] [步骤3.1] portfolio已更新: "
-                        f"现金 ${old_cash:.2f} -> ${new_cash:.2f}, "
-                        f"持仓数 {old_positions} -> {new_positions}")
-            
-            # 更新account_info
-            updated_account_info = self._build_account_info(latest_portfolio)
-            account_info.update(updated_account_info)
-            logger.debug(f"[Model {self.model_id}] [批次组处理] [步骤3.2] account_info已更新: "
-                        f"总收益率={updated_account_info.get('total_return', 0):.2f}%")
-            
-            # 更新constraints
-            old_occupied = constraints.get('occupied', 0)
-            old_available_cash = constraints.get('available_cash', 0)
-            constraints['occupied'] = len(latest_portfolio.get('positions', []) or [])
-            constraints['available_cash'] = latest_portfolio.get('cash', 0)
-            logger.debug(f"[Model {self.model_id}] [批次组处理] [步骤3.3] constraints已更新: "
-                        f"已占用 {old_occupied} -> {constraints['occupied']}, "
-                        f"可用现金 ${old_available_cash:.2f} -> ${constraints['available_cash']:.2f}")
-            
-            logger.debug(f"[Model {self.model_id}] [批次组处理] [步骤3] 状态更新完成")
             logger.debug(f"[Model {self.model_id}] [批次组处理] ========== 批次组处理完成 ==========")
             
         except Exception as e:
@@ -1871,26 +1809,10 @@ class TradingEngine:
                     logger.error(f"[Model {self.model_id}] [分批卖出] 批次 {batch_num} 重新获取portfolio和account_info失败: {e}")
                     # 继续使用当前值，不中断流程
             
-            # 为当前批次创建只包含对应symbol的market_state子集
-            batch_market_state = {}
-            for symbol in batch_symbols:
-                if symbol != 'N/A':
-                    symbol_upper = symbol.upper()
-                    if symbol_upper in market_state:
-                        batch_market_state[symbol_upper] = market_state[symbol_upper].copy()
-                        
-                        try:
-                            logger.debug(f"[Model {self.model_id}] [分批卖出] 批次 {batch_num} 正在获取 {symbol_upper} 的技术指标...")
-                            merged_data = self._merge_timeframe_data(symbol_upper)
-                            timeframes_data = merged_data.get(symbol_upper, {}) if merged_data else {}
-                            
-                            if timeframes_data:
-                                batch_market_state[symbol_upper]['indicators'] = {'timeframes': timeframes_data}
-                            else:
-                                batch_market_state[symbol_upper]['indicators'] = {'timeframes': {}}
-                        except Exception as e:
-                            logger.error(f"[Model {self.model_id}] [分批卖出] 批次 {batch_num} 获取 {symbol_upper} 技术指标失败: {e}")
-                            batch_market_state[symbol_upper]['indicators'] = {'timeframes': {}}
+            # 使用市场数据管理器为当前批次创建market_state子集
+            batch_market_state = self.market_data_manager.build_batch_market_state(
+                batch_symbols, market_state, batch_num
+            )
             
             # 调用决策（不立即执行）
             try:
@@ -1954,13 +1876,12 @@ class TradingEngine:
                 
                 logger.debug(f"[Model {self.model_id}] [分批卖出] 批次组 {group_start+1}-{group_end} 处理完成")
                 
-                # 重新获取最新的portfolio和account_info，确保后续批次使用最新数据
+                # 使用市场数据管理器重新获取最新的portfolio和account_info
                 logger.debug(f"[Model {self.model_id}] [分批卖出] 重新获取最新的portfolio和account_info...")
                 try:
-                    updated_portfolio = self._get_portfolio(self.model_id, current_prices)
-                    portfolio.update(updated_portfolio)
-                    updated_account_info = self._build_account_info(updated_portfolio)
-                    account_info.update(updated_account_info)
+                    self.market_data_manager.refresh_portfolio_and_account_info(
+                        portfolio, account_info, None, current_prices
+                    )
                     logger.debug(f"[Model {self.model_id}] [分批卖出] portfolio和account_info已更新: "
                                 f"现金=${portfolio.get('cash', 0):.2f}, "
                                 f"持仓数={len(portfolio.get('positions', []) or [])}, "
@@ -2012,29 +1933,11 @@ class TradingEngine:
         
         logger.debug(f"[Model {self.model_id}] [卖出批次组处理] 开始处理 {len(group_decisions)} 个批次的卖出决策...")
         
-        # 合并所有批次的决策和对话
-        all_decisions = {}
-        all_payloads = []
-        all_market_states = {}
-        
-        for batch_data in group_decisions:
-            payload = batch_data.get('payload', {})
-            decisions = payload.get('decisions') or {}
-            batch_market_state = batch_data.get('batch_market_state', {})
-            batch_num = batch_data.get('batch_num', 0)
-            
-            # 合并决策
-            for symbol, decision in decisions.items():
-                if symbol not in all_decisions:
-                    all_decisions[symbol] = decision
-                    logger.debug(f"[Model {self.model_id}] [卖出批次组处理] 批次 {batch_num} 卖出决策: {symbol} -> {decision.get('signal')}")
-            
-            # 合并market_state
-            all_market_states.update(batch_market_state)
-            
-            # 保存payload用于记录对话
-            if not payload.get('skipped') and payload.get('prompt'):
-                all_payloads.append(payload)
+        # 使用批量决策处理器合并决策
+        merged = self.batch_decision_processor.merge_group_decisions(group_decisions)
+        all_decisions = merged['decisions']
+        all_payloads = merged['payloads']
+        all_market_states = merged['market_states']
         
         if not all_decisions:
             logger.debug(f"[Model {self.model_id}] [卖出批次组处理] 无有效卖出决策，跳过执行")
@@ -2043,70 +1946,19 @@ class TradingEngine:
         logger.debug(f"[Model {self.model_id}] [卖出批次组处理] 合并完成: 卖出决策数={len(all_decisions)}, 对话数={len(all_payloads)}")
         
         # ========== 步骤1: 记录所有批次的AI对话到数据库 ==========
-        logger.debug(f"[Model {self.model_id}] [卖出批次组处理] [步骤1] 记录AI对话到数据库...")
-        for payload in all_payloads:
-            try:
-                self._record_ai_conversation(payload, conversation_type='sell')
-            except Exception as e:
-                logger.error(f"[Model {self.model_id}] [卖出批次组处理] 记录AI对话失败: {e}")
-        logger.debug(f"[Model {self.model_id}] [卖出批次组处理] [步骤1] AI对话已记录")
+        self.batch_decision_processor.record_conversations(all_payloads, conversation_type='sell')
         
         # ========== 步骤2: 顺序执行所有卖出决策 ==========
-        logger.debug(f"[Model {self.model_id}] [卖出批次组处理] [步骤2] 开始顺序执行卖出决策...")
-        
-        # 获取最新持仓状态
-        logger.debug(f"[Model {self.model_id}] [卖出批次组处理] [步骤2.1] 获取最新持仓状态...")
-        latest_portfolio = self._get_portfolio(self.model_id, current_prices)
-        logger.debug(f"[Model {self.model_id}] [卖出批次组处理] [步骤2.1] 最新持仓状态: "
-                    f"总价值=${latest_portfolio.get('total_value', 0):.2f}, "
-                    f"现金=${latest_portfolio.get('cash', 0):.2f}, "
-                    f"持仓数={len(latest_portfolio.get('positions', []) or [])}")
-        
-        # 执行所有卖出决策（顺序执行）
-        logger.debug(f"[Model {self.model_id}] [卖出批次组处理] [步骤2.2] 开始执行卖出决策...")
-        execution_start = datetime.now(timezone(timedelta(hours=8)))
-        batch_results = self._execute_decisions(
-            all_decisions,
-            all_market_states,
-            latest_portfolio
+        batch_results = self.batch_decision_processor.execute_decisions(
+            all_decisions, all_market_states, current_prices, executions
         )
-        execution_duration = (datetime.now(timezone(timedelta(hours=8))) - execution_start).total_seconds()
-        logger.debug(f"[Model {self.model_id}] [卖出批次组处理] [步骤2.2] 卖出决策执行完成: 耗时={execution_duration:.2f}秒, 结果数={len(batch_results)}")
-        
-        # 记录每个执行结果
-        for idx, result in enumerate(batch_results):
-            logger.debug(f"[Model {self.model_id}] [卖出批次组处理] [步骤2.2.{idx+1}] 卖出执行结果: "
-                        f"合约={result.get('symbol', 'N/A')}, "
-                        f"信号={result.get('signal')}, "
-                        f"数量={result.get('position_amt', 0)}, "
-                        f"价格=${result.get('price', 0):.4f}, "
-                        f"错误={result.get('error', '无')}")
-        
-        # 添加到执行结果列表
-        logger.debug(f"[Model {self.model_id}] [卖出批次组处理] [步骤2.3] 添加执行结果到列表（当前总数: {len(executions)}）...")
-        executions.extend(batch_results)
-        logger.debug(f"[Model {self.model_id}] [卖出批次组处理] [步骤2.3] 执行结果已添加（新总数: {len(executions)}）")
         
         logger.debug(f"[Model {self.model_id}] [卖出批次组处理] 执行完成, 卖出决策数: {len(all_decisions)}, 执行结果: {len(batch_results)}")
         
         # ========== 步骤3: 更新portfolio和account_info ==========
-        logger.debug(f"[Model {self.model_id}] [卖出批次组处理] [步骤3] 更新portfolio和account_info...")
-        
-        # 更新portfolio引用
-        old_cash = portfolio.get('cash', 0)
-        old_positions = len(portfolio.get('positions', []) or [])
-        portfolio.update(latest_portfolio)
-        new_cash = portfolio.get('cash', 0)
-        new_positions = len(portfolio.get('positions', []) or [])
-        logger.debug(f"[Model {self.model_id}] [卖出批次组处理] [步骤3.1] portfolio已更新: "
-                    f"现金 ${old_cash:.2f} -> ${new_cash:.2f}, "
-                    f"持仓数 {old_positions} -> {new_positions}")
-        
-        # 更新account_info
-        updated_account_info = self._build_account_info(latest_portfolio)
-        account_info.update(updated_account_info)
-        logger.debug(f"[Model {self.model_id}] [卖出批次组处理] [步骤3.2] account_info已更新: "
-                    f"总收益率={updated_account_info.get('total_return', 0):.2f}%")
+        self.batch_decision_processor.update_portfolio_and_account_info(
+            portfolio, account_info, None, current_prices
+        )
         
         logger.debug(f"[Model {self.model_id}] [卖出批次组处理] [步骤3] 状态更新完成")
 
@@ -2643,17 +2495,9 @@ class TradingEngine:
         
         # 【根据signal自动确定position_side】不再从decision中获取position_side字段
         signal = decision.get('signal', '').lower()
-        if signal == 'buy_to_long':
-            position_side = 'LONG'  # 开多仓
-            trade_signal = 'buy_to_long'  # trades表记录的signal
-        elif signal == 'buy_to_short':
-            position_side = 'SHORT'  # 开空仓
-            trade_signal = 'buy_to_short'  # trades表记录的signal
-        else:
-            # 如果signal不是buy_to_long或buy_to_short，默认使用LONG（向后兼容）
+        position_side, trade_signal = parse_signal_to_position_side(signal)
+        if signal not in ['buy_to_long', 'buy_to_short']:
             logger.warning(f"[Model {self.model_id}] Invalid signal '{signal}' for _execute_buy, defaulting to LONG")
-            position_side = 'LONG'
-            trade_signal = 'buy_to_long'
         
         logger.info(f"[Model {self.model_id}] [开仓] {symbol} signal={signal} → position_side={position_side}")
 
@@ -2667,25 +2511,19 @@ class TradingEngine:
         if available_cash <= 0:
             return {'symbol': symbol, 'error': '可用现金不足，无法买入'}
         
-        max_affordable_qty = available_cash / (price * (1 + self.trade_fee_rate))
-        risk_pct = float(decision.get('risk_budget_pct', 3)) / 100
-        risk_pct = min(max(risk_pct, 0.01), 0.05)
-        risk_based_qty = (available_cash * risk_pct) / (price * (1 + self.trade_fee_rate))
+        # 使用工具函数计算交易数量
+        risk_budget_pct = float(decision.get('risk_budget_pct', 3))
+        quantity, error_msg = calculate_quantity_with_risk(
+            available_cash, price, self.trade_fee_rate, quantity, risk_budget_pct
+        )
+        if error_msg:
+            return {'symbol': symbol, 'error': error_msg}
 
-        # 确保quantity为整数（策略返回的quantity已经是整数，这里再次确保）
-        quantity = int(float(quantity))
-        if quantity <= 0 or quantity > max_affordable_qty:
-            adjusted_qty = min(max_affordable_qty, risk_based_qty if risk_based_qty > 0 else max_affordable_qty)
-            quantity = int(adjusted_qty)  # 确保调整后的数量也是整数
+        # 使用工具函数计算交易所需资金
+        trade_amount, trade_fee, total_required = calculate_trade_requirements(
+            quantity, price, leverage, self.trade_fee_rate
+        )
         
-        if quantity <= 0:
-            return {'symbol': symbol, 'error': '现金不足，无法买入'}
-
-        trade_amount = quantity * price
-        trade_fee = trade_amount * self.trade_fee_rate
-        required_margin = (quantity * price) / leverage
-        total_required = required_margin + trade_fee
-
         if total_required > available_cash:
             return {'symbol': symbol, 'error': '可用资金不足（含手续费）'}
 
@@ -2772,8 +2610,8 @@ class TradingEngine:
         
         # 每次交易后立即记录账户价值快照
         try:
-            # 从market_state中提取current_prices格式：{symbol: price_value}
-            current_prices = {s: m.get('price', 0) for s, m in market_state.items()}
+            # 使用工具函数从market_state中提取价格字典
+            current_prices = extract_prices_from_market_state(market_state)
             logger.debug(f"[Model {self.model_id}] [开仓交易] 交易已记录到trades表，立即记录账户价值快照")
             self._record_account_snapshot(current_prices)
             logger.debug(f"[Model {self.model_id}] [开仓交易] 账户价值快照已记录")
@@ -2816,29 +2654,16 @@ class TradingEngine:
         - 必须检查是否有对应方向的持仓
         - 如果没有持仓，返回错误信息
         """
-        # 查找持仓信息
-        position = self._find_position(portfolio, symbol)
-        if not position:
-            return {'symbol': symbol, 'error': 'Position not found'}
-        
         # 【根据signal自动确定position_side】不再从decision中获取position_side字段
         signal = decision.get('signal', '').lower()
-        if signal == 'sell_to_long':
-            position_side = 'LONG'  # 平多仓
-            trade_signal = 'sell_to_long'  # trades表记录的signal
-        elif signal == 'sell_to_short':
-            position_side = 'SHORT'  # 平空仓
-            trade_signal = 'sell_to_short'  # trades表记录的signal
-        else:
-            # 如果signal不是sell_to_long或sell_to_short，默认使用LONG（向后兼容）
+        position_side, trade_signal = parse_signal_to_position_side(signal)
+        if signal not in ['sell_to_long', 'sell_to_short']:
             logger.warning(f"[Model {self.model_id}] Invalid signal '{signal}' for _execute_sell, defaulting to LONG")
-            position_side = 'LONG'
-            trade_signal = 'sell_to_long'
         
-        # 检查持仓方向是否匹配
-        actual_position_side = position.get('position_side', 'LONG')
-        if actual_position_side != position_side:
-            return {'symbol': symbol, 'error': f'持仓方向不匹配：期望{position_side}，实际{actual_position_side}'}
+        # 使用工具函数验证持仓（包含查找和验证逻辑，避免重复查找）
+        position, error_msg = validate_position_for_trade(portfolio, symbol, position_side)
+        if error_msg:
+            return {'symbol': symbol, 'error': error_msg}
         
         current_price = market_state[symbol]['price']
         entry_price = position.get('avg_price', 0)
@@ -2848,15 +2673,10 @@ class TradingEngine:
         if position_amt <= 0:
             return {'symbol': symbol, 'error': '持仓数量为0，无法平仓'}
         
-        # 计算毛盈亏和净盈亏
-        if position_side == 'LONG':
-            gross_pnl = (current_price - entry_price) * position_amt
-        else:  # SHORT
-            gross_pnl = (entry_price - current_price) * position_amt
-        
-        trade_amount = position_amt * current_price
-        trade_fee = trade_amount * self.trade_fee_rate
-        net_pnl = gross_pnl - trade_fee
+        # 使用工具函数计算盈亏
+        gross_pnl, trade_fee, net_pnl = calculate_pnl(
+            entry_price, current_price, position_amt, position_side, self.trade_fee_rate
+        )
         
         # 【确定SDK调用的side参数】统一使用SELL（平多和平空都使用SELL）
         sdk_side = 'SELL'  # 统一使用SELL
@@ -2942,8 +2762,8 @@ class TradingEngine:
         
         # 每次交易后立即记录账户价值快照
         try:
-            # 从market_state中提取current_prices格式：{symbol: price_value}
-            current_prices = {s: m.get('price', 0) for s, m in market_state.items()}
+            # 使用工具函数从market_state中提取价格字典
+            current_prices = extract_prices_from_market_state(market_state)
             logger.debug(f"[Model {self.model_id}] [平仓交易] 交易已记录到trades表，立即记录账户价值快照")
             self._record_account_snapshot(current_prices)
             logger.debug(f"[Model {self.model_id}] [平仓交易] 账户价值快照已记录")
@@ -3002,18 +2822,13 @@ class TradingEngine:
         position_amt = int(abs(position.get('position_amt', 0)))
         position_side = position.get('position_side', 'LONG')
 
-        # 计算毛盈亏和净盈亏
-        if position_side == 'LONG':
-            gross_pnl = (current_price - entry_price) * position_amt
-        else:  # SHORT
-            gross_pnl = (entry_price - current_price) * position_amt
+        # 使用工具函数计算盈亏
+        gross_pnl, trade_fee, net_pnl = calculate_pnl(
+            entry_price, current_price, position_amt, position_side, self.trade_fee_rate
+        )
 
-        trade_amount = position_amt * current_price
-        trade_fee = trade_amount * self.trade_fee_rate
-        net_pnl = gross_pnl - trade_fee
-
-        # 确定交易方向
-        side_for_trade = self._get_side_for_trade(position_side)
+        # 使用工具函数确定交易方向
+        side_for_trade = get_side_for_trade(position_side)
 
         # 获取交易上下文
         model_uuid, trade_id = self._get_trade_context()
@@ -3085,8 +2900,8 @@ class TradingEngine:
         
         # 每次交易后立即记录账户价值快照
         try:
-            # 从market_state中提取current_prices格式：{symbol: price_value}
-            current_prices = {s: m.get('price', 0) for s, m in market_state.items()}
+            # 使用工具函数从market_state中提取价格字典
+            current_prices = extract_prices_from_market_state(market_state)
             logger.debug(f"[Model {self.model_id}] [平仓交易] 交易已记录到trades表，立即记录账户价值快照")
             self._record_account_snapshot(current_prices)
             logger.debug(f"[Model {self.model_id}] [平仓交易] 账户价值快照已记录")
@@ -3141,8 +2956,8 @@ class TradingEngine:
             return {'symbol': symbol, 'error': 'Stop price not provided'}
         stop_price = float(stop_price)
         
-        # 确定交易方向
-        side_for_trade = self._get_side_for_trade(position_side)
+        # 使用工具函数确定交易方向
+        side_for_trade = get_side_for_trade(position_side)
 
         # 获取交易上下文
         model_uuid, trade_id = self._get_trade_context()
@@ -3213,8 +3028,8 @@ class TradingEngine:
         
         # 每次交易后立即记录账户价值快照
         try:
-            # 从market_state中提取current_prices格式：{symbol: price_value}
-            current_prices = {s: m.get('price', 0) for s, m in market_state.items()}
+            # 使用工具函数从market_state中提取价格字典
+            current_prices = extract_prices_from_market_state(market_state)
             logger.debug(f"[Model {self.model_id}] [止损交易] 交易已记录到trades表，立即记录账户价值快照")
             self._record_account_snapshot(current_prices)
             logger.debug(f"[Model {self.model_id}] [止损交易] 账户价值快照已记录")
@@ -3270,8 +3085,8 @@ class TradingEngine:
             return {'symbol': symbol, 'error': 'Take profit price not provided'}
         stop_price = float(stop_price)
         
-        # 确定交易方向
-        side_for_trade = self._get_side_for_trade(position_side)
+        # 使用工具函数确定交易方向
+        side_for_trade = get_side_for_trade(position_side)
 
         # 获取交易上下文
         model_uuid, trade_id = self._get_trade_context()
@@ -3335,8 +3150,8 @@ class TradingEngine:
         
         # 每次交易后立即记录账户价值快照
         try:
-            # 从market_state中提取current_prices格式：{symbol: price_value}
-            current_prices = {s: m.get('price', 0) for s, m in market_state.items()}
+            # 使用工具函数从market_state中提取价格字典
+            current_prices = extract_prices_from_market_state(market_state)
             logger.debug(f"[Model {self.model_id}] [止盈交易] 交易已记录到trades表，立即记录账户价值快照")
             self._record_account_snapshot(current_prices)
             logger.debug(f"[Model {self.model_id}] [止盈交易] 账户价值快照已记录")

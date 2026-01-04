@@ -14,6 +14,14 @@
           <div class="header-status">
             <span class="status-dot active"></span>
             <span class="status-text">运行中</span>
+            <button 
+              class="btn-icon" 
+              @click="handleOpenTradeContainerLogsModal" 
+              title="交易容器日志"
+              style="margin-left: 8px;"
+            >
+              <i class="bi bi-file-text"></i>
+            </button>
           </div>
         </div>
         <div class="header-right">
@@ -125,8 +133,23 @@
               <div class="model-header">
                 <div class="model-name">{{ model.name || `模型 #${model.id}` }}</div>
                 <div class="model-actions" @click.stop>
-                  <button class="model-action-btn" @click="handleOpenTradeLogsModal(model.id, model.name || `模型 #${model.id}`)" title="交易日志">
-                    <i class="bi bi-file-text"></i>
+                  <button 
+                    v-if="model.auto_buy_enabled || model.autoBuyEnabled" 
+                    class="model-action-btn" 
+                    @click="handleOpenBuyLogsModal(model.id, model.name || `模型 #${model.id}`)" 
+                    title="买执行日志"
+                    style="color: #67c23a;"
+                  >
+                    <i class="bi bi-arrow-up-circle"></i>
+                  </button>
+                  <button 
+                    v-if="model.auto_sell_enabled || model.autoSellEnabled" 
+                    class="model-action-btn" 
+                    @click="handleOpenSellLogsModal(model.id, model.name || `模型 #${model.id}`)" 
+                    title="卖执行日志"
+                    style="color: #f56c6c;"
+                  >
+                    <i class="bi bi-arrow-down-circle"></i>
                   </button>
                   <button class="model-action-btn" @click="handleOpenStrategyConfigModal(model.id, model.name || `模型 #${model.id}`)" title="策略配置">
                     <i class="bi bi-diagram-3"></i>
@@ -754,6 +777,22 @@
       @close="showTradeLogsModal = false"
     />
     
+    <BuyLogsModal
+      :visible="showBuyLogsModal"
+      :modelId="pendingBuyLogsModelId"
+      :modelName="buyLogsModelName"
+      @update:visible="showBuyLogsModal = $event"
+      @close="showBuyLogsModal = false"
+    />
+    
+    <SellLogsModal
+      :visible="showSellLogsModal"
+      :modelId="pendingSellLogsModelId"
+      :modelName="sellLogsModelName"
+      @update:visible="showSellLogsModal = $event"
+      @close="showSellLogsModal = false"
+    />
+    
     <!-- 模型设置模态框（合并杠杆和最大持仓数量） -->
     <div v-if="showModelSettingsModal" class="modal show" @click.self="showModelSettingsModal = false">
       <div class="modal-content">
@@ -911,6 +950,8 @@ import AccountModal from './components/AccountModal.vue'
 import AddModelModal from './components/AddModelModal.vue'
 import ModelStrategyConfigModal from './components/ModelStrategyConfigModal.vue'
 import TradeLogsModal from './components/TradeLogsModal.vue'
+import BuyLogsModal from './components/BuyLogsModal.vue'
+import SellLogsModal from './components/SellLogsModal.vue'
 import { useTradingApp } from './composables/useTradingApp'
 
 const {
@@ -1052,6 +1093,12 @@ const activeTab = ref('positions')
 const showTradeLogsModal = ref(false)
 const pendingTradeLogsModelId = ref(null)
 const tradeLogsModelName = ref('')
+const showBuyLogsModal = ref(false)
+const pendingBuyLogsModelId = ref(null)
+const buyLogsModelName = ref('')
+const showSellLogsModal = ref(false)
+const pendingSellLogsModelId = ref(null)
+const sellLogsModelName = ref('')
 const tempLeverage = ref(10) // 临时杠杆值
 
 // 监听标签切换，动态重新加载数据
@@ -1148,6 +1195,24 @@ const handleOpenTradeLogsModal = (modelId, modelName) => {
   showTradeLogsModal.value = true
   pendingTradeLogsModelId.value = modelId
   tradeLogsModelName.value = modelName
+}
+
+const handleOpenTradeContainerLogsModal = () => {
+  showTradeLogsModal.value = true
+  pendingTradeLogsModelId.value = null // null表示trade容器
+  tradeLogsModelName.value = '交易容器'
+}
+
+const handleOpenBuyLogsModal = (modelId, modelName) => {
+  showBuyLogsModal.value = true
+  pendingBuyLogsModelId.value = modelId
+  buyLogsModelName.value = modelName
+}
+
+const handleOpenSellLogsModal = (modelId, modelName) => {
+  showSellLogsModal.value = true
+  pendingSellLogsModelId.value = modelId
+  sellLogsModelName.value = modelName
 }
 
 const openKlineChartFromMarket = (symbol, contractSymbol) => {

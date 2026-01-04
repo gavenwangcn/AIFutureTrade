@@ -61,6 +61,13 @@ AUTO_TRADING = True  # Whether to enable auto trading (enabled by default)
 TRADING_INTERVAL = 5  # Trading execution interval (seconds)
 TRADE_FEE_RATE = 0.002  # Trading fee rate: 0.2% (bidirectional fee)
 
+# Trading loop configuration
+# Whether to start trading loops on service startup (default: False)
+# Note: With the new model-based container architecture, trading loops are managed by individual model containers
+# This flag controls whether the main trade service should also start trading loops
+# Set to False by default to avoid conflicts with model containers
+TRADING_LOOP_ENABLED = os.getenv('TRADING_LOOP_ENABLED', 'false').lower() in {'1', 'true', 'yes'}  # Default: False
+
 # ============ AI Trading Decision Configuration ============
 
 PROMPT_MARKET_SYMBOL_LIMIT = 5  # Number of market contracts processed each time AI model is called

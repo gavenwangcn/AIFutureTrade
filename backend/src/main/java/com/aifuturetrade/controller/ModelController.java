@@ -309,24 +309,24 @@ public class ModelController {
     }
 
     /**
-     * 手动执行一次买入交易周期
+     * 启用模型自动买入（设置 auto_buy_enabled = true）
      * @param modelId 模型ID
-     * @return 买入交易执行结果
+     * @return 更新结果
      */
     @PostMapping("/{modelId}/execute-buy")
-    @Operation(summary = "手动执行一次买入交易周期")
+    @Operation(summary = "启用模型自动买入")
     public ResponseEntity<Map<String, Object>> executeBuyTrading(@PathVariable(value = "modelId") String modelId) {
         Map<String, Object> result = modelService.executeBuyTrading(modelId);
         return new ResponseEntity<>(result, HttpStatus.OK);
     }
 
     /**
-     * 手动执行一次卖出交易周期
+     * 启用模型自动卖出（设置 auto_sell_enabled = true）
      * @param modelId 模型ID
-     * @return 卖出交易执行结果
+     * @return 更新结果
      */
     @PostMapping("/{modelId}/execute-sell")
-    @Operation(summary = "手动执行一次卖出交易周期")
+    @Operation(summary = "启用模型自动卖出")
     public ResponseEntity<Map<String, Object>> executeSellTrading(@PathVariable(value = "modelId") String modelId) {
         Map<String, Object> result = modelService.executeSellTrading(modelId);
         return new ResponseEntity<>(result, HttpStatus.OK);

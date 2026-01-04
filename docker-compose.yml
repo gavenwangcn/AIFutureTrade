@@ -165,6 +165,76 @@ services:
       - aifuturetrade-network
 
   # ============================================================================
+  # 模型买入服务镜像（仅构建，不自动启动）
+  # ============================================================================
+  # 说明：
+  # 1. 此服务仅用于构建镜像，不自动启动容器
+  # 2. 后续由 Java Backend 服务通过 Docker API 动态创建容器
+  # 3. 构建镜像：docker-compose build model-buy
+  # 4. 或使用 profile：docker-compose --profile model-images build
+  # ============================================================================
+  model-buy:
+    build:
+      context: .
+      dockerfile: trade/Dockerfile
+    # 不设置 container_name，因为容器由 Java Backend 动态创建
+    # 不设置 ports，因为容器由 Java Backend 动态创建时指定
+    environment:
+      # MODEL_ID 由 Java Backend 在创建容器时动态设置
+      - MODEL_ID=${MODEL_ID:-1}
+      # MySQL配置
+      - MYSQL_HOST=${MYSQL_HOST:-193.134.209.95}
+      - MYSQL_PORT=${MYSQL_PORT:-32123}
+      - MYSQL_USER=${MYSQL_USER:-aifuturetrade}
+      - MYSQL_PASSWORD=${MYSQL_PASSWORD:-aifuturetrade123}
+      - MYSQL_DATABASE=${MYSQL_DATABASE:-aifuturetrade}
+      # Binance配置
+      - BINANCE_API_KEY=${BINANCE_API_KEY}
+      - BINANCE_SECRET_KEY=${BINANCE_API_SECRET}
+    # 覆盖 CMD，使用 model_start_buy.py 启动
+    command: ["python", "-m", "trade.start.model_start_buy"]
+    # 使用 profile，默认不启动
+    profiles:
+      - model-images
+    networks:
+      - aifuturetrade-network
+
+  # ============================================================================
+  # 模型卖出服务镜像（仅构建，不自动启动）
+  # ============================================================================
+  # 说明：
+  # 1. 此服务仅用于构建镜像，不自动启动容器
+  # 2. 后续由 Java Backend 服务通过 Docker API 动态创建容器
+  # 3. 构建镜像：docker-compose build model-sell
+  # 4. 或使用 profile：docker-compose --profile model-images build
+  # ============================================================================
+  model-sell:
+    build:
+      context: .
+      dockerfile: trade/Dockerfile
+    # 不设置 container_name，因为容器由 Java Backend 动态创建
+    # 不设置 ports，因为容器由 Java Backend 动态创建时指定
+    environment:
+      # MODEL_ID 由 Java Backend 在创建容器时动态设置
+      - MODEL_ID=${MODEL_ID:-1}
+      # MySQL配置
+      - MYSQL_HOST=${MYSQL_HOST:-193.134.209.95}
+      - MYSQL_PORT=${MYSQL_PORT:-32123}
+      - MYSQL_USER=${MYSQL_USER:-aifuturetrade}
+      - MYSQL_PASSWORD=${MYSQL_PASSWORD:-aifuturetrade123}
+      - MYSQL_DATABASE=${MYSQL_DATABASE:-aifuturetrade}
+      # Binance配置
+      - BINANCE_API_KEY=${BINANCE_API_KEY}
+      - BINANCE_SECRET_KEY=${BINANCE_API_SECRET}
+    # 覆盖 CMD，使用 model_start_sell.py 启动
+    command: ["python", "-m", "trade.start.model_start_sell"]
+    # 使用 profile，默认不启动
+    profiles:
+      - model-images
+    networks:
+      - aifuturetrade-network
+
+  # ============================================================================
   # 前端服务（Vue 3 + KLineChart 10.0.0）
   # ============================================================================
   # 注意：此服务会在构建时先构建 KLineChart 10.0.0 基础库，然后构建前端应用
