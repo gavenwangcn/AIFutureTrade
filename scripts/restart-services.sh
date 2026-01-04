@@ -54,6 +54,17 @@ fi
 
 log "使用命令: $DOCKER_COMPOSE_CMD"
 
+# 检查是否存在 docker-compose-up.sh 脚本
+DOCKER_COMPOSE_UP_SCRIPT="${SCRIPT_DIR}/docker-compose-up.sh"
+USE_UP_SCRIPT=false
+
+if [ -f "$DOCKER_COMPOSE_UP_SCRIPT" ] && [ -x "$DOCKER_COMPOSE_UP_SCRIPT" ]; then
+    USE_UP_SCRIPT=true
+    log "找到 docker-compose-up.sh 脚本，将使用它来启动服务"
+else
+    log "未找到 docker-compose-up.sh 脚本，将使用标准命令启动服务"
+fi
+
 # 第一步：停止并删除所有容器
 log "执行: $DOCKER_COMPOSE_CMD down"
 if $DOCKER_COMPOSE_CMD down >> "$LOG_FILE" 2>&1; then
@@ -66,11 +77,23 @@ fi
 sleep 5
 
 # 第二步：重新启动所有服务
-log "执行: $DOCKER_COMPOSE_CMD up -d"
-if $DOCKER_COMPOSE_CMD up -d >> "$LOG_FILE" 2>&1; then
-    log "✓ 服务已重新启动"
+if [ "$USE_UP_SCRIPT" = true ]; then
+    # 使用 docker-compose-up.sh 脚本启动（包含 --scale 参数）
+    # 重启时通常不需要重新构建，所以不传递 --build 参数
+    log "执行: $DOCKER_COMPOSE_UP_SCRIPT"
+    if bash "$DOCKER_COMPOSE_UP_SCRIPT" >> "$LOG_FILE" 2>&1; then
+        log "✓ 服务已重新启动（使用 docker-compose-up.sh）"
+    else
+        error_exit "启动服务失败"
+    fi
 else
-    error_exit "启动服务失败"
+    # 使用标准命令，但添加 --scale 参数确保 model-buy 和 model-sell 不启动
+    log "执行: $DOCKER_COMPOSE_CMD up -d --scale model-buy=0 --scale model-sell=0"
+    if $DOCKER_COMPOSE_CMD up -d --scale model-buy=0 --scale model-sell=0 >> "$LOG_FILE" 2>&1; then
+        log "✓ 服务已重新启动"
+    else
+        error_exit "启动服务失败"
+    fi
 fi
 
 # 等待服务启动
