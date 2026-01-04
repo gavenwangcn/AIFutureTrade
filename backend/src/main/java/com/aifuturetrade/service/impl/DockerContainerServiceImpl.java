@@ -5,6 +5,8 @@ import com.github.dockerjava.api.DockerClient;
 import com.github.dockerjava.api.command.CreateContainerResponse;
 import com.github.dockerjava.api.command.InspectContainerResponse;
 import com.github.dockerjava.api.exception.NotFoundException;
+import com.github.dockerjava.api.model.Network;
+import java.util.List;
 import com.github.dockerjava.core.DefaultDockerClientConfig;
 import com.github.dockerjava.core.DockerClientImpl;
 import com.github.dockerjava.httpclient5.ApacheDockerHttpClient;
@@ -108,9 +110,77 @@ public class DockerContainerServiceImpl implements DockerContainerService {
             } catch (Exception e) {
                 log.warn("Docker连接测试失败，但继续初始化: {}", e.getMessage());
             }
+            
+            // 确保 Docker 网络存在
+            ensureNetworkExists();
         } catch (Exception e) {
             log.error("Docker容器管理服务初始化失败", e);
             throw new RuntimeException("Docker容器管理服务初始化失败: " + e.getMessage(), e);
+        }
+    }
+    
+    /**
+     * 确保 Docker 网络存在，如果不存在则创建
+     */
+    private void ensureNetworkExists() {
+        try {
+            // 先尝试通过列表查找网络（更可靠的方法）
+            try {
+                List<Network> networks = dockerClient.listNetworksCmd().exec();
+                boolean networkExists = networks.stream()
+                        .anyMatch(n -> dockerNetwork.equals(n.getName()) || dockerNetwork.equals(n.getId()));
+                if (networkExists) {
+                    log.info("Docker 网络已存在: {}", dockerNetwork);
+                    return;
+                }
+            } catch (Exception e) {
+                log.debug("无法通过列表查找网络，将尝试直接检查: {}", e.getMessage());
+            }
+            
+            // 尝试直接检查网络（使用 inspectNetworkCmd）
+            try {
+                dockerClient.inspectNetworkCmd()
+                        .withNetworkId(dockerNetwork)
+                        .exec();
+                log.info("Docker 网络已存在: {}", dockerNetwork);
+                return;
+            } catch (NotFoundException e) {
+                // 网络不存在，继续创建
+                log.info("Docker 网络不存在，将创建: {}", dockerNetwork);
+            } catch (Exception e) {
+                log.debug("检查网络时出错，将尝试创建: {}", e.getMessage());
+            }
+            
+            // 创建网络
+            try {
+                dockerClient.createNetworkCmd()
+                        .withName(dockerNetwork)
+                        .withDriver("bridge")
+                        .exec();
+                log.info("Docker 网络创建成功: {}", dockerNetwork);
+            } catch (Exception e) {
+                // 如果网络已存在（并发创建），忽略错误
+                String errorMsg = e.getMessage() != null ? e.getMessage() : "";
+                if (errorMsg.contains("already exists") || errorMsg.contains("already exist")) {
+                    log.debug("Docker 网络已存在（并发创建）: {}", dockerNetwork);
+                } else {
+                    // 再次检查网络是否存在（可能在其他地方被创建了）
+                    try {
+                        List<Network> networks = dockerClient.listNetworksCmd().exec();
+                        boolean networkExists = networks.stream()
+                                .anyMatch(n -> dockerNetwork.equals(n.getName()) || dockerNetwork.equals(n.getId()));
+                        if (networkExists) {
+                            log.info("Docker 网络已存在（创建后检查）: {}", dockerNetwork);
+                            return;
+                        }
+                        log.warn("创建 Docker 网络失败，且网络不存在: {} - {}", dockerNetwork, errorMsg);
+                    } catch (Exception ex) {
+                        log.warn("创建 Docker 网络失败，且无法验证: {} - {}", dockerNetwork, errorMsg);
+                    }
+                }
+            }
+        } catch (Exception e) {
+            log.warn("确保 Docker 网络存在时出错，但继续运行: {} - {}", dockerNetwork, e.getMessage());
         }
     }
     
@@ -180,6 +250,9 @@ public class DockerContainerServiceImpl implements DockerContainerService {
         Map<String, Object> result = new HashMap<>();
         
         try {
+            // 确保网络存在
+            ensureNetworkExists();
+            
             // 检查容器是否已存在且运行中
             if (isContainerRunning(containerName)) {
                 log.info("容器已存在且运行中: {}", containerName);
