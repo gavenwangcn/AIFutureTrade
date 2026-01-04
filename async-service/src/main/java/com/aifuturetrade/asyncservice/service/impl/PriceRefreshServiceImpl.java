@@ -86,9 +86,12 @@ public class PriceRefreshServiceImpl implements PriceRefreshService {
         log.info("=".repeat(80));
         
         try {
+            // 获取UTC+8时间，用于数据库查询
+            LocalDateTime utc8Time = LocalDateTime.now(java.time.ZoneOffset.ofHours(8));
+            
             // 查询需要刷新的symbol列表
             log.info("[PriceRefresh] [步骤1] 开始查询需要刷新价格的symbol列表...");
-            List<String> symbols = marketTickerMapper.selectSymbolsNeedingPriceRefresh();
+            List<String> symbols = marketTickerMapper.selectSymbolsNeedingPriceRefresh(utc8Time);
             
             log.info("[PriceRefresh] [步骤1] 查询完成，返回 {} 个symbol", 
                     symbols != null ? symbols.size() : 0);
