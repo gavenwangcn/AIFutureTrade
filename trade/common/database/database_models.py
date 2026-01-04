@@ -221,21 +221,39 @@ class ModelsDatabase:
             logger.error(f"[Models] Failed to get provider ID mapping: {e}")
             return {}
     
-    def get_model(self, model_id: int) -> Optional[Dict]:
+    def get_model(self, model_id) -> Optional[Dict]:
         """
         Get model information
         
         Args:
-            model_id: Model ID (integer)
+            model_id: Model ID (integer or UUID string)
         
         Returns:
             Model information dictionary, returns None if not found
         """
         try:
-            model_mapping = self._get_model_id_mapping()
-            model_uuid = model_mapping.get(model_id)
-            if not model_uuid:
-                return None
+            # 如果 model_id 是字符串（UUID格式），直接使用
+            if isinstance(model_id, str):
+                # 检查是否是有效的UUID格式（包含连字符或32位十六进制字符）
+                if '-' in model_id or (len(model_id) == 32 and all(c in '0123456789abcdefABCDEF' for c in model_id)):
+                    model_uuid = model_id
+                else:
+                    # 尝试作为整数字符串处理（向后兼容）
+                    try:
+                        int_id = int(model_id)
+                        model_mapping = self._get_model_id_mapping()
+                        model_uuid = model_mapping.get(int_id)
+                        if not model_uuid:
+                            return None
+                    except ValueError:
+                        # 如果无法转换为整数，尝试直接作为UUID使用
+                        model_uuid = model_id
+            else:
+                # 如果是整数，使用映射转换
+                model_mapping = self._get_model_id_mapping()
+                model_uuid = model_mapping.get(model_id)
+                if not model_uuid:
+                    return None
             
             # Query model and associated provider
             rows = self.query(f"""
@@ -260,8 +278,23 @@ class ModelsDatabase:
                       "account_alias", "is_virtual", "symbol_source", "created_at",
                       "api_key", "api_secret", "api_url", "provider_type"]
             result = self._row_to_dict(rows[0], columns)
-            # Convert ID to int to maintain compatibility
-            result['id'] = model_id
+            # Convert ID to maintain compatibility
+            # 如果原始 model_id 是整数，转换为整数；如果是字符串，保持字符串
+            if isinstance(model_id, int):
+                result['id'] = model_id
+            else:
+                # 对于字符串ID，尝试转换为整数ID（用于兼容性）
+                try:
+                    model_mapping = self._get_model_id_mapping()
+                    for int_id, uuid_str in model_mapping.items():
+                        if uuid_str == model_uuid:
+                            result['id'] = int_id
+                            break
+                    else:
+                        # 如果找不到映射，保持UUID字符串
+                        result['id'] = model_uuid
+                except Exception:
+                    result['id'] = model_uuid
             if result.get('provider_id'):
                 provider_mapping = self._get_provider_id_mapping()
                 for pid, puuid in provider_mapping.items():

@@ -59,21 +59,35 @@ logger = logging.getLogger(__name__)
 
 # ============ 配置和初始化 ============
 
-def get_model_id_from_env() -> int:
-    """从环境变量获取模型ID"""
+def get_model_id_from_env() -> str:
+    """从环境变量获取模型ID（支持UUID字符串格式）"""
     model_id_str = os.getenv('MODEL_ID')
     if not model_id_str:
         logger.error("MODEL_ID environment variable is not set")
         sys.exit(1)
     
+    # 验证模型ID格式（可以是UUID字符串或整数字符串）
+    model_id_str = model_id_str.strip()
+    if not model_id_str:
+        logger.error("MODEL_ID environment variable is empty")
+        sys.exit(1)
+    
+    # 如果是UUID格式（包含连字符），直接返回
+    if '-' in model_id_str:
+        return model_id_str
+    
+    # 如果是纯数字字符串，尝试转换为整数（向后兼容）
     try:
         model_id = int(model_id_str)
         if model_id <= 0:
             raise ValueError("MODEL_ID must be a positive integer")
-        return model_id
+        # 返回字符串格式，但保持为数字字符串（用于兼容性）
+        return model_id_str
     except ValueError as e:
-        logger.error(f"Invalid MODEL_ID: {model_id_str}, {e}")
-        sys.exit(1)
+        # 如果既不是UUID也不是整数，可能是UUID格式但没有连字符
+        # 直接返回字符串，让数据库层处理
+        logger.info(f"MODEL_ID is in string format (UUID): {model_id_str}")
+        return model_id_str
 
 def get_buy_interval_seconds(db) -> int:
     """读取买入交易频率设置（分钟）并返回秒数"""
@@ -90,7 +104,7 @@ def get_buy_interval_seconds(db) -> int:
     minutes = max(1, min(1440, minutes))
     return minutes * 60
 
-def init_trading_engine_for_model(model_id: int, db, market_fetcher):
+def init_trading_engine_for_model(model_id: str, db, market_fetcher):
     """初始化指定模型的交易引擎"""
     logger.info(f"Initializing trading engine for model {model_id}...")
     
@@ -149,7 +163,7 @@ def init_trading_engine_for_model(model_id: int, db, market_fetcher):
     logger.info(f"Successfully initialized trading engine for model {model_id} with trade_type={trade_type}")
     return engine
 
-def trading_buy_loop_for_model(model_id: int, engine: TradingEngine, db):
+def trading_buy_loop_for_model(model_id: str, engine: TradingEngine, db):
     """单个模型的买入交易循环"""
     logger.info(f"Trading buy loop started for model {model_id}")
     
