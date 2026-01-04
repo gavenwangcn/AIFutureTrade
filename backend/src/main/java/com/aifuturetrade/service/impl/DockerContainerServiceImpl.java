@@ -277,6 +277,18 @@ public class DockerContainerServiceImpl implements DockerContainerService {
                         .toArray(String[]::new);
             }
             
+            // 根据容器名称确定启动命令
+            // buy-{modelId} 使用 model_start_buy.py
+            // sell-{modelId} 使用 model_start_sell.py
+            String[] cmd = null;
+            if (containerName.startsWith("buy-")) {
+                cmd = new String[]{"python", "-m", "trade.start.model_start_buy"};
+                log.info("设置容器启动命令为: python -m trade.start.model_start_buy");
+            } else if (containerName.startsWith("sell-")) {
+                cmd = new String[]{"python", "-m", "trade.start.model_start_sell"};
+                log.info("设置容器启动命令为: python -m trade.start.model_start_sell");
+            }
+            
             // 创建容器配置（使用 HostConfig 替代已弃用的方法）
             com.github.dockerjava.api.model.HostConfig hostConfig = com.github.dockerjava.api.model.HostConfig.newHostConfig()
                     .withNetworkMode(dockerNetwork)
@@ -287,6 +299,7 @@ public class DockerContainerServiceImpl implements DockerContainerService {
                     .withName(containerName)
                     .withEnv(envArray != null ? envArray : new String[0])
                     .withHostConfig(hostConfig)
+                    .withCmd(cmd)  // 设置启动命令
                     .exec();
             
             String containerId = createResponse.getId();
