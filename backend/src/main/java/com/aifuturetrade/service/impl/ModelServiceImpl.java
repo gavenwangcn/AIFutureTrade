@@ -297,6 +297,33 @@ public class ModelServiceImpl implements ModelService {
     public Boolean deleteModel(String id) {
         log.debug("[ModelService] 开始删除模型及其关联数据, modelId: {}", id);
         
+        // 0. 先删除相关的 Docker 容器（buy-{modelId} 和 sell-{modelId}）
+        try {
+            String buyContainerName = "buy-" + id;
+            String sellContainerName = "sell-" + id;
+            
+            log.info("[ModelService] 开始删除模型相关的 Docker 容器: {} 和 {}", buyContainerName, sellContainerName);
+            
+            // 删除 buy 容器
+            boolean buyContainerRemoved = dockerContainerService.removeContainer(buyContainerName);
+            if (buyContainerRemoved) {
+                log.info("[ModelService] 成功删除 buy 容器: {}", buyContainerName);
+            } else {
+                log.warn("[ModelService] 删除 buy 容器失败或容器不存在: {}", buyContainerName);
+            }
+            
+            // 删除 sell 容器
+            boolean sellContainerRemoved = dockerContainerService.removeContainer(sellContainerName);
+            if (sellContainerRemoved) {
+                log.info("[ModelService] 成功删除 sell 容器: {}", sellContainerName);
+            } else {
+                log.warn("[ModelService] 删除 sell 容器失败或容器不存在: {}", sellContainerName);
+            }
+        } catch (Exception e) {
+            // 容器删除失败不应该阻止模型删除，只记录警告
+            log.warn("[ModelService] 删除模型相关的 Docker 容器时出错，但继续删除模型数据: {}", e.getMessage(), e);
+        }
+        
         // 按顺序删除所有关联表的数据
         // 1. 删除账户价值历史记录
         try {

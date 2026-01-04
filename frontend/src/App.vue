@@ -926,6 +926,10 @@
               <i class="bi bi-exclamation-triangle"></i>
               将会删除当前模型相关的所有数据，此操作不可恢复，请谨慎操作！
             </p>
+            <p style="color: #e6a23c; margin-top: 10px; font-size: 14px;">
+              <i class="bi bi-info-circle"></i>
+              如果该模型有正在运行的买入或卖出容器，将会自动停止并删除。
+            </p>
           </div>
         </div>
         <div class="modal-footer">
