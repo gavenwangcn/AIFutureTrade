@@ -1,10 +1,10 @@
 """
-交易引擎 - AI交易决策执行的核心逻辑模块
+交易引擎 - 交易决策执行的核心逻辑模块
 
-本模块提供完整的AI交易执行流程，包括：
+本模块提供完整的交易执行流程，包括：
 - 买入/卖出决策周期的执行
 - 市场数据获取和处理
-- AI决策的批量处理和并发执行
+- 决策的批量处理和并发执行
 - 订单执行（开仓、平仓、止损、止盈）
 - 账户信息管理和记录
 
@@ -12,11 +12,6 @@
 1. 买入服务：execute_buy_cycle() - 从涨跌幅榜选择候选，调用AI决策并执行买入
 2. 卖出服务：execute_sell_cycle() - 对持仓进行卖出/平仓决策并执行
 3. 订单执行：支持开仓、平仓、止损、止盈等多种订单类型
-4. 并发处理：使用多线程批量处理AI决策，提高执行效率
-
-注意：
-- 交易循环管理已移至 trade/app.py，不再在此模块中管理线程
-- 买入和卖出循环在 trade/app.py 中分别独立运行
 """
 from datetime import datetime, timezone, timedelta
 from typing import Dict, List, Optional
@@ -112,6 +107,9 @@ class TradingEngine:
         # 【Binance订单客户端】不再在初始化时创建，改为每次使用时新建实例
         # 确保每次交易都使用最新的 model 表中的 api_key 和 api_secret
         # 这样每个model可以使用不同的API账户进行交易，且每次都是最新的凭证
+        
+        # 初始化辅助管理器（MarketDataManager 和 BatchDecisionProcessor）
+        self._init_managers()
 
     def _init_managers(self) -> None:
         """
