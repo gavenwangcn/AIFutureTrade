@@ -7,9 +7,9 @@ All configuration items support overriding default values through environment va
 Configuration categories:
 1. Database configuration: MySQL connection information
 2. Binance API configuration: API keys, trading mode, market data configuration
-3. Async service configuration: Price refresh, Symbol offline and other scheduled task configurations
-4. Trading configuration: Auto trading, trading interval, fee rate and other configurations
-5. AI decision configuration: Concurrency and batch processing configurations related to AI trading decisions
+3. Trading configuration: Auto trading, trading interval, fee rate and other configurations
+4. AI decision configuration: Batch processing configurations related to AI trading decisions
+5. Binance Service configuration: Binance Service microservice configuration
 6. Logging configuration: Log level, format, date format configuration
 
 Usage:
@@ -19,7 +19,7 @@ Usage:
 
 Environment variables:
     All configuration items support overriding through environment variables, format: configuration item name (uppercase)
-    For example: MYSQL_HOST, BINANCE_API_KEY, PRICE_REFRESH_CRON, etc.
+    For example: MYSQL_HOST, BINANCE_API_KEY, TRADING_INTERVAL, etc.
 
 Notes:
     - Sensitive information (such as API keys, database passwords) should be set through environment variables, do not hardcode
@@ -54,17 +54,6 @@ FUTURES_TOP_GAINERS_LIMIT = 5  # Limit on number of trading pairs returned in to
 FUTURES_TOP_GAINERS_REFRESH = 30  # Top gainers list refresh interval (seconds), can be adjusted according to deployment needs
 FUTURES_KLINE_LIMIT = 300  # Maximum limit for K-line data retrieval
 FUTURES_LEADERBOARD_REFRESH = 5  # Frontend polling refresh interval for gain/loss leaderboard (seconds)
-FUTURES_MARKET_PRICES_REFRESH = int(os.getenv('FUTURES_MARKET_PRICES_REFRESH', '10'))  # Frontend polling refresh interval for market price quotes (seconds), default 10 seconds
-
-# ============ Async Service Configuration ============
-
-# Price refresh service configuration
-PRICE_REFRESH_CRON = os.getenv('PRICE_REFRESH_CRON', '*/5 * * * *')  # Cron expression, default execution every 5 minutes
-PRICE_REFRESH_MAX_PER_MINUTE = int(os.getenv('PRICE_REFRESH_MAX_PER_MINUTE', '1000'))  # Maximum number of symbols refreshed per minute
-
-# Market Symbol offline service configuration
-MARKET_SYMBOL_OFFLINE_CRON = os.getenv('MARKET_SYMBOL_OFFLINE_CRON', '*/30 * * * *')  # Cron expression, default execution every 30 minutes
-MARKET_SYMBOL_RETENTION_MINUTES = int(os.getenv('MARKET_SYMBOL_RETENTION_MINUTES', '30'))  # Ticker data retention minutes, default 30 minutes
 
 # ============ Trading Configuration ============
 
@@ -72,16 +61,9 @@ AUTO_TRADING = True  # Whether to enable auto trading (enabled by default)
 TRADING_INTERVAL = 5  # Trading execution interval (seconds)
 TRADE_FEE_RATE = 0.002  # Trading fee rate: 0.2% (bidirectional fee)
 
-# Trade record display configuration
-TRADES_DISPLAY_COUNT = int(os.getenv('TRADES_DISPLAY_COUNT', '5'))  # Number of trade records displayed on frontend, default 5
-TRADES_QUERY_LIMIT = int(os.getenv('TRADES_QUERY_LIMIT', '5'))  # Number of trade records queried on backend, default 5
-
-
 # ============ AI Trading Decision Configuration ============
 
-PROMPT_MARKET_SYMBOL_LIMIT = 3  # Number of market contracts processed each time AI model is called
-BUY_DECISION_THREAD_COUNT = 1  # Number of concurrent threads for buy decision API calls
-SELL_DECISION_THREAD_COUNT = 1  # Number of concurrent threads for sell decision API calls
+PROMPT_MARKET_SYMBOL_LIMIT = 5  # Number of market contracts processed each time AI model is called
 
 
 # ============ Binance Service Configuration ============

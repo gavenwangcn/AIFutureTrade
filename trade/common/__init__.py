@@ -8,6 +8,7 @@
 
 注意：
 - 交易相关服务（ai.ai_trader, trading_engine, ai.prompt_defaults）已迁移到 trade 包
-- 市场数据服务（market_data, market_streams）已迁移到 market 包
+- 市场数据服务（market_data）已迁移到 market 包
+- market_streams 功能已迁移到 Java async-service 实现
 """
 

@@ -32,12 +32,10 @@ def test_imports():
         ("trade.common.database.database_market_tickers", "市场行情数据库模块"),
         ("trade.common.binance_futures", "币安期货客户端模块"),
         ("trade.market.market_data", "市场数据模块"),
-        ("trade.market.market_streams", "市场数据流模块"),
         ("trade.ai.ai_trader", "AI交易器模块"),
         ("trade.trading_engine", "交易引擎模块"),
         ("trade.ai.prompt_defaults", "提示词默认值模块"),
         ("trade.app", "交易服务模块"),
-        ("trade.async.async_agent", "异步代理模块"),
     ]
     
     failed_imports = []
