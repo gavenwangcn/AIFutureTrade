@@ -3,6 +3,7 @@ package com.aifuturetrade.asyncservice.api.binance;
 import com.binance.connector.client.common.ApiResponse;
 import com.binance.connector.client.derivatives_trading_usds_futures.rest.model.Interval;
 import com.binance.connector.client.derivatives_trading_usds_futures.rest.model.KlineCandlestickDataResponse;
+import com.binance.connector.client.derivatives_trading_usds_futures.rest.model.KlineCandlestickDataResponseItem;
 import com.binance.connector.client.derivatives_trading_usds_futures.rest.model.SymbolPriceTickerV2Response;
 import com.binance.connector.client.derivatives_trading_usds_futures.rest.model.SymbolPriceTickerV2Response1;
 import com.binance.connector.client.derivatives_trading_usds_futures.rest.model.SymbolPriceTickerV2Response2;
@@ -13,6 +14,7 @@ import com.binance.connector.client.derivatives_trading_usds_futures.rest.model.
 import com.binance.connector.client.derivatives_trading_usds_futures.rest.model.Ticker24hrPriceChangeStatisticsResponse2Inner;
 import lombok.extern.slf4j.Slf4j;
 
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -293,80 +295,353 @@ public class BinanceFuturesClient extends BinanceFuturesBase {
     /**
      * 获取K线数据
      * 
-     * Kline/candlestick bars for a symbol. Klines are uniquely identified by their open time.
-     * If startTime and endTime are not sent, the most recent klines are returned.
-     * 
      * @param symbol 交易对符号，如 'BTCUSDT'
-     * @param interval 时间间隔，如 '1d' 表示日K线
-     * @param limit 返回数据数量，默认100，最大1000
-     * @return KlineCandlestickDataResponse K线数据列表，每个元素包含：
-     *         [0] 开盘时间, [1] 开盘价, [2] 最高价, [3] 最低价, [4] 收盘价, [5] 成交量,
-     *         [6] 收盘时间, [7] 成交额, [8] 成交次数, [9] 主动买入成交量, [10] 主动买入成交额, [11] 忽略
+     * @param interval K线间隔，如 '1m', '5m', '1h', '1d' 等
+     * @param limit 返回的K线数量，默认120
+     * @param startTime 起始时间戳（毫秒），可选
+     * @param endTime 结束时间戳（毫秒），可选
+     * @return K线数据列表，每个元素为包含完整K线信息的字典
      */
-    public KlineCandlestickDataResponse getKlines(String symbol, String interval, int limit) {
-        String requestSymbol = symbol.toUpperCase();
-        log.debug("[Binance Futures] 开始获取 {} K线数据, 间隔: {}, 数量: {}", requestSymbol, interval, limit);
+    public List<Map<String, Object>> getKlines(String symbol, String interval, Integer limit, 
+                                               Long startTime, Long endTime) {
+        log.info("[Binance Futures] 开始获取K线数据, symbol={}, interval={}, limit={}, startTime={}, endTime={}", 
+                symbol, interval, limit, startTime, endTime);
         
-        KlineCandlestickDataResponse result = null;
+        List<Map<String, Object>> klines = new ArrayList<>();
         
         try {
-            long callStart = System.currentTimeMillis();
+            // 如果 startTime 和 endTime 为空，自动计算时间范围
+            Long calculatedStartTime = startTime;
+            Long calculatedEndTime = endTime;
             
-            // 将字符串间隔转换为Interval枚举
-            Interval intervalEnum = parseInterval(interval);
-            
-            // 调用API获取K线数据
-            ApiResponse<KlineCandlestickDataResponse> response = restApi.klineCandlestickData(
-                    requestSymbol, intervalEnum, null, null, (long) limit);
-            
-            long callDuration = System.currentTimeMillis() - callStart;
-            
-            // 获取响应数据
-            KlineCandlestickDataResponse responseData = response.getData();
-            if (responseData != null && !responseData.isEmpty()) {
-                result = responseData;
-                log.debug("[Binance Futures] {} K线数据获取成功, 返回 {} 条记录, 耗时 {} 毫秒", 
-                        requestSymbol, result.size(), callDuration);
-            } else {
-                log.warn("[Binance Futures] {} K线数据为空", requestSymbol);
+            if (calculatedStartTime == null || calculatedEndTime == null) {
+                // endTime 取当前时间
+                calculatedEndTime = System.currentTimeMillis();
+                
+                // 验证和转换limit参数（Binance API限制：1-1000）
+                Long defaultLimit = ("1d".equals(interval) || "1w".equals(interval)) ? 99L : 499L;
+                Long limitLong = (limit != null && limit > 0 && limit <= 1000) 
+                    ? limit.longValue() 
+                    : defaultLimit;
+                
+                // 计算interval对应的毫秒数
+                long intervalMinutes = getIntervalMinutes(interval);
+                long intervalMillis = intervalMinutes * 60 * 1000;
+                
+                // 将endTime对齐到当前K线周期的开始时间（向下取整）
+                // 例如：如果当前是18:11:30，interval=1m，对齐到18:11:00
+                // 这样确保返回的K线时间跨度正好是limit * interval
+                // 第一条K线从startTime开始，最后一条K线到endTime结束
+                calculatedEndTime = (calculatedEndTime / intervalMillis) * intervalMillis;
+                
+                // startTime 根据 limit 和 interval 计算
+                // 例如：limit=50, interval=1m，则 startTime = endTime - 50分钟
+                // 由于endTime已对齐到K线周期开始，计算出的startTime也会对齐到K线周期开始
+                long totalMinutes = limitLong * intervalMinutes;
+                calculatedStartTime = calculatedEndTime - (totalMinutes * 60 * 1000);
+                
+                log.info("[Binance Futures] 自动计算时间范围: interval={} ({}分钟/根), limit={}, 总时间跨度={}分钟", 
+                        interval, intervalMinutes, limitLong, totalMinutes);
+                log.info("[Binance Futures] 计算的 startTime={}, endTime={}", calculatedStartTime, calculatedEndTime);
             }
             
+            // 构建API调用参数
+            Map<String, Object> params = new HashMap<>();
+            params.put("symbol", symbol.toUpperCase());
+            params.put("interval", interval);
+            if (limit != null) {
+                params.put("limit", limit);
+            }
+            if (calculatedStartTime != null) {
+                params.put("startTime", calculatedStartTime);
+            }
+            if (calculatedEndTime != null) {
+                params.put("endTime", calculatedEndTime);
+            }
+            
+            // 调用API获取K线数据
+            long apiStartTime = System.currentTimeMillis();
+            List<KlineCandlestickDataResponseItem> items = null;
+            
+            try {
+                String requestSymbol = symbol.toUpperCase();
+                log.debug("[Binance Futures] 准备调用SDK获取K线数据, symbol={}, interval={}, limit={}, startTime={}, endTime={}", 
+                        requestSymbol, interval, limit, calculatedStartTime, calculatedEndTime);
+                
+                // 将字符串interval转换为Interval枚举
+                Interval intervalEnum = convertStringToInterval(interval);
+                if (intervalEnum == null) {
+                    log.error("[Binance Futures] 不支持的interval: {}", interval);
+                    return new ArrayList<>();
+                }
+                
+                // 验证和转换limit参数（Binance API限制：1-1000）
+                // 1天（1d）和1周（1w）返回99根，其他interval返回499根
+                Long defaultLimit = ("1d".equals(interval) || "1w".equals(interval)) ? 99L : 499L;
+                Long limitLong = (limit != null && limit > 0 && limit <= 1000) 
+                    ? limit.longValue() 
+                    : defaultLimit;
+                
+                log.debug("[Binance Futures] 调用参数: symbol={}, interval={}, startTime={}, endTime={}, limit={}", 
+                        requestSymbol, intervalEnum, calculatedStartTime, calculatedEndTime, limitLong);
+                
+                // 调用SDK API获取K线数据
+                // 参考官方示例：klineCandlestickData(symbol, interval, startTime, endTime, limit)
+                ApiResponse<KlineCandlestickDataResponse> response = 
+                        restApi.klineCandlestickData(requestSymbol, intervalEnum, calculatedStartTime, calculatedEndTime, limitLong);
+                
+                // 直接使用SDK的getData()方法获取KlineCandlestickDataResponse
+                // KlineCandlestickDataResponse继承自ArrayList<KlineCandlestickDataResponseItem>，可以直接当作List使用
+                if (response != null) {
+                    KlineCandlestickDataResponse responseData = response.getData();
+                    if (responseData != null) {
+                        // KlineCandlestickDataResponse本身就是List<KlineCandlestickDataResponseItem>
+                        items = responseData;
+                        
+                        if (items != null && !items.isEmpty()) {
+                            log.debug("[Binance Futures] SDK响应获取成功, 返回 {} 条K线数据", items.size());
+                        } else {
+                            log.warn("[Binance Futures] SDK响应数据为空");
+                        }
+                    } else {
+                        log.error("[Binance Futures] SDK响应数据为null");
+                    }
+                } else {
+                    log.error("[Binance Futures] SDK响应为null");
+                }
+                
+            } catch (Exception apiExc) {
+                log.error("[Binance Futures] 调用SDK API失败: {}, 错误详情: {}", 
+                        apiExc.getMessage(), apiExc.getClass().getName(), apiExc);
+                // 不抛出异常，返回空列表，让上层处理
+                items = null;
+            }
+            
+            long apiDuration = System.currentTimeMillis() - apiStartTime;
+            if (items != null) {
+                log.info("[Binance Futures] API调用完成, 耗时: {} 毫秒, 返回 {} 条K线数据", 
+                        apiDuration, items.size());
+            } else {
+                log.warn("[Binance Futures] API调用完成, 耗时: {} 毫秒, 但返回数据为空", apiDuration);
+            }
+            
+            // 处理响应数据 - 直接使用SDK对象
+            if (items != null && !items.isEmpty()) {
+                for (KlineCandlestickDataResponseItem item : items) {
+                    Map<String, Object> klineDict = new HashMap<>();
+                    
+                    // KlineCandlestickDataResponseItem继承自ArrayList<String>，可以直接当作List使用
+                    // 直接使用item作为List<String>
+                    if (item != null && item.size() >= 11) {
+                        Long openTime = parseLong(item.get(0));
+                        String openPrice = item.get(1);
+                        String highPrice = item.get(2);
+                        String lowPrice = item.get(3);
+                        String closePrice = item.get(4);
+                        String volume = item.get(5);
+                        Long closeTime = parseLong(item.get(6));
+                        String quoteAssetVolume = item.get(7);
+                        Long numberOfTrades = parseLong(item.get(8));
+                        String takerBuyBaseVolume = item.get(9);
+                        String takerBuyQuoteVolume = item.get(10);
+                        
+                        klineDict.put("open_time", openTime);
+                        klineDict.put("open_price", openPrice);
+                        klineDict.put("high_price", highPrice);
+                        klineDict.put("low_price", lowPrice);
+                        klineDict.put("close_price", closePrice);
+                        klineDict.put("volume", volume);
+                        klineDict.put("close_time", closeTime);
+                        klineDict.put("quote_asset_volume", quoteAssetVolume);
+                        klineDict.put("number_of_trades", numberOfTrades);
+                        klineDict.put("taker_buy_base_volume", takerBuyBaseVolume);
+                        klineDict.put("taker_buy_quote_volume", takerBuyQuoteVolume);
+                        
+                        klines.add(klineDict);
+                    }
+                }
+            }
+            
+            long totalDuration = System.currentTimeMillis() - apiStartTime;
+            log.info("[Binance Futures] K线数据获取完成, symbol={}, interval={}, 返回 {} 条记录, 总耗时 {} 毫秒", 
+                    symbol.toUpperCase(), interval, klines.size(), totalDuration);
+            
         } catch (Exception exc) {
-            log.error("[Binance Futures] 获取 {} K线数据失败: {}", requestSymbol, exc.getMessage(), exc);
+            log.error("[Binance Futures] 获取K线数据失败: symbol={}, interval={}, 错误: {}", 
+                    symbol, interval, exc.getMessage(), exc);
         }
         
-        return result;
+        return klines;
     }
     
     /**
      * 将字符串间隔转换为Interval枚举
      * 
-     * @param interval 字符串间隔，如 '1m', '5m', '1h', '4h', '1d'
-     * @return Interval枚举值
+     * @param intervalStr 字符串间隔，如 '1m', '5m', '1h', '4h', '1d'
+     * @return Interval枚举值，如果不支持则返回null
      */
-    private Interval parseInterval(String interval) {
-        if (interval == null || interval.isEmpty()) {
-            return Interval.INTERVAL_1d;
+    private Interval convertStringToInterval(String intervalStr) {
+        if (intervalStr == null || intervalStr.isEmpty()) {
+            return null;
         }
         
-        switch (interval.toLowerCase()) {
-            case "1m": return Interval.INTERVAL_1m;
-            case "3m": return Interval.INTERVAL_3m;
-            case "5m": return Interval.INTERVAL_5m;
-            case "15m": return Interval.INTERVAL_15m;
-            case "30m": return Interval.INTERVAL_30m;
-            case "1h": return Interval.INTERVAL_1h;
-            case "2h": return Interval.INTERVAL_2h;
-            case "4h": return Interval.INTERVAL_4h;
-            case "6h": return Interval.INTERVAL_6h;
-            case "8h": return Interval.INTERVAL_8h;
-            case "12h": return Interval.INTERVAL_12h;
-            case "1d": return Interval.INTERVAL_1d;
-            case "3d": return Interval.INTERVAL_3d;
-            case "1w": return Interval.INTERVAL_1w;
-            case "1M": return Interval.INTERVAL_1M;
-            default: return Interval.INTERVAL_1d;
+        // 首先遍历所有枚举值，直接匹配toString()结果
+        // 因为枚举值的toString()可能返回 "1m", "3m" 等格式
+        try {
+            Interval[] values = Interval.values();
+            String inputLower = intervalStr.toLowerCase();
+            String inputUpper = intervalStr.toUpperCase();
+            
+            // 优先尝试精确匹配（区分大小写）
+            for (Interval interval : values) {
+                String enumStr = interval.toString();
+                // 精确匹配（区分大小写，避免"1m"匹配到"1M"）
+                if (enumStr.equals(intervalStr)) {
+                    log.debug("[Binance Futures] 精确匹配Interval枚举: {} -> {}", intervalStr, interval);
+                    return interval;
+                }
+            }
+            
+            // 如果精确匹配失败，尝试忽略大小写匹配
+            // 但要注意区分小写m（分钟）和大写M（月）
+            for (Interval interval : values) {
+                String enumStr = interval.toString();
+                String enumLower = enumStr.toLowerCase();
+                
+                // 对于小写m（分钟），只匹配小写
+                if (intervalStr.endsWith("m") && !intervalStr.endsWith("M")) {
+                    if (enumLower.equals(inputLower) && enumStr.endsWith("m")) {
+                        log.debug("[Binance Futures] 小写匹配Interval枚举: {} -> {}", intervalStr, interval);
+                        return interval;
+                    }
+                }
+                // 对于大写M（月），只匹配大写
+                else if (intervalStr.endsWith("M") && !intervalStr.endsWith("m")) {
+                    if (enumStr.toUpperCase().equals(inputUpper) && enumStr.endsWith("M")) {
+                        log.debug("[Binance Futures] 大写匹配Interval枚举: {} -> {}", intervalStr, interval);
+                        return interval;
+                    }
+                }
+                // 其他情况，忽略大小写匹配
+                else {
+                    if (enumLower.equals(inputLower)) {
+                        log.debug("[Binance Futures] 忽略大小写匹配Interval枚举: {} -> {}", intervalStr, interval);
+                        return interval;
+                    }
+                }
+            }
+            
+            // 如果直接匹配失败，尝试匹配枚举名称（可能包含INTERVAL_前缀）
+            String[] possibleNames = {
+                intervalStr,                           // 直接使用 1m, 3m
+                "INTERVAL_" + intervalStr,            // INTERVAL_1m, INTERVAL_3m
+                "INTERVAL_" + intervalStr.toLowerCase(), // INTERVAL_1m
+                "INTERVAL_" + intervalStr.toUpperCase(), // INTERVAL_1M
+            };
+            
+            for (String enumName : possibleNames) {
+                try {
+                    Interval result = Interval.valueOf(enumName);
+                    log.debug("[Binance Futures] 通过枚举名称匹配Interval枚举: {} -> {}", intervalStr, result);
+                    return result;
+                } catch (IllegalArgumentException e) {
+                    continue;
+                }
+            }
+            
+        } catch (Exception e) {
+            log.warn("[Binance Futures] 查找Interval枚举失败: {}", e.getMessage());
         }
+        
+        log.error("[Binance Futures] 不支持的interval格式: {}", intervalStr);
+        return null;
+    }
+    
+    /**
+     * 根据interval字符串获取对应的分钟数
+     * @param intervalStr 时间间隔字符串，如 "1m", "5m", "1h", "1d" 等
+     * @return 对应的分钟数
+     */
+    private long getIntervalMinutes(String intervalStr) {
+        if (intervalStr == null || intervalStr.isEmpty()) {
+            return 1; // 默认1分钟
+        }
+        
+        // 先检查大写M（月），因为toLowerCase()会把M变成m
+        if (intervalStr.endsWith("M")) {
+            // 月：1M
+            String numStr = intervalStr.substring(0, intervalStr.length() - 1);
+            try {
+                return Long.parseLong(numStr) * 30 * 24 * 60; // 近似30天
+            } catch (NumberFormatException e) {
+                return 30 * 24 * 60;
+            }
+        }
+        
+        String lowerInterval = intervalStr.toLowerCase();
+        
+        // 解析数字和单位
+        if (lowerInterval.endsWith("m")) {
+            // 分钟：1m, 3m, 5m, 15m, 30m
+            String numStr = lowerInterval.substring(0, lowerInterval.length() - 1);
+            try {
+                return Long.parseLong(numStr);
+            } catch (NumberFormatException e) {
+                return 1;
+            }
+        } else if (lowerInterval.endsWith("h")) {
+            // 小时：1h, 2h, 4h, 6h, 8h, 12h
+            String numStr = lowerInterval.substring(0, lowerInterval.length() - 1);
+            try {
+                return Long.parseLong(numStr) * 60;
+            } catch (NumberFormatException e) {
+                return 60;
+            }
+        } else if (lowerInterval.endsWith("d")) {
+            // 天：1d, 3d
+            String numStr = lowerInterval.substring(0, lowerInterval.length() - 1);
+            try {
+                return Long.parseLong(numStr) * 24 * 60;
+            } catch (NumberFormatException e) {
+                return 24 * 60;
+            }
+        } else if (lowerInterval.endsWith("w")) {
+            // 周：1w
+            String numStr = lowerInterval.substring(0, lowerInterval.length() - 1);
+            try {
+                return Long.parseLong(numStr) * 7 * 24 * 60;
+            } catch (NumberFormatException e) {
+                return 7 * 24 * 60;
+            }
+        }
+        
+        log.warn("[Binance Futures] 未识别的interval格式: {}, 默认返回1分钟", intervalStr);
+        return 1;
+    }
+    
+    /**
+     * 安全的Long类型转换
+     * @param obj 要转换的对象
+     * @return Long值，转换失败返回null
+     */
+    private Long parseLong(Object obj) {
+        if (obj == null) {
+            return null;
+        }
+        if (obj instanceof Long) {
+            return (Long) obj;
+        }
+        if (obj instanceof Integer) {
+            return ((Integer) obj).longValue();
+        }
+        if (obj instanceof String) {
+            try {
+                return Long.parseLong((String) obj);
+            } catch (NumberFormatException e) {
+                return null;
+            }
+        }
+        return null;
     }
     
     /**

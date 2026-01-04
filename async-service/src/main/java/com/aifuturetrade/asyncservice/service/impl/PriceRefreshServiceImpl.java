@@ -3,7 +3,6 @@ package com.aifuturetrade.asyncservice.service.impl;
 import com.aifuturetrade.asyncservice.dao.mapper.MarketTickerMapper;
 import com.aifuturetrade.asyncservice.service.PriceRefreshService;
 import com.aifuturetrade.asyncservice.api.binance.BinanceFuturesClient;
-import com.binance.connector.client.derivatives_trading_usds_futures.rest.model.KlineCandlestickDataResponse;
 import com.binance.connector.client.derivatives_trading_usds_futures.rest.model.KlineCandlestickDataResponseItem;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -127,7 +126,7 @@ public class PriceRefreshServiceImpl implements PriceRefreshService {
         try {
             // 获取最近2天的日K线数据
             log.info("[PriceRefresh] 🔍 Symbol {}: 开始获取日K线数据...", symbol);
-            KlineCandlestickDataResponse klines = binanceClient.getKlines(symbol, "1d", 2);
+            List<Map<String, Object>> klines = binanceClient.getKlines(symbol, "1d", 2, null, null);
             
             log.info("[PriceRefresh] 📊 Symbol {}: 获取K线数据完成, 返回 {} 条记录", 
                     symbol, klines != null ? klines.size() : 0);
@@ -142,9 +141,9 @@ public class PriceRefreshServiceImpl implements PriceRefreshService {
             
             if (klines.size() == 1) {
                 // 如果只有1条K线，使用这条K线的开盘价
-                KlineCandlestickDataResponseItem singleKline = klines.get(0);
+                Map<String, Object> singleKline = klines.get(0);
                 log.info("[PriceRefresh] 📈 Symbol {}: 只有1条K线数据 - openTime={}, open={}, close={}", 
-                        symbol, singleKline.get(0), singleKline.get(1), singleKline.get(4));
+                        symbol, singleKline.get("open_time"), singleKline.get("open_price"), singleKline.get("close_price"));
                 
                 openPrice = extractOpenPrice(singleKline);
                 priceSource = "单条K线的开盘价";
@@ -152,12 +151,12 @@ public class PriceRefreshServiceImpl implements PriceRefreshService {
                 log.info("[PriceRefresh] 💰 Symbol {}: 提取的{} = {}", symbol, priceSource, openPrice);
             } else {
                 // 如果有2条或更多K线，使用第一条（昨天）的收盘价作为今天的开盘价
-                KlineCandlestickDataResponseItem yesterdayKline = klines.get(0);
-                KlineCandlestickDataResponseItem todayKline = klines.get(1);
+                Map<String, Object> yesterdayKline = klines.get(0);
+                Map<String, Object> todayKline = klines.get(1);
                 log.info("[PriceRefresh] 📈 Symbol {}: 昨天K线数据 - openTime={}, open={}, close={}", 
-                        symbol, yesterdayKline.get(0), yesterdayKline.get(1), yesterdayKline.get(4));
+                        symbol, yesterdayKline.get("open_time"), yesterdayKline.get("open_price"), yesterdayKline.get("close_price"));
                 log.info("[PriceRefresh] 📈 Symbol {}: 今天K线数据 - openTime={}, open={}, close={}", 
-                        symbol, todayKline.get(0), todayKline.get(1), todayKline.get(4));
+                        symbol, todayKline.get("open_time"), todayKline.get("open_price"), todayKline.get("close_price"));
                 
                 openPrice = extractClosePrice(yesterdayKline);
                 priceSource = "昨天收盘价";
