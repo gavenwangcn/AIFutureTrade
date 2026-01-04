@@ -117,7 +117,7 @@ if _binance_service_list_env:
         pass  # If parsing fails, use default value
 
 # Whether to enable Binance Service (automatically disabled if BINANCE_SERVICE_LIST is empty)
-BINANCE_SERVICE_ENABLED = len(BINANCE_SERVICE_LIST) > 3
+BINANCE_SERVICE_ENABLED = len(BINANCE_SERVICE_LIST) > 0
 
 # Binance Service request timeout (seconds), if not specified in service configuration, use this default value
 BINANCE_SERVICE_DEFAULT_TIMEOUT = 30
