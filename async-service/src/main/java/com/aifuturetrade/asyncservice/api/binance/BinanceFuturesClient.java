@@ -14,7 +14,10 @@ import com.binance.connector.client.derivatives_trading_usds_futures.rest.model.
 import com.binance.connector.client.derivatives_trading_usds_futures.rest.model.Ticker24hrPriceChangeStatisticsResponse2Inner;
 import lombok.extern.slf4j.Slf4j;
 
+import java.time.Instant;
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -330,11 +333,13 @@ public class BinanceFuturesClient extends BinanceFuturesBase {
                 long intervalMinutes = getIntervalMinutes(interval);
                 long intervalMillis = intervalMinutes * 60 * 1000;
                 
-                // 将endTime对齐到当前K线周期的开始时间（向下取整）
-                // 例如：如果当前是18:11:30，interval=1m，对齐到18:11:00
-                // 这样确保返回的K线时间跨度正好是limit * interval
-                // 第一条K线从startTime开始，最后一条K线到endTime结束
-                calculatedEndTime = (calculatedEndTime / intervalMillis) * intervalMillis;
+                // 将endTime向前跳一格（加上一个interval的时间）
+                // 例如：如果当前是18:11:30，interval=1m，则endTime=18:12:30（当前时间+1分钟）
+                // 例如：如果当前是18:11:30，interval=5m，则endTime=18:16:30（当前时间+5分钟）
+                // 例如：如果当前是18:11:30，interval=1h，则endTime=19:11:30（当前时间+1小时）
+                // 例如：如果当前是18:11:30，interval=1d，则endTime=明天18:11:30（当前时间+1天）
+                // 这样确保返回的K线数据包含最新的K线周期
+                calculatedEndTime = calculatedEndTime + intervalMillis;
                 
                 // startTime 根据 limit 和 interval 计算
                 // 例如：limit=50, interval=1m，则 startTime = endTime - 50分钟
@@ -447,13 +452,39 @@ public class BinanceFuturesClient extends BinanceFuturesBase {
                         String takerBuyBaseVolume = item.get(9);
                         String takerBuyQuoteVolume = item.get(10);
                         
+                        // 转换时间戳为日期格式（不使用时区转换，直接使用UTC时间）
+                        // 注意：open_time 和 close_time 是 UTC 时间戳（毫秒），用于API调用
+                        // open_time_dt_str 和 close_time_dt_str 是 UTC 格式的时间字符串，不包含时区信息
+                        LocalDateTime openTimeDt = null;
+                        String openTimeDtStr = null;
+                        if (openTime != null) {
+                            LocalDateTime openTimeLocal = Instant.ofEpochMilli(openTime).atZone(ZoneOffset.UTC).toLocalDateTime();
+                            openTimeDt = openTimeLocal;
+                            // 格式：2025-01-01 12:00:00（不包含时区信息）
+                            openTimeDtStr = openTimeLocal.format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"));
+                        }
+                        LocalDateTime closeTimeDt = null;
+                        String closeTimeDtStr = null;
+                        if (closeTime != null) {
+                            LocalDateTime closeTimeLocal = Instant.ofEpochMilli(closeTime).atZone(ZoneOffset.UTC).toLocalDateTime();
+                            closeTimeDt = closeTimeLocal;
+                            // 格式：2025-01-01 12:00:00（不包含时区信息）
+                            closeTimeDtStr = closeTimeLocal.format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"));
+                        }
+                        
                         klineDict.put("open_time", openTime);
+                        klineDict.put("open_time_dt", openTimeDt);
+                        // UTC格式的时间字符串（用于显示，不包含时区信息）
+                        klineDict.put("open_time_dt_str", openTimeDtStr);
                         klineDict.put("open_price", openPrice);
                         klineDict.put("high_price", highPrice);
                         klineDict.put("low_price", lowPrice);
                         klineDict.put("close_price", closePrice);
                         klineDict.put("volume", volume);
                         klineDict.put("close_time", closeTime);
+                        klineDict.put("close_time_dt", closeTimeDt);
+                        // UTC格式的时间字符串（用于显示，不包含时区信息）
+                        klineDict.put("close_time_dt_str", closeTimeDtStr);
                         klineDict.put("quote_asset_volume", quoteAssetVolume);
                         klineDict.put("number_of_trades", numberOfTrades);
                         klineDict.put("taker_buy_base_volume", takerBuyBaseVolume);
