@@ -322,8 +322,8 @@ public class BinanceFuturesClient extends BinanceFuturesBase {
             Long calculatedEndTime = endTime;
             
             if (calculatedStartTime == null || calculatedEndTime == null) {
-                // endTime 取当前时间
-                calculatedEndTime = System.currentTimeMillis();
+                // endTime 取UTC+8当前时间
+                calculatedEndTime = java.time.ZonedDateTime.now(java.time.ZoneOffset.ofHours(8)).toInstant().toEpochMilli();
                 
                 // 验证和转换limit参数（Binance API限制：1-1000）
                 Long defaultLimit = ("1d".equals(interval) || "1w".equals(interval)) ? 99L : 499L;
