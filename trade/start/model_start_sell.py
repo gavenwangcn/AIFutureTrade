@@ -263,6 +263,17 @@ def main():
     model_id = get_model_id_from_env()
     logger.info(f"Starting sell loop for model {model_id}")
     
+    # 打印数据库配置信息（详细日志）
+    import trade.common.config as app_config
+    logger.info("=" * 60)
+    logger.info("Database Configuration:")
+    logger.info(f"  MYSQL_HOST: {app_config.MYSQL_HOST}")
+    logger.info(f"  MYSQL_PORT: {app_config.MYSQL_PORT}")
+    logger.info(f"  MYSQL_USER: {app_config.MYSQL_USER}")
+    logger.info(f"  MYSQL_DATABASE: {app_config.MYSQL_DATABASE}")
+    logger.info(f"  Database Connection String: mysql://{app_config.MYSQL_USER}@{app_config.MYSQL_HOST}:{app_config.MYSQL_PORT}/{app_config.MYSQL_DATABASE}")
+    logger.info("=" * 60)
+    
     # 初始化数据库
     logger.info("Initializing database...")
     db = Database()

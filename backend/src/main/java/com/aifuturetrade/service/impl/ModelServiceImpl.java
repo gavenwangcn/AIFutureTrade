@@ -1618,6 +1618,16 @@ public class ModelServiceImpl implements ModelService {
                 envVars.put("BINANCE_SECRET_KEY", binanceApiSecret);
             }
             
+            // 打印详细的数据库配置信息（用于调试）
+            log.info("=== Container Database Configuration (Buy) ===");
+            log.info("MODEL_ID: {}", modelId);
+            log.info("MYSQL_HOST: {}", mysqlHost);
+            log.info("MYSQL_PORT: {}", mysqlPort);
+            log.info("MYSQL_USER: {}", mysqlUser);
+            log.info("MYSQL_DATABASE: {}", mysqlDatabase);
+            log.info("Database Connection: mysql://{}@{}:{}/{}", mysqlUser, mysqlHost, mysqlPort, mysqlDatabase);
+            log.info("================================================");
+            
             // 启动模型买入容器
             Map<String, Object> containerResult = dockerContainerService.startModelBuyContainer(
                     modelId, modelBuyImageName, envVars);
@@ -1689,6 +1699,16 @@ public class ModelServiceImpl implements ModelService {
             if (binanceApiSecret != null && !binanceApiSecret.isEmpty()) {
                 envVars.put("BINANCE_SECRET_KEY", binanceApiSecret);
             }
+            
+            // 打印详细的数据库配置信息（用于调试）
+            log.info("=== Container Database Configuration (Sell) ===");
+            log.info("MODEL_ID: {}", modelId);
+            log.info("MYSQL_HOST: {}", mysqlHost);
+            log.info("MYSQL_PORT: {}", mysqlPort);
+            log.info("MYSQL_USER: {}", mysqlUser);
+            log.info("MYSQL_DATABASE: {}", mysqlDatabase);
+            log.info("Database Connection: mysql://{}@{}:{}/{}", mysqlUser, mysqlHost, mysqlPort, mysqlDatabase);
+            log.info("================================================");
             
             // 启动模型卖出容器
             Map<String, Object> containerResult = dockerContainerService.startModelSellContainer(

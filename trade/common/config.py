@@ -30,7 +30,7 @@ import os
 # ============ MySQL Database Configuration ============
 
 # MySQL connection configuration
-MYSQL_HOST = os.getenv('MYSQL_HOST', 'localhost')  # MySQL server address
+MYSQL_HOST = os.getenv('MYSQL_HOST', '154.89.148.172')  # MySQL server address (default: 154.89.148.172)
 MYSQL_PORT = int(os.getenv('MYSQL_PORT', '32123'))  # MySQL server port
 MYSQL_USER = os.getenv('MYSQL_USER', 'aifuturetrade')  # MySQL username
 MYSQL_PASSWORD = os.getenv('MYSQL_PASSWORD', 'aifuturetrade123')  # MySQL password
