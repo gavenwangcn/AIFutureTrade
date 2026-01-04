@@ -156,18 +156,6 @@ class Database:
             - Does not automatically initialize table structure, need to call init_db() method
             - Uses MySQL connection information from configuration file
         """
-        # 打印数据库连接配置（详细日志）
-        import logging
-        db_logger = logging.getLogger(__name__)
-        db_logger.info("=" * 60)
-        db_logger.info("Database Connection Configuration:")
-        db_logger.info(f"  Host: {app_config.MYSQL_HOST}")
-        db_logger.info(f"  Port: {app_config.MYSQL_PORT}")
-        db_logger.info(f"  User: {app_config.MYSQL_USER}")
-        db_logger.info(f"  Database: {app_config.MYSQL_DATABASE}")
-        db_logger.info(f"  Connection String: mysql://{app_config.MYSQL_USER}@{app_config.MYSQL_HOST}:{app_config.MYSQL_PORT}/{app_config.MYSQL_DATABASE}")
-        db_logger.info("=" * 60)
-        
         # Use DBUtils connection pool
         self._pool = create_pooled_db(
             host=app_config.MYSQL_HOST,

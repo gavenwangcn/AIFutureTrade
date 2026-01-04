@@ -104,23 +104,23 @@ def get_buy_interval_seconds(db) -> int:
     minutes = max(1, min(1440, minutes))
     return minutes * 60
 
-def init_trading_engine_for_model(model_id: str, db, market_fetcher):
+def init_trading_engine_for_model(model_id_int: int, db, market_fetcher):
     """初始化指定模型的交易引擎"""
-    logger.info(f"Initializing trading engine for model {model_id}...")
+    logger.info(f"Initializing trading engine for model {model_id_int}...")
     
     models_db = ModelsDatabase(pool=db._pool if hasattr(db, '_pool') else None)
     providers_db = ProvidersDatabase(pool=db._pool if hasattr(db, '_pool') else None)
     strategys_db = StrategysDatabase(pool=db._pool if hasattr(db, '_pool') else None)
     
-    model = models_db.get_model(model_id)
+    model = models_db.get_model(model_id_int)  # get_model可以接受整数ID
     if not model:
-        logger.error(f"Model {model_id} not found, cannot initialize trading engine")
+        logger.error(f"Model {model_id_int} not found, cannot initialize trading engine")
         return None
     
     # 获取trade_type，默认为'strategy'
     trade_type = model.get('trade_type', 'strategy')
     if trade_type not in ['ai', 'strategy']:
-        logger.warning(f"Model {model_id} has invalid trade_type '{trade_type}', defaulting to 'strategy'")
+        logger.warning(f"Model {model_id_int} has invalid trade_type '{trade_type}', defaulting to 'strategy'")
         trade_type = 'strategy'
     
     # 根据trade_type创建对应的trader
@@ -128,10 +128,10 @@ def init_trading_engine_for_model(model_id: str, db, market_fetcher):
         # 使用AI交易，需要provider信息
         provider = providers_db.get_provider(model['provider_id'])
         if not provider:
-            logger.error(f"Provider not found for model {model_id}, cannot initialize AITrader")
+            logger.error(f"Provider not found for model {model_id_int}, cannot initialize AITrader")
             return None
         
-        logger.info(f"Creating AITrader instance for model {model_id} with provider {provider.get('provider_type', 'openai')} and model {model['model_name']}")
+        logger.info(f"Creating AITrader instance for model {model_id_int} with provider {provider.get('provider_type', 'openai')} and model {model['model_name']}")
         
         trader = AITrader(
             provider_type=provider.get('provider_type', 'openai'),
@@ -143,29 +143,29 @@ def init_trading_engine_for_model(model_id: str, db, market_fetcher):
         )
     else:
         # 使用策略交易（默认）
-        logger.info(f"Creating StrategyTrader instance for model {model_id}")
+        logger.info(f"Creating StrategyTrader instance for model {model_id_int}")
         
         trader = StrategyTrader(
             db=db,
-            model_id=model_id
+            model_id=model_id_int  # StrategyTrader需要整数ID
         )
     
     TRADE_FEE_RATE = getattr(app_config, 'TRADE_FEE_RATE', 0.002)
     
     engine = TradingEngine(
-        model_id=model_id,
+        model_id=model_id_int,  # TradingEngine需要整数ID
         db=db,
         market_fetcher=market_fetcher,
         trader=trader,
         trade_fee_rate=TRADE_FEE_RATE
     )
     
-    logger.info(f"Successfully initialized trading engine for model {model_id} with trade_type={trade_type}")
+    logger.info(f"Successfully initialized trading engine for model {model_id_int} with trade_type={trade_type}")
     return engine
 
-def trading_buy_loop_for_model(model_id: str, engine: TradingEngine, db):
+def trading_buy_loop_for_model(model_id_int: int, engine: TradingEngine, db):
     """单个模型的买入交易循环"""
-    logger.info(f"Trading buy loop started for model {model_id}")
+    logger.info(f"Trading buy loop started for model {model_id_int}")
     
     # 创建 ModelsDatabase 和 StrategysDatabase 实例用于模型操作
     models_db = ModelsDatabase(pool=db._pool if hasattr(db, '_pool') else None)
@@ -177,35 +177,35 @@ def trading_buy_loop_for_model(model_id: str, engine: TradingEngine, db):
         try:
             logger.info(f"\n{'='*60}")
             logger.info(f"BUY CYCLE: {datetime.now(timezone(timedelta(hours=8))).strftime('%Y-%m-%d %H:%M:%S')}")
-            logger.info(f"Model ID: {model_id}")
+            logger.info(f"Model ID: {model_id_int}")
             logger.info(f"{'='*60}")
             
-            # 检查模型的 auto_buy_enabled 字段
-            if not models_db.is_model_auto_buy_enabled(model_id):
-                logger.info(f"SKIP: Model {model_id} - auto_buy_enabled=0, skipping AI buy decision")
+            # 检查模型的 auto_buy_enabled 字段（使用整数ID）
+            if not models_db.is_model_auto_buy_enabled(model_id_int):
+                logger.info(f"SKIP: Model {model_id_int} - auto_buy_enabled=0, skipping AI buy decision")
             else:
                 # 对于 trade_type='strategy' 的模型，检查是否存在买入策略
-                model = models_db.get_model(model_id)
+                model = models_db.get_model(model_id_int)  # get_model可以接受整数ID
                 if model:
                     trade_type = model.get('trade_type', 'strategy')
                     if trade_type == 'strategy':
                         # 获取模型ID映射
                         model_mapping = models_db._get_model_id_mapping()
-                        # 查询买入策略
+                        # 查询买入策略（使用整数ID）
                         buy_strategies = strategys_db.get_model_strategies_by_int_id(
-                            model_id, 
+                            model_id_int, 
                             'buy', 
                             model_mapping
                         )
                         if not buy_strategies:
-                            logger.info(f"SKIP: Model {model_id} - trade_type=strategy but no buy strategy configured, skipping buy decision")
+                            logger.info(f"SKIP: Model {model_id_int} - trade_type=strategy but no buy strategy configured, skipping buy decision")
                         else:
                             # 执行买入决策
-                            logger.info(f"\nEXEC BUY: Model {model_id} - auto_buy_enabled=1, executing AI buy decision")
+                            logger.info(f"\nEXEC BUY: Model {model_id_int} - auto_buy_enabled=1, executing AI buy decision")
                             result = engine.execute_buy_cycle()
                             
                             if result.get('success'):
-                                logger.info(f"OK: Model {model_id} buy cycle completed")
+                                logger.info(f"OK: Model {model_id_int} buy cycle completed")
                                 if result.get('executions'):
                                     for exec_result in result['executions']:
                                         signal = exec_result.get('signal', 'unknown')
@@ -215,14 +215,14 @@ def trading_buy_loop_for_model(model_id: str, engine: TradingEngine, db):
                                             logger.info(f"  BUY TRADE: {symbol}: {msg}")
                             else:
                                 error = result.get('error', 'Unknown error')
-                                logger.warning(f"Model {model_id} buy cycle failed: {error}")
+                                logger.warning(f"Model {model_id_int} buy cycle failed: {error}")
                     else:
                         # AI交易类型，直接执行
-                        logger.info(f"\nEXEC BUY: Model {model_id} - auto_buy_enabled=1, executing AI buy decision")
+                        logger.info(f"\nEXEC BUY: Model {model_id_int} - auto_buy_enabled=1, executing AI buy decision")
                         result = engine.execute_buy_cycle()
                         
                         if result.get('success'):
-                            logger.info(f"OK: Model {model_id} buy cycle completed")
+                            logger.info(f"OK: Model {model_id_int} buy cycle completed")
                             if result.get('executions'):
                                 for exec_result in result['executions']:
                                     signal = exec_result.get('signal', 'unknown')
@@ -232,7 +232,7 @@ def trading_buy_loop_for_model(model_id: str, engine: TradingEngine, db):
                                         logger.info(f"  BUY TRADE: {symbol}: {msg}")
                         else:
                             error = result.get('error', 'Unknown error')
-                            logger.warning(f"Model {model_id} buy cycle failed: {error}")
+                            logger.warning(f"Model {model_id_int} buy cycle failed: {error}")
             
             interval_seconds = get_buy_interval_seconds(db)
             interval_minutes = interval_seconds / 60
@@ -253,7 +253,7 @@ def trading_buy_loop_for_model(model_id: str, engine: TradingEngine, db):
             logger.info("RETRY: Retrying in 60 seconds\n")
             time.sleep(60)
     
-    logger.info(f"Trading buy loop stopped for model {model_id}")
+    logger.info(f"Trading buy loop stopped for model {model_id_int}")
 
 # ============ 主程序 ============
 
@@ -287,19 +287,23 @@ def main():
         logger.error(f"Failed to initialize database tables: {e}")
         sys.exit(1)
     
+    models_db = ModelsDatabase(pool=db._pool if hasattr(db, '_pool') else None)
+    model_id_int = models_db._uuid_to_int(model_id) if isinstance(model_id, str) else model_id
+    logger.info(f"Model ID (UUID): {model_id}, Model ID (Integer): {model_id_int}")
+    
     # 初始化市场数据获取器
     logger.info("Initializing market data fetcher...")
     market_fetcher = MarketDataFetcher(db)
     
-    # 初始化交易引擎
-    engine = init_trading_engine_for_model(model_id, db, market_fetcher)
+    # 初始化交易引擎（传递整数ID）
+    engine = init_trading_engine_for_model(model_id_int, db, market_fetcher)
     if not engine:
         logger.error(f"Failed to initialize trading engine for model {model_id}")
         sys.exit(1)
     
-    # 启动买入循环
+    # 启动买入循环（传递整数ID，避免循环中重复转换）
     try:
-        trading_buy_loop_for_model(model_id, engine, db)
+        trading_buy_loop_for_model(model_id_int, engine, db)
     except KeyboardInterrupt:
         logger.info("Received interrupt signal, shutting down...")
     except Exception as e:
