@@ -215,7 +215,7 @@ docker:
 
 # MySQL配置（用于传递给模型容器）
 mysql:
-  host: ${MYSQL_HOST:193.134.209.95}
+  host: ${MYSQL_HOST:154.89.148.172}  # 默认数据库地址：154.89.148.172
   port: ${MYSQL_PORT:32123}
   user: ${MYSQL_USER:aifuturetrade}
   password: ${MYSQL_PASSWORD:aifuturetrade123}
