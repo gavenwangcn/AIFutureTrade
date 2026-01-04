@@ -211,9 +211,9 @@ def test_kline_with_endtime_only_1d():
         logger.info(f"limit: 500")
         
         response = client.rest_api.kline_candlestick_data(
-            symbol="BTCUSDT",
+            symbol="MYXUSDT",
             interval=KlineCandlestickDataIntervalEnum["INTERVAL_1d"].value,
-            limit=500,
+            limit=2,
             start_time=None,  # 不传入start_time
             end_time=end_time  # 只传入end_time
         )
@@ -367,20 +367,20 @@ if __name__ == "__main__":
     logger.info("")
     
     # 测试1: 不带时间参数
-    test_kline_without_time_params()
-    logger.info("")
+    #test_kline_without_time_params()
+    #logger.info("")
     
     # 测试4: 只带endTime参数查询1m、5m、15m K线数据（limit=120）
-    test_kline_with_endtime_only_short_intervals()
-    logger.info("")
+    #test_kline_with_endtime_only_short_intervals()
+    #logger.info("")
     
     # 测试5: 只带endTime参数查询1天K线数据（limit=120）
     test_kline_with_endtime_only_1d()
     logger.info("")
     
     # 测试6: 只带endTime参数查询1周K线数据（limit=120）
-    test_kline_with_endtime_only_1w()
-    logger.info("")
+    #test_kline_with_endtime_only_1w()
+    #logger.info("")
     
     logger.info("=" * 60)
     logger.info("测试完成")
