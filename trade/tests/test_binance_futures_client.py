@@ -180,7 +180,7 @@ def exercise_binance_futures_client(api_key: str, api_secret: str) -> None:
     #_log_sample("top_gainers", top_gainers)
 
 
-    symbols: List[str] = ["USUALUSDT", "ESPORTSUSDT", "CROSSUSDT"]
+    symbols: List[str] = ["MYXUSDT", "ESPORTSUSDT", "CROSSUSDT"]
 
     #logging.info("Testing get_24h_ticker()...")
     #ticker_24h = client.get_24h_ticker(symbols)
@@ -191,14 +191,14 @@ def exercise_binance_futures_client(api_key: str, api_secret: str) -> None:
     #_log_sample("symbol_prices", symbol_prices)
 
     logging.info("Testing get_klines()...")
-    klines = client.get_klines(symbol="BTCUSDT", interval="1m", limit=5)
+    klines = client.get_klines(symbol="MYXUSDT", interval="1m", limit=5)
     _log_sample("klines", klines)
 
     # 获取今天和昨天的日K线数据，使用limit=2验证是否能获取两条K线
     logging.info("Testing get_klines() for today and yesterday daily data with limit=2...")
     
     # 获取最近两天的日K线数据
-    klines_daily = client.get_klines(symbol="BTCUSDT", interval="1d", limit=2)
+    klines_daily = client.get_klines(symbol="MYXUSDT", interval="1d", limit=2)
     
     # 打印结果
     logging.info(f"Daily klines count: {len(klines_daily)}")
@@ -221,39 +221,7 @@ def exercise_binance_futures_client(api_key: str, api_secret: str) -> None:
         logging.info("Successfully retrieved 2 daily klines as expected")
     else:
         logging.warning(f"Expected 2 daily klines, but got {len(klines_daily)}")
-
-    # 测试技术指标计算功能
-    logging.info("Testing calculate_technical_indicators()...")
-    try:
-        # 导入MarketDataFetcher类
-        from trade.market.market_data import MarketDataFetcher
-        from trade.common.database.database_market_tickers import MarketTickersDatabase
-        import json
         
-        # 创建MarketDataFetcher实例（需要数据库连接）
-        # 由于这是一个测试脚本，我们创建一个简单的数据库实例
-        db = MarketTickersDatabase()
-        market_fetcher = MarketDataFetcher(db)
-        
-        # 设置币安期货客户端
-        market_fetcher._futures_client = client
-        
-        # 计算BTC的技术指标
-        indicators = market_fetcher.calculate_technical_indicators("BTC")
-        
-        # 打印完整的接口返回值JSON格式
-        logging.info("=" * 80)
-        logging.info("calculate_technical_indicators() 返回值 (JSON格式):")
-        logging.info("=" * 80)
-        if indicators:
-            logging.info(json.dumps(indicators, default=str, ensure_ascii=False))
-        else:
-            logging.warning("返回值为空或None")
-        logging.info("=" * 80)
-            
-    except Exception as e:
-        logging.error(f"Error calculating technical indicators: {e}", exc_info=True)
-
     logging.info("All BinanceFuturesClient method calls completed.")
 
 
