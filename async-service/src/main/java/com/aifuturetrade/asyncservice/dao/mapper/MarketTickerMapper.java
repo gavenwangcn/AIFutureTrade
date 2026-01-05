@@ -56,15 +56,15 @@ public interface MarketTickerMapper extends BaseMapper<MarketTickerDO> {
 
     /**
      * 查询需要刷新价格的symbol列表
-     * 条件：update_price_date为空或超过1小时未更新
+     * 条件：update_price_date为空或超过10分钟未更新
      * 
-     * @param utc8Time UTC+8时间，用于计算1小时前的时间
+     * @param utc8Time UTC+8时间，用于计算10分钟前的时间
      * @return symbol列表
      */
     @Select("SELECT DISTINCT `symbol` " +
             "FROM `24_market_tickers` " +
             "WHERE `update_price_date` IS NULL " +
-            "   OR `update_price_date` < DATE_SUB(#{utc8Time}, INTERVAL 1 HOUR) " +
+            "   OR `update_price_date` < DATE_SUB(#{utc8Time}, INTERVAL 10 MINUTE) " +
             "ORDER BY `symbol`")
     List<String> selectSymbolsNeedingPriceRefresh(@Param("utc8Time") LocalDateTime utc8Time);
 
