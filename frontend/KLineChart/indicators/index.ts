@@ -17,20 +17,26 @@
 import { registerIndicator } from '../src/extension/indicator/index'
 
 import ma from './ma'
+import ema from './ema'
 import macd from './macd'
 import rsi from './rsi'
 import vol from './vol'
+import kdj from './kdj'
 
 // 注册自定义指标
 registerIndicator(ma)
+registerIndicator(ema)
 registerIndicator(macd)
 registerIndicator(rsi)
 registerIndicator(vol)
+registerIndicator(kdj)
 
 export {
   ma,
+  ema,
   macd,
   rsi,
-  vol
+  vol,
+  kdj
 }
 

@@ -5,6 +5,20 @@
         <div class="kline-modal-header">
           <h3>{{ title }}</h3>
           <div class="kline-toolbar">
+            <div class="kline-indicator-buttons">
+              <button
+                :class="{ 'indicator-btn': true, 'active': currentIndicator === 'MA' }"
+                @click="handleIndicatorChange('MA')"
+              >
+                MA
+              </button>
+              <button
+                :class="{ 'indicator-btn': true, 'active': currentIndicator === 'EMA' }"
+                @click="handleIndicatorChange('EMA')"
+              >
+                EMA
+              </button>
+            </div>
             <div class="kline-timeframes">
               <button
                 v-for="tf in timeframes"
@@ -70,6 +84,7 @@ const currentInterval = ref(props.interval)
 const title = ref(`${props.symbol} - K线图`)
 const isInitializing = ref(false) // 标记是否正在初始化
 const initTimeoutId = ref(null) // 存储初始化定时器ID
+const currentIndicator = ref('MA') // 当前显示的指标：'MA' 或 'EMA'
 
 // 时间周期配置
 // KLineChart 10.0.0 使用 { span: number, type: string } 格式
@@ -228,10 +243,11 @@ const initChart = async () => {
     // 设置数据加载器
     chartInstance.value.setDataLoader(dataLoader.value)
 
-    // 创建默认指标
-    chartInstance.value.createIndicator('MA', false, { id: 'candle_pane' })
+    // 创建默认指标（根据当前选中的指标类型）
+    chartInstance.value.createIndicator(currentIndicator.value, false, { id: 'candle_pane' })
     chartInstance.value.createIndicator('VOL', false)
     chartInstance.value.createIndicator('MACD', false)
+    chartInstance.value.createIndicator('KDJ', false)
     chartInstance.value.createIndicator('RSI', false)
 
     console.log('[KLineChart] Chart initialized successfully')
@@ -242,6 +258,27 @@ const initChart = async () => {
     isInitializing.value = false
     initTimeoutId.value = null
   }
+}
+
+// 处理指标切换
+const handleIndicatorChange = (indicator) => {
+  if (!chartInstance.value || currentIndicator.value === indicator) {
+    return
+  }
+
+  // 移除当前指标
+  chartInstance.value.removeIndicator({ 
+    name: currentIndicator.value, 
+    paneId: 'candle_pane' 
+  })
+
+  // 创建新指标
+  chartInstance.value.createIndicator(indicator, false, { id: 'candle_pane' })
+
+  // 更新当前指标状态
+  currentIndicator.value = indicator
+
+  console.log(`[KLineChart] Indicator switched to: ${indicator}`)
 }
 
 // 处理时间周期切换
@@ -381,7 +418,7 @@ onUnmounted(() => {
   border-radius: 8px;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
   width: 80%;
-  height: 85vh;
+  height: 98vh;
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -390,14 +427,14 @@ onUnmounted(() => {
 @media (max-width: 1200px) {
   .kline-modal-content {
     width: 85%;
-    height: 90vh;
+    height: 98vh;
   }
 }
 
 @media (max-width: 768px) {
   .kline-modal-content {
     width: 95%;
-    height: 95vh;
+    height: 98vh;
   }
 }
 
@@ -420,6 +457,33 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   gap: 16px;
+}
+
+.kline-indicator-buttons {
+  display: flex;
+  gap: 8px;
+  margin-right: 8px;
+}
+
+.indicator-btn {
+  padding: 6px 12px;
+  border: 1px solid #ddd;
+  background: #fff;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 14px;
+  transition: all 0.2s;
+  font-weight: 500;
+}
+
+.indicator-btn:hover {
+  background: #f5f5f5;
+}
+
+.indicator-btn.active {
+  background: #1677ff;
+  color: white;
+  border-color: #1677ff;
 }
 
 .kline-timeframes {
