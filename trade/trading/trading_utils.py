@@ -61,31 +61,60 @@ def calculate_quantity_with_risk(
     """
     根据可用现金和风险预算计算交易数量
     
+    该函数实现了基于风险控制的交易数量计算逻辑，确保：
+    1. 不超过可用现金限制
+    2. 符合风险预算要求（默认最大3%风险暴露）
+    3. 考虑交易费用的影响
+    4. 对无效请求数量进行合理调整
+    
     Args:
-        available_cash: 可用现金
-        price: 当前价格
-        trade_fee_rate: 交易费率
-        requested_quantity: 请求的数量
-        risk_budget_pct: 风险预算百分比（默认3%）
+        available_cash: 可用现金（交易账户中的可用资金）
+        price: 当前价格（交易对的最新成交价格）
+        trade_fee_rate: 交易费率（单边费率，如0.001表示0.1%）
+        requested_quantity: 请求的数量（模型建议的交易数量）
+        risk_budget_pct: 风险预算百分比（默认3%，即最大风险暴露不超过可用现金的3%）
     
     Returns:
         Tuple[float, Optional[str]]: (计算后的数量, 错误信息)
     """
+    # 基本检查：可用现金必须大于0
     if available_cash <= 0:
         return 0, '可用现金不足，无法买入'
     
+    # 计算最大可承受数量（考虑交易费用）
+    # 公式：可用现金 ÷ (价格 × (1 + 交易费率))
+    # 说明：购买数量需要考虑手续费，确保总支出（数量×价格×(1+费率)）不超过可用现金
     max_affordable_qty = available_cash / (price * (1 + trade_fee_rate))
+    
+    # 计算风险百分比：限制在1%~5%之间
+    # 说明：将用户输入的百分比转换为小数，并确保在安全范围内
+    # - 最低1%：避免过度保守的交易
+    # - 最高5%：控制单笔交易的最大风险暴露
     risk_pct = min(max(risk_budget_pct / 100, 0.01), 0.05)
+    
+    # 计算基于风险的数量
+    # 公式：(可用现金 × 风险百分比) ÷ (价格 × (1 + 交易费率))
+    # 说明：根据风险预算计算的最大允许交易数量，确保单笔交易风险可控
     risk_based_qty = (available_cash * risk_pct) / (price * (1 + trade_fee_rate))
     
+    # 处理请求数量：转换为整数
+    # 说明：加密货币交易通常要求整数数量，小数部分会被截断
     quantity = int(float(requested_quantity))
+    
+    # 检查请求数量是否有效：
+    # 1. 必须大于0
+    # 2. 不能超过最大可承受数量
     if quantity <= 0 or quantity > max_affordable_qty:
+        # 调整数量：取最大可承受数量和风险基数量中的较小值
+        # 说明：确保交易既符合资金限制，又符合风险控制要求
         adjusted_qty = min(max_affordable_qty, risk_based_qty if risk_based_qty > 0 else max_affordable_qty)
         quantity = int(adjusted_qty)
     
+    # 最终检查：调整后的数量必须大于0
     if quantity <= 0:
         return 0, '现金不足，无法买入'
     
+    # 返回计算后的数量（整数）和无错误信息
     return quantity, None
 
 
