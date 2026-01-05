@@ -122,7 +122,7 @@ class MarketDataManager:
                 query_symbol = symbol_upper
             
             try:
-                logger.debug(f"[Model {self.model_id}] [批次 {batch_num}] 正在获取 {symbol_upper} ({query_symbol}) 的技术指标...")
+                logger.info(f"[Model {self.model_id}] [批次 {batch_num}] 正在获取 {symbol_upper} ({query_symbol}) 的技术指标...")
                 merged_data = self._merge_timeframe_data(query_symbol)
                 timeframes_data = merged_data.get(query_symbol, {}) if merged_data else {}
                 

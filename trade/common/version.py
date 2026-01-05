@@ -1,5 +1,5 @@
 """
-Version information for AIStockTrade
+Version information 
 """
 __version__ = "0.0.1"
 __author__ = "eric8417"
