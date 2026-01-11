@@ -39,3 +39,8 @@ docker run --rm -it --net=container:aifuturetrade-async-service alpine sh -c "ap
 
 http://156.254.6.176:5004/api/market-data/klines?symbol=MYXUSDT&interval=1d&limit=2
 
+docker stop $(docker ps -q --filter "name=buy-*")
+docker rm $(docker ps -a -q -f "name=buy-*")
+docker stop $(docker ps -q --filter "name=sell-*")
+docker rm $(docker ps -a -q -f "name=sell-*")
+
