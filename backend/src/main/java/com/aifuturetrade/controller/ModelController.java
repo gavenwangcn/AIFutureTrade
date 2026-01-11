@@ -212,9 +212,9 @@ public class ModelController {
     @PostMapping("/{modelId}/max_positions")
     @Operation(summary = "更新模型的最大持仓数量")
     public ResponseEntity<Map<String, Object>> updateModelMaxPositions(@PathVariable(value = "modelId") String modelId, @RequestBody Map<String, Object> requestBody) {
-        log.info("[ModelController] 更新模型最大持仓数量请求: modelId={}, requestBody={}", modelId, requestBody);
+        log.debug("[ModelController] 更新模型最大持仓数量请求: modelId={}, requestBody={}", modelId, requestBody);
         Object maxPositionsObj = requestBody.get("max_positions");
-        log.info("[ModelController] 从requestBody获取的max_positions值: value={}, type={}, isNull={}", 
+        log.debug("[ModelController] 从requestBody获取的max_positions值: value={}, type={}, isNull={}", 
                 maxPositionsObj, 
                 maxPositionsObj != null ? maxPositionsObj.getClass().getName() : "null",
                 maxPositionsObj == null);
@@ -243,9 +243,9 @@ public class ModelController {
             errorResult.put("message", "Invalid max_positions type: " + maxPositionsObj.getClass().getName());
             return new ResponseEntity<>(errorResult, HttpStatus.BAD_REQUEST);
         }
-        log.info("[ModelController] 解析后的max_positions值: {}", maxPositions);
+        log.debug("[ModelController] 解析后的max_positions值: {}", maxPositions);
         Map<String, Object> result = modelService.updateModelMaxPositions(modelId, maxPositions);
-        log.info("[ModelController] 更新模型最大持仓数量完成: modelId={}, maxPositions={}, result={}", modelId, maxPositions, result);
+        log.debug("[ModelController] 更新模型最大持仓数量完成: modelId={}, maxPositions={}, result={}", modelId, maxPositions, result);
         return new ResponseEntity<>(result, HttpStatus.OK);
     }
 
