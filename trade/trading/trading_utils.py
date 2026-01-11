@@ -55,66 +55,72 @@ def calculate_quantity_with_risk(
     available_cash: float,
     price: float,
     trade_fee_rate: float,
-    requested_quantity: float,
-    risk_budget_pct: float = 3.0
+    requested_quantity_usdt: float,
+    risk_budget_pct: float = 3.0,
+    leverage: int = 1
 ) -> Tuple[float, Optional[str]]:
     """
-    根据可用现金和风险预算计算交易数量
+    根据可用现金、风险预算和杠杆计算实际买入数量（合约数量）
     
-    该函数实现了基于风险控制的交易数量计算逻辑，确保：
-    1. 不超过可用现金限制
-    2. 符合风险预算要求（默认最大3%风险暴露）
-    3. 考虑交易费用的影响
-    4. 对无效请求数量进行合理调整
+    新的杠杆交易逻辑：
+    1. requested_quantity_usdt 是USDT数量（账户可用资金），不是合约数量
+    2. 杠杆放大可使用资金倍数
+    3. 实际买入数量 = (可用资金 * 本金比例 * 杠杆) / symbol市价
+    4. 本金 = 可用资金 * 本金比例
     
     Args:
-        available_cash: 可用现金（交易账户中的可用资金）
+        available_cash: 可用现金（交易账户中的可用资金，USDT）
         price: 当前价格（交易对的最新成交价格）
         trade_fee_rate: 交易费率（单边费率，如0.001表示0.1%）
-        requested_quantity: 请求的数量（模型建议的交易数量）
+        requested_quantity_usdt: 请求的USDT数量（模型建议的USDT数量，不是合约数量）
         risk_budget_pct: 风险预算百分比（默认3%，即最大风险暴露不超过可用现金的3%）
+        leverage: 杠杆倍数（默认1倍）
     
     Returns:
-        Tuple[float, Optional[str]]: (计算后的数量, 错误信息)
+        Tuple[float, Optional[str]]: (实际买入的合约数量, 错误信息)
     """
     # 基本检查：可用现金必须大于0
     if available_cash <= 0:
         return 0, '可用现金不足，无法买入'
     
-    # 计算最大可承受数量（考虑交易费用）
-    # 公式：可用现金 ÷ (价格 × (1 + 交易费率))
-    # 说明：购买数量需要考虑手续费，确保总支出（数量×价格×(1+费率)）不超过可用现金
-    max_affordable_qty = available_cash / (price * (1 + trade_fee_rate))
+    if price <= 0:
+        return 0, '价格无效，无法买入'
     
-    # 计算风险百分比：限制在1%~5%之间
+    if leverage <= 0:
+        return 0, '杠杆倍数无效'
+    
+    # 计算风险百分比：限制在1%~100%之间
     # 说明：将用户输入的百分比转换为小数，并确保在安全范围内
-    # - 最低1%：避免过度保守的交易
-    # - 最高5%：控制单笔交易的最大风险暴露
-    risk_pct = min(max(risk_budget_pct / 100, 0.01), 0.05)
+    risk_pct = min(max(risk_budget_pct / 100, 0.01), 1.0)
     
-    # 计算基于风险的数量
-    # 公式：(可用现金 × 风险百分比) ÷ (价格 × (1 + 交易费率))
-    # 说明：根据风险预算计算的最大允许交易数量，确保单笔交易风险可控
-    risk_based_qty = (available_cash * risk_pct) / (price * (1 + trade_fee_rate))
+    # 如果请求的USDT数量有效，使用请求的数量；否则使用风险预算
+    if requested_quantity_usdt > 0:
+        # 使用请求的USDT数量，但不能超过可用现金
+        capital_usdt = min(requested_quantity_usdt, available_cash)
+    else:
+        # 使用风险预算计算本金
+        capital_usdt = available_cash * risk_pct
     
-    # 处理请求数量：转换为整数
-    # 说明：加密货币交易通常要求整数数量，小数部分会被截断
-    quantity = int(float(requested_quantity))
+    # 确保本金不超过可用现金
+    capital_usdt = min(capital_usdt, available_cash)
     
-    # 检查请求数量是否有效：
-    # 1. 必须大于0
-    # 2. 不能超过最大可承受数量
-    if quantity <= 0 or quantity > max_affordable_qty:
-        # 调整数量：取最大可承受数量和风险基数量中的较小值
-        # 说明：确保交易既符合资金限制，又符合风险控制要求
-        adjusted_qty = min(max_affordable_qty, risk_based_qty if risk_based_qty > 0 else max_affordable_qty)
-        quantity = int(adjusted_qty)
+    if capital_usdt <= 0:
+        return 0, '本金不足，无法买入'
+    
+    # 计算杠杆后的可使用资金
+    leveraged_capital = capital_usdt * leverage
+    
+    # 计算实际买入的合约数量 = 杠杆后资金 / 价格
+    actual_quantity = leveraged_capital / price
+    
+    # 转换为整数（合约数量必须是整数）
+    quantity = int(actual_quantity)
     
     # 最终检查：调整后的数量必须大于0
     if quantity <= 0:
-        return 0, '现金不足，无法买入'
+        return 0, '计算后的合约数量为0，无法买入'
     
-    # 返回计算后的数量（整数）和无错误信息
+    # 返回计算后的合约数量（整数）和无错误信息
     return quantity, None
 
 
@@ -155,26 +161,42 @@ def calculate_trade_requirements(
     quantity: float,
     price: float,
     leverage: int,
-    trade_fee_rate: float
-) -> Tuple[float, float, float]:
+    trade_fee_rate: float,
+    capital_usdt: float
+) -> Tuple[float, float, float, float]:
     """
-    计算交易所需资金
+    计算交易所需资金（新的杠杆交易逻辑）
+    
+    新的逻辑：
+    1. 交易金额 = 合约数量 * 价格（杠杆后的总价值）
+    2. 手续费 = 交易金额 * 交易费率（双向收费，买入和卖出各收一次）
+    3. initial_margin（本金）= capital_usdt（使用的本金USDT数量）
+    4. 总消耗资金 = 本金 + 手续费（手续费只算到本金上，不算到杠杆后的总金额）
     
     Args:
-        quantity: 数量
+        quantity: 实际买入的合约数量
         price: 价格
-        leverage: 杠杆
-        trade_fee_rate: 交易费率
+        leverage: 杠杆倍数
+        trade_fee_rate: 交易费率（单边费率，如0.001表示0.1%）
+        capital_usdt: 使用的本金USDT数量（不是杠杆后的金额）
     
     Returns:
-        Tuple[float, float, float]: (交易金额, 手续费, 所需保证金)
+        Tuple[float, float, float, float]: (交易金额, 买入手续费, 卖出手续费, initial_margin本金)
     """
+    # 交易金额 = 合约数量 * 价格（这是杠杆后的总价值）
     trade_amount = quantity * price
-    trade_fee = trade_amount * trade_fee_rate
-    required_margin = trade_amount / leverage
-    total_required = required_margin + trade_fee
     
-    return trade_amount, trade_fee, total_required
+    # 买入手续费 = 交易金额 * 交易费率
+    buy_fee = trade_amount * trade_fee_rate
+    
+    # 卖出手续费 = 交易金额 * 交易费率（双向收费）
+    sell_fee = trade_amount * trade_fee_rate
+    
+    # initial_margin（本金）= capital_usdt（使用的本金USDT数量）
+    # 四舍五入保留两位小数
+    initial_margin = round(capital_usdt, 2)
+    
+    return trade_amount, buy_fee, sell_fee, initial_margin
 
 
 def calculate_pnl(

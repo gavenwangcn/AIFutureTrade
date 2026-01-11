@@ -85,10 +85,6 @@ BINANCE_SERVICE_LIST = [
     #     "base_url": "http://localhost:5004",  # Binance Service base URL
     #     "timeout": 30,  # Request timeout (seconds), default 30 seconds
     # },
-     {
-         "base_url": "http://109.206.245.131:5004",
-         "timeout": 30,
-     },
     {
          "base_url": "http://156.254.6.176:5004",
          "timeout": 30,

@@ -2502,21 +2502,48 @@ class TradingEngine:
         if available_cash <= 0:
             return {'symbol': symbol, 'error': '可用现金不足，无法买入'}
         
-        # 使用工具函数计算交易数量
-        risk_budget_pct = float(decision.get('risk_budget_pct', 3))
-        quantity, error_msg = calculate_quantity_with_risk(
-            available_cash, price, self.trade_fee_rate, quantity, risk_budget_pct
-        )
-        if error_msg:
-            return {'symbol': symbol, 'error': error_msg}
-
+        # 【新的杠杆交易逻辑】
+        # decision中的quantity是合约数量，需要根据USDT、杠杆和价格计算
+        # AI模型应该返回：quantity = (USDT数量 * leverage) / symbol价格
+        requested_quantity = float(decision.get('quantity', 0))  # 合约数量
+        
+        if requested_quantity <= 0:
+            return {'symbol': symbol, 'error': '请求的合约数量无效'}
+        
+        # 根据合约数量反推需要的本金USDT数量
+        # 公式：capital_usdt = (quantity * price) / leverage
+        # 这是因为：quantity = (capital_usdt * leverage) / price
+        # 所以：capital_usdt = (quantity * price) / leverage
+        required_capital_usdt = (requested_quantity * price) / leverage
+        
+        # 验证需要的本金是否超过可用资金
+        if required_capital_usdt > available_cash:
+            return {'symbol': symbol, 'error': f'可用资金不足，需要 {required_capital_usdt:.2f} USDT，但只有 {available_cash:.2f} USDT'}
+        
+        # 使用的本金USDT数量
+        capital_usdt = required_capital_usdt
+        
         # 使用工具函数计算交易所需资金
-        trade_amount, trade_fee, total_required = calculate_trade_requirements(
-            quantity, price, leverage, self.trade_fee_rate
+        trade_amount, buy_fee, sell_fee, initial_margin = calculate_trade_requirements(
+            requested_quantity, price, leverage, self.trade_fee_rate, capital_usdt
         )
+        
+        # 总消耗资金 = 本金 + 买入手续费（手续费只算到本金上）
+        total_required = initial_margin + buy_fee
         
         if total_required > available_cash:
             return {'symbol': symbol, 'error': '可用资金不足（含手续费）'}
+        
+        # position_amt = 买入 symbol 合约的数量（合约数量），四舍五入保留两位小数
+        position_amt = round(requested_quantity, 2)
+        
+        # quantity = 使用的 USDT 数量（本金放大杠杆后的数值），四舍五入保留两位小数
+        # 用于 trades 表记录
+        quantity = round(capital_usdt * leverage, 2)
+        
+        # 总手续费 = 买入手续费 + 卖出手续费（用于记录）
+        trade_fee = buy_fee + sell_fee
+        # initial_margin 四舍五入保留两位小数（已在 calculate_trade_requirements 中处理）
 
         # 【确定SDK调用的side参数】统一使用BUY（开多和开空都使用BUY）
         # positionSide参数会根据signal自动确定（LONG或SHORT）
@@ -2545,9 +2572,10 @@ class TradingEngine:
                           f" | symbol={symbol} | leverage={leverage}")
                 
                 # 然后执行交易
+                # SDK 调用时使用合约数量（position_amt），不是 USDT 数量（quantity）
                 logger.info(f"@API@ [Model {self.model_id}] [market_trade] === 准备调用接口 ===" 
                           f" | symbol={symbol} | side={sdk_side} | position_side={position_side} | "
-                          f"quantity={quantity} | price={price} | leverage={leverage}")
+                          f"quantity={position_amt} (合约数量) | price={price} | leverage={leverage}")
                 
                 conversation_id = self._get_conversation_id()
                 
@@ -2556,7 +2584,7 @@ class TradingEngine:
                     side=sdk_side,
                     order_type='MARKET',
                     position_side=position_side,
-                    quantity=quantity,
+                    quantity=position_amt,  # SDK 使用合约数量
                     model_id=model_uuid,
                     conversation_id=conversation_id,
                     trade_id=trade_id,
@@ -2572,10 +2600,13 @@ class TradingEngine:
             sdk_call_skipped, sdk_skip_reason = self._handle_sdk_client_error(symbol, 'market_trade')
 
         # 【更新持仓】使用根据signal自动确定的position_side
+        # 传递 initial_margin（本金）到数据库
+        # position_amt = 合约数量，quantity = 杠杆后的 USDT 数量
         try:
             self._update_position(
-                self.model_id, symbol=symbol, position_amt=quantity, avg_price=price, 
-                leverage=leverage, position_side=position_side  # 使用根据signal自动确定的position_side
+                self.model_id, symbol=symbol, position_amt=position_amt, avg_price=price, 
+                leverage=leverage, position_side=position_side,  # 使用根据signal自动确定的position_side
+                initial_margin=initial_margin  # 传递本金（使用的USDT数量）
             )
         except Exception as db_err:
             logger.error(f"TRADE: Update position failed ({trade_signal.upper()}) model={self.model_id} future={symbol}: {db_err}")
@@ -2585,7 +2616,9 @@ class TradingEngine:
         trade_side = 'buy'  # 统一使用buy
         
         # 记录交易
-        logger.info(f"TRADE: PENDING - Model {self.model_id} {trade_signal.upper()} {symbol} position_side={position_side} qty={quantity} price={price} fee={trade_fee}")
+        # quantity = 杠杆后的 USDT 数量（用于 trades 表）
+        # position_amt = 合约数量（用于 portfolios 表）
+        logger.info(f"TRADE: PENDING - Model {self.model_id} {trade_signal.upper()} {symbol} position_side={position_side} quantity={quantity} USDT (杠杆后), position_amt={position_amt} (合约数量), price={price} fee={trade_fee}")
         try:
             self.db.insert_rows(
                 self.db.trades_table,
@@ -2613,12 +2646,13 @@ class TradingEngine:
         return {
             'symbol': symbol,
             'signal': trade_signal,  # 返回实际的signal（buy_to_long或buy_to_short）
-            'position_amt': quantity,
+            'position_amt': position_amt,  # 合约数量
+            'quantity': quantity,  # 杠杆后的 USDT 数量
             'position_side': position_side,  # 返回position_side信息
             'price': price,
             'leverage': leverage,
             'fee': trade_fee,
-            'message': f'开仓 {symbol} {position_side} {quantity:.4f} @ ${price:.2f} (手续费: ${trade_fee:.2f})'
+            'message': f'开仓 {symbol} {position_side} 合约数量={position_amt:.2f}, USDT数量={quantity:.2f} @ ${price:.2f} (手续费: ${trade_fee:.2f})'
         }
 
     def _execute_sell(self, symbol: str, decision: Dict, market_state: Dict, portfolio: Dict) -> Dict:
@@ -2658,8 +2692,8 @@ class TradingEngine:
         
         current_price = market_state[symbol]['price']
         entry_price = position.get('avg_price', 0)
-        # 确保position_amt为整数（去除小数部分）
-        position_amt = int(abs(position.get('position_amt', 0)))
+        # position_amt 四舍五入保留两位小数
+        position_amt = round(abs(position.get('position_amt', 0)), 2)
         
         if position_amt <= 0:
             return {'symbol': symbol, 'error': '持仓数量为0，无法平仓'}
@@ -2809,8 +2843,8 @@ class TradingEngine:
 
         current_price = market_state[symbol]['price']
         entry_price = position.get('avg_price', 0)
-        # 确保position_amt为整数（去除小数部分）
-        position_amt = int(abs(position.get('position_amt', 0)))
+        # position_amt 四舍五入保留两位小数
+        position_amt = round(abs(position.get('position_amt', 0)), 2)
         position_side = position.get('position_side', 'LONG')
 
         # 使用工具函数计算盈亏
@@ -3017,6 +3051,14 @@ class TradingEngine:
             logger.error(f"TRADE: Add trade failed (STOP_LOSS) model={self.model_id} symbol={symbol}: {db_err}")
             raise
         
+        # 更新 portfolios 表：止损单触发时会平仓，需要更新持仓记录
+        try:
+            self._close_position(self.model_id, symbol=symbol, position_side=position_side)
+            logger.info(f"TRADE: Updated portfolios - Model {self.model_id} STOP_LOSS {symbol} position_side={position_side}")
+        except Exception as db_err:
+            logger.error(f"TRADE: Close position failed (STOP_LOSS) model={self.model_id} future={symbol}: {db_err}")
+            raise
+        
         # 每次交易后立即记录账户价值快照
         try:
             # 使用工具函数从market_state中提取价格字典
@@ -3138,6 +3180,14 @@ class TradingEngine:
             logger.error(f"TRADE: Add trade failed (TAKE_PROFIT) model={self.model_id} symbol={symbol}: {db_err}")
             raise
         self._log_trade_record('take_profit', symbol, position_side, sdk_call_skipped, sdk_skip_reason)
+        
+        # 更新 portfolios 表：止盈单触发时会平仓，需要更新持仓记录
+        try:
+            self._close_position(self.model_id, symbol=symbol, position_side=position_side)
+            logger.info(f"TRADE: Updated portfolios - Model {self.model_id} TAKE_PROFIT {symbol} position_side={position_side}")
+        except Exception as db_err:
+            logger.error(f"TRADE: Close position failed (TAKE_PROFIT) model={self.model_id} future={symbol}: {db_err}")
+            raise
         
         # 每次交易后立即记录账户价值快照
         try:

@@ -225,27 +225,35 @@ class GeneratedSellStrategy(StrategyBaseSell):
                 # self.log.info(f"{symbol} 多单平仓条件判断: 价格/MA(99)={condition_value:.4f}, 阈值=0.98, 结果={condition_value < 0.98}")
                 # 
                 # if position_side == 'LONG' and 满足多单平仓条件:
-                #     self.log.info(f"{symbol} 多单满足平仓条件（价格={current_price:.4f} < 0.98*MA(99)={0.98*ma99_value:.4f}），准备平仓")
+                #     # ⚠️ 重要：quantity 是合约数量（平仓数量），不是 USDT 数量
+                #     # 从持仓中获取合约数量
+                #     position_amt = abs(position.get('position_amt', 0))  # 持仓合约数量
+                #     # 平仓100%（或根据策略规则平仓部分）
+                #     close_quantity = position_amt  # 或 position_amt * 0.5（平仓50%）
+                #     self.log.info(f"{symbol} 多单满足平仓条件（价格={current_price:.4f} < 0.98*MA(99)={0.98*ma99_value:.4f}），准备平仓 {close_quantity} 个合约")
                 #     decisions[symbol] = {
                 #         "signal": "close_position",  # 或 "stop_loss" 或 "take_profit"
-                #         "quantity": position_amt,
+                #         "quantity": close_quantity,  # 合约数量，不是 USDT 数量
                 #         "price": current_price,
                 #         "stop_price": trigger_price,
-                #         "leverage": position.get('leverage', 5),
+                #         "leverage": position.get('leverage', 5),  # 使用持仓时的杠杆
                 #         "justification": "理由"
                 #     }
-                #     self.log.info(f"{symbol} 平仓决策已添加: signal={decisions[symbol]['signal']}, quantity={decisions[symbol]['quantity']}")
+                #     self.log.info(f"{symbol} 平仓决策已添加: signal={decisions[symbol]['signal']}, quantity={decisions[symbol]['quantity']} 个合约")
                 # elif position_side == 'SHORT' and 满足空单平仓条件:
-                #     self.log.info(f"{symbol} 空单满足平仓条件（价格={current_price:.4f} > 1.02*MA(99)={1.02*ma99_value:.4f}），准备平仓")
+                #     # ⚠️ 重要：quantity 是合约数量（平仓数量），不是 USDT 数量
+                #     position_amt = abs(position.get('position_amt', 0))  # 持仓合约数量
+                #     close_quantity = position_amt  # 或 position_amt * 0.5（平仓50%）
+                #     self.log.info(f"{symbol} 空单满足平仓条件（价格={current_price:.4f} > 1.02*MA(99)={1.02*ma99_value:.4f}），准备平仓 {close_quantity} 个合约")
                 #     decisions[symbol] = {
                 #         "signal": "close_position",  # 或 "stop_loss" 或 "take_profit"
-                #         "quantity": position_amt,
+                #         "quantity": close_quantity,  # 合约数量，不是 USDT 数量
                 #         "price": current_price,
                 #         "stop_price": trigger_price,
-                #         "leverage": position.get('leverage', 5),
+                #         "leverage": position.get('leverage', 5),  # 使用持仓时的杠杆
                 #         "justification": "理由"
                 #     }
-                #     self.log.info(f"{symbol} 平仓决策已添加: signal={decisions[symbol]['signal']}, quantity={decisions[symbol]['quantity']}")
+                #     self.log.info(f"{symbol} 平仓决策已添加: signal={decisions[symbol]['signal']}, quantity={decisions[symbol]['quantity']} 个合约")
                 # else:
                 #     self.log.info(f"{symbol} 不满足任何平仓条件，跳过")
             except Exception as e:
@@ -351,14 +359,68 @@ klines_1h = timeframes.get('1h', {}).get('klines', [])
 {
     "SYMBOL": {
         "signal": "close_position" | "stop_loss" | "take_profit",  # 必须
-        "quantity": 100,                                            # 必须：数量
+        "quantity": 100,                                            # 必须：合约数量（平仓数量），不是USDT数量
         "price": 0.0345,                                            # 可选：期望价格
         "stop_price": 0.0325,                                       # 必须：止损/止盈触发价格
-        "leverage": 5,                                              # 必须：杠杆倍数
+        "leverage": 5,                                              # 必须：杠杆倍数（通常与持仓的杠杆一致）
         "justification": "理由说明"                                 # 必须：理由
     }
 }
 ```
+
+**⚠️ 重要：关于 quantity 字段和杠杆的说明（关键）：**
+
+### quantity 字段说明（卖出决策）：
+- **quantity 是合约数量（平仓数量），不是 USDT 数量**
+- **quantity 表示要平仓的合约数量**
+- **通常使用 `position.get('position_amt', 0)` 获取持仓数量**
+
+### 平仓逻辑：
+1. **获取持仓信息**：从 `portfolio.get('positions', [])` 中获取对应 symbol 的持仓
+2. **获取持仓数量**：`position_amt = position.get('position_amt', 0)`（合约数量）
+3. **确定平仓数量**：
+   - 平仓100%：`quantity = position_amt`
+   - 平仓50%：`quantity = position_amt * 0.5`
+   - 平仓部分：`quantity = position_amt * 平仓比例`
+4. **杠杆**：通常与持仓时的杠杆一致，从 `position.get('leverage', 5)` 获取
+
+### 完整示例：
+**示例：平仓全部持仓**
+```python
+# 获取持仓
+position = next((p for p in positions if p.get('symbol') == symbol), None)
+position_amt = abs(position.get('position_amt', 0))  # 持仓合约数量
+
+# 平仓100%
+decisions[symbol] = {
+    "signal": "close_position",
+    "quantity": position_amt,  # 合约数量
+    "leverage": position.get('leverage', 5),  # 使用持仓时的杠杆
+    "justification": "满足平仓条件"
+}
+```
+
+**示例：平仓50%持仓**
+```python
+# 获取持仓
+position = next((p for p in positions if p.get('symbol') == symbol), None)
+position_amt = abs(position.get('position_amt', 0))  # 持仓合约数量
+
+# 平仓50%
+close_pct = 0.5
+decisions[symbol] = {
+    "signal": "close_position",
+    "quantity": position_amt * close_pct,  # 合约数量（50%）
+    "leverage": position.get('leverage', 5),  # 使用持仓时的杠杆
+    "justification": "满足平仓条件，平仓50%"
+}
+```
+
+### 注意事项：
+- **quantity 必须是合约数量，不能是 USDT 数量**
+- **quantity 不能超过持仓数量**：`quantity <= position_amt`
+- **杠杆应该与持仓时的杠杆一致**，从 `position.get('leverage', 5)` 获取
+- **系统会自动计算平仓时的 USDT 数量**：`quantity * 当前价格`
 
 ### 5. 代码质量要求
 
@@ -383,6 +445,13 @@ klines_1h = timeframes.get('1h', {}).get('klines', [])
 - 正确计算技术指标（如 MA(99)）
 - 正确判断平仓条件（根据持仓方向 LONG/SHORT）
 - 正确处理多单和空单的不同平仓逻辑
+- **平仓数量计算（重要）**：
+  - **quantity 字段是合约数量，不是 USDT 数量**
+  - 从持仓中获取：`position_amt = abs(position.get('position_amt', 0))`
+  - 平仓100%：`quantity = position_amt`
+  - 平仓部分：`quantity = position_amt * 平仓比例`
+  - **杠杆**：使用持仓时的杠杆 `position.get('leverage', 5)`
+  - **系统会自动计算平仓时的 USDT 数量**：`quantity * 当前价格`
 - **必须初始化 decisions = {} 在方法开始处**
 - **必须确保所有代码路径都返回 decisions 字典**
 - **建议使用 try-except 处理异常，确保异常时返回空字典而不是抛出异常**
@@ -405,6 +474,13 @@ klines_1h = timeframes.get('1h', {}).get('klines', [])
 - **execute_sell_decision**: 根据持仓方向（LONG/SHORT）检查对应的平仓条件
 - 使用 `talib.SMA()` 计算 MA(99)，需要至少 99 根 K 线数据
 - 根据持仓方向判断：多单（LONG）和空单（SHORT）有不同的平仓条件
+- **平仓数量计算（重要）**：
+  - **quantity 字段是合约数量，不是 USDT 数量**
+  - 从持仓中获取：`position_amt = abs(position.get('position_amt', 0))`
+  - 平仓100%：`quantity = position_amt`
+  - 平仓部分：`quantity = position_amt * 平仓比例`
+  - **杠杆**：使用持仓时的杠杆 `position.get('leverage', 5)`
+  - **系统会自动计算平仓时的 USDT 数量**：`quantity * 当前价格`
 - **数据获取**：统一使用 `market_state` 获取技术指标数据
 - **返回值**：必须初始化 `decisions = {}`，必须返回字典，不能返回 None
 - **异常处理**：建议使用 try-except 包装主要逻辑，确保异常时返回空字典

@@ -226,23 +226,40 @@ class GeneratedBuyStrategy(StrategyBaseBuy):
                 # self.log.info(f"{symbol} 开多条件判断: 价格/MA(99)={condition_value:.4f}, 阈值=1.02, 结果={condition_value > 1.02}")
                 # 
                 # if 满足开多条件:
-                #     self.log.info(f"{symbol} 满足开多条件（价格={current_price:.4f} > 1.02*MA(99)={1.02*ma99_value:.4f}），准备开多单")
+                #     # ⚠️ 重要：quantity 是合约数量，需要根据 USDT、杠杆和价格计算
+                #     # 计算公式：quantity = (USDT数量 * leverage) / symbol价格
+                #     available_cash = portfolio.get('cash', 0)
+                #     capital_pct = 0.5  # 使用50%本金
+                #     capital_usdt = available_cash * capital_pct  # USDT数量（本金）
+                #     leverage = 5  # 杠杆倍数
+                #     # 计算合约数量
+                #     quantity = (capital_usdt * leverage) / current_price
+                #     quantity = round(quantity, 2)  # 四舍五入保留两位小数
+                #     self.log.info(f"{symbol} 满足开多条件（价格={current_price:.4f} > 1.02*MA(99)={1.02*ma99_value:.4f}），准备开多单，使用本金={capital_usdt:.2f} USDT，杠杆={leverage}，计算合约数量={quantity:.2f}")
                 #     decisions[symbol] = {
                 #         "signal": "buy_to_long",
-                #         "quantity": 100,
-                #         "leverage": 5,
+                #         "quantity": quantity,  # 合约数量
+                #         "leverage": leverage,
                 #         "justification": "理由"
                 #     }
-                #     self.log.info(f"{symbol} 开多单决策已添加: quantity={decisions[symbol]['quantity']}, leverage={decisions[symbol]['leverage']}")
+                #     self.log.info(f"{symbol} 开多单决策已添加: quantity={decisions[symbol]['quantity']:.2f} 个合约, leverage={decisions[symbol]['leverage']}")
                 # elif 满足开空条件:
-                #     self.log.info(f"{symbol} 满足开空条件（价格={current_price:.4f} <= 0.98*MA(99)={0.98*ma99_value:.4f}），准备开空单")
+                #     # ⚠️ 重要：quantity 是合约数量，需要根据 USDT、杠杆和价格计算
+                #     available_cash = portfolio.get('cash', 0)
+                #     capital_pct = 0.5  # 使用50%本金
+                #     capital_usdt = available_cash * capital_pct  # USDT数量（本金）
+                #     leverage = 5  # 杠杆倍数
+                #     # 计算合约数量
+                #     quantity = (capital_usdt * leverage) / current_price
+                #     quantity = round(quantity, 2)  # 四舍五入保留两位小数
+                #     self.log.info(f"{symbol} 满足开空条件（价格={current_price:.4f} <= 0.98*MA(99)={0.98*ma99_value:.4f}），准备开空单，使用本金={capital_usdt:.2f} USDT，杠杆={leverage}，计算合约数量={quantity:.2f}")
                 #     decisions[symbol] = {
                 #         "signal": "buy_to_short",
-                #         "quantity": 100,
-                #         "leverage": 5,
+                #         "quantity": quantity,  # 合约数量
+                #         "leverage": leverage,
                 #         "justification": "理由"
                 #     }
-                #     self.log.info(f"{symbol} 开空单决策已添加: quantity={decisions[symbol]['quantity']}, leverage={decisions[symbol]['leverage']}")
+                #     self.log.info(f"{symbol} 开空单决策已添加: quantity={decisions[symbol]['quantity']:.2f} 个合约, leverage={decisions[symbol]['leverage']}")
                 # else:
                 #     self.log.info(f"{symbol} 不满足任何开仓条件，跳过")
             except Exception as e:
@@ -367,11 +384,83 @@ klines_1h = timeframes.get('1h', {}).get('klines', [])
 {
     "SYMBOL": {
         "signal": "buy_to_long" | "buy_to_short",  # 必须
-        "quantity": 100,                              # 必须：数量
+        "quantity": 5.0,                             # 必须：合约数量，需要根据USDT、杠杆和价格计算
         "leverage": 5,                                # 必须：杠杆倍数
         "justification": "理由说明"                   # 必须：理由
     }
 }
+```
+
+**⚠️ 重要：关于 quantity 字段和杠杆交易逻辑的说明（关键）：**
+
+### quantity 字段说明：
+- **quantity 是合约数量**
+- **quantity 需要根据 USDT 数量、杠杆倍数和 symbol 价格计算**
+- **计算公式：quantity（合约数量）= (USDT数量 * leverage) / symbol价格**
+
+### 杠杆交易逻辑：
+1. **确定使用的本金 USDT 数量**：根据策略决定使用多少 USDT（如 50 USDT 或可用资金的 25%）
+2. **杠杆（leverage）**：放大倍数，如 10 倍杠杆
+3. **计算合约数量（quantity）**：`quantity = (USDT数量 * leverage) / symbol价格`
+4. **系统验证**：系统会根据 quantity 反推需要的本金，验证是否足够（包括手续费）
+5. **initial_margin（本金）**：`(quantity * price) / leverage`（系统自动计算）
+
+### 完整计算示例：
+**示例1：使用固定 USDT 数量**
+- 可用资金 = 200 USDT
+- 使用本金 = 50 USDT
+- leverage = 10 倍
+- symbol价格 = 100 USDT
+- **计算过程：**
+  - quantity（合约数量）= (50 * 10) / 100 = 5 个合约
+  - 系统验证：需要的本金 = (5 * 100) / 10 = 50 USDT ✓
+  - initial_margin（本金）= 50 USDT
+  - **结果：**quantity = 5（合约数量），使用 50 USDT 本金，通过 10 倍杠杆
+
+**示例2：使用部分本金（如25%）**
+- 可用资金 = 200 USDT
+- 使用比例 = 25%
+- leverage = 10 倍
+- symbol价格 = 100 USDT
+- **计算过程：**
+  - 使用本金 = 200 * 25% = 50 USDT
+  - quantity（合约数量）= (50 * 10) / 100 = 5 个合约
+  - 系统验证：需要的本金 = (5 * 100) / 10 = 50 USDT ✓
+  - initial_margin（本金）= 50 USDT
+  - **结果：**quantity = 5（合约数量），使用 50 USDT 本金（占可用资金的25%），通过 10 倍杠杆
+
+### 代码实现要点：
+```python
+# 获取可用资金和当前价格
+available_cash = portfolio.get('cash', 0)
+current_price = market_state.get(symbol, {}).get('price', 0)
+
+# 方式1：使用固定 USDT 数量
+capital_usdt = 50.0  # 使用 50 USDT 本金
+leverage = 10
+quantity = (capital_usdt * leverage) / current_price  # 计算合约数量
+
+# 方式2：使用百分比（推荐）
+capital_pct = 0.25  # 使用25%本金
+capital_usdt = available_cash * capital_pct  # USDT数量
+leverage = 10
+quantity = (capital_usdt * leverage) / current_price  # 计算合约数量
+
+# 四舍五入保留两位小数
+quantity = round(quantity, 2)
+
+# 添加到决策
+decisions[symbol] = {
+    "signal": "buy_to_long",
+    "quantity": quantity,  # 合约数量
+    "leverage": leverage,
+    "justification": "理由"
+}
+
+# 系统会自动：
+# - 根据 quantity 反推需要的本金：capital_usdt = (quantity * price) / leverage
+# - 验证本金是否足够（包括手续费）
+# - 计算 initial_margin = capital_usdt（本金）
 ```
 
 **如果没有决策，返回空字典：**
@@ -418,7 +507,23 @@ def execute_buy_decision(...):
 - 严格按照 strategy_context 中的买入策略规则实现
 - 正确计算技术指标（如 MA(99)）
 - 正确判断开仓条件（开多单或开空单）
-- 正确设置仓位比例（如 50% 仓位）
+- **仓位计算（重要）**：
+  - 50% 仓位 = `portfolio.get('cash', 0) * 0.5`（USDT数量，本金）
+  - **quantity 字段是合约数量，需要根据 USDT、杠杆和价格计算**
+  - **计算公式：quantity（合约数量）= (USDT数量 * leverage) / symbol价格**
+  - **计算步骤：**
+    1. 确定使用的本金 USDT 数量（如 50 USDT 或可用资金的 25%）
+    2. 计算合约数量：`quantity = (USDT数量 * leverage) / symbol价格`
+    3. 四舍五入保留两位小数：`quantity = round(quantity, 2)`
+  - **系统会自动：**
+    - 根据 quantity 反推需要的本金：`需要的本金 = (quantity * price) / leverage`
+    - 验证本金是否足够（包括手续费）
+    - 计算 initial_margin = 需要的本金（USDT数量）
+    - trades 表中的 quantity = `需要的本金 * leverage`（杠杆后的 USDT 数量）
+  - **示例：** 使用本金 = 50 USDT, leverage = 10, 价格 = 100
+    - quantity（合约数量）= (50 * 10) / 100 = 5 个
+    - 系统验证：需要的本金 = (5 * 100) / 10 = 50 USDT ✓
+    - initial_margin = 50 USDT
 - 正确处理多单和空单的不同逻辑
 - **必须初始化 decisions = {} 在方法开始处**
 - **必须确保所有代码路径都返回 decisions 字典**
@@ -436,8 +541,22 @@ def execute_buy_decision(...):
 实现要点：
 - **execute_buy_decision**: 检查开多单条件（价格 > 1.02 × MA(99)）和开空单条件（价格 ≤ 0.98 × MA(99)）
 - 使用 `talib.SMA()` 计算 MA(99)，需要至少 99 根 K 线数据
-- 仓位计算：50% 仓位需要根据 `portfolio.get('cash', 0)` 和当前价格计算
-- 杠杆：统一使用 5 倍杠杆
+- **仓位计算（重要）**：
+  - 50% 仓位 = `portfolio.get('cash', 0) * 0.5`（USDT数量，本金）
+  - **quantity 字段是合约数量，需要根据 USDT、杠杆和价格计算**
+  - **计算公式：quantity（合约数量）= (USDT数量 * leverage) / symbol价格**
+  - **系统会根据 quantity 反推需要的本金并验证**
+  - **计算流程：**
+    1. 确定使用的本金 USDT 数量（如 50 USDT 或可用资金的 25%）
+    2. 计算合约数量：`quantity = (USDT数量 * leverage) / symbol价格`
+    3. 系统反推验证：`需要的本金 = (quantity * price) / leverage`
+    4. initial_margin（本金）= 需要的本金（USDT数量）
+    5. trades 表中的 quantity = `需要的本金 * leverage`（杠杆后的 USDT 数量）
+  - **示例：** 使用本金 = 50 USDT, leverage = 5, 价格 = 100
+    - quantity（合约数量）= (50 * 5) / 100 = 2.5 个（四舍五入保留两位小数）
+    - 系统验证：需要的本金 = (2.5 * 100) / 5 = 50 USDT ✓
+    - initial_margin = 50 USDT
+- 杠杆：统一使用 5 倍杠杆（或根据策略规则设置）
 - **数据获取**：统一使用 `market_state` 获取技术指标数据
 - **返回值**：必须初始化 `decisions = {}`，必须返回字典，不能返回 None
 - **异常处理**：建议使用 try-except 包装主要逻辑，确保异常时返回空字典
