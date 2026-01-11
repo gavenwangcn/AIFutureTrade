@@ -472,11 +472,11 @@ public class AiProviderServiceImpl implements AiProviderService {
                 try {
                     JsonNode usageMetadata = jsonNode.get("usageMetadata");
                     if (usageMetadata != null) {
-                        int promptTokenCount = usageMetadata.has("promptTokenCount") ? usageMetadata.get("promptTokenCount").asInt() : 0;
+                        int apiPromptTokenCount = usageMetadata.has("promptTokenCount") ? usageMetadata.get("promptTokenCount").asInt() : 0;
                         int candidatesTokenCount = usageMetadata.has("candidatesTokenCount") ? usageMetadata.get("candidatesTokenCount").asInt() : 0;
                         int totalTokenCount = usageMetadata.has("totalTokenCount") ? usageMetadata.get("totalTokenCount").asInt() : 0;
                         log.info("[Gemini API] Token使用情况: prompt_tokens={}, candidates_tokens={}, total_tokens={}", 
-                                promptTokenCount, candidatesTokenCount, totalTokenCount);
+                                apiPromptTokenCount, candidatesTokenCount, totalTokenCount);
                     }
                 } catch (Exception e) {
                     log.debug("[Gemini API] 无法解析token使用信息: {}", e.getMessage());
