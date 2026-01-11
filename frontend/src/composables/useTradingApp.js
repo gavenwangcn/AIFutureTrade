@@ -105,6 +105,7 @@ const lastPortfolioSymbolsRefreshTime = ref(null) // 持仓合约列表最后刷
     model_name: '',
     leverage: 10,
     max_positions: 3,
+    auto_close_percent: null,
     buy_batch_size: 1,
     buy_batch_execution_interval: 60,
     buy_batch_execution_group_size: 1,
@@ -2213,6 +2214,7 @@ let portfolioSymbolsRefreshInterval = null // 模型持仓合约列表自动刷�
           model_name: localModel.model_name || '',
           leverage: localModel.leverage || 10,
           max_positions: localModel.max_positions || 3,
+          auto_close_percent: localModel.auto_close_percent || null,
           buy_batch_size: localModel.buy_batch_size || 1,
           buy_batch_execution_interval: localModel.buy_batch_execution_interval || 60,
           buy_batch_execution_group_size: localModel.buy_batch_execution_group_size || 1,
@@ -2317,10 +2319,12 @@ let portfolioSymbolsRefreshInterval = null // 模型持仓合约列表自动刷�
         promises.push(modelApi.updateProvider(pendingModelSettingsId.value, providerId, modelName))
       }
       
-      // 更新杠杆和最大持仓数量
+      // 更新杠杆、最大持仓数量和自动平仓百分比
+      const autoClosePercentValue = tempModelSettings.value.auto_close_percent
       promises.push(
         modelApi.setLeverage(pendingModelSettingsId.value, leverageValue),
-        modelApi.setMaxPositions(pendingModelSettingsId.value, maxPositionsValue)
+        modelApi.setMaxPositions(pendingModelSettingsId.value, maxPositionsValue),
+        modelApi.setAutoClosePercent(pendingModelSettingsId.value, autoClosePercentValue || null)
       )
       
       // 更新批次配置

@@ -87,6 +87,7 @@ class DatabaseInitializer:
             `leverage` TINYINT UNSIGNED DEFAULT 10,
             `auto_buy_enabled` TINYINT UNSIGNED DEFAULT 1,
             `auto_sell_enabled` TINYINT UNSIGNED DEFAULT 1,
+            `auto_close_percent` DOUBLE DEFAULT NULL COMMENT '自动平仓百分比（当损失本金达到此百分比时自动平仓，0-100，NULL表示不启用）',
             `max_positions` TINYINT UNSIGNED DEFAULT 3,
             `buy_batch_size` INT UNSIGNED DEFAULT 1,
             `buy_batch_execution_interval` INT UNSIGNED DEFAULT 60,
@@ -128,6 +129,10 @@ class DatabaseInitializer:
             `updated_at` DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
             UNIQUE KEY `uk_model_symbol_side` (`model_id`, `symbol`, `position_side`),
             INDEX `idx_model_id` (`model_id`),
+            INDEX `idx_symbol` (`symbol`),
+            INDEX `idx_model_symbol` (`model_id`, `symbol`),
+            INDEX `idx_position_amt` (`position_amt`),
+            INDEX `idx_created_at` (`created_at`),
             INDEX `idx_updated_at` (`updated_at`)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
         """
@@ -150,7 +155,10 @@ class DatabaseInitializer:
             `fee` DOUBLE DEFAULT 0,
             `timestamp` DATETIME DEFAULT CURRENT_TIMESTAMP,
             INDEX `idx_model_timestamp` (`model_id`, `timestamp`),
-            INDEX `idx_future` (`future`)
+            INDEX `idx_future` (`future`),
+            INDEX `idx_signal` (`signal`),
+            INDEX `idx_side` (`side`),
+            INDEX `idx_timestamp` (`timestamp`)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
         """
         self.command(ddl)
@@ -206,6 +214,7 @@ class DatabaseInitializer:
             `cross_un_pnl` DOUBLE DEFAULT 0.0,
             `timestamp` DATETIME DEFAULT CURRENT_TIMESTAMP,
             INDEX `idx_model_timestamp` (`model_id`, `timestamp`),
+            INDEX `idx_model_alias_timestamp` (`model_id`, `account_alias`, `timestamp`),
             INDEX `idx_timestamp` (`timestamp`)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
         """
@@ -384,7 +393,9 @@ class DatabaseInitializer:
             `updated_at` DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
             INDEX `idx_name` (`name`),
             INDEX `idx_type` (`type`),
-            INDEX `idx_created_at` (`created_at`)
+            INDEX `idx_type_created_at` (`type`, `created_at`),
+            INDEX `idx_created_at` (`created_at`),
+            INDEX `idx_updated_at` (`updated_at`)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
         """
         self.command(ddl)
@@ -427,6 +438,7 @@ class DatabaseInitializer:
             `justification` TEXT COMMENT 'Trigger reason (nullable)',
             `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP,
             INDEX `idx_model_id` (`model_id`),
+            INDEX `idx_model_created_at` (`model_id`, `created_at`),
             INDEX `idx_strategy_name` (`strategy_name`),
             INDEX `idx_strategy_type` (`strategy_type`),
             INDEX `idx_signal` (`signal`),

@@ -230,6 +230,31 @@ public class ModelController {
     }
 
     /**
+     * 更新模型的自动平仓百分比
+     * @param modelId 模型ID
+     * @param requestBody 请求体，包含auto_close_percent
+     * @return 更新操作结果
+     */
+    @PostMapping("/{modelId}/auto_close_percent")
+    @Operation(summary = "更新模型的自动平仓百分比")
+    public ResponseEntity<Map<String, Object>> updateModelAutoClosePercent(@PathVariable(value = "modelId") String modelId, @RequestBody Map<String, Object> requestBody) {
+        Object autoClosePercentObj = requestBody.get("auto_close_percent");
+        Double autoClosePercent = null;
+        if (autoClosePercentObj != null) {
+            if (autoClosePercentObj instanceof Number) {
+                autoClosePercent = ((Number) autoClosePercentObj).doubleValue();
+            } else if (autoClosePercentObj instanceof String) {
+                String str = (String) autoClosePercentObj;
+                if (!str.isEmpty()) {
+                    autoClosePercent = Double.parseDouble(str);
+                }
+            }
+        }
+        Map<String, Object> result = modelService.updateModelAutoClosePercent(modelId, autoClosePercent);
+        return new ResponseEntity<>(result, HttpStatus.OK);
+    }
+
+    /**
      * 更新模型的API提供方和模型名称
      * @param modelId 模型ID
      * @param requestBody 请求体，包含provider_id和model_name

@@ -148,6 +148,12 @@ public class ModelDO implements Serializable {
     private Boolean autoSellEnabled;
 
     /**
+     * 自动平仓百分比（当损失本金达到此百分比时自动平仓）
+     */
+    @TableField("auto_close_percent")
+    private Double autoClosePercent;
+
+    /**
      * 创建时间
      */
     @TableField("created_at")

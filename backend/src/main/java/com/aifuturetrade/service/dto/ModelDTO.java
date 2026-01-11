@@ -128,6 +128,11 @@ public class ModelDTO implements Serializable {
     private Boolean autoSellEnabled;
 
     /**
+     * 自动平仓百分比（当损失本金达到此百分比时自动平仓）
+     */
+    private Double autoClosePercent;
+
+    /**
      * 创建时间
      */
     private LocalDateTime createdAt;

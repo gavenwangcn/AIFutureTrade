@@ -146,6 +146,14 @@ public interface ModelService {
     Map<String, Object> updateModelLeverage(String modelId, Integer leverage);
 
     /**
+     * 更新模型的自动平仓百分比
+     * @param modelId 模型ID（UUID格式）
+     * @param autoClosePercent 自动平仓百分比（0-100，null表示不启用）
+     * @return 更新结果
+     */
+    Map<String, Object> updateModelAutoClosePercent(String modelId, Double autoClosePercent);
+
+    /**
      * 更新模型的API提供方和模型名称
      * @param modelId 模型ID（UUID格式）
      * @param providerId 新的API提供方ID（UUID格式）

@@ -38,6 +38,11 @@
       <small class="form-help">同时持有的最大交易对数量，默认为3</small>
     </div>
     <div class="form-group">
+      <label>自动平仓百分比</label>
+      <input v-model.number="formData.autoClosePercent" type="number" class="form-input" min="0" max="100" step="0.1" />
+      <small class="form-help">当损失本金达到此百分比时自动平仓（例如：10 表示损失10%本金时自动平仓）。留空或0表示不启用自动平仓。</small>
+    </div>
+    <div class="form-group">
       <label>选择账户 <span style="color: red;">*</span></label>
       <select v-model="formData.accountAlias" class="form-input" required>
         <option value="">请选择账户</option>
@@ -163,6 +168,7 @@ const formData = ref({
   displayName: '',
   initialCapital: 100000,
   maxPositions: 3,  // 默认最大持仓数量为3
+  autoClosePercent: null,  // 自动平仓百分比，默认不启用
   accountAlias: '',
   isVirtual: true,  // 默认值为 true（虚拟账户）
   symbolSource: 'leaderboard',  // 默认使用涨跌榜
@@ -247,6 +253,7 @@ const handleSubmit = async () => {
       name: formData.value.displayName,
       initialCapital: formData.value.initialCapital,
       maxPositions: formData.value.maxPositions,
+      autoClosePercent: formData.value.autoClosePercent || null,
       accountAlias: formData.value.accountAlias,
       isVirtual: formData.value.isVirtual,
       symbolSource: formData.value.symbolSource,
@@ -277,6 +284,7 @@ const clearForm = () => {
     displayName: '',
     initialCapital: 100000,
     maxPositions: 3,  // 重置为默认值3
+    autoClosePercent: null,  // 重置为默认值
     accountAlias: '',
     isVirtual: true,  // 重置为默认值 true（虚拟账户）
     symbolSource: 'leaderboard',  // 重置为默认值

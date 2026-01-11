@@ -7,7 +7,6 @@ import com.aifuturetrade.service.MarketService;
 import com.aifuturetrade.service.dto.ModelDTO;
 import com.aifuturetrade.common.util.PageResult;
 import com.aifuturetrade.common.util.PageRequest;
-import com.aifuturetrade.common.api.trade.TradeServiceClient;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
@@ -1310,6 +1309,42 @@ public class ModelServiceImpl implements ModelService {
         } catch (Exception e) {
             log.error("[ModelService] 更新模型杠杆倍数失败: {}", e.getMessage(), e);
             throw new RuntimeException("更新模型杠杆倍数失败: " + e.getMessage(), e);
+        }
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public Map<String, Object> updateModelAutoClosePercent(String modelId, Double autoClosePercent) {
+        log.debug("[ModelService] 更新模型自动平仓百分比, modelId={}, autoClosePercent={}", modelId, autoClosePercent);
+        try {
+            // 验证参数：null 或 0 表示不启用，否则必须在 0-100 之间
+            if (autoClosePercent != null && (autoClosePercent < 0 || autoClosePercent > 100)) {
+                throw new IllegalArgumentException("auto_close_percent must be between 0 and 100, or null to disable");
+            }
+            
+            ModelDO model = modelMapper.selectModelById(modelId);
+            if (model == null) {
+                throw new RuntimeException("Model not found");
+            }
+            
+            UpdateWrapper<ModelDO> updateWrapper = new UpdateWrapper<>();
+            updateWrapper.eq("id", modelId);
+            // 如果值为 null 或 0，设置为 null（不启用）
+            if (autoClosePercent == null || autoClosePercent == 0) {
+                updateWrapper.set("auto_close_percent", null);
+            } else {
+                updateWrapper.set("auto_close_percent", autoClosePercent);
+            }
+            modelMapper.update(null, updateWrapper);
+            
+            Map<String, Object> result = new HashMap<>();
+            result.put("success", true);
+            result.put("model_id", modelId);
+            result.put("auto_close_percent", autoClosePercent);
+            return result;
+        } catch (Exception e) {
+            log.error("[ModelService] 更新模型自动平仓百分比失败: {}", e.getMessage(), e);
+            throw new RuntimeException("更新模型自动平仓百分比失败: " + e.getMessage(), e);
         }
     }
 

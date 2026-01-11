@@ -860,6 +860,19 @@
               <small class="form-help">设置该模型最多可以同时持有的合约数量，默认为3。</small>
             </div>
             <div class="form-group">
+              <label for="settingsAutoClosePercentInput">自动平仓百分比</label>
+              <input 
+                type="number" 
+                id="settingsAutoClosePercentInput" 
+                class="form-input" 
+                min="0" 
+                max="100" 
+                step="0.1"
+                v-model.number="tempModelSettings.auto_close_percent"
+              >
+              <small class="form-help">当损失本金达到此百分比时自动平仓（例如：10 表示损失10%本金时自动平仓）。留空或0表示不启用自动平仓。</small>
+            </div>
+            <div class="form-group">
               <label style="font-weight: 600; margin-bottom: 12px; display: block;">买入批次配置</label>
               <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px;">
                 <div>

@@ -98,6 +98,11 @@ export const modelApi = {
   setMaxPositions: (modelId, maxPositions) => apiPost(`/api/models/${modelId}/max_positions`, { max_positions: maxPositions }),
 
   /**
+   * 设置自动平仓百分比
+   */
+  setAutoClosePercent: (modelId, autoClosePercent) => apiPost(`/api/models/${modelId}/auto_close_percent`, { auto_close_percent: autoClosePercent }),
+
+  /**
    * 更新模型的API提供方和模型名称
    */
   updateProvider: (modelId, providerId, modelName) => apiPut(`/api/models/${modelId}/provider`, { provider_id: providerId, model_name: modelName }),
