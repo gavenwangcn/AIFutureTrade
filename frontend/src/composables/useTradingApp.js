@@ -2300,7 +2300,7 @@ let portfolioSymbolsRefreshInterval = null // 模型持仓合约列表自动刷�
     }
     
     // 验证最大持仓数量
-    if (!maxPositionsValue || maxPositionsValue < 1 || !Number.isInteger(maxPositionsValue)) {
+    if (maxPositionsValue === null || maxPositionsValue === undefined || maxPositionsValue < 1 || !Number.isInteger(maxPositionsValue)) {
       alert('请输入有效的最大持仓数量（必须 >= 1 的整数）')
       return
     }
@@ -2321,9 +2321,11 @@ let portfolioSymbolsRefreshInterval = null // 模型持仓合约列表自动刷�
       
       // 更新杠杆、最大持仓数量和自动平仓百分比
       const autoClosePercentValue = tempModelSettings.value.auto_close_percent
+      // 确保 maxPositionsValue 是有效的整数
+      const validMaxPositions = Number.isInteger(maxPositionsValue) ? maxPositionsValue : Math.floor(maxPositionsValue)
       promises.push(
         modelApi.setLeverage(pendingModelSettingsId.value, leverageValue),
-        modelApi.setMaxPositions(pendingModelSettingsId.value, maxPositionsValue),
+        modelApi.setMaxPositions(pendingModelSettingsId.value, validMaxPositions),
         modelApi.setAutoClosePercent(pendingModelSettingsId.value, autoClosePercentValue || null)
       )
       
@@ -2363,7 +2365,8 @@ let portfolioSymbolsRefreshInterval = null // 模型持仓合约列表自动刷�
       alert('模型设置已保存')
     } catch (error) {
       console.error('[TradingApp] Error saving model settings:', error)
-      alert('保存模型设置失败')
+      const errorMessage = error?.response?.data?.message || error?.message || '保存模型设置失败'
+      alert(`保存模型设置失败: ${errorMessage}`)
     } finally {
       savingModelSettings.value = false
     }

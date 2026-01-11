@@ -11,6 +11,7 @@ import com.aifuturetrade.common.util.PageRequest;
 import com.aifuturetrade.dao.mapper.ModelStrategyMapper;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -24,6 +25,7 @@ import java.util.Map;
  * 控制器：交易模型
  * 处理交易模型相关的HTTP请求
  */
+@Slf4j
 @RestController
 @RequestMapping("/api/models")
 @Tag(name = "交易模型管理", description = "交易模型管理接口")
@@ -210,8 +212,40 @@ public class ModelController {
     @PostMapping("/{modelId}/max_positions")
     @Operation(summary = "更新模型的最大持仓数量")
     public ResponseEntity<Map<String, Object>> updateModelMaxPositions(@PathVariable(value = "modelId") String modelId, @RequestBody Map<String, Object> requestBody) {
-        Integer maxPositions = ((Number) requestBody.get("max_positions")).intValue();
+        log.info("[ModelController] 更新模型最大持仓数量请求: modelId={}, requestBody={}", modelId, requestBody);
+        Object maxPositionsObj = requestBody.get("max_positions");
+        log.info("[ModelController] 从requestBody获取的max_positions值: value={}, type={}, isNull={}", 
+                maxPositionsObj, 
+                maxPositionsObj != null ? maxPositionsObj.getClass().getName() : "null",
+                maxPositionsObj == null);
+        if (maxPositionsObj == null) {
+            Map<String, Object> errorResult = new HashMap<>();
+            errorResult.put("success", false);
+            errorResult.put("message", "max_positions is required");
+            return new ResponseEntity<>(errorResult, HttpStatus.BAD_REQUEST);
+        }
+        Integer maxPositions;
+        if (maxPositionsObj instanceof Number) {
+            maxPositions = ((Number) maxPositionsObj).intValue();
+        } else if (maxPositionsObj instanceof String) {
+            try {
+                maxPositions = Integer.parseInt((String) maxPositionsObj);
+            } catch (NumberFormatException e) {
+                Map<String, Object> errorResult = new HashMap<>();
+                errorResult.put("success", false);
+                errorResult.put("message", "Invalid max_positions format: " + maxPositionsObj);
+                return new ResponseEntity<>(errorResult, HttpStatus.BAD_REQUEST);
+            }
+        } else {
+            log.warn("[ModelController] max_positions类型无效: type={}, value={}", maxPositionsObj.getClass().getName(), maxPositionsObj);
+            Map<String, Object> errorResult = new HashMap<>();
+            errorResult.put("success", false);
+            errorResult.put("message", "Invalid max_positions type: " + maxPositionsObj.getClass().getName());
+            return new ResponseEntity<>(errorResult, HttpStatus.BAD_REQUEST);
+        }
+        log.info("[ModelController] 解析后的max_positions值: {}", maxPositions);
         Map<String, Object> result = modelService.updateModelMaxPositions(modelId, maxPositions);
+        log.info("[ModelController] 更新模型最大持仓数量完成: modelId={}, maxPositions={}, result={}", modelId, maxPositions, result);
         return new ResponseEntity<>(result, HttpStatus.OK);
     }
 
