@@ -54,12 +54,17 @@ def execute_buy_decision(
 - 参数顺序必须完全一致
 - 参数类型注解必须完全一致
 
-**完整示例代码结构：**
+**完整示例代码结构（包含详细注释）：**
 ```python
 from trade.strategy.strategy_template_buy import StrategyBaseBuy
 from typing import Dict, List
 
 class GeneratedBuyStrategy(StrategyBaseBuy):
+    """
+    买入策略类
+    
+    根据策略规则（strategy_context）生成买入决策，包括开多单和开空单。
+    """
     def execute_buy_decision(
         self,
         candidates: List[Dict],
@@ -67,13 +72,27 @@ class GeneratedBuyStrategy(StrategyBaseBuy):
         account_info: Dict,
         market_state: Dict
     ) -> Dict[str, Dict]:
+        """
+        执行买入决策
+        
+        参数:
+            candidates: 候选交易对列表，每个元素包含 symbol、price 等信息
+            portfolio: 持仓组合信息，包含 cash（可用资金）、positions（持仓列表）等
+            account_info: 账户信息
+            market_state: 市场状态字典，包含各交易对的价格、成交量、技术指标等数据
+        
+        返回:
+            Dict[str, Dict]: 买入决策字典，key为交易对符号，value为决策详情
+                格式: {"SYMBOL": {"signal": "buy_to_long", "quantity": 5.0, "leverage": 10, "justification": "理由"}}
+                如果没有决策，返回空字典 {}
+        """
         # ⚠️ 重要：必须初始化decisions字典，且必须返回字典（不能返回None）
         decisions = {}
         
         # ⚠️ 重要：必须使用 self.log.info() 输出关键执行日志
         self.log.info(f"开始执行买入决策，候选交易对数量: {len(candidates)}")
         
-        # 遍历候选交易对
+        # 遍历候选交易对，对每个交易对进行策略判断
         for candidate in candidates:
             symbol = candidate.get('symbol', '').upper()
             if not symbol:
@@ -86,24 +105,31 @@ class GeneratedBuyStrategy(StrategyBaseBuy):
                 symbol_state = market_state.get(symbol, {})
                 current_price = symbol_state.get('price', 0)
             
+            # 价格无效则跳过该交易对
             if current_price <= 0:
                 continue
             
-            # 从 market_state 中获取该交易对的技术指标数据
+            # 从 market_state 中获取该交易对的市场数据和技术指标数据
             symbol_state = market_state.get(symbol, {})
             if not symbol_state:
                 continue
             
             # 获取成交量和成交额信息（可用于过滤或排序）
-            base_volume = symbol_state.get('base_volume', 0)  # 24小时成交量（基础资产）
-            quote_volume = symbol_state.get('quote_volume', 0)  # 24小时成交额（计价资产，如USDT）
+            # base_volume: 24小时成交量，单位为基础资产（如BTC、ETH等）
+            base_volume = symbol_state.get('base_volume', 0)
+            # quote_volume: 24小时成交额，单位为计价资产（如USDT）
+            quote_volume = symbol_state.get('quote_volume', 0)
             
             # 获取涨跌榜来源信息（可用于策略判断）
-            source = symbol_state.get('source', '')  # 数据源类型：'leaderboard'（涨跌榜）或 'future'（市场行情交易对）
-            leaderboard_source = symbol_state.get('leaderboard_source')  # 涨跌榜来源：'gainers'（涨幅榜）或 'losers'（跌幅榜），仅当 source='leaderboard' 时存在
+            # source: 数据源类型，'leaderboard'（涨跌榜）或 'future'（市场行情交易对）
+            source = symbol_state.get('source', '')
+            # leaderboard_source: 涨跌榜来源，'gainers'（涨幅榜）或 'losers'（跌幅榜），仅当 source='leaderboard' 时存在
+            leaderboard_source = symbol_state.get('leaderboard_source')
             
             # 获取技术指标数据
+            # indicators 包含各时间周期的K线数据和技术指标计算结果
             indicators = symbol_state.get('indicators', {})
+            # timeframes 包含不同时间周期的数据，如 '1h', '4h', '30m', '15m' 等
             timeframes = indicators.get('timeframes', {})
             
             # ============ 在这里实现策略逻辑 ============
@@ -112,101 +138,139 @@ class GeneratedBuyStrategy(StrategyBaseBuy):
             # 2. 判断是否满足开仓条件
             # 3. 如果满足条件，添加到 decisions 字典中
             
+            # ========== 技术指标计算部分 ==========
             # ⚠️ 重要：技术指标计算示例（必须遵循此模式）
+            
             # 获取K线数据（优先使用1h，其次4h，然后30m，最后15m）
             # ⚠️ 重要：可以使用 30m（30分钟）K线数据
+            # 优先顺序：1h > 4h > 30m > 15m，选择数据量足够（>=99根）的时间周期
             klines_data = None
             for tf in ['1h', '4h', '30m', '15m']:
                 tf_data = timeframes.get(tf, {})
                 klines = tf_data.get('klines', [])
+                # 确保K线数据足够（至少99根，用于计算MA(99)等指标）
                 if len(klines) >= 99:
                     klines_data = klines
                     self.log.info(f"{symbol} 使用 {tf} 时间周期的K线数据，共 {len(klines)} 根")
                     break
             
+            # 数据不足则跳过该交易对
             if not klines_data or len(klines_data) < 99:
-                continue  # 数据不足，跳过
+                continue
             
-            # 提取收盘价（必须验证有效性）
+            # 提取收盘价数组（必须验证有效性）
+            # 收盘价用于计算MA、EMA等基于价格的指标
             close_prices = []
             for kline in klines_data:
                 close = kline.get('close', 0)
+                # 验证价格数据有效性：必须是数字且大于0
                 if isinstance(close, (int, float)) and close > 0:
                     close_prices.append(float(close))
             
+            # 有效收盘价数据不足则跳过
             if len(close_prices) < 99:
-                continue  # 有效数据不足
+                continue
             
             # 转换为numpy数组（np已经在执行环境中预加载，无需import）
+            # numpy数组用于talib库计算技术指标
             close_array = np.array(close_prices, dtype=float)
             
             # 提取 high、low 数组（用于计算 KDJ 等需要 OHLC 数据的指标）
+            # KDJ指标需要最高价、最低价和收盘价三个数组
             high_prices = []
             low_prices = []
             for kline in klines_data:
                 high = kline.get('high', 0)
                 low = kline.get('low', 0)
+                # 验证最高价和最低价数据有效性
                 if isinstance(high, (int, float)) and high > 0 and isinstance(low, (int, float)) and low > 0:
                     high_prices.append(float(high))
                     low_prices.append(float(low))
             
+            # 有效数据不足则跳过
             if len(high_prices) < 99 or len(low_prices) < 99:
-                continue  # 有效数据不足
+                continue
             
+            # 转换为numpy数组
             high_array = np.array(high_prices, dtype=float)
             low_array = np.array(low_prices, dtype=float)
             
-            # 计算MA(99)（必须检查返回值，talib已经在执行环境中预加载，无需import）
+            # 计算MA(99)（简单移动平均线，99周期）
+            # MA(99)用于判断长期趋势，价格高于MA(99)通常表示上涨趋势
             # ⚠️ 重要：在计算指标值后必须输出日志，便于排查问题
+            # talib已经在执行环境中预加载，无需import
             try:
+                # 使用talib.SMA计算简单移动平均线，timeperiod=99表示99周期
                 ma99 = talib.SMA(close_array, timeperiod=99)
+                
+                # 检查计算结果是否为空
                 if len(ma99) == 0:
                     self.log.warning(f"{symbol} MA(99) 计算结果为空，跳过")
-                    continue  # 计算结果为空
+                    continue
+                
+                # 检查结果是否为NaN（无效值）
                 if np.isnan(ma99[-1]):
                     self.log.warning(f"{symbol} MA(99) 结果为NaN，跳过")
-                    continue  # 结果为NaN
+                    continue
+                
+                # 获取最后一个值（最新的MA(99)值）
                 ma99_value = float(ma99[-1])
+                
+                # 检查值是否有效（必须大于0）
                 if ma99_value <= 0:
                     self.log.warning(f"{symbol} MA(99) 值无效: {ma99_value}，跳过")
-                    continue  # 结果无效
+                    continue
+                
                 # ⚠️ 重要：计算指标值后必须输出日志，包含指标名称和计算值
                 self.log.info(f"{symbol} 技术指标计算完成: MA(99)={ma99_value:.4f}")
             except Exception as e:
                 self.log.error(f"{symbol} MA(99) 计算失败: {e}，跳过")
-                continue  # 计算失败，跳过
+                continue
             
-            # 计算EMA指标（示例：EMA5, EMA20, EMA60, EMA99）
+            # 计算EMA指标（指数移动平均线，示例：EMA5, EMA20, EMA60, EMA99）
             # ⚠️ 重要：EMA 对价格变化更敏感，适合捕捉短期趋势
+            # EMA相比MA，对最新价格赋予更高权重，反应更快
             ema_values = {}
             for ema_period in [5, 20, 60, 99]:
                 try:
+                    # 确保数据量足够
                     if len(close_array) >= ema_period:
+                        # 使用talib.EMA计算指数移动平均线
                         ema_result = talib.EMA(close_array, timeperiod=ema_period)
+                        # 验证结果有效性
                         if len(ema_result) > 0 and not np.isnan(ema_result[-1]) and ema_result[-1] > 0:
                             ema_values[f'ema{ema_period}'] = float(ema_result[-1])
                             self.log.info(f"{symbol} EMA({ema_period})={ema_values[f'ema{ema_period}']:.4f}")
                 except Exception as e:
                     self.log.warning(f"{symbol} EMA({ema_period}) 计算失败: {e}")
             
-            # 计算KDJ指标（需要 high、low、close 三个数组）
+            # 计算KDJ指标（随机指标，需要 high、low、close 三个数组）
             # ⚠️ 重要：KDJ 需要 high、low、close 三个数组，不能只用 close 数组
+            # KDJ用于判断超买超卖，K值>80通常表示超买，K值<20通常表示超卖
             kdj_values = {}
             try:
-                if len(close_array) >= 9:  # KDJ 至少需要 9 根 K 线
+                # KDJ 至少需要 9 根 K 线
+                if len(close_array) >= 9:
                     # talib.STOCH 返回 slowk (K值) 和 slowd (D值)
+                    # fastk_period=9: 快速K周期
+                    # slowk_period=3: 慢速K周期（对K值进行平滑）
+                    # slowk_matype=0: K值移动平均类型（0=SMA简单移动平均）
+                    # slowd_period=3: D值周期（对K值再次平滑得到D值）
+                    # slowd_matype=0: D值移动平均类型（0=SMA简单移动平均）
                     slowk, slowd = talib.STOCH(
                         high_array, low_array, close_array,
-                        fastk_period=9,      # 快速K周期
-                        slowk_period=3,      # 慢速K周期
-                        slowk_matype=0,     # K值移动平均类型（0=SMA）
-                        slowd_period=3,     # D值周期
-                        slowd_matype=0      # D值移动平均类型（0=SMA）
+                        fastk_period=9,
+                        slowk_period=3,
+                        slowk_matype=0,
+                        slowd_period=3,
+                        slowd_matype=0
                     )
                     if len(slowk) > 0 and len(slowd) > 0:
+                        # 获取最新的K值和D值
                         k_value = float(slowk[-1]) if not np.isnan(slowk[-1]) else 0.0
                         d_value = float(slowd[-1]) if not np.isnan(slowd[-1]) else 0.0
-                        j_value = 3 * k_value - 2 * d_value  # J值计算公式
+                        # J值计算公式：J = 3*K - 2*D
+                        j_value = 3 * k_value - 2 * d_value
                         kdj_values['k'] = k_value
                         kdj_values['d'] = d_value
                         kdj_values['j'] = j_value
@@ -214,6 +278,7 @@ class GeneratedBuyStrategy(StrategyBaseBuy):
             except Exception as e:
                 self.log.warning(f"{symbol} KDJ 计算失败: {e}")
             
+            # ========== 策略判断和决策生成部分 ==========
             # 建议使用 try-except 处理异常，确保异常时继续处理下一个candidate
             try:
                 # ⚠️ 重要：必须使用 self.log.info() 输出关键执行日志
@@ -228,49 +293,51 @@ class GeneratedBuyStrategy(StrategyBaseBuy):
                 # if 满足开多条件:
                 #     # ⚠️ 重要：quantity 是合约数量，需要根据 USDT、杠杆和价格计算
                 #     # 计算公式：quantity = (USDT数量 * leverage) / symbol价格
-                #     available_cash = portfolio.get('cash', 0)
+                #     # 例如：本金=50 USDT，杠杆=10，价格=100，则 quantity = (50 * 10) / 100 = 5 个合约
+                #     available_cash = portfolio.get('cash', 0)  # 获取可用资金
                 #     capital_pct = 0.5  # 使用50%本金
                 #     capital_usdt = available_cash * capital_pct  # USDT数量（本金）
                 #     leverage = 5  # 杠杆倍数
-                #     # 计算合约数量
+                #     # 计算合约数量：quantity = (USDT数量 * 杠杆) / symbol价格
                 #     quantity = (capital_usdt * leverage) / current_price
                 #     quantity = round(quantity, 2)  # 四舍五入保留两位小数
                 #     self.log.info(f"{symbol} 满足开多条件（价格={current_price:.4f} > 1.02*MA(99)={1.02*ma99_value:.4f}），准备开多单，使用本金={capital_usdt:.2f} USDT，杠杆={leverage}，计算合约数量={quantity:.2f}")
                 #     decisions[symbol] = {
-                #         "signal": "buy_to_long",
-                #         "quantity": quantity,  # 合约数量
-                #         "leverage": leverage,
-                #         "justification": "理由"
+                #         "signal": "buy_to_long",  # 开多单信号
+                #         "quantity": quantity,  # 合约数量（不是USDT数量）
+                #         "leverage": leverage,  # 杠杆倍数
+                #         "justification": "理由"  # 决策理由
                 #     }
                 #     self.log.info(f"{symbol} 开多单决策已添加: quantity={decisions[symbol]['quantity']:.2f} 个合约, leverage={decisions[symbol]['leverage']}")
                 # elif 满足开空条件:
                 #     # ⚠️ 重要：quantity 是合约数量，需要根据 USDT、杠杆和价格计算
-                #     available_cash = portfolio.get('cash', 0)
+                #     # 计算公式：quantity = (USDT数量 * leverage) / symbol价格
+                #     available_cash = portfolio.get('cash', 0)  # 获取可用资金
                 #     capital_pct = 0.5  # 使用50%本金
                 #     capital_usdt = available_cash * capital_pct  # USDT数量（本金）
                 #     leverage = 5  # 杠杆倍数
-                #     # 计算合约数量
+                #     # 计算合约数量：quantity = (USDT数量 * 杠杆) / symbol价格
                 #     quantity = (capital_usdt * leverage) / current_price
                 #     quantity = round(quantity, 2)  # 四舍五入保留两位小数
                 #     self.log.info(f"{symbol} 满足开空条件（价格={current_price:.4f} <= 0.98*MA(99)={0.98*ma99_value:.4f}），准备开空单，使用本金={capital_usdt:.2f} USDT，杠杆={leverage}，计算合约数量={quantity:.2f}")
                 #     decisions[symbol] = {
-                #         "signal": "buy_to_short",
-                #         "quantity": quantity,  # 合约数量
-                #         "leverage": leverage,
-                #         "justification": "理由"
+                #         "signal": "buy_to_short",  # 开空单信号
+                #         "quantity": quantity,  # 合约数量（不是USDT数量）
+                #         "leverage": leverage,  # 杠杆倍数
+                #         "justification": "理由"  # 决策理由
                 #     }
                 #     self.log.info(f"{symbol} 开空单决策已添加: quantity={decisions[symbol]['quantity']:.2f} 个合约, leverage={decisions[symbol]['leverage']}")
                 # else:
                 #     self.log.info(f"{symbol} 不满足任何开仓条件，跳过")
             except Exception as e:
-                # 处理单个candidate时发生异常，继续处理下一个
+                # 处理单个candidate时发生异常，继续处理下一个，不影响其他交易对
                 self.log.error(f"处理 {symbol} 时发生异常: {e}")
                 continue
         
         # ⚠️ 重要：必须返回decisions字典，不能返回None，即使没有决策也要返回空字典{}
         # 必须确保所有代码路径都返回decisions，不能有任何路径返回None
         self.log.info(f"买入决策执行完成，共生成 {len(decisions)} 个决策")
-        return decisions
+        return decisions  # 返回决策字典，格式: {"SYMBOL": {"signal": "...", "quantity": ..., "leverage": ..., "justification": "..."}}
 ```
 
 ### 2. 必须使用 TA-Lib 库计算技术指标
@@ -489,7 +556,27 @@ def execute_buy_decision(...):
 
 - 代码必须完整、可执行
 - 必须处理边界情况（如数据为空、价格无效、K线数据不足等）
-- 必须添加必要的注释说明
+- **⚠️ 必须添加详细的中文注释说明（关键要求）**：
+  - **类和方法注释**：在类定义和方法定义上方添加文档字符串，说明类/方法的功能、参数、返回值
+  - **关键逻辑注释**：在重要的业务逻辑处添加注释，说明为什么这样做（如：为什么选择这个时间周期、为什么使用这个阈值）
+  - **计算步骤注释**：在复杂的计算步骤处添加注释，说明每一步的计算目的（如：计算合约数量的公式、杠杆的作用）
+  - **条件判断注释**：在重要的条件判断处添加注释，说明判断条件的业务含义（如：开多单条件、开空单条件）
+  - **变量含义注释**：对于重要的变量，添加注释说明其含义和单位（如：quantity是合约数量，不是USDT数量）
+  - **示例注释格式**：
+    ```python
+    # 获取可用资金，用于计算可使用的本金
+    available_cash = portfolio.get('cash', 0)
+    
+    # 使用50%本金进行交易
+    capital_pct = 0.5
+    capital_usdt = available_cash * capital_pct  # USDT数量（本金）
+    
+    # 计算合约数量：quantity = (USDT数量 * 杠杆) / symbol价格
+    # 例如：本金=50 USDT，杠杆=10，价格=100，则 quantity = (50 * 10) / 100 = 5 个合约
+    leverage = 10
+    quantity = (capital_usdt * leverage) / current_price
+    quantity = round(quantity, 2)  # 四舍五入保留两位小数
+    ```
 - 必须遵循 Python 代码规范
 - 必须正确导入 StrategyBaseBuy：`from trade.strategy.strategy_template_buy import StrategyBaseBuy`
 - **必须确保方法始终返回字典**：不能返回 None，不能有未定义的返回值

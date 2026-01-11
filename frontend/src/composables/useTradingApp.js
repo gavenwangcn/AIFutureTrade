@@ -488,6 +488,13 @@ let portfolioSymbolsRefreshInterval = null // 模型持仓合约列表自动刷�
       const data = await modelApi.getAll()
       // 后端直接返回数组格式
       models.value = Array.isArray(data) ? data : []
+      // 调试日志：检查 max_positions 字段是否正确加载
+      console.log('[TradingApp] 模型列表已加载，数量:', models.value.length)
+      models.value.forEach(model => {
+        if (model.id) {
+          console.log(`[TradingApp] 模型 ${model.id}: max_positions=${model.max_positions}, maxPositions=${model.maxPositions}`)
+        }
+      })
     } catch (error) {
       console.error('[TradingApp] Error loading models:', error)
       errors.value.models = error.message
@@ -2137,7 +2144,9 @@ let portfolioSymbolsRefreshInterval = null // 模型持仓合约列表自动刷�
     const model = models.value.find(m => m.id === modelId)
     pendingMaxPositionsModelId.value = modelId
     maxPositionsModelName.value = modelName || `模型 #${modelId}`
-    tempMaxPositions.value = model?.max_positions || 3
+    // 优先使用 max_positions，如果没有则使用 maxPositions（兼容两种命名方式）
+    tempMaxPositions.value = model?.max_positions ?? model?.maxPositions ?? 3
+    console.log('[TradingApp] 打开最大持仓数量设置模态框, modelId=', modelId, 'max_positions=', tempMaxPositions.value)
     showMaxPositionsModal.value = true
   }
   
@@ -2168,18 +2177,23 @@ let portfolioSymbolsRefreshInterval = null // 模型持仓合约列表自动刷�
       // 从后端获取模型信息
       const model = await modelApi.getById(modelId)
       console.log('[TradingApp] 加载模型信息, modelId=', modelId, 'model=', model)
+      console.log('[TradingApp] 模型 max_positions 字段值: max_positions=', model.max_positions, 'maxPositions=', model.maxPositions)
       
       // 确保 provider_id 是字符串类型（如果是 null 或 undefined，则设为空字符串）
       const providerId = model.provider_id ? String(model.provider_id) : ''
       const modelName = model.model_name || ''
       
-      console.log('[TradingApp] 设置模型配置, providerId=', providerId, 'modelName=', modelName)
+      // 优先使用 max_positions，如果没有则使用 maxPositions（兼容两种命名方式）
+      const maxPositionsValue = model.max_positions ?? model.maxPositions ?? 3
+      console.log('[TradingApp] 解析后的 max_positions 值:', maxPositionsValue)
+      
+      console.log('[TradingApp] 设置模型配置, providerId=', providerId, 'modelName=', modelName, 'max_positions=', maxPositionsValue)
       
       tempModelSettings.value = {
         provider_id: providerId,
         model_name: modelName,
         leverage: model.leverage || 10,
-        max_positions: model.max_positions || 3,
+        max_positions: maxPositionsValue,
         auto_close_percent: model.auto_close_percent ?? null,
         buy_batch_size: model.buy_batch_size || 1,
         buy_batch_execution_interval: model.buy_batch_execution_interval || 60,
@@ -2210,11 +2224,14 @@ let portfolioSymbolsRefreshInterval = null // 模型持仓合约列表自动刷�
         // 确保 provider_id 是字符串类型（如果是 null 或 undefined，则设为空字符串）
         const providerId = localModel.provider_id ? String(localModel.provider_id) : ''
         
+        // 优先使用 max_positions，如果没有则使用 maxPositions（兼容两种命名方式）
+        const maxPositionsValue = localModel.max_positions ?? localModel.maxPositions ?? 3
+        
         tempModelSettings.value = {
           provider_id: providerId,
           model_name: localModel.model_name || '',
           leverage: localModel.leverage || 10,
-          max_positions: localModel.max_positions || 3,
+          max_positions: maxPositionsValue,
           auto_close_percent: localModel.auto_close_percent ?? null,
           buy_batch_size: localModel.buy_batch_size || 1,
           buy_batch_execution_interval: localModel.buy_batch_execution_interval || 60,

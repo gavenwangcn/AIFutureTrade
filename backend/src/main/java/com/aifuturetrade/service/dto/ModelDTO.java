@@ -84,7 +84,10 @@ public class ModelDTO implements Serializable {
 
     /**
      * 最大持仓数量
+     * 支持两种命名方式：max_positions（snake_case）和 maxPositions（camelCase）
      */
+    @JsonProperty("max_positions")
+    @JsonAlias({"maxPositions"})
     private Integer maxPositions;
 
     /**
