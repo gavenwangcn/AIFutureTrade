@@ -279,6 +279,40 @@ class GeneratedSellStrategy(StrategyBaseSell):
             except Exception as e:
                 self.log.warning(f"{symbol} KDJ 计算失败: {e}")
             
+            # 计算移动平均线金叉和死叉（重要交易信号）
+            # ⚠️ 重要：金叉（快速线上穿慢速线）通常是买入信号，死叉（快速线下穿慢速线）通常是卖出信号
+            # 对于卖出策略：多单持仓时死叉是平仓信号，空单持仓时金叉是平仓信号
+            golden_cross = False
+            death_cross = False
+            try:
+                if len(close_array) >= 21:  # 至少需要21根K线（MA20需要20根，还需要1根用于比较）
+                    # 计算快速均线和慢速均线
+                    fast_ma = talib.SMA(close_array, timeperiod=5)   # MA5（快速均线）
+                    slow_ma = talib.SMA(close_array, timeperiod=20)  # MA20（慢速均线）
+                    
+                    # 获取当前值和上一根K线的值
+                    if len(fast_ma) >= 2 and len(slow_ma) >= 2:
+                        fast_ma_current = float(fast_ma[-1])  # 当前K线的MA5值
+                        slow_ma_current = float(slow_ma[-1])  # 当前K线的MA20值
+                        fast_ma_prev = float(fast_ma[-2])     # 上一根K线的MA5值
+                        slow_ma_prev = float(slow_ma[-2])     # 上一根K线的MA20值
+                        
+                        # 判断金叉：当前快速线在慢速线上方，且上一根K线时快速线在慢速线下方或相等
+                        # 对于多单持仓：金叉是利好信号，通常不平仓
+                        # 对于空单持仓：金叉是利空信号，通常需要平仓
+                        if fast_ma_current > slow_ma_current and fast_ma_prev <= slow_ma_prev:
+                            golden_cross = True
+                            self.log.info(f"{symbol} 检测到金叉信号: MA5={fast_ma_current:.4f} > MA20={slow_ma_current:.4f}，上一根K线时 MA5={fast_ma_prev:.4f} <= MA20={slow_ma_prev:.4f}")
+                        
+                        # 判断死叉：当前快速线在慢速线下方，且上一根K线时快速线在慢速线上方或相等
+                        # 对于多单持仓：死叉是利空信号，通常需要平仓
+                        # 对于空单持仓：死叉是利好信号，通常不平仓
+                        if fast_ma_current < slow_ma_current and fast_ma_prev >= slow_ma_prev:
+                            death_cross = True
+                            self.log.info(f"{symbol} 检测到死叉信号: MA5={fast_ma_current:.4f} < MA20={slow_ma_current:.4f}，上一根K线时 MA5={fast_ma_prev:.4f} >= MA20={slow_ma_prev:.4f}")
+            except Exception as e:
+                self.log.warning(f"{symbol} 金叉死叉判断失败: {e}")
+            
             # ========== 策略判断和决策生成部分 ==========
             # 建议使用 try-except 处理异常，确保异常时继续处理下一个position
             try:
@@ -365,6 +399,58 @@ class GeneratedSellStrategy(StrategyBaseSell):
 
 - **MACD 指标**：使用 `talib.MACD()` 计算指数平滑异同移动平均线
   - 示例：`macd, signal, histogram = talib.MACD(close_array, fastperiod=12, slowperiod=26, signalperiod=9)`
+
+- **⚠️ 重要：移动平均线金叉和死叉判断（关键交易信号）**：
+  - **金叉（Golden Cross）**：快速均线上穿慢速均线，通常被视为买入信号
+    - **判断条件**：当前K线时 `fast_ma > slow_ma` 且上一根K线时 `fast_ma <= slow_ma`
+    - **含义**：短期趋势转强，价格上涨动能增强，对于持仓的多单是利好信号，对于持仓的空单是平仓信号
+    - **代码示例**：
+      ```python
+      # 计算快速均线和慢速均线（例如：MA5和MA20）
+      fast_ma = talib.SMA(close_array, timeperiod=5)   # 快速均线（MA5）
+      slow_ma = talib.SMA(close_array, timeperiod=20)  # 慢速均线（MA20）
+      
+      # 获取当前值和上一根K线的值
+      fast_ma_current = fast_ma[-1]  # 当前K线的快速均线值
+      slow_ma_current = slow_ma[-1]  # 当前K线的慢速均线值
+      fast_ma_prev = fast_ma[-2]     # 上一根K线的快速均线值
+      slow_ma_prev = slow_ma[-2]     # 上一根K线的慢速均线值
+      
+      # 判断金叉：当前快速线在慢速线上方，且上一根K线时快速线在慢速线下方或相等
+      golden_cross = (fast_ma_current > slow_ma_current) and (fast_ma_prev <= slow_ma_prev)
+      
+      if golden_cross:
+          self.log.info(f"{symbol} 检测到金叉信号: MA5={fast_ma_current:.4f} > MA20={slow_ma_current:.4f}，上一根K线时 MA5={fast_ma_prev:.4f} <= MA20={slow_ma_prev:.4f}")
+      ```
+  - **死叉（Death Cross）**：快速均线下穿慢速均线，通常被视为卖出信号
+    - **判断条件**：当前K线时 `fast_ma < slow_ma` 且上一根K线时 `fast_ma >= slow_ma`
+    - **含义**：短期趋势转弱，价格下跌动能增强，对于持仓的多单是平仓信号，对于持仓的空单是利好信号
+    - **代码示例**：
+      ```python
+      # 计算快速均线和慢速均线（例如：MA5和MA20）
+      fast_ma = talib.SMA(close_array, timeperiod=5)   # 快速均线（MA5）
+      slow_ma = talib.SMA(close_array, timeperiod=20)  # 慢速均线（MA20）
+      
+      # 获取当前值和上一根K线的值
+      fast_ma_current = fast_ma[-1]  # 当前K线的快速均线值
+      slow_ma_current = slow_ma[-1]  # 当前K线的慢速均线值
+      fast_ma_prev = fast_ma[-2]     # 上一根K线的快速均线值
+      slow_ma_prev = slow_ma[-2]     # 上一根K线的慢速均线值
+      
+      # 判断死叉：当前快速线在慢速线下方，且上一根K线时快速线在慢速线上方或相等
+      death_cross = (fast_ma_current < slow_ma_current) and (fast_ma_prev >= slow_ma_prev)
+      
+      if death_cross:
+          self.log.info(f"{symbol} 检测到死叉信号: MA5={fast_ma_current:.4f} < MA20={slow_ma_current:.4f}，上一根K线时 MA5={fast_ma_prev:.4f} >= MA20={slow_ma_prev:.4f}")
+      ```
+  - **⚠️ 重要注意事项**：
+    - 必须确保有足够的历史数据（至少需要 `slow_period + 1` 根K线，因为需要比较当前值和上一根K线的值）
+    - 金叉和死叉是趋势转换的重要信号，但需要结合其他指标（如成交量、RSI等）进行综合判断
+    - 可以使用不同周期的均线组合（如MA5/MA20、MA10/MA30、EMA5/EMA20等）
+    - 在卖出策略中：
+      - **多单持仓**：死叉信号通常是平仓信号（趋势转弱）
+      - **空单持仓**：金叉信号通常是平仓信号（趋势转强）
+    - 在判断金叉死叉时，必须输出详细的日志信息，包括当前值、上一根K线的值和判断结果
 
 **⚠️ 重要：所有指标计算后必须使用 self.log.info() 输出指标名称和计算值，便于排查问题**
 
