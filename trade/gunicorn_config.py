@@ -65,7 +65,7 @@ def post_worker_init(worker):
     try:
         from trade.app import _start_trading_loops
         _start_trading_loops()
-        worker.log.info("Trading loops started in worker")
+        # 不再打印 "Trading loops started in worker" 日志（由 _start_trading_loops 内部处理日志输出）
     except Exception as e:
         worker.log.warning(f"Failed to start trading loops in worker: {e}")
 

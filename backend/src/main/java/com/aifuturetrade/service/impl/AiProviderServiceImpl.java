@@ -136,6 +136,7 @@ public class AiProviderServiceImpl implements AiProviderService {
      * 使用HTTP客户端实现，匹配Python版本使用OpenAI SDK的逻辑
      */
     private String callOpenAiCompatibleApi(String apiUrl, String apiKey, String modelName, String prompt) throws Exception {
+        long startTime = System.currentTimeMillis();
         try {
             // 规范化base_url，确保以/v1结尾，参考Python版本的逻辑
             String baseUrl = normalizeApiUrl(apiUrl);
@@ -161,8 +162,9 @@ public class AiProviderServiceImpl implements AiProviderService {
             
             List<Map<String, String>> messages = new ArrayList<>();
             Map<String, String> systemMessage = new HashMap<>();
+            String systemContent = "You are a professional cryptocurrency trading strategy code generator. Output ONLY the Python code, without any JSON wrapper, markdown code blocks, or explanations. The output must be pure Python code that can be directly executed.";
             systemMessage.put("role", "system");
-            systemMessage.put("content", "You are a professional cryptocurrency trading strategy code generator. Output ONLY the Python code, without any JSON wrapper, markdown code blocks, or explanations. The output must be pure Python code that can be directly executed.");
+            systemMessage.put("content", systemContent);
             messages.add(systemMessage);
             
             Map<String, String> userMessage = new HashMap<>();
@@ -172,7 +174,19 @@ public class AiProviderServiceImpl implements AiProviderService {
             
             requestBody.put("messages", messages);
             
+            // 估算 token 数量
+            int systemTokenCount = estimateTokenCount(systemContent);
+            int promptTokenCount = estimateTokenCount(prompt);
+            int totalInputTokenCount = systemTokenCount + promptTokenCount;
+            
             String requestBodyJson = objectMapper.writeValueAsString(requestBody);
+            int requestBodySize = requestBodyJson.length();
+            
+            // 记录请求详细信息
+            log.info("[OpenAI API] 开始调用API: url={}, model={}, temperature={}, max_tokens={}, top_p={}, timeout=5分钟", 
+                    url, modelName, temperature, maxTokens, topP);
+            log.info("[OpenAI API] 输入Token估算: system_tokens={}, prompt_tokens={}, total_input_tokens={}, request_body_size={} bytes", 
+                    systemTokenCount, promptTokenCount, totalInputTokenCount, requestBodySize);
             
             // 构建HTTP请求
             HttpRequest request = HttpRequest.newBuilder()
@@ -180,26 +194,52 @@ public class AiProviderServiceImpl implements AiProviderService {
                     .header("Authorization", "Bearer " + apiKey)
                     .header("Content-Type", "application/json")
                     .POST(HttpRequest.BodyPublishers.ofString(requestBodyJson))
-                    .timeout(Duration.ofSeconds(60))
+                    .timeout(Duration.ofMinutes(5))  // 超时时间设置为5分钟
                     .build();
             
             // 发送请求
             HttpResponse<String> response = httpClient.send(request, 
                     HttpResponse.BodyHandlers.ofString());
             
+            long elapsedTime = System.currentTimeMillis() - startTime;
+            
+            // 记录响应信息
+            log.info("[OpenAI API] 收到响应: status_code={}, elapsed_time={}ms", response.statusCode(), elapsedTime);
+            
             // 处理响应
             if (response.statusCode() == 200) {
                 JsonNode jsonNode = objectMapper.readTree(response.body());
+                
+                // 尝试提取 token 使用信息（如果 API 返回）
+                try {
+                    JsonNode usage = jsonNode.get("usage");
+                    if (usage != null) {
+                        int promptTokens = usage.has("prompt_tokens") ? usage.get("prompt_tokens").asInt() : 0;
+                        int completionTokens = usage.has("completion_tokens") ? usage.get("completion_tokens").asInt() : 0;
+                        int totalTokens = usage.has("total_tokens") ? usage.get("total_tokens").asInt() : 0;
+                        log.info("[OpenAI API] Token使用情况: prompt_tokens={}, completion_tokens={}, total_tokens={}", 
+                                promptTokens, completionTokens, totalTokens);
+                    }
+                } catch (Exception e) {
+                    log.debug("[OpenAI API] 无法解析token使用信息: {}", e.getMessage());
+                }
+                
                 JsonNode choices = jsonNode.get("choices");
                 if (choices != null && choices.isArray() && choices.size() > 0) {
                     JsonNode message = choices.get(0).get("message");
                     if (message != null) {
                         String content = message.get("content").asText();
+                        int responseContentLength = content != null ? content.length() : 0;
+                        int responseTokenEstimate = estimateTokenCount(content);
+                        log.info("[OpenAI API] 响应内容: length={} chars, estimated_tokens={}", 
+                                responseContentLength, responseTokenEstimate);
                         return extractCodeFromResponse(content);
                     }
                 }
             }
             
+            log.error("[OpenAI API] API调用失败: status_code={}, response_body={}", 
+                    response.statusCode(), response.body());
             throw new RuntimeException("Failed to get response from OpenAI API: " + response.statusCode() + 
                     ", body: " + response.body());
             
@@ -227,6 +267,7 @@ public class AiProviderServiceImpl implements AiProviderService {
      * 使用HTTP请求直接调用Anthropic的Claude API
      */
     private String callAnthropicApi(String apiUrl, String apiKey, String modelName, String prompt) throws Exception {
+        long startTime = System.currentTimeMillis();
         try {
             // 规范化base_url，确保以/v1结尾
             String baseUrl = normalizeApiUrl(apiUrl);
@@ -240,6 +281,8 @@ public class AiProviderServiceImpl implements AiProviderService {
             Double temperature = getConfigDouble(config, "strategy_temperature", 0.0);
             Double topP = getConfigDouble(config, "strategy_top_p", 0.9);
             
+            String systemContent = "You are a professional cryptocurrency trading strategy code generator. Output ONLY the Python code, without any JSON wrapper, markdown code blocks, or explanations. The output must be pure Python code that can be directly executed.";
+            
             // 构建请求体，参考Python版本的实现
             Map<String, Object> requestBody = new HashMap<>();
             requestBody.put("model", modelName);
@@ -249,7 +292,7 @@ public class AiProviderServiceImpl implements AiProviderService {
             if (topP != null) {
                 requestBody.put("top_p", topP);
             }
-            requestBody.put("system", "You are a professional cryptocurrency trading strategy code generator. Output ONLY the Python code, without any JSON wrapper, markdown code blocks, or explanations. The output must be pure Python code that can be directly executed.");
+            requestBody.put("system", systemContent);
             
             List<Map<String, String>> messages = new ArrayList<>();
             Map<String, String> userMessage = new HashMap<>();
@@ -258,7 +301,19 @@ public class AiProviderServiceImpl implements AiProviderService {
             messages.add(userMessage);
             requestBody.put("messages", messages);
             
+            // 估算 token 数量
+            int systemTokenCount = estimateTokenCount(systemContent);
+            int promptTokenCount = estimateTokenCount(prompt);
+            int totalInputTokenCount = systemTokenCount + promptTokenCount;
+            
             String requestBodyJson = objectMapper.writeValueAsString(requestBody);
+            int requestBodySize = requestBodyJson.length();
+            
+            // 记录请求详细信息
+            log.info("[Anthropic API] 开始调用API: url={}, model={}, temperature={}, max_tokens={}, top_p={}, timeout=5分钟", 
+                    url, modelName, temperature, maxTokens, topP);
+            log.info("[Anthropic API] 输入Token估算: system_tokens={}, prompt_tokens={}, total_input_tokens={}, request_body_size={} bytes", 
+                    systemTokenCount, promptTokenCount, totalInputTokenCount, requestBodySize);
             
             // 构建HTTP请求
             HttpRequest request = HttpRequest.newBuilder()
@@ -267,23 +322,48 @@ public class AiProviderServiceImpl implements AiProviderService {
                     .header("anthropic-version", "2023-06-01")
                     .header("Content-Type", "application/json")
                     .POST(HttpRequest.BodyPublishers.ofString(requestBodyJson))
-                    .timeout(Duration.ofSeconds(60))
+                    .timeout(Duration.ofMinutes(5))  // 超时时间设置为5分钟
                     .build();
             
             // 发送请求
             HttpResponse<String> response = httpClient.send(request, 
                     HttpResponse.BodyHandlers.ofString());
             
+            long elapsedTime = System.currentTimeMillis() - startTime;
+            
+            // 记录响应信息
+            log.info("[Anthropic API] 收到响应: status_code={}, elapsed_time={}ms", response.statusCode(), elapsedTime);
+            
             // 处理响应
             if (response.statusCode() == 200) {
                 JsonNode jsonNode = objectMapper.readTree(response.body());
-                    JsonNode content = jsonNode.get("content");
-                    if (content != null && content.isArray() && content.size() > 0) {
-                        String text = content.get(0).get("text").asText();
-                        return extractCodeFromResponse(text);
+                
+                // 尝试提取 token 使用信息（如果 API 返回）
+                try {
+                    JsonNode usage = jsonNode.get("usage");
+                    if (usage != null) {
+                        int inputTokens = usage.has("input_tokens") ? usage.get("input_tokens").asInt() : 0;
+                        int outputTokens = usage.has("output_tokens") ? usage.get("output_tokens").asInt() : 0;
+                        log.info("[Anthropic API] Token使用情况: input_tokens={}, output_tokens={}", 
+                                inputTokens, outputTokens);
                     }
+                } catch (Exception e) {
+                    log.debug("[Anthropic API] 无法解析token使用信息: {}", e.getMessage());
+                }
+                
+                JsonNode content = jsonNode.get("content");
+                if (content != null && content.isArray() && content.size() > 0) {
+                    String text = content.get(0).get("text").asText();
+                    int responseContentLength = text != null ? text.length() : 0;
+                    int responseTokenEstimate = estimateTokenCount(text);
+                    log.info("[Anthropic API] 响应内容: length={} chars, estimated_tokens={}", 
+                            responseContentLength, responseTokenEstimate);
+                    return extractCodeFromResponse(text);
+                }
             }
             
+            log.error("[Anthropic API] API调用失败: status_code={}, response_body={}", 
+                    response.statusCode(), response.body());
             throw new RuntimeException("Failed to get response from Anthropic API: " + response.statusCode() + 
                     ", body: " + response.body());
             
@@ -308,10 +388,14 @@ public class AiProviderServiceImpl implements AiProviderService {
      * 使用HTTP请求直接调用Google的Gemini API
      */
     private String callGeminiApi(String apiUrl, String apiKey, String modelName, String prompt) throws Exception {
+        long startTime = System.currentTimeMillis();
         try {
             // 规范化base_url，确保以/v1结尾
             String baseUrl = normalizeApiUrl(apiUrl);
             String url = baseUrl + "/" + modelName + ":generateContent";
+            
+            String systemPrefix = "You are a professional cryptocurrency trader. Output JSON format only.\n\n";
+            String fullPrompt = systemPrefix + prompt;
             
             // 构建请求体，参考Python版本的实现
             Map<String, Object> requestBody = new HashMap<>();
@@ -319,7 +403,7 @@ public class AiProviderServiceImpl implements AiProviderService {
             Map<String, Object> content = new HashMap<>();
             List<Map<String, String>> parts = new ArrayList<>();
             Map<String, String> part = new HashMap<>();
-            part.put("text", "You are a professional cryptocurrency trader. Output JSON format only.\n\n" + prompt);
+            part.put("text", fullPrompt);
             parts.add(part);
             content.put("parts", parts);
             contents.add(content);
@@ -346,7 +430,19 @@ public class AiProviderServiceImpl implements AiProviderService {
             }
             requestBody.put("generationConfig", generationConfig);
             
+            // 估算 token 数量
+            int systemTokenCount = estimateTokenCount(systemPrefix);
+            int promptTokenCount = estimateTokenCount(prompt);
+            int totalInputTokenCount = systemTokenCount + promptTokenCount;
+            
             String requestBodyJson = objectMapper.writeValueAsString(requestBody);
+            int requestBodySize = requestBodyJson.length();
+            
+            // 记录请求详细信息
+            log.info("[Gemini API] 开始调用API: url={}, model={}, temperature={}, max_output_tokens={}, top_p={}, top_k={}, timeout=5分钟", 
+                    url, modelName, temperature, maxTokens, topP, topK);
+            log.info("[Gemini API] 输入Token估算: system_tokens={}, prompt_tokens={}, total_input_tokens={}, request_body_size={} bytes", 
+                    systemTokenCount, promptTokenCount, totalInputTokenCount, requestBodySize);
             
             // 构建URL，添加API密钥作为查询参数
             String urlWithKey = url + "?key=" + java.net.URLEncoder.encode(apiKey, "UTF-8");
@@ -356,16 +452,36 @@ public class AiProviderServiceImpl implements AiProviderService {
                     .uri(URI.create(urlWithKey))
                     .header("Content-Type", "application/json")
                     .POST(HttpRequest.BodyPublishers.ofString(requestBodyJson))
-                    .timeout(Duration.ofSeconds(60))
+                    .timeout(Duration.ofMinutes(5))  // 超时时间设置为5分钟
                     .build();
             
             // 发送请求
             HttpResponse<String> response = httpClient.send(request, 
                     HttpResponse.BodyHandlers.ofString());
             
+            long elapsedTime = System.currentTimeMillis() - startTime;
+            
+            // 记录响应信息
+            log.info("[Gemini API] 收到响应: status_code={}, elapsed_time={}ms", response.statusCode(), elapsedTime);
+            
             // 处理响应
             if (response.statusCode() == 200) {
                 JsonNode jsonNode = objectMapper.readTree(response.body());
+                
+                // 尝试提取 token 使用信息（如果 API 返回）
+                try {
+                    JsonNode usageMetadata = jsonNode.get("usageMetadata");
+                    if (usageMetadata != null) {
+                        int promptTokenCount = usageMetadata.has("promptTokenCount") ? usageMetadata.get("promptTokenCount").asInt() : 0;
+                        int candidatesTokenCount = usageMetadata.has("candidatesTokenCount") ? usageMetadata.get("candidatesTokenCount").asInt() : 0;
+                        int totalTokenCount = usageMetadata.has("totalTokenCount") ? usageMetadata.get("totalTokenCount").asInt() : 0;
+                        log.info("[Gemini API] Token使用情况: prompt_tokens={}, candidates_tokens={}, total_tokens={}", 
+                                promptTokenCount, candidatesTokenCount, totalTokenCount);
+                    }
+                } catch (Exception e) {
+                    log.debug("[Gemini API] 无法解析token使用信息: {}", e.getMessage());
+                }
+                
                 JsonNode candidates = jsonNode.get("candidates");
                 if (candidates != null && candidates.isArray() && candidates.size() > 0) {
                     JsonNode candidate = candidates.get(0);
@@ -374,12 +490,18 @@ public class AiProviderServiceImpl implements AiProviderService {
                         JsonNode candidateParts = candidateContent.get("parts");
                         if (candidateParts != null && candidateParts.isArray() && candidateParts.size() > 0) {
                             String text = candidateParts.get(0).get("text").asText();
+                            int responseContentLength = text != null ? text.length() : 0;
+                            int responseTokenEstimate = estimateTokenCount(text);
+                            log.info("[Gemini API] 响应内容: length={} chars, estimated_tokens={}", 
+                                    responseContentLength, responseTokenEstimate);
                             return extractCodeFromResponse(text);
                         }
                     }
                 }
             }
             
+            log.error("[Gemini API] API调用失败: status_code={}, response_body={}", 
+                    response.statusCode(), response.body());
             throw new RuntimeException("Failed to get response from Gemini API: " + response.statusCode() + 
                     ", body: " + response.body());
             
@@ -625,6 +747,36 @@ public class AiProviderServiceImpl implements AiProviderService {
             return List.of("gemini-pro", "gemini-pro-vision");
         }
         return List.of("gpt-3.5-turbo", "gpt-4", "gpt-4-turbo");
+    }
+
+    /**
+     * 估算文本的 token 数量
+     * 使用简单的估算方法：1 token ≈ 4 个字符（对于英文）
+     * 对于中文，1 token ≈ 1.5 个字符
+     * 这是一个粗略估算，实际 token 数量可能因模型而异
+     * 
+     * @param text 要估算的文本
+     * @return 估算的 token 数量
+     */
+    private int estimateTokenCount(String text) {
+        if (text == null || text.isEmpty()) {
+            return 0;
+        }
+        // 简单估算：英文 1 token ≈ 4 字符，中文 1 token ≈ 1.5 字符
+        // 混合文本使用折中方案：1 token ≈ 3 字符
+        int charCount = text.length();
+        // 计算中文字符数量（粗略估算）
+        int chineseCharCount = 0;
+        for (char c : text.toCharArray()) {
+            if (c >= 0x4E00 && c <= 0x9FFF) {  // 中文字符范围
+                chineseCharCount++;
+            }
+        }
+        int nonChineseCharCount = charCount - chineseCharCount;
+        // 中文字符按 1.5 字符/token，非中文字符按 4 字符/token 估算
+        int estimatedTokens = (int) (chineseCharCount / 1.5 + nonChineseCharCount / 4.0);
+        // 至少返回 1 个 token（如果文本不为空）
+        return Math.max(1, estimatedTokens);
     }
 
     /**

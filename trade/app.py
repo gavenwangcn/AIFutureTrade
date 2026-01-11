@@ -326,22 +326,36 @@ def validate_strategy_code():
     返回:
         JSON: 测试结果，包含passed、errors、warnings等字段
     """
+    # 获取客户端IP地址
+    client_ip = request.remote_addr
+    
     try:
+        # 记录请求开始
+        logger.info(f"[API] 策略代码验证请求开始: client_ip={client_ip}")
+        
         data = request.get_json()
         if not data:
+            logger.warning(f"[API] 策略代码验证请求失败: 请求体为空, client_ip={client_ip}")
             return jsonify({'error': '请求体不能为空', 'passed': False}), 400
         
         strategy_code = data.get('strategy_code')
         strategy_type = data.get('strategy_type')
         strategy_name = data.get('strategy_name', '测试策略')
         
+        # 记录请求参数（不记录完整代码，只记录代码长度）
+        strategy_code_length = len(strategy_code) if strategy_code else 0
+        logger.info(f"[API] 策略代码验证请求参数: strategy_name={strategy_name}, strategy_type={strategy_type}, code_length={strategy_code_length}, client_ip={client_ip}")
+        
         if not strategy_code:
+            logger.warning(f"[API] 策略代码验证请求失败: strategy_code参数为空, strategy_name={strategy_name}, strategy_type={strategy_type}, client_ip={client_ip}")
             return jsonify({'error': 'strategy_code参数不能为空', 'passed': False}), 400
         
         if not strategy_type or strategy_type not in ['buy', 'sell']:
+            logger.warning(f"[API] 策略代码验证请求失败: strategy_type参数无效, strategy_type={strategy_type}, strategy_name={strategy_name}, client_ip={client_ip}")
             return jsonify({'error': 'strategy_type参数必须为"buy"或"sell"', 'passed': False}), 400
         
         # 导入对应的测试器
+        logger.debug(f"[API] 导入策略测试器: strategy_type={strategy_type}")
         if strategy_type == 'buy':
             from trade.strategy.strategy_code_tester_buy import StrategyCodeTesterBuy
             tester = StrategyCodeTesterBuy()
@@ -349,15 +363,41 @@ def validate_strategy_code():
             from trade.strategy.strategy_code_tester_sell import StrategyCodeTesterSell
             tester = StrategyCodeTesterSell()
         
+        logger.info(f"[API] 开始执行策略代码测试: strategy_name={strategy_name}, strategy_type={strategy_type}, tester={tester.__class__.__name__}")
+        
         # 执行测试
         result = tester.test_strategy_code(strategy_code, strategy_name)
         
-        logger.info(f"策略代码验证完成: {strategy_name}, 类型: {strategy_type}, 通过: {result.get('passed', False)}")
+        # 记录测试结果详情
+        passed = result.get('passed', False)
+        errors = result.get('errors', [])
+        warnings = result.get('warnings', [])
+        errors_count = len(errors) if errors else 0
+        warnings_count = len(warnings) if warnings else 0
+        
+        logger.info(
+            f"[API] 策略代码验证完成: strategy_name={strategy_name}, strategy_type={strategy_type}, "
+            f"passed={passed}, errors_count={errors_count}, warnings_count={warnings_count}, "
+            f"client_ip={client_ip}"
+        )
+        
+        # 如果有错误，记录错误详情
+        if errors_count > 0:
+            logger.warning(f"[API] 策略代码验证发现错误: strategy_name={strategy_name}, errors={errors[:3]}, client_ip={client_ip}")  # 只记录前3个错误
+        
+        # 如果有警告，记录警告详情
+        if warnings_count > 0:
+            logger.info(f"[API] 策略代码验证发现警告: strategy_name={strategy_name}, warnings={warnings[:3]}, client_ip={client_ip}")  # 只记录前3个警告
         
         return jsonify(result)
         
     except Exception as e:
-        logger.error(f"验证策略代码时发生异常: {e}", exc_info=True)
+        logger.error(
+            f"[API] 策略代码验证时发生异常: strategy_name={strategy_name if 'strategy_name' in locals() else 'N/A'}, "
+            f"strategy_type={strategy_type if 'strategy_type' in locals() else 'N/A'}, "
+            f"error={e}, client_ip={client_ip}",
+            exc_info=True
+        )
         error_result = {
             "passed": False,
             "errors": [f"测试执行异常: {str(e)}"],
