@@ -132,7 +132,10 @@ public class ModelDTO implements Serializable {
 
     /**
      * 自动平仓百分比（当损失本金达到此百分比时自动平仓）
+     * 支持两种命名方式：auto_close_percent（snake_case）和 autoClosePercent（camelCase）
      */
+    @JsonProperty("auto_close_percent")
+    @JsonAlias({"autoClosePercent"})
     private Double autoClosePercent;
 
     /**
