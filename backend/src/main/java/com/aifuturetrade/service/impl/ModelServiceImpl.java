@@ -679,9 +679,20 @@ public class ModelServiceImpl implements ModelService {
                     log.warn("[ModelService] 持仓 {} 未获取到实时价格，使用存储的盈亏: {}", symbol, storedPnl);
                 }
                 
-                // 计算已用保证金
-                if (leverage != null && leverage > 0) {
-                    marginUsed += (positionAmt * avgPrice) / leverage;
+                // 计算已用保证金（优先使用 initialMargin 字段，如果不存在或为 null 则使用公式计算）
+                // 注意：initialMargin 为 0 是合法值（虽然罕见），应该直接使用，不需要 fallback
+                Double initialMargin = portfolioDO != null ? portfolioDO.getInitialMargin() : null;
+                if (initialMargin != null) {
+                    // 使用 initialMargin 字段（开仓时已正确设置，即使为 0 也使用）
+                    marginUsed += initialMargin;
+                } else {
+                    // Fallback: 如果 initialMargin 为 null（字段不存在），使用公式计算（兼容历史数据）
+                    if (leverage != null && leverage > 0) {
+                        Double calculatedMargin = (positionAmt * avgPrice) / leverage;
+                        marginUsed += calculatedMargin;
+                        log.debug("[ModelService] Using calculated margin for {}: {} (initialMargin is null)", 
+                                symbol, calculatedMargin);
+                    }
                 }
                 
                 // 计算持仓价值
