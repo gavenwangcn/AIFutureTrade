@@ -110,24 +110,51 @@ public class BinanceFuturesOrderServiceImpl implements BinanceFuturesOrderServic
             log.info("[BinanceFuturesOrderService] 计算持仓方向: 原方向={}, 反方向={}, signal={}", 
                     portfolio.getPositionSide(), oppositePositionSide, signal);
 
-            // 5. 插入trades表记录
+            // 5. 计算盈亏和手续费
+            Double entryPrice = portfolio.getAvgPrice();
+            Double positionAmt = Math.abs(portfolio.getPositionAmt());
+            String positionSide = portfolio.getPositionSide();
+            
+            // 计算毛盈亏
+            Double grossPnl;
+            if ("LONG".equalsIgnoreCase(positionSide)) {
+                grossPnl = (currentPrice - entryPrice) * positionAmt;
+            } else {
+                grossPnl = (entryPrice - currentPrice) * positionAmt;
+            }
+            
+            // 计算手续费（使用默认费率0.001，即0.1%）
+            Double tradeFeeRate = 0.001;
+            Double tradeAmount = positionAmt * currentPrice;
+            Double fee = tradeAmount * tradeFeeRate;
+            
+            // 计算净盈亏
+            Double netPnl = grossPnl - fee;
+            
+            log.info("[BinanceFuturesOrderService] 计算盈亏: 开仓价={}, 当前价={}, 数量={}, 方向={}, 毛盈亏={}, 手续费={}, 净盈亏={}", 
+                    entryPrice, currentPrice, positionAmt, positionSide, grossPnl, fee, netPnl);
+
+            // 6. 插入trades表记录（使用传入的modelId，而不是system_user）
             TradeDO trade = new TradeDO();
-            trade.setModelId("system_user");
+            trade.setModelId(modelId);  // 使用传入的modelId
             trade.setFuture(symbol);
             trade.setSignal(signal);
             trade.setPrice(currentPrice);
-            trade.setQuantity(Math.abs(portfolio.getPositionAmt()));
+            trade.setQuantity(positionAmt);
+            trade.setPnl(netPnl);  // 设置净盈亏
+            trade.setFee(fee);      // 设置手续费
             trade.setTimestamp(LocalDateTime.now());
             tradeMapper.insert(trade);
 
-            log.info("[BinanceFuturesOrderService] 插入trades表记录成功: tradeId={}", trade.getId());
+            log.info("[BinanceFuturesOrderService] 插入trades表记录成功: tradeId={}, modelId={}, pnl={}, fee={}", 
+                    trade.getId(), modelId, netPnl, fee);
 
-            // 6. 删除portfolios表记录
+            // 7. 删除portfolios表记录
             portfolioMapper.deleteById(portfolio.getId());
 
             log.info("[BinanceFuturesOrderService] 删除portfolios表记录成功: portfolioId={}", portfolio.getId());
 
-            // 7. 调用SDK执行卖出
+            // 8. 调用SDK执行卖出
             BinanceFuturesOrderClient orderClient = new BinanceFuturesOrderClient(
                     model.getApiKey(),
                     model.getApiSecret(),
@@ -139,7 +166,7 @@ public class BinanceFuturesOrderServiceImpl implements BinanceFuturesOrderServic
             Map<String, Object> orderParams = new HashMap<>();
             orderParams.put("symbol", formattedSymbol);
             orderParams.put("side", "SELL");
-            orderParams.put("quantity", Math.abs(portfolio.getPositionAmt()));
+            orderParams.put("quantity", positionAmt);
             orderParams.put("orderType", "MARKET");
             orderParams.put("positionSide", oppositePositionSide);
             orderParams.put("testMode", true);
@@ -154,7 +181,7 @@ public class BinanceFuturesOrderServiceImpl implements BinanceFuturesOrderServic
                 sdkResponse = orderClient.marketTrade(
                         formattedSymbol,
                         "SELL",
-                        Math.abs(portfolio.getPositionAmt()),
+                        positionAmt,
                         "MARKET",
                         oppositePositionSide,
                         true
@@ -167,9 +194,9 @@ public class BinanceFuturesOrderServiceImpl implements BinanceFuturesOrderServic
                 throw e; // 抛出异常以触发事务回滚
             }
 
-            // 8. 记录binance_trade_logs
+            // 9. 记录binance_trade_logs（model_id仍然使用system_user）
             BinanceTradeLogDO tradeLog = new BinanceTradeLogDO();
-            tradeLog.setModelId("system_user");
+            tradeLog.setModelId("system_user");  // binance_trade_logs表仍然使用system_user
             tradeLog.setTradeId(trade.getId());
             tradeLog.setType("test");
             tradeLog.setMethodName("marketTrade");
@@ -192,15 +219,17 @@ public class BinanceFuturesOrderServiceImpl implements BinanceFuturesOrderServic
 
             log.info("[BinanceFuturesOrderService] 记录binance_trade_logs成功: logId={}", tradeLog.getId());
 
-            // 9. 返回结果
+            // 10. 返回结果
             Map<String, Object> result = new HashMap<>();
             result.put("success", true);
             result.put("message", "卖出成功");
             result.put("tradeId", trade.getId());
             result.put("symbol", symbol);
-            result.put("quantity", Math.abs(portfolio.getPositionAmt()));
+            result.put("quantity", positionAmt);
             result.put("price", currentPrice);
             result.put("positionSide", portfolio.getPositionSide());
+            result.put("pnl", netPnl);
+            result.put("fee", fee);
             
             log.info("[BinanceFuturesOrderService] 一键卖出完成，modelId: {}, symbol: {}", modelId, symbol);
             

@@ -138,7 +138,8 @@ class Database:
         portfolio = portfolios_db.get_portfolio(model_id, current_prices, ...)
         trades_db.add_trade(model_id, symbol, signal, quantity, price)
         conversations_db.add_conversation(model_id, user_prompt, ai_response)
-        account_values_db.record_account_value(model_id, balance, available_balance, cross_wallet_balance)
+        account_values_db.record_account_value(model_id, balance, available_balance, cross_wallet_balance, 
+                                               cross_pnl=0.0, cross_un_pnl=0.0)
         history = account_value_historys_db.get_account_value_history(model_id, limit=100)
         db.close()  # Explicitly close connection pool, release resources
     

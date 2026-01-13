@@ -324,20 +324,23 @@ public class ModelServiceImpl implements ModelService {
         }
         
         // 按顺序删除所有关联表的数据
+        // 关键数据的删除失败应该抛出异常，让事务回滚，确保数据一致性
         // 1. 删除账户价值历史记录
         try {
             int count = accountValueHistoryMapper.deleteByModelId(id);
-            log.debug("[ModelService] Deleted {} account_value_historys records for model: {}", count, id);
+            log.info("[ModelService] Deleted {} account_value_historys records for model: {}", count, id);
         } catch (Exception e) {
-            log.warn("[ModelService] Failed to delete account_value_historys for model {}: {}", id, e.getMessage());
+            log.error("[ModelService] Failed to delete account_value_historys for model {}: {}", id, e.getMessage(), e);
+            throw new RuntimeException("Failed to delete account_value_historys for model: " + id, e);
         }
         
         // 2. 删除账户价值记录
         try {
             int count = accountValuesMapper.deleteByModelId(id);
-            log.debug("[ModelService] Deleted {} account_values records for model: {}", count, id);
+            log.info("[ModelService] Deleted {} account_values records for model: {}", count, id);
         } catch (Exception e) {
-            log.warn("[ModelService] Failed to delete account_values for model {}: {}", id, e.getMessage());
+            log.error("[ModelService] Failed to delete account_values for model {}: {}", id, e.getMessage(), e);
+            throw new RuntimeException("Failed to delete account_values for model: " + id, e);
         }
         
         // 3. 删除币安交易日志
@@ -346,6 +349,7 @@ public class ModelServiceImpl implements ModelService {
             log.debug("[ModelService] Deleted {} binance_trade_logs records for model: {}", count, id);
         } catch (Exception e) {
             log.warn("[ModelService] Failed to delete binance_trade_logs for model {}: {}", id, e.getMessage());
+            // 币安交易日志删除失败不影响主流程，只记录警告
         }
         
         // 4. 删除对话记录
@@ -354,6 +358,7 @@ public class ModelServiceImpl implements ModelService {
             log.debug("[ModelService] Deleted {} conversations records for model: {}", count, id);
         } catch (Exception e) {
             log.warn("[ModelService] Failed to delete conversations for model {}: {}", id, e.getMessage());
+            // 对话记录删除失败不影响主流程，只记录警告
         }
         
         // 5. 删除模型提示词配置
@@ -362,6 +367,7 @@ public class ModelServiceImpl implements ModelService {
             log.debug("[ModelService] Deleted {} model_prompts records for model: {}", count, id);
         } catch (Exception e) {
             log.warn("[ModelService] Failed to delete model_prompts for model {}: {}", id, e.getMessage());
+            // 模型提示词配置删除失败不影响主流程，只记录警告
         }
         
         // 6. 删除模型策略关联
@@ -370,30 +376,34 @@ public class ModelServiceImpl implements ModelService {
             log.debug("[ModelService] Deleted {} model_strategy records for model: {}", count, id);
         } catch (Exception e) {
             log.warn("[ModelService] Failed to delete model_strategy for model {}: {}", id, e.getMessage());
+            // 模型策略关联删除失败不影响主流程，只记录警告
         }
         
         // 7. 删除持仓记录
         try {
             int count = portfolioMapper.deleteByModelId(id);
-            log.debug("[ModelService] Deleted {} portfolios records for model: {}", count, id);
+            log.info("[ModelService] Deleted {} portfolios records for model: {}", count, id);
         } catch (Exception e) {
-            log.warn("[ModelService] Failed to delete portfolios for model {}: {}", id, e.getMessage());
+            log.error("[ModelService] Failed to delete portfolios for model {}: {}", id, e.getMessage(), e);
+            throw new RuntimeException("Failed to delete portfolios for model: " + id, e);
         }
         
         // 8. 删除交易记录
         try {
             int count = tradeMapper.deleteByModelId(id);
-            log.debug("[ModelService] Deleted {} trades records for model: {}", count, id);
+            log.info("[ModelService] Deleted {} trades records for model: {}", count, id);
         } catch (Exception e) {
-            log.warn("[ModelService] Failed to delete trades for model {}: {}", id, e.getMessage());
+            log.error("[ModelService] Failed to delete trades for model {}: {}", id, e.getMessage(), e);
+            throw new RuntimeException("Failed to delete trades for model: " + id, e);
         }
         
         // 9. 删除策略决策记录
         try {
             int count = strategyDecisionMapper.deleteByModelId(id);
-            log.debug("[ModelService] Deleted {} strategy_decisions records for model: {}", count, id);
+            log.info("[ModelService] Deleted {} strategy_decisions records for model: {}", count, id);
         } catch (Exception e) {
-            log.warn("[ModelService] Failed to delete strategy_decisions for model {}: {}", id, e.getMessage());
+            log.error("[ModelService] Failed to delete strategy_decisions for model {}: {}", id, e.getMessage(), e);
+            throw new RuntimeException("Failed to delete strategy_decisions for model: " + id, e);
         }
         
         // 最后删除model记录本身

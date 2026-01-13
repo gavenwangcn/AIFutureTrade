@@ -612,12 +612,18 @@ class TradingEngine:
             updated_portfolio = self._get_portfolio(self.model_id, current_prices)
             balance = updated_portfolio.get('total_value', 0)
             available_balance = updated_portfolio.get('cash', 0)
-            cross_wallet_balance = updated_portfolio.get('positions_value', 0)
+            # cross_wallet_balance 表示账户的余额（全仓钱包余额），应该等于总余额 balance
+            # 而不是 positions_value（持仓价值）
+            cross_wallet_balance = balance
+            cross_pnl = updated_portfolio.get('realized_pnl', 0)  # 已实现盈亏
+            cross_un_pnl = updated_portfolio.get('unrealized_pnl', 0)  # 未实现盈亏
             
             logger.debug(f"[Model {self.model_id}] [账户价值快照] 账户价值: "
                        f"总余额(balance)=${balance:.2f}, "
                        f"可用余额(available_balance)=${available_balance:.2f}, "
-                       f"全仓余额(cross_wallet_balance)=${cross_wallet_balance:.2f}")
+                       f"全仓余额(cross_wallet_balance)=${cross_wallet_balance:.2f}, "
+                       f"已实现盈亏(cross_pnl)=${cross_pnl:.2f}, "
+                       f"未实现盈亏(cross_un_pnl)=${cross_un_pnl:.2f}")
             
             model = self.models_db.get_model(self.model_id)
             account_alias = model.get('account_alias', '') if model else ''
@@ -630,6 +636,7 @@ class TradingEngine:
             logger.debug(f"[Model {self.model_id}] [账户价值快照] 准备调用record_account_value方法...")
             logger.debug(f"[Model {self.model_id}] [账户价值快照] 调用参数: model_id={self.model_id}, balance=${balance:.2f}, "
                        f"available_balance=${available_balance:.2f}, cross_wallet_balance=${cross_wallet_balance:.2f}, "
+                       f"cross_pnl=${cross_pnl:.2f}, cross_un_pnl=${cross_un_pnl:.2f}, "
                        f"account_alias={account_alias}")
             self.account_values_db.record_account_value(
                 self.model_id,
@@ -637,7 +644,8 @@ class TradingEngine:
                 available_balance=available_balance,
                 cross_wallet_balance=cross_wallet_balance,
                 account_alias=account_alias,
-                cross_un_pnl=0.0,
+                cross_pnl=cross_pnl,
+                cross_un_pnl=cross_un_pnl,
                 model_id_mapping=model_mapping,
                 get_model_func=self.models_db.get_model,
                 account_value_historys_table=ACCOUNT_VALUE_HISTORYS_TABLE
@@ -1128,7 +1136,8 @@ class TradingEngine:
                 # 如果没有记录，使用portfolio数据作为fallback
                 balance = portfolio.get('total_value', 0)
                 available_balance = portfolio.get('cash', 0)
-                cross_wallet_balance = portfolio.get('positions_value', 0)
+                # cross_wallet_balance 表示账户的余额（全仓钱包余额），应该等于总余额 balance
+                cross_wallet_balance = balance
                 cross_un_pnl = 0.0
                 logger.warning(f"[Model {self.model_id}] No account_values record found for virtual model, using portfolio data")
         else:
@@ -1137,7 +1146,8 @@ class TradingEngine:
                 logger.warning(f"[Model {self.model_id}] account_alias is empty for non-virtual model, using portfolio data")
                 balance = portfolio.get('total_value', 0)
                 available_balance = portfolio.get('cash', 0)
-                cross_wallet_balance = portfolio.get('positions_value', 0)
+                # cross_wallet_balance 表示账户的余额（全仓钱包余额），应该等于总余额 balance
+                cross_wallet_balance = balance
                 cross_un_pnl = 0.0
             else:
                 account_data = self.account_asset_db.get_account_asset(account_alias)
@@ -1150,7 +1160,8 @@ class TradingEngine:
                     # 如果account_asset表中没有数据，使用portfolio数据作为fallback
                     balance = portfolio.get('total_value', 0)
                     available_balance = portfolio.get('cash', 0)
-                    cross_wallet_balance = portfolio.get('positions_value', 0)
+                    # cross_wallet_balance 表示账户的余额（全仓钱包余额），应该等于总余额 balance
+                    cross_wallet_balance = balance
                     cross_un_pnl = 0.0
                     logger.warning(f"[Model {self.model_id}] No account_asset record found for account_alias={account_alias}, using portfolio data")
         

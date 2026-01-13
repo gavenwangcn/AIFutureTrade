@@ -193,6 +193,7 @@ class DatabaseInitializer:
             `balance` DOUBLE DEFAULT 0.0,
             `available_balance` DOUBLE DEFAULT 0.0,
             `cross_wallet_balance` DOUBLE DEFAULT 0.0,
+            `cross_pnl` DOUBLE DEFAULT 0.0,
             `cross_un_pnl` DOUBLE DEFAULT 0.0,
             `timestamp` DATETIME DEFAULT CURRENT_TIMESTAMP,
             INDEX `idx_model_alias_timestamp` (`model_id`, `account_alias`, `timestamp`)
@@ -211,6 +212,7 @@ class DatabaseInitializer:
             `balance` DOUBLE DEFAULT 0.0,
             `available_balance` DOUBLE DEFAULT 0.0,
             `cross_wallet_balance` DOUBLE DEFAULT 0.0,
+            `cross_pnl` DOUBLE DEFAULT 0.0,
             `cross_un_pnl` DOUBLE DEFAULT 0.0,
             `timestamp` DATETIME DEFAULT CURRENT_TIMESTAMP,
             INDEX `idx_model_timestamp` (`model_id`, `timestamp`),
