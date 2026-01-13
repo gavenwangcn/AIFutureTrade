@@ -1058,6 +1058,22 @@ let portfolioSymbolsRefreshInterval = null // 模型持仓合约列表自动刷�
         return
       }
       
+      // 计算数据的最小值和最大值，用于设置Y轴范围
+      const values = data.map(d => d.value).filter(v => v !== null && v !== undefined && !isNaN(v))
+      let minValue = values.length > 0 ? Math.min(...values) : 0
+      let maxValue = values.length > 0 ? Math.max(...values) : 0
+      
+      // 如果最小值和最大值相同，设置一个合理的范围
+      if (minValue === maxValue && minValue > 0) {
+        minValue = minValue * 0.99  // 向下扩展1%
+        maxValue = maxValue * 1.01  // 向上扩展1%
+      } else if (minValue !== maxValue) {
+        // 如果值不同，扩展一点范围以便显示
+        const range = maxValue - minValue
+        minValue = minValue - range * 0.05  // 向下扩展5%
+        maxValue = maxValue + range * 0.05  // 向上扩展5%
+      }
+      
       const option = {
         grid: {
           left: '60',
@@ -1076,32 +1092,21 @@ let portfolioSymbolsRefreshInterval = null // 模型持仓合约列表自动刷�
         yAxis: {
           type: 'value',
           scale: false,  // 禁用自动缩放，确保即使值相同也能正确显示趋势
+          min: minValue,  // 直接设置最小值
+          max: maxValue,  // 直接设置最大值
           axisLine: { lineStyle: { color: '#e5e6eb' } },
           axisLabel: {
             color: '#86909c',
             fontSize: 11,
-            formatter: (value) => `$${value.toLocaleString()}`
-          },
-          splitLine: { lineStyle: { color: '#f2f3f5' } },
-          // 当所有值相同时，设置合理的Y轴范围，避免显示为直线
-          min: (value) => {
-            const minValue = value.min
-            const maxValue = value.max
-            // 如果最小值和最大值相同，设置一个合理的范围
-            if (minValue === maxValue && minValue > 0) {
-              return minValue * 0.99  // 向下扩展1%
+            formatter: (value) => {
+              // 确保value是有效数字
+              if (value === null || value === undefined || isNaN(value)) {
+                return ''
+              }
+              return `$${value.toLocaleString()}`
             }
-            return 'dataMin'  // 否则使用数据最小值
           },
-          max: (value) => {
-            const minValue = value.min
-            const maxValue = value.max
-            // 如果最小值和最大值相同，设置一个合理的范围
-            if (minValue === maxValue && maxValue > 0) {
-              return maxValue * 1.01  // 向上扩展1%
-            }
-            return 'dataMax'  // 否则使用数据最大值
-          }
+          splitLine: { lineStyle: { color: '#f2f3f5' } }
         },
         series: [{
           type: 'line',
