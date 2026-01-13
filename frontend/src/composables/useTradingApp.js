@@ -1075,14 +1075,33 @@ let portfolioSymbolsRefreshInterval = null // 模型持仓合约列表自动刷�
         },
         yAxis: {
           type: 'value',
-          scale: true,
+          scale: false,  // 禁用自动缩放，确保即使值相同也能正确显示趋势
           axisLine: { lineStyle: { color: '#e5e6eb' } },
           axisLabel: {
             color: '#86909c',
             fontSize: 11,
             formatter: (value) => `$${value.toLocaleString()}`
           },
-          splitLine: { lineStyle: { color: '#f2f3f5' } }
+          splitLine: { lineStyle: { color: '#f2f3f5' } },
+          // 当所有值相同时，设置合理的Y轴范围，避免显示为直线
+          min: (value) => {
+            const minValue = value.min
+            const maxValue = value.max
+            // 如果最小值和最大值相同，设置一个合理的范围
+            if (minValue === maxValue && minValue > 0) {
+              return minValue * 0.99  // 向下扩展1%
+            }
+            return 'dataMin'  // 否则使用数据最小值
+          },
+          max: (value) => {
+            const minValue = value.min
+            const maxValue = value.max
+            // 如果最小值和最大值相同，设置一个合理的范围
+            if (minValue === maxValue && maxValue > 0) {
+              return maxValue * 1.01  // 向上扩展1%
+            }
+            return 'dataMax'  // 否则使用数据最大值
+          }
         },
         series: [{
           type: 'line',
