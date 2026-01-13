@@ -1092,7 +1092,7 @@ class TradingEngine:
     
     def _build_account_info(self, portfolio: Dict) -> Dict:
         """
-        构建账户信息用于AI决策
+        构建账户信息用于决策
         
         根据model的is_virtual值判断数据源：
         - 如果是virtual (True)：从account_values表获取最新记录
@@ -1114,6 +1114,7 @@ class TradingEngine:
                 'balance': 0.0,
                 'available_balance': 0.0,
                 'cross_wallet_balance': 0.0,
+                'cross_pnl': 0.0,
                 'cross_un_pnl': 0.0
             }
         
@@ -1131,6 +1132,7 @@ class TradingEngine:
                 balance = account_data.get('balance', 0.0)
                 available_balance = account_data.get('available_balance', 0.0)
                 cross_wallet_balance = account_data.get('cross_wallet_balance', 0.0)
+                cross_pnl = account_data.get('cross_pnl', 0.0)  # 已实现盈亏
                 cross_un_pnl = account_data.get('cross_un_pnl', 0.0)
             else:
                 # 如果没有记录，使用portfolio数据作为fallback
@@ -1138,6 +1140,7 @@ class TradingEngine:
                 available_balance = portfolio.get('cash', 0)
                 # cross_wallet_balance 表示账户的余额（全仓钱包余额），应该等于总余额 balance
                 cross_wallet_balance = balance
+                cross_pnl = portfolio.get('realized_pnl', 0.0)  # 已实现盈亏
                 cross_un_pnl = 0.0
                 logger.warning(f"[Model {self.model_id}] No account_values record found for virtual model, using portfolio data")
         else:
@@ -1148,6 +1151,7 @@ class TradingEngine:
                 available_balance = portfolio.get('cash', 0)
                 # cross_wallet_balance 表示账户的余额（全仓钱包余额），应该等于总余额 balance
                 cross_wallet_balance = balance
+                cross_pnl = portfolio.get('realized_pnl', 0.0)  # 已实现盈亏
                 cross_un_pnl = 0.0
             else:
                 account_data = self.account_asset_db.get_account_asset(account_alias)
@@ -1155,6 +1159,8 @@ class TradingEngine:
                     balance = account_data.get('balance', 0.0)
                     available_balance = account_data.get('available_balance', 0.0)
                     cross_wallet_balance = account_data.get('cross_wallet_balance', 0.0)
+                    # account_asset表没有cross_pnl字段，使用portfolio的realized_pnl作为fallback
+                    cross_pnl = portfolio.get('realized_pnl', 0.0)  # 已实现盈亏
                     cross_un_pnl = account_data.get('cross_un_pnl', 0.0)
                 else:
                     # 如果account_asset表中没有数据，使用portfolio数据作为fallback
@@ -1162,6 +1168,7 @@ class TradingEngine:
                     available_balance = portfolio.get('cash', 0)
                     # cross_wallet_balance 表示账户的余额（全仓钱包余额），应该等于总余额 balance
                     cross_wallet_balance = balance
+                    cross_pnl = portfolio.get('realized_pnl', 0.0)  # 已实现盈亏
                     cross_un_pnl = 0.0
                     logger.warning(f"[Model {self.model_id}] No account_asset record found for account_alias={account_alias}, using portfolio data")
         
@@ -1175,6 +1182,7 @@ class TradingEngine:
             'balance': balance,
             'available_balance': available_balance,
             'cross_wallet_balance': cross_wallet_balance,
+            'cross_pnl': cross_pnl,  # 已实现盈亏
             'cross_un_pnl': cross_un_pnl
         }
 
