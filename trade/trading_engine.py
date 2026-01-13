@@ -2510,22 +2510,32 @@ class TradingEngine:
         if requested_quantity <= 0:
             return {'symbol': symbol, 'error': '请求的合约数量无效'}
         
+        # position_amt = 买入 symbol 合约的数量（合约数量）
+        # 与strategy_decisions表的quantity保持一致：使用int向下取整（与策略执行记录保持一致）
+        # 注意：strategy_decisions表中quantity被转换为整数（int(float(quantity))），
+        # 所以这里也使用相同的处理方式，确保portfolios表的position_amt与strategy_decisions表的quantity一致
+        position_amt = int(float(requested_quantity))
+        
+        if position_amt <= 0:
+            return {'symbol': symbol, 'error': '请求的合约数量无效（向下取整后为0）'}
+        
         # 根据合约数量反推需要的本金USDT数量
         # 公式：capital_usdt = (quantity * price) / leverage
         # 这是因为：quantity = (capital_usdt * leverage) / price
         # 所以：capital_usdt = (quantity * price) / leverage
-        required_capital_usdt = (requested_quantity * price) / leverage
+        # 注意：使用position_amt（整数）而不是requested_quantity（可能为小数）来计算
+        required_capital_usdt = (position_amt * price) / leverage
         
         # 验证需要的本金是否超过可用资金
         if required_capital_usdt > available_cash:
-            return {'symbol': symbol, 'error': f'可用资金不足，需要 {required_capital_usdt:.2f} USDT，但只有 {available_cash:.2f} USDT'}
+            return {'symbol': symbol, 'error': f'可用资金不足，需要 {required_capital_usdt:.2f} USDT，但只有 {available_cash:.2f} USDT'} 
         
         # 使用的本金USDT数量
         capital_usdt = required_capital_usdt
         
-        # 使用工具函数计算交易所需资金
+        # 使用工具函数计算交易所需资金（使用position_amt而不是requested_quantity）
         trade_amount, buy_fee, sell_fee, initial_margin = calculate_trade_requirements(
-            requested_quantity, price, leverage, self.trade_fee_rate, capital_usdt
+            position_amt, price, leverage, self.trade_fee_rate, capital_usdt
         )
         
         # 总消耗资金 = 本金 + 买入手续费（手续费只算到本金上）
@@ -2534,12 +2544,9 @@ class TradingEngine:
         if total_required > available_cash:
             return {'symbol': symbol, 'error': '可用资金不足（含手续费）'}
         
-        # position_amt = 买入 symbol 合约的数量（合约数量），四舍五入保留两位小数
-        position_amt = round(requested_quantity, 2)
-        
-        # quantity = 使用的 USDT 数量（本金放大杠杆后的数值），四舍五入保留两位小数
-        # 用于 trades 表记录
-        quantity = round(capital_usdt * leverage, 2)
+        # quantity = 合约数量（与strategy_decisions表保持一致，统一使用合约数量）
+        # 用于 trades 表记录，与策略执行记录中的quantity含义一致
+        quantity = position_amt
         
         # 总手续费 = 买入手续费 + 卖出手续费（用于记录）
         trade_fee = buy_fee + sell_fee
@@ -2601,7 +2608,7 @@ class TradingEngine:
 
         # 【更新持仓】使用根据signal自动确定的position_side
         # 传递 initial_margin（本金）到数据库
-        # position_amt = 合约数量，quantity = 杠杆后的 USDT 数量
+        # position_amt = 合约数量，quantity = 合约数量（与strategy_decisions表保持一致）
         try:
             self._update_position(
                 self.model_id, symbol=symbol, position_amt=position_amt, avg_price=price, 
@@ -2616,9 +2623,9 @@ class TradingEngine:
         trade_side = 'buy'  # 统一使用buy
         
         # 记录交易
-        # quantity = 杠杆后的 USDT 数量（用于 trades 表）
+        # quantity = 合约数量（用于 trades 表，与strategy_decisions表保持一致）
         # position_amt = 合约数量（用于 portfolios 表）
-        logger.info(f"TRADE: PENDING - Model {self.model_id} {trade_signal.upper()} {symbol} position_side={position_side} quantity={quantity} USDT (杠杆后), position_amt={position_amt} (合约数量), price={price} fee={trade_fee}")
+        logger.info(f"TRADE: PENDING - Model {self.model_id} {trade_signal.upper()} {symbol} position_side={position_side} quantity={quantity} (合约数量), position_amt={position_amt} (合约数量), price={price} fee={trade_fee}")
         try:
             self.db.insert_rows(
                 self.db.trades_table,
@@ -2647,12 +2654,12 @@ class TradingEngine:
             'symbol': symbol,
             'signal': trade_signal,  # 返回实际的signal（buy_to_long或buy_to_short）
             'position_amt': position_amt,  # 合约数量
-            'quantity': quantity,  # 杠杆后的 USDT 数量
+            'quantity': quantity,  # 合约数量（与strategy_decisions表保持一致）
             'position_side': position_side,  # 返回position_side信息
             'price': price,
             'leverage': leverage,
             'fee': trade_fee,
-            'message': f'开仓 {symbol} {position_side} 合约数量={position_amt:.2f}, USDT数量={quantity:.2f} @ ${price:.2f} (手续费: ${trade_fee:.2f})'
+            'message': f'开仓 {symbol} {position_side} 合约数量={position_amt:.2f} @ ${price:.2f} (手续费: ${trade_fee:.2f})'
         }
 
     def _execute_sell(self, symbol: str, decision: Dict, market_state: Dict, portfolio: Dict) -> Dict:
@@ -2692,8 +2699,8 @@ class TradingEngine:
         
         current_price = market_state[symbol]['price']
         entry_price = position.get('avg_price', 0)
-        # position_amt 四舍五入保留两位小数
-        position_amt = round(abs(position.get('position_amt', 0)), 2)
+        # position_amt 转换为整数（与strategy_decisions表和portfolios表保持一致）
+        position_amt = int(abs(position.get('position_amt', 0)))
         
         if position_amt <= 0:
             return {'symbol': symbol, 'error': '持仓数量为0，无法平仓'}
@@ -2843,8 +2850,8 @@ class TradingEngine:
 
         current_price = market_state[symbol]['price']
         entry_price = position.get('avg_price', 0)
-        # position_amt 四舍五入保留两位小数
-        position_amt = round(abs(position.get('position_amt', 0)), 2)
+        # position_amt 转换为整数（与strategy_decisions表和portfolios表保持一致）
+        position_amt = int(abs(position.get('position_amt', 0)))
         position_side = position.get('position_side', 'LONG')
 
         # 使用工具函数计算盈亏
@@ -3030,16 +3037,36 @@ class TradingEngine:
         trade_amount = position_amt * stop_price
         trade_fee = trade_amount * self.trade_fee_rate
         
+        # 计算盈亏：使用开仓价格和止损价格
+        entry_price = position.get('avg_price', 0.0)
+        calculated_pnl = 0.0
+        if entry_price > 0 and stop_price > 0:
+            gross_pnl, _, net_pnl = calculate_pnl(
+                entry_price=entry_price,
+                current_price=stop_price,  # 止损价格作为平仓价格
+                quantity=position_amt,
+                position_side=position_side,
+                trade_fee_rate=self.trade_fee_rate
+            )
+            calculated_pnl = net_pnl
+            logger.info(f"TRADE: PNL计算 - Model {self.model_id} STOP_LOSS {symbol} | "
+                       f"entry_price={entry_price:.4f}, stop_price={stop_price:.4f}, "
+                       f"position_side={position_side}, quantity={position_amt}, "
+                       f"gross_pnl={gross_pnl:.4f}, net_pnl={calculated_pnl:.4f}")
+        else:
+            logger.warning(f"TRADE: PNL计算跳过 - Model {self.model_id} STOP_LOSS {symbol} | "
+                          f"entry_price={entry_price}, stop_price={stop_price} (价格无效)")
+        
         # 记录止损单到trades表（使用提前生成的trade_id）
         logger.info(f"TRADE: PENDING - Model {self.model_id} STOP_LOSS {symbol} position_side={position_side} position_amt={position_amt} stop_price={stop_price}")
         if sdk_call_skipped:
             logger.warning(f"TRADE: ⚠️ SDK调用被跳过，但交易记录仍将保存到数据库 | symbol={symbol} | reason={sdk_skip_reason}")
         try:
-            # 【记录到trades表】side字段使用position_side的反向
+            # 【记录到trades表】side字段使用position_side的反向，pnl字段使用计算出的盈亏
             # 注意：这里需要修改add_trade方法支持传入trade_id，或者使用其他方式
             self.db.insert_rows(
                 self.db.trades_table,
-                [[trade_id, model_uuid, symbol.upper(), 'stop_loss', position_amt, stop_price, position.get('leverage', 1), side_for_trade.lower(), 0, trade_fee, datetime.now(timezone(timedelta(hours=8))).replace(tzinfo=None)]],
+                [[trade_id, model_uuid, symbol.upper(), 'stop_loss', position_amt, stop_price, position.get('leverage', 1), side_for_trade.lower(), calculated_pnl, trade_fee, datetime.now(timezone(timedelta(hours=8))).replace(tzinfo=None)]],
                 ["id", "model_id", "future", "signal", "quantity", "price", "leverage", "side", "pnl", "fee", "timestamp"]
             )
             if sdk_call_skipped:
@@ -3167,12 +3194,32 @@ class TradingEngine:
         trade_amount = position_amt * stop_price
         trade_fee = trade_amount * self.trade_fee_rate
         
+        # 计算盈亏：使用开仓价格和止盈价格
+        entry_price = position.get('avg_price', 0.0)
+        calculated_pnl = 0.0
+        if entry_price > 0 and stop_price > 0:
+            gross_pnl, _, net_pnl = calculate_pnl(
+                entry_price=entry_price,
+                current_price=stop_price,  # 止盈价格作为平仓价格
+                quantity=position_amt,
+                position_side=position_side,
+                trade_fee_rate=self.trade_fee_rate
+            )
+            calculated_pnl = net_pnl
+            logger.info(f"TRADE: PNL计算 - Model {self.model_id} TAKE_PROFIT {symbol} | "
+                       f"entry_price={entry_price:.4f}, stop_price={stop_price:.4f}, "
+                       f"position_side={position_side}, quantity={position_amt}, "
+                       f"gross_pnl={gross_pnl:.4f}, net_pnl={calculated_pnl:.4f}")
+        else:
+            logger.warning(f"TRADE: PNL计算跳过 - Model {self.model_id} TAKE_PROFIT {symbol} | "
+                          f"entry_price={entry_price}, stop_price={stop_price} (价格无效)")
+        
         # 记录止盈单
         logger.info(f"TRADE: PENDING - Model {self.model_id} TAKE_PROFIT {symbol} position_side={position_side} position_amt={position_amt} stop_price={stop_price}")
         try:
             self.db.insert_rows(
                 self.db.trades_table,
-                [[trade_id, model_uuid, symbol.upper(), 'take_profit', position_amt, stop_price, position.get('leverage', 1), side_for_trade.lower(), 0, trade_fee, datetime.now(timezone(timedelta(hours=8))).replace(tzinfo=None)]],
+                [[trade_id, model_uuid, symbol.upper(), 'take_profit', position_amt, stop_price, position.get('leverage', 1), side_for_trade.lower(), calculated_pnl, trade_fee, datetime.now(timezone(timedelta(hours=8))).replace(tzinfo=None)]],
                 ["id", "model_id", "future", "signal", "quantity", "price", "leverage", "side", "pnl", "fee", "timestamp"]
             )
             logger.info(f"TRADE: RECORDED - Model {self.model_id} TAKE_PROFIT {symbol}")
