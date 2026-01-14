@@ -38,7 +38,7 @@ Open an issue for discussion.
 docker run --rm -it --net=container:aifuturetrade-async-service alpine sh -c "apk add iproute2 && watch -n 1 'ss -tunp | grep :443'"
 
 http://156.254.6.176:5004/api/market-data/klines?symbol=MYXUSDT&interval=1d&limit=2
-
+http://185.242.232.42:5004/api/market-data/klines?symbol=MYXUSDT&interval=1d&limit=2
 docker stop $(docker ps -q --filter "name=buy-*")
 docker rm $(docker ps -a -q -f "name=buy-*")
 docker stop $(docker ps -q --filter "name=sell-*")
