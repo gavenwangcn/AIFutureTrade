@@ -1058,6 +1058,22 @@ let portfolioSymbolsRefreshInterval = null // 模型持仓合约列表自动刷�
         return
       }
       
+      // 计算数据的最小值和最大值，用于设置Y轴范围
+      const values = data.map(d => d.value).filter(v => v !== null && v !== undefined && !isNaN(v))
+      let minValue = values.length > 0 ? Math.min(...values) : 0
+      let maxValue = values.length > 0 ? Math.max(...values) : 0
+      
+      // 如果最小值和最大值相同，设置一个合理的范围
+      if (minValue === maxValue && minValue > 0) {
+        minValue = minValue * 0.99  // 向下扩展1%
+        maxValue = maxValue * 1.01  // 向上扩展1%
+      } else if (minValue !== maxValue) {
+        // 如果值不同，扩展一点范围以便显示
+        const range = maxValue - minValue
+        minValue = minValue - range * 0.05  // 向下扩展5%
+        maxValue = maxValue + range * 0.05  // 向上扩展5%
+      }
+      
       const option = {
         grid: {
           left: '60',
@@ -1075,12 +1091,20 @@ let portfolioSymbolsRefreshInterval = null // 模型持仓合约列表自动刷�
         },
         yAxis: {
           type: 'value',
-          scale: true,
+          scale: false,  // 禁用自动缩放，确保即使值相同也能正确显示趋势
+          min: minValue,  // 直接设置最小值
+          max: maxValue,  // 直接设置最大值
           axisLine: { lineStyle: { color: '#e5e6eb' } },
           axisLabel: {
             color: '#86909c',
             fontSize: 11,
-            formatter: (value) => `$${value.toLocaleString()}`
+            formatter: (value) => {
+              // 确保value是有效数字
+              if (value === null || value === undefined || isNaN(value)) {
+                return ''
+              }
+              return `$${value.toLocaleString()}`
+            }
           },
           splitLine: { lineStyle: { color: '#f2f3f5' } }
         },
@@ -2007,19 +2031,28 @@ let portfolioSymbolsRefreshInterval = null // 模型持仓合约列表自动刷�
     conversations.value = []
     aggregatedChartData.value = [] // 清空聚合图表数据，确保只显示当前模型的数据
     
-    // 重置策略决策分页到第一页
+    // 重置所有分页到第一页
     strategyDecisions.value = []
     strategyDecisionsPage.value = 1
     strategyDecisionsTotal.value = 0
     strategyDecisionsTotalPages.value = 0
     
+    // 重置交易记录分页到第一页
+    trades.value = []
+    tradesPage.value = 1
+    tradesTotal.value = 0
+    tradesTotalPages.value = 0
+    
+    // 清空持仓数据，确保重新加载
+    positions.value = []
+    
     currentModelId.value = modelId
     isAggregatedView.value = false
-    // 加载模型相关数据
+    // 加载模型相关数据（从第一页开始加载）
     await Promise.all([
       loadPortfolio(),
-      loadPositions(),
-      loadTrades(),
+      loadPositions(), // 刷新持仓数据
+      loadTrades(1, tradesPageSize.value), // 从第一页开始加载交易记录
       loadConversationsOrDecisions(), // 根据trade_type加载对话或策略决策数据
       loadModelPortfolioSymbols() // 立即加载一次模型持仓合约数据
     ])

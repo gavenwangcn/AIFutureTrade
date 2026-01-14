@@ -209,7 +209,7 @@ class AccountValuesDatabase:
     
     def record_account_value(self, model_id: int, balance: float,
                             available_balance: float, cross_wallet_balance: float,
-                            account_alias: str = '', cross_un_pnl: float = 0.0,
+                            account_alias: str = '', cross_pnl: float = 0.0, cross_un_pnl: float = 0.0,
                             model_id_mapping: Dict[int, str] = None,
                             get_model_func: Callable[[int], Optional[Dict]] = None,
                             account_value_historys_table: str = None):
@@ -225,6 +225,7 @@ class AccountValuesDatabase:
             available_balance: 下单可用余额
             cross_wallet_balance: 全仓余额
             account_alias: 账户唯一识别码（可选，默认空字符串）
+            cross_pnl: 全仓已实现盈亏（可选，默认0.0）
             cross_un_pnl: 全仓持仓未实现盈亏（可选，默认0.0）
             model_id_mapping: 可选的模型ID映射字典
             get_model_func: 可选的获取模型信息的函数
@@ -292,10 +293,11 @@ class AccountValuesDatabase:
                         balance = %s,
                         available_balance = %s,
                         cross_wallet_balance = %s,
+                        cross_pnl = %s,
                         cross_un_pnl = %s,
                         timestamp = %s
                     WHERE id = %s
-                """, (final_account_alias, balance, available_balance, cross_wallet_balance, cross_un_pnl, current_time, existing_id))
+                """, (final_account_alias, balance, available_balance, cross_wallet_balance, cross_pnl, cross_un_pnl, current_time, existing_id))
                 logger.debug(f"[AccountValues] Updated account_values record for model {model_id} (id={existing_id}), account_alias={final_account_alias}")
             else:
                 # 不存在记录，执行INSERT
@@ -305,8 +307,8 @@ class AccountValuesDatabase:
                 av_id = self._generate_id()
                 self.insert_rows(
                     self.account_values_table,
-                    [[av_id, model_uuid, account_alias, balance, available_balance, cross_wallet_balance, cross_un_pnl, current_time]],
-                    ["id", "model_id", "account_alias", "balance", "available_balance", "cross_wallet_balance", "cross_un_pnl", "timestamp"]
+                    [[av_id, model_uuid, account_alias, balance, available_balance, cross_wallet_balance, cross_pnl, cross_un_pnl, current_time]],
+                    ["id", "model_id", "account_alias", "balance", "available_balance", "cross_wallet_balance", "cross_pnl", "cross_un_pnl", "timestamp"]
                 )
                 logger.debug(f"[AccountValues] Inserted account_values record for model {model_id} (id={av_id}), account_alias={account_alias}")
                 final_account_alias_for_history = account_alias
@@ -322,8 +324,8 @@ class AccountValuesDatabase:
                     current_time = datetime.now(beijing_tz)
                     self.insert_rows(
                         account_value_historys_table,
-                        [[history_id, model_uuid, final_account_alias_for_history, balance, available_balance, cross_wallet_balance, cross_un_pnl, current_time]],
-                        ["id", "model_id", "account_alias", "balance", "available_balance", "cross_wallet_balance", "cross_un_pnl", "timestamp"]
+                        [[history_id, model_uuid, final_account_alias_for_history, balance, available_balance, cross_wallet_balance, cross_pnl, cross_un_pnl, current_time]],
+                        ["id", "model_id", "account_alias", "balance", "available_balance", "cross_wallet_balance", "cross_pnl", "cross_un_pnl", "timestamp"]
                     )
                     logger.debug(f"[AccountValues] Inserted account_value_historys record for model {model_id} (id={history_id}), account_alias={final_account_alias_for_history}, timestamp={current_time}")
                 except Exception as history_err:
@@ -361,7 +363,7 @@ class AccountValuesDatabase:
             
             rows = self.query(f"""
                 SELECT `account_alias`, `balance`, `available_balance`, 
-                       `cross_wallet_balance`, `cross_un_pnl`, `timestamp`
+                       `cross_wallet_balance`, `cross_pnl`, `cross_un_pnl`, `timestamp`
                 FROM `{self.account_values_table}`
                 WHERE `model_id` = %s
                 ORDER BY `timestamp` DESC
@@ -372,7 +374,7 @@ class AccountValuesDatabase:
                 return None
             
             columns = ["account_alias", "balance", "available_balance", 
-                      "cross_wallet_balance", "cross_un_pnl", "timestamp"]
+                      "cross_wallet_balance", "cross_pnl", "cross_un_pnl", "timestamp"]
             result = self._row_to_dict(rows[0], columns)
             
             return {
@@ -380,6 +382,7 @@ class AccountValuesDatabase:
                 "balance": float(result["balance"]) if result["balance"] is not None else 0.0,
                 "available_balance": float(result["available_balance"]) if result["available_balance"] is not None else 0.0,
                 "cross_wallet_balance": float(result["cross_wallet_balance"]) if result["cross_wallet_balance"] is not None else 0.0,
+                "cross_pnl": float(result["cross_pnl"]) if result["cross_pnl"] is not None else 0.0,
                 "cross_un_pnl": float(result["cross_un_pnl"]) if result["cross_un_pnl"] is not None else 0.0
             }
         except Exception as e:

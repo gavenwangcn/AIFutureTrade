@@ -386,8 +386,24 @@ class PortfoliosDatabase:
                 """)
                 realized_pnl = float(pnl_rows[0][0]) if pnl_rows and pnl_rows[0][0] is not None else 0.0
             
-            # Calculate margin used (prefer initial_margin field, if not available use traditional calculation)
-            margin_used = sum([p.get('initial_margin', 0) or (abs(p['position_amt']) * p['avg_price'] / p['leverage']) for p in positions])
+            # Calculate margin used (use initial_margin field if available, otherwise calculate)
+            # 优先使用 initial_margin 字段（开仓时已正确设置），如果字段不存在或为 None 则使用公式计算
+            # 注意：initial_margin 为 0 是合法值（虽然罕见），应该直接使用，不需要 fallback
+            margin_used = 0.0
+            for p in positions:
+                initial_margin = p.get('initial_margin')
+                if initial_margin is not None:
+                    # 使用 initial_margin 字段（开仓时已正确设置，即使为 0 也使用）
+                    margin_used += initial_margin
+                else:
+                    # Fallback: 如果 initial_margin 为 None（字段不存在），使用公式计算（兼容历史数据）
+                    position_amt = abs(p.get('position_amt', 0))
+                    avg_price = p.get('avg_price', 0)
+                    leverage = p.get('leverage', 1)
+                    if leverage > 0:
+                        calculated_margin = (position_amt * avg_price) / leverage
+                        margin_used += calculated_margin
+                        logger.debug(f"[Portfolios] Using calculated margin for {p.get('symbol')}: {calculated_margin} (initial_margin is None)")
             
             # Calculate unrealized P&L (prefer unrealized_profit field, if not available calculate)
             unrealized_pnl = 0

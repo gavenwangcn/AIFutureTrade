@@ -44,3 +44,8 @@ docker rm $(docker ps -a -q -f "name=buy-*")
 docker stop $(docker ps -q --filter "name=sell-*")
 docker rm $(docker ps -a -q -f "name=sell-*")
 
+cash = 初始资金 + 已实现盈亏 - 已用保证金（可用于新开仓的资金）
+margin_used = Σ((持仓数量 × 开仓均价) / 杠杆倍数)（所有持仓占用的保证金）
+positions_value = Σ(持仓数量 × 开仓均价)（持仓的开仓价值总和）
+total_value = 初始资金 + 已实现盈亏 + 未实现盈亏（账户总价值）
+
