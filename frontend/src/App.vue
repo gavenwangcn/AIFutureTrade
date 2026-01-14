@@ -1118,6 +1118,16 @@ const pendingSellLogsModelId = ref(null)
 const sellLogsModelName = ref('')
 const tempLeverage = ref(10) // 临时杠杆值
 
+// 监听模型切换，自动切换到持仓模块并重置分页
+watch(currentModelId, async (newModelId, oldModelId) => {
+  // 当模型切换时（从无模型到有模型，或从一个模型切换到另一个模型）
+  if (newModelId && newModelId !== oldModelId && !isAggregatedView.value) {
+    console.log(`[App] Model changed: ${oldModelId} -> ${newModelId}, switching to positions tab`)
+    // 自动切换到持仓模块
+    activeTab.value = 'positions'
+  }
+})
+
 // 监听标签切换，动态重新加载数据
 watch(activeTab, async (newTab, oldTab) => {
   // 只在选中模型且非聚合视图时加载数据

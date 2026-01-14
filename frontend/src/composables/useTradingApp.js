@@ -2031,19 +2031,28 @@ let portfolioSymbolsRefreshInterval = null // 模型持仓合约列表自动刷�
     conversations.value = []
     aggregatedChartData.value = [] // 清空聚合图表数据，确保只显示当前模型的数据
     
-    // 重置策略决策分页到第一页
+    // 重置所有分页到第一页
     strategyDecisions.value = []
     strategyDecisionsPage.value = 1
     strategyDecisionsTotal.value = 0
     strategyDecisionsTotalPages.value = 0
     
+    // 重置交易记录分页到第一页
+    trades.value = []
+    tradesPage.value = 1
+    tradesTotal.value = 0
+    tradesTotalPages.value = 0
+    
+    // 清空持仓数据，确保重新加载
+    positions.value = []
+    
     currentModelId.value = modelId
     isAggregatedView.value = false
-    // 加载模型相关数据
+    // 加载模型相关数据（从第一页开始加载）
     await Promise.all([
       loadPortfolio(),
-      loadPositions(),
-      loadTrades(),
+      loadPositions(), // 刷新持仓数据
+      loadTrades(1, tradesPageSize.value), // 从第一页开始加载交易记录
       loadConversationsOrDecisions(), // 根据trade_type加载对话或策略决策数据
       loadModelPortfolioSymbols() // 立即加载一次模型持仓合约数据
     ])
