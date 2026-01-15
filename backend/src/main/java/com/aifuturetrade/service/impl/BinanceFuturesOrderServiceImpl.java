@@ -179,7 +179,6 @@ public class BinanceFuturesOrderServiceImpl implements BinanceFuturesOrderServic
             log.info("[BinanceFuturesOrderService] 调用SDK执行卖出，参数: {}", orderParams);
 
             Map<String, Object> sdkResponse = null;
-            String errorContext = null;
             String responseType = "200";
             
             try {
@@ -194,7 +193,6 @@ public class BinanceFuturesOrderServiceImpl implements BinanceFuturesOrderServic
                 log.info("[BinanceFuturesOrderService] SDK调用成功: {}", sdkResponse);
             } catch (Exception e) {
                 log.error("[BinanceFuturesOrderService] SDK调用失败: {}", e.getMessage(), e);
-                errorContext = e.getMessage();
                 responseType = "500";
                 throw e; // 抛出异常以触发事务回滚
             }
@@ -212,9 +210,6 @@ public class BinanceFuturesOrderServiceImpl implements BinanceFuturesOrderServic
                     tradeLog.setResponseContext(objectMapper.writeValueAsString(sdkResponse));
                 }
                 tradeLog.setResponseType(responseType);
-                if (errorContext != null) {
-                    tradeLog.setErrorContext(errorContext);
-                }
             } catch (Exception e) {
                 log.warn("[BinanceFuturesOrderService] 序列化参数失败: {}", e.getMessage());
             }
