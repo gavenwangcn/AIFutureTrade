@@ -418,12 +418,13 @@ class BinanceFuturesClient(_BinanceFuturesBase):
         )
 
         # 创建SDK配置和客户端
-        # 设置超时时间为10秒（read timeout），避免网络超时错误
+        # 设置超时时间为10秒（10000毫秒），避免网络超时错误
+        # 注意：timeout参数单位是毫秒，默认值是1000毫秒（1秒）
         configuration = ConfigurationRestAPI(
             api_key=api_key,
             api_secret=api_secret,
             base_path=rest_base,
-            read_timeout=10.0,  # 读取超时时间设置为10秒
+            timeout=10000,  # 超时时间设置为10秒（10000毫秒）
         )
 
         self.quote_asset = quote_asset.upper()
@@ -995,12 +996,13 @@ class BinanceFuturesAccountClient(_BinanceFuturesBase):
         )
 
         # 创建SDK配置和客户端
-        # 设置超时时间为10秒（read timeout），避免网络超时错误
+        # 设置超时时间为10秒（10000毫秒），避免网络超时错误
+        # 注意：timeout参数单位是毫秒，默认值是1000毫秒（1秒）
         configuration = ConfigurationRestAPI(
             api_key=api_key,
             api_secret=api_secret,
             base_path=rest_base,
-            read_timeout=10.0,  # 读取超时时间设置为10秒
+            timeout=10000,  # 超时时间设置为10秒（10000毫秒）
         )
 
         self.quote_asset = quote_asset.upper()
@@ -1072,12 +1074,13 @@ class BinanceFuturesOrderClient(_BinanceFuturesBase):
         )
 
         # 创建SDK配置和客户端
-        # 设置超时时间为10秒（read timeout），避免网络超时错误
+        # 设置超时时间为10秒（10000毫秒），避免网络超时错误
+        # 注意：timeout参数单位是毫秒，默认值是1000毫秒（1秒）
         configuration = ConfigurationRestAPI(
             api_key=api_key,
             api_secret=api_secret,
             base_path=rest_base,
-            read_timeout=10.0,  # 读取超时时间设置为10秒
+            timeout=10000,  # 超时时间设置为10秒（10000毫秒）
         )
 
         self.quote_asset = quote_asset.upper()
