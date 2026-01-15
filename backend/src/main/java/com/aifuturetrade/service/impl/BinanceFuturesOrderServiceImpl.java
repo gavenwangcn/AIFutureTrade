@@ -143,6 +143,9 @@ public class BinanceFuturesOrderServiceImpl implements BinanceFuturesOrderServic
             trade.setQuantity(positionAmt);
             trade.setPnl(netPnl);  // 设置净盈亏
             trade.setFee(fee);      // 设置手续费
+            // 设置原始保证金（从portfolio中获取，用于计算盈亏百分比）
+            Double initialMargin = portfolio.getInitialMargin();
+            trade.setInitialMargin(initialMargin != null ? initialMargin : 0.0);
             trade.setTimestamp(LocalDateTime.now());
             tradeMapper.insert(trade);
 

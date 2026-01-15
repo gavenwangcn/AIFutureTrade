@@ -473,6 +473,11 @@ public class ModelServiceImpl implements ModelService {
                 position.put("leverage", portfolioDO.getLeverage());
                 position.put("unrealizedProfit", portfolioDO.getUnrealizedProfit());
                 position.put("unrealized_profit", portfolioDO.getUnrealizedProfit());
+                // 添加原始保证金字段（用于计算盈亏百分比）
+                if (portfolioDO.getInitialMargin() != null) {
+                    position.put("initialMargin", portfolioDO.getInitialMargin());
+                    position.put("initial_margin", portfolioDO.getInitialMargin());
+                }
                 positions.add(position);
                 
                 if (portfolioDO.getSymbol() != null) {
@@ -685,13 +690,23 @@ public class ModelServiceImpl implements ModelService {
                 if (initialMargin != null) {
                     // 使用 initialMargin 字段（开仓时已正确设置，即使为 0 也使用）
                     marginUsed += initialMargin;
+                    // 确保position map中包含initialMargin字段（用于前端计算盈亏百分比）
+                    pos.put("initialMargin", initialMargin);
+                    pos.put("initial_margin", initialMargin);
                 } else {
                     // Fallback: 如果 initialMargin 为 null（字段不存在），使用公式计算（兼容历史数据）
                     if (leverage != null && leverage > 0) {
                         Double calculatedMargin = (positionAmt * avgPrice) / leverage;
                         marginUsed += calculatedMargin;
+                        // 将计算出的保证金也放入position map
+                        pos.put("initialMargin", calculatedMargin);
+                        pos.put("initial_margin", calculatedMargin);
                         log.debug("[ModelService] Using calculated margin for {}: {} (initialMargin is null)", 
                                 symbol, calculatedMargin);
+                    } else {
+                        // 如果无法计算，设置为0
+                        pos.put("initialMargin", 0.0);
+                        pos.put("initial_margin", 0.0);
                     }
                 }
                 
@@ -964,6 +979,8 @@ public class ModelServiceImpl implements ModelService {
             trade.put("quantity", tradeDO.getQuantity());
             trade.put("pnl", tradeDO.getPnl() != null ? tradeDO.getPnl() : 0.0);
             trade.put("fee", tradeDO.getFee() != null ? tradeDO.getFee() : 0.0);  // 添加fee字段
+            trade.put("initialMargin", tradeDO.getInitialMargin() != null ? tradeDO.getInitialMargin() : 0.0);  // 添加initialMargin字段
+            trade.put("initial_margin", tradeDO.getInitialMargin() != null ? tradeDO.getInitialMargin() : 0.0);  // 兼容字段名
             trade.put("status", tradeDO.getStatus());
             
             // 格式化timestamp字段为字符串（北京时间）

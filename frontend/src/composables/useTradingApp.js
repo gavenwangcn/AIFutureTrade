@@ -1187,6 +1187,7 @@ let portfolioSymbolsRefreshInterval = null // 模型持仓合约列表自动刷�
           const positionSide = pos.position_side !== undefined ? pos.position_side : (pos.positionSide !== undefined ? pos.positionSide : '')
           const pnl = pos.pnl !== undefined ? pos.pnl : 0
           const leverage = pos.leverage !== undefined ? pos.leverage : 1
+          const initialMargin = pos.initial_margin !== undefined ? pos.initial_margin : (pos.initialMargin !== undefined ? pos.initialMargin : 0)
           
           console.log(`[TradingApp] 持仓[${index + 1}] 原始数据:`, {
             symbol: pos.symbol,
@@ -1199,7 +1200,9 @@ let portfolioSymbolsRefreshInterval = null // 模型持仓合约列表自动刷�
             position_side: pos.position_side,
             positionSide: pos.positionSide,
             pnl: pos.pnl,
-            leverage: pos.leverage
+            leverage: pos.leverage,
+            initial_margin: pos.initial_margin,
+            initialMargin: pos.initialMargin
           })
           
           const mappedPos = {
@@ -1211,6 +1214,7 @@ let portfolioSymbolsRefreshInterval = null // 模型持仓合约列表自动刷�
             currentPrice: currentPrice || 0,
             leverage: leverage || 1,
             pnl: pnl || 0,
+            initialMargin: initialMargin || 0,
             // 保留原始数据
             ...pos
           }
@@ -2587,6 +2591,38 @@ let portfolioSymbolsRefreshInterval = null // 模型持仓合约列表自动刷�
   }
   
   /**
+   * 格式化盈亏百分比（当前盈亏值占原始保证金的比例）
+   * @param {number} pnl - 当前盈亏值
+   * @param {number} initialMargin - 原始保证金
+   * @returns {string} 格式化后的盈亏百分比（带符号，保留2位小数），如果数据不正常则返回"--"
+   */
+  const formatPnlPercent = (pnl, initialMargin) => {
+    // 检查 initialMargin 是否为无效值（null, undefined, 0, 空字符串, NaN）
+    if (initialMargin === null || initialMargin === undefined || initialMargin === '' || 
+        initialMargin === 0 || isNaN(parseFloat(initialMargin)) || parseFloat(initialMargin) <= 0) {
+      return '--'  // 如果原始保证金为0、不存在或无效，显示"--"
+    }
+    
+    // 检查 pnl 是否为无效值
+    if (pnl === null || pnl === undefined || pnl === '' || isNaN(parseFloat(pnl))) {
+      return '--'  // 如果盈亏值为无效，也显示"--"
+    }
+    
+    const pnlNum = parseFloat(pnl)
+    const marginNum = parseFloat(initialMargin)
+    
+    // 再次检查解析后的值
+    if (isNaN(pnlNum) || isNaN(marginNum) || marginNum <= 0) {
+      return '--'
+    }
+    
+    // 计算盈亏百分比：(盈亏值 / 原始保证金) * 100
+    const percent = (pnlNum / marginNum) * 100
+    const sign = percent >= 0 ? '+' : ''
+    return `${sign}${percent.toFixed(2)}%`
+  }
+  
+  /**
    * 格式化成交量（中文单位：亿、万）
    */
   const formatVolumeChinese = (value) => {
@@ -2875,6 +2911,7 @@ let portfolioSymbolsRefreshInterval = null // 模型持仓合约列表自动刷�
     formatCurrency5,
     formatPnl,
     formatPnl5,
+    formatPnlPercent,
     getPnlClass,
     formatVolumeChinese,
     formatTime,

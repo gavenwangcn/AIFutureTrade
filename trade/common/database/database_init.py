@@ -153,6 +153,7 @@ class DatabaseInitializer:
             `side` VARCHAR(10) DEFAULT 'long',
             `pnl` DOUBLE DEFAULT 0,
             `fee` DOUBLE DEFAULT 0,
+            `initial_margin` DOUBLE DEFAULT 0.0,
             `timestamp` DATETIME DEFAULT CURRENT_TIMESTAMP,
             INDEX `idx_model_timestamp` (`model_id`, `timestamp`),
             INDEX `idx_future` (`future`),
@@ -163,6 +164,9 @@ class DatabaseInitializer:
         """
         self.command(ddl)
         logger.debug(f"[DatabaseInit] Ensured table {table_name} exists")
+        
+        # 注意：如果表已存在但字段不存在，需要手动执行以下SQL添加字段：
+        # ALTER TABLE `trades` ADD COLUMN `initial_margin` DOUBLE DEFAULT 0.0 AFTER `fee`
     
     def ensure_conversations_table(self, table_name: str = "conversations"):
         """Create conversations table if not exists"""

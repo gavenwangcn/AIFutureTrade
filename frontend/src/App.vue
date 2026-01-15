@@ -488,6 +488,7 @@
                     <th>当前价</th>
                     <th>杠杆</th>
                     <th>盈亏</th>
+                    <th>盈亏百分比</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -503,9 +504,12 @@
                     <td :class="getPnlClass(position.pnl || 0, true)">
                       <strong>{{ formatPnl(position.pnl || 0, true) }}</strong>
                     </td>
+                    <td :class="getPnlClass(position.pnl || 0, true)">
+                      <strong>{{ formatPnlPercent(position.pnl, position.initialMargin || position.initial_margin) }}</strong>
+                    </td>
                   </tr>
                   <tr v-if="positions.length === 0">
-                    <td colspan="7" class="empty-state">暂无持仓</td>
+                    <td colspan="8" class="empty-state">暂无持仓</td>
                   </tr>
                 </tbody>
               </table>
@@ -528,6 +532,7 @@
                       <th>数量</th>
                       <th>价格</th>
                       <th>盈亏</th>
+                      <th>盈亏百分比</th>
                       <th>费用</th>
                     </tr>
                   </thead>
@@ -543,10 +548,13 @@
                       <td>{{ (trade.quantity || 0).toFixed(4) }}</td>
                       <td>${{ formatPrice6(trade.price) }}</td>
                       <td :class="getPnlClass(trade.pnl || 0, true)">{{ formatPnl(trade.pnl || 0, true) }}</td>
+                      <td :class="getPnlClass(trade.pnl || 0, true)">
+                        <strong>{{ formatPnlPercent(trade.pnl, trade.initialMargin || trade.initial_margin) }}</strong>
+                      </td>
                       <td>${{ formatCurrency(trade.fee || 0) }}</td>
                     </tr>
                     <tr v-if="trades.length === 0">
-                      <td colspan="7" class="empty-state">暂无交易记录</td>
+                      <td colspan="8" class="empty-state">暂无交易记录</td>
                     </tr>
                   </tbody>
                 </table>
@@ -1084,6 +1092,7 @@ const {
   formatCurrency5,
   formatPnl,
   formatPnl5,
+  formatPnlPercent,
   getPnlClass,
   formatVolumeChinese,
   formatTime,

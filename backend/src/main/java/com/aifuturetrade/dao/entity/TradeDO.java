@@ -73,6 +73,12 @@ public class TradeDO implements Serializable {
     private Double fee;
 
     /**
+     * 原始保证金（用于计算盈亏百分比）
+     */
+    @TableField("initial_margin")
+    private Double initialMargin;
+
+    /**
      * 状态（success, failed）
      */
     @TableField(exist = false)
