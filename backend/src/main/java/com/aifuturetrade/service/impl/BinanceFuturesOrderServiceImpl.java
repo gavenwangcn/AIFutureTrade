@@ -18,6 +18,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -146,7 +147,8 @@ public class BinanceFuturesOrderServiceImpl implements BinanceFuturesOrderServic
             // 设置原始保证金（从portfolio中获取，用于计算盈亏百分比）
             Double initialMargin = portfolio.getInitialMargin();
             trade.setInitialMargin(initialMargin != null ? initialMargin : 0.0);
-            trade.setTimestamp(LocalDateTime.now());
+            // 使用UTC+8时区的时间（与Python代码保持一致）
+            trade.setTimestamp(LocalDateTime.now(ZoneOffset.ofHours(8)));
             tradeMapper.insert(trade);
 
             log.info("[BinanceFuturesOrderService] 插入trades表记录成功: tradeId={}, modelId={}, pnl={}, fee={}", 
