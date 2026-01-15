@@ -54,14 +54,30 @@ def get_log_level():
     }
     return log_level_map.get(log_level_str, logging.INFO)
 
+# 自定义Formatter，使用UTC+8时区
+class UTC8Formatter(logging.Formatter):
+    """自定义Formatter，使用UTC+8时区格式化日志时间"""
+    def formatTime(self, record, datefmt=None):
+        from datetime import datetime, timezone, timedelta
+        # 将时间戳转换为UTC+8时区
+        dt = datetime.fromtimestamp(record.created, tz=timezone(timedelta(hours=8)))
+        if datefmt:
+            return dt.strftime(datefmt)
+        return dt.strftime('%Y-%m-%d %H:%M:%S')
+
 log_format = getattr(app_config, 'LOG_FORMAT', '%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 log_date_format = getattr(app_config, 'LOG_DATE_FORMAT', '%Y-%m-%d %H:%M:%S')
 
+# 创建自定义Formatter
+formatter = UTC8Formatter(log_format, datefmt=log_date_format)
+
+# 创建StreamHandler并设置Formatter
+handler = logging.StreamHandler(sys.stdout)
+handler.setFormatter(formatter)
+
 logging.basicConfig(
     level=get_log_level(),
-    format=log_format,
-    datefmt=log_date_format,
-    handlers=[logging.StreamHandler(sys.stdout)]
+    handlers=[handler]
 )
 
 logging.getLogger('werkzeug').setLevel(logging.WARNING)
