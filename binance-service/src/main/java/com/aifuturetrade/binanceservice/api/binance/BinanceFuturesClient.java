@@ -453,30 +453,32 @@ public class BinanceFuturesClient extends BinanceFuturesBase {
                         String takerBuyBaseVolume = item.get(9);
                         String takerBuyQuoteVolume = item.get(10);
                         
-                        // 转换时间戳为日期格式（不使用时区转换，直接使用UTC时间）
+                        // 转换时间戳为日期格式（转换为UTC+8时区）
                         // 注意：open_time 和 close_time 是 UTC 时间戳（毫秒），用于API调用
-                        // open_time_dt_str 和 close_time_dt_str 是 UTC 格式的时间字符串，不包含时区信息
+                        // open_time_dt_str 和 close_time_dt_str 是 UTC+8 格式的时间字符串，不包含时区信息
                         LocalDateTime openTimeDt = null;
                         String openTimeDtStr = null;
                         if (openTime != null) {
-                            LocalDateTime openTimeLocal = Instant.ofEpochMilli(openTime).atZone(ZoneOffset.UTC).toLocalDateTime();
+                            // 转换为UTC+8时区
+                            LocalDateTime openTimeLocal = Instant.ofEpochMilli(openTime).atZone(ZoneOffset.ofHours(8)).toLocalDateTime();
                             openTimeDt = openTimeLocal;
-                            // 格式：2025-01-01 12:00:00（不包含时区信息）
+                            // 格式：2025-01-01 12:00:00（UTC+8时区，不包含时区信息）
                             openTimeDtStr = openTimeLocal.format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"));
                         }
                         LocalDateTime closeTimeDt = null;
                         String closeTimeDtStr = null;
                         if (closeTime != null) {
-                            LocalDateTime closeTimeLocal = Instant.ofEpochMilli(closeTime).atZone(ZoneOffset.UTC).toLocalDateTime();
+                            // 转换为UTC+8时区
+                            LocalDateTime closeTimeLocal = Instant.ofEpochMilli(closeTime).atZone(ZoneOffset.ofHours(8)).toLocalDateTime();
                             closeTimeDt = closeTimeLocal;
-                            // 格式：2025-01-01 12:00:00（不包含时区信息）
+                            // 格式：2025-01-01 12:00:00（UTC+8时区，不包含时区信息）
                             closeTimeDtStr = closeTimeLocal.format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"));
                         }
                         
                         // 保留原始UTC时间戳（用于API调用和计算）
                         klineDict.put("open_time", openTime);
                         klineDict.put("open_time_dt", openTimeDt);
-                        // UTC格式的时间字符串（用于显示，不包含时区信息）
+                        // UTC+8格式的时间字符串（用于显示，不包含时区信息）
                         klineDict.put("open_time_dt_str", openTimeDtStr);
                         klineDict.put("open", openPrice);
                         klineDict.put("high", highPrice);
@@ -486,7 +488,7 @@ public class BinanceFuturesClient extends BinanceFuturesBase {
                         // 保留原始UTC时间戳（用于API调用和计算）
                         klineDict.put("close_time", closeTime);
                         klineDict.put("close_time_dt", closeTimeDt);
-                        // UTC格式的时间字符串（用于显示，不包含时区信息）
+                        // UTC+8格式的时间字符串（用于显示，不包含时区信息）
                         klineDict.put("close_time_dt_str", closeTimeDtStr);
                         klineDict.put("quote_asset_volume", quoteAssetVolume);
                         klineDict.put("number_of_trades", numberOfTrades);
