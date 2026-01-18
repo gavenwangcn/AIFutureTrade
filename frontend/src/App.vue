@@ -881,6 +881,18 @@
               <small class="form-help">当损失本金达到此百分比时自动平仓（例如：10 表示损失10%本金时自动平仓）。留空或0表示不启用自动平仓。</small>
             </div>
             <div class="form-group">
+              <label for="settingsBaseVolumeInput">每日成交量过滤阈值（千万单位）</label>
+              <input 
+                type="number" 
+                id="settingsBaseVolumeInput" 
+                class="form-input" 
+                min="0" 
+                step="0.1"
+                v-model.number="tempModelSettings.base_volume"
+              >
+              <small class="form-help">只交易每日成交量大于此阈值的合约（以千万为单位，例如：10 表示1亿成交量）。留空或0表示不过滤。</small>
+            </div>
+            <div class="form-group">
               <label style="font-weight: 600; margin-bottom: 12px; display: block;">买入批次配置</label>
               <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px;">
                 <div>

@@ -1387,6 +1387,41 @@ public class ModelServiceImpl implements ModelService {
     }
 
     @Override
+    public Map<String, Object> updateModelBaseVolume(String modelId, Double baseVolume) {
+        log.debug("[ModelService] 更新模型每日成交量过滤阈值, modelId={}, baseVolume={}", modelId, baseVolume);
+        try {
+            // 验证参数：null 或 0 表示不过滤，否则必须 >= 0
+            if (baseVolume != null && baseVolume < 0) {
+                throw new IllegalArgumentException("base_volume must be >= 0, or null to disable");
+            }
+            
+            ModelDO model = modelMapper.selectModelById(modelId);
+            if (model == null) {
+                throw new RuntimeException("Model not found");
+            }
+            
+            UpdateWrapper<ModelDO> updateWrapper = new UpdateWrapper<>();
+            updateWrapper.eq("id", modelId);
+            // 如果值为 null 或 0，设置为 null（不过滤）
+            if (baseVolume == null || baseVolume == 0) {
+                updateWrapper.set("base_volume", null);
+            } else {
+                updateWrapper.set("base_volume", baseVolume);
+            }
+            modelMapper.update(null, updateWrapper);
+            
+            Map<String, Object> result = new HashMap<>();
+            result.put("success", true);
+            result.put("model_id", modelId);
+            result.put("base_volume", baseVolume);
+            return result;
+        } catch (Exception e) {
+            log.error("[ModelService] 更新模型每日成交量过滤阈值失败: {}", e.getMessage(), e);
+            throw new RuntimeException("更新模型每日成交量过滤阈值失败: " + e.getMessage(), e);
+        }
+    }
+
+    @Override
     @Transactional(rollbackFor = Exception.class)
     public Map<String, Object> updateModelProvider(String modelId, String providerId, String modelName) {
         log.debug("[ModelService] 更新模型提供方和模型名称, modelId={}, providerId={}, modelName={}", modelId, providerId, modelName);

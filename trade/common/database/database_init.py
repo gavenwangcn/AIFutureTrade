@@ -101,6 +101,7 @@ class DatabaseInitializer:
             `is_virtual` TINYINT UNSIGNED DEFAULT 0,
             `symbol_source` VARCHAR(50) DEFAULT 'leaderboard',
             `trade_type` VARCHAR(20) DEFAULT 'strategy' COMMENT 'Trade type: ai-use AI trading, strategy-use strategy trading',
+            `base_volume` DOUBLE DEFAULT NULL COMMENT '每日成交量过滤阈值（以千万为单位），NULL表示不过滤',
             `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP,
             INDEX `idx_provider_id` (`provider_id`),
             INDEX `idx_account_alias` (`account_alias`),
@@ -110,6 +111,48 @@ class DatabaseInitializer:
         """
         self.command(ddl)
         logger.debug(f"[DatabaseInit] Ensured table {table_name} exists")
+        
+        # Check and add base_volume field (if table exists but field doesn't exist)
+        try:
+            # Check if base_volume field exists
+            check_column_sql = f"""
+            SELECT COUNT(*) FROM information_schema.COLUMNS 
+            WHERE TABLE_SCHEMA = DATABASE() 
+            AND TABLE_NAME = '{table_name}' 
+            AND COLUMN_NAME = 'base_volume'
+            """
+            result = self.command(check_column_sql)
+            # If field doesn't exist, add field
+            if isinstance(result, list) and len(result) > 0 and result[0][0] == 0:
+                alter_sql = f"""
+                ALTER TABLE `{table_name}` 
+                ADD COLUMN `base_volume` DOUBLE DEFAULT NULL COMMENT '每日成交量过滤阈值（以千万为单位），NULL表示不过滤' AFTER `trade_type`
+                """
+                self.command(alter_sql)
+                logger.info(f"[DatabaseInit] Added base_volume column to {table_name} table")
+            
+            # 如果存在旧的quote_volume字段，迁移数据到base_volume（兼容旧数据）
+            check_old_column_sql = f"""
+            SELECT COUNT(*) FROM information_schema.COLUMNS 
+            WHERE TABLE_SCHEMA = DATABASE() 
+            AND TABLE_NAME = '{table_name}' 
+            AND COLUMN_NAME = 'quote_volume'
+            """
+            old_result = self.command(check_old_column_sql)
+            if isinstance(old_result, list) and len(old_result) > 0 and old_result[0][0] > 0:
+                # 检查base_volume字段是否存在
+                base_volume_exists = isinstance(result, list) and len(result) > 0 and result[0][0] > 0
+                if base_volume_exists:
+                    # 迁移数据：将quote_volume的值复制到base_volume（如果base_volume为NULL）
+                    migrate_sql = f"""
+                    UPDATE `{table_name}` 
+                    SET `base_volume` = `quote_volume` 
+                    WHERE `base_volume` IS NULL AND `quote_volume` IS NOT NULL
+                    """
+                    self.command(migrate_sql)
+                    logger.info(f"[DatabaseInit] Migrated data from quote_volume to base_volume in {table_name} table")
+        except Exception as e:
+            logger.warning(f"[DatabaseInit] Failed to check/add base_volume column to {table_name}: {e}")
         
   
     def ensure_portfolios_table(self, table_name: str = "portfolios"):

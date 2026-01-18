@@ -70,7 +70,8 @@ TRADING_LOOP_ENABLED = os.getenv('TRADING_LOOP_ENABLED', 'false').lower() in {'1
 
 # ============ AI Trading Decision Configuration ============
 
-PROMPT_MARKET_SYMBOL_LIMIT = 5  # Number of market contracts processed each time AI model is called
+PROMPT_MARKET_SYMBOL_LIMIT = 10  # Number of market contracts processed each time model is called (from leaderboard)
+TRADE_MARKET_SYMBOL_LIMIT = 5  # Number of symbols actually submitted to strategy decision module (after filtering by base_volume)
 
 
 # ============ Binance Service Configuration ============

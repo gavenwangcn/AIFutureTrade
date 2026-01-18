@@ -154,6 +154,14 @@ public interface ModelService {
     Map<String, Object> updateModelAutoClosePercent(String modelId, Double autoClosePercent);
 
     /**
+     * 更新模型的每日成交量过滤阈值（千万单位）
+     * @param modelId 模型ID（UUID格式）
+     * @param baseVolume 每日成交量过滤阈值（千万单位，null表示不过滤）
+     * @return 更新结果
+     */
+    Map<String, Object> updateModelBaseVolume(String modelId, Double baseVolume);
+
+    /**
      * 更新模型的API提供方和模型名称
      * @param modelId 模型ID（UUID格式）
      * @param providerId 新的API提供方ID（UUID格式）

@@ -154,6 +154,12 @@ public class ModelDO implements Serializable {
     private Double autoClosePercent;
 
     /**
+     * 每日成交量过滤阈值（以千万为单位），NULL表示不过滤
+     */
+    @TableField("base_volume")
+    private Double baseVolume;
+
+    /**
      * 创建时间
      */
     @TableField("created_at")

@@ -106,6 +106,7 @@ const lastPortfolioSymbolsRefreshTime = ref(null) // 持仓合约列表最后刷
     leverage: 10,
     max_positions: 3,
     auto_close_percent: null,
+    base_volume: null,
     buy_batch_size: 1,
     buy_batch_execution_interval: 60,
     buy_batch_execution_group_size: 1,
@@ -2228,7 +2229,11 @@ let portfolioSymbolsRefreshInterval = null // 模型持仓合约列表自动刷�
       const autoClosePercentValue = model.auto_close_percent ?? model.autoClosePercent ?? null
       console.log('[TradingApp] 解析后的 auto_close_percent 值:', autoClosePercentValue)
       
-      console.log('[TradingApp] 设置模型配置, providerId=', providerId, 'modelName=', modelName, 'max_positions=', maxPositionsValue, 'auto_close_percent=', autoClosePercentValue)
+      // 优先使用 base_volume，兼容旧字段名 quote_volume
+      const baseVolumeValue = model.base_volume ?? model.baseVolume ?? model.quote_volume ?? model.quoteVolume ?? null
+      console.log('[TradingApp] 解析后的 base_volume 值:', baseVolumeValue)
+      
+      console.log('[TradingApp] 设置模型配置, providerId=', providerId, 'modelName=', modelName, 'max_positions=', maxPositionsValue, 'auto_close_percent=', autoClosePercentValue, 'base_volume=', baseVolumeValue)
       
       tempModelSettings.value = {
         provider_id: providerId,
@@ -2236,6 +2241,7 @@ let portfolioSymbolsRefreshInterval = null // 模型持仓合约列表自动刷�
         leverage: model.leverage || 10,
         max_positions: maxPositionsValue,
         auto_close_percent: autoClosePercentValue,
+        base_volume: baseVolumeValue,
         buy_batch_size: model.buy_batch_size || 1,
         buy_batch_execution_interval: model.buy_batch_execution_interval || 60,
         buy_batch_execution_group_size: model.buy_batch_execution_group_size || 1,
@@ -2271,12 +2277,16 @@ let portfolioSymbolsRefreshInterval = null // 模型持仓合约列表自动刷�
         // 优先使用 auto_close_percent，如果没有则使用 autoClosePercent（兼容两种命名方式）
         const autoClosePercentValue = localModel.auto_close_percent ?? localModel.autoClosePercent ?? null
         
+        // 优先使用 base_volume，兼容旧字段名 quote_volume
+        const baseVolumeValue = localModel.base_volume ?? localModel.baseVolume ?? localModel.quote_volume ?? localModel.quoteVolume ?? null
+        
         tempModelSettings.value = {
           provider_id: providerId,
           model_name: localModel.model_name || '',
           leverage: localModel.leverage || 10,
           max_positions: maxPositionsValue,
           auto_close_percent: autoClosePercentValue,
+          base_volume: baseVolumeValue,
           buy_batch_size: localModel.buy_batch_size || 1,
           buy_batch_execution_interval: localModel.buy_batch_execution_interval || 60,
           buy_batch_execution_group_size: localModel.buy_batch_execution_group_size || 1,
@@ -2381,14 +2391,16 @@ let portfolioSymbolsRefreshInterval = null // 模型持仓合约列表自动刷�
         promises.push(modelApi.updateProvider(pendingModelSettingsId.value, providerId, modelName))
       }
       
-      // 更新杠杆、最大持仓数量和自动平仓百分比
+      // 更新杠杆、最大持仓数量、自动平仓百分比和每日成交量过滤阈值
       const autoClosePercentValue = tempModelSettings.value.auto_close_percent
+      const baseVolumeValue = tempModelSettings.value.base_volume
       // 确保 maxPositionsValue 是有效的整数
       const validMaxPositions = Number.isInteger(maxPositionsValue) ? maxPositionsValue : Math.floor(maxPositionsValue)
       promises.push(
         modelApi.setLeverage(pendingModelSettingsId.value, leverageValue),
         modelApi.setMaxPositions(pendingModelSettingsId.value, validMaxPositions),
-        modelApi.setAutoClosePercent(pendingModelSettingsId.value, autoClosePercentValue || null)
+        modelApi.setAutoClosePercent(pendingModelSettingsId.value, autoClosePercentValue || null),
+        modelApi.setBaseVolume(pendingModelSettingsId.value, baseVolumeValue || null)
       )
       
       // 更新批次配置

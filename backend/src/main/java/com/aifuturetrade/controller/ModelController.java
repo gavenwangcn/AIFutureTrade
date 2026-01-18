@@ -289,6 +289,48 @@ public class ModelController {
     }
 
     /**
+     * 更新模型的每日成交量过滤阈值（千万单位）
+     * @param modelId 模型ID
+     * @param requestBody 请求体，包含base_volume（兼容quote_volume）
+     * @return 更新操作结果
+     */
+    @PostMapping("/{modelId}/base_volume")
+    @Operation(summary = "更新模型的每日成交量过滤阈值")
+    public ResponseEntity<Map<String, Object>> updateModelBaseVolume(@PathVariable(value = "modelId") String modelId, @RequestBody Map<String, Object> requestBody) {
+        // 优先使用base_volume，兼容旧字段名quote_volume
+        Object baseVolumeObj = requestBody.get("base_volume");
+        if (baseVolumeObj == null) {
+            baseVolumeObj = requestBody.get("quote_volume");
+        }
+        Double baseVolume = null;
+        if (baseVolumeObj != null) {
+            if (baseVolumeObj instanceof Number) {
+                baseVolume = ((Number) baseVolumeObj).doubleValue();
+            } else if (baseVolumeObj instanceof String) {
+                String str = (String) baseVolumeObj;
+                if (!str.isEmpty()) {
+                    baseVolume = Double.parseDouble(str);
+                }
+            }
+        }
+        Map<String, Object> result = modelService.updateModelBaseVolume(modelId, baseVolume);
+        return new ResponseEntity<>(result, HttpStatus.OK);
+    }
+    
+    /**
+     * 更新模型的每日成交量过滤阈值（千万单位）- 兼容旧接口
+     * @param modelId 模型ID
+     * @param requestBody 请求体，包含quote_volume
+     * @return 更新操作结果
+     */
+    @PostMapping("/{modelId}/quote_volume")
+    @Operation(summary = "更新模型的每日成交量过滤阈值（兼容旧接口）")
+    public ResponseEntity<Map<String, Object>> updateModelQuoteVolume(@PathVariable(value = "modelId") String modelId, @RequestBody Map<String, Object> requestBody) {
+        // 兼容旧接口，重定向到base_volume
+        return updateModelBaseVolume(modelId, requestBody);
+    }
+
+    /**
      * 更新模型的API提供方和模型名称
      * @param modelId 模型ID
      * @param requestBody 请求体，包含provider_id和model_name

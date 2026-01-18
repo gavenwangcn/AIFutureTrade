@@ -2387,8 +2387,133 @@ class TradingEngine:
         
         logger.info(f"[Model {self.model_id}] 过滤后剩余 {len(filtered_candidates)} 个候选symbol")
         
+        # 步骤2.5: 根据模型的base_volume配置过滤成交量（在最开始进行过滤，避免调用SDK的K线接口）
+        try:
+            model = self.models_db.get_model(self.model_id)
+            # 兼容旧字段名quote_volume，优先使用base_volume
+            base_volume_threshold = model.get('base_volume') if model else None
+            if base_volume_threshold is None:
+                base_volume_threshold = model.get('quote_volume') if model else None  # 兼容旧字段名
+            
+            if base_volume_threshold is not None and base_volume_threshold > 0:
+                # 获取候选symbol的成交量信息（从数据库获取，避免调用SDK）
+                symbol_list = []
+                for candidate in filtered_candidates:
+                    symbol = candidate.get('symbol')
+                    if not symbol:
+                        continue
+                    contract_symbol = candidate.get('contract_symbol')
+                    if contract_symbol:
+                        contract_symbol = contract_symbol.upper()
+                    else:
+                        symbol_upper = symbol.upper()
+                        if not symbol_upper.endswith('USDT'):
+                            contract_symbol = f"{symbol_upper}USDT"
+                        else:
+                            contract_symbol = symbol_upper
+                    symbol_list.append(contract_symbol)
+                
+                if symbol_list:
+                    # 从数据库获取成交量信息（24小时成交量，单位：基础资产）
+                    volume_data = self._get_symbol_volumes(symbol_list)
+                    
+                    # 过滤成交量：只保留每日成交量（base_volume）大于阈值的symbol
+                    # base_volume_threshold单位是千万，需要转换为基础资产单位（乘以10000000）
+                    threshold_base = base_volume_threshold * 10000000
+                    volume_filtered_candidates = []
+                    for candidate in filtered_candidates:
+                        symbol = candidate.get('symbol')
+                        if not symbol:
+                            continue
+                        contract_symbol = candidate.get('contract_symbol')
+                        if contract_symbol:
+                            contract_symbol = contract_symbol.upper()
+                        else:
+                            symbol_upper = symbol.upper()
+                            if not symbol_upper.endswith('USDT'):
+                                contract_symbol = f"{symbol_upper}USDT"
+                            else:
+                                contract_symbol = symbol_upper
+                        
+                        volume_info = volume_data.get(contract_symbol, {})
+                        base_volume_value = volume_info.get('base_volume', 0.0) if volume_info else 0.0
+                        
+                        if base_volume_value >= threshold_base:
+                            volume_filtered_candidates.append(candidate)
+                            logger.debug(f"[Model {self.model_id}] {symbol} 成交量过滤通过: base_volume={base_volume_value}, threshold={threshold_base}")
+                        else:
+                            logger.debug(f"[Model {self.model_id}] {symbol} 成交量过滤失败: base_volume={base_volume_value} < threshold={threshold_base}")
+                    
+                    filtered_candidates = volume_filtered_candidates
+                    logger.info(f"[Model {self.model_id}] 成交量过滤后剩余 {len(filtered_candidates)} 个候选symbol（阈值：{base_volume_threshold}千万）")
+                else:
+                    logger.warning(f"[Model {self.model_id}] 无法获取symbol列表进行成交量过滤")
+            else:
+                logger.debug(f"[Model {self.model_id}] 未配置base_volume或值为0/null，跳过成交量过滤")
+        except Exception as e:
+            logger.warning(f"[Model {self.model_id}] 成交量过滤失败: {e}，继续使用未过滤的候选symbol")
+        
+        if not filtered_candidates:
+            logger.info(f"[Model {self.model_id}] 成交量过滤后无可用候选symbol")
+            return [], {}
+        
+        # 步骤2.6: 根据TRADE_MARKET_SYMBOL_LIMIT配置限制最终提交给策略判断模块的symbol数量（仅对leaderboard数据源生效）
+        if symbol_source == 'leaderboard':
+            try:
+                trade_limit = getattr(app_config, 'TRADE_MARKET_SYMBOL_LIMIT', 5)
+                trade_limit = max(1, int(trade_limit))
+                
+                # 分离涨跌榜
+                gainers_candidates = [c for c in filtered_candidates if c.get('leaderboard_source') == 'gainers']
+                losers_candidates = [c for c in filtered_candidates if c.get('leaderboard_source') == 'losers']
+                
+                # 对涨榜按change_percent从大到小排序（涨幅越大越靠前）
+                # 兼容多种字段名：change_percent, changePercent, price_change_percent
+                def get_change_percent(candidate):
+                    return candidate.get('change_percent') or candidate.get('changePercent') or candidate.get('price_change_percent') or 0.0
+                
+                gainers_candidates.sort(key=get_change_percent, reverse=True)
+                # 对跌榜按change_percent从小到大排序（跌幅越大越靠前，因为跌幅是负数）
+                losers_candidates.sort(key=get_change_percent, reverse=False)
+                
+                # 取前N个（如果数量不足则全部取）
+                final_gainers = gainers_candidates[:trade_limit]
+                final_losers = losers_candidates[:trade_limit]
+                
+                filtered_candidates = final_gainers + final_losers
+                
+                # 提取涨跌榜的symbol列表用于日志打印
+                gainers_symbols = [c.get('symbol', '') or c.get('contract_symbol', '') for c in final_gainers]
+                losers_symbols = [c.get('symbol', '') or c.get('contract_symbol', '') for c in final_losers]
+                
+                logger.info(f"[Model {self.model_id}] TRADE_MARKET_SYMBOL_LIMIT限制后: 涨榜{len(final_gainers)}个（共{len(gainers_candidates)}个），跌榜{len(final_losers)}个（共{len(losers_candidates)}个），总计{len(filtered_candidates)}个")
+                logger.info(f"[Model {self.model_id}] 提交到策略执行模块 - 涨榜symbol列表: {gainers_symbols}")
+                logger.info(f"[Model {self.model_id}] 提交到策略执行模块 - 跌榜symbol列表: {losers_symbols}")
+            except Exception as e:
+                logger.warning(f"[Model {self.model_id}] TRADE_MARKET_SYMBOL_LIMIT限制失败: {e}，继续使用未限制的候选symbol")
+        
+        if not filtered_candidates:
+            logger.info(f"[Model {self.model_id}] TRADE_MARKET_SYMBOL_LIMIT限制后无可用候选symbol")
+            return [], {}
+        
         # 步骤3: 基于候选symbol列表获取市场状态信息（价格、成交量，可选K线指标）
         market_state = self._build_market_state_for_candidates(filtered_candidates, symbol_source, include_indicators=include_indicators)
+        
+        # 在最终返回前，打印提交的symbol列表信息（包括非leaderboard数据源的情况）
+        if symbol_source == 'leaderboard':
+            # 对于leaderboard数据源，如果TRADE_MARKET_SYMBOL_LIMIT限制失败，需要在这里打印
+            # 分离涨跌榜并打印
+            gainers_candidates = [c for c in filtered_candidates if c.get('leaderboard_source') == 'gainers']
+            losers_candidates = [c for c in filtered_candidates if c.get('leaderboard_source') == 'losers']
+            if gainers_candidates or losers_candidates:
+                gainers_symbols = [c.get('symbol', '') or c.get('contract_symbol', '') for c in gainers_candidates]
+                losers_symbols = [c.get('symbol', '') or c.get('contract_symbol', '') for c in losers_candidates]
+                logger.info(f"[Model {self.model_id}] 提交到策略执行模块 - 涨榜symbol列表: {gainers_symbols}")
+                logger.info(f"[Model {self.model_id}] 提交到策略执行模块 - 跌榜symbol列表: {losers_symbols}")
+        else:
+            # 对于非leaderboard数据源（如future），打印提交的symbol列表
+            submitted_symbols = [c.get('symbol', '') or c.get('contract_symbol', '') for c in filtered_candidates]
+            logger.info(f"[Model {self.model_id}] 提交到策略执行模块 - symbol列表: {submitted_symbols}")
         
         return filtered_candidates, market_state
     

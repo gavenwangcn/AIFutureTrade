@@ -139,6 +139,15 @@ public class ModelDTO implements Serializable {
     private Double autoClosePercent;
 
     /**
+     * 每日成交量过滤阈值（以千万为单位），NULL表示不过滤
+     * 支持两种命名方式：base_volume（snake_case）和 baseVolume（camelCase）
+     * 兼容旧字段名：quote_volume（snake_case）和 quoteVolume（camelCase）
+     */
+    @JsonProperty("base_volume")
+    @JsonAlias({"baseVolume", "quote_volume", "quoteVolume"})
+    private Double baseVolume;
+
+    /**
      * 创建时间
      */
     private LocalDateTime createdAt;
