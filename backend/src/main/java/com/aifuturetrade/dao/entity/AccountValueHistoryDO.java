@@ -65,6 +65,12 @@ public class AccountValueHistoryDO implements Serializable {
     private Double crossUnPnl;
 
     /**
+     * 关联的trade记录ID（可为空，表示非交易触发的账户价值记录）
+     */
+    @TableField("trade_id")
+    private String tradeId;
+
+    /**
      * 时间戳
      */
     private LocalDateTime timestamp;

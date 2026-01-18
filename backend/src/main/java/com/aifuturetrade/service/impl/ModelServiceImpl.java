@@ -734,7 +734,7 @@ public class ModelServiceImpl implements ModelService {
             portfolio.put("realized_pnl", realizedPnl);
             portfolio.put("unrealized_pnl", unrealizedPnl);
             
-            // 获取账户价值历史
+            // 获取账户价值历史（默认查询最近100条，如果前端需要时间范围查询，可以调用新的API）
             List<Map<String, Object>> accountValueHistory = accountValueHistoryMapper.selectHistoryByModelId(modelId, 100);
             
             Map<String, Object> result = new LinkedHashMap<>();
@@ -1921,6 +1921,42 @@ public class ModelServiceImpl implements ModelService {
         
         log.warn("[ModelService] 不支持的类型转换: {} ({})", value, value.getClass().getName());
         return null;
+    }
+
+    @Override
+    public List<Map<String, Object>> getAccountValueHistory(String modelId, String startTime, String endTime) {
+        log.debug("[ModelService] 获取账户价值历史（时间范围查询）, modelId={}, startTime={}, endTime={}", modelId, startTime, endTime);
+        try {
+            java.time.LocalDateTime startDateTime = null;
+            java.time.LocalDateTime endDateTime = null;
+            
+            // 解析开始时间
+            if (startTime != null && !startTime.isEmpty()) {
+                try {
+                    startDateTime = java.time.LocalDateTime.parse(startTime.replace("Z", "").replace("+08:00", ""));
+                } catch (Exception e) {
+                    log.warn("[ModelService] 开始时间解析失败: {}, 将忽略开始时间限制", startTime);
+                }
+            }
+            
+            // 解析结束时间
+            if (endTime != null && !endTime.isEmpty()) {
+                try {
+                    endDateTime = java.time.LocalDateTime.parse(endTime.replace("Z", "").replace("+08:00", ""));
+                } catch (Exception e) {
+                    log.warn("[ModelService] 结束时间解析失败: {}, 将忽略结束时间限制", endTime);
+                }
+            }
+            
+            List<Map<String, Object>> history = accountValueHistoryMapper.selectHistoryByModelIdAndTimeRange(
+                    modelId, startDateTime, endDateTime);
+            
+            log.debug("[ModelService] 查询到 {} 条账户价值历史记录", history.size());
+            return history;
+        } catch (Exception e) {
+            log.error("[ModelService] 获取账户价值历史失败: {}", e.getMessage(), e);
+            return new ArrayList<>();
+        }
     }
 
 }

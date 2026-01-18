@@ -35,6 +35,19 @@ export const modelApi = {
   getPortfolio: (modelId) => apiGet(`/api/models/${modelId}/portfolio`),
 
   /**
+   * 获取模型账户价值历史（支持时间范围查询）
+   * @param {string} modelId - 模型ID
+   * @param {string} startTime - 开始时间（可选，ISO格式字符串，如 "2024-01-01T00:00:00"）
+   * @param {string} endTime - 结束时间（可选，ISO格式字符串，如 "2024-01-31T23:59:59"）
+   */
+  getAccountValueHistory: (modelId, startTime = null, endTime = null) => {
+    const params = {}
+    if (startTime) params.startTime = startTime
+    if (endTime) params.endTime = endTime
+    return apiGet(`/api/models/${modelId}/account-value-history`, params)
+  },
+
+  /**
    * 获取模型交易记录（分页）
    * @param {string} modelId - 模型ID
    * @param {number} page - 页码，从1开始，默认为1

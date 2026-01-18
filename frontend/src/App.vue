@@ -377,8 +377,41 @@
 
         <!-- Chart -->
         <div v-if="currentModelId || isAggregatedView" class="content-card">
-          <div class="card-header">
+          <div class="card-header" style="display: flex; justify-content: space-between; align-items: center;">
             <h3 class="card-title">{{ isAggregatedView ? '聚合账户总览' : '账户价值走势' }}</h3>
+            <!-- 时间选择控件（仅单模型视图显示） -->
+            <div v-if="!isAggregatedView && currentModelId" style="display: flex; gap: 10px; align-items: center;">
+              <!-- 快速选择下拉框 -->
+              <select 
+                v-model="timeRangePreset" 
+                @change="handleTimeRangeChange"
+                style="padding: 6px 12px; border: 1px solid #e5e6eb; border-radius: 4px; font-size: 14px; background: white; cursor: pointer;"
+              >
+                <option value="5days">最近5天</option>
+                <option value="10days">最近10天</option>
+                <option value="30days">最近30天</option>
+                <option value="custom">自定义</option>
+              </select>
+              
+              <!-- 自定义时间选择（当选择"自定义"时显示） -->
+              <template v-if="timeRangePreset === 'custom'">
+                <input 
+                  type="datetime-local" 
+                  v-model="customStartTime"
+                  @change="handleTimeRangeChange"
+                  style="padding: 6px 12px; border: 1px solid #e5e6eb; border-radius: 4px; font-size: 14px;"
+                  placeholder="开始时间"
+                />
+                <span style="color: #86909c;">至</span>
+                <input 
+                  type="datetime-local" 
+                  v-model="customEndTime"
+                  @change="handleTimeRangeChange"
+                  style="padding: 6px 12px; border: 1px solid #e5e6eb; border-radius: 4px; font-size: 14px;"
+                  placeholder="结束时间"
+                />
+              </template>
+            </div>
           </div>
           <div class="card-body">
             <div id="accountChart" style="width: 100%; height: 300px;"></div>
@@ -1015,6 +1048,10 @@ const {
   portfolio,
   accountValueHistory,
   aggregatedChartData,
+  timeRangePreset,
+  customStartTime,
+  customEndTime,
+  loadAccountValueHistory,
   positions,
   trades,
   tradesPage,
@@ -1204,6 +1241,13 @@ const openKlineChart = (symbol) => {
 
 const handleKlineIntervalChange = (interval) => {
   klineChartInterval.value = interval
+}
+
+// 处理时间范围变化
+const handleTimeRangeChange = async () => {
+  if (currentModelId.value) {
+    await loadAccountValueHistory()
+  }
 }
 
 const handleSaveLeverage = async () => {

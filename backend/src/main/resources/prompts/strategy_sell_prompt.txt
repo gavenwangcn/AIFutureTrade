@@ -157,6 +157,17 @@ class GeneratedSellStrategy(StrategyBaseSell):
             # timeframes 包含不同时间周期的数据，如 '1h', '4h', '30m', '15m' 等
             timeframes = indicators.get('timeframes', {})
             
+            # ⚠️ 重要：获取上一根K线收盘价（用于策略判断）
+            # previous_close_prices 包含各时间框架的上一根K线收盘价
+            # 格式：{'1m': close_price, '5m': close_price, '15m': close_price, '30m': close_price, '1h': close_price, '4h': close_price, '1d': close_price, '1w': close_price}
+            # 说明：K线数组是倒序的（从新到旧），倒数第二个K线的close就是上一根K线的收盘价
+            # 使用示例：
+            #   previous_close_5m = symbol_market_state.get('previous_close_prices', {}).get('5m', 0)  # 获取5分钟K线的上一根收盘价
+            #   previous_close_1h = symbol_market_state.get('previous_close_prices', {}).get('1h', 0)  # 获取1小时K线的上一根收盘价
+            #   如果上一根K线收盘价存在，可以用于判断价格变化趋势：
+            #   if current_price < previous_close_5m:  # 当前价格低于上一根5分钟K线收盘价，可能下跌趋势，考虑平仓
+            previous_close_prices = symbol_market_state.get('previous_close_prices', {})
+            
             # ============ 在这里实现策略逻辑 ============
             # 根据 strategy_context 中的卖出策略规则编写代码
             # 1. 计算所需的技术指标（如 MA(99)）

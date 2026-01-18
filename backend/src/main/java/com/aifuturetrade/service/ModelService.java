@@ -75,6 +75,15 @@ public interface ModelService {
     Map<String, Object> getPortfolio(String modelId);
 
     /**
+     * 根据时间范围获取模型的账户价值历史
+     * @param modelId 模型ID（UUID格式）
+     * @param startTime 开始时间（可选，ISO格式字符串，如 "2024-01-01T00:00:00"）
+     * @param endTime 结束时间（可选，ISO格式字符串，如 "2024-01-31T23:59:59"）
+     * @return 账户价值历史记录列表
+     */
+    List<Map<String, Object>> getAccountValueHistory(String modelId, String startTime, String endTime);
+
+    /**
      * 获取模型的持仓合约symbol列表
      * @param modelId 模型ID（UUID格式）
      * @return 持仓合约symbol列表

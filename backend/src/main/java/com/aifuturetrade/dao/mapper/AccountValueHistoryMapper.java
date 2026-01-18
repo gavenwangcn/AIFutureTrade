@@ -21,12 +21,30 @@ public interface AccountValueHistoryMapper extends BaseMapper<AccountValueHistor
      * 返回字段使用snake_case格式，与前端期望一致
      */
     @Select("SELECT id, model_id, account_alias, balance, available_balance, " +
-            "cross_wallet_balance, cross_un_pnl, timestamp " +
+            "cross_wallet_balance, cross_un_pnl, trade_id, timestamp " +
             "FROM account_value_historys " +
             "WHERE model_id = #{modelId} " +
             "ORDER BY timestamp DESC " +
             "LIMIT #{limit}")
     List<Map<String, Object>> selectHistoryByModelId(@Param("modelId") String modelId, @Param("limit") Integer limit);
+
+    /**
+     * 根据模型ID和时间范围查询账户价值历史
+     * 返回字段使用snake_case格式，与前端期望一致
+     */
+    @Select("<script>" +
+            "SELECT id, model_id, account_alias, balance, available_balance, " +
+            "cross_wallet_balance, cross_un_pnl, trade_id, timestamp " +
+            "FROM account_value_historys " +
+            "WHERE model_id = #{modelId} " +
+            "<if test='startTime != null'> AND timestamp &gt;= #{startTime} </if>" +
+            "<if test='endTime != null'> AND timestamp &lt;= #{endTime} </if>" +
+            "ORDER BY timestamp DESC " +
+            "</script>")
+    List<Map<String, Object>> selectHistoryByModelIdAndTimeRange(
+            @Param("modelId") String modelId,
+            @Param("startTime") java.time.LocalDateTime startTime,
+            @Param("endTime") java.time.LocalDateTime endTime);
 
     /**
      * 查询聚合账户价值历史（所有模型）

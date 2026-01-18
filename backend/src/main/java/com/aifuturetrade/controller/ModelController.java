@@ -119,6 +119,23 @@ public class ModelController {
     }
 
     /**
+     * 根据时间范围获取模型的账户价值历史
+     * @param modelId 模型ID
+     * @param startTime 开始时间（可选，ISO格式字符串，如 "2024-01-01T00:00:00"）
+     * @param endTime 结束时间（可选，ISO格式字符串，如 "2024-01-31T23:59:59"）
+     * @return 账户价值历史记录列表
+     */
+    @GetMapping("/{modelId}/account-value-history")
+    @Operation(summary = "根据时间范围获取模型的账户价值历史")
+    public ResponseEntity<List<Map<String, Object>>> getAccountValueHistory(
+            @PathVariable(value = "modelId") String modelId,
+            @RequestParam(value = "startTime", required = false) String startTime,
+            @RequestParam(value = "endTime", required = false) String endTime) {
+        List<Map<String, Object>> history = modelService.getAccountValueHistory(modelId, startTime, endTime);
+        return new ResponseEntity<>(history, HttpStatus.OK);
+    }
+
+    /**
      * 获取模型的持仓合约symbol列表
      * @param modelId 模型ID
      * @return 持仓合约symbol列表

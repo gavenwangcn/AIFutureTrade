@@ -210,6 +210,7 @@ class AccountValuesDatabase:
     def record_account_value(self, model_id: int, balance: float,
                             available_balance: float, cross_wallet_balance: float,
                             account_alias: str = '', cross_pnl: float = 0.0, cross_un_pnl: float = 0.0,
+                            trade_id: str = None,
                             model_id_mapping: Dict[int, str] = None,
                             get_model_func: Callable[[int], Optional[Dict]] = None,
                             account_value_historys_table: str = None):
@@ -324,10 +325,10 @@ class AccountValuesDatabase:
                     current_time = datetime.now(beijing_tz)
                     self.insert_rows(
                         account_value_historys_table,
-                        [[history_id, model_uuid, final_account_alias_for_history, balance, available_balance, cross_wallet_balance, cross_pnl, cross_un_pnl, current_time]],
-                        ["id", "model_id", "account_alias", "balance", "available_balance", "cross_wallet_balance", "cross_pnl", "cross_un_pnl", "timestamp"]
+                        [[history_id, model_uuid, final_account_alias_for_history, balance, available_balance, cross_wallet_balance, cross_pnl, cross_un_pnl, trade_id, current_time]],
+                        ["id", "model_id", "account_alias", "balance", "available_balance", "cross_wallet_balance", "cross_pnl", "cross_un_pnl", "trade_id", "timestamp"]
                     )
-                    logger.debug(f"[AccountValues] Inserted account_value_historys record for model {model_id} (id={history_id}), account_alias={final_account_alias_for_history}, timestamp={current_time}")
+                    logger.debug(f"[AccountValues] Inserted account_value_historys record for model {model_id} (id={history_id}), trade_id={trade_id}, account_alias={final_account_alias_for_history}, timestamp={current_time}")
                 except Exception as history_err:
                     # 历史记录插入失败不影响主流程
                     logger.warning(f"[AccountValues] Failed to insert account_value_historys record for model {model_id}: {history_err}")

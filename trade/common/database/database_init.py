@@ -258,14 +258,38 @@ class DatabaseInitializer:
             `cross_wallet_balance` DOUBLE DEFAULT 0.0,
             `cross_pnl` DOUBLE DEFAULT 0.0,
             `cross_un_pnl` DOUBLE DEFAULT 0.0,
+            `trade_id` VARCHAR(36) DEFAULT NULL COMMENT '关联的trade记录ID，NULL表示非交易触发的账户价值记录',
             `timestamp` DATETIME DEFAULT CURRENT_TIMESTAMP,
             INDEX `idx_model_timestamp` (`model_id`, `timestamp`),
             INDEX `idx_model_alias_timestamp` (`model_id`, `account_alias`, `timestamp`),
-            INDEX `idx_timestamp` (`timestamp`)
+            INDEX `idx_timestamp` (`timestamp`),
+            INDEX `idx_trade_id` (`trade_id`)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
         """
         self.command(ddl)
         logger.debug(f"[DatabaseInit] Ensured table {table_name} exists")
+        
+        # Check and add trade_id field (if table exists but field doesn't exist)
+        try:
+            # Check if trade_id field exists
+            check_column_sql = f"""
+            SELECT COUNT(*) FROM information_schema.COLUMNS 
+            WHERE TABLE_SCHEMA = DATABASE() 
+            AND TABLE_NAME = '{table_name}' 
+            AND COLUMN_NAME = 'trade_id'
+            """
+            result = self.command(check_column_sql)
+            # If field doesn't exist, add field
+            if isinstance(result, list) and len(result) > 0 and result[0][0] == 0:
+                alter_sql = f"""
+                ALTER TABLE `{table_name}` 
+                ADD COLUMN `trade_id` VARCHAR(36) DEFAULT NULL COMMENT '关联的trade记录ID，NULL表示非交易触发的账户价值记录' AFTER `cross_un_pnl`,
+                ADD INDEX `idx_trade_id` (`trade_id`)
+                """
+                self.command(alter_sql)
+                logger.info(f"[DatabaseInit] Added trade_id column to {table_name} table")
+        except Exception as e:
+            logger.warning(f"[DatabaseInit] Failed to check/add trade_id column to {table_name}: {e}")
     
     def ensure_settings_table(self, table_name: str = "settings"):
         """Create settings table if not exists"""

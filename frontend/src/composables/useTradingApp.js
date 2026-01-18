@@ -53,6 +53,11 @@ export function useTradingApp() {
   })
   const accountValueHistory = ref([]) // 账户价值历史数据（用于图表）
   const aggregatedChartData = ref([]) // 聚合视图图表数据
+  // 时间选择相关状态
+  const timeRangePreset = ref('5days') // 快速选择：'5days', '10days', '30days', 'custom'
+  const customStartTime = ref('') // 自定义开始时间
+  const customEndTime = ref('') // 自定义结束时间
+  const tradeMarkers = ref(new Map()) // 存储交易标记信息，key为trade_id，value为交易详情
   const positions = ref([])
   const trades = ref([])
   const allTrades = ref([])  // 存储所有从后端获取的交易记录
@@ -718,6 +723,95 @@ let portfolioSymbolsRefreshInterval = null // 模型持仓合约列表自动刷�
   }
   
   /**
+   * 获取时间范围（根据快速选择或自定义时间）
+   */
+  const getTimeRange = () => {
+    if (timeRangePreset.value === 'custom') {
+      return {
+        startTime: customStartTime.value || null,
+        endTime: customEndTime.value || null
+      }
+    }
+    
+    // 计算快速选择的时间范围
+    const endTime = new Date()
+    const startTime = new Date()
+    
+    if (timeRangePreset.value === '5days') {
+      startTime.setDate(endTime.getDate() - 5)
+    } else if (timeRangePreset.value === '10days') {
+      startTime.setDate(endTime.getDate() - 10)
+    } else if (timeRangePreset.value === '30days') {
+      startTime.setDate(endTime.getDate() - 30)
+    }
+    
+    // 格式化为ISO字符串（本地时间，不包含时区）
+    const formatDateTime = (date) => {
+      const year = date.getFullYear()
+      const month = String(date.getMonth() + 1).padStart(2, '0')
+      const day = String(date.getDate()).padStart(2, '0')
+      const hours = String(date.getHours()).padStart(2, '0')
+      const minutes = String(date.getMinutes()).padStart(2, '0')
+      const seconds = String(date.getSeconds()).padStart(2, '0')
+      return `${year}-${month}-${day}T${hours}:${minutes}:${seconds}`
+    }
+    
+    return {
+      startTime: formatDateTime(startTime),
+      endTime: formatDateTime(endTime)
+    }
+  }
+
+  /**
+   * 加载账户价值历史数据（支持时间范围）
+   */
+  const loadAccountValueHistory = async () => {
+    if (!currentModelId.value) return
+    
+    try {
+      const timeRange = getTimeRange()
+      const history = await modelApi.getAccountValueHistory(
+        currentModelId.value,
+        timeRange.startTime,
+        timeRange.endTime
+      )
+      
+      // 提取有trade_id的记录，用于后续查询交易详情
+      const tradeIds = history
+        .filter(h => h.trade_id)
+        .map(h => h.trade_id)
+      
+      // 如果有trade_id，尝试加载trades数据以获取交易详情
+      if (tradeIds.length > 0) {
+        // 如果trades未加载或数据较少，尝试加载更多trades数据
+        // 为了获取所有相关交易，我们加载第一页的trades（通常包含最近的交易）
+        if (allTrades.value.length === 0) {
+          try {
+            await loadTrades()  // 加载第一页的trades
+          } catch (e) {
+            console.warn('[TradingApp] Failed to load trades for trade markers:', e)
+          }
+        }
+        
+        // 更新tradeMarkers映射，将trade_id映射到交易详情
+        tradeIds.forEach(tradeId => {
+          const trade = allTrades.value.find(t => t.id === tradeId)
+          if (trade) {
+            tradeMarkers.value.set(tradeId, trade)
+          }
+        })
+      }
+      
+      accountValueHistory.value = history
+      await nextTick()
+      updateAccountChart(history, portfolio.value.totalValue, false)
+    } catch (error) {
+      console.error('[TradingApp] Error loading account value history:', error)
+      errors.value.portfolio = error.message
+    }
+  }
+
+  /**
    * 加载投资组合数据
    */
   const loadPortfolio = async () => {
@@ -734,21 +828,11 @@ let portfolioSymbolsRefreshInterval = null // 模型持仓合约列表自动刷�
           realizedPnl: data.portfolio.realized_pnl || 0,
           unrealizedPnl: data.portfolio.unrealized_pnl || 0
         }
-        // 保存账户价值历史数据（只显示当前模型的数据）
-        // 清空聚合图表数据，确保只显示当前模型的数据
-        aggregatedChartData.value = []
-        if (data.account_value_history) {
-          accountValueHistory.value = data.account_value_history
-          await nextTick()
-          // 明确传递 false 表示单模型视图，只显示当前模型的数据
-          updateAccountChart(data.account_value_history, portfolio.value.totalValue, false)
-        } else {
-          // 如果没有数据，清空图表显示
-          accountValueHistory.value = []
-          await nextTick()
-          updateAccountChart([], portfolio.value.totalValue, false)
-        }
       }
+      
+      // 加载账户价值历史数据（使用时间范围查询）
+      await loadAccountValueHistory()
+      
       // 加载模型持仓合约列表
       await loadModelPortfolioSymbols()
     } catch (error) {
@@ -1020,7 +1104,7 @@ let portfolioSymbolsRefreshInterval = null // 模型持仓合约列表自动刷�
       }
       
       // 后端已返回UTC+8时区的ISO格式字符串，直接解析并格式化显示
-      const data = history.reverse().map(h => {
+      const data = history.reverse().map((h, index) => {
         // 后端返回的是ISO格式字符串（如 '2024-01-01T12:00:00+08:00'），直接解析
         const date = new Date(h.timestamp)
         let timeStr = ''
@@ -1036,10 +1120,27 @@ let portfolioSymbolsRefreshInterval = null // 模型持仓合约列表自动刷�
         }
         return {
           time: timeStr,
-          value: h.balance || h.total_value || 0  // 使用新字段名balance，兼容旧字段名total_value
+          value: h.balance || h.total_value || 0,  // 使用新字段名balance，兼容旧字段名total_value
+          tradeId: h.trade_id || null,  // 保存trade_id用于标记
+          timestamp: h.timestamp,  // 保存原始时间戳
+          originalIndex: index  // 保存原始索引
         }
       })
       
+      // 收集有trade_id的数据点，用于显示交易标记（在添加当前值之前）
+      const tradeMarkers = []
+      data.forEach((d, index) => {
+        if (d.tradeId) {
+          tradeMarkers.push({
+            name: '交易',
+            coord: [index, d.value],
+            tradeId: d.tradeId,
+            timestamp: d.timestamp
+          })
+        }
+      })
+      
+      // 添加当前值（如果有）
       if (currentValue !== undefined && currentValue !== null) {
         const now = new Date()
         const currentTime = now.toLocaleTimeString('zh-CN', {
@@ -1049,7 +1150,10 @@ let portfolioSymbolsRefreshInterval = null // 模型持仓合约列表自动刷�
         })
         data.push({
           time: currentTime,
-          value: currentValue
+          value: currentValue,
+          tradeId: null,  // 当前值没有trade_id
+          timestamp: null,
+          originalIndex: -1
         })
       }
       
@@ -1124,19 +1228,90 @@ let portfolioSymbolsRefreshInterval = null // 模型持仓合约列表自动刷�
                 { offset: 1, color: 'rgba(51, 112, 255, 0)' }
               ]
             }
-          }
+          },
+          // 添加交易标记点
+          markPoint: tradeMarkers.length > 0 ? {
+            data: tradeMarkers.map(marker => ({
+              name: '交易',
+              coord: marker.coord,
+              symbol: 'pin',
+              symbolSize: 30,
+              itemStyle: {
+                color: '#ff4d4f',
+                borderColor: '#fff',
+                borderWidth: 2
+              },
+              label: {
+                show: false
+              },
+              // 保存交易信息用于tooltip
+              tradeId: marker.tradeId,
+              timestamp: marker.timestamp
+            })),
+            animation: false
+          } : undefined
         }],
         tooltip: {
-          trigger: 'axis',
+          trigger: 'item',
           backgroundColor: 'rgba(255, 255, 255, 0.95)',
           borderColor: '#e5e6eb',
           borderWidth: 1,
           textStyle: { color: '#1d2129' },
           formatter: (params) => {
-            if (!params || !params[0]) return ''
-            const value = params[0].value
-            if (value === null || value === undefined) return ''
-            return `${params[0].axisValue || ''}<br/>账户价值: $${value.toFixed(2)}`
+            if (!params) return ''
+            
+            // 如果是标记点（交易标记）
+            if (params.componentType === 'markPoint' && params.data && params.data.tradeId) {
+              const tradeId = params.data.tradeId
+              const timestamp = params.data.timestamp
+              // 从tradeMarkers映射中查找交易详情
+              const trade = tradeMarkers.value.get(tradeId) || allTrades.value.find(t => t.id === tradeId)
+              if (trade) {
+                const tradeTime = new Date(timestamp).toLocaleString('zh-CN')
+                const signal = trade.signal || '未知'
+                const symbol = trade.future || trade.symbol || '未知'
+                const quantity = trade.quantity || 0
+                const price = trade.price || 0
+                return `
+                  <div style="padding: 4px;">
+                    <div style="font-weight: bold; margin-bottom: 4px;">交易信息</div>
+                    <div>币种: ${symbol}</div>
+                    <div>时间: ${tradeTime}</div>
+                    <div>操作: ${signal}</div>
+                    <div>数量: ${quantity}</div>
+                    <div>价格: $${price.toFixed(4)}</div>
+                  </div>
+                `
+              } else {
+                // 如果找不到交易详情，显示基本信息
+                const tradeTime = new Date(timestamp).toLocaleString('zh-CN')
+                return `
+                  <div style="padding: 4px;">
+                    <div style="font-weight: bold; margin-bottom: 4px;">交易标记</div>
+                    <div>时间: ${tradeTime}</div>
+                    <div>交易ID: ${tradeId.substring(0, 8)}...</div>
+                    <div style="font-size: 11px; color: #86909c; margin-top: 4px;">提示：交易详情请查看"交易记录"模块</div>
+                  </div>
+                `
+              }
+            }
+            
+            // 普通数据点
+            if (params.componentType === 'series') {
+              const value = params.value
+              if (value === null || value === undefined) return ''
+              const dataIndex = params.dataIndex
+              const timeStr = data[dataIndex]?.time || ''
+              const tradeId = data[dataIndex]?.tradeId
+              
+              let result = `${timeStr}<br/>账户价值: $${value.toFixed(2)}`
+              if (tradeId) {
+                result += '<br/><span style="color: #ff4d4f;">● 交易标记</span>'
+              }
+              return result
+            }
+            
+            return ''
           }
         }
       }
@@ -2832,6 +3007,11 @@ let portfolioSymbolsRefreshInterval = null // 模型持仓合约列表自动刷�
     portfolio,
     accountValueHistory,
     aggregatedChartData,
+    // 时间选择相关
+    timeRangePreset,
+    customStartTime,
+    customEndTime,
+    loadAccountValueHistory,
     positions,
     trades,
     // 分页相关状态

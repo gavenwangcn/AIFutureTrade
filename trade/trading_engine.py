@@ -599,12 +599,13 @@ class TradingEngine:
         logger.info(f"[Model {self.model_id}] [交易检测] 所有执行结果检查完毕，未找到有效交易信号")
         return False
     
-    def _record_account_snapshot(self, current_prices: Dict) -> None:
+    def _record_account_snapshot(self, current_prices: Dict, trade_id: str = None) -> None:
         """
         记录账户价值快照（公共方法）
         
         Args:
             current_prices: 当前价格映射
+            trade_id: 关联的trade记录ID（可选，如果提供则关联到account_value_historys记录）
         """
         try:
             logger.debug(f"[Model {self.model_id}] [账户价值快照] 开始记录账户价值快照...")
@@ -637,7 +638,7 @@ class TradingEngine:
             logger.debug(f"[Model {self.model_id}] [账户价值快照] 调用参数: model_id={self.model_id}, balance=${balance:.2f}, "
                        f"available_balance=${available_balance:.2f}, cross_wallet_balance=${cross_wallet_balance:.2f}, "
                        f"cross_pnl=${cross_pnl:.2f}, cross_un_pnl=${cross_un_pnl:.2f}, "
-                       f"account_alias={account_alias}")
+                       f"account_alias={account_alias}, trade_id={trade_id}")
             self.account_values_db.record_account_value(
                 self.model_id,
                 balance=balance,
@@ -646,6 +647,7 @@ class TradingEngine:
                 account_alias=account_alias,
                 cross_pnl=cross_pnl,
                 cross_un_pnl=cross_un_pnl,
+                trade_id=trade_id,
                 model_id_mapping=model_mapping,
                 get_model_func=self.models_db.get_model,
                 account_value_historys_table=ACCOUNT_VALUE_HISTORYS_TABLE
@@ -943,10 +945,41 @@ class TradingEngine:
                 query_symbol = f"{query_symbol}USDT"
             merged_data = self._merge_timeframe_data(query_symbol)
             # 将合并后的数据格式调整为与原有格式兼容（只包含klines）
+            timeframes_data = merged_data.get(query_symbol, {}) if merged_data else {}
+            
+            # 提取每个时间框架的上一根K线收盘价（倒数第二个K线的close）
+            # K线数组是倒序的（从新到旧），索引-2就是上一根K线的收盘价
+            previous_close_prices = {}
+            for timeframe, timeframe_data in timeframes_data.items():
+                klines = timeframe_data.get('klines', [])
+                if klines and len(klines) >= 2:
+                    # 倒数第二个K线（索引-2）就是上一根K线的收盘价
+                    previous_kline = klines[-2]
+                    if isinstance(previous_kline, dict):
+                        previous_close = previous_kline.get('close')
+                        if previous_close is not None:
+                            try:
+                                previous_close_prices[timeframe] = float(previous_close)
+                            except (ValueError, TypeError):
+                                logger.warning(f"[Model {self.model_id}] {original_symbol} {timeframe} 上一根K线收盘价转换失败: {previous_close}")
+                elif klines and len(klines) == 1:
+                    # 如果只有一根K线，使用当前K线的收盘价作为上一根K线收盘价（兼容处理）
+                    current_kline = klines[0]
+                    if isinstance(current_kline, dict):
+                        current_close = current_kline.get('close')
+                        if current_close is not None:
+                            try:
+                                previous_close_prices[timeframe] = float(current_close)
+                            except (ValueError, TypeError):
+                                pass
+            
             if query_symbol in merged_data:
-                market_state[original_symbol]['indicators'] = {'timeframes': merged_data[query_symbol]}
+                market_state[original_symbol]['indicators'] = {'timeframes': timeframes_data}
             else:
                 market_state[original_symbol]['indicators'] = {'timeframes': {}}
+            
+            # 添加上一根K线收盘价信息
+            market_state[original_symbol]['previous_close_prices'] = previous_close_prices
 
         return market_state
 
@@ -2320,6 +2353,32 @@ class TradingEngine:
             merged_data = self._merge_timeframe_data(query_symbol)
             timeframes_data = merged_data.get(query_symbol, {}) if merged_data else {}
             
+            # 提取每个时间框架的上一根K线收盘价（倒数第二个K线的close）
+            # K线数组是倒序的（从新到旧），索引-2就是上一根K线的收盘价
+            previous_close_prices = {}
+            for timeframe, timeframe_data in timeframes_data.items():
+                klines = timeframe_data.get('klines', [])
+                if klines and len(klines) >= 2:
+                    # 倒数第二个K线（索引-2）就是上一根K线的收盘价
+                    previous_kline = klines[-2]
+                    if isinstance(previous_kline, dict):
+                        previous_close = previous_kline.get('close')
+                        if previous_close is not None:
+                            try:
+                                previous_close_prices[timeframe] = float(previous_close)
+                            except (ValueError, TypeError):
+                                logger.warning(f"[Model {self.model_id}] {symbol} {timeframe} 上一根K线收盘价转换失败: {previous_close}")
+                elif klines and len(klines) == 1:
+                    # 如果只有一根K线，使用当前K线的收盘价作为上一根K线收盘价（兼容处理）
+                    current_kline = klines[0]
+                    if isinstance(current_kline, dict):
+                        current_close = current_kline.get('close')
+                        if current_close is not None:
+                            try:
+                                previous_close_prices[timeframe] = float(current_close)
+                            except (ValueError, TypeError):
+                                pass
+            
             # 从数据库获取的成交量和成交额信息覆盖默认值0.0
             # 优先使用从24_market_tickers表获取的数据，如果没有则使用price_info或candidate中的值
             # get_symbol_volumes返回Dict[str, Dict[str, float]]，包含base_volume和quote_volume
@@ -2340,6 +2399,7 @@ class TradingEngine:
                 'base_volume': base_volume_value,  # 24小时成交量（基础资产）
                 'quote_volume': quote_volume_value,  # 24小时成交额（计价资产，如USDT）
                 'indicators': {'timeframes': timeframes_data} if timeframes_data else {},  # 只包含klines
+                'previous_close_prices': previous_close_prices,  # 上一根K线收盘价，格式：{timeframe: close_price}
                 'source': symbol_source,
                 'leaderboard_source': candidate.get('leaderboard_source')  # 涨跌榜来源：'gainers'（涨幅榜）或 'losers'（跌幅榜），仅当 source='leaderboard' 时存在
             }
@@ -2784,12 +2844,12 @@ class TradingEngine:
         
         self._log_trade_record(trade_signal, symbol, position_side, sdk_call_skipped, sdk_skip_reason)
         
-        # 每次交易后立即记录账户价值快照
+        # 每次交易后立即记录账户价值快照（关联trade_id）
         try:
             # 使用工具函数从market_state中提取价格字典
             current_prices = extract_prices_from_market_state(market_state)
-            logger.debug(f"[Model {self.model_id}] [开仓交易] 交易已记录到trades表，立即记录账户价值快照")
-            self._record_account_snapshot(current_prices)
+            logger.debug(f"[Model {self.model_id}] [开仓交易] 交易已记录到trades表，立即记录账户价值快照（trade_id={trade_id}）")
+            self._record_account_snapshot(current_prices, trade_id=trade_id)
             logger.debug(f"[Model {self.model_id}] [开仓交易] 账户价值快照已记录")
         except Exception as snapshot_err:
             logger.error(f"[Model {self.model_id}] [开仓交易] 记录账户价值快照失败: {snapshot_err}", exc_info=True)
@@ -2957,8 +3017,8 @@ class TradingEngine:
         try:
             # 使用工具函数从market_state中提取价格字典
             current_prices = extract_prices_from_market_state(market_state)
-            logger.debug(f"[Model {self.model_id}] [平仓交易] 交易已记录到trades表，立即记录账户价值快照")
-            self._record_account_snapshot(current_prices)
+            logger.debug(f"[Model {self.model_id}] [平仓交易] 交易已记录到trades表，立即记录账户价值快照（trade_id={trade_id}）")
+            self._record_account_snapshot(current_prices, trade_id=trade_id)
             logger.debug(f"[Model {self.model_id}] [平仓交易] 账户价值快照已记录")
         except Exception as snapshot_err:
             logger.error(f"[Model {self.model_id}] [平仓交易] 记录账户价值快照失败: {snapshot_err}", exc_info=True)
@@ -3111,8 +3171,8 @@ class TradingEngine:
         try:
             # 使用工具函数从market_state中提取价格字典
             current_prices = extract_prices_from_market_state(market_state)
-            logger.debug(f"[Model {self.model_id}] [平仓交易] 交易已记录到trades表，立即记录账户价值快照")
-            self._record_account_snapshot(current_prices)
+            logger.debug(f"[Model {self.model_id}] [平仓交易] 交易已记录到trades表，立即记录账户价值快照（trade_id={trade_id}）")
+            self._record_account_snapshot(current_prices, trade_id=trade_id)
             logger.debug(f"[Model {self.model_id}] [平仓交易] 账户价值快照已记录")
         except Exception as snapshot_err:
             logger.error(f"[Model {self.model_id}] [平仓交易] 记录账户价值快照失败: {snapshot_err}", exc_info=True)
@@ -3324,12 +3384,12 @@ class TradingEngine:
             logger.error(f"TRADE: Update position failed (STOP_LOSS) model={self.model_id} future={symbol}: {db_err}")
             raise
         
-        # 每次交易后立即记录账户价值快照
+        # 每次交易后立即记录账户价值快照（关联trade_id）
         try:
             # 使用工具函数从market_state中提取价格字典
             current_prices = extract_prices_from_market_state(market_state)
-            logger.debug(f"[Model {self.model_id}] [止损交易] 交易已记录到trades表，立即记录账户价值快照")
-            self._record_account_snapshot(current_prices)
+            logger.debug(f"[Model {self.model_id}] [止损交易] 交易已记录到trades表，立即记录账户价值快照（trade_id={trade_id}）")
+            self._record_account_snapshot(current_prices, trade_id=trade_id)
             logger.debug(f"[Model {self.model_id}] [止损交易] 账户价值快照已记录")
         except Exception as snapshot_err:
             logger.error(f"[Model {self.model_id}] [止损交易] 记录账户价值快照失败: {snapshot_err}", exc_info=True)
@@ -3541,12 +3601,12 @@ class TradingEngine:
             logger.error(f"TRADE: Update position failed (TAKE_PROFIT) model={self.model_id} future={symbol}: {db_err}")
             raise
         
-        # 每次交易后立即记录账户价值快照
+        # 每次交易后立即记录账户价值快照（关联trade_id）
         try:
             # 使用工具函数从market_state中提取价格字典
             current_prices = extract_prices_from_market_state(market_state)
-            logger.debug(f"[Model {self.model_id}] [止盈交易] 交易已记录到trades表，立即记录账户价值快照")
-            self._record_account_snapshot(current_prices)
+            logger.debug(f"[Model {self.model_id}] [止盈交易] 交易已记录到trades表，立即记录账户价值快照（trade_id={trade_id}）")
+            self._record_account_snapshot(current_prices, trade_id=trade_id)
             logger.debug(f"[Model {self.model_id}] [止盈交易] 账户价值快照已记录")
         except Exception as snapshot_err:
             logger.error(f"[Model {self.model_id}] [止盈交易] 记录账户价值快照失败: {snapshot_err}", exc_info=True)
