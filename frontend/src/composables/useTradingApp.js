@@ -2856,6 +2856,28 @@ let portfolioSymbolsRefreshInterval = null // 模型持仓合约列表自动刷�
   }
 
   /**
+   * 格式化基础成交量（以千万为单位）
+   * @param {number} value - 成交量值
+   * @returns {string} 格式化后的字符串，例如：1.23千万
+   */
+  const formatBaseVolume = (value) => {
+    if (!value && value !== 0) return '--'
+    const num = parseFloat(value)
+    if (isNaN(num)) return '--'
+    
+    // 转换为千万单位
+    const volumeInTenMillion = num / 10000000
+    
+    // 如果小于0.01千万，显示原始值（保留2位小数）
+    if (volumeInTenMillion < 0.01) {
+      return num.toFixed(2)
+    }
+    
+    // 大于等于0.01千万，显示千万单位
+    return `${volumeInTenMillion.toFixed(2)}千万`
+  }
+
+  /**
    * 格式化交易信号（翻译成中文）
    */
   const formatSignal = (signal) => {
@@ -3130,6 +3152,7 @@ let portfolioSymbolsRefreshInterval = null // 模型持仓合约列表自动刷�
     formatPnlPercent,
     getPnlClass,
     formatVolumeChinese,
+    formatBaseVolume,
     formatTime,
     formatSignal,
     getSignalBadgeClass,

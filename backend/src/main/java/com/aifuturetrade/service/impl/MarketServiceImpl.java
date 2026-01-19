@@ -260,6 +260,7 @@ public class MarketServiceImpl implements MarketService {
             Double priceChangePercent = getDoubleValue(row, "price_change_percent");
             Double lastPrice = getDoubleValue(row, "last_price");
             Double quoteVolume = getDoubleValue(row, "quote_volume");
+            Double baseVolume = getDoubleValue(row, "base_volume");
             Object eventTime = row.get("event_time");
             
             Map<String, Object> item = new HashMap<>();
@@ -272,6 +273,7 @@ public class MarketServiceImpl implements MarketService {
             item.put("price", lastPrice);
             item.put("change_percent", priceChangePercent);
             item.put("quote_volume", quoteVolume);
+            item.put("base_volume", baseVolume);
             item.put("timeframes", "");
             item.put("event_time", eventTime);
             

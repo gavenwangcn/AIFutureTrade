@@ -22,7 +22,7 @@ public interface MarketTickerMapper extends BaseMapper<MarketTickerDO> {
      * @return 涨幅榜数据列表，按 price_change_percent 降序排列
      */
     @Select("SELECT " +
-            "`symbol`, `price_change_percent`, `last_price`, `quote_volume`, " +
+            "`symbol`, `price_change_percent`, `last_price`, `quote_volume`, `base_volume`, " +
             "`event_time`, `side` " +
             "FROM `24_market_tickers` " +
             "WHERE `price_change_percent` IS NOT NULL " +
@@ -37,7 +37,7 @@ public interface MarketTickerMapper extends BaseMapper<MarketTickerDO> {
      * @return 跌幅榜数据列表，按 price_change_percent 绝对值降序排列
      */
     @Select("SELECT " +
-            "`symbol`, `price_change_percent`, `last_price`, `quote_volume`, " +
+            "`symbol`, `price_change_percent`, `last_price`, `quote_volume`, `base_volume`, " +
             "`event_time`, `side` " +
             "FROM `24_market_tickers` " +
             "WHERE `price_change_percent` IS NOT NULL " +
