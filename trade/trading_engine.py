@@ -773,11 +773,11 @@ class TradingEngine:
             model_mapping = self.models_db._get_model_id_mapping()
             from trade.common.database.database_init import ACCOUNT_VALUE_HISTORYS_TABLE
             
-            logger.debug(f"[Model {self.model_id}] [账户价值快照] 准备调用record_account_value方法...")
+            logger.info(f"[Model {self.model_id}] [账户价值快照] 准备调用record_account_value方法 (trade_id={trade_id})...")
             logger.debug(f"[Model {self.model_id}] [账户价值快照] 调用参数: model_id={self.model_id}, balance=${balance:.2f}, "
                        f"available_balance=${available_balance:.2f}, cross_wallet_balance=${cross_wallet_balance:.2f}, "
                        f"cross_pnl=${cross_pnl:.2f}, cross_un_pnl=${cross_un_pnl:.2f}, "
-                       f"account_alias={account_alias}, trade_id={trade_id}")
+                       f"account_alias={account_alias}, trade_id={trade_id}, account_value_historys_table={ACCOUNT_VALUE_HISTORYS_TABLE}")
             self.account_values_db.record_account_value(
                 self.model_id,
                 balance=balance,
@@ -791,7 +791,7 @@ class TradingEngine:
                 get_model_func=self.models_db.get_model,
                 account_value_historys_table=ACCOUNT_VALUE_HISTORYS_TABLE
             )
-            logger.debug(f"[Model {self.model_id}] [账户价值快照] record_account_value方法调用完成，账户价值快照记录完成")
+            logger.info(f"[Model {self.model_id}] [账户价值快照] ✅ record_account_value方法调用完成，账户价值快照记录完成 (trade_id={trade_id})")
         except Exception as e:
             logger.error(f"[Model {self.model_id}] [账户价值快照] 记录账户价值快照失败: {e}", exc_info=True)
             # 不抛出异常，避免影响主流程，但记录详细错误信息
@@ -2987,12 +2987,13 @@ class TradingEngine:
         try:
             # 使用工具函数从market_state中提取价格字典
             current_prices = extract_prices_from_market_state(market_state)
-            logger.debug(f"[Model {self.model_id}] [开仓交易] 交易已记录到trades表，立即记录账户价值快照（trade_id={trade_id}）")
+            logger.info(f"[Model {self.model_id}] [开仓交易] ✅ 交易已记录到trades表 (trade_id={trade_id})，立即记录账户价值快照")
+            logger.debug(f"[Model {self.model_id}] [开仓交易] market_state keys: {list(market_state.keys())}, current_prices: {current_prices}")
             self._record_account_snapshot(current_prices, trade_id=trade_id)
-            logger.debug(f"[Model {self.model_id}] [开仓交易] 账户价值快照已记录")
+            logger.info(f"[Model {self.model_id}] [开仓交易] ✅ 账户价值快照已记录 (trade_id={trade_id})")
         except Exception as snapshot_err:
-            logger.error(f"[Model {self.model_id}] [开仓交易] 记录账户价值快照失败: {snapshot_err}", exc_info=True)
-            # 不抛出异常，避免影响主流程
+            logger.error(f"[Model {self.model_id}] [开仓交易] ❌ 记录账户价值快照失败: trade_id={trade_id}, error={snapshot_err}", exc_info=True)
+            # 不抛出异常，避免影响主流程，但记录详细错误信息以便排查
 
         return {
             'symbol': symbol,
@@ -3156,12 +3157,13 @@ class TradingEngine:
         try:
             # 使用工具函数从market_state中提取价格字典
             current_prices = extract_prices_from_market_state(market_state)
-            logger.debug(f"[Model {self.model_id}] [平仓交易] 交易已记录到trades表，立即记录账户价值快照（trade_id={trade_id}）")
+            logger.info(f"[Model {self.model_id}] [平仓交易] ✅ 交易已记录到trades表 (trade_id={trade_id})，立即记录账户价值快照")
+            logger.debug(f"[Model {self.model_id}] [平仓交易] market_state keys: {list(market_state.keys())}, current_prices: {current_prices}")
             self._record_account_snapshot(current_prices, trade_id=trade_id)
-            logger.debug(f"[Model {self.model_id}] [平仓交易] 账户价值快照已记录")
+            logger.info(f"[Model {self.model_id}] [平仓交易] ✅ 账户价值快照已记录 (trade_id={trade_id})")
         except Exception as snapshot_err:
-            logger.error(f"[Model {self.model_id}] [平仓交易] 记录账户价值快照失败: {snapshot_err}", exc_info=True)
-            # 不抛出异常，避免影响主流程
+            logger.error(f"[Model {self.model_id}] [平仓交易] ❌ 记录账户价值快照失败: trade_id={trade_id}, error={snapshot_err}", exc_info=True)
+            # 不抛出异常，避免影响主流程，但记录详细错误信息以便排查
         
         return {
             'symbol': symbol,
@@ -3310,12 +3312,13 @@ class TradingEngine:
         try:
             # 使用工具函数从market_state中提取价格字典
             current_prices = extract_prices_from_market_state(market_state)
-            logger.debug(f"[Model {self.model_id}] [平仓交易] 交易已记录到trades表，立即记录账户价值快照（trade_id={trade_id}）")
+            logger.info(f"[Model {self.model_id}] [平仓交易] ✅ 交易已记录到trades表 (trade_id={trade_id})，立即记录账户价值快照")
+            logger.debug(f"[Model {self.model_id}] [平仓交易] market_state keys: {list(market_state.keys())}, current_prices: {current_prices}")
             self._record_account_snapshot(current_prices, trade_id=trade_id)
-            logger.debug(f"[Model {self.model_id}] [平仓交易] 账户价值快照已记录")
+            logger.info(f"[Model {self.model_id}] [平仓交易] ✅ 账户价值快照已记录 (trade_id={trade_id})")
         except Exception as snapshot_err:
-            logger.error(f"[Model {self.model_id}] [平仓交易] 记录账户价值快照失败: {snapshot_err}", exc_info=True)
-            # 不抛出异常，避免影响主流程
+            logger.error(f"[Model {self.model_id}] [平仓交易] ❌ 记录账户价值快照失败: trade_id={trade_id}, error={snapshot_err}", exc_info=True)
+            # 不抛出异常，避免影响主流程，但记录详细错误信息以便排查
 
         return {
             'symbol': symbol,
@@ -3527,12 +3530,13 @@ class TradingEngine:
         try:
             # 使用工具函数从market_state中提取价格字典
             current_prices = extract_prices_from_market_state(market_state)
-            logger.debug(f"[Model {self.model_id}] [止损交易] 交易已记录到trades表，立即记录账户价值快照（trade_id={trade_id}）")
+            logger.info(f"[Model {self.model_id}] [止损交易] ✅ 交易已记录到trades表 (trade_id={trade_id})，立即记录账户价值快照")
+            logger.debug(f"[Model {self.model_id}] [止损交易] market_state keys: {list(market_state.keys())}, current_prices: {current_prices}")
             self._record_account_snapshot(current_prices, trade_id=trade_id)
-            logger.debug(f"[Model {self.model_id}] [止损交易] 账户价值快照已记录")
+            logger.info(f"[Model {self.model_id}] [止损交易] ✅ 账户价值快照已记录 (trade_id={trade_id})")
         except Exception as snapshot_err:
-            logger.error(f"[Model {self.model_id}] [止损交易] 记录账户价值快照失败: {snapshot_err}", exc_info=True)
-            # 不抛出异常，避免影响主流程
+            logger.error(f"[Model {self.model_id}] [止损交易] ❌ 记录账户价值快照失败: trade_id={trade_id}, error={snapshot_err}", exc_info=True)
+            # 不抛出异常，避免影响主流程，但记录详细错误信息以便排查
 
         return {
             'symbol': symbol,
@@ -3744,12 +3748,13 @@ class TradingEngine:
         try:
             # 使用工具函数从market_state中提取价格字典
             current_prices = extract_prices_from_market_state(market_state)
-            logger.debug(f"[Model {self.model_id}] [止盈交易] 交易已记录到trades表，立即记录账户价值快照（trade_id={trade_id}）")
+            logger.info(f"[Model {self.model_id}] [止盈交易] ✅ 交易已记录到trades表 (trade_id={trade_id})，立即记录账户价值快照")
+            logger.debug(f"[Model {self.model_id}] [止盈交易] market_state keys: {list(market_state.keys())}, current_prices: {current_prices}")
             self._record_account_snapshot(current_prices, trade_id=trade_id)
-            logger.debug(f"[Model {self.model_id}] [止盈交易] 账户价值快照已记录")
+            logger.info(f"[Model {self.model_id}] [止盈交易] ✅ 账户价值快照已记录 (trade_id={trade_id})")
         except Exception as snapshot_err:
-            logger.error(f"[Model {self.model_id}] [止盈交易] 记录账户价值快照失败: {snapshot_err}", exc_info=True)
-            # 不抛出异常，避免影响主流程
+            logger.error(f"[Model {self.model_id}] [止盈交易] ❌ 记录账户价值快照失败: trade_id={trade_id}, error={snapshot_err}", exc_info=True)
+            # 不抛出异常，避免影响主流程，但记录详细错误信息以便排查
 
         return {
             'symbol': symbol,
