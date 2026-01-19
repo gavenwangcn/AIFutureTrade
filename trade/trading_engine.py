@@ -422,23 +422,32 @@ class TradingEngine:
                         
                         # 确定基准余额
                         base_balance = None
-                        if today_account_value:
-                            # 如果找到当天的记录，使用记录的balance
-                            base_balance = today_account_value.get('balance')
-                            logger.debug(f"[Model {self.model_id}] [买入服务] [阶段1.3] 找到当天账户价值记录: balance={base_balance}")
+                        
+                        if today_account_value and today_account_value.get('balance') is not None:
+                            # 如果找到当天的记录且balance不为None，使用记录的balance
+                            base_balance = today_account_value.get('balance', 0)
+                            if base_balance > 0:
+                                logger.debug(f"[Model {self.model_id}] [买入服务] [阶段1.3] 找到当天账户价值记录: balance={base_balance:.2f}")
+                            else:
+                                logger.warning(f"[Model {self.model_id}] [买入服务] [阶段1.3] 当天账户价值记录的balance为0或负数: {base_balance}, 不做控制")
+                                base_balance = None
                         else:
-                            # 如果没有记录，检查是否有任何历史记录
+                            # 如果没有找到当天的记录，检查是否有任何历史记录
                             has_records = self.account_values_daily_db.has_any_record(model_id_uuid)
                             if not has_records:
                                 # 如果没有任何记录，使用模型的初始资金
-                                base_balance = model.get('initial_capital', 10000.0)
-                                logger.debug(f"[Model {self.model_id}] [买入服务] [阶段1.3] 无历史记录，使用初始资金: balance={base_balance}")
+                                base_balance = model.get('initial_capital')
+                                if base_balance is not None and base_balance > 0:
+                                    logger.debug(f"[Model {self.model_id}] [买入服务] [阶段1.3] 无历史记录，使用初始资金作为基准: balance={base_balance:.2f}")
+                                else:
+                                    logger.warning(f"[Model {self.model_id}] [买入服务] [阶段1.3] initial_capital为None或0: {base_balance}, 不做控制")
+                                    base_balance = None
                             else:
-                                # 如果有历史记录但今天没有，不做控制（查不到数据就不做控制）
-                                logger.debug(f"[Model {self.model_id}] [买入服务] [阶段1.3] 有历史记录但今天没有记录，不做控制")
+                                # 如果有历史记录但今天没有，不做控制（查不到当日数据就不做控制）
+                                logger.debug(f"[Model {self.model_id}] [买入服务] [阶段1.3] 有历史记录但今天没有记录，不做控制（允许继续交易）")
                                 base_balance = None
                         
-                        # 如果找到了基准余额，计算当日收益率
+                        # 如果找到了有效的基准余额，计算当日收益率并进行控制
                         if base_balance is not None and base_balance > 0:
                             daily_return_rate = ((current_total_value - base_balance) / base_balance) * 100
                             logger.debug(f"[Model {self.model_id}] [买入服务] [阶段1.3] 当日收益率计算: "
