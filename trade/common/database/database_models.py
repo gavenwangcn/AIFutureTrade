@@ -261,7 +261,7 @@ class ModelsDatabase:
                        m.leverage, m.auto_buy_enabled, m.auto_sell_enabled, m.max_positions, 
                        m.buy_batch_size, m.buy_batch_execution_interval, m.buy_batch_execution_group_size,
                        m.sell_batch_size, m.sell_batch_execution_interval, m.sell_batch_execution_group_size,
-                       m.account_alias, m.is_virtual, m.symbol_source, m.created_at,
+                       m.account_alias, m.is_virtual, m.symbol_source, m.trade_type, m.base_volume, m.daily_return, m.created_at,
                        m.api_key, m.api_secret, p.api_url, p.provider_type
                 FROM {self.models_table} m
                 LEFT JOIN {self.providers_table} p ON m.provider_id = p.id
@@ -275,7 +275,7 @@ class ModelsDatabase:
                       "leverage", "auto_buy_enabled", "auto_sell_enabled", "max_positions",
                       "buy_batch_size", "buy_batch_execution_interval", "buy_batch_execution_group_size",
                       "sell_batch_size", "sell_batch_execution_interval", "sell_batch_execution_group_size",
-                      "account_alias", "is_virtual", "symbol_source", "created_at",
+                      "account_alias", "is_virtual", "symbol_source", "trade_type", "base_volume", "daily_return", "created_at",
                       "api_key", "api_secret", "api_url", "provider_type"]
             result = self._row_to_dict(rows[0], columns)
             # Convert ID to maintain compatibility

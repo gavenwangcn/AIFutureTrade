@@ -348,6 +348,31 @@ public class ModelController {
     }
 
     /**
+     * 更新模型的目标每日收益率（百分比）
+     * @param modelId 模型ID
+     * @param requestBody 请求体，包含daily_return
+     * @return 更新操作结果
+     */
+    @PostMapping("/{modelId}/daily_return")
+    @Operation(summary = "更新模型的目标每日收益率")
+    public ResponseEntity<Map<String, Object>> updateModelDailyReturn(@PathVariable(value = "modelId") String modelId, @RequestBody Map<String, Object> requestBody) {
+        Object dailyReturnObj = requestBody.get("daily_return");
+        Double dailyReturn = null;
+        if (dailyReturnObj != null) {
+            if (dailyReturnObj instanceof Number) {
+                dailyReturn = ((Number) dailyReturnObj).doubleValue();
+            } else if (dailyReturnObj instanceof String) {
+                String str = (String) dailyReturnObj;
+                if (!str.isEmpty()) {
+                    dailyReturn = Double.parseDouble(str);
+                }
+            }
+        }
+        Map<String, Object> result = modelService.updateModelDailyReturn(modelId, dailyReturn);
+        return new ResponseEntity<>(result, HttpStatus.OK);
+    }
+
+    /**
      * 更新模型的API提供方和模型名称
      * @param modelId 模型ID
      * @param requestBody 请求体，包含provider_id和model_name
@@ -589,6 +614,18 @@ public class ModelController {
             response.put("error", e.getMessage());
             return new ResponseEntity<>(response, HttpStatus.INTERNAL_SERVER_ERROR);
         }
+    }
+
+    /**
+     * 获取模型的交易数据分析（按策略名称分组统计）
+     * @param modelId 模型ID
+     * @return 策略分析数据列表
+     */
+    @GetMapping("/{modelId}/analysis")
+    @Operation(summary = "获取模型的交易数据分析")
+    public ResponseEntity<List<Map<String, Object>>> getModelAnalysis(@PathVariable(value = "modelId") String modelId) {
+        List<Map<String, Object>> analysis = modelService.getModelAnalysis(modelId);
+        return new ResponseEntity<>(analysis, HttpStatus.OK);
     }
 
 }

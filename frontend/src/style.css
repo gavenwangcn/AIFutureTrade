@@ -717,6 +717,28 @@ body {
     align-items: center;
 }
 
+.section-header-btn {
+    background: transparent;
+    border: none;
+    padding: 4px 8px;
+    cursor: pointer;
+    color: var(--text-3);
+    transition: all 0.2s ease;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 4px;
+}
+
+.section-header-btn:hover {
+    color: var(--primary);
+    background: rgba(51, 112, 255, 0.1);
+}
+
+.section-header-btn i {
+    font-size: 14px;
+}
+
 .section-header i {
     font-size: 14px;
     color: var(--text-3);

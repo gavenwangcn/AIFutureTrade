@@ -148,6 +148,14 @@ public class ModelDTO implements Serializable {
     private Double baseVolume;
 
     /**
+     * 目标每日收益率（百分比），NULL表示不限制
+     * 支持两种命名方式：daily_return（snake_case）和 dailyReturn（camelCase）
+     */
+    @JsonProperty("daily_return")
+    @JsonAlias({"dailyReturn"})
+    private Double dailyReturn;
+
+    /**
      * 创建时间
      */
     private LocalDateTime createdAt;

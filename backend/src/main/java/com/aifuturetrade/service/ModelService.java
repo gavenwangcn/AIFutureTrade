@@ -171,6 +171,14 @@ public interface ModelService {
     Map<String, Object> updateModelBaseVolume(String modelId, Double baseVolume);
 
     /**
+     * 更新模型的目标每日收益率（百分比）
+     * @param modelId 模型ID（UUID格式）
+     * @param dailyReturn 目标每日收益率（百分比，null表示不限制）
+     * @return 更新结果
+     */
+    Map<String, Object> updateModelDailyReturn(String modelId, Double dailyReturn);
+
+    /**
      * 更新模型的API提供方和模型名称
      * @param modelId 模型ID（UUID格式）
      * @param providerId 新的API提供方ID（UUID格式）
@@ -228,5 +236,13 @@ public interface ModelService {
      * @return 更新后的自动卖出状态
      */
     Map<String, Object> disableSellTrading(String modelId);
+
+    /**
+     * 获取模型的交易数据分析（按策略名称分组统计）
+     * @param modelId 模型ID（UUID格式）
+     * @return 策略分析数据列表，每个元素包含：strategy_name（策略名称/模型信息）、trade_count（交易次数）、
+     *         win_rate（胜率）、avg_profit（平均盈利）、avg_loss（平均亏损）、profit_loss_ratio（盈亏比）
+     */
+    List<Map<String, Object>> getModelAnalysis(String modelId);
 
 }

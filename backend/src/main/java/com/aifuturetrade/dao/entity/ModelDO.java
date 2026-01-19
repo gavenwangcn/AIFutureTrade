@@ -160,6 +160,12 @@ public class ModelDO implements Serializable {
     private Double baseVolume;
 
     /**
+     * 目标每日收益率（百分比），NULL表示不限制
+     */
+    @TableField("daily_return")
+    private Double dailyReturn;
+
+    /**
      * 创建时间
      */
     @TableField("created_at")

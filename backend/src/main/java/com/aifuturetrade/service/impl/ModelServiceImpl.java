@@ -1625,6 +1625,50 @@ public class ModelServiceImpl implements ModelService {
      * @param modelDO 数据对象
      * @return 数据传输对象
      */
+    @Override
+    public Map<String, Object> updateModelDailyReturn(String modelId, Double dailyReturn) {
+        log.debug("[ModelService] 更新模型目标每日收益率, modelId={}, dailyReturn={}", modelId, dailyReturn);
+        try {
+            if (dailyReturn != null && dailyReturn < 0) {
+                throw new IllegalArgumentException("daily_return must be >= 0, or null to disable");
+            }
+            
+            ModelDO model = modelMapper.selectModelById(modelId);
+            if (model == null) {
+                Map<String, Object> errorResult = new HashMap<>();
+                errorResult.put("success", false);
+                errorResult.put("error", "Model not found");
+                return errorResult;
+            }
+            
+            UpdateWrapper<ModelDO> updateWrapper = new UpdateWrapper<>();
+            updateWrapper.eq("id", modelId);
+            updateWrapper.set("daily_return", dailyReturn);
+            
+            int result = modelMapper.update(null, updateWrapper);
+            
+            Map<String, Object> response = new HashMap<>();
+            if (result > 0) {
+                response.put("success", true);
+                response.put("message", "Daily return updated successfully");
+                response.put("daily_return", dailyReturn);
+                log.info("[ModelService] 更新模型目标每日收益率成功, modelId={}, dailyReturn={}", modelId, dailyReturn);
+            } else {
+                response.put("success", false);
+                response.put("error", "Failed to update daily return");
+                log.warn("[ModelService] 更新模型目标每日收益率失败, modelId={}", modelId);
+            }
+            
+            return response;
+        } catch (Exception e) {
+            log.error("[ModelService] 更新模型目标每日收益率失败: {}", e.getMessage(), e);
+            Map<String, Object> errorResult = new HashMap<>();
+            errorResult.put("success", false);
+            errorResult.put("error", e.getMessage());
+            return errorResult;
+        }
+    }
+
     private ModelDTO convertToDTO(ModelDO modelDO) {
         ModelDTO modelDTO = new ModelDTO();
         BeanUtils.copyProperties(modelDO, modelDTO);
@@ -1955,6 +1999,85 @@ public class ModelServiceImpl implements ModelService {
             return history;
         } catch (Exception e) {
             log.error("[ModelService] 获取账户价值历史失败: {}", e.getMessage(), e);
+            return new ArrayList<>();
+        }
+    }
+
+    @Override
+    public List<Map<String, Object>> getModelAnalysis(String modelId) {
+        log.debug("[ModelService] ========== 开始获取模型分析数据 ==========");
+        log.debug("[ModelService] modelId: {}", modelId);
+        try {
+            // 调用Mapper方法获取策略分析数据
+            List<Map<String, Object>> analysisList = tradeMapper.selectStrategyAnalysisByModelId(modelId);
+            
+            log.debug("[ModelService] 查询到 {} 条策略分析记录", analysisList.size());
+            
+            // 处理数据格式，确保返回的数据符合前端要求
+            List<Map<String, Object>> result = new ArrayList<>();
+            for (Map<String, Object> item : analysisList) {
+                Map<String, Object> analysisItem = new LinkedHashMap<>();
+                
+                // 策略名称（对应图片中的"策略分类"，用户要求改为"角模型信息-对应的是模型名称"）
+                // 这里使用strategy_name作为模型信息
+                analysisItem.put("strategy_name", item.get("strategy_name"));
+                analysisItem.put("model_name", item.get("strategy_name")); // 兼容字段
+                
+                // 交易次数
+                Object tradeCountObj = item.get("trade_count");
+                Long tradeCount = tradeCountObj != null ? 
+                    (tradeCountObj instanceof Number ? ((Number) tradeCountObj).longValue() : Long.parseLong(tradeCountObj.toString())) : 0L;
+                analysisItem.put("trade_count", tradeCount);
+                
+                // 胜率（盈利的交易占总交易的比率）
+                Object winRateObj = item.get("win_rate");
+                if (winRateObj != null) {
+                    Double winRate = winRateObj instanceof Number ? 
+                        ((Number) winRateObj).doubleValue() : Double.parseDouble(winRateObj.toString());
+                    analysisItem.put("win_rate", winRate);
+                } else {
+                    analysisItem.put("win_rate", null);
+                }
+                
+                // 平均盈利（所有盈利的交易总额除以所有盈利交易的总数）
+                Object avgProfitObj = item.get("avg_profit");
+                if (avgProfitObj != null) {
+                    Double avgProfit = avgProfitObj instanceof Number ? 
+                        ((Number) avgProfitObj).doubleValue() : Double.parseDouble(avgProfitObj.toString());
+                    analysisItem.put("avg_profit", avgProfit);
+                } else {
+                    analysisItem.put("avg_profit", null);
+                }
+                
+                // 平均亏损（所有亏损的交易总额除以所有亏损交易的总数）
+                Object avgLossObj = item.get("avg_loss");
+                if (avgLossObj != null) {
+                    Double avgLoss = avgLossObj instanceof Number ? 
+                        ((Number) avgLossObj).doubleValue() : Double.parseDouble(avgLossObj.toString());
+                    analysisItem.put("avg_loss", avgLoss);
+                } else {
+                    analysisItem.put("avg_loss", null);
+                }
+                
+                // 盈亏比（盈利的交易数比上亏损交易数）
+                Object profitLossRatioObj = item.get("profit_loss_ratio");
+                if (profitLossRatioObj != null) {
+                    Double profitLossRatio = profitLossRatioObj instanceof Number ? 
+                        ((Number) profitLossRatioObj).doubleValue() : Double.parseDouble(profitLossRatioObj.toString());
+                    analysisItem.put("profit_loss_ratio", profitLossRatio);
+                } else {
+                    analysisItem.put("profit_loss_ratio", null);
+                }
+                
+                result.add(analysisItem);
+            }
+            
+            log.debug("[ModelService] 处理完成，共 {} 条分析记录", result.size());
+            log.debug("[ModelService] ========== 获取模型分析数据完成 ==========");
+            
+            return result;
+        } catch (Exception e) {
+            log.error("[ModelService] 获取模型分析数据失败: {}", e.getMessage(), e);
             return new ArrayList<>();
         }
     }

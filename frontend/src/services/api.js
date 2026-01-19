@@ -126,6 +126,11 @@ export const modelApi = {
   setQuoteVolume: (modelId, quoteVolume) => apiPost(`/api/models/${modelId}/base_volume`, { base_volume: quoteVolume }),
 
   /**
+   * 设置目标每日收益率（百分比）
+   */
+  setDailyReturn: (modelId, dailyReturn) => apiPost(`/api/models/${modelId}/daily_return`, { daily_return: dailyReturn }),
+
+  /**
    * 更新模型的API提供方和模型名称
    */
   updateProvider: (modelId, providerId, modelName) => apiPut(`/api/models/${modelId}/provider`, { provider_id: providerId, model_name: modelName }),
@@ -163,7 +168,12 @@ export const modelApi = {
   /**
    * 批量保存模型策略配置
    */
-  saveStrategyConfig: (modelId, data) => apiPost(`/api/models/${modelId}/strategy-config`, data)
+  saveStrategyConfig: (modelId, data) => apiPost(`/api/models/${modelId}/strategy-config`, data),
+
+  /**
+   * 获取模型的交易数据分析（按策略名称分组统计）
+   */
+  getAnalysis: (modelId) => apiGet(`/api/models/${modelId}/analysis`)
 }
 
 /**

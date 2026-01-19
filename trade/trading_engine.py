@@ -28,6 +28,7 @@ from trade.common.database.database_models import ModelsDatabase
 from trade.common.database.database_portfolios import PortfoliosDatabase
 from trade.common.database.database_conversations import ConversationsDatabase
 from trade.common.database.database_account_values import AccountValuesDatabase
+from trade.common.database.database_account_values_daily import AccountValuesDailyDatabase
 from trade.common.database.database_futures import FuturesDatabase
 from trade.common.database.database_account_asset import AccountAssetDatabase
 from trade.common.database.database_binance_trade_logs import BinanceTradeLogsDatabase
@@ -83,6 +84,7 @@ class TradingEngine:
         self.portfolios_db = PortfoliosDatabase(pool=db._pool if hasattr(db, '_pool') else None)
         self.conversations_db = ConversationsDatabase(pool=db._pool if hasattr(db, '_pool') else None)
         self.account_values_db = AccountValuesDatabase(pool=db._pool if hasattr(db, '_pool') else None)
+        self.account_values_daily_db = AccountValuesDailyDatabase(pool=db._pool if hasattr(db, '_pool') else None)
         self.futures_db = FuturesDatabase(pool=db._pool if hasattr(db, '_pool') else None)
         self.account_asset_db = AccountAssetDatabase(pool=db._pool if hasattr(db, '_pool') else None)
         self.binance_trade_logs_db = BinanceTradeLogsDatabase(pool=db._pool if hasattr(db, '_pool') else None)
@@ -396,16 +398,176 @@ class TradingEngine:
                     'skip_reason': f'持仓数量已达上限: {current_positions_count}/{self.max_positions}'
                 }
             
+            # ========== 检查每日收益率限制 ==========
+            logger.debug(f"[Model {self.model_id}] [买入服务] [阶段1.3] 开始检查每日收益率限制")
+            try:
+                # 获取模型的daily_return配置
+                daily_return = model.get('daily_return')
+                if daily_return is not None and daily_return > 0:
+                    # 获取当前账户总值
+                    current_total_value = portfolio.get('total_value', 0)
+                    
+                    # 获取当天的账户价值记录（从早上8点开始）
+                    model_id_uuid = model.get('id')  # 获取UUID格式的模型ID
+                    if isinstance(model_id_uuid, int):
+                        # 如果是整数ID，需要转换为UUID
+                        model_mapping = self.models_db._get_model_id_mapping()
+                        model_id_uuid = model_mapping.get(model_id_uuid)
+                    
+                    if model_id_uuid:
+                        today_account_value = self.account_values_daily_db.get_today_account_value(model_id_uuid)
+                        
+                        # 确定基准余额
+                        base_balance = None
+                        if today_account_value:
+                            # 如果找到当天的记录，使用记录的balance
+                            base_balance = today_account_value.get('balance')
+                            logger.debug(f"[Model {self.model_id}] [买入服务] [阶段1.3] 找到当天账户价值记录: balance={base_balance}")
+                        else:
+                            # 如果没有记录，检查是否有任何历史记录
+                            has_records = self.account_values_daily_db.has_any_record(model_id_uuid)
+                            if not has_records:
+                                # 如果没有任何记录，使用模型的初始资金
+                                base_balance = model.get('initial_capital', 10000.0)
+                                logger.debug(f"[Model {self.model_id}] [买入服务] [阶段1.3] 无历史记录，使用初始资金: balance={base_balance}")
+                            else:
+                                # 如果有历史记录但今天没有，不做控制（查不到数据就不做控制）
+                                logger.debug(f"[Model {self.model_id}] [买入服务] [阶段1.3] 有历史记录但今天没有记录，不做控制")
+                                base_balance = None
+                        
+                        # 如果找到了基准余额，计算当日收益率
+                        if base_balance is not None and base_balance > 0:
+                            daily_return_rate = ((current_total_value - base_balance) / base_balance) * 100
+                            logger.debug(f"[Model {self.model_id}] [买入服务] [阶段1.3] 当日收益率计算: "
+                                       f"当前总值={current_total_value:.2f}, "
+                                       f"基准余额={base_balance:.2f}, "
+                                       f"当日收益率={daily_return_rate:.2f}%, "
+                                       f"目标收益率={daily_return:.2f}%")
+                            
+                            # 如果当日收益率大于等于目标收益率，跳过买入交易
+                            if daily_return_rate >= daily_return:
+                                logger.info(f"[Model {self.model_id}] [买入服务] [阶段1.3] 当日收益率已达到目标: "
+                                          f"当日收益率={daily_return_rate:.2f}% >= 目标收益率={daily_return:.2f}%, "
+                                          f"跳过买入交易")
+                                cycle_end_time = datetime.now(timezone(timedelta(hours=8)))
+                                cycle_duration = (cycle_end_time - cycle_start_time).total_seconds()
+                                logger.debug(f"[Model {self.model_id}] [买入服务] ========== 买入决策周期执行完成（已跳过,当日收益率已达目标） ==========")
+                                logger.debug(f"[Model {self.model_id}] [买入服务] 执行统计: "
+                                           f"总耗时={cycle_duration:.2f}秒, "
+                                           f"执行操作数=0, "
+                                           f"跳过原因=当日收益率已达目标")
+                                return {
+                                    'success': True,
+                                    'executions': [],
+                                    'portfolio': portfolio,
+                                    'conversations': [],
+                                    'skipped': True,
+                                    'skip_reason': f'当日收益率已达目标: {daily_return_rate:.2f}% >= {daily_return:.2f}%'
+                                }
+                            else:
+                                logger.debug(f"[Model {self.model_id}] [买入服务] [阶段1.3] 当日收益率未达目标: "
+                                           f"当日收益率={daily_return_rate:.2f}% < 目标收益率={daily_return:.2f}%, "
+                                           f"继续执行买入交易")
+                        else:
+                            logger.debug(f"[Model {self.model_id}] [买入服务] [阶段1.3] 无法确定基准余额，不做控制")
+                    else:
+                        logger.warning(f"[Model {self.model_id}] [买入服务] [阶段1.3] 无法获取模型UUID ID，跳过每日收益率检查")
+                else:
+                    logger.debug(f"[Model {self.model_id}] [买入服务] [阶段1.3] 未配置daily_return或为0，不做控制")
+            except Exception as e:
+                logger.warning(f"[Model {self.model_id}] [买入服务] [阶段1.3] 检查每日收益率限制时出错: {e}，继续执行买入交易")
+                # 出错时不做控制，继续执行买入交易
+            
+            # ========== 检查每日收益率限制 ==========
+            logger.debug(f"[Model {self.model_id}] [买入服务] [阶段1.3] 开始检查每日收益率限制")
+            try:
+                # 获取模型的daily_return配置
+                daily_return = model.get('daily_return')
+                if daily_return is not None and daily_return > 0:
+                    # 获取当前账户总值
+                    current_total_value = portfolio.get('total_value', 0)
+                    
+                    # 获取当天的账户价值记录（从早上8点开始）
+                    model_id_uuid = model.get('id')  # 获取UUID格式的模型ID
+                    if isinstance(model_id_uuid, int):
+                        # 如果是整数ID，需要转换为UUID
+                        model_mapping = self.models_db._get_model_id_mapping()
+                        model_id_uuid = model_mapping.get(model_id_uuid)
+                    
+                    if model_id_uuid:
+                        today_account_value = self.account_values_daily_db.get_today_account_value(model_id_uuid)
+                        
+                        # 确定基准余额
+                        base_balance = None
+                        if today_account_value:
+                            # 如果找到当天的记录，使用记录的balance
+                            base_balance = today_account_value.get('balance')
+                            logger.debug(f"[Model {self.model_id}] [买入服务] [阶段1.3] 找到当天账户价值记录: balance={base_balance}")
+                        else:
+                            # 如果没有记录，检查是否有任何历史记录
+                            has_records = self.account_values_daily_db.has_any_record(model_id_uuid)
+                            if not has_records:
+                                # 如果没有任何记录，使用模型的初始资金
+                                base_balance = model.get('initial_capital', 10000.0)
+                                logger.debug(f"[Model {self.model_id}] [买入服务] [阶段1.3] 无历史记录，使用初始资金: balance={base_balance}")
+                            else:
+                                # 如果有历史记录但今天没有，不做控制（查不到数据就不做控制）
+                                logger.debug(f"[Model {self.model_id}] [买入服务] [阶段1.3] 有历史记录但今天没有记录，不做控制")
+                                base_balance = None
+                        
+                        # 如果找到了基准余额，计算当日收益率
+                        if base_balance is not None and base_balance > 0:
+                            daily_return_rate = ((current_total_value - base_balance) / base_balance) * 100
+                            logger.debug(f"[Model {self.model_id}] [买入服务] [阶段1.3] 当日收益率计算: "
+                                       f"当前总值={current_total_value:.2f}, "
+                                       f"基准余额={base_balance:.2f}, "
+                                       f"当日收益率={daily_return_rate:.2f}%, "
+                                       f"目标收益率={daily_return:.2f}%")
+                            
+                            # 如果当日收益率大于等于目标收益率，跳过买入交易
+                            if daily_return_rate >= daily_return:
+                                logger.info(f"[Model {self.model_id}] [买入服务] [阶段1.3] 当日收益率已达到目标: "
+                                          f"当日收益率={daily_return_rate:.2f}% >= 目标收益率={daily_return:.2f}%, "
+                                          f"跳过买入交易")
+                                cycle_end_time = datetime.now(timezone(timedelta(hours=8)))
+                                cycle_duration = (cycle_end_time - cycle_start_time).total_seconds()
+                                logger.debug(f"[Model {self.model_id}] [买入服务] ========== 买入决策周期执行完成（已跳过,当日收益率已达目标） ==========")
+                                logger.debug(f"[Model {self.model_id}] [买入服务] 执行统计: "
+                                           f"总耗时={cycle_duration:.2f}秒, "
+                                           f"执行操作数=0, "
+                                           f"跳过原因=当日收益率已达目标")
+                                return {
+                                    'success': True,
+                                    'executions': [],
+                                    'portfolio': portfolio,
+                                    'conversations': [],
+                                    'skipped': True,
+                                    'skip_reason': f'当日收益率已达目标: {daily_return_rate:.2f}% >= {daily_return:.2f}%'
+                                }
+                            else:
+                                logger.debug(f"[Model {self.model_id}] [买入服务] [阶段1.3] 当日收益率未达目标: "
+                                           f"当日收益率={daily_return_rate:.2f}% < 目标收益率={daily_return:.2f}%, "
+                                           f"继续执行买入交易")
+                        else:
+                            logger.debug(f"[Model {self.model_id}] [买入服务] [阶段1.3] 无法确定基准余额，不做控制")
+                    else:
+                        logger.warning(f"[Model {self.model_id}] [买入服务] [阶段1.3] 无法获取模型UUID ID，跳过每日收益率检查")
+                else:
+                    logger.debug(f"[Model {self.model_id}] [买入服务] [阶段1.3] 未配置daily_return或为0，不做控制")
+            except Exception as e:
+                logger.warning(f"[Model {self.model_id}] [买入服务] [阶段1.3] 检查每日收益率限制时出错: {e}，继续执行买入交易")
+                # 出错时不做控制，继续执行买入交易
+            
             # 构建账户信息（用于决策）
             account_info = self._build_account_info(portfolio)
-            logger.debug(f"[Model {self.model_id}] [买入服务] [阶段1.3] 账户信息构建完成: "
+            logger.debug(f"[Model {self.model_id}] [买入服务] [阶段1.4] 账户信息构建完成: "
                         f"初始资金=${account_info.get('initial_capital', 0):.2f}, "
                         f"总收益率={account_info.get('total_return', 0):.2f}%")
             
             # 获取提示词模板（仅买入约束）- 仅当trade_type为ai时才需要
             if trade_type == 'ai':
                 prompt_templates = self._get_prompt_templates()
-                logger.debug(f"[Model {self.model_id}] [买入服务] [阶段1.4] 买入提示词模板获取完成")
+                logger.debug(f"[Model {self.model_id}] [买入服务] [阶段1.5] 买入提示词模板获取完成")
             else:
                 prompt_templates = {}
                 logger.debug(f"[Model {self.model_id}] [买入服务] [阶段1.4] trade_type={trade_type}，跳过提示词模板获取")

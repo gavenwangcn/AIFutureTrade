@@ -27,6 +27,7 @@ TRADES_TABLE = "trades"
 CONVERSATIONS_TABLE = "conversations"
 ACCOUNT_VALUES_TABLE = "account_values"
 ACCOUNT_VALUE_HISTORYS_TABLE = "account_value_historys"
+ACCOUNT_VALUES_DAILY_TABLE = "account_values_daily"
 SETTINGS_TABLE = "settings"
 MODEL_PROMPTS_TABLE = "model_prompts"
 MODEL_FUTURES_TABLE = "model_futures"
@@ -102,6 +103,7 @@ class DatabaseInitializer:
             `symbol_source` VARCHAR(50) DEFAULT 'leaderboard',
             `trade_type` VARCHAR(20) DEFAULT 'strategy' COMMENT 'Trade type: ai-use AI trading, strategy-use strategy trading',
             `base_volume` DOUBLE DEFAULT NULL COMMENT '每日成交量过滤阈值（以千万为单位），NULL表示不过滤',
+            `daily_return` DOUBLE DEFAULT NULL COMMENT '目标每日收益率（百分比），NULL表示不限制',
             `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP,
             INDEX `idx_provider_id` (`provider_id`),
             INDEX `idx_account_alias` (`account_alias`),
@@ -151,8 +153,24 @@ class DatabaseInitializer:
                     """
                     self.command(migrate_sql)
                     logger.info(f"[DatabaseInit] Migrated data from quote_volume to base_volume in {table_name} table")
+            
+            # Check and add daily_return field
+            check_daily_return_sql = f"""
+            SELECT COUNT(*) FROM information_schema.COLUMNS 
+            WHERE TABLE_SCHEMA = DATABASE() 
+            AND TABLE_NAME = '{table_name}' 
+            AND COLUMN_NAME = 'daily_return'
+            """
+            daily_return_result = self.command(check_daily_return_sql)
+            if isinstance(daily_return_result, list) and len(daily_return_result) > 0 and daily_return_result[0][0] == 0:
+                alter_daily_return_sql = f"""
+                ALTER TABLE `{table_name}` 
+                ADD COLUMN `daily_return` DOUBLE DEFAULT NULL COMMENT '目标每日收益率（百分比），NULL表示不限制' AFTER `base_volume`
+                """
+                self.command(alter_daily_return_sql)
+                logger.info(f"[DatabaseInit] Added daily_return column to {table_name} table")
         except Exception as e:
-            logger.warning(f"[DatabaseInit] Failed to check/add base_volume column to {table_name}: {e}")
+            logger.warning(f"[DatabaseInit] Failed to check/add base_volume/daily_return column to {table_name}: {e}")
         
   
     def ensure_portfolios_table(self, table_name: str = "portfolios"):
@@ -290,6 +308,23 @@ class DatabaseInitializer:
                 logger.info(f"[DatabaseInit] Added trade_id column to {table_name} table")
         except Exception as e:
             logger.warning(f"[DatabaseInit] Failed to check/add trade_id column to {table_name}: {e}")
+    
+    def ensure_account_values_daily_table(self, table_name: str = "account_values_daily"):
+        """Create account_values_daily table if not exists"""
+        ddl = f"""
+        CREATE TABLE IF NOT EXISTS `{table_name}` (
+            `id` VARCHAR(36) PRIMARY KEY,
+            `model_id` VARCHAR(36) NOT NULL,
+            `balance` DOUBLE DEFAULT 0.0 COMMENT '账户总值',
+            `available_balance` DOUBLE DEFAULT 0.0 COMMENT '可用现金',
+            `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '记录时间（每天8点）',
+            INDEX `idx_model_id` (`model_id`),
+            INDEX `idx_created_at` (`created_at`),
+            INDEX `idx_model_created` (`model_id`, `created_at`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+        """
+        self.command(ddl)
+        logger.debug(f"[DatabaseInit] Ensured table {table_name} exists")
     
     def ensure_settings_table(self, table_name: str = "settings"):
         """Create settings table if not exists"""
@@ -612,6 +647,9 @@ def init_database_tables(command_func: Callable[[str], Any], table_names: dict):
     # Account value historys table (for history records, INSERT only)
     initializer.ensure_account_value_historys_table(table_names.get('account_value_historys_table', 'account_value_historys'))
     
+    # Account values daily table (for daily account value records at 8 AM)
+    initializer.ensure_account_values_daily_table(table_names.get('account_values_daily_table', 'account_values_daily'))
+    
     # Settings table
     initializer.ensure_settings_table(table_names.get('settings_table', 'settings'))
     
@@ -687,6 +725,7 @@ def init_all_database_tables(command_func: Callable[[str, tuple], Any]):
         'conversations_table': CONVERSATIONS_TABLE,
         'account_values_table': ACCOUNT_VALUES_TABLE,
         'account_value_historys_table': ACCOUNT_VALUE_HISTORYS_TABLE,
+        'account_values_daily_table': ACCOUNT_VALUES_DAILY_TABLE,
         'settings_table': SETTINGS_TABLE,
         'model_prompts_table': MODEL_PROMPTS_TABLE,
         'model_futures_table': MODEL_FUTURES_TABLE,

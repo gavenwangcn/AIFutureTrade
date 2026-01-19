@@ -48,6 +48,11 @@
       <small class="form-help">只交易每日成交量大于此阈值的合约（以千万为单位，例如：10 表示1亿成交量）。留空或0表示不过滤。</small>
     </div>
     <div class="form-group">
+      <label>目标每日收益率（百分比）</label>
+      <input v-model.number="formData.dailyReturn" type="number" class="form-input" min="0" step="0.1" />
+      <small class="form-help">设置目标每日收益率（百分比，例如：5 表示5%）。当当日收益率达到此值时，将不再进行买入交易。留空或0表示不限制。</small>
+    </div>
+    <div class="form-group">
       <label>选择账户 <span style="color: red;">*</span></label>
       <select v-model="formData.accountAlias" class="form-input" required>
         <option value="">请选择账户</option>
@@ -175,6 +180,7 @@ const formData = ref({
   maxPositions: 3,  // 默认最大持仓数量为3
   autoClosePercent: null,  // 自动平仓百分比，默认不启用
   baseVolume: null,  // 每日成交量过滤阈值（千万单位），默认不过滤
+  dailyReturn: null,  // 目标每日收益率（百分比），默认不限制
   accountAlias: '',
   isVirtual: true,  // 默认值为 true（虚拟账户）
   symbolSource: 'leaderboard',  // 默认使用涨跌榜
@@ -261,6 +267,7 @@ const handleSubmit = async () => {
       maxPositions: formData.value.maxPositions,
       autoClosePercent: formData.value.autoClosePercent || null,
       baseVolume: formData.value.baseVolume || null,
+      dailyReturn: formData.value.dailyReturn || null,
       accountAlias: formData.value.accountAlias,
       isVirtual: formData.value.isVirtual,
       symbolSource: formData.value.symbolSource,
@@ -293,6 +300,7 @@ const clearForm = () => {
     maxPositions: 3,  // 重置为默认值3
     autoClosePercent: null,  // 重置为默认值
     baseVolume: null,  // 重置为默认值
+    dailyReturn: null,  // 重置为默认值
     accountAlias: '',
     isVirtual: true,  // 重置为默认值 true（虚拟账户）
     symbolSource: 'leaderboard',  // 重置为默认值

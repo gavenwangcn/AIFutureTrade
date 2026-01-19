@@ -107,6 +107,14 @@
         <div class="sidebar-section">
           <div class="section-header">
             <span>交易模型</span>
+            <button 
+              v-if="currentModelId && !isAggregatedView"
+              class="section-header-btn" 
+              @click="handleOpenAnalysisModal(currentModelId, currentModel?.name || `模型 #${currentModelId}`)"
+              title="交易模型数据分析"
+            >
+              <i class="bi bi-graph-up-arrow"></i>
+            </button>
           </div>
           <div class="model-list">
             <!-- 聚合视图选项 -->
@@ -833,6 +841,13 @@
       @update:visible="showSellLogsModal = $event"
       @close="showSellLogsModal = false"
     />
+    <ModelAnalysisModal
+      :visible="showAnalysisModal"
+      :modelId="pendingAnalysisModelId"
+      :modelName="analysisModelName"
+      @update:visible="showAnalysisModal = $event"
+      @close="showAnalysisModal = false"
+    />
     
     <!-- 模型设置模态框（合并杠杆和最大持仓数量） -->
     <div v-if="showModelSettingsModal" class="modal show" @click.self="showModelSettingsModal = false">
@@ -924,6 +939,18 @@
                 v-model.number="tempModelSettings.base_volume"
               >
               <small class="form-help">只交易每日成交量大于此阈值的合约（以千万为单位，例如：10 表示1亿成交量）。留空或0表示不过滤。</small>
+            </div>
+            <div class="form-group">
+              <label for="settingsDailyReturnInput">目标每日收益率（百分比）</label>
+              <input 
+                type="number" 
+                id="settingsDailyReturnInput" 
+                class="form-input" 
+                min="0" 
+                step="0.1"
+                v-model.number="tempModelSettings.daily_return"
+              >
+              <small class="form-help">设置目标每日收益率（百分比，例如：5 表示5%）。当当日收益率达到此值时，将不再进行买入交易。留空或0表示不限制。</small>
             </div>
             <div class="form-group">
               <label style="font-weight: 600; margin-bottom: 12px; display: block;">买入批次配置</label>
@@ -1022,6 +1049,7 @@ import ModelStrategyConfigModal from './components/ModelStrategyConfigModal.vue'
 import TradeLogsModal from './components/TradeLogsModal.vue'
 import BuyLogsModal from './components/BuyLogsModal.vue'
 import SellLogsModal from './components/SellLogsModal.vue'
+import ModelAnalysisModal from './components/ModelAnalysisModal.vue'
 import { useTradingApp } from './composables/useTradingApp'
 
 const {
@@ -1174,6 +1202,9 @@ const buyLogsModelName = ref('')
 const showSellLogsModal = ref(false)
 const pendingSellLogsModelId = ref(null)
 const sellLogsModelName = ref('')
+const showAnalysisModal = ref(false)
+const pendingAnalysisModelId = ref(null)
+const analysisModelName = ref('')
 const tempLeverage = ref(10) // 临时杠杆值
 
 // 监听模型切换，自动切换到持仓模块并重置分页
@@ -1305,6 +1336,12 @@ const handleOpenSellLogsModal = (modelId, modelName) => {
   showSellLogsModal.value = true
   pendingSellLogsModelId.value = modelId
   sellLogsModelName.value = modelName
+}
+
+const handleOpenAnalysisModal = (modelId, modelName) => {
+  showAnalysisModal.value = true
+  pendingAnalysisModelId.value = modelId
+  analysisModelName.value = modelName
 }
 
 const openKlineChartFromMarket = (symbol, contractSymbol) => {
