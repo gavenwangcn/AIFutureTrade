@@ -100,7 +100,7 @@ class AccountValuesDailyDatabase:
                         logger.debug(f"[AccountValuesDaily] Error during cleanup: {cleanup_error}")
                 
                 if not is_network_error or attempt == max_retries - 1:
-                    logger.error(f"[AccountValuesDaily] Database operation failed (attempt {attempt + 1}/{max_retries}): {e}")
+                    logger.error(f"[AccountValuesDaily] Database operation failed (attempt {attempt + 1}/{max_retries}): {error_type}: {error_msg}", exc_info=True)
                     raise
                 
                 logger.warning(f"[AccountValuesDaily] Network error occurred (attempt {attempt + 1}/{max_retries}), retrying in {retry_delay}s...")
@@ -218,12 +218,19 @@ class AccountValuesDailyDatabase:
                     WHERE `model_id` = %s
                     """
                     cursor.execute(sql, (model_id,))
-                    count = cursor.fetchone()[0]
-                    return count > 0
+                    row = cursor.fetchone()
+                    if row is None:
+                        logger.warning(f"[AccountValuesDaily] COUNT query returned None for model {model_id}")
+                        return False
+                    count = row[0] if isinstance(row, (tuple, list)) else row
+                    if count is None:
+                        logger.warning(f"[AccountValuesDaily] COUNT value is None for model {model_id}")
+                        return False
+                    return int(count) > 0
                 finally:
                     cursor.close()
             
             return self._with_connection(_execute_query)
         except Exception as e:
-            logger.error(f"[AccountValuesDaily] Failed to check records for model {model_id}: {e}")
+            logger.error(f"[AccountValuesDaily] Failed to check records for model {model_id}: {e}", exc_info=True)
             return False
