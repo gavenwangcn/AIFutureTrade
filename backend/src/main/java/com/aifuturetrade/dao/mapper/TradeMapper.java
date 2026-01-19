@@ -79,4 +79,42 @@ public interface TradeMapper extends BaseMapper<TradeDO> {
             "ORDER BY trade_count DESC")
     List<Map<String, Object>> selectStrategyAnalysisByModelId(@Param("modelId") String modelId);
 
+    /**
+     * 查询所有模型的分析数据（按模型ID和策略名称分组统计）
+     * 统计：交易次数、胜率、平均盈利、平均亏损、盈亏比
+     * 关联逻辑：通过model_id、symbol、signal和时间窗口（5分钟内）来匹配策略决策和交易记录
+     * @return 所有模型的统计信息列表，每个元素包含：model_id, model_name, strategy_name, trade_count, win_rate, avg_profit, avg_loss, profit_loss_ratio
+     */
+    @Select("SELECT " +
+            "    sd.model_id, " +
+            "    COALESCE(m.name, CONCAT('模型 ', sd.model_id)) as model_name, " +
+            "    COALESCE(sd.strategy_name, '未知策略') as strategy_name, " +
+            "    COUNT(DISTINCT t.id) as trade_count, " +
+            "    CASE " +
+            "        WHEN COUNT(DISTINCT t.id) = 0 THEN NULL " +
+            "        ELSE CAST(SUM(CASE WHEN t.pnl > 0 THEN 1 ELSE 0 END) AS DECIMAL(10, 5)) / COUNT(DISTINCT t.id) " +
+            "    END as win_rate, " +
+            "    CASE " +
+            "        WHEN SUM(CASE WHEN t.pnl > 0 THEN 1 ELSE 0 END) = 0 THEN NULL " +
+            "        ELSE AVG(CASE WHEN t.pnl > 0 THEN t.pnl ELSE NULL END) " +
+            "    END as avg_profit, " +
+            "    CASE " +
+            "        WHEN SUM(CASE WHEN t.pnl < 0 THEN 1 ELSE 0 END) = 0 THEN NULL " +
+            "        ELSE AVG(CASE WHEN t.pnl < 0 THEN t.pnl ELSE NULL END) " +
+            "    END as avg_loss, " +
+            "    CASE " +
+            "        WHEN SUM(CASE WHEN t.pnl < 0 THEN 1 ELSE 0 END) = 0 THEN NULL " +
+            "        ELSE CAST(SUM(CASE WHEN t.pnl > 0 THEN 1 ELSE 0 END) AS DECIMAL(10, 2)) / " +
+            "             NULLIF(SUM(CASE WHEN t.pnl < 0 THEN 1 ELSE 0 END), 0) " +
+            "    END as profit_loss_ratio " +
+            "FROM strategy_decisions sd " +
+            "LEFT JOIN trades t ON sd.model_id = t.model_id " +
+            "    AND sd.symbol = t.future " +
+            "    AND sd.signal = t.signal " +
+            "    AND ABS(TIMESTAMPDIFF(SECOND, sd.created_at, t.timestamp)) <= 300 " +
+            "LEFT JOIN models m ON sd.model_id = m.id " +
+            "GROUP BY sd.model_id, sd.strategy_name, m.name " +
+            "ORDER BY sd.model_id, trade_count DESC")
+    List<Map<String, Object>> selectAllModelsAnalysis();
+
 }

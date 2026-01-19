@@ -2126,4 +2126,87 @@ public class ModelServiceImpl implements ModelService {
         }
     }
 
+    @Override
+    public List<Map<String, Object>> getAllModelsAnalysis() {
+        log.debug("[ModelService] ========== 开始获取所有模型分析数据 ==========");
+        try {
+            // 调用Mapper方法获取所有模型的分析数据
+            List<Map<String, Object>> analysisList = tradeMapper.selectAllModelsAnalysis();
+            
+            log.debug("[ModelService] 查询到 {} 条模型分析记录", analysisList.size());
+            
+            // 处理数据格式，确保返回的数据符合前端要求
+            List<Map<String, Object>> result = new ArrayList<>();
+            for (Map<String, Object> item : analysisList) {
+                Map<String, Object> analysisItem = new LinkedHashMap<>();
+                
+                // 模型ID
+                analysisItem.put("model_id", item.get("model_id"));
+                
+                // 模型名称
+                analysisItem.put("model_name", item.get("model_name"));
+                
+                // 策略名称（对应图片中的"策略分类"，用户要求改为"模型信息-对应的是模型名称"）
+                // 这里使用model_name作为模型信息
+                analysisItem.put("strategy_name", item.get("model_name"));
+                
+                // 交易次数
+                Object tradeCountObj = item.get("trade_count");
+                Long tradeCount = tradeCountObj != null ? 
+                    (tradeCountObj instanceof Number ? ((Number) tradeCountObj).longValue() : Long.parseLong(tradeCountObj.toString())) : 0L;
+                analysisItem.put("trade_count", tradeCount);
+                
+                // 胜率（盈利的交易占总交易的比率）
+                Object winRateObj = item.get("win_rate");
+                if (winRateObj != null) {
+                    Double winRate = winRateObj instanceof Number ? 
+                        ((Number) winRateObj).doubleValue() : Double.parseDouble(winRateObj.toString());
+                    analysisItem.put("win_rate", winRate);
+                } else {
+                    analysisItem.put("win_rate", null);
+                }
+                
+                // 平均盈利（所有盈利的交易总额除以所有盈利交易的总数）
+                Object avgProfitObj = item.get("avg_profit");
+                if (avgProfitObj != null) {
+                    Double avgProfit = avgProfitObj instanceof Number ? 
+                        ((Number) avgProfitObj).doubleValue() : Double.parseDouble(avgProfitObj.toString());
+                    analysisItem.put("avg_profit", avgProfit);
+                } else {
+                    analysisItem.put("avg_profit", null);
+                }
+                
+                // 平均亏损（所有亏损的交易总额除以所有亏损交易的总数）
+                Object avgLossObj = item.get("avg_loss");
+                if (avgLossObj != null) {
+                    Double avgLoss = avgLossObj instanceof Number ? 
+                        ((Number) avgLossObj).doubleValue() : Double.parseDouble(avgLossObj.toString());
+                    analysisItem.put("avg_loss", avgLoss);
+                } else {
+                    analysisItem.put("avg_loss", null);
+                }
+                
+                // 盈亏比（盈利的交易数比上亏损交易数）
+                Object profitLossRatioObj = item.get("profit_loss_ratio");
+                if (profitLossRatioObj != null) {
+                    Double profitLossRatio = profitLossRatioObj instanceof Number ? 
+                        ((Number) profitLossRatioObj).doubleValue() : Double.parseDouble(profitLossRatioObj.toString());
+                    analysisItem.put("profit_loss_ratio", profitLossRatio);
+                } else {
+                    analysisItem.put("profit_loss_ratio", null);
+                }
+                
+                result.add(analysisItem);
+            }
+            
+            log.debug("[ModelService] 处理完成，共 {} 条分析记录", result.size());
+            log.debug("[ModelService] ========== 获取所有模型分析数据完成 ==========");
+            
+            return result;
+        } catch (Exception e) {
+            log.error("[ModelService] 获取所有模型分析数据失败: {}", e.getMessage(), e);
+            return new ArrayList<>();
+        }
+    }
+
 }

@@ -178,7 +178,8 @@ export const modelApi = {
   /**
    * 获取模型的交易数据分析（按策略名称分组统计）
    */
-  getAnalysis: (modelId) => apiGet(`/api/models/${modelId}/analysis`)
+  getAnalysis: (modelId) => apiGet(`/api/models/${modelId}/analysis`),
+  getAllModelsAnalysis: () => apiGet('/api/models/analysis/all')
 }
 
 /**

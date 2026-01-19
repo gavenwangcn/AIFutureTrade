@@ -108,9 +108,8 @@
           <div class="section-header">
             <span>交易模型</span>
             <button 
-              v-if="currentModelId && !isAggregatedView"
               class="section-header-btn" 
-              @click="handleOpenAnalysisModal(currentModelId, currentModel?.name || `模型 #${currentModelId}`)"
+              @click="handleOpenAnalysisModal"
               title="交易模型数据分析"
             >
               <i class="bi bi-graph-up-arrow"></i>
@@ -851,8 +850,6 @@
     />
     <ModelAnalysisModal
       :visible="showAnalysisModal"
-      :modelId="pendingAnalysisModelId"
-      :modelName="analysisModelName"
       @update:visible="showAnalysisModal = $event"
       @close="showAnalysisModal = false"
     />
@@ -1223,8 +1220,6 @@ const showSellLogsModal = ref(false)
 const pendingSellLogsModelId = ref(null)
 const sellLogsModelName = ref('')
 const showAnalysisModal = ref(false)
-const pendingAnalysisModelId = ref(null)
-const analysisModelName = ref('')
 const tempLeverage = ref(10) // 临时杠杆值
 
 // 监听模型切换，自动切换到持仓模块并重置分页
@@ -1358,10 +1353,8 @@ const handleOpenSellLogsModal = (modelId, modelName) => {
   sellLogsModelName.value = modelName
 }
 
-const handleOpenAnalysisModal = (modelId, modelName) => {
+const handleOpenAnalysisModal = () => {
   showAnalysisModal.value = true
-  pendingAnalysisModelId.value = modelId
-  analysisModelName.value = modelName
 }
 
 const openKlineChartFromMarket = (symbol, contractSymbol) => {

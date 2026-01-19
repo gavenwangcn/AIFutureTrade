@@ -253,4 +253,12 @@ public interface ModelService {
      */
     List<Map<String, Object>> getModelAnalysis(String modelId);
 
+    /**
+     * 获取所有模型的交易数据分析（按模型ID和策略名称分组统计）
+     * @return 所有模型的分析数据列表，每个元素包含：model_id（模型ID）、model_name（模型名称）、
+     *         strategy_name（策略名称/模型信息）、trade_count（交易次数）、win_rate（胜率）、
+     *         avg_profit（平均盈利）、avg_loss（平均亏损）、profit_loss_ratio（盈亏比）
+     */
+    List<Map<String, Object>> getAllModelsAnalysis();
+
 }

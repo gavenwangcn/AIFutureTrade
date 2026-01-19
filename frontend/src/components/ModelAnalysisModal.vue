@@ -1,7 +1,7 @@
 <template>
   <Modal
     :visible="visible"
-    :title="`交易模型数据分析 - ${modelName}`"
+    title="交易模型数据分析"
     large
     @update:visible="$emit('update:visible', $event)"
     @close="handleClose"
@@ -82,14 +82,6 @@ const props = defineProps({
   visible: {
     type: Boolean,
     default: false
-  },
-  modelId: {
-    type: [String, Number],
-    default: null
-  },
-  modelName: {
-    type: String,
-    default: ''
   }
 })
 
@@ -121,17 +113,12 @@ const formatNumber = (value, decimals = 2) => {
 
 // 加载分析数据
 const loadAnalysisData = async () => {
-  if (!props.modelId) {
-    error.value = '模型ID不能为空'
-    return
-  }
-
   loading.value = true
   error.value = null
   analysisData.value = []
 
   try {
-    const data = await modelApi.getAnalysis(props.modelId)
+    const data = await modelApi.getAllModelsAnalysis()
     analysisData.value = data || []
   } catch (err) {
     console.error('加载分析数据失败:', err)
@@ -149,14 +136,7 @@ const handleClose = () => {
 
 // 监听visible变化，当对话框打开时加载数据
 watch(() => props.visible, (newVal) => {
-  if (newVal && props.modelId) {
-    loadAnalysisData()
-  }
-})
-
-// 监听modelId变化
-watch(() => props.modelId, (newVal) => {
-  if (props.visible && newVal) {
+  if (newVal) {
     loadAnalysisData()
   }
 })

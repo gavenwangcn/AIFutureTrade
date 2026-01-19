@@ -653,4 +653,11 @@ public class ModelController {
         return new ResponseEntity<>(analysis, HttpStatus.OK);
     }
 
+    @GetMapping("/analysis/all")
+    @Operation(summary = "获取所有模型的交易数据分析", description = "获取所有模型的交易数据分析（按模型ID和策略名称分组统计）")
+    public ResponseEntity<List<Map<String, Object>>> getAllModelsAnalysis() {
+        List<Map<String, Object>> analysis = modelService.getAllModelsAnalysis();
+        return new ResponseEntity<>(analysis, HttpStatus.OK);
+    }
+
 }
