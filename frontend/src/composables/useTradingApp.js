@@ -772,11 +772,15 @@ let portfolioSymbolsRefreshInterval = null // 模型持仓合约列表自动刷�
     
     try {
       const timeRange = getTimeRange()
+      console.log('[TradingApp] Loading account value history with time range:', timeRange)
+      
       const history = await modelApi.getAccountValueHistory(
         currentModelId.value,
         timeRange.startTime,
         timeRange.endTime
       )
+      
+      console.log('[TradingApp] Loaded account value history:', history.length, 'records')
       
       // 提取有trade_id的记录，用于后续查询交易详情
       const tradeIds = history
@@ -1106,7 +1110,9 @@ let portfolioSymbolsRefreshInterval = null // 模型持仓合约列表自动刷�
       }
       
       // 后端已返回UTC+8时区的ISO格式字符串，直接解析并格式化显示
-      const data = history.reverse().map((h, index) => {
+      // 注意：history需要按时间正序排列（从早到晚），所以先reverse
+      const sortedHistory = [...history].reverse()  // 创建副本并反转，避免修改原数组
+      const data = sortedHistory.map((h, index) => {
         // 后端返回的是ISO格式字符串（如 '2024-01-01T12:00:00+08:00'），直接解析
         const date = new Date(h.timestamp)
         let timeStr = ''
@@ -1262,36 +1268,61 @@ let portfolioSymbolsRefreshInterval = null // 模型持仓合约列表自动刷�
           formatter: (params) => {
             if (!params) return ''
             
+            // Signal中文翻译映射
+            const signalMap = {
+              'buy_to_long': '开多',
+              'buy_to_short': '开空',
+              'sell_to_long': '平多',
+              'sell_to_short': '平空',
+              'close_position': '平仓',
+              'stop_loss': '止损',
+              'take_profit': '止盈',
+              'hold': '观望'
+            }
+            const translateSignal = (signal) => {
+              return signalMap[signal] || signal || '未知'
+            }
+            
+            // 获取交易信息的辅助函数
+            const getTradeInfo = (tradeId, timestamp) => {
+              const trade = tradeMarkers.value.get(tradeId) || allTrades.value.find(t => t.id === tradeId)
+              if (trade) {
+                const signal = trade.signal || '未知'
+                const symbol = trade.future || trade.symbol || '未知'
+                const quantity = trade.quantity || 0
+                return {
+                  symbol,
+                  signal: translateSignal(signal),
+                  quantity,
+                  timestamp: timestamp ? new Date(timestamp).toLocaleString('zh-CN') : null
+                }
+              }
+              return null
+            }
+            
             // 如果是标记点（交易标记）
             if (params.componentType === 'markPoint' && params.data && params.data.tradeId) {
               const tradeId = params.data.tradeId
               const timestamp = params.data.timestamp
-              // 从tradeMarkers映射中查找交易详情
-              const trade = tradeMarkers.value.get(tradeId) || allTrades.value.find(t => t.id === tradeId)
-              if (trade) {
-                const tradeTime = new Date(timestamp).toLocaleString('zh-CN')
-                const signal = trade.signal || '未知'
-                const symbol = trade.future || trade.symbol || '未知'
-                const quantity = trade.quantity || 0
-                const price = trade.price || 0
+              const tradeInfo = getTradeInfo(tradeId, timestamp)
+              
+              if (tradeInfo) {
                 return `
                   <div style="padding: 4px;">
                     <div style="font-weight: bold; margin-bottom: 4px;">交易信息</div>
-                    <div>币种: ${symbol}</div>
-                    <div>时间: ${tradeTime}</div>
-                    <div>操作: ${signal}</div>
-                    <div>数量: ${quantity}</div>
-                    <div>价格: $${price.toFixed(4)}</div>
+                    <div>币种: ${tradeInfo.symbol}</div>
+                    <div>操作: ${tradeInfo.signal}</div>
+                    <div>数量: ${tradeInfo.quantity}</div>
                   </div>
                 `
               } else {
                 // 如果找不到交易详情，显示基本信息
-                const tradeTime = new Date(timestamp).toLocaleString('zh-CN')
+                const tradeTime = timestamp ? new Date(timestamp).toLocaleString('zh-CN') : ''
                 return `
                   <div style="padding: 4px;">
                     <div style="font-weight: bold; margin-bottom: 4px;">交易标记</div>
                     <div>时间: ${tradeTime}</div>
-                    <div>交易ID: ${tradeId.substring(0, 8)}...</div>
+                    <div>交易ID: ${tradeId ? tradeId.substring(0, 8) + '...' : '未知'}</div>
                     <div style="font-size: 11px; color: #86909c; margin-top: 4px;">提示：交易详情请查看"交易记录"模块</div>
                   </div>
                 `
@@ -1305,11 +1336,22 @@ let portfolioSymbolsRefreshInterval = null // 模型持仓合约列表自动刷�
               const dataIndex = params.dataIndex
               const timeStr = data[dataIndex]?.time || ''
               const tradeId = data[dataIndex]?.tradeId
+              const timestamp = data[dataIndex]?.timestamp
               
               let result = `${timeStr}<br/>账户价值: $${value.toFixed(2)}`
+              
+              // 如果有trade_id，显示交易信息
               if (tradeId) {
-                result += '<br/><span style="color: #ff4d4f;">● 交易标记</span>'
+                const tradeInfo = getTradeInfo(tradeId, timestamp)
+                if (tradeInfo) {
+                  result += `<br/><div style="font-size: 11px; color: #86909c; margin-top: 4px; border-top: 1px solid #e5e6eb; padding-top: 4px;">`
+                  result += `${tradeInfo.symbol} | ${tradeInfo.signal} | ${tradeInfo.quantity}`
+                  result += `</div>`
+                } else {
+                  result += '<br/><span style="color: #ff4d4f; font-size: 11px;">● 交易标记</span>'
+                }
               }
+              
               return result
             }
             
