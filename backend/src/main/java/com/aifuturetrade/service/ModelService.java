@@ -261,4 +261,19 @@ public interface ModelService {
      */
     List<Map<String, Object>> getAllModelsAnalysis();
 
+    /**
+     * 获取模型的每日收益率
+     * 
+     * 计算逻辑：
+     * 1. 从account_values_daily表查询当前模型的当日账户总值（当日为早8点到下一天的早8点）
+     * 2. 与当前的账户总值（portfolio.total_value）做比较计算每日收益率
+     * 3. 如果account_values_daily表中没有一条当前model的数据，则使用models表对应的initial_capital初始资金作为当日账户总值
+     * 4. 如果account_values_daily查不到当日的balance账户总值信息，则返回null（前端显示为--）
+     * 
+     * @param modelId 模型ID（UUID格式）
+     * @param currentTotalValue 当前账户总值（从portfolio获取）
+     * @return 每日收益率（百分比），如果无法计算则返回null
+     */
+    Double getDailyReturnRate(String modelId, Double currentTotalValue);
+
 }

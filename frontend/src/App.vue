@@ -388,6 +388,15 @@
             </div>
             <div class="stat-value" :class="getPnlClass(portfolio.unrealizedPnl, true)">{{ formatPnl5(portfolio.unrealizedPnl, true) }}</div>
           </div>
+          <div class="stat-card">
+            <div class="stat-header">
+              <span class="stat-label">每日收益率</span>
+              <i class="bi bi-percent text-primary"></i>
+            </div>
+            <div class="stat-value" :class="getPnlClass(portfolio.dailyReturnRate, false)">
+              {{ portfolio.dailyReturnRate !== null && portfolio.dailyReturnRate !== undefined ? formatPercentage(portfolio.dailyReturnRate) : '--' }}
+            </div>
+          </div>
         </div>
 
         <!-- Chart -->
@@ -1190,6 +1199,7 @@ const {
   formatVolumeChinese,
   formatBaseVolume,
   formatTime,
+  formatPercentage,
   formatSignal,
   getSignalBadgeClass,
   modelPortfolioSymbols,

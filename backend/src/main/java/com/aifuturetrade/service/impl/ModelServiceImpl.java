@@ -111,6 +111,9 @@ public class ModelServiceImpl implements ModelService {
     private StrategyDecisionMapper strategyDecisionMapper;
 
     @Autowired
+    private AccountValuesDailyMapper accountValuesDailyMapper;
+
+    @Autowired
     private com.aifuturetrade.common.api.binance.BinanceConfig binanceConfig;
 
     @Value("${app.trades-query-limit:10}")
@@ -2205,6 +2208,69 @@ public class ModelServiceImpl implements ModelService {
         } catch (Exception e) {
             log.error("[ModelService] 获取所有模型分析数据失败: {}", e.getMessage(), e);
             return new ArrayList<>();
+        }
+    }
+
+    @Override
+    public Double getDailyReturnRate(String modelId, Double currentTotalValue) {
+        log.debug("[ModelService] 计算每日收益率, modelId={}, currentTotalValue={}", modelId, currentTotalValue);
+        
+        try {
+            // 获取当前时间（UTC+8时区）
+            LocalDateTime now = LocalDateTime.now(java.time.ZoneId.of("Asia/Shanghai"));
+            
+            // 计算当天的开始时间（今天早上8点）
+            LocalDateTime todayStart = now.withHour(8).withMinute(0).withSecond(0).withNano(0);
+            
+            // 如果当前时间早于8点，则使用昨天早上8点作为开始时间
+            if (now.getHour() < 8) {
+                todayStart = todayStart.minusDays(1);
+            }
+            
+            log.debug("[ModelService] 当天开始时间（UTC+8）: {}", todayStart);
+            
+            // 查询当天的账户价值记录
+            Map<String, Object> todayRecord = accountValuesDailyMapper.selectTodayAccountValue(modelId, todayStart);
+            
+            Double baseBalance = null;
+            
+            if (todayRecord != null && todayRecord.get("balance") != null) {
+                // 找到了当天的记录，使用当天的balance作为基准
+                baseBalance = ((Number) todayRecord.get("balance")).doubleValue();
+                log.debug("[ModelService] 找到当天记录, baseBalance={}", baseBalance);
+            } else {
+                // 没有找到当天的记录，检查是否有任何历史记录
+                Long recordCount = accountValuesDailyMapper.countByModelId(modelId);
+                
+                if (recordCount != null && recordCount > 0) {
+                    // 有历史记录但没有当天的记录，返回null（前端显示为--）
+                    log.debug("[ModelService] 有历史记录但没有当天记录，返回null");
+                    return null;
+                } else {
+                    // 没有任何记录，使用initial_capital作为基准
+                    ModelDO model = modelMapper.selectById(modelId);
+                    if (model != null && model.getInitialCapital() != null) {
+                        baseBalance = model.getInitialCapital();
+                        log.debug("[ModelService] 没有历史记录，使用initial_capital作为基准, baseBalance={}", baseBalance);
+                    } else {
+                        log.warn("[ModelService] 模型不存在或initial_capital为null, modelId={}", modelId);
+                        return null;
+                    }
+                }
+            }
+            
+            // 计算每日收益率
+            if (baseBalance != null && baseBalance > 0 && currentTotalValue != null) {
+                Double dailyReturnRate = ((currentTotalValue - baseBalance) / baseBalance) * 100.0;
+                log.debug("[ModelService] 每日收益率计算完成: {}%", dailyReturnRate);
+                return dailyReturnRate;
+            } else {
+                log.warn("[ModelService] 无法计算每日收益率: baseBalance={}, currentTotalValue={}", baseBalance, currentTotalValue);
+                return null;
+            }
+        } catch (Exception e) {
+            log.error("[ModelService] 计算每日收益率失败: {}", e.getMessage(), e);
+            return null;
         }
     }
 

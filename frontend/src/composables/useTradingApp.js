@@ -49,7 +49,8 @@ export function useTradingApp() {
     totalValue: 0,
     availableCash: 0,
     realizedPnl: 0,
-    unrealizedPnl: 0
+    unrealizedPnl: 0,
+    dailyReturnRate: null  // 每日收益率（百分比）
   })
   const accountValueHistory = ref([]) // 账户价值历史数据（用于图表）
   const aggregatedChartData = ref([]) // 聚合视图图表数据
@@ -832,7 +833,8 @@ let portfolioSymbolsRefreshInterval = null // 模型持仓合约列表自动刷�
           totalValue: data.portfolio.total_value || 0,
           availableCash: data.portfolio.cash || data.portfolio.available_cash || 0,  // 兼容两种字段名
           realizedPnl: data.portfolio.realized_pnl || 0,
-          unrealizedPnl: data.portfolio.unrealized_pnl || 0
+          unrealizedPnl: data.portfolio.unrealized_pnl || 0,
+          dailyReturnRate: data.portfolio.daily_return_rate !== undefined ? data.portfolio.daily_return_rate : null
         }
       }
       
@@ -2920,6 +2922,14 @@ let portfolioSymbolsRefreshInterval = null // 模型持仓合约列表自动刷�
   }
 
   /**
+   * 格式化百分比（用于每日收益率等）
+   */
+  const formatPercentage = (value) => {
+    if (value === null || value === undefined || isNaN(value)) return '--'
+    return `${value >= 0 ? '+' : ''}${value.toFixed(2)}%`
+  }
+
+  /**
    * 格式化交易信号（翻译成中文）
    */
   const formatSignal = (signal) => {
@@ -3196,6 +3206,7 @@ let portfolioSymbolsRefreshInterval = null // 模型持仓合约列表自动刷�
     formatVolumeChinese,
     formatBaseVolume,
     formatTime,
+    formatPercentage,
     formatSignal,
     getSignalBadgeClass,
     

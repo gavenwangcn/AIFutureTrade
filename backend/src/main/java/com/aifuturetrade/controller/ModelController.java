@@ -115,6 +115,17 @@ public class ModelController {
     @Operation(summary = "获取模型的投资组合数据")
     public ResponseEntity<Map<String, Object>> getPortfolio(@PathVariable(value = "modelId") String modelId) {
         Map<String, Object> portfolio = modelService.getPortfolio(modelId);
+        
+        // 计算并添加每日收益率
+        if (portfolio != null && portfolio.containsKey("portfolio")) {
+            Map<String, Object> portfolioData = (Map<String, Object>) portfolio.get("portfolio");
+            if (portfolioData != null && portfolioData.containsKey("total_value")) {
+                Double currentTotalValue = ((Number) portfolioData.get("total_value")).doubleValue();
+                Double dailyReturnRate = modelService.getDailyReturnRate(modelId, currentTotalValue);
+                portfolioData.put("daily_return_rate", dailyReturnRate);
+            }
+        }
+        
         return new ResponseEntity<>(portfolio, HttpStatus.OK);
     }
 
