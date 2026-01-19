@@ -58,6 +58,8 @@ logging:
     com.aifuturetrade.asyncservice.service.impl.MarketTickerStreamServiceImpl: info
     com.aifuturetrade.asyncservice.service.impl.MarketSymbolOfflineServiceImpl: warn
     com.aifuturetrade.asyncservice.service.impl.AsyncAgentServiceImpl: info
+    com.aifuturetrade.asyncservice.service.impl.AutoCloseServiceImpl: info
+    com.aifuturetrade.asyncservice.service.impl.AccountValuesDailyServiceImpl: info
     com.aifuturetrade.asyncservice.api.binance: info
     com.aifuturetrade.asyncservice.dao.mapper: info
     # 第三方库日志级别

@@ -19,11 +19,13 @@ public interface AccountValuesDailyMapper extends BaseMapper<AccountValuesDailyD
      * @param modelId 模型ID
      * @param balance 账户总值
      * @param availableBalance 可用现金
+     * @param createdAt 创建时间（UTC+8时区）
      */
     @Insert("INSERT INTO account_values_daily (id, model_id, balance, available_balance, created_at) " +
-            "VALUES (#{id}, #{modelId}, #{balance}, #{availableBalance}, NOW())")
+            "VALUES (#{id}, #{modelId}, #{balance}, #{availableBalance}, #{createdAt})")
     void insertDailyAccountValue(@Param("id") String id, 
                                  @Param("modelId") String modelId,
                                  @Param("balance") Double balance,
-                                 @Param("availableBalance") Double availableBalance);
+                                 @Param("availableBalance") Double availableBalance,
+                                 @Param("createdAt") java.time.LocalDateTime createdAt);
 }

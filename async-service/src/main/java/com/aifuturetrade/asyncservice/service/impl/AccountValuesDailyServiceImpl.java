@@ -10,6 +10,8 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
+import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -110,8 +112,10 @@ public class AccountValuesDailyServiceImpl implements AccountValuesDailyService 
                     
                     // 记录到account_values_daily表
                     String recordId = UUID.randomUUID().toString();
+                    // 获取UTC+8时区的当前时间（北京时间）
+                    LocalDateTime createdAt = LocalDateTime.now(ZoneId.of("Asia/Shanghai"));
                     accountValuesDailyMapper.insertDailyAccountValue(
-                            recordId, modelId, balance, availableBalance);
+                            recordId, modelId, balance, availableBalance, createdAt);
                     
                     successCount++;
                     log.debug("[AccountValuesDaily] ✅ 模型 {} 记录成功: balance={}, available_balance={}", 
