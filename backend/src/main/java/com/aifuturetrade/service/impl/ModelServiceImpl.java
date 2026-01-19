@@ -2146,8 +2146,7 @@ public class ModelServiceImpl implements ModelService {
                 // 模型名称
                 analysisItem.put("model_name", item.get("model_name"));
                 
-                // 策略名称（对应图片中的"策略分类"，用户要求改为"模型信息-对应的是模型名称"）
-                // 这里使用model_name作为模型信息
+                // 前端表头“模型信息”：这里直接使用模型名称（每个模型一行）
                 analysisItem.put("strategy_name", item.get("model_name"));
                 
                 // 交易次数
