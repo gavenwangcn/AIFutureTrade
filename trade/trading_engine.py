@@ -222,8 +222,9 @@ class TradingEngine:
                 prompt_templates = self._get_prompt_templates()
                 logger.debug(f"[Model {self.model_id}] [卖出服务] [阶段1.5] 卖出提示词模板获取完成")
             else:
-                prompt_templates = {}
-                logger.debug(f"[Model {self.model_id}] [卖出服务] [阶段1.5] trade_type={trade_type}，跳过提示词模板获取")
+                # 策略交易不需要提示词模板，但为了兼容性提供默认值
+                prompt_templates = {'buy': '', 'sell': ''}
+                logger.debug(f"[Model {self.model_id}] [卖出服务] [阶段1.5] trade_type={trade_type}，使用空提示词模板")
             
             # 初始化执行结果和对话记录
             executions = []
