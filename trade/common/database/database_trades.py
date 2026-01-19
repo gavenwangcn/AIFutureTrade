@@ -257,11 +257,26 @@ class TradesDatabase:
                     
                     trades = []
                     for row in rows:
+                        # 处理字典格式（DictCursor）或元组格式（普通cursor）
+                        if isinstance(row, dict):
+                            trade_id = row.get('id')
+                            signal = row.get('signal')
+                            pnl = row.get('pnl')
+                            timestamp = row.get('timestamp')
+                        elif isinstance(row, (tuple, list)):
+                            trade_id = row[0]
+                            signal = row[1]
+                            pnl = row[2]
+                            timestamp = row[3]
+                        else:
+                            logger.warning(f"[Trades] Unexpected row format: {type(row)}")
+                            continue
+                        
                         trades.append({
-                            'id': row[0],
-                            'signal': row[1],
-                            'pnl': float(row[2]) if row[2] is not None else 0.0,
-                            'timestamp': row[3]
+                            'id': trade_id,
+                            'signal': signal,
+                            'pnl': float(pnl) if pnl is not None else 0.0,
+                            'timestamp': timestamp
                         })
                     
                     return trades

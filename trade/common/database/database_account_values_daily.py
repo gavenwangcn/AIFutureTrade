@@ -184,10 +184,23 @@ class AccountValuesDailyDatabase:
                     row = cursor.fetchone()
                     
                     if row:
+                        # 处理字典格式（DictCursor）或元组格式（普通cursor）
+                        if isinstance(row, dict):
+                            balance = row.get('balance')
+                            available_balance = row.get('available_balance')
+                            created_at = row.get('created_at')
+                        elif isinstance(row, (tuple, list)):
+                            balance = row[0]
+                            available_balance = row[1]
+                            created_at = row[2]
+                        else:
+                            logger.warning(f"[AccountValuesDaily] Unexpected row format for model {model_id}: {type(row)}")
+                            return None
+                        
                         return {
-                            'balance': float(row[0]) if row[0] is not None else 0.0,
-                            'available_balance': float(row[1]) if row[1] is not None else 0.0,
-                            'created_at': row[2]
+                            'balance': float(balance) if balance is not None else 0.0,
+                            'available_balance': float(available_balance) if available_balance is not None else 0.0,
+                            'created_at': created_at
                         }
                     return None
                 finally:
@@ -213,7 +226,7 @@ class AccountValuesDailyDatabase:
                 cursor = conn.cursor()
                 try:
                     sql = f"""
-                    SELECT COUNT(*) 
+                    SELECT COUNT(*) as count
                     FROM `{self.account_values_daily_table}`
                     WHERE `model_id` = %s
                     """
@@ -222,11 +235,26 @@ class AccountValuesDailyDatabase:
                     if row is None:
                         logger.warning(f"[AccountValuesDaily] COUNT query returned None for model {model_id}")
                         return False
-                    count = row[0] if isinstance(row, (tuple, list)) else row
+                    
+                    # 处理字典格式（DictCursor）或元组格式（普通cursor）
+                    if isinstance(row, dict):
+                        count = row.get('count') or row.get('COUNT(*)')
+                    elif isinstance(row, (tuple, list)):
+                        count = row[0]
+                    else:
+                        count = row
+                    
                     if count is None:
                         logger.warning(f"[AccountValuesDaily] COUNT value is None for model {model_id}")
                         return False
-                    return int(count) > 0
+                    
+                    # 确保count是数字类型
+                    try:
+                        count_int = int(count)
+                        return count_int > 0
+                    except (ValueError, TypeError) as e:
+                        logger.error(f"[AccountValuesDaily] Failed to convert count to int for model {model_id}: count={count}, type={type(count)}, error={e}")
+                        return False
                 finally:
                     cursor.close()
             
