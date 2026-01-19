@@ -1274,7 +1274,7 @@ let portfolioRefreshInterval = null // 投资组合数据自动刷新定时器�
           left: '60',
           right: '20',
           bottom: '40',
-          top: '40',  // 增加top空间，为trade信息标签留出位置
+          top: '60',  // 增加top空间，为trade信息标签留出足够位置
           containLabel: false
         },
         xAxis: {
@@ -1305,7 +1305,9 @@ let portfolioRefreshInterval = null // 投资组合数据自动刷新定时器�
         },
         series: [{
           type: 'line',
-          // 为每个数据点配置对象，包含value和label
+          name: '账户价值',
+          smooth: true,
+          // 为每个数据点配置对象，包含value和trade信息
           data: data.map((d, index) => {
             const dataPoint = {
               value: d.value,
@@ -1314,7 +1316,7 @@ let portfolioRefreshInterval = null // 投资组合数据自动刷新定时器�
               dataIndex: index
             }
             
-            // 如果有trade_id，添加label配置，在数据点上方显示trade信息
+            // 如果有trade_id，添加trade信息到dataPoint中，用于tooltip显示
             // 优先使用后端返回的trade信息（已关联查询），如果没有则从allTrades中查找
             if (d.tradeId) {
               let symbol = '未知'
@@ -1339,27 +1341,25 @@ let portfolioRefreshInterval = null // 投资组合数据自动刷新定时器�
               // 翻译signal为中文
               const translatedSignal = translateSignalForChart(signal)
               
-              // 在数据点上方显示trade信息（以小字模式，黄色文字）
-              dataPoint.label = {
-                show: true,
-                position: 'top',
-                distance: 10,
-                fontSize: 10,
-                color: '#ffd700',  // 黄色
-                formatter: `${symbol} | ${translatedSignal} | ${quantity}`,
-                backgroundColor: 'rgba(255, 255, 255, 0.9)',
-                borderColor: '#e5e6eb',
-                borderWidth: 1,
-                borderRadius: 3,
-                padding: [2, 6],
-                fontWeight: 'normal'
+              // 将trade信息保存到dataPoint的extra字段中，用于tooltip显示
+              dataPoint.extra = `${symbol} | ${translatedSignal} | ${quantity}`
+              
+              // 对于有trade信息的点，显示symbol以便用户知道这里有交易信息
+              dataPoint.itemStyle = {
+                color: '#ffd700',  // 黄色标记点
+                borderColor: '#fff',
+                borderWidth: 2
               }
             }
             
             return dataPoint
           }).filter(d => d.value !== null && d.value !== undefined),
-          smooth: true,
-          symbol: 'none',
+          // 对于有trade信息的点，显示symbol
+          symbol: 'circle',
+          symbolSize: (value, params) => {
+            // 如果有trade信息，显示稍大的点
+            return params.data && params.data.tradeId ? 8 : 0
+          },
           lineStyle: { color: '#3370ff', width: 2 },
           areaStyle: {
             color: {
@@ -1371,142 +1371,55 @@ let portfolioRefreshInterval = null // 投资组合数据自动刷新定时器�
               ]
             }
           },
-          // 添加交易标记点（保留用于tooltip）
-          markPoint: tradeMarkers.length > 0 ? {
-            data: tradeMarkers.map(marker => ({
-              name: '交易',
-              coord: marker.coord,
-              symbol: 'pin',
-              symbolSize: 30,
-              itemStyle: {
-                color: '#ff4d4f',
-                borderColor: '#fff',
-                borderWidth: 2
-              },
-              label: {
-                show: false
-              },
-              // 保存交易信息用于tooltip
-              tradeId: marker.tradeId,
-              timestamp: marker.timestamp
-            })),
-            animation: false
-          } : undefined
+          // 鼠标悬停时的样式（参考示例代码）
+          emphasis: {
+            focus: 'series',
+            itemStyle: {
+              borderWidth: 2,
+              borderColor: '#3370ff',
+              shadowBlur: 10,
+              shadowColor: 'rgba(51, 112, 255, 0.3)'
+            }
+          }
         }],
         tooltip: {
-          trigger: 'item',
+          trigger: 'axis',  // 使用axis触发，参考示例代码
           backgroundColor: 'rgba(255, 255, 255, 0.95)',
           borderColor: '#e5e6eb',
           borderWidth: 1,
           textStyle: { color: '#1d2129' },
           formatter: (params) => {
-            if (!params) return ''
+            if (!params || !params[0]) return ''
             
-            // 获取交易信息的辅助函数（使用已定义的translateSignalForChart函数）
-            // 优先使用后端返回的trade信息，如果没有则从allTrades中查找
-            const getTradeInfo = (tradeId, timestamp, dataIndex) => {
-              // 优先从data数组中获取后端返回的trade信息
-              if (dataIndex !== undefined && dataIndex >= 0 && dataIndex < data.length) {
-                const dataItem = data[dataIndex]
-                if (dataItem && (dataItem.tradeFuture || dataItem.tradeSignal !== null || dataItem.tradeQuantity !== null)) {
-                  return {
-                    symbol: dataItem.tradeFuture || '未知',
-                    signal: translateSignalForChart(dataItem.tradeSignal || '未知'),
-                    quantity: dataItem.tradeQuantity || 0,
-                    timestamp: timestamp ? new Date(timestamp).toLocaleString('zh-CN') : null
-                  }
-                }
-              }
-              
-              // 如果没有，则从allTrades中查找（兼容旧逻辑）
-              const trade = tradeMarkers.value.get(tradeId) || allTrades.value.find(t => t.id === tradeId)
-              if (trade) {
-                const signal = trade.signal || '未知'
-                const symbol = trade.future || trade.symbol || '未知'
-                const quantity = trade.quantity || 0
-                return {
-                  symbol,
-                  signal: translateSignalForChart(signal),
-                  quantity,
-                  timestamp: timestamp ? new Date(timestamp).toLocaleString('zh-CN') : null
-                }
-              }
-              return null
-            }
+            // 参考示例代码的formatter方式
+            const date = params[0].axisValue  // 时间
+            const html = [`<div style="font-weight: bold; margin-bottom: 8px; padding-bottom: 4px; border-bottom: 1px solid #e5e6eb;">${date}</div>`]
             
-            // 如果是数据点（series），检查是否有trade信息
-            if (params.componentType === 'series' && params.data && params.data.tradeId) {
-              const tradeId = params.data.tradeId
-              const timestamp = params.data.timestamp
-              const dataIndex = params.data.dataIndex
-              const tradeInfo = getTradeInfo(tradeId, timestamp, dataIndex)
+            params.forEach(item => {
+              const value = item.value
+              const valueStr = typeof value === 'number' ? `$${value.toFixed(2)}` : value
               
-              if (tradeInfo) {
-                const value = params.value
-                const timeStr = data[dataIndex]?.time || ''
-                return `${timeStr}<br/>账户价值: $${value.toFixed(2)}<br/><div style="font-size: 11px; color: #86909c; margin-top: 4px; border-top: 1px solid #e5e6eb; padding-top: 4px;">${tradeInfo.symbol} | ${tradeInfo.signal} | ${tradeInfo.quantity}</div>`
-              }
-            }
-            
-            // 如果是标记点（交易标记）
-            if (params.componentType === 'markPoint' && params.data && params.data.tradeId) {
-              const tradeId = params.data.tradeId
-              const timestamp = params.data.timestamp
-              // markPoint的coord是[index, value]，可以通过index从data数组中获取trade信息
-              const coord = params.data.coord
-              const dataIndex = coord && coord.length > 0 ? coord[0] : undefined
-              const tradeInfo = getTradeInfo(tradeId, timestamp, dataIndex)
+              // 构建tooltip内容
+              let itemHtml = `
+                <div style="display: flex; align-items: center; margin-bottom: 4px;">
+                  <span style="display: inline-block; width: 10px; height: 10px; background: ${item.color}; border-radius: 50%; margin-right: 8px;"></span>
+                  <span>${item.seriesName || '账户价值'}: ${valueStr}</span>
+                </div>
+              `
               
-              if (tradeInfo) {
-                return `
-                  <div style="padding: 4px;">
-                    <div style="font-weight: bold; margin-bottom: 4px;">交易信息</div>
-                    <div>币种: ${tradeInfo.symbol}</div>
-                    <div>操作: ${tradeInfo.signal}</div>
-                    <div>数量: ${tradeInfo.quantity}</div>
-                  </div>
-                `
-              } else {
-                // 如果找不到交易详情，显示基本信息
-                const tradeTime = timestamp ? new Date(timestamp).toLocaleString('zh-CN') : ''
-                return `
-                  <div style="padding: 4px;">
-                    <div style="font-weight: bold; margin-bottom: 4px;">交易标记</div>
-                    <div>时间: ${tradeTime}</div>
-                    <div>交易ID: ${tradeId ? tradeId.substring(0, 8) + '...' : '未知'}</div>
-                    <div style="font-size: 11px; color: #86909c; margin-top: 4px;">提示：交易详情请查看"交易记录"模块</div>
+              // 如果有trade信息（extra字段），显示在下方
+              if (item.data && item.data.extra) {
+                itemHtml += `
+                  <div style="font-size: 11px; color: #ffd700; margin-top: 4px; padding-top: 4px; border-top: 1px solid #e5e6eb;">
+                    <span style="font-weight: bold;">交易信息:</span> ${item.data.extra}
                   </div>
                 `
               }
-            }
+              
+              html.push(itemHtml)
+            })
             
-            // 普通数据点
-            if (params.componentType === 'series') {
-              const value = params.value
-              if (value === null || value === undefined) return ''
-              const dataIndex = params.dataIndex
-              const timeStr = data[dataIndex]?.time || ''
-              const tradeId = data[dataIndex]?.tradeId
-              const timestamp = data[dataIndex]?.timestamp
-              
-              let result = `${timeStr}<br/>账户价值: $${value.toFixed(2)}`
-              
-              // 如果有trade_id，显示交易信息
-              if (tradeId) {
-                const tradeInfo = getTradeInfo(tradeId, timestamp)
-                if (tradeInfo) {
-                  result += `<br/><div style="font-size: 11px; color: #86909c; margin-top: 4px; border-top: 1px solid #e5e6eb; padding-top: 4px;">`
-                  result += `${tradeInfo.symbol} | ${tradeInfo.signal} | ${tradeInfo.quantity}`
-                  result += `</div>`
-                } else {
-                  result += '<br/><span style="color: #ff4d4f; font-size: 11px;">● 交易标记</span>'
-                }
-              }
-              
-              return result
-            }
-            
-            return ''
+            return html.join('')
           }
         }
       }
