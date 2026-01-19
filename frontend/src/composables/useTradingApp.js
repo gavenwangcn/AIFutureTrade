@@ -896,8 +896,8 @@ let portfolioRefreshInterval = null // 投资组合数据自动刷新定时器�
         }
       }
       
-      // 加载账户价值历史数据（使用时间范围查询）
-      await loadAccountValueHistory()
+      // 注意：账户价值历史数据不再在这里加载
+      // 只有在切换日期选项框时（handleTimeRangeChange）或选择模型时（selectModel）才加载
       
       // 加载模型持仓合约列表
       await loadModelPortfolioSymbols()
@@ -2438,7 +2438,8 @@ let portfolioRefreshInterval = null // 投资组合数据自动刷新定时器�
       loadPositions(), // 刷新持仓数据
       loadTrades(1, tradesPageSize.value), // 从第一页开始加载交易记录
       loadConversationsOrDecisions(), // 根据trade_type加载对话或策略决策数据
-      loadModelPortfolioSymbols() // 立即加载一次模型持仓合约数据
+      loadModelPortfolioSymbols(), // 立即加载一次模型持仓合约数据
+      loadAccountValueHistory() // 只在选择模型时加载一次账户价值历史（使用默认时间范围）
     ])
     // 选择模型后启动模型持仓合约列表自动刷新
     startPortfolioSymbolsAutoRefresh()
