@@ -373,6 +373,31 @@ public class ModelController {
     }
 
     /**
+     * 更新模型的连续亏损次数阈值
+     * @param modelId 模型ID
+     * @param requestBody 请求体，包含losses_num
+     * @return 更新操作结果
+     */
+    @PostMapping("/{modelId}/losses_num")
+    @Operation(summary = "更新模型的连续亏损次数阈值")
+    public ResponseEntity<Map<String, Object>> updateModelLossesNum(@PathVariable(value = "modelId") String modelId, @RequestBody Map<String, Object> requestBody) {
+        Object lossesNumObj = requestBody.get("losses_num");
+        Integer lossesNum = null;
+        if (lossesNumObj != null) {
+            if (lossesNumObj instanceof Number) {
+                lossesNum = ((Number) lossesNumObj).intValue();
+            } else if (lossesNumObj instanceof String) {
+                String str = (String) lossesNumObj;
+                if (!str.isEmpty()) {
+                    lossesNum = Integer.parseInt(str);
+                }
+            }
+        }
+        Map<String, Object> result = modelService.updateModelLossesNum(modelId, lossesNum);
+        return new ResponseEntity<>(result, HttpStatus.OK);
+    }
+
+    /**
      * 更新模型的API提供方和模型名称
      * @param modelId 模型ID
      * @param requestBody 请求体，包含provider_id和model_name

@@ -953,6 +953,17 @@
               <small class="form-help">设置目标每日收益率（百分比，例如：5 表示5%）。当当日收益率达到此值时，将不再进行买入交易。留空或0表示不限制。</small>
             </div>
             <div class="form-group">
+              <label for="settingsLossesNumInput">连续亏损次数阈值</label>
+              <input 
+                type="number" 
+                id="settingsLossesNumInput" 
+                class="form-input" 
+                min="1"
+                v-model.number="tempModelSettings.losses_num"
+              >
+              <small class="form-help">设置连续亏损次数阈值（例如：3 表示连续3笔亏损后暂停买入交易）。留空或0表示不限制。</small>
+            </div>
+            <div class="form-group">
               <label style="font-weight: 600; margin-bottom: 12px; display: block;">买入批次配置</label>
               <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px;">
                 <div>

@@ -53,6 +53,11 @@
       <small class="form-help">设置目标每日收益率（百分比，例如：5 表示5%）。当当日收益率达到此值时，将不再进行买入交易。留空或0表示不限制。</small>
     </div>
     <div class="form-group">
+      <label>连续亏损次数阈值</label>
+      <input v-model.number="formData.lossesNum" type="number" class="form-input" min="1" />
+      <small class="form-help">设置连续亏损次数阈值（例如：3 表示连续3笔亏损后暂停买入交易）。留空或0表示不限制。</small>
+    </div>
+    <div class="form-group">
       <label>选择账户 <span style="color: red;">*</span></label>
       <select v-model="formData.accountAlias" class="form-input" required>
         <option value="">请选择账户</option>
@@ -181,6 +186,7 @@ const formData = ref({
   autoClosePercent: null,  // 自动平仓百分比，默认不启用
   baseVolume: null,  // 每日成交量过滤阈值（千万单位），默认不过滤
   dailyReturn: null,  // 目标每日收益率（百分比），默认不限制
+  lossesNum: null,  // 连续亏损次数阈值，默认不限制
   accountAlias: '',
   isVirtual: true,  // 默认值为 true（虚拟账户）
   symbolSource: 'leaderboard',  // 默认使用涨跌榜
@@ -268,6 +274,7 @@ const handleSubmit = async () => {
       autoClosePercent: formData.value.autoClosePercent || null,
       baseVolume: formData.value.baseVolume || null,
       dailyReturn: formData.value.dailyReturn || null,
+      lossesNum: formData.value.lossesNum || null,
       accountAlias: formData.value.accountAlias,
       isVirtual: formData.value.isVirtual,
       symbolSource: formData.value.symbolSource,
@@ -301,6 +308,7 @@ const clearForm = () => {
     autoClosePercent: null,  // 重置为默认值
     baseVolume: null,  // 重置为默认值
     dailyReturn: null,  // 重置为默认值
+    lossesNum: null,  // 重置为默认值
     accountAlias: '',
     isVirtual: true,  // 重置为默认值 true（虚拟账户）
     symbolSource: 'leaderboard',  // 重置为默认值

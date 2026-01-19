@@ -131,6 +131,11 @@ export const modelApi = {
   setDailyReturn: (modelId, dailyReturn) => apiPost(`/api/models/${modelId}/daily_return`, { daily_return: dailyReturn }),
 
   /**
+   * 设置连续亏损次数阈值
+   */
+  setLossesNum: (modelId, lossesNum) => apiPost(`/api/models/${modelId}/losses_num`, { losses_num: lossesNum }),
+
+  /**
    * 更新模型的API提供方和模型名称
    */
   updateProvider: (modelId, providerId, modelName) => apiPut(`/api/models/${modelId}/provider`, { provider_id: providerId, model_name: modelName }),

@@ -179,6 +179,14 @@ public interface ModelService {
     Map<String, Object> updateModelDailyReturn(String modelId, Double dailyReturn);
 
     /**
+     * 更新模型的连续亏损次数阈值
+     * @param modelId 模型ID（UUID格式）
+     * @param lossesNum 连续亏损次数阈值（null表示不限制）
+     * @return 更新结果
+     */
+    Map<String, Object> updateModelLossesNum(String modelId, Integer lossesNum);
+
+    /**
      * 更新模型的API提供方和模型名称
      * @param modelId 模型ID（UUID格式）
      * @param providerId 新的API提供方ID（UUID格式）

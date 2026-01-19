@@ -104,6 +104,7 @@ class DatabaseInitializer:
             `trade_type` VARCHAR(20) DEFAULT 'strategy' COMMENT 'Trade type: ai-use AI trading, strategy-use strategy trading',
             `base_volume` DOUBLE DEFAULT NULL COMMENT '每日成交量过滤阈值（以千万为单位），NULL表示不过滤',
             `daily_return` DOUBLE DEFAULT NULL COMMENT '目标每日收益率（百分比），NULL表示不限制',
+            `losses_num` INT UNSIGNED DEFAULT NULL COMMENT '连续亏损次数阈值，达到此值后暂停买入交易，NULL表示不限制',
             `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP,
             INDEX `idx_provider_id` (`provider_id`),
             INDEX `idx_account_alias` (`account_alias`),
@@ -169,8 +170,24 @@ class DatabaseInitializer:
                 """
                 self.command(alter_daily_return_sql)
                 logger.info(f"[DatabaseInit] Added daily_return column to {table_name} table")
+            
+            # Check and add losses_num field
+            check_losses_num_sql = f"""
+            SELECT COUNT(*) FROM information_schema.COLUMNS 
+            WHERE TABLE_SCHEMA = DATABASE() 
+            AND TABLE_NAME = '{table_name}' 
+            AND COLUMN_NAME = 'losses_num'
+            """
+            losses_num_result = self.command(check_losses_num_sql)
+            if isinstance(losses_num_result, list) and len(losses_num_result) > 0 and losses_num_result[0][0] == 0:
+                alter_losses_num_sql = f"""
+                ALTER TABLE `{table_name}` 
+                ADD COLUMN `losses_num` INT UNSIGNED DEFAULT NULL COMMENT '连续亏损次数阈值，达到此值后暂停买入交易，NULL表示不限制' AFTER `daily_return`
+                """
+                self.command(alter_losses_num_sql)
+                logger.info(f"[DatabaseInit] Added losses_num column to {table_name} table")
         except Exception as e:
-            logger.warning(f"[DatabaseInit] Failed to check/add base_volume/daily_return column to {table_name}: {e}")
+            logger.warning(f"[DatabaseInit] Failed to check/add base_volume/daily_return/losses_num column to {table_name}: {e}")
         
   
     def ensure_portfolios_table(self, table_name: str = "portfolios"):

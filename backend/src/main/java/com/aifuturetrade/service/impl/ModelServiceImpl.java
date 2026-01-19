@@ -1669,6 +1669,50 @@ public class ModelServiceImpl implements ModelService {
         }
     }
 
+    @Override
+    public Map<String, Object> updateModelLossesNum(String modelId, Integer lossesNum) {
+        log.debug("[ModelService] 更新模型连续亏损次数阈值, modelId={}, lossesNum={}", modelId, lossesNum);
+        try {
+            if (lossesNum != null && lossesNum < 1) {
+                throw new IllegalArgumentException("losses_num must be >= 1, or null to disable");
+            }
+            
+            ModelDO model = modelMapper.selectModelById(modelId);
+            if (model == null) {
+                Map<String, Object> errorResult = new HashMap<>();
+                errorResult.put("success", false);
+                errorResult.put("error", "Model not found");
+                return errorResult;
+            }
+            
+            UpdateWrapper<ModelDO> updateWrapper = new UpdateWrapper<>();
+            updateWrapper.eq("id", modelId);
+            updateWrapper.set("losses_num", lossesNum);
+            
+            int result = modelMapper.update(null, updateWrapper);
+            
+            Map<String, Object> response = new HashMap<>();
+            if (result > 0) {
+                response.put("success", true);
+                response.put("message", "Losses num updated successfully");
+                response.put("losses_num", lossesNum);
+                log.info("[ModelService] 更新模型连续亏损次数阈值成功, modelId={}, lossesNum={}", modelId, lossesNum);
+            } else {
+                response.put("success", false);
+                response.put("error", "Failed to update losses num");
+                log.warn("[ModelService] 更新模型连续亏损次数阈值失败, modelId={}", modelId);
+            }
+            
+            return response;
+        } catch (Exception e) {
+            log.error("[ModelService] 更新模型连续亏损次数阈值失败: {}", e.getMessage(), e);
+            Map<String, Object> errorResult = new HashMap<>();
+            errorResult.put("success", false);
+            errorResult.put("error", e.getMessage());
+            return errorResult;
+        }
+    }
+
     private ModelDTO convertToDTO(ModelDO modelDO) {
         ModelDTO modelDTO = new ModelDTO();
         BeanUtils.copyProperties(modelDO, modelDTO);

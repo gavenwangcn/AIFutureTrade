@@ -213,6 +213,66 @@ class TradesDatabase:
             logger.error(f"[Trades] Failed to add trade: {e}")
             raise
     
+    def get_today_sell_trades(self, model_id: str) -> List[Dict[str, Any]]:
+        """
+        获取当天的卖出交易记录（当天指从早上8点到第二天早上8点）
+        
+        Args:
+            model_id: 模型ID（UUID格式）
+            
+        Returns:
+            List[Dict]: 卖出交易记录列表，每个记录包含id, signal, pnl, timestamp等字段
+        """
+        try:
+            def _execute_query(conn):
+                cursor = conn.cursor()
+                try:
+                    # 获取当前时间（北京时间）
+                    beijing_tz = timezone(timedelta(hours=8))
+                    now = datetime.now(beijing_tz)
+                    
+                    # 计算当天的开始时间（今天早上8点）
+                    today_start = now.replace(hour=8, minute=0, second=0, microsecond=0)
+                    
+                    # 如果当前时间早于8点，则使用昨天早上8点作为开始时间
+                    if now.hour < 8:
+                        today_start = today_start - timedelta(days=1)
+                    
+                    # 卖出交易信号列表
+                    sell_signals = ['sell_to_long', 'sell_to_short', 'close_position', 'stop_loss', 'take_profit']
+                    signals_placeholders = ','.join(['%s'] * len(sell_signals))
+                    
+                    # 查询当天的卖出交易记录，按时间倒序排列
+                    sql = f"""
+                    SELECT `id`, `signal`, `pnl`, `timestamp`
+                    FROM `{self.trades_table}`
+                    WHERE `model_id` = %s 
+                    AND `signal` IN ({signals_placeholders})
+                    AND `timestamp` >= %s
+                    ORDER BY `timestamp` DESC
+                    """
+                    params = [model_id] + sell_signals + [today_start]
+                    cursor.execute(sql, params)
+                    rows = cursor.fetchall()
+                    
+                    trades = []
+                    for row in rows:
+                        trades.append({
+                            'id': row[0],
+                            'signal': row[1],
+                            'pnl': float(row[2]) if row[2] is not None else 0.0,
+                            'timestamp': row[3]
+                        })
+                    
+                    return trades
+                finally:
+                    cursor.close()
+            
+            return self._with_connection(_execute_query)
+        except Exception as e:
+            logger.error(f"[Trades] Failed to get today sell trades for model {model_id}: {e}")
+            return []
+    
     def query(self, sql: str, params: tuple = None, as_dict: bool = False):
         """Execute a query and return results."""
         def _execute_query(conn):

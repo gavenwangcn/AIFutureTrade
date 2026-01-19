@@ -166,6 +166,12 @@ public class ModelDO implements Serializable {
     private Double dailyReturn;
 
     /**
+     * 连续亏损次数阈值，达到此值后暂停买入交易，NULL表示不限制
+     */
+    @TableField("losses_num")
+    private Integer lossesNum;
+
+    /**
      * 创建时间
      */
     @TableField("created_at")

@@ -156,6 +156,14 @@ public class ModelDTO implements Serializable {
     private Double dailyReturn;
 
     /**
+     * 连续亏损次数阈值，达到此值后暂停买入交易，NULL表示不限制
+     * 支持两种命名方式：losses_num（snake_case）和 lossesNum（camelCase）
+     */
+    @JsonProperty("losses_num")
+    @JsonAlias({"lossesNum"})
+    private Integer lossesNum;
+
+    /**
      * 创建时间
      */
     private LocalDateTime createdAt;

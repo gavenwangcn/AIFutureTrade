@@ -24,7 +24,7 @@
           <table class="analysis-table">
             <thead>
               <tr>
-                <th>角模型信息</th>
+                <th>模型信息</th>
                 <th>交易次数</th>
                 <th>胜率</th>
                 <th>平均盈利</th>

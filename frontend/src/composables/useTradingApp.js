@@ -113,6 +113,7 @@ const lastPortfolioSymbolsRefreshTime = ref(null) // 持仓合约列表最后刷
     auto_close_percent: null,
     base_volume: null,
     daily_return: null,
+    losses_num: null,
     buy_batch_size: 1,
     buy_batch_execution_interval: 60,
     buy_batch_execution_group_size: 1,
@@ -2413,7 +2414,11 @@ let portfolioSymbolsRefreshInterval = null // 模型持仓合约列表自动刷�
       const dailyReturnValue = model.daily_return ?? model.dailyReturn ?? null
       console.log('[TradingApp] 解析后的 daily_return 值:', dailyReturnValue)
       
-      console.log('[TradingApp] 设置模型配置, providerId=', providerId, 'modelName=', modelName, 'max_positions=', maxPositionsValue, 'auto_close_percent=', autoClosePercentValue, 'base_volume=', baseVolumeValue, 'daily_return=', dailyReturnValue)
+      // 优先使用 losses_num，如果没有则使用 lossesNum（兼容两种命名方式）
+      const lossesNumValue = model.losses_num ?? model.lossesNum ?? null
+      console.log('[TradingApp] 解析后的 losses_num 值:', lossesNumValue)
+      
+      console.log('[TradingApp] 设置模型配置, providerId=', providerId, 'modelName=', modelName, 'max_positions=', maxPositionsValue, 'auto_close_percent=', autoClosePercentValue, 'base_volume=', baseVolumeValue, 'daily_return=', dailyReturnValue, 'losses_num=', lossesNumValue)
       
       tempModelSettings.value = {
         provider_id: providerId,
@@ -2423,6 +2428,7 @@ let portfolioSymbolsRefreshInterval = null // 模型持仓合约列表自动刷�
         auto_close_percent: autoClosePercentValue,
         base_volume: baseVolumeValue,
         daily_return: dailyReturnValue,
+        losses_num: lossesNumValue,
         buy_batch_size: model.buy_batch_size || 1,
         buy_batch_execution_interval: model.buy_batch_execution_interval || 60,
         buy_batch_execution_group_size: model.buy_batch_execution_group_size || 1,
@@ -2464,6 +2470,9 @@ let portfolioSymbolsRefreshInterval = null // 模型持仓合约列表自动刷�
         // 优先使用 daily_return，如果没有则使用 dailyReturn（兼容两种命名方式）
         const dailyReturnValue = localModel.daily_return ?? localModel.dailyReturn ?? null
         
+        // 优先使用 losses_num，如果没有则使用 lossesNum（兼容两种命名方式）
+        const lossesNumValue = localModel.losses_num ?? localModel.lossesNum ?? null
+        
         tempModelSettings.value = {
           provider_id: providerId,
           model_name: localModel.model_name || '',
@@ -2472,6 +2481,7 @@ let portfolioSymbolsRefreshInterval = null // 模型持仓合约列表自动刷�
           auto_close_percent: autoClosePercentValue,
           base_volume: baseVolumeValue,
           daily_return: dailyReturnValue,
+          losses_num: lossesNumValue,
           buy_batch_size: localModel.buy_batch_size || 1,
           buy_batch_execution_interval: localModel.buy_batch_execution_interval || 60,
           buy_batch_execution_group_size: localModel.buy_batch_execution_group_size || 1,
@@ -2576,10 +2586,11 @@ let portfolioSymbolsRefreshInterval = null // 模型持仓合约列表自动刷�
         promises.push(modelApi.updateProvider(pendingModelSettingsId.value, providerId, modelName))
       }
       
-      // 更新杠杆、最大持仓数量、自动平仓百分比、每日成交量过滤阈值和目标每日收益率
+      // 更新杠杆、最大持仓数量、自动平仓百分比、每日成交量过滤阈值、目标每日收益率和连续亏损次数阈值
       const autoClosePercentValue = tempModelSettings.value.auto_close_percent
       const baseVolumeValue = tempModelSettings.value.base_volume
       const dailyReturnValue = tempModelSettings.value.daily_return
+      const lossesNumValue = tempModelSettings.value.losses_num
       // 确保 maxPositionsValue 是有效的整数
       const validMaxPositions = Number.isInteger(maxPositionsValue) ? maxPositionsValue : Math.floor(maxPositionsValue)
       promises.push(
@@ -2587,7 +2598,8 @@ let portfolioSymbolsRefreshInterval = null // 模型持仓合约列表自动刷�
         modelApi.setMaxPositions(pendingModelSettingsId.value, validMaxPositions),
         modelApi.setAutoClosePercent(pendingModelSettingsId.value, autoClosePercentValue || null),
         modelApi.setBaseVolume(pendingModelSettingsId.value, baseVolumeValue || null),
-        modelApi.setDailyReturn(pendingModelSettingsId.value, dailyReturnValue || null)
+        modelApi.setDailyReturn(pendingModelSettingsId.value, dailyReturnValue || null),
+        modelApi.setLossesNum(pendingModelSettingsId.value, lossesNumValue || null)
       )
       
       // 更新批次配置
