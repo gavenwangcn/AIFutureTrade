@@ -58,6 +58,7 @@ export function useTradingApp() {
   const timeRangePreset = ref('5days') // 快速选择：'5days', '10days', '30days', 'custom'
   const customStartTime = ref('') // 自定义开始时间
   const customEndTime = ref('') // 自定义结束时间
+  const isLoadingAccountHistory = ref(false) // 账户价值历史加载状态
   const tradeMarkers = ref(new Map()) // 存储交易标记信息，key为trade_id，value为交易详情
   const positions = ref([])
   const trades = ref([])
@@ -159,6 +160,7 @@ let marketPricesRefreshInterval = null // 市场行情价格自动刷新定时�
 let gainersRefreshInterval = null // 涨幅榜自动刷新定时器（轮询方式，默认5秒）
 let losersRefreshInterval = null // 跌幅榜自动刷新定时器（轮询方式，默认5秒）
 let portfolioSymbolsRefreshInterval = null // 模型持仓合约列表自动刷新定时器（轮询方式，默认10秒）
+let portfolioRefreshInterval = null // 投资组合数据自动刷新定时器（轮询方式，默认5秒，包含账户总值、可用现金、已实现盈亏、未实现盈亏、每日收益率）
   let leaderboardRefreshInterval = null // 涨跌榜自动刷新定时器（已废弃，保留以兼容旧代码）
   
   // ECharts 实例
@@ -485,6 +487,42 @@ let portfolioSymbolsRefreshInterval = null // 模型持仓合约列表自动刷�
     stopLosersAutoRefresh()
   }
 
+  /**
+   * 启动投资组合数据自动刷新（轮询方式）
+   * 刷新账户总值、可用现金、已实现盈亏、未实现盈亏、每日收益率等数据
+   */
+  const startPortfolioAutoRefresh = () => {
+    // 清除已有定时器
+    if (portfolioRefreshInterval) {
+      clearInterval(portfolioRefreshInterval)
+      portfolioRefreshInterval = null
+    }
+
+    // 立即获取一次数据
+    loadPortfolio()
+
+    // 使用配置的刷新时间（默认5秒，与其他模块保持一致）
+    const refreshInterval = 5000 // 5秒
+    
+    portfolioRefreshInterval = setInterval(() => {
+      console.log(`[TradingApp] 轮询刷新投资组合数据（${refreshInterval/1000}秒间隔）`)
+      loadPortfolio()
+    }, refreshInterval)
+
+    console.log(`[TradingApp] ✅ 投资组合数据自动刷新已启动（轮询方式，${refreshInterval/1000}秒间隔）`)
+  }
+
+  /**
+   * 停止投资组合数据自动刷新
+   */
+  const stopPortfolioAutoRefresh = () => {
+    if (portfolioRefreshInterval) {
+      clearInterval(portfolioRefreshInterval)
+      portfolioRefreshInterval = null
+      console.log('[TradingApp] 投资组合数据自动刷新已停止')
+    }
+  }
+
   // ============ 数据加载方法 ============
   
   /**
@@ -771,9 +809,23 @@ let portfolioSymbolsRefreshInterval = null // 模型持仓合约列表自动刷�
   const loadAccountValueHistory = async () => {
     if (!currentModelId.value) return
     
+    // 设置加载状态
+    isLoadingAccountHistory.value = true
+    
     try {
       const timeRange = getTimeRange()
       console.log('[TradingApp] Loading account value history with time range:', timeRange)
+      
+      // 先销毁旧图表，确保重新创建
+      if (accountChart.value) {
+        try {
+          accountChart.value.dispose()
+          accountChart.value = null
+          console.log('[TradingApp] 已销毁旧图表，准备重新创建')
+        } catch (e) {
+          console.warn('[TradingApp] 销毁旧图表时出错:', e)
+        }
+      }
       
       const history = await modelApi.getAccountValueHistory(
         currentModelId.value,
@@ -811,10 +863,16 @@ let portfolioSymbolsRefreshInterval = null // 模型持仓合约列表自动刷�
       
       accountValueHistory.value = history
       await nextTick()
+      
+      // 重新创建并渲染图表
       updateAccountChart(history, portfolio.value.totalValue, false)
+      console.log('[TradingApp] 图表已重新创建并渲染')
     } catch (error) {
       console.error('[TradingApp] Error loading account value history:', error)
       errors.value.portfolio = error.message
+    } finally {
+      // 无论成功或失败，都要关闭加载状态
+      isLoadingAccountHistory.value = false
     }
   }
 
@@ -886,6 +944,9 @@ let portfolioSymbolsRefreshInterval = null // 模型持仓合约列表自动刷�
    * 显示聚合视图
    */
   const showAggregatedView = async () => {
+    // 切换到聚合视图时，停止投资组合数据自动刷新（聚合视图不需要自动刷新）
+    stopPortfolioAutoRefresh()
+    
     // 切换到聚合视图时，清空单个模型的数据，确保只显示聚合数据
     accountValueHistory.value = []
     currentModelId.value = null
@@ -1133,9 +1194,28 @@ let portfolioSymbolsRefreshInterval = null // 模型持仓合约列表自动刷�
           value: h.balance || h.total_value || 0,  // 使用新字段名balance，兼容旧字段名total_value
           tradeId: h.trade_id || null,  // 保存trade_id用于标记
           timestamp: h.timestamp,  // 保存原始时间戳
-          originalIndex: index  // 保存原始索引
+          originalIndex: index,  // 保存原始索引
+          // 后端已关联查询trades表，直接保存trade信息
+          tradeFuture: h.future || null,  // 合约符号
+          tradeSignal: h.signal || null,  // 交易信号
+          tradeQuantity: h.quantity || null  // 交易数量
         }
       })
+      
+      // Signal中文翻译映射（提前定义，供后续使用）
+      const signalMapForChart = {
+        'buy_to_long': '开多',
+        'buy_to_short': '开空',
+        'sell_to_long': '平多',
+        'sell_to_short': '平空',
+        'close_position': '平仓',
+        'stop_loss': '止损',
+        'take_profit': '止盈',
+        'hold': '观望'
+      }
+      const translateSignalForChart = (signal) => {
+        return signalMapForChart[signal] || signal || '未知'
+      }
       
       // 收集有trade_id的数据点，用于显示交易标记（在添加当前值之前）
       const tradeMarkers = []
@@ -1194,7 +1274,7 @@ let portfolioSymbolsRefreshInterval = null // 模型持仓合约列表自动刷�
           left: '60',
           right: '20',
           bottom: '40',
-          top: '20',
+          top: '40',  // 增加top空间，为trade信息标签留出位置
           containLabel: false
         },
         xAxis: {
@@ -1225,7 +1305,59 @@ let portfolioSymbolsRefreshInterval = null // 模型持仓合约列表自动刷�
         },
         series: [{
           type: 'line',
-          data: data.map(d => d.value).filter(v => v !== null && v !== undefined),
+          // 为每个数据点配置对象，包含value和label
+          data: data.map((d, index) => {
+            const dataPoint = {
+              value: d.value,
+              tradeId: d.tradeId,
+              timestamp: d.timestamp,
+              dataIndex: index
+            }
+            
+            // 如果有trade_id，添加label配置，在数据点上方显示trade信息
+            // 优先使用后端返回的trade信息（已关联查询），如果没有则从allTrades中查找
+            if (d.tradeId) {
+              let symbol = '未知'
+              let signal = '未知'
+              let quantity = 0
+              
+              // 优先使用后端返回的trade信息
+              if (d.tradeFuture || d.tradeSignal !== null || d.tradeQuantity !== null) {
+                symbol = d.tradeFuture || '未知'
+                signal = d.tradeSignal || '未知'
+                quantity = d.tradeQuantity || 0
+              } else {
+                // 如果没有，则从allTrades中查找（兼容旧逻辑）
+                const trade = tradeMarkers.value.get(d.tradeId) || allTrades.value.find(t => t.id === d.tradeId)
+                if (trade) {
+                  symbol = trade.future || trade.symbol || '未知'
+                  signal = trade.signal || '未知'
+                  quantity = trade.quantity || 0
+                }
+              }
+              
+              // 翻译signal为中文
+              const translatedSignal = translateSignalForChart(signal)
+              
+              // 在数据点上方显示trade信息（以小字模式，黄色文字）
+              dataPoint.label = {
+                show: true,
+                position: 'top',
+                distance: 10,
+                fontSize: 10,
+                color: '#ffd700',  // 黄色
+                formatter: `${symbol} | ${translatedSignal} | ${quantity}`,
+                backgroundColor: 'rgba(255, 255, 255, 0.9)',
+                borderColor: '#e5e6eb',
+                borderWidth: 1,
+                borderRadius: 3,
+                padding: [2, 6],
+                fontWeight: 'normal'
+              }
+            }
+            
+            return dataPoint
+          }).filter(d => d.value !== null && d.value !== undefined),
           smooth: true,
           symbol: 'none',
           lineStyle: { color: '#3370ff', width: 2 },
@@ -1239,7 +1371,7 @@ let portfolioSymbolsRefreshInterval = null // 模型持仓合约列表自动刷�
               ]
             }
           },
-          // 添加交易标记点
+          // 添加交易标记点（保留用于tooltip）
           markPoint: tradeMarkers.length > 0 ? {
             data: tradeMarkers.map(marker => ({
               name: '交易',
@@ -1270,23 +1402,23 @@ let portfolioSymbolsRefreshInterval = null // 模型持仓合约列表自动刷�
           formatter: (params) => {
             if (!params) return ''
             
-            // Signal中文翻译映射
-            const signalMap = {
-              'buy_to_long': '开多',
-              'buy_to_short': '开空',
-              'sell_to_long': '平多',
-              'sell_to_short': '平空',
-              'close_position': '平仓',
-              'stop_loss': '止损',
-              'take_profit': '止盈',
-              'hold': '观望'
-            }
-            const translateSignal = (signal) => {
-              return signalMap[signal] || signal || '未知'
-            }
-            
-            // 获取交易信息的辅助函数
-            const getTradeInfo = (tradeId, timestamp) => {
+            // 获取交易信息的辅助函数（使用已定义的translateSignalForChart函数）
+            // 优先使用后端返回的trade信息，如果没有则从allTrades中查找
+            const getTradeInfo = (tradeId, timestamp, dataIndex) => {
+              // 优先从data数组中获取后端返回的trade信息
+              if (dataIndex !== undefined && dataIndex >= 0 && dataIndex < data.length) {
+                const dataItem = data[dataIndex]
+                if (dataItem && (dataItem.tradeFuture || dataItem.tradeSignal !== null || dataItem.tradeQuantity !== null)) {
+                  return {
+                    symbol: dataItem.tradeFuture || '未知',
+                    signal: translateSignalForChart(dataItem.tradeSignal || '未知'),
+                    quantity: dataItem.tradeQuantity || 0,
+                    timestamp: timestamp ? new Date(timestamp).toLocaleString('zh-CN') : null
+                  }
+                }
+              }
+              
+              // 如果没有，则从allTrades中查找（兼容旧逻辑）
               const trade = tradeMarkers.value.get(tradeId) || allTrades.value.find(t => t.id === tradeId)
               if (trade) {
                 const signal = trade.signal || '未知'
@@ -1294,7 +1426,7 @@ let portfolioSymbolsRefreshInterval = null // 模型持仓合约列表自动刷�
                 const quantity = trade.quantity || 0
                 return {
                   symbol,
-                  signal: translateSignal(signal),
+                  signal: translateSignalForChart(signal),
                   quantity,
                   timestamp: timestamp ? new Date(timestamp).toLocaleString('zh-CN') : null
                 }
@@ -1302,11 +1434,28 @@ let portfolioSymbolsRefreshInterval = null // 模型持仓合约列表自动刷�
               return null
             }
             
+            // 如果是数据点（series），检查是否有trade信息
+            if (params.componentType === 'series' && params.data && params.data.tradeId) {
+              const tradeId = params.data.tradeId
+              const timestamp = params.data.timestamp
+              const dataIndex = params.data.dataIndex
+              const tradeInfo = getTradeInfo(tradeId, timestamp, dataIndex)
+              
+              if (tradeInfo) {
+                const value = params.value
+                const timeStr = data[dataIndex]?.time || ''
+                return `${timeStr}<br/>账户价值: $${value.toFixed(2)}<br/><div style="font-size: 11px; color: #86909c; margin-top: 4px; border-top: 1px solid #e5e6eb; padding-top: 4px;">${tradeInfo.symbol} | ${tradeInfo.signal} | ${tradeInfo.quantity}</div>`
+              }
+            }
+            
             // 如果是标记点（交易标记）
             if (params.componentType === 'markPoint' && params.data && params.data.tradeId) {
               const tradeId = params.data.tradeId
               const timestamp = params.data.timestamp
-              const tradeInfo = getTradeInfo(tradeId, timestamp)
+              // markPoint的coord是[index, value]，可以通过index从data数组中获取trade信息
+              const coord = params.data.coord
+              const dataIndex = coord && coord.length > 0 ? coord[0] : undefined
+              const tradeInfo = getTradeInfo(tradeId, timestamp, dataIndex)
               
               if (tradeInfo) {
                 return `
@@ -1362,8 +1511,15 @@ let portfolioSymbolsRefreshInterval = null // 模型持仓合约列表自动刷�
         }
       }
       try {
+        // 如果图表实例不存在，重新创建
+        if (!accountChart.value) {
+          accountChart.value = echarts.init(chartDom)
+          console.log('[TradingApp] 重新创建图表实例')
+        }
+        
         if (accountChart.value && typeof accountChart.value.setOption === 'function') {
           accountChart.value.setOption(option, true) // 第二个参数 true 表示不合并，完全替换
+          console.log('[TradingApp] 图表配置已更新')
         }
       } catch (error) {
         console.error('[TradingApp] Error setting chart option (single-model):', error)
@@ -1882,6 +2038,8 @@ let portfolioSymbolsRefreshInterval = null // 模型持仓合约列表自动刷�
           loadTrades(),
           loadConversationsOrDecisions()
         ])
+        // 启动投资组合数据自动刷新（包含账户总值、可用现金、已实现盈亏、未实现盈亏、每日收益率）
+        startPortfolioAutoRefresh()
       }
       
       console.log('[TradingApp] ✅ 应用初始化完成')
@@ -2284,6 +2442,11 @@ let portfolioSymbolsRefreshInterval = null // 模型持仓合约列表自动刷�
     ])
     // 选择模型后启动模型持仓合约列表自动刷新
     startPortfolioSymbolsAutoRefresh()
+    
+    // 启动投资组合数据自动刷新（包含账户总值、可用现金、已实现盈亏、未实现盈亏、每日收益率）
+    // 先停止之前的刷新（如果存在），再启动新的刷新
+    stopPortfolioAutoRefresh()
+    startPortfolioAutoRefresh()
   }
   
   /**
@@ -3058,6 +3221,9 @@ let portfolioSymbolsRefreshInterval = null // 模型持仓合约列表自动刷�
     // 停止模型持仓合约列表自动刷新
     stopPortfolioSymbolsAutoRefresh()
     
+    // 停止投资组合数据自动刷新
+    stopPortfolioAutoRefresh()
+    
     // 清理 WebSocket 连接
     if (socket.value) {
       console.log('[WebSocket] 组件卸载，断开 WebSocket 连接')
@@ -3109,6 +3275,7 @@ let portfolioSymbolsRefreshInterval = null // 模型持仓合约列表自动刷�
     timeRangePreset,
     customStartTime,
     customEndTime,
+    isLoadingAccountHistory,
     loadAccountValueHistory,
     positions,
     trades,
@@ -3238,6 +3405,9 @@ let portfolioSymbolsRefreshInterval = null // 模型持仓合约列表自动刷�
     stopLosersAutoRefresh,
     startLeaderboardAutoRefresh, // 已废弃，保留以兼容旧代码
     stopLeaderboardAutoRefresh, // 已废弃，保留以兼容旧代码
+    // 投资组合数据自动刷新方法
+    startPortfolioAutoRefresh,
+    stopPortfolioAutoRefresh,
     
     // 图表更新方法
     updateAccountChart

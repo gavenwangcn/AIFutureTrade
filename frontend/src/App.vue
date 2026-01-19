@@ -437,8 +437,13 @@
               </template>
             </div>
           </div>
-          <div class="card-body">
-            <div id="accountChart" style="width: 100%; height: 300px;"></div>
+          <div class="card-body" style="position: relative;">
+            <!-- 加载动画 -->
+            <div v-if="isLoadingAccountHistory" style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); z-index: 10; display: flex; flex-direction: column; align-items: center; gap: 12px;">
+              <div class="spinner" style="width: 40px; height: 40px; border: 4px solid #f3f3f3; border-top: 4px solid #3370ff; border-radius: 50%; animation: spin 1s linear infinite;"></div>
+              <span style="color: #86909c; font-size: 14px;">加载中...</span>
+            </div>
+            <div id="accountChart" style="width: 100%; height: 300px;" :style="{ opacity: isLoadingAccountHistory ? 0.3 : 1 }"></div>
           </div>
         </div>
 
@@ -1104,6 +1109,7 @@ const {
   timeRangePreset,
   customStartTime,
   customEndTime,
+  isLoadingAccountHistory,
   loadAccountValueHistory,
   positions,
   trades,
