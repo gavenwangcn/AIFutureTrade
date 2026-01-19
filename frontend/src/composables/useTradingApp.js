@@ -1408,10 +1408,27 @@ let portfolioRefreshInterval = null // 投资组合数据自动刷新定时器�
               `
               
               // 如果有trade信息（extra字段），显示在下方
-              if (item.data && item.data.extra) {
+              // 背景使用黄色，文字使用红色
+              // 在axis模式下，需要从item.data中获取extra字段
+              let extraInfo = null
+              
+              // 尝试多种方式获取extra信息
+              if (item.data && typeof item.data === 'object') {
+                // 如果item.data是对象，直接获取extra
+                extraInfo = item.data.extra || null
+              } else if (item.dataIndex !== undefined && data && data[item.dataIndex]) {
+                // 如果item.data不是对象，尝试从data数组中获取
+                const dataItem = data[item.dataIndex]
+                if (dataItem && typeof dataItem === 'object' && dataItem.extra) {
+                  extraInfo = dataItem.extra
+                }
+              }
+              
+              // 如果找到了extra信息，显示trade信息（背景黄色，文字红色）
+              if (extraInfo) {
                 itemHtml += `
-                  <div style="font-size: 11px; color: #ffd700; margin-top: 4px; padding-top: 4px; border-top: 1px solid #e5e6eb;">
-                    <span style="font-weight: bold;">交易信息:</span> ${item.data.extra}
+                  <div style="font-size: 12px; color: #ff0000; background-color: #ffd700; margin-top: 6px; padding: 6px 8px; border-radius: 4px; font-weight: bold;">
+                    <span>交易信息: ${extraInfo}</span>
                   </div>
                 `
               }
