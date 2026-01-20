@@ -2016,7 +2016,7 @@ public class ModelServiceImpl implements ModelService {
 
     @Override
     public List<Map<String, Object>> getAccountValueHistory(String modelId, String startTime, String endTime) {
-        log.info("[ModelService] 获取账户价值历史（时间范围查询）, modelId={}, startTime={}, endTime={}", modelId, startTime, endTime);
+        log.debug("[ModelService] 获取账户价值历史（时间范围查询）, modelId={}, startTime={}, endTime={}", modelId, startTime, endTime);
         try {
             java.time.LocalDateTime startDateTime = null;
             java.time.LocalDateTime endDateTime = null;
@@ -2042,25 +2042,7 @@ public class ModelServiceImpl implements ModelService {
             List<Map<String, Object>> history = accountValueHistoryMapper.selectHistoryByModelIdAndTimeRange(
                     modelId, startDateTime, endDateTime);
             
-            log.info("[ModelService] 查询到 {} 条账户价值历史记录，返回 {} 条数据", history.size(), history.size());
-            
-            // 添加部分数据样例日志，便于排查trade信息
-            if (!history.isEmpty()) {
-                // 记录前3条数据作为样例
-                for (int i = 0; i < Math.min(3, history.size()); i++) {
-                    Map<String, Object> record = history.get(i);
-                    log.info("[ModelService] 账户价值历史样例数据 - 第{}条: id={}, timestamp={}, balance={}, tradeId={}, future={}, signal={}, quantity={}", 
-                            i+1, 
-                            record.get("id"), 
-                            record.get("timestamp"), 
-                            record.get("balance"), 
-                            record.get("trade_id"), 
-                            record.get("future"), 
-                            record.get("signal"), 
-                            record.get("quantity"));
-                }
-            }
-            
+            log.debug("[ModelService] 查询到 {} 条账户价值历史记录", history.size());
             return history;
         } catch (Exception e) {
             log.error("[ModelService] 获取账户价值历史失败: {}", e.getMessage(), e);
