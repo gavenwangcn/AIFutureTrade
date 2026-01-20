@@ -1179,104 +1179,34 @@ let portfolioRefreshInterval = null // 投资组合数据自动刷新定时器�
           formatter: (params) => {
             if (!params || !params[0]) return ''
             
-            // 构建tooltip内容
-            const date = params[0].axisValue  // 时间
-            const html = [`<div style="font-weight: bold; margin-bottom: 8px; padding-bottom: 4px; border-bottom: 1px solid #e5e6eb;">${date}</div>`]
-            
-            params.forEach(param => {
-              if (!param || param.value === null || param.value === undefined) return
-              
-              // 处理value为对象的情况（保留了trade信息）
-              const actualValue = typeof param.value === 'object' ? param.value.value : param.value
-              if (actualValue === null || actualValue === undefined) return
-              
-              // 构建基本信息
-              let itemHtml = `
-                <div style="display: flex; align-items: center; margin-bottom: 4px;">
-                  <span style="display: inline-block; width: 10px; height: 10px; background: ${param.color}; border-radius: 50%; margin-right: 8px;"></span>
-                  <span>${param.seriesName || '账户价值'}: $${actualValue.toFixed(2)}</span>
-                </div>
-              `
-              
-              // 查找trade信息
-              let extraInfo = null
+            // 只显示交易信息，按照指定格式输出
+            for (const param of params) {
+              if (!param || param.value === null || param.value === undefined) continue
               
               // 尝试多种方式获取extra信息
+              let extraInfo = null
+              
+              // 处理value为对象的情况
               if (typeof param.value === 'object' && param.value.extra) {
-                // value是对象，直接从value.extra获取
                 extraInfo = param.value.extra
               } else if (param.data && typeof param.data === 'object') {
-                // 从param.data中获取
                 extraInfo = param.data.extra || null
               }
               
-              // 如果找到了extra信息，显示trade信息
+              // 如果找到了extra信息，按照指定格式输出
               if (extraInfo) {
-                itemHtml += `
-                  <div style="font-size: 12px; color: #ff0000; background-color: #ffd700; margin-top: 6px; padding: 6px 8px; border-radius: 4px; font-weight: bold;">
-                    <span>交易信息: ${extraInfo}</span>
-                  </div>
-                `
+                return `"交易信息":"${extraInfo}"`
               }
-              
-              html.push(itemHtml)
-            })
+            }
             
-            return html.join('')
+            // 如果没有交易信息，不显示tooltip
+            return null
           }
         }
       }
       try {
         if (accountChart.value && typeof accountChart.value.setOption === 'function') {
           accountChart.value.setOption(option, true) // 第二个参数 true 表示不合并，完全替换
-          
-          // 添加点击事件处理
-          accountChart.value.off('click') // 先移除旧的点击事件，避免重复绑定
-          accountChart.value.on('click', function(params) {
-            console.log('[TradingApp] 多模型图表点击事件:', params)
-            
-            // 查找trade信息
-            let extraInfo = null
-            let tradeData = null
-            
-            // 处理value为对象的情况
-            const actualValue = typeof params.value === 'object' ? params.value.value : params.value
-            
-            // 尝试多种方式获取trade信息
-            if (typeof params.value === 'object') {
-              if (params.value.extra) {
-                extraInfo = params.value.extra
-                tradeData = params.value
-              } else if (params.value.tradeId) {
-                tradeData = params.value
-              }
-            } else if (params.data && typeof params.data === 'object') {
-              if (params.data.extra) {
-                extraInfo = params.data.extra
-                tradeData = params.data
-              } else if (params.data.tradeId) {
-                tradeData = params.data
-              }
-            }
-            
-            if (tradeData) {
-              // 构建完整的trade信息
-              let tradeInfo = {
-                time: params.axisValue,
-                value: actualValue,
-                seriesName: params.seriesName,
-                tradeId: tradeData.tradeId
-              }
-              
-              if (extraInfo) {
-                tradeInfo.extra = extraInfo
-              }
-              
-              // 显示弹框
-              alert('交易信息:\n' + JSON.stringify(tradeInfo, null, 2))
-              console.log('[TradingApp] 多模型交易信息:', tradeInfo)
-            }
-          })
         }
       } catch (error) {
         console.error('[TradingApp] Error setting chart option (multi-model):', error)
@@ -1521,25 +1451,9 @@ let portfolioRefreshInterval = null // 投资组合数据自动刷新定时器�
           formatter: (params) => {
             if (!params || !params[0]) return ''
             
-            // 参考示例代码的formatter方式
-            const date = params[0].axisValue  // 时间
-            const html = [`<div style="font-weight: bold; margin-bottom: 8px; padding-bottom: 4px; border-bottom: 1px solid #e5e6eb;">${date}</div>`]
-            
-            params.forEach(item => {
-              const value = item.value
-              const valueStr = typeof value === 'number' ? `$${value.toFixed(2)}` : value
-              
-              // 构建tooltip内容
-              let itemHtml = `
-                <div style="display: flex; align-items: center; margin-bottom: 4px;">
-                  <span style="display: inline-block; width: 10px; height: 10px; background: ${item.color}; border-radius: 50%; margin-right: 8px;"></span>
-                  <span>${item.seriesName || '账户价值'}: ${valueStr}</span>
-                </div>
-              `
-              
-              // 如果有trade信息（extra字段），显示在下方
-              // 背景使用黄色，文字使用红色
-              // 在axis模式下，需要从item.data中获取extra字段
+            // 只显示交易信息，按照指定格式输出
+            for (const item of params) {
+              // 尝试多种方式获取extra信息
               let extraInfo = null
               
               // 尝试多种方式获取extra信息
@@ -1554,19 +1468,14 @@ let portfolioRefreshInterval = null // 投资组合数据自动刷新定时器�
                 }
               }
               
-              // 如果找到了extra信息，显示trade信息（背景黄色，文字红色）
+              // 如果找到了extra信息，按照指定格式输出
               if (extraInfo) {
-                itemHtml += `
-                  <div style="font-size: 12px; color: #ff0000; background-color: #ffd700; margin-top: 6px; padding: 6px 8px; border-radius: 4px; font-weight: bold;">
-                    <span>交易信息: ${extraInfo}</span>
-                  </div>
-                `
+                return `"交易信息":"${extraInfo}"`
               }
-              
-              html.push(itemHtml)
-            })
+            }
             
-            return html.join('')
+            // 如果没有交易信息，不显示tooltip
+            return null
           }
         }
       }
@@ -1580,43 +1489,6 @@ let portfolioRefreshInterval = null // 投资组合数据自动刷新定时器�
         if (accountChart.value && typeof accountChart.value.setOption === 'function') {
           accountChart.value.setOption(option, true) // 第二个参数 true 表示不合并，完全替换
           console.log('[TradingApp] 图表配置已更新')
-          
-          // 添加点击事件处理
-          accountChart.value.off('click') // 先移除旧的点击事件，避免重复绑定
-          accountChart.value.on('click', function(params) {
-            console.log('[TradingApp] 图表点击事件:', params)
-            
-            // 查找trade信息
-            let extraInfo = null
-            let tradeData = null
-            
-            // 尝试多种方式获取trade信息
-            if (params.data && typeof params.data === 'object') {
-              if (params.data.extra) {
-                extraInfo = params.data.extra
-                tradeData = params.data
-              } else if (params.data.tradeId) {
-                tradeData = params.data
-              }
-            }
-            
-            if (tradeData) {
-              // 构建完整的trade信息
-              let tradeInfo = {
-                time: params.axisValue,
-                value: params.value,
-                tradeId: tradeData.tradeId
-              }
-              
-              if (extraInfo) {
-                tradeInfo.extra = extraInfo
-              }
-              
-              // 显示弹框
-              alert('交易信息:\n' + JSON.stringify(tradeInfo, null, 2))
-              console.log('[TradingApp] 交易信息:', tradeInfo)
-            }
-          })
         }
       } catch (error) {
         console.error('[TradingApp] Error setting chart option (single-model):', error)
