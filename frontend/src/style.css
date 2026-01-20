@@ -1851,6 +1851,12 @@ body {
     height: 300px !important;
 }
 
+/* 确保 ECharts tooltip 能正常显示 */
+.echarts-tooltip {
+    z-index: 9999 !important;
+    pointer-events: none;
+}
+
 /* Tabs */
 .card-tabs {
     display: flex;

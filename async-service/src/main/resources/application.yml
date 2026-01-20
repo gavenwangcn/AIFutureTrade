@@ -60,7 +60,7 @@ logging:
     com.aifuturetrade.asyncservice.service.impl.AsyncAgentServiceImpl: info
     com.aifuturetrade.asyncservice.service.impl.AutoCloseServiceImpl: warn
     com.aifuturetrade.asyncservice.service.impl.AccountValuesDailyServiceImpl: warn
-    com.aifuturetrade.asyncservice.api.binance: info
+    com.aifuturetrade.asyncservice.api.binance: warn
     com.aifuturetrade.asyncservice.dao.mapper: info
     # 第三方库日志级别
     com.binance: info

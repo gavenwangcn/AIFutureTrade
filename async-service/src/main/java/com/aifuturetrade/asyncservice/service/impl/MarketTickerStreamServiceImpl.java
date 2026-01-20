@@ -402,6 +402,7 @@ public class MarketTickerStreamServiceImpl implements MarketTickerStreamService 
                     Thread.currentThread().interrupt();
                     break;
                 } catch (Exception e) {
+                    log.info("[MarketTickerStreamService] ⚠️ 流处理出现异常: {}", e.getMessage());
                     // 处理所有WebSocket异常（包括MessageTooLargeException），并重新建立连接
                     if (handleException(e)) {
                         // handleException已经处理了重连逻辑，这里只需要记录日志

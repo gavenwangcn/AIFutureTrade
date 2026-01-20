@@ -1443,6 +1443,17 @@ let portfolioRefreshInterval = null // 投资组合数据自动刷新定时器�
         }],
         tooltip: {
           trigger: 'axis',  // 参考示例代码，使用axis触发
+          show: true,  // 确保tooltip显示
+          hideDelay: 100,  // 延迟隐藏，减少频繁触发
+          enterable: false,  // 不允许鼠标进入tooltip，减少事件冲突
+          backgroundColor: 'rgba(255, 255, 255, 0.95)',  // 背景色
+          borderColor: '#e5e6eb',  // 边框色
+          borderWidth: 1,  // 边框宽度
+          textStyle: { 
+            color: '#1d2129',  // 文字颜色
+            fontSize: 12
+          },
+          padding: [8, 12],  // 内边距
           formatter: function(params) {
             // 参考示例代码的简洁风格，trigger: 'axis'时params是数组
             try {
@@ -1468,21 +1479,8 @@ let portfolioRefreshInterval = null // 投资组合数据自动刷新定时器�
                   const dataPoint = chartData[dataIndex]
                   if (dataPoint && dataPoint.extra) {
                     extraInfo = dataPoint.extra
-                    console.log(`[TradingApp] Tooltip formatter: 找到trade信息 dataIndex=${dataIndex}, extra=${extraInfo}`)
-                  } else {
-                    console.log(`[TradingApp] Tooltip formatter: dataIndex=${dataIndex}, dataPoint存在但无extra字段`, dataPoint)
                   }
-                } else {
-                  console.log(`[TradingApp] Tooltip formatter: dataIndex=${dataIndex}, chartData[dataIndex]不存在`, {
-                    chartDataLength: chartData ? chartData.length : 0,
-                    dataIndex: dataIndex
-                  })
                 }
-              } else {
-                console.log(`[TradingApp] Tooltip formatter: 无法获取trade信息`, {
-                  dataIndex: dataIndex,
-                  hasChartData: !!window._chartDataForTooltip
-                })
               }
               
               // 如果还没找到，尝试从item.data获取
@@ -1548,96 +1546,14 @@ let portfolioRefreshInterval = null // 投资组合数据自动刷新定时器�
             console.log('[TradingApp] 前5个数据点示例:', seriesData.slice(0, 5))
           }
           
-          // 添加tooltip事件监听，用于调试
-          accountChart.value.off('showTip') // 先移除旧的事件监听
+          // 移除调试事件监听，避免频繁触发日志
+          // 如果需要调试，可以通过浏览器开发者工具查看 ECharts 事件
+          accountChart.value.off('showTip')
           accountChart.value.off('hideTip')
           accountChart.value.off('tooltip')
-          
-          // 监听tooltip显示事件
-          accountChart.value.on('showTip', (params) => {
-            console.log('[TradingApp] ========== ✅ ECharts showTip event triggered ==========')
-            console.log('[TradingApp] showTip params:', params)
-            console.log('[TradingApp] showTip params type:', typeof params)
-            if (params && params.length > 0) {
-              console.log('[TradingApp] showTip first item:', params[0])
-            }
-          })
-          
-          // 监听tooltip隐藏事件
-          accountChart.value.on('hideTip', (params) => {
-            console.log('[TradingApp] ========== ❌ ECharts hideTip event triggered ==========')
-            console.log('[TradingApp] hideTip params:', params)
-            // 检查tooltip DOM元素
-            const tooltipEl = document.querySelector('.echarts-tooltip')
-            if (tooltipEl) {
-              console.log('[TradingApp] Tooltip DOM element found:', {
-                display: window.getComputedStyle(tooltipEl).display,
-                visibility: window.getComputedStyle(tooltipEl).visibility,
-                opacity: window.getComputedStyle(tooltipEl).opacity,
-                zIndex: window.getComputedStyle(tooltipEl).zIndex
-              })
-            } else {
-              // 只在调试时输出，避免日志过多
-              // console.warn('[TradingApp] ⚠️ Tooltip DOM element not found!')
-            }
-          })
-          
-          // 监听tooltip的通用事件
-          accountChart.value.on('tooltip', (params) => {
-            console.log('[TradingApp] ========== 🔔 ECharts tooltip event triggered ==========')
-            console.log('[TradingApp] tooltip event params:', params)
-          })
-          
-          // 添加鼠标事件监听，用于调试tooltip显示
           accountChart.value.getZr().off('mousemove')
           accountChart.value.getZr().off('mouseover')
           accountChart.value.getZr().off('mouseout')
-          
-          // 监听鼠标移动，检查是否在数据点附近
-          let lastLoggedIndex = -1
-          accountChart.value.getZr().on('mousemove', (e) => {
-            try {
-              const pointInPixel = [e.offsetX, e.offsetY]
-              const pointInGrid = accountChart.value.convertFromPixel('grid', pointInPixel)
-              if (pointInGrid && pointInGrid[0] !== null && pointInGrid[1] !== null) {
-                // 找到最近的数据点
-                const dataIndex = Math.round(pointInGrid[0])
-                if (dataIndex >= 0 && dataIndex < seriesData.length && dataIndex !== lastLoggedIndex) {
-                  lastLoggedIndex = dataIndex
-                  const dataPoint = seriesData[dataIndex]
-                  if (dataPoint) {
-                    console.log(`[TradingApp] 🖱️ Mouse over data point ${dataIndex}:`, {
-                      value: dataPoint.value,
-                      hasExtra: !!dataPoint.extra,
-                      extra: dataPoint.extra,
-                      tradeId: dataPoint.tradeId
-                    })
-                  }
-                }
-              }
-            } catch (err) {
-              // 忽略转换错误
-            }
-          })
-          
-          // 监听鼠标悬停在图表元素上
-          accountChart.value.getZr().on('mouseover', (e) => {
-            console.log('[TradingApp] 🖱️ Mouse over chart element:', e.target)
-          })
-          
-          // 检查tooltip DOM元素是否存在
-          setTimeout(() => {
-            const tooltipElements = document.querySelectorAll('.echarts-tooltip')
-            console.log('[TradingApp] 🔍 Tooltip DOM elements found:', tooltipElements.length)
-            tooltipElements.forEach((el, idx) => {
-              console.log(`[TradingApp] Tooltip element ${idx}:`, {
-                visible: window.getComputedStyle(el).display !== 'none',
-                zIndex: window.getComputedStyle(el).zIndex,
-                position: window.getComputedStyle(el).position,
-                opacity: window.getComputedStyle(el).opacity
-              })
-            })
-          }, 1000)
         }
       } catch (error) {
         console.error('[TradingApp] Error setting chart option (single-model):', error)
