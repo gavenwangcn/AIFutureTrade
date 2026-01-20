@@ -1303,7 +1303,7 @@ let portfolioRefreshInterval = null // 投资组合数据自动刷新定时器�
         xAxis: {
           type: 'category',
           boundaryGap: false,
-          // 不过滤xAxis的data，保持与原始数据索引一致，确保tooltip能正确获取dataIndex
+          // 保持与原始数据索引一致，确保tooltip能正确获取dataIndex
           data: data.map(d => d.time || ''),
           axisLine: { lineStyle: { color: '#e5e6eb' } },
           axisLabel: { color: '#86909c', fontSize: 11 }
@@ -1403,15 +1403,33 @@ let portfolioRefreshInterval = null // 投资组合数据自动刷新定时器�
               console.log('[TradingApp] 前3个有extra的数据点:', dataPointsWithExtra.slice(0, 3))
             }
             
-            // 返回过滤后的数据用于图表显示（null/undefined的值会被ECharts忽略）
-            return fullChartDataMap.filter(d => d && d.value !== null && d.value !== undefined)
+            // 返回数据数组，保持与xAxis的data索引一致
+            // ECharts需要数值数组，但我们可以返回对象数组以便tooltip访问extra信息
+            return fullChartDataMap.map(d => {
+              // 如果value无效，返回null（ECharts会忽略）
+              if (d === null || d === undefined || d.value === null || d.value === undefined) {
+                return null
+              }
+              // 如果有extra信息，返回对象格式以便tooltip访问
+              if (d.extra) {
+                return {
+                  value: d.value,
+                  extra: d.extra,
+                  tradeId: d.tradeId
+                }
+              }
+              // 否则返回数值
+              return d.value
+            })
           })(),
           // 对于有trade信息的点，显示symbol
           symbol: 'circle',
           symbolSize: (value, params) => {
             // 如果有trade信息，显示稍大的点，确保可交互
-            const size = params.data && params.data.tradeId ? 10 : 0  // 增大到10，确保可交互
-            return size
+            const dataItem = params.data
+            const hasTradeInfo = (typeof dataItem === 'object' && dataItem !== null && dataItem.tradeId) || 
+                                 (dataItem && typeof dataItem === 'object' && dataItem.extra)
+            return hasTradeInfo ? 10 : 0
           },
           // 确保数据点可交互
           triggerLineEvent: true,
@@ -1443,72 +1461,74 @@ let portfolioRefreshInterval = null // 投资组合数据自动刷新定时器�
         }],
         tooltip: {
           trigger: 'axis',  // 参考示例代码，使用axis触发
-          show: true,  // 确保tooltip显示
-          hideDelay: 100,  // 延迟隐藏，减少频繁触发
-          enterable: false,  // 不允许鼠标进入tooltip，减少事件冲突
-          backgroundColor: 'rgba(255, 255, 255, 0.95)',  // 背景色
-          borderColor: '#e5e6eb',  // 边框色
-          borderWidth: 1,  // 边框宽度
-          textStyle: { 
-            color: '#1d2129',  // 文字颜色
-            fontSize: 12
-          },
-          padding: [8, 12],  // 内边距
+          // 使用extraCssText直接设置样式，确保z-index生效
+          extraCssText: 'z-index: 9999 !important; pointer-events: none;',
           formatter: function(params) {
-            // 参考示例代码的简洁风格，trigger: 'axis'时params是数组
-            try {
-              if (!params || !Array.isArray(params) || params.length === 0 || !params[0]) {
-                return '无数据'
-              }
-              
-              const firstParam = params[0]
-              // 获取时间（参考示例代码，直接使用axisValue）
-              const date = firstParam.axisValue || firstParam.name || '未知时间'
-              
-              // 获取dataIndex（在trigger: 'axis'模式下，所有系列共享同一个dataIndex）
-              const dataIndex = firstParam.dataIndex
-              
-              // 构建内容，完全按照示例代码的方式：使用marker、seriesName和<br/>换行
-              let result = `${date}<br/>`
-              
-              // 获取trade信息（extra字段）- 优先从window._chartDataForTooltip获取
-              let extraInfo = null
-              if (dataIndex !== undefined && dataIndex !== null && window._chartDataForTooltip) {
-                const chartData = window._chartDataForTooltip
-                if (chartData && Array.isArray(chartData) && chartData[dataIndex]) {
-                  const dataPoint = chartData[dataIndex]
-                  if (dataPoint && dataPoint.extra) {
-                    extraInfo = dataPoint.extra
-                  }
+            // 参考示例代码，trigger: 'axis'时params是数组
+            if (!params || !Array.isArray(params) || params.length === 0 || !params[0]) {
+              return ''
+            }
+            
+            const firstParam = params[0]
+            // 获取时间
+            const date = firstParam.axisValue || firstParam.name || ''
+            
+            // 获取dataIndex
+            const dataIndex = firstParam.dataIndex
+            
+            // 构建tooltip内容
+            let result = date + '<br/>'
+            
+            // 遍历所有系列数据
+            params.forEach((item) => {
+              // 获取数据值
+              let value = item.value
+              // 如果value是对象，提取数值
+              if (typeof value === 'object' && value !== null) {
+                if (value.value !== undefined) {
+                  value = value.value
+                } else if (typeof value === 'number') {
+                  // value本身就是数字
+                } else {
+                  value = null
                 }
               }
               
-              // 如果还没找到，尝试从item.data获取
-              if (!extraInfo && firstParam.data && typeof firstParam.data === 'object' && firstParam.data.extra) {
+              // 如果value仍然无效，跳过
+              if (value === null || value === undefined) {
+                return
+              }
+              
+              const valueStr = typeof value === 'number' ? '$' + value.toFixed(2) : (value || 'N/A')
+              result += item.marker + ' ' + (item.seriesName || '账户价值') + ': ' + valueStr + '<br/>'
+            })
+            
+            // 获取trade信息
+            let extraInfo = null
+            if (dataIndex !== undefined && dataIndex !== null) {
+              // 方式1: 从firstParam的value对象获取（如果value是对象且包含extra）
+              if (firstParam.value && typeof firstParam.value === 'object' && firstParam.value.extra) {
+                extraInfo = firstParam.value.extra
+              }
+              // 方式2: 从firstParam的data获取
+              else if (firstParam.data && typeof firstParam.data === 'object' && firstParam.data.extra) {
                 extraInfo = firstParam.data.extra
               }
-              
-              // 遍历所有系列数据
-              params.forEach((item) => {
-                // 获取数据值
-                const value = item.value
-                const valueStr = typeof value === 'number' ? `$${value.toFixed(2)}` : (value || 'N/A')
-                
-                // 完全按照示例代码方式：marker + seriesName + value + <br/>
-                result += `${item.marker} ${item.seriesName || '账户价值'}: ${valueStr}<br/>`
-              })
-              
-              // 如果有trade信息，添加到tooltip末尾
-              if (extraInfo) {
-                result += `<br/>交易信息: ${extraInfo}`
+              // 方式3: 从window._chartDataForTooltip获取
+              else if (window._chartDataForTooltip && window._chartDataForTooltip[dataIndex]) {
+                const dataPoint = window._chartDataForTooltip[dataIndex]
+                if (dataPoint && dataPoint.extra) {
+                  extraInfo = dataPoint.extra
+                }
               }
-              
-              return result
-              
-            } catch (err) {
-              console.error('[TradingApp] ❌ Error in tooltip formatter:', err)
-              return 'Tooltip错误'
             }
+            
+            // 如果有trade信息，添加到tooltip末尾
+            if (extraInfo) {
+              result += '<br/>交易信息: ' + extraInfo
+            }
+            
+            return result
           }
         }
       }

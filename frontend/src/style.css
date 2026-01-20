@@ -1852,9 +1852,21 @@ body {
 }
 
 /* 确保 ECharts tooltip 能正常显示 */
+/* ECharts tooltip 默认类名是 .echarts-tooltip，但可能被appendToBody移动到body下 */
+body > div[class*="echarts-tooltip"],
+div[class*="echarts-tooltip"],
 .echarts-tooltip {
     z-index: 9999 !important;
-    pointer-events: none;
+    pointer-events: none !important;
+    position: absolute !important;
+}
+
+/* 更具体的选择器，针对账户价值图表容器 */
+#accountChart ~ div[class*="echarts-tooltip"],
+.card-body div[class*="echarts-tooltip"],
+.content-card div[class*="echarts-tooltip"] {
+    z-index: 9999 !important;
+    pointer-events: none !important;
 }
 
 /* Tabs */
