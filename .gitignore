@@ -112,3 +112,10 @@ docs/node_modules/
 .npmrc
 website/
 
+# SKILL文件
+SKILL.md
+
+# Trae相关
+.trae/
+trae/*.SKILL.md
+

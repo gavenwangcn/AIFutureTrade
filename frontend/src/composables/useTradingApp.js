@@ -1064,7 +1064,36 @@ let portfolioRefreshInterval = null // 投资组合数据自动刷新定时器�
         const color = colors[index % colors.length]
         const dataPoints = timeAxis.map(time => {
           const point = model.data?.find(p => p.timestamp === time)
-          return point ? point.value : null
+          if (!point) return null
+          
+          // 保留完整的point对象，包括trade信息
+          const dataPoint = {
+            value: point.value,
+            tradeId: point.tradeId,
+            timestamp: point.timestamp
+          }
+          
+          // 如果有trade_id，添加trade信息到extra字段
+          if (point.tradeId) {
+            let symbol = '未知'
+            let signal = '未知'
+            let quantity = 0
+            
+            // 优先使用后端返回的trade信息
+            if (point.tradeFuture || point.tradeSignal !== null || point.tradeQuantity !== null) {
+              symbol = point.tradeFuture || '未知'
+              signal = point.tradeSignal || '未知'
+              quantity = point.tradeQuantity || 0
+            }
+            
+            // 翻译signal为中文
+            const translatedSignal = translateSignalForChart(signal)
+            
+            // 将trade信息保存到extra字段
+            dataPoint.extra = `${symbol} | ${translatedSignal} | ${quantity}`
+          }
+          
+          return dataPoint
         })
         
         // 确保 series 对象包含所有必需的属性
@@ -1073,11 +1102,26 @@ let portfolioRefreshInterval = null // 投资组合数据自动刷新定时器�
           type: 'line', // 确保 type 属性存在
           data: dataPoints || [],
           smooth: true,
-          symbol: 'circle',
-          symbolSize: 4,
+          symbol: (value, params) => {
+            // 如果有trade信息，显示稍大的点
+            return params.data && params.data.tradeId ? 'circle' : 'none'
+          },
+          symbolSize: (value, params) => {
+            // 如果有trade信息，显示稍大的点
+            return params.data && params.data.tradeId ? 8 : 0
+          },
           lineStyle: { color: color, width: 2 },
           itemStyle: { color: color },
-          connectNulls: true
+          connectNulls: true,
+          emphasis: {
+            focus: 'series',
+            itemStyle: {
+              borderWidth: 2,
+              borderColor: color,
+              shadowBlur: 10,
+              shadowColor: `${color}4D` // 50% opacity
+            }
+          }
         }
       }).filter(s => s && s.type) // 过滤掉无效的 series
       
@@ -1134,13 +1178,51 @@ let portfolioRefreshInterval = null // 投资组合数据自动刷新定时器�
           textStyle: { color: '#1d2129' },
           formatter: (params) => {
             if (!params || !params[0]) return ''
-            let result = `${params[0].axisValue || ''}<br/>`
+            
+            // 构建tooltip内容
+            const date = params[0].axisValue  // 时间
+            const html = [`<div style="font-weight: bold; margin-bottom: 8px; padding-bottom: 4px; border-bottom: 1px solid #e5e6eb;">${date}</div>`]
+            
             params.forEach(param => {
-              if (param && param.value !== null && param.value !== undefined) {
-                result += `${param.marker || ''}${param.seriesName || ''}: $${param.value.toFixed(2)}<br/>`
+              if (!param || param.value === null || param.value === undefined) return
+              
+              // 处理value为对象的情况（保留了trade信息）
+              const actualValue = typeof param.value === 'object' ? param.value.value : param.value
+              if (actualValue === null || actualValue === undefined) return
+              
+              // 构建基本信息
+              let itemHtml = `
+                <div style="display: flex; align-items: center; margin-bottom: 4px;">
+                  <span style="display: inline-block; width: 10px; height: 10px; background: ${param.color}; border-radius: 50%; margin-right: 8px;"></span>
+                  <span>${param.seriesName || '账户价值'}: $${actualValue.toFixed(2)}</span>
+                </div>
+              `
+              
+              // 查找trade信息
+              let extraInfo = null
+              
+              // 尝试多种方式获取extra信息
+              if (typeof param.value === 'object' && param.value.extra) {
+                // value是对象，直接从value.extra获取
+                extraInfo = param.value.extra
+              } else if (param.data && typeof param.data === 'object') {
+                // 从param.data中获取
+                extraInfo = param.data.extra || null
               }
+              
+              // 如果找到了extra信息，显示trade信息
+              if (extraInfo) {
+                itemHtml += `
+                  <div style="font-size: 12px; color: #ff0000; background-color: #ffd700; margin-top: 6px; padding: 6px 8px; border-radius: 4px; font-weight: bold;">
+                    <span>交易信息: ${extraInfo}</span>
+                  </div>
+                `
+              }
+              
+              html.push(itemHtml)
             })
-            return result
+            
+            return html.join('')
           }
         }
       }
