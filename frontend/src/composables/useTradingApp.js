@@ -1444,19 +1444,35 @@ let portfolioRefreshInterval = null // 投资组合数据自动刷新定时器�
         }],
         tooltip: {
           trigger: 'axis',  // 使用axis触发，参考示例代码
+          confine: true,  // 确保tooltip限制在图表容器内，避免被overflow:hidden裁剪
           backgroundColor: 'rgba(255, 255, 255, 0.95)',
           borderColor: '#e5e6eb',
           borderWidth: 1,
           textStyle: { color: '#1d2129' },
+          // 设置更高的z-index，确保tooltip显示在其他元素之上
+          extraCssText: 'z-index: 9999; box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);',
           formatter: (params) => {
             if (!params || !params[0]) return ''
             
-            // 只显示交易信息，按照指定格式输出
-            for (const item of params) {
-              // 尝试多种方式获取extra信息
+            // 参考示例代码的formatter方式
+            const date = params[0].axisValue  // 时间
+            const html = [`<div style="font-weight: bold; margin-bottom: 8px; padding-bottom: 4px; border-bottom: 1px solid #e5e6eb;">${date}</div>`]
+            
+            params.forEach(item => {
+              const value = item.value
+              const valueStr = typeof value === 'number' ? `$${value.toFixed(2)}` : value
+              
+              // 构建tooltip内容
+              let itemHtml = `
+                <div style="display: flex; align-items: center; margin-bottom: 4px;">
+                  <span style="display: inline-block; width: 10px; height: 10px; background: ${item.color}; border-radius: 50%; margin-right: 8px;"></span>
+                  <span>${item.seriesName || '账户价值'}: ${valueStr}</span>
+                </div>
+              `
+              
+              // 尝试多种方式获取extra信息（trade信息）
               let extraInfo = null
               
-              // 尝试多种方式获取extra信息
               if (item.data && typeof item.data === 'object') {
                 // 如果item.data是对象，直接获取extra
                 extraInfo = item.data.extra || null
@@ -1468,14 +1484,20 @@ let portfolioRefreshInterval = null // 投资组合数据自动刷新定时器�
                 }
               }
               
-              // 如果找到了extra信息，按照指定格式输出
+              // 如果有trade信息（extra字段），显示在下方
+              // 背景使用黄色，文字使用红色（按要求）
               if (extraInfo) {
-                return `"交易信息":"${extraInfo}"`
+                itemHtml += `
+                  <div style="font-size: 12px; color: #ff0000; background-color: #ffd700; margin-top: 6px; padding: 6px 8px; border-radius: 4px; font-weight: bold;">
+                    <span>交易信息: ${extraInfo}</span>
+                  </div>
+                `
               }
-            }
+              
+              html.push(itemHtml)
+            })
             
-            // 如果没有交易信息，不显示tooltip
-            return null
+            return html.join('')
           }
         }
       }
