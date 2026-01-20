@@ -1303,7 +1303,8 @@ let portfolioRefreshInterval = null // 投资组合数据自动刷新定时器�
         xAxis: {
           type: 'category',
           boundaryGap: false,
-          data: data.map(d => d.time).filter(Boolean),
+          // 不过滤xAxis的data，保持与原始数据索引一致，确保tooltip能正确获取dataIndex
+          data: data.map(d => d.time || ''),
           axisLine: { lineStyle: { color: '#e5e6eb' } },
           axisLabel: { color: '#86909c', fontSize: 11 }
         },
@@ -1335,8 +1336,9 @@ let portfolioRefreshInterval = null // 投资组合数据自动刷新定时器�
           // 为每个数据点配置对象，包含value和trade信息
           data: (() => {
             // 保存data数组的引用，供tooltip formatter使用
-            const chartData = data.map((d, index) => {
-                    const dataPoint = {
+            // 先创建完整的映射数组（不过滤），保持原始索引
+            const fullChartDataMap = data.map((d, index) => {
+              const dataPoint = {
                 value: d.value,
                 tradeId: d.tradeId,
                 timestamp: d.timestamp,
@@ -1389,25 +1391,20 @@ let portfolioRefreshInterval = null // 投资组合数据自动刷新定时器�
               }
               
               return dataPoint
-            }).filter(d => d.value !== null && d.value !== undefined)
+            })
             
-            console.log('[TradingApp] 处理后的chartData数量:', chartData.length)
-            const dataPointsWithExtra = chartData.filter(d => d && d.extra)
+            // 将完整的映射数组保存到外部作用域，供tooltip formatter使用
+            // 这样可以通过原始dataIndex直接访问，不受过滤影响
+            window._chartDataForTooltip = fullChartDataMap
+            console.log('[TradingApp] ✅ chartData已保存到 window._chartDataForTooltip, 数量:', fullChartDataMap.length)
+            const dataPointsWithExtra = fullChartDataMap.filter(d => d && d.extra)
             console.log('[TradingApp] 有extra字段的数据点:', dataPointsWithExtra.length)
             if (dataPointsWithExtra.length > 0) {
               console.log('[TradingApp] 前3个有extra的数据点:', dataPointsWithExtra.slice(0, 3))
             }
             
-            // 将chartData保存到外部作用域，供tooltip formatter使用
-            window._chartDataForTooltip = chartData
-            console.log('[TradingApp] ✅ chartData已保存到 window._chartDataForTooltip, 数量:', chartData.length)
-            console.log('[TradingApp] ✅ 前3个chartData示例:', chartData.slice(0, 3).map(d => ({
-              value: d.value,
-              extra: d.extra,
-              tradeId: d.tradeId
-            })))
-            
-            return chartData
+            // 返回过滤后的数据用于图表显示（null/undefined的值会被ECharts忽略）
+            return fullChartDataMap.filter(d => d && d.value !== null && d.value !== undefined)
           })(),
           // 对于有trade信息的点，显示symbol
           symbol: 'circle',
@@ -1457,8 +1454,41 @@ let portfolioRefreshInterval = null // 投资组合数据自动刷新定时器�
               // 获取时间（参考示例代码，直接使用axisValue）
               const date = firstParam.axisValue || firstParam.name || '未知时间'
               
+              // 获取dataIndex（在trigger: 'axis'模式下，所有系列共享同一个dataIndex）
+              const dataIndex = firstParam.dataIndex
+              
               // 构建内容，完全按照示例代码的方式：使用marker、seriesName和<br/>换行
               let result = `${date}<br/>`
+              
+              // 获取trade信息（extra字段）- 优先从window._chartDataForTooltip获取
+              let extraInfo = null
+              if (dataIndex !== undefined && dataIndex !== null && window._chartDataForTooltip) {
+                const chartData = window._chartDataForTooltip
+                if (chartData && Array.isArray(chartData) && chartData[dataIndex]) {
+                  const dataPoint = chartData[dataIndex]
+                  if (dataPoint && dataPoint.extra) {
+                    extraInfo = dataPoint.extra
+                    console.log(`[TradingApp] Tooltip formatter: 找到trade信息 dataIndex=${dataIndex}, extra=${extraInfo}`)
+                  } else {
+                    console.log(`[TradingApp] Tooltip formatter: dataIndex=${dataIndex}, dataPoint存在但无extra字段`, dataPoint)
+                  }
+                } else {
+                  console.log(`[TradingApp] Tooltip formatter: dataIndex=${dataIndex}, chartData[dataIndex]不存在`, {
+                    chartDataLength: chartData ? chartData.length : 0,
+                    dataIndex: dataIndex
+                  })
+                }
+              } else {
+                console.log(`[TradingApp] Tooltip formatter: 无法获取trade信息`, {
+                  dataIndex: dataIndex,
+                  hasChartData: !!window._chartDataForTooltip
+                })
+              }
+              
+              // 如果还没找到，尝试从item.data获取
+              if (!extraInfo && firstParam.data && typeof firstParam.data === 'object' && firstParam.data.extra) {
+                extraInfo = firstParam.data.extra
+              }
               
               // 遍历所有系列数据
               params.forEach((item) => {
@@ -1468,33 +1498,12 @@ let portfolioRefreshInterval = null // 投资组合数据自动刷新定时器�
                 
                 // 完全按照示例代码方式：marker + seriesName + value + <br/>
                 result += `${item.marker} ${item.seriesName || '账户价值'}: ${valueStr}<br/>`
-                
-                // 获取trade信息（extra字段）
-                let extraInfo = null
-                
-                // 方式1: 从item.data获取（如果data是对象）
-                if (item.data && typeof item.data === 'object' && item.data.extra) {
-                  extraInfo = item.data.extra
-                }
-                
-                // 方式2: 从window._chartDataForTooltip获取
-                if (!extraInfo && item.dataIndex !== undefined && window._chartDataForTooltip) {
-                  const chartData = window._chartDataForTooltip
-                  if (chartData && chartData[item.dataIndex] && chartData[item.dataIndex].extra) {
-                    extraInfo = chartData[item.dataIndex].extra
-                  }
-                }
-                
-                // 方式3: 从原始data数组获取
-                if (!extraInfo && item.dataIndex !== undefined && data && data[item.dataIndex] && data[item.dataIndex].extra) {
-                  extraInfo = data[item.dataIndex].extra
-                }
-                
-                // 如果有trade信息，按照示例代码方式添加（使用<br/>换行，简洁风格）
-                if (extraInfo) {
-                  result += `交易信息: ${extraInfo}<br/>`
-                }
               })
+              
+              // 如果有trade信息，添加到tooltip末尾
+              if (extraInfo) {
+                result += `<br/>交易信息: ${extraInfo}`
+              }
               
               return result
               
