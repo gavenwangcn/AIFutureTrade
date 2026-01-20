@@ -380,7 +380,6 @@ let portfolioRefreshInterval = null // 投资组合数据自动刷新定时器�
     const refreshInterval = 5000 // 5秒
     
     gainersRefreshInterval = setInterval(() => {
-      console.log(`[TradingApp] 轮询刷新涨幅榜数据（${refreshInterval/1000}秒间隔）`)
       loadGainers()
     }, refreshInterval)
 
@@ -416,7 +415,6 @@ let portfolioRefreshInterval = null // 投资组合数据自动刷新定时器�
     const refreshInterval = 5000 // 5秒
     
     losersRefreshInterval = setInterval(() => {
-      console.log(`[TradingApp] 轮询刷新跌幅榜数据（${refreshInterval/1000}秒间隔）`)
       loadLosers()
     }, refreshInterval)
 
@@ -452,7 +450,6 @@ let portfolioRefreshInterval = null // 投资组合数据自动刷新定时器�
     const refreshInterval = 5000 // 5秒
     
     portfolioSymbolsRefreshInterval = setInterval(() => {
-      console.log(`[TradingApp] 轮询刷新模型持仓合约列表数据（${refreshInterval/1000}秒间隔）`)
       loadModelPortfolioSymbols()
     }, refreshInterval)
 
@@ -703,13 +700,10 @@ let portfolioRefreshInterval = null // 投资组合数据自动刷新定时器�
     loading.value.portfolioSymbols = true
     errors.value.portfolioSymbols = null
     try {
-      console.log('[TradingApp] 开始加载持仓合约实时行情, modelId:', currentModelId.value)
       const response = await modelApi.getPortfolioSymbols(currentModelId.value)
       console.log('[TradingApp] 收到持仓合约实时行情API响应:', response)
       
       if (response.data && Array.isArray(response.data)) {
-        console.log('[TradingApp] 持仓合约实时行情数据数量:', response.data.length)
-        console.log('[TradingApp] 持仓合约实时行情原始数据:', JSON.stringify(response.data, null, 2))
         
         // 处理数据，确保字段名正确
         modelPortfolioSymbols.value = response.data.map((item, index) => {
@@ -1430,16 +1424,14 @@ let portfolioRefreshInterval = null // 投资组合数据自动刷新定时器�
           // 对于有trade信息的点，显示symbol
           symbol: 'circle',
           symbolSize: (value, params) => {
-            // 如果有trade信息，显示稍大的点
-            const size = params.data && params.data.tradeId ? 8 : 0
-            // 添加调试日志
-            if (size > 0) {
-              console.log('[TradingApp] Symbol size for trade point:', size, 'data:', params.data)
-            }
+            // 如果有trade信息，显示稍大的点，确保可交互
+            const size = params.data && params.data.tradeId ? 10 : 0  // 增大到10，确保可交互
             return size
           },
           // 确保数据点可交互
           triggerLineEvent: true,
+          // 确保所有数据点都可以触发tooltip（即使symbolSize为0）
+          silent: false,
           lineStyle: { color: '#3370ff', width: 2 },
           areaStyle: {
             color: {
@@ -1463,13 +1455,15 @@ let portfolioRefreshInterval = null // 投资组合数据自动刷新定时器�
           }
         }],
         tooltip: {
-          trigger: 'item',  // 改为item触发，当鼠标移动到数据点上时显示
-          // 同时支持axis触发，显示十字准星
+          trigger: 'axis',  // 改回axis触发，更可靠
+          // 同时支持item触发，当鼠标移动到数据点上时也能显示
           axisPointer: {
             type: 'cross',  // 显示十字准星
             label: {
               backgroundColor: '#6a7985'
-            }
+            },
+            // 确保axisPointer可以触发tooltip
+            triggerTooltip: true
           },
           confine: false,  // 改为false，允许tooltip显示在容器外，避免被裁剪
           backgroundColor: 'rgba(255, 255, 255, 0.95)',
@@ -1486,7 +1480,7 @@ let portfolioRefreshInterval = null // 投资组合数据自动刷新定时器�
           alwaysShowContent: false,
           // 添加enterable选项，允许鼠标进入tooltip
           enterable: false,
-          // 触发条件：鼠标移动到数据点上
+          // 触发条件：鼠标移动或点击
           triggerOn: 'mousemove|click',
           formatter: (params) => {
             // 添加调试日志
@@ -1498,22 +1492,20 @@ let portfolioRefreshInterval = null // 投资组合数据自动刷新定时器�
               console.log('[TradingApp] window._chartDataForTooltip length:', window._chartDataForTooltip.length)
             }
             
-            // item触发模式下，params是单个对象，不是数组
-            let paramsArray = Array.isArray(params) ? params : [params]
-            
-            if (!paramsArray || paramsArray.length === 0 || !paramsArray[0]) {
-              console.warn('[TradingApp] Tooltip params is empty')
+            // axis触发模式下，params是数组
+            if (!params || !Array.isArray(params) || params.length === 0 || !params[0]) {
+              console.warn('[TradingApp] Tooltip params is empty or invalid:', params)
               return ''
             }
             
-            const firstParam = paramsArray[0]
-            // item触发模式下，使用params.name或params.axisValue获取时间
-            const date = firstParam.axisValue || firstParam.name || firstParam.value || '未知时间'
+            const firstParam = params[0]
+            // axis触发模式下，使用axisValue获取时间
+            const date = firstParam.axisValue || firstParam.name || '未知时间'
             console.log('[TradingApp] Tooltip date:', date)
             
             const html = [`<div style="font-weight: bold; margin-bottom: 8px; padding-bottom: 4px; border-bottom: 1px solid #e5e6eb;">${date}</div>`]
             
-            paramsArray.forEach((item, index) => {
+            params.forEach((item, index) => {
               console.log(`[TradingApp] Processing tooltip item ${index}:`, {
                 value: item.value,
                 data: item.data,
@@ -1524,8 +1516,8 @@ let portfolioRefreshInterval = null // 投资组合数据自动刷新定时器�
                 axisValue: item.axisValue
               })
               
-              // item触发模式下，value可能在item.value或item.data.value中
-              const value = item.value !== undefined ? item.value : (item.data && item.data.value !== undefined ? item.data.value : null)
+              // axis触发模式下，value在item.value中
+              const value = item.value
               const valueStr = typeof value === 'number' ? `$${value.toFixed(2)}` : (value || 'N/A')
               
               // 构建tooltip内容
