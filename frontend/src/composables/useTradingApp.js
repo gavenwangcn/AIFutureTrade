@@ -1363,57 +1363,89 @@ let portfolioRefreshInterval = null // 投资组合数据自动刷新定时器�
           },
           splitLine: { lineStyle: { color: '#f2f3f5' } }
         },
+        // 先处理数据点，保存chartData供tooltip使用
+        // 注意：这里使用立即执行函数来创建chartData
         series: [{
           type: 'line',
           name: '账户价值',
           smooth: true,
           // 为每个数据点配置对象，包含value和trade信息
-          data: data.map((d, index) => {
-            const dataPoint = {
-              value: d.value,
-              tradeId: d.tradeId,
-              timestamp: d.timestamp,
-              dataIndex: index
-            }
-            
-            // 如果有trade_id，添加trade信息到dataPoint中，用于tooltip显示
-            // 优先使用后端返回的trade信息（已关联查询），如果没有则从allTrades中查找
-            if (d.tradeId) {
-              let symbol = '未知'
-              let signal = '未知'
-              let quantity = 0
+          data: (() => {
+            // 保存data数组的引用，供tooltip formatter使用
+            const chartData = data.map((d, index) => {
+                    const dataPoint = {
+                value: d.value,
+                tradeId: d.tradeId,
+                timestamp: d.timestamp,
+                dataIndex: index
+              }
               
-              // 优先使用后端返回的trade信息
-              if (d.tradeFuture || d.tradeSignal !== null || d.tradeQuantity !== null) {
-                symbol = d.tradeFuture || '未知'
-                signal = d.tradeSignal || '未知'
-                quantity = d.tradeQuantity || 0
-              } else {
-                // 如果没有，则从allTrades中查找（兼容旧逻辑）
-                const trade = tradeMarkers.value.get(d.tradeId) || allTrades.value.find(t => t.id === d.tradeId)
-                if (trade) {
-                  symbol = trade.future || trade.symbol || '未知'
-                  signal = trade.signal || '未知'
-                  quantity = trade.quantity || 0
+              // 如果有trade_id，添加trade信息到dataPoint中，用于tooltip显示
+              // 优先使用后端返回的trade信息（已关联查询），如果没有则从allTrades中查找
+              if (d.tradeId) {
+                let symbol = '未知'
+                let signal = '未知'
+                let quantity = 0
+                
+                // 优先使用后端返回的trade信息
+                if (d.tradeFuture || d.tradeSignal !== null || d.tradeQuantity !== null) {
+                  symbol = d.tradeFuture || '未知'
+                  signal = d.tradeSignal || '未知'
+                  quantity = d.tradeQuantity || 0
+                } else {
+                  // 如果没有，则从allTrades中查找（兼容旧逻辑）
+                  const trade = tradeMarkers.value.get(d.tradeId) || allTrades.value.find(t => t.id === d.tradeId)
+                  if (trade) {
+                    symbol = trade.future || trade.symbol || '未知'
+                    signal = trade.signal || '未知'
+                    quantity = trade.quantity || 0
+                  }
+                }
+                
+                // 翻译signal为中文
+                const translatedSignal = translateSignalForChart(signal)
+                
+                // 将trade信息保存到dataPoint的extra字段中，用于tooltip显示
+                dataPoint.extra = `${symbol} | ${translatedSignal} | ${quantity}`
+                
+                // 添加调试日志
+                console.log(`[TradingApp] Data point ${index} has trade info:`, {
+                  tradeId: d.tradeId,
+                  symbol: symbol,
+                  signal: translatedSignal,
+                  quantity: quantity,
+                  extra: dataPoint.extra
+                })
+                
+                // 对于有trade信息的点，显示symbol以便用户知道这里有交易信息
+                dataPoint.itemStyle = {
+                  color: '#ffd700',  // 黄色标记点
+                  borderColor: '#fff',
+                  borderWidth: 2
                 }
               }
               
-              // 翻译signal为中文
-              const translatedSignal = translateSignalForChart(signal)
-              
-              // 将trade信息保存到dataPoint的extra字段中，用于tooltip显示
-              dataPoint.extra = `${symbol} | ${translatedSignal} | ${quantity}`
-              
-              // 对于有trade信息的点，显示symbol以便用户知道这里有交易信息
-              dataPoint.itemStyle = {
-                color: '#ffd700',  // 黄色标记点
-                borderColor: '#fff',
-                borderWidth: 2
-              }
+              return dataPoint
+            }).filter(d => d.value !== null && d.value !== undefined)
+            
+            console.log('[TradingApp] 处理后的chartData数量:', chartData.length)
+            const dataPointsWithExtra = chartData.filter(d => d && d.extra)
+            console.log('[TradingApp] 有extra字段的数据点:', dataPointsWithExtra.length)
+            if (dataPointsWithExtra.length > 0) {
+              console.log('[TradingApp] 前3个有extra的数据点:', dataPointsWithExtra.slice(0, 3))
             }
             
-            return dataPoint
-          }).filter(d => d.value !== null && d.value !== undefined),
+            // 将chartData保存到外部作用域，供tooltip formatter使用
+            window._chartDataForTooltip = chartData
+            console.log('[TradingApp] ✅ chartData已保存到 window._chartDataForTooltip, 数量:', chartData.length)
+            console.log('[TradingApp] ✅ 前3个chartData示例:', chartData.slice(0, 3).map(d => ({
+              value: d.value,
+              extra: d.extra,
+              tradeId: d.tradeId
+            })))
+            
+            return chartData
+          })(),
           // 对于有trade信息的点，显示symbol
           symbol: 'circle',
           symbolSize: (value, params) => {
@@ -1444,21 +1476,59 @@ let portfolioRefreshInterval = null // 投资组合数据自动刷新定时器�
         }],
         tooltip: {
           trigger: 'axis',  // 使用axis触发，参考示例代码
-          confine: true,  // 确保tooltip限制在图表容器内，避免被overflow:hidden裁剪
+          // 同时支持item触发，当鼠标移动到数据点上时也能显示
+          axisPointer: {
+            type: 'cross',  // 显示十字准星
+            label: {
+              backgroundColor: '#6a7985'
+            }
+          },
+          confine: false,  // 改为false，允许tooltip显示在容器外，避免被裁剪
           backgroundColor: 'rgba(255, 255, 255, 0.95)',
           borderColor: '#e5e6eb',
           borderWidth: 1,
-          textStyle: { color: '#1d2129' },
+          textStyle: { color: '#1d2129', fontSize: 12 },
+          padding: [8, 12],
           // 设置更高的z-index，确保tooltip显示在其他元素之上
-          extraCssText: 'z-index: 9999; box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);',
+          extraCssText: 'z-index: 99999 !important; box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15) !important; pointer-events: none !important;',
+          // 添加appendToBody选项，确保tooltip附加到body上（ECharts 5.x支持）
+          // appendToBody: true,  // 注释掉，因为可能不支持
+          // 添加showDelay和hideDelay，便于调试
+          showDelay: 0,
+          hideDelay: 100,
+          // 确保tooltip始终显示
+          alwaysShowContent: false,
+          // 添加enterable选项，允许鼠标进入tooltip
+          enterable: false,
           formatter: (params) => {
-            if (!params || !params[0]) return ''
+            // 添加调试日志
+            console.log('[TradingApp] ========== Tooltip formatter called ==========')
+            console.log('[TradingApp] Tooltip formatter params:', params)
+            console.log('[TradingApp] window._chartDataForTooltip exists:', !!window._chartDataForTooltip)
+            if (window._chartDataForTooltip) {
+              console.log('[TradingApp] window._chartDataForTooltip length:', window._chartDataForTooltip.length)
+            }
+            
+            if (!params || !params[0]) {
+              console.warn('[TradingApp] Tooltip params is empty')
+              return ''
+            }
             
             // 参考示例代码的formatter方式
             const date = params[0].axisValue  // 时间
+            console.log('[TradingApp] Tooltip date:', date)
+            
             const html = [`<div style="font-weight: bold; margin-bottom: 8px; padding-bottom: 4px; border-bottom: 1px solid #e5e6eb;">${date}</div>`]
             
-            params.forEach(item => {
+            params.forEach((item, index) => {
+              console.log(`[TradingApp] Processing tooltip item ${index}:`, {
+                value: item.value,
+                data: item.data,
+                dataIndex: item.dataIndex,
+                seriesName: item.seriesName,
+                color: item.color
+              })
+              
               const value = item.value
               const valueStr = typeof value === 'number' ? `$${value.toFixed(2)}` : value
               
@@ -1473,32 +1543,66 @@ let portfolioRefreshInterval = null // 投资组合数据自动刷新定时器�
               // 尝试多种方式获取extra信息（trade信息）
               let extraInfo = null
               
+              // 方式1: 直接从item.data获取
               if (item.data && typeof item.data === 'object') {
-                // 如果item.data是对象，直接获取extra
+                console.log(`[TradingApp] Item ${index} - item.data is object:`, item.data)
                 extraInfo = item.data.extra || null
-              } else if (item.dataIndex !== undefined && data && data[item.dataIndex]) {
-                // 如果item.data不是对象，尝试从data数组中获取
-                const dataItem = data[item.dataIndex]
-                if (dataItem && typeof dataItem === 'object' && dataItem.extra) {
-                  extraInfo = dataItem.extra
+                console.log(`[TradingApp] Item ${index} - extraInfo from item.data:`, extraInfo)
+              }
+              
+              // 方式2: 从window._chartDataForTooltip数组中根据dataIndex获取
+              if (!extraInfo && item.dataIndex !== undefined && window._chartDataForTooltip) {
+                const chartData = window._chartDataForTooltip
+                console.log(`[TradingApp] Item ${index} - dataIndex:`, item.dataIndex, 'chartData array length:', chartData ? chartData.length : 0)
+                if (chartData && chartData[item.dataIndex]) {
+                  const dataItem = chartData[item.dataIndex]
+                  console.log(`[TradingApp] Item ${index} - dataItem from chartData array:`, dataItem)
+                  if (dataItem && typeof dataItem === 'object' && dataItem.extra) {
+                    extraInfo = dataItem.extra
+                    console.log(`[TradingApp] Item ${index} - extraInfo from chartData array:`, extraInfo)
+                  }
+                } else {
+                  console.warn(`[TradingApp] Item ${index} - chartData[${item.dataIndex}] is undefined or null`)
+                }
+              }
+              
+              // 方式3: 如果item.data是值，尝试从原始data数组中查找
+              if (!extraInfo && item.dataIndex !== undefined && data && data.length > 0) {
+                console.log(`[TradingApp] Item ${index} - Trying to find in original data array by index`)
+                const originalDataItem = data[item.dataIndex]
+                console.log(`[TradingApp] Item ${index} - originalDataItem:`, originalDataItem)
+                if (originalDataItem && typeof originalDataItem === 'object' && originalDataItem.extra) {
+                  extraInfo = originalDataItem.extra
+                  console.log(`[TradingApp] Item ${index} - Found extraInfo in original data:`, extraInfo)
                 }
               }
               
               // 如果有trade信息（extra字段），显示在下方
               // 背景使用黄色，文字使用红色（按要求）
               if (extraInfo) {
+                console.log(`[TradingApp] Item ${index} - Adding trade info to tooltip:`, extraInfo)
                 itemHtml += `
                   <div style="font-size: 12px; color: #ff0000; background-color: #ffd700; margin-top: 6px; padding: 6px 8px; border-radius: 4px; font-weight: bold;">
                     <span>交易信息: ${extraInfo}</span>
                   </div>
                 `
+              } else {
+                console.warn(`[TradingApp] Item ${index} - No extraInfo found for this data point`)
               }
               
               html.push(itemHtml)
             })
             
-            return html.join('')
-          }
+            const result = html.join('')
+            console.log('[TradingApp] Tooltip formatter result HTML length:', result.length)
+            console.log('[TradingApp] Tooltip formatter result preview:', result.substring(0, 200))
+            console.log('[TradingApp] ========== Tooltip formatter end ==========')
+            return result
+          },
+          // 添加tooltip的显示和隐藏事件监听，用于调试
+          show: true,
+          // 确保tooltip始终显示
+          alwaysShowContent: false
         }
       }
       try {
@@ -1511,6 +1615,88 @@ let portfolioRefreshInterval = null // 投资组合数据自动刷新定时器�
         if (accountChart.value && typeof accountChart.value.setOption === 'function') {
           accountChart.value.setOption(option, true) // 第二个参数 true 表示不合并，完全替换
           console.log('[TradingApp] 图表配置已更新')
+          
+          // 添加调试日志：检查数据点中是否有extra字段
+          const seriesData = option.series[0].data
+          console.log('[TradingApp] 图表数据点总数:', seriesData.length)
+          const dataPointsWithExtra = seriesData.filter(d => d && d.extra)
+          console.log('[TradingApp] 有extra字段的数据点数量:', dataPointsWithExtra.length)
+          if (dataPointsWithExtra.length > 0) {
+            console.log('[TradingApp] 前3个有extra的数据点示例:', dataPointsWithExtra.slice(0, 3).map(d => ({
+              value: d.value,
+              extra: d.extra,
+              tradeId: d.tradeId
+            })))
+          } else {
+            console.warn('[TradingApp] ⚠️ 没有找到任何包含extra字段的数据点！')
+            console.log('[TradingApp] 前5个数据点示例:', seriesData.slice(0, 5))
+          }
+          
+          // 添加tooltip事件监听，用于调试
+          accountChart.value.off('showTip') // 先移除旧的事件监听
+          accountChart.value.off('hideTip')
+          accountChart.value.on('showTip', (params) => {
+            console.log('[TradingApp] ========== ✅ ECharts showTip event triggered ==========')
+            console.log('[TradingApp] showTip params:', params)
+            console.log('[TradingApp] showTip params type:', typeof params)
+            if (params && params.length > 0) {
+              console.log('[TradingApp] showTip first item:', params[0])
+            }
+          })
+          accountChart.value.on('hideTip', () => {
+            console.log('[TradingApp] ========== ❌ ECharts hideTip event triggered ==========')
+          })
+          
+          // 添加鼠标事件监听，用于调试tooltip显示
+          accountChart.value.getZr().off('mousemove')
+          accountChart.value.getZr().off('mouseover')
+          accountChart.value.getZr().off('mouseout')
+          
+          // 监听鼠标移动，检查是否在数据点附近
+          let lastLoggedIndex = -1
+          accountChart.value.getZr().on('mousemove', (e) => {
+            try {
+              const pointInPixel = [e.offsetX, e.offsetY]
+              const pointInGrid = accountChart.value.convertFromPixel('grid', pointInPixel)
+              if (pointInGrid && pointInGrid[0] !== null && pointInGrid[1] !== null) {
+                // 找到最近的数据点
+                const dataIndex = Math.round(pointInGrid[0])
+                if (dataIndex >= 0 && dataIndex < seriesData.length && dataIndex !== lastLoggedIndex) {
+                  lastLoggedIndex = dataIndex
+                  const dataPoint = seriesData[dataIndex]
+                  if (dataPoint) {
+                    console.log(`[TradingApp] 🖱️ Mouse over data point ${dataIndex}:`, {
+                      value: dataPoint.value,
+                      hasExtra: !!dataPoint.extra,
+                      extra: dataPoint.extra,
+                      tradeId: dataPoint.tradeId
+                    })
+                  }
+                }
+              }
+            } catch (err) {
+              // 忽略转换错误
+            }
+          })
+          
+          // 监听鼠标悬停在图表元素上
+          accountChart.value.getZr().on('mouseover', (e) => {
+            console.log('[TradingApp] 🖱️ Mouse over chart element:', e.target)
+          })
+          
+          // 检查tooltip DOM元素是否存在
+          setTimeout(() => {
+            const tooltipElements = document.querySelectorAll('.echarts-tooltip')
+            console.log('[TradingApp] 🔍 Tooltip DOM elements found:', tooltipElements.length)
+            tooltipElements.forEach((el, idx) => {
+              console.log(`[TradingApp] Tooltip element ${idx}:`, {
+                visible: window.getComputedStyle(el).display !== 'none',
+                zIndex: window.getComputedStyle(el).zIndex,
+                position: window.getComputedStyle(el).position,
+                opacity: window.getComputedStyle(el).opacity
+              })
+            })
+          }, 1000)
         }
       } catch (error) {
         console.error('[TradingApp] Error setting chart option (single-model):', error)
