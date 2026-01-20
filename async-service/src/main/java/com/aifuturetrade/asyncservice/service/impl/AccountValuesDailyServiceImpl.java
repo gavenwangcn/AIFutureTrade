@@ -38,7 +38,7 @@ public class AccountValuesDailyServiceImpl implements AccountValuesDailyService 
     private AccountValuesDailyMapper accountValuesDailyMapper;
     
     // Cron表达式配置，默认每两分钟执行一次
-    @Value("${async.account-values-daily.cron:0 */2 * * * ?}")
+    @Value("${async.account-values-daily.cron:0 0 8 * * ?}")
     private String cronExpression;
     
     // 调度器运行状态

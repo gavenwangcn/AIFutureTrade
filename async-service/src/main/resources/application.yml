@@ -158,3 +158,8 @@ async:
   auto-close:
     # 执行周期（秒），默认3秒
     interval-seconds: ${ASYNC_AUTO_CLOSE_INTERVAL_SECONDS:3}
+  
+  # 账户每日价值服务配置
+  account-values-daily:
+    # Cron表达式（每天8点执行，格式：秒 分 时 日 月 周）
+    cron: "0 0 8 * * ?"
