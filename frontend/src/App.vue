@@ -787,6 +787,51 @@
       @interval-change="handleKlineIntervalChange"
     />
 
+    <!-- Trade详情弹框 -->
+    <Modal
+      :visible="showTradeDetailModal"
+      title="交易详情"
+      @update:visible="showTradeDetailModal = $event"
+      @close="showTradeDetailModal = false"
+    >
+      <div v-if="selectedTradeDetail" class="trade-detail-content">
+        <div class="trade-detail-row">
+          <div class="trade-detail-label">合约符号</div>
+          <div class="trade-detail-value">{{ selectedTradeDetail.symbol }}</div>
+        </div>
+        <div class="trade-detail-row">
+          <div class="trade-detail-label">交易信号</div>
+          <div class="trade-detail-value">{{ selectedTradeDetail.translatedSignal }}</div>
+        </div>
+        <div class="trade-detail-row">
+          <div class="trade-detail-label">交易数量</div>
+          <div class="trade-detail-value">{{ selectedTradeDetail.quantity }}</div>
+        </div>
+        <div v-if="selectedTradeDetail.price !== null" class="trade-detail-row">
+          <div class="trade-detail-label">交易价格</div>
+          <div class="trade-detail-value">${{ selectedTradeDetail.price?.toFixed(2) || 'N/A' }}</div>
+        </div>
+        <div v-if="selectedTradeDetail.pnl !== null" class="trade-detail-row">
+          <div class="trade-detail-label">盈亏</div>
+          <div class="trade-detail-value" :class="{ 'profit': selectedTradeDetail.pnl > 0, 'loss': selectedTradeDetail.pnl < 0 }">
+            ${{ selectedTradeDetail.pnl?.toFixed(2) || 'N/A' }}
+          </div>
+        </div>
+        <div v-if="selectedTradeDetail.fee !== null" class="trade-detail-row">
+          <div class="trade-detail-label">手续费</div>
+          <div class="trade-detail-value">${{ selectedTradeDetail.fee?.toFixed(2) || 'N/A' }}</div>
+        </div>
+        <div class="trade-detail-row">
+          <div class="trade-detail-label">账户价值</div>
+          <div class="trade-detail-value">${{ selectedTradeDetail.accountValue?.toFixed(2) || 'N/A' }}</div>
+        </div>
+        <div class="trade-detail-row">
+          <div class="trade-detail-label">交易时间</div>
+          <div class="trade-detail-value">{{ selectedTradeDetail.timestamp ? new Date(selectedTradeDetail.timestamp).toLocaleString('zh-CN') : 'N/A' }}</div>
+        </div>
+      </div>
+    </Modal>
+
     <!-- 模态框组件 -->
     <SettingsModal
       :visible="showSettingsModal"
@@ -1070,6 +1115,7 @@
 import { ref, onMounted, watch } from 'vue'
 import KLineChart from './components/KLineChart.vue'
 import SettingsModal from './components/SettingsModal.vue'
+import Modal from './components/Modal.vue'
 import StrategyManagementModal from './components/StrategyManagementModal.vue'
 import FutureConfigModal from './components/FutureConfigModal.vue'
 import ApiProviderModal from './components/ApiProviderModal.vue'
@@ -1143,6 +1189,8 @@ const {
   showLeverageModal,
   pendingLeverageModelId,
   leverageModelName,
+  showTradeDetailModal,
+  selectedTradeDetail,
   showMaxPositionsModal,
   pendingMaxPositionsModelId,
   maxPositionsModelName,

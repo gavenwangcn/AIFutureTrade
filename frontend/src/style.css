@@ -1849,25 +1849,11 @@ body {
 #accountChart {
     width: 100% !important;
     height: 300px !important;
+    min-width: 0;
+    min-height: 0;
+    display: block;
 }
 
-/* 确保 ECharts tooltip 能正常显示 */
-/* ECharts tooltip 默认类名是 .echarts-tooltip，但可能被appendToBody移动到body下 */
-body > div[class*="echarts-tooltip"],
-div[class*="echarts-tooltip"],
-.echarts-tooltip {
-    z-index: 9999 !important;
-    pointer-events: none !important;
-    position: absolute !important;
-}
-
-/* 更具体的选择器，针对账户价值图表容器 */
-#accountChart ~ div[class*="echarts-tooltip"],
-.card-body div[class*="echarts-tooltip"],
-.content-card div[class*="echarts-tooltip"] {
-    z-index: 9999 !important;
-    pointer-events: none !important;
-}
 
 /* Tabs */
 .card-tabs {
@@ -2249,6 +2235,45 @@ div[class*="echarts-tooltip"],
     display: flex;
     justify-content: flex-end;
     gap: 12px;
+}
+
+/* Trade详情弹框样式 */
+.trade-detail-content {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+}
+
+.trade-detail-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 12px 0;
+    border-bottom: 1px solid var(--border-1);
+}
+
+.trade-detail-row:last-child {
+    border-bottom: none;
+}
+
+.trade-detail-label {
+    font-size: 14px;
+    color: var(--text-2);
+    font-weight: 500;
+}
+
+.trade-detail-value {
+    font-size: 14px;
+    color: var(--text-1);
+    font-weight: 600;
+}
+
+.trade-detail-value.profit {
+    color: var(--danger);
+}
+
+.trade-detail-value.loss {
+    color: var(--success);
 }
 
 /* Form */
