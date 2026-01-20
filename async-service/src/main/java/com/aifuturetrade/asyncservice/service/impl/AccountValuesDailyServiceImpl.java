@@ -7,6 +7,7 @@ import com.aifuturetrade.asyncservice.entity.ModelDO;
 import com.aifuturetrade.asyncservice.service.AccountValuesDailyService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
@@ -15,6 +16,7 @@ import java.time.ZoneId;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * 账户每日价值服务实现
@@ -35,12 +37,17 @@ public class AccountValuesDailyServiceImpl implements AccountValuesDailyService 
     @Autowired
     private AccountValuesDailyMapper accountValuesDailyMapper;
     
+    // Cron表达式配置，默认每两分钟执行一次
+    @Value("${async.account-values-daily.cron:0 */2 * * * ?}")
+    private String cronExpression;
+    
+    // 调度器运行状态
+    private final AtomicBoolean schedulerRunning = new AtomicBoolean(false);
+    
     /**
-     * 每天8点执行，记录所有模型的每日账户价值
-     * Cron表达式：0 0 8 * * ? 表示每天8点执行
+     * 记录所有模型的每日账户价值
      */
     @Override
-    @Scheduled(cron = "0 */2 * * * ?")
     public void recordDailyAccountValues() {
         log.info("=".repeat(80));
         log.info("[AccountValuesDaily] ========== 开始执行每日账户价值记录任务 ==========");
@@ -134,7 +141,34 @@ public class AccountValuesDailyServiceImpl implements AccountValuesDailyService 
             
         } catch (Exception e) {
             log.error("[AccountValuesDaily] ❌ 执行每日账户价值记录任务失败: {}", e.getMessage(), e);
-            log.info("=".repeat(80));
+            log.info(".".repeat(80));
         }
+    }
+    
+    /**
+     * 使用cron表达式启动定时调度器
+     * 默认每两分钟执行一次
+     */
+    @Override
+    @Scheduled(cron = "${async.account-values-daily.cron:0 */2 * * * ?}")
+    public void startScheduler() {
+        if (schedulerRunning.get()) {
+            return;
+        }
+        
+        schedulerRunning.set(true);
+        try {
+            recordDailyAccountValues();
+        } finally {
+            schedulerRunning.set(false);
+        }
+    }
+    
+    /**
+     * 停止定时调度器
+     */
+    @Override
+    public void stopScheduler() {
+        schedulerRunning.set(false);
     }
 }

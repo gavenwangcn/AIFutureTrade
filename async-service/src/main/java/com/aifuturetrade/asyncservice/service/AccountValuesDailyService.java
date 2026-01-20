@@ -13,4 +13,15 @@ public interface AccountValuesDailyService {
      * 每天8点执行
      */
     void recordDailyAccountValues();
+    
+    /**
+     * 启动定时调度器
+     * 使用cron表达式配置执行频率
+     */
+    void startScheduler();
+    
+    /**
+     * 停止定时调度器
+     */
+    void stopScheduler();
 }

@@ -4,6 +4,7 @@ import com.aifuturetrade.asyncservice.service.AsyncAgentService;
 import com.aifuturetrade.asyncservice.service.MarketSymbolOfflineService;
 import com.aifuturetrade.asyncservice.service.PriceRefreshService;
 import com.aifuturetrade.asyncservice.service.MarketTickerStreamService;
+import com.aifuturetrade.asyncservice.service.AccountValuesDailyService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
@@ -34,6 +35,10 @@ public class AsyncAgentServiceImpl implements AsyncAgentService {
     // 市场Ticker流服务
     @Autowired(required = false)
     private MarketTickerStreamService marketTickerStreamService;
+    
+    // 账户每日价值服务
+    @Autowired(required = false)
+    private AccountValuesDailyService accountValuesDailyService;
     
     private final AtomicBoolean allTasksRunning = new AtomicBoolean(false);
     
@@ -108,13 +113,16 @@ public class AsyncAgentServiceImpl implements AsyncAgentService {
             case "market_symbol_offline":
                 runMarketSymbolOfflineTask();
                 break;
+            case "account_values_daily":
+                runAccountValuesDailyTask();
+                break;
             case "all":
                 runAllTasks(durationSeconds);
                 break;
             default:
                 log.error("[AsyncAgentServiceImpl] ❌ 未知的任务类型: task={}", task);
                 throw new IllegalArgumentException(
-                        "Unknown task '" + task + "'. Available: market_tickers, price_refresh, market_symbol_offline, all");
+                        "Unknown task '" + task + "'. Available: market_tickers, price_refresh, market_symbol_offline, account_values_daily, all");
         }
     }
     
@@ -128,6 +136,7 @@ public class AsyncAgentServiceImpl implements AsyncAgentService {
         stopMarketTickersTask();
         stopPriceRefreshTask();
         stopMarketSymbolOfflineTask();
+        stopAccountValuesDailyTask();
         log.info("[AsyncAgentServiceImpl] ✅ 所有任务已停止");
     }
     
@@ -140,6 +149,8 @@ public class AsyncAgentServiceImpl implements AsyncAgentService {
                 return priceRefreshService != null; // 价格刷新服务通过定时任务运行
             case "market_symbol_offline":
                 return marketSymbolOfflineService != null; // Symbol下线服务通过定时任务运行
+            case "account_values_daily":
+                return accountValuesDailyService != null; // 账户每日价值服务通过定时任务运行
             case "all":
                 return allTasksRunning.get();
             default:
@@ -195,11 +206,46 @@ public class AsyncAgentServiceImpl implements AsyncAgentService {
     }
     
     /**
+     * 运行账户每日价值记录任务
+     * 依赖@Scheduled注解和cron表达式进行定时触发
+     */
+    private void runAccountValuesDailyTask() {
+        // 账户每日价值服务通过@Scheduled注解自动运行，无需立即执行
+        // 这里保持方法存在是为了与其他任务保持一致的API设计
+        log.info("[AsyncAgentServiceImpl] Account values daily task is configured with cron expression, will be triggered automatically");
+        
+        // 可以选择手动触发一次，或者只依赖cron表达式
+        // 以下代码为手动触发一次的实现，如果不需要可以注释掉
+        /*
+executorService.submit(() -> {
+            try {
+                if (accountValuesDailyService != null) {
+                    accountValuesDailyService.recordDailyAccountValues();
+                } else {
+                    log.warn("[AsyncAgentServiceImpl] AccountValuesDailyService is null");
+                }
+            } catch (Exception e) {
+                log.error("[AsyncAgentServiceImpl] Account values daily task error", e);
+            }
+        });
+        */
+    }
+    
+    /**
      * 停止市场Symbol下线任务
      */
     private void stopMarketSymbolOfflineTask() {
         if (marketSymbolOfflineService != null) {
             marketSymbolOfflineService.stopScheduler();
+        }
+    }
+    
+    /**
+     * 停止账户每日价值任务
+     */
+    private void stopAccountValuesDailyTask() {
+        if (accountValuesDailyService != null) {
+            accountValuesDailyService.stopScheduler();
         }
     }
     
@@ -218,10 +264,11 @@ public class AsyncAgentServiceImpl implements AsyncAgentService {
         // 启动所有任务
         runMarketTickersTask(durationSeconds);
         
-        // 价格刷新和Symbol下线服务通过定时任务自动运行
+        // 价格刷新、Symbol下线和账户每日价值服务通过定时任务自动运行
         // 如果需要立即执行，可以手动触发
         runPriceRefreshTask();
         runMarketSymbolOfflineTask();
+        runAccountValuesDailyTask();
         
         // 如果指定了运行时长，等待指定时间后停止
         if (durationSeconds != null) {
