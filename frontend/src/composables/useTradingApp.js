@@ -345,7 +345,6 @@ let portfolioRefreshInterval = null // 投资组合数据自动刷新定时器�
     const refreshInterval = 10000 // 10秒
     
     marketPricesRefreshInterval = setInterval(() => {
-      console.log(`[TradingApp] 轮询刷新市场行情价格数据（${refreshInterval/1000}秒间隔）`)
       loadMarketPrices()
     }, refreshInterval)
 
@@ -714,15 +713,6 @@ let portfolioRefreshInterval = null // 投资组合数据自动刷新定时器�
         
         // 处理数据，确保字段名正确
         modelPortfolioSymbols.value = response.data.map((item, index) => {
-          console.log(`[TradingApp] 持仓合约[${index + 1}] 原始数据:`, {
-            symbol: item.symbol,
-            price: item.price,
-            change: item.change,
-            changePercent: item.changePercent,
-            quoteVolume: item.quoteVolume,
-            volume: item.volume
-          })
-          
           // 确保字段名正确
           const mappedItem = {
             symbol: item.symbol || '',
@@ -736,18 +726,9 @@ let portfolioRefreshInterval = null // 投资组合数据自动刷新定时器�
             ...item  // 保留所有原始字段
           }
           
-          console.log(`[TradingApp] 持仓合约[${index + 1}] 映射后数据:`, {
-            symbol: mappedItem.symbol,
-            price: mappedItem.price,
-            changePercent: mappedItem.changePercent,
-            quoteVolume: mappedItem.quoteVolume
-          })
-          
           return mappedItem
         })
         
-        console.log('[TradingApp] 映射完成，最终持仓合约实时行情数据数量:', modelPortfolioSymbols.value.length)
-        console.log('[TradingApp] 最终持仓合约实时行情数据:', JSON.stringify(modelPortfolioSymbols.value, null, 2))
       } else {
         console.warn('[TradingApp] 持仓合约实时行情数据格式不正确:', response)
         modelPortfolioSymbols.value = []
