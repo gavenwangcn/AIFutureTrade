@@ -1450,8 +1450,15 @@ let portfolioRefreshInterval = null // 投资组合数据自动刷新定时器�
           symbol: 'circle',
           symbolSize: (value, params) => {
             // 如果有trade信息，显示稍大的点
-            return params.data && params.data.tradeId ? 8 : 0
+            const size = params.data && params.data.tradeId ? 8 : 0
+            // 添加调试日志
+            if (size > 0) {
+              console.log('[TradingApp] Symbol size for trade point:', size, 'data:', params.data)
+            }
+            return size
           },
+          // 确保数据点可交互
+          triggerLineEvent: true,
           lineStyle: { color: '#3370ff', width: 2 },
           areaStyle: {
             color: {
@@ -1475,8 +1482,8 @@ let portfolioRefreshInterval = null // 投资组合数据自动刷新定时器�
           }
         }],
         tooltip: {
-          trigger: 'axis',  // 使用axis触发，参考示例代码
-          // 同时支持item触发，当鼠标移动到数据点上时也能显示
+          trigger: 'item',  // 改为item触发，当鼠标移动到数据点上时显示
+          // 同时支持axis触发，显示十字准星
           axisPointer: {
             type: 'cross',  // 显示十字准星
             label: {
@@ -1491,51 +1498,59 @@ let portfolioRefreshInterval = null // 投资组合数据自动刷新定时器�
           padding: [8, 12],
           // 设置更高的z-index，确保tooltip显示在其他元素之上
           extraCssText: 'z-index: 99999 !important; box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15) !important; pointer-events: none !important;',
-          // 添加appendToBody选项，确保tooltip附加到body上（ECharts 5.x支持）
-          // appendToBody: true,  // 注释掉，因为可能不支持
           // 添加showDelay和hideDelay，便于调试
           showDelay: 0,
-          hideDelay: 100,
+          hideDelay: 300,  // 增加延迟，避免快速隐藏
           // 确保tooltip始终显示
           alwaysShowContent: false,
           // 添加enterable选项，允许鼠标进入tooltip
           enterable: false,
+          // 触发条件：鼠标移动到数据点上
+          triggerOn: 'mousemove|click',
           formatter: (params) => {
             // 添加调试日志
             console.log('[TradingApp] ========== Tooltip formatter called ==========')
             console.log('[TradingApp] Tooltip formatter params:', params)
+            console.log('[TradingApp] Tooltip formatter params type:', Array.isArray(params) ? 'array' : typeof params)
             console.log('[TradingApp] window._chartDataForTooltip exists:', !!window._chartDataForTooltip)
             if (window._chartDataForTooltip) {
               console.log('[TradingApp] window._chartDataForTooltip length:', window._chartDataForTooltip.length)
             }
             
-            if (!params || !params[0]) {
+            // item触发模式下，params是单个对象，不是数组
+            let paramsArray = Array.isArray(params) ? params : [params]
+            
+            if (!paramsArray || paramsArray.length === 0 || !paramsArray[0]) {
               console.warn('[TradingApp] Tooltip params is empty')
               return ''
             }
             
-            // 参考示例代码的formatter方式
-            const date = params[0].axisValue  // 时间
+            const firstParam = paramsArray[0]
+            // item触发模式下，使用params.name或params.axisValue获取时间
+            const date = firstParam.axisValue || firstParam.name || firstParam.value || '未知时间'
             console.log('[TradingApp] Tooltip date:', date)
             
             const html = [`<div style="font-weight: bold; margin-bottom: 8px; padding-bottom: 4px; border-bottom: 1px solid #e5e6eb;">${date}</div>`]
             
-            params.forEach((item, index) => {
+            paramsArray.forEach((item, index) => {
               console.log(`[TradingApp] Processing tooltip item ${index}:`, {
                 value: item.value,
                 data: item.data,
                 dataIndex: item.dataIndex,
                 seriesName: item.seriesName,
-                color: item.color
+                color: item.color,
+                name: item.name,
+                axisValue: item.axisValue
               })
               
-              const value = item.value
-              const valueStr = typeof value === 'number' ? `$${value.toFixed(2)}` : value
+              // item触发模式下，value可能在item.value或item.data.value中
+              const value = item.value !== undefined ? item.value : (item.data && item.data.value !== undefined ? item.data.value : null)
+              const valueStr = typeof value === 'number' ? `$${value.toFixed(2)}` : (value || 'N/A')
               
               // 构建tooltip内容
               let itemHtml = `
                 <div style="display: flex; align-items: center; margin-bottom: 4px;">
-                  <span style="display: inline-block; width: 10px; height: 10px; background: ${item.color}; border-radius: 50%; margin-right: 8px;"></span>
+                  <span style="display: inline-block; width: 10px; height: 10px; background: ${item.color || '#3370ff'}; border-radius: 50%; margin-right: 8px;"></span>
                   <span>${item.seriesName || '账户价值'}: ${valueStr}</span>
                 </div>
               `
@@ -1543,7 +1558,7 @@ let portfolioRefreshInterval = null // 投资组合数据自动刷新定时器�
               // 尝试多种方式获取extra信息（trade信息）
               let extraInfo = null
               
-              // 方式1: 直接从item.data获取
+              // 方式1: 直接从item.data获取（item触发模式下，item.data就是数据点对象）
               if (item.data && typeof item.data === 'object') {
                 console.log(`[TradingApp] Item ${index} - item.data is object:`, item.data)
                 extraInfo = item.data.extra || null
@@ -1580,14 +1595,14 @@ let portfolioRefreshInterval = null // 投资组合数据自动刷新定时器�
               // 如果有trade信息（extra字段），显示在下方
               // 背景使用黄色，文字使用红色（按要求）
               if (extraInfo) {
-                console.log(`[TradingApp] Item ${index} - Adding trade info to tooltip:`, extraInfo)
+                console.log(`[TradingApp] Item ${index} - ✅ Adding trade info to tooltip:`, extraInfo)
                 itemHtml += `
                   <div style="font-size: 12px; color: #ff0000; background-color: #ffd700; margin-top: 6px; padding: 6px 8px; border-radius: 4px; font-weight: bold;">
                     <span>交易信息: ${extraInfo}</span>
                   </div>
                 `
               } else {
-                console.warn(`[TradingApp] Item ${index} - No extraInfo found for this data point`)
+                console.warn(`[TradingApp] Item ${index} - ❌ No extraInfo found for this data point`)
               }
               
               html.push(itemHtml)
