@@ -1443,36 +1443,42 @@ let portfolioRefreshInterval = null // 投资组合数据自动刷新定时器�
           }
         }],
         tooltip: {
-          trigger: 'axis',  // 改回axis触发，更可靠
-          // 同时支持item触发，当鼠标移动到数据点上时也能显示
+          trigger: 'axis',  // 使用axis触发
           axisPointer: {
-            type: 'cross',  // 显示十字准星
-            label: {
-              backgroundColor: '#6a7985'
+            type: 'line',  // 改为line类型，更简洁
+            lineStyle: {
+              color: '#3370ff',
+              width: 1,
+              type: 'dashed'
             },
-            // 确保axisPointer可以触发tooltip
-            triggerTooltip: true
+            label: {
+              show: false  // 隐藏label，避免干扰
+            }
           },
-          confine: false,  // 改为false，允许tooltip显示在容器外，避免被裁剪
+          confine: false,  // 允许tooltip显示在容器外
           backgroundColor: 'rgba(255, 255, 255, 0.95)',
           borderColor: '#e5e6eb',
           borderWidth: 1,
           textStyle: { color: '#1d2129', fontSize: 12 },
           padding: [8, 12],
           // 设置更高的z-index，确保tooltip显示在其他元素之上
-          extraCssText: 'z-index: 99999 !important; box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15) !important; pointer-events: none !important;',
-          // 添加showDelay和hideDelay，便于调试
+          extraCssText: 'z-index: 99999 !important; box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15) !important;',
+          // 添加showDelay和hideDelay
           showDelay: 0,
-          hideDelay: 300,  // 增加延迟，避免快速隐藏
-          // 确保tooltip始终显示
-          alwaysShowContent: false,
-          // 添加enterable选项，允许鼠标进入tooltip
-          enterable: false,
-          // 触发条件：鼠标移动或点击
-          triggerOn: 'mousemove|click',
+          hideDelay: 100,
+          // 触发条件：鼠标移动
+          triggerOn: 'mousemove',
+          // 确保tooltip可以显示
+          show: true,
           formatter: (params) => {
             // 使用try-catch确保不会因为错误导致tooltip不显示
             try {
+              // 先检查params是否有效，避免后续错误
+              if (!params || !Array.isArray(params) || params.length === 0 || !params[0]) {
+                console.warn('[TradingApp] ⚠️ Tooltip formatter called with invalid params:', params)
+                return '<div style="padding: 8px;">无数据</div>'
+              }
+              
               console.log('[TradingApp] ========== 🔧 Tooltip formatter called ==========')
               console.log('[TradingApp] Tooltip formatter params:', params)
               console.log('[TradingApp] Tooltip formatter params type:', Array.isArray(params) ? 'array' : typeof params)
@@ -1649,7 +1655,8 @@ let portfolioRefreshInterval = null // 投资组合数据自动刷新定时器�
                 zIndex: window.getComputedStyle(tooltipEl).zIndex
               })
             } else {
-              console.warn('[TradingApp] ⚠️ Tooltip DOM element not found!')
+              // 只在调试时输出，避免日志过多
+              // console.warn('[TradingApp] ⚠️ Tooltip DOM element not found!')
             }
           })
           
