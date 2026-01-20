@@ -1420,6 +1420,8 @@ let portfolioRefreshInterval = null // 投资组合数据自动刷新定时器�
           triggerLineEvent: true,
           // 确保所有数据点都可以触发tooltip（即使symbolSize为0）
           silent: false,
+          // 确保数据点可以触发tooltip
+          triggerEvent: true,
           lineStyle: { color: '#3370ff', width: 2 },
           areaStyle: {
             color: {
@@ -1443,16 +1445,16 @@ let portfolioRefreshInterval = null // 投资组合数据自动刷新定时器�
           }
         }],
         tooltip: {
-          trigger: 'axis',  // 使用axis触发
+          trigger: 'axis',  // 使用axis触发，根据ECharts 6.0.0 API
           axisPointer: {
-            type: 'line',  // 改为line类型，更简洁
+            type: 'line',  // 使用line类型
             lineStyle: {
               color: '#3370ff',
               width: 1,
               type: 'dashed'
             },
             label: {
-              show: false  // 隐藏label，避免干扰
+              show: false
             }
           },
           confine: false,  // 允许tooltip显示在容器外
@@ -1461,137 +1463,81 @@ let portfolioRefreshInterval = null // 投资组合数据自动刷新定时器�
           borderWidth: 1,
           textStyle: { color: '#1d2129', fontSize: 12 },
           padding: [8, 12],
-          // 设置更高的z-index，确保tooltip显示在其他元素之上
           extraCssText: 'z-index: 99999 !important; box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15) !important;',
-          // 添加showDelay和hideDelay
           showDelay: 0,
           hideDelay: 100,
-          // 触发条件：鼠标移动
           triggerOn: 'mousemove',
-          // 确保tooltip可以显示
-          show: true,
-          formatter: (params) => {
-            // 使用try-catch确保不会因为错误导致tooltip不显示
+          // 根据ECharts 6.0.0 API，formatter签名: (params: Array, ticket: string, callback: Function) => string
+          formatter: function(params, ticket, callback) {
+            // 根据ECharts 6.0.0 API，trigger: 'axis'时，params是数组
             try {
-              // 先检查params是否有效，避免后续错误
-              if (!params || !Array.isArray(params) || params.length === 0 || !params[0]) {
-                console.warn('[TradingApp] ⚠️ Tooltip formatter called with invalid params:', params)
-                return '<div style="padding: 8px;">无数据</div>'
-              }
-              
-              console.log('[TradingApp] ========== 🔧 Tooltip formatter called ==========')
+              console.log('[TradingApp] ========== 🔧 Tooltip formatter called (ECharts 6.0.0) ==========')
               console.log('[TradingApp] Tooltip formatter params:', params)
-              console.log('[TradingApp] Tooltip formatter params type:', Array.isArray(params) ? 'array' : typeof params)
-              console.log('[TradingApp] window._chartDataForTooltip exists:', !!window._chartDataForTooltip)
-              if (window._chartDataForTooltip) {
-                console.log('[TradingApp] window._chartDataForTooltip length:', window._chartDataForTooltip.length)
-              }
               
-              // axis触发模式下，params是数组
+              // 检查params有效性
               if (!params || !Array.isArray(params) || params.length === 0 || !params[0]) {
-                console.warn('[TradingApp] ⚠️ Tooltip params is empty or invalid:', params)
-                // 即使params无效，也返回一个基本的tooltip，确保tooltip能显示
+                console.warn('[TradingApp] ⚠️ Invalid params:', params)
                 return '<div style="padding: 8px;">无数据</div>'
               }
               
               const firstParam = params[0]
-              // axis触发模式下，使用axisValue获取时间
+              // 获取时间（axis触发模式下，使用axisValue）
               const date = firstParam.axisValue || firstParam.name || '未知时间'
-              console.log('[TradingApp] Tooltip date:', date)
               
-              const html = [`<div style="font-weight: bold; margin-bottom: 8px; padding-bottom: 4px; border-bottom: 1px solid #e5e6eb;">${date}</div>`]
+              // 构建HTML内容
+              let html = `<div style="font-weight: bold; margin-bottom: 8px; padding-bottom: 4px; border-bottom: 1px solid #e5e6eb;">${date}</div>`
               
+              // 遍历所有系列数据
               params.forEach((item, index) => {
-                console.log(`[TradingApp] Processing tooltip item ${index}:`, {
-                  value: item.value,
-                  data: item.data,
-                  dataIndex: item.dataIndex,
-                  seriesName: item.seriesName,
-                  color: item.color,
-                  name: item.name,
-                  axisValue: item.axisValue
-                })
-                
-                // axis触发模式下，value在item.value中
+                // 获取数据值
                 const value = item.value
                 const valueStr = typeof value === 'number' ? `$${value.toFixed(2)}` : (value || 'N/A')
                 
-                // 构建tooltip内容
-                let itemHtml = `
+                // 构建基础内容（使用ECharts提供的marker）
+                html += `
                   <div style="display: flex; align-items: center; margin-bottom: 4px;">
-                    <span style="display: inline-block; width: 10px; height: 10px; background: ${item.color || '#3370ff'}; border-radius: 50%; margin-right: 8px;"></span>
+                    ${item.marker || `<span style="display: inline-block; width: 10px; height: 10px; background: ${item.color || '#3370ff'}; border-radius: 50%; margin-right: 8px;"></span>`}
                     <span>${item.seriesName || '账户价值'}: ${valueStr}</span>
                   </div>
                 `
                 
-                // 尝试多种方式获取extra信息（trade信息）
+                // 获取trade信息（extra字段）
                 let extraInfo = null
                 
-                // 方式1: 直接从item.data获取（item触发模式下，item.data就是数据点对象）
-                if (item.data && typeof item.data === 'object') {
-                  console.log(`[TradingApp] Item ${index} - item.data is object:`, item.data)
-                  extraInfo = item.data.extra || null
-                  console.log(`[TradingApp] Item ${index} - extraInfo from item.data:`, extraInfo)
+                // 方式1: 从item.data获取（如果data是对象）
+                if (item.data && typeof item.data === 'object' && item.data.extra) {
+                  extraInfo = item.data.extra
                 }
                 
-                // 方式2: 从window._chartDataForTooltip数组中根据dataIndex获取
+                // 方式2: 从window._chartDataForTooltip获取
                 if (!extraInfo && item.dataIndex !== undefined && window._chartDataForTooltip) {
                   const chartData = window._chartDataForTooltip
-                  console.log(`[TradingApp] Item ${index} - dataIndex:`, item.dataIndex, 'chartData array length:', chartData ? chartData.length : 0)
-                  if (chartData && chartData[item.dataIndex]) {
-                    const dataItem = chartData[item.dataIndex]
-                    console.log(`[TradingApp] Item ${index} - dataItem from chartData array:`, dataItem)
-                    if (dataItem && typeof dataItem === 'object' && dataItem.extra) {
-                      extraInfo = dataItem.extra
-                      console.log(`[TradingApp] Item ${index} - extraInfo from chartData array:`, extraInfo)
-                    }
-                  } else {
-                    console.warn(`[TradingApp] Item ${index} - chartData[${item.dataIndex}] is undefined or null`)
+                  if (chartData && chartData[item.dataIndex] && chartData[item.dataIndex].extra) {
+                    extraInfo = chartData[item.dataIndex].extra
                   }
                 }
                 
-                // 方式3: 如果item.data是值，尝试从原始data数组中查找
-                if (!extraInfo && item.dataIndex !== undefined && data && data.length > 0) {
-                  console.log(`[TradingApp] Item ${index} - Trying to find in original data array by index`)
-                  const originalDataItem = data[item.dataIndex]
-                  console.log(`[TradingApp] Item ${index} - originalDataItem:`, originalDataItem)
-                  if (originalDataItem && typeof originalDataItem === 'object' && originalDataItem.extra) {
-                    extraInfo = originalDataItem.extra
-                    console.log(`[TradingApp] Item ${index} - Found extraInfo in original data:`, extraInfo)
-                  }
+                // 方式3: 从原始data数组获取
+                if (!extraInfo && item.dataIndex !== undefined && data && data[item.dataIndex] && data[item.dataIndex].extra) {
+                  extraInfo = data[item.dataIndex].extra
                 }
                 
-                // 如果有trade信息（extra字段），显示在下方
-                // 背景使用黄色，文字使用红色（按要求）
+                // 如果有trade信息，添加显示（黄色背景，红色文字）
                 if (extraInfo) {
-                  console.log(`[TradingApp] Item ${index} - ✅ Adding trade info to tooltip:`, extraInfo)
-                  itemHtml += `
+                  console.log(`[TradingApp] ✅ Found trade info for item ${index}:`, extraInfo)
+                  html += `
                     <div style="font-size: 12px; color: #ff0000; background-color: #ffd700; margin-top: 6px; padding: 6px 8px; border-radius: 4px; font-weight: bold;">
                       <span>交易信息: ${extraInfo}</span>
                     </div>
                   `
-                } else {
-                  console.warn(`[TradingApp] Item ${index} - ❌ No extraInfo found for this data point`)
                 }
-                
-                html.push(itemHtml)
               })
               
-              const result = html.join('')
-              console.log('[TradingApp] Tooltip formatter result HTML length:', result.length)
-              console.log('[TradingApp] Tooltip formatter result preview:', result.substring(0, 200))
-              console.log('[TradingApp] ========== ✅ Tooltip formatter end (returning result) ==========')
+              console.log('[TradingApp] ✅ Tooltip formatter completed, returning HTML')
+              return html
               
-              // 确保返回的内容不为空
-              if (!result || result.trim().length === 0) {
-                console.warn('[TradingApp] ⚠️ Tooltip formatter returned empty result!')
-                return '<div style="padding: 8px;">账户价值数据</div>'
-              }
-              
-              return result
             } catch (err) {
               console.error('[TradingApp] ❌ Error in tooltip formatter:', err)
-              // 即使出错也返回一个基本的tooltip
               return '<div style="padding: 8px; color: red;">Tooltip错误</div>'
             }
           },
