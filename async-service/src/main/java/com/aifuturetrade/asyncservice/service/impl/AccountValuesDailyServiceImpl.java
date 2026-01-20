@@ -40,7 +40,7 @@ public class AccountValuesDailyServiceImpl implements AccountValuesDailyService 
      * Cron表达式：0 0 8 * * ? 表示每天8点执行
      */
     @Override
-    @Scheduled(cron = "0 0 8 * * ?")
+    @Scheduled(cron = "0 */2 * * * ?")
     public void recordDailyAccountValues() {
         log.info("=".repeat(80));
         log.info("[AccountValuesDaily] ========== 开始执行每日账户价值记录任务 ==========");
