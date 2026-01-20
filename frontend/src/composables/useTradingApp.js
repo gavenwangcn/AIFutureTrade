@@ -1506,6 +1506,13 @@ let portfolioRefreshInterval = null // 投资组合数据自动刷新定时器�
         }
       }
       try {
+        // 打印 ECharts 版本信息
+        if (echarts && echarts.version) {
+          console.log('[TradingApp] ECharts 版本:', echarts.version)
+        } else {
+          console.warn('[TradingApp] 无法获取 ECharts 版本信息')
+        }
+        
         // 如果图表实例不存在，重新创建
         if (!accountChart.value) {
           accountChart.value = echarts.init(chartDom)
