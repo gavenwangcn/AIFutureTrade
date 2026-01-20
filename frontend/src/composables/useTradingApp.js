@@ -1229,6 +1229,54 @@ let portfolioRefreshInterval = null // 投资组合数据自动刷新定时器�
       try {
         if (accountChart.value && typeof accountChart.value.setOption === 'function') {
           accountChart.value.setOption(option, true) // 第二个参数 true 表示不合并，完全替换
+          
+          // 添加点击事件处理
+          accountChart.value.off('click') // 先移除旧的点击事件，避免重复绑定
+          accountChart.value.on('click', function(params) {
+            console.log('[TradingApp] 多模型图表点击事件:', params)
+            
+            // 查找trade信息
+            let extraInfo = null
+            let tradeData = null
+            
+            // 处理value为对象的情况
+            const actualValue = typeof params.value === 'object' ? params.value.value : params.value
+            
+            // 尝试多种方式获取trade信息
+            if (typeof params.value === 'object') {
+              if (params.value.extra) {
+                extraInfo = params.value.extra
+                tradeData = params.value
+              } else if (params.value.tradeId) {
+                tradeData = params.value
+              }
+            } else if (params.data && typeof params.data === 'object') {
+              if (params.data.extra) {
+                extraInfo = params.data.extra
+                tradeData = params.data
+              } else if (params.data.tradeId) {
+                tradeData = params.data
+              }
+            }
+            
+            if (tradeData) {
+              // 构建完整的trade信息
+              let tradeInfo = {
+                time: params.axisValue,
+                value: actualValue,
+                seriesName: params.seriesName,
+                tradeId: tradeData.tradeId
+              }
+              
+              if (extraInfo) {
+                tradeInfo.extra = extraInfo
+              }
+              
+              // 显示弹框
+              alert('交易信息:\n' + JSON.stringify(tradeInfo, null, 2))
+              console.log('[TradingApp] 多模型交易信息:', tradeInfo)
+            }
+          })
         }
       } catch (error) {
         console.error('[TradingApp] Error setting chart option (multi-model):', error)
@@ -1532,6 +1580,43 @@ let portfolioRefreshInterval = null // 投资组合数据自动刷新定时器�
         if (accountChart.value && typeof accountChart.value.setOption === 'function') {
           accountChart.value.setOption(option, true) // 第二个参数 true 表示不合并，完全替换
           console.log('[TradingApp] 图表配置已更新')
+          
+          // 添加点击事件处理
+          accountChart.value.off('click') // 先移除旧的点击事件，避免重复绑定
+          accountChart.value.on('click', function(params) {
+            console.log('[TradingApp] 图表点击事件:', params)
+            
+            // 查找trade信息
+            let extraInfo = null
+            let tradeData = null
+            
+            // 尝试多种方式获取trade信息
+            if (params.data && typeof params.data === 'object') {
+              if (params.data.extra) {
+                extraInfo = params.data.extra
+                tradeData = params.data
+              } else if (params.data.tradeId) {
+                tradeData = params.data
+              }
+            }
+            
+            if (tradeData) {
+              // 构建完整的trade信息
+              let tradeInfo = {
+                time: params.axisValue,
+                value: params.value,
+                tradeId: tradeData.tradeId
+              }
+              
+              if (extraInfo) {
+                tradeInfo.extra = extraInfo
+              }
+              
+              // 显示弹框
+              alert('交易信息:\n' + JSON.stringify(tradeInfo, null, 2))
+              console.log('[TradingApp] 交易信息:', tradeInfo)
+            }
+          })
         }
       } catch (error) {
         console.error('[TradingApp] Error setting chart option (single-model):', error)
