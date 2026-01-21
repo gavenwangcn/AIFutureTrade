@@ -2595,16 +2595,16 @@ class TradingEngine:
         
         logger.info(f"[Model {self.model_id}] 过滤后剩余 {len(filtered_candidates)} 个候选symbol")
         
-        # 步骤2.5: 根据模型的base_volume配置过滤成交量（在最开始进行过滤，避免调用SDK的K线接口）
+        # 步骤2.5: 根据模型的quote_volume配置过滤成交额（在最开始进行过滤，避免调用SDK的K线接口）
         try:
             model = self.models_db.get_model(self.model_id)
-            # 兼容旧字段名quote_volume，优先使用base_volume
-            base_volume_threshold = model.get('base_volume') if model else None
-            if base_volume_threshold is None:
-                base_volume_threshold = model.get('quote_volume') if model else None  # 兼容旧字段名
+            # 兼容旧字段名base_volume，优先使用quote_volume
+            quote_volume_threshold = model.get('base_volume') if model else None
+            if quote_volume_threshold is None:
+                quote_volume_threshold = model.get('quote_volume') if model else None  # 兼容旧字段名
             
-            if base_volume_threshold is not None and base_volume_threshold > 0:
-                # 获取候选symbol的成交量信息（从数据库获取，避免调用SDK）
+            if quote_volume_threshold is not None and quote_volume_threshold > 0:
+                # 获取候选symbol的成交额信息（从数据库获取，避免调用SDK）
                 symbol_list = []
                 for candidate in filtered_candidates:
                     symbol = candidate.get('symbol')
@@ -2622,12 +2622,12 @@ class TradingEngine:
                     symbol_list.append(contract_symbol)
                 
                 if symbol_list:
-                    # 从数据库获取成交量信息（24小时成交量，单位：基础资产）
+                    # 从数据库获取成交额信息（24小时成交额）
                     volume_data = self._get_symbol_volumes(symbol_list)
                     
-                    # 过滤成交量：只保留每日成交量（base_volume）大于阈值的symbol
-                    # base_volume_threshold单位是千万，需要转换为基础资产单位（乘以10000000）
-                    threshold_base = base_volume_threshold * 10000000
+                    # 过滤成交额：只保留每日成交额（quote_volume）大于阈值的symbol
+                    # quote_volume_threshold单位是千万，需要转换为对应单位（乘以10000000）
+                    threshold_quote = quote_volume_threshold * 10000000
                     volume_filtered_candidates = []
                     for candidate in filtered_candidates:
                         symbol = candidate.get('symbol')
@@ -2644,25 +2644,25 @@ class TradingEngine:
                                 contract_symbol = symbol_upper
                         
                         volume_info = volume_data.get(contract_symbol, {})
-                        base_volume_value = volume_info.get('base_volume', 0.0) if volume_info else 0.0
+                        quote_volume_value = volume_info.get('quote_volume', 0.0) if volume_info else 0.0
                         
-                        if base_volume_value >= threshold_base:
+                        if quote_volume_value >= threshold_quote:
                             volume_filtered_candidates.append(candidate)
-                            logger.debug(f"[Model {self.model_id}] {symbol} 成交量过滤通过: base_volume={base_volume_value}, threshold={threshold_base}")
+                            logger.debug(f"[Model {self.model_id}] {symbol} 成交额过滤通过: quote_volume={quote_volume_value}, threshold={threshold_quote}")
                         else:
-                            logger.debug(f"[Model {self.model_id}] {symbol} 成交量过滤失败: base_volume={base_volume_value} < threshold={threshold_base}")
+                            logger.debug(f"[Model {self.model_id}] {symbol} 成交额过滤失败: quote_volume={quote_volume_value} < threshold={threshold_quote}")
                     
                     filtered_candidates = volume_filtered_candidates
-                    logger.info(f"[Model {self.model_id}] 成交量过滤后剩余 {len(filtered_candidates)} 个候选symbol（阈值：{base_volume_threshold}千万）")
+                    logger.info(f"[Model {self.model_id}] 成交额过滤后剩余 {len(filtered_candidates)} 个候选symbol（阈值：{quote_volume_threshold}千万）")
                 else:
-                    logger.warning(f"[Model {self.model_id}] 无法获取symbol列表进行成交量过滤")
+                    logger.warning(f"[Model {self.model_id}] 无法获取symbol列表进行成交额过滤")
             else:
-                logger.debug(f"[Model {self.model_id}] 未配置base_volume或值为0/null，跳过成交量过滤")
+                logger.debug(f"[Model {self.model_id}] 未配置quote_volume或值为0/null，跳过成交额过滤")
         except Exception as e:
-            logger.warning(f"[Model {self.model_id}] 成交量过滤失败: {e}，继续使用未过滤的候选symbol")
+            logger.warning(f"[Model {self.model_id}] 成交额过滤失败: {e}，继续使用未过滤的候选symbol")
         
         if not filtered_candidates:
-            logger.info(f"[Model {self.model_id}] 成交量过滤后无可用候选symbol")
+            logger.info(f"[Model {self.model_id}] 成交额过滤后无可用候选symbol")
             return [], {}
         
         # 步骤2.6: 根据TRADE_MARKET_SYMBOL_LIMIT配置限制最终提交给策略判断模块的symbol数量（仅对leaderboard数据源生效）
