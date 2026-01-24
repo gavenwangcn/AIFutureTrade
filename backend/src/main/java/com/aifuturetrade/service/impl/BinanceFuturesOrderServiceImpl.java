@@ -139,31 +139,137 @@ public class BinanceFuturesOrderServiceImpl implements BinanceFuturesOrderServic
             log.info("[BinanceFuturesOrderService] 计算盈亏: 开仓价={}, 当前价={}, 数量={}, 方向={}, 毛盈亏={}, 手续费={}, 净盈亏={}", 
                     entryPrice, currentPrice, positionAmt, positionSide, grossPnl, fee, netPnl);
 
-            // 6. 插入trades表记录（使用传入的modelId，而不是system_user）
+            // 6. 解析SDK返回数据（如果是real模式且调用成功）
+            String finalSignal = signal;
+            String finalSide = positionSide.toLowerCase();
+            Double finalQuantity = positionAmt;
+            Double finalPrice = currentPrice;
+            Long orderId = null;
+            String orderType = null;
+            String origType = null;
+            String errorMsg = null;
+            
+            if (!useTestMode && sdkResponse != null) {
+                // real模式且调用成功，解析SDK返回数据
+                Object executedQtyObj = sdkResponse.get("executedQty");
+                Object avgPriceObj = sdkResponse.get("avgPrice");
+                Object sideObj = sdkResponse.get("side");
+                Object positionSideObj = sdkResponse.get("positionSide");
+                Object orderIdObj = sdkResponse.get("orderId");
+                Object typeObj = sdkResponse.get("type");
+                Object origTypeObj = sdkResponse.get("origType");
+                
+                // 提取executedQty（成交量）
+                if (executedQtyObj != null) {
+                    try {
+                        finalQuantity = Double.parseDouble(executedQtyObj.toString());
+                    } catch (Exception e) {
+                        log.warn("[BinanceFuturesOrderService] 解析executedQty失败: {}", e.getMessage());
+                    }
+                }
+                
+                // 提取avgPrice（平均成交价）
+                if (avgPriceObj != null) {
+                    try {
+                        finalPrice = Double.parseDouble(avgPriceObj.toString());
+                    } catch (Exception e) {
+                        log.warn("[BinanceFuturesOrderService] 解析avgPrice失败: {}", e.getMessage());
+                    }
+                }
+                
+                // 提取side（买卖方向），映射到signal
+                if (sideObj != null) {
+                    String sideStr = sideObj.toString().toUpperCase();
+                    if ("BUY".equals(sideStr)) {
+                        String posSide = positionSideObj != null ? positionSideObj.toString().toUpperCase() : "";
+                        if ("SHORT".equals(posSide)) {
+                            finalSignal = "buy_to_short";
+                        } else {
+                            finalSignal = "buy_to_long";
+                        }
+                    } else if ("SELL".equals(sideStr)) {
+                        String posSide = positionSideObj != null ? positionSideObj.toString().toUpperCase() : "";
+                        if ("SHORT".equals(posSide)) {
+                            finalSignal = "sell_to_short";
+                        } else {
+                            finalSignal = "sell_to_long";
+                        }
+                    }
+                }
+                
+                // 提取positionSide（持仓方向），映射到side字段
+                if (positionSideObj != null) {
+                    String posSide = positionSideObj.toString().toUpperCase();
+                    if ("LONG".equals(posSide) || "SHORT".equals(posSide)) {
+                        finalSide = posSide.toLowerCase();
+                    }
+                }
+                
+                // 提取orderId
+                if (orderIdObj != null) {
+                    try {
+                        orderId = Long.parseLong(orderIdObj.toString());
+                    } catch (Exception e) {
+                        log.warn("[BinanceFuturesOrderService] 解析orderId失败: {}", e.getMessage());
+                    }
+                }
+                
+                // 提取type
+                if (typeObj != null) {
+                    orderType = typeObj.toString();
+                }
+                
+                // 提取origType
+                if (origTypeObj != null) {
+                    origType = origTypeObj.toString();
+                }
+            } else if (!useTestMode && sdkError != null) {
+                // real模式调用失败，quantity和price设置为0，signal和side使用策略返回的值
+                finalQuantity = 0.0;
+                finalPrice = 0.0;
+                errorMsg = sdkError;
+                log.warn("[BinanceFuturesOrderService] real模式调用失败，quantity和price设置为0，signal和side使用策略返回的值");
+            }
+            
+            // 7. 插入trades表记录（使用传入的modelId，而不是system_user）
             TradeDO trade = new TradeDO();
             trade.setModelId(modelId);  // 使用传入的modelId
             trade.setFuture(symbol);
-            trade.setSignal(signal);
-            trade.setPrice(currentPrice);
-            trade.setQuantity(positionAmt);
+            trade.setSignal(finalSignal);  // 使用解析后的signal
+            trade.setPrice(finalPrice);  // 使用解析后的price
+            trade.setQuantity(finalQuantity);  // 使用解析后的quantity
+            trade.setSide(finalSide);  // 使用解析后的side
             trade.setPnl(netPnl);  // 设置净盈亏
             trade.setFee(fee);      // 设置手续费
             // 设置原始保证金（从portfolio中获取，用于计算盈亏百分比）
             Double initialMargin = portfolio.getInitialMargin();
             trade.setInitialMargin(initialMargin != null ? initialMargin : 0.0);
+            // 设置新字段（如果real模式有值）
+            if (orderId != null) {
+                trade.setOrderId(orderId);
+            }
+            if (orderType != null) {
+                trade.setType(orderType);
+            }
+            if (origType != null) {
+                trade.setOrigType(origType);
+            }
+            if (errorMsg != null) {
+                trade.setError(errorMsg);
+            }
             // 使用UTC+8时区的时间（与Python代码保持一致）
             trade.setTimestamp(LocalDateTime.now(ZoneOffset.ofHours(8)));
             tradeMapper.insert(trade);
 
-            log.info("[BinanceFuturesOrderService] 插入trades表记录成功: tradeId={}, modelId={}, pnl={}, fee={}", 
-                    trade.getId(), modelId, netPnl, fee);
+            log.info("[BinanceFuturesOrderService] 插入trades表记录成功: tradeId={}, modelId={}, signal={}, quantity={}, price={}, pnl={}, fee={}", 
+                    trade.getId(), modelId, finalSignal, finalQuantity, finalPrice, netPnl, fee);
 
-            // 7. 删除portfolios表记录
+            // 8. 删除portfolios表记录
             portfolioMapper.deleteById(portfolio.getId());
 
             log.info("[BinanceFuturesOrderService] 删除portfolios表记录成功: portfolioId={}", portfolio.getId());
 
-            // 8. 调用SDK执行卖出
+            // 9. 调用SDK执行卖出
             BinanceFuturesOrderClient orderClient = new BinanceFuturesOrderClient(
                     model.getApiKey(),
                     model.getApiSecret(),
@@ -172,8 +278,11 @@ public class BinanceFuturesOrderServiceImpl implements BinanceFuturesOrderServic
                     binanceConfig.getTestnet()
             );
 
-            // 判断是否使用测试模式（根据配置）
-            boolean useTestMode = "test".equalsIgnoreCase(sellPositionTradeMode);
+            // 根据is_virtual判断使用real还是test模式
+            // 如果is_virtual不为true（即非虚拟），使用real模式
+            Boolean isVirtual = model.getIsVirtual();
+            boolean useTestMode = (isVirtual != null && isVirtual);
+            String modelTradeMode = useTestMode ? "test" : "real";
             
             Map<String, Object> orderParams = new HashMap<>();
             orderParams.put("symbol", formattedSymbol);
@@ -183,12 +292,13 @@ public class BinanceFuturesOrderServiceImpl implements BinanceFuturesOrderServic
             orderParams.put("positionSide", oppositePositionSide);
             orderParams.put("testMode", useTestMode);
 
-            log.info("[BinanceFuturesOrderService] 调用SDK执行卖出，交易模式: {} ({})", 
-                    sellPositionTradeMode, useTestMode ? "测试接口，不会真实成交" : "真实交易接口");
+            log.info("[BinanceFuturesOrderService] 调用SDK执行卖出，交易模式: {} (is_virtual={}, {})", 
+                    modelTradeMode, isVirtual, useTestMode ? "测试接口，不会真实成交" : "真实交易接口");
             log.info("[BinanceFuturesOrderService] 调用SDK执行卖出，参数: {}", orderParams);
 
             Map<String, Object> sdkResponse = null;
             String responseType = "200";
+            String sdkError = null;
             
             try {
                 sdkResponse = orderClient.marketTrade(
@@ -201,16 +311,19 @@ public class BinanceFuturesOrderServiceImpl implements BinanceFuturesOrderServic
                 );
                 log.info("[BinanceFuturesOrderService] SDK调用成功: {}", sdkResponse);
             } catch (Exception e) {
-                log.error("[BinanceFuturesOrderService] SDK调用失败: {}", e.getMessage(), e);
+                sdkError = e.getMessage();
+                log.error("[BinanceFuturesOrderService] SDK调用失败: {}", sdkError, e);
                 responseType = "500";
-                throw e; // 抛出异常以触发事务回滚
+                // real模式调用失败时，不抛出异常，继续执行数据库记录（quantity和price设置为0，error字段记录错误）
+                // test模式失败时也不抛出异常，继续执行（保持一致性）
+                log.warn("[BinanceFuturesOrderService] SDK调用失败，将继续记录到trades表（{}模式）", modelTradeMode);
             }
 
-            // 9. 记录binance_trade_logs（model_id仍然使用system_user）
+            // 10. 记录binance_trade_logs（model_id仍然使用system_user）
             BinanceTradeLogDO tradeLog = new BinanceTradeLogDO();
             tradeLog.setModelId("system_user");  // binance_trade_logs表仍然使用system_user
             tradeLog.setTradeId(trade.getId());
-            tradeLog.setType(useTestMode ? "test" : "real");  // 根据配置设置类型
+            tradeLog.setType(modelTradeMode);  // 根据is_virtual设置类型
             tradeLog.setMethodName("marketTrade");
             
             try {
@@ -228,7 +341,7 @@ public class BinanceFuturesOrderServiceImpl implements BinanceFuturesOrderServic
 
             log.info("[BinanceFuturesOrderService] 记录binance_trade_logs成功: logId={}", tradeLog.getId());
 
-            // 10. 返回结果
+            // 11. 返回结果
             Map<String, Object> result = new HashMap<>();
             result.put("success", true);
             result.put("message", "卖出成功");

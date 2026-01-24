@@ -157,8 +157,11 @@ public class AutoCloseServiceImpl implements AutoCloseService {
                     }
                     
                     // 根据is_virtual判断使用real还是test模式
-                    // 如果is_virtual不为1（即非虚拟），使用real模式
-                    boolean useRealMode = (model.getIsVirtual() == null || model.getIsVirtual() == 0);
+                    // 如果is_virtual不为true（即非虚拟），使用real模式
+                    // is_virtual在数据库中：0表示非虚拟，1表示虚拟
+                    // 在Java中映射为Boolean：false表示非虚拟，true表示虚拟
+                    Boolean isVirtual = model.getIsVirtual();
+                    boolean useRealMode = (isVirtual == null || !isVirtual);
                     String modelTradeMode = useRealMode ? "real" : "test";
                     
                     // 检查配置

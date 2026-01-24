@@ -95,4 +95,40 @@ public class TradeDO implements Serializable {
     @TableField(exist = false)
     private LocalDateTime createdAt;
 
+    /**
+     * 系统订单号（从SDK接口返回）
+     */
+    @TableField("orderId")
+    private Long orderId;
+
+    /**
+     * 订单类型（从SDK接口返回）
+     */
+    @TableField("type")
+    private String type;
+
+    /**
+     * 触发前订单类型（从SDK接口返回）
+     */
+    @TableField("origType")
+    private String origType;
+
+    /**
+     * 错误消息（当接口返回错误时记录）
+     */
+    @TableField("error")
+    private String error;
+
+    /**
+     * 持仓方向（long/short）
+     */
+    @TableField("side")
+    private String side;
+
+    /**
+     * 杠杆倍数
+     */
+    @TableField("leverage")
+    private Integer leverage;
+
 }
