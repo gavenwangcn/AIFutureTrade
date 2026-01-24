@@ -139,11 +139,7 @@ public class BinanceFuturesOrderServiceImpl implements BinanceFuturesOrderServic
             log.info("[BinanceFuturesOrderService] 计算盈亏: 开仓价={}, 当前价={}, 数量={}, 方向={}, 毛盈亏={}, 手续费={}, 净盈亏={}", 
                     entryPrice, currentPrice, positionAmt, positionSide, grossPnl, fee, netPnl);
 
-            // 6. 删除portfolios表记录
-            portfolioMapper.deleteById(portfolio.getId());
-            log.info("[BinanceFuturesOrderService] 删除portfolios表记录成功: portfolioId={}", portfolio.getId());
-
-            // 7. 调用SDK执行卖出
+            // 6. 调用SDK执行卖出（在删除portfolios记录之前）
             BinanceFuturesOrderClient orderClient = new BinanceFuturesOrderClient(
                     model.getApiKey(),
                     model.getApiSecret(),
@@ -318,6 +314,30 @@ public class BinanceFuturesOrderServiceImpl implements BinanceFuturesOrderServic
             log.info("[BinanceFuturesOrderService] 插入trades表记录成功: tradeId={}, modelId={}, signal={}, quantity={}, price={}, pnl={}, fee={}", 
                     trade.getId(), modelId, finalSignal, finalQuantity, finalPrice, netPnl, fee);
 
+            // 9. 只有在real模式且SDK返回成功时才删除portfolios表记录
+            if (!useTestMode && sdkResponse != null && sdkError == null) {
+                // real模式且SDK返回成功，删除portfolios表记录
+                try {
+                    portfolioMapper.deleteById(portfolio.getId());
+                    log.info("[BinanceFuturesOrderService] 删除portfolios表记录成功（real模式，SDK成功）: portfolioId={}", portfolio.getId());
+                } catch (Exception dbErr) {
+                    log.error("[BinanceFuturesOrderService] 删除portfolios表记录失败: {}", dbErr.getMessage(), dbErr);
+                    // 不抛出异常，因为交易已经记录到trades表
+                }
+            } else if (useTestMode) {
+                // test模式，删除portfolios表记录（测试模式始终更新）
+                try {
+                    portfolioMapper.deleteById(portfolio.getId());
+                    log.info("[BinanceFuturesOrderService] 删除portfolios表记录成功（test模式）: portfolioId={}", portfolio.getId());
+                } catch (Exception dbErr) {
+                    log.error("[BinanceFuturesOrderService] 删除portfolios表记录失败: {}", dbErr.getMessage(), dbErr);
+                }
+            } else {
+                // real模式但SDK调用失败，不删除portfolios表记录
+                log.warn("[BinanceFuturesOrderService] 跳过删除portfolios表记录（real模式，SDK失败）: portfolioId={}, error={}", 
+                        portfolio.getId(), sdkError);
+            }
+
             // 10. 记录binance_trade_logs（model_id仍然使用system_user）
             BinanceTradeLogDO tradeLog = new BinanceTradeLogDO();
             tradeLog.setModelId("system_user");  // binance_trade_logs表仍然使用system_user
@@ -340,7 +360,7 @@ public class BinanceFuturesOrderServiceImpl implements BinanceFuturesOrderServic
 
             log.info("[BinanceFuturesOrderService] 记录binance_trade_logs成功: logId={}", tradeLog.getId());
 
-            // 11. 返回结果
+            // 12. 返回结果
             Map<String, Object> result = new HashMap<>();
             result.put("success", true);
             result.put("message", "卖出成功");

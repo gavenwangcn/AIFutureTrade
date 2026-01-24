@@ -395,11 +395,12 @@ public class AutoCloseServiceImpl implements AutoCloseService {
                 if (response != null && response.getData() != null) {
                     log.info("[AutoClose] ✅ 平仓订单提交成功: {}", response.getData());
                     
-                    // 更新 portfolios 表：删除持仓记录
+                    // 只有在real模式且SDK返回成功时才更新 portfolios 表：删除持仓记录
+                    // real模式：只有订单提交成功才删除持仓记录
                     try {
                         int deleted = portfolioMapper.deletePosition(model.getId(), symbol.toUpperCase(), positionSide);
                         if (deleted > 0) {
-                            log.info("[AutoClose] ✅ 已更新 portfolios 表，删除持仓记录: modelId={}, symbol={}, positionSide={}", 
+                            log.info("[AutoClose] ✅ 已更新 portfolios 表，删除持仓记录（real模式，SDK成功）: modelId={}, symbol={}, positionSide={}", 
                                     model.getId(), symbol, positionSide);
                         } else {
                             log.warn("[AutoClose] ⚠️  未找到要删除的持仓记录: modelId={}, symbol={}, positionSide={}", 
@@ -413,6 +414,9 @@ public class AutoCloseServiceImpl implements AutoCloseService {
                     return true;
                 } else {
                     log.error("[AutoClose] ❌ 平仓订单提交失败: 响应为空");
+                    // real模式但订单提交失败，不删除portfolios表记录
+                    log.warn("[AutoClose] ⚠️  跳过删除portfolios表记录（real模式，SDK失败）: modelId={}, symbol={}, positionSide={}", 
+                            model.getId(), symbol, positionSide);
                     return false;
                 }
             }

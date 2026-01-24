@@ -3088,19 +3088,6 @@ class TradingEngine:
         else:
             sdk_call_skipped, sdk_skip_reason = self._handle_sdk_client_error(symbol, 'market_trade')
 
-        # 【更新持仓】使用根据signal自动确定的position_side
-        # 传递 initial_margin（本金）到数据库
-        # position_amt = 合约数量，quantity = 合约数量（与strategy_decisions表保持一致）
-        try:
-            self._update_position(
-                self.model_id, symbol=symbol, position_amt=position_amt, avg_price=price, 
-                leverage=leverage, position_side=position_side,  # 使用根据signal自动确定的position_side
-                initial_margin=initial_margin  # 传递本金（使用的USDT数量）
-            )
-        except Exception as db_err:
-            logger.error(f"TRADE: Update position failed ({trade_signal.upper()}) model={self.model_id} future={symbol}: {db_err}")
-            raise
-
         # 解析SDK返回数据（如果是real模式且调用成功）
         parsed_response = None
         if trade_mode == 'real' and sdk_response:
@@ -3117,6 +3104,64 @@ class TradingEngine:
                 'origType': None,
                 'error': sdk_error
             }
+
+        # 【更新持仓】只有在real模式且SDK返回成功时才更新portfolios表
+        # 对于real模式：使用SDK返回的executedQty, avgPrice, positionSide
+        # 对于test模式：使用策略返回的值
+        if trade_mode == 'real' and parsed_response and not parsed_response.get('error'):
+            # real模式且SDK返回成功，使用SDK返回的数据更新portfolios表
+            executed_qty = parsed_response.get('executedQty', 0.0)
+            avg_price_from_sdk = parsed_response.get('avgPrice', 0.0)
+            position_side_from_sdk = parsed_response.get('positionSide', position_side.lower())
+            
+            # 将position_side转换为大写（数据库存储为大写）
+            if position_side_from_sdk:
+                position_side_from_sdk = position_side_from_sdk.upper()
+            else:
+                position_side_from_sdk = position_side
+            
+            # 将executedQty转换为整数（与strategy_decisions表保持一致）
+            executed_qty_int = int(float(executed_qty)) if executed_qty else 0
+            
+            if executed_qty_int > 0 and avg_price_from_sdk > 0:
+                try:
+                    # 重新计算initial_margin（基于实际成交的executedQty和avgPrice）
+                    actual_required_capital = (executed_qty_int * avg_price_from_sdk) / leverage
+                    actual_trade_amount, actual_buy_fee, _, actual_initial_margin = calculate_trade_requirements(
+                        executed_qty_int, avg_price_from_sdk, leverage, self.trade_fee_rate, actual_required_capital
+                    )
+                    
+                    self._update_position(
+                        self.model_id, symbol=symbol, position_amt=executed_qty_int, 
+                        avg_price=avg_price_from_sdk, 
+                        leverage=leverage, position_side=position_side_from_sdk,
+                        initial_margin=actual_initial_margin
+                    )
+                    logger.info(f"TRADE: Updated portfolios (real mode, SDK success) - Model {self.model_id} {symbol} "
+                              f"position_amt={executed_qty_int} avg_price={avg_price_from_sdk} position_side={position_side_from_sdk}")
+                except Exception as db_err:
+                    logger.error(f"TRADE: Update position failed (real mode, SDK success) model={self.model_id} future={symbol}: {db_err}")
+                    raise
+            else:
+                logger.warn(f"TRADE: Skipped portfolios update (real mode, SDK success but invalid data) - "
+                          f"Model {self.model_id} {symbol} executedQty={executed_qty} avgPrice={avg_price_from_sdk}")
+        elif trade_mode == 'test' or (trade_mode == 'real' and (not parsed_response or parsed_response.get('error'))):
+            # test模式或real模式但SDK调用失败，使用策略返回的值更新portfolios表
+            try:
+                self._update_position(
+                    self.model_id, symbol=symbol, position_amt=position_amt, avg_price=price, 
+                    leverage=leverage, position_side=position_side,
+                    initial_margin=initial_margin
+                )
+                if trade_mode == 'test':
+                    logger.info(f"TRADE: Updated portfolios (test mode) - Model {self.model_id} {symbol} "
+                              f"position_amt={position_amt} avg_price={price} position_side={position_side}")
+                else:
+                    logger.warn(f"TRADE: Updated portfolios (real mode, SDK failed, using strategy values) - "
+                              f"Model {self.model_id} {symbol} position_amt={position_amt} avg_price={price} position_side={position_side}")
+            except Exception as db_err:
+                logger.error(f"TRADE: Update position failed ({trade_signal.upper()}) model={self.model_id} future={symbol}: {db_err}")
+                raise
         
         # 【确定trades表的side字段】
         # 如果是real模式且解析成功，使用解析后的值；否则使用策略返回的值
@@ -3308,13 +3353,6 @@ class TradingEngine:
         else:
             sdk_call_skipped, sdk_skip_reason = self._handle_sdk_client_error(symbol, 'market_trade')
         
-        # 平仓：更新数据库持仓记录（将持仓数量设为0）
-        try:
-            self._close_position(self.model_id, symbol=symbol, position_side=position_side)
-        except Exception as db_err:
-            logger.error(f"TRADE: Close position failed ({trade_signal.upper()}) model={self.model_id} future={symbol}: {db_err}")
-            raise
-        
         # 解析SDK返回数据（如果是real模式且调用成功）
         parsed_response = None
         if trade_mode == 'real' and sdk_response:
@@ -3331,6 +3369,28 @@ class TradingEngine:
                 'origType': None,
                 'error': sdk_error
             }
+        
+        # 平仓：只有在real模式且SDK返回成功时才更新数据库持仓记录（将持仓数量设为0）
+        # 对于test模式：始终更新（因为测试模式不会真实成交）
+        if trade_mode == 'real' and parsed_response and not parsed_response.get('error'):
+            # real模式且SDK返回成功，才关闭持仓
+            try:
+                self._close_position(self.model_id, symbol=symbol, position_side=position_side)
+                logger.info(f"TRADE: Closed position (real mode, SDK success) - Model {self.model_id} {symbol} position_side={position_side}")
+            except Exception as db_err:
+                logger.error(f"TRADE: Close position failed (real mode, SDK success) model={self.model_id} future={symbol}: {db_err}")
+                raise
+        elif trade_mode == 'test' or (trade_mode == 'real' and (not parsed_response or parsed_response.get('error'))):
+            # test模式或real模式但SDK调用失败，也关闭持仓（test模式始终更新，real模式失败时也更新以保持一致性）
+            try:
+                self._close_position(self.model_id, symbol=symbol, position_side=position_side)
+                if trade_mode == 'test':
+                    logger.info(f"TRADE: Closed position (test mode) - Model {self.model_id} {symbol} position_side={position_side}")
+                else:
+                    logger.warn(f"TRADE: Closed position (real mode, SDK failed) - Model {self.model_id} {symbol} position_side={position_side}")
+            except Exception as db_err:
+                logger.error(f"TRADE: Close position failed ({trade_signal.upper()}) model={self.model_id} future={symbol}: {db_err}")
+                raise
         
         # 【确定trades表的side字段】
         # 如果是real模式且解析成功，使用解析后的值；否则使用策略返回的值

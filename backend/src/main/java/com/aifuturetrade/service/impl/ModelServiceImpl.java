@@ -2105,17 +2105,18 @@ public class ModelServiceImpl implements ModelService {
                     analysisItem.put("avg_profit", null);
                 }
                 
-                // 平均亏损（所有亏损的交易总额除以所有亏损交易的总数）
+                // 平均亏损（所有亏损的交易总额除以所有亏损交易的总数，取绝对值显示为正数）
                 Object avgLossObj = item.get("avg_loss");
                 if (avgLossObj != null) {
                     Double avgLoss = avgLossObj instanceof Number ? 
                         ((Number) avgLossObj).doubleValue() : Double.parseDouble(avgLossObj.toString());
-                    analysisItem.put("avg_loss", avgLoss);
+                    // 取绝对值，确保前端显示为正数
+                    analysisItem.put("avg_loss", Math.abs(avgLoss));
                 } else {
                     analysisItem.put("avg_loss", null);
                 }
                 
-                // 盈亏比（盈利的交易数比上亏损交易数）
+                // 盈亏比（平均盈利 / 平均亏损，取绝对值）
                 Object profitLossRatioObj = item.get("profit_loss_ratio");
                 if (profitLossRatioObj != null) {
                     Double profitLossRatio = profitLossRatioObj instanceof Number ? 
@@ -2123,6 +2124,16 @@ public class ModelServiceImpl implements ModelService {
                     analysisItem.put("profit_loss_ratio", profitLossRatio);
                 } else {
                     analysisItem.put("profit_loss_ratio", null);
+                }
+                
+                // 期望值（EV = 胜率 × 平均盈利 - (1-胜率) × 平均亏损）
+                Object expectedValueObj = item.get("expected_value");
+                if (expectedValueObj != null) {
+                    Double expectedValue = expectedValueObj instanceof Number ? 
+                        ((Number) expectedValueObj).doubleValue() : Double.parseDouble(expectedValueObj.toString());
+                    analysisItem.put("expected_value", expectedValue);
+                } else {
+                    analysisItem.put("expected_value", null);
                 }
                 
                 result.add(analysisItem);
@@ -2187,17 +2198,18 @@ public class ModelServiceImpl implements ModelService {
                     analysisItem.put("avg_profit", null);
                 }
                 
-                // 平均亏损（所有亏损的交易总额除以所有亏损交易的总数）
+                // 平均亏损（所有亏损的交易总额除以所有亏损交易的总数，取绝对值显示为正数）
                 Object avgLossObj = item.get("avg_loss");
                 if (avgLossObj != null) {
                     Double avgLoss = avgLossObj instanceof Number ? 
                         ((Number) avgLossObj).doubleValue() : Double.parseDouble(avgLossObj.toString());
-                    analysisItem.put("avg_loss", avgLoss);
+                    // 取绝对值，确保前端显示为正数
+                    analysisItem.put("avg_loss", Math.abs(avgLoss));
                 } else {
                     analysisItem.put("avg_loss", null);
                 }
                 
-                // 盈亏比（盈利的交易数比上亏损交易数）
+                // 盈亏比（平均盈利 / 平均亏损，取绝对值）
                 Object profitLossRatioObj = item.get("profit_loss_ratio");
                 if (profitLossRatioObj != null) {
                     Double profitLossRatio = profitLossRatioObj instanceof Number ? 
@@ -2205,6 +2217,16 @@ public class ModelServiceImpl implements ModelService {
                     analysisItem.put("profit_loss_ratio", profitLossRatio);
                 } else {
                     analysisItem.put("profit_loss_ratio", null);
+                }
+                
+                // 期望值（EV = 胜率 × 平均盈利 - (1-胜率) × 平均亏损）
+                Object expectedValueObj = item.get("expected_value");
+                if (expectedValueObj != null) {
+                    Double expectedValue = expectedValueObj instanceof Number ? 
+                        ((Number) expectedValueObj).doubleValue() : Double.parseDouble(expectedValueObj.toString());
+                    analysisItem.put("expected_value", expectedValue);
+                } else {
+                    analysisItem.put("expected_value", null);
                 }
                 
                 result.add(analysisItem);

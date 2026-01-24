@@ -30,6 +30,7 @@
                 <th>平均盈利</th>
                 <th>平均亏损</th>
                 <th>盈亏比</th>
+                <th>期望值</th>
               </tr>
             </thead>
             <tbody>
@@ -61,6 +62,13 @@
                 <td>
                   <span v-if="item.profit_loss_ratio !== null && item.profit_loss_ratio !== undefined">
                     {{ formatNumber(item.profit_loss_ratio, 2) }}
+                  </span>
+                  <span v-else class="empty-value">-</span>
+                </td>
+                <td>
+                  <span v-if="item.expected_value !== null && item.expected_value !== undefined" 
+                        :class="getExpectedValueClass(item.expected_value)">
+                    {{ formatExpectedValue(item.expected_value) }}
                   </span>
                   <span v-else class="empty-value">-</span>
                 </td>
@@ -109,6 +117,21 @@ const formatPercentage = (value) => {
 const formatNumber = (value, decimals = 2) => {
   if (value === null || value === undefined) return '-'
   return Number(value).toFixed(decimals)
+}
+
+// 格式化期望值（带正负号）
+const formatExpectedValue = (value) => {
+  if (value === null || value === undefined) return '-'
+  const num = Number(value)
+  const sign = num >= 0 ? '+' : ''
+  return sign + num.toFixed(2)
+}
+
+// 获取期望值的样式类
+const getExpectedValueClass = (value) => {
+  if (value === null || value === undefined) return ''
+  const num = Number(value)
+  return num >= 0 ? 'expected-value-positive' : 'expected-value-negative'
 }
 
 // 加载分析数据
@@ -227,6 +250,16 @@ watch(() => props.visible, (newVal) => {
 }
 
 .loss-value {
+  color: #f56c6c;
+  font-weight: 500;
+}
+
+.expected-value-positive {
+  color: #67c23a;
+  font-weight: 500;
+}
+
+.expected-value-negative {
   color: #f56c6c;
   font-weight: 500;
 }
