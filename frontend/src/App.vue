@@ -597,6 +597,7 @@
                       <th>盈亏</th>
                       <th>盈亏百分比</th>
                       <th>费用</th>
+                      <th>交易错误信息</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -620,9 +621,19 @@
                         <strong>{{ formatPnlPercent(trade.pnl, trade.initialMargin || trade.initial_margin) }}</strong>
                       </td>
                       <td>${{ formatCurrency(trade.fee || 0) }}</td>
+                      <td>
+                        <span 
+                          v-if="trade.error" 
+                          :title="trade.error"
+                          style="color: #f56c6c; cursor: help; max-width: 200px; display: inline-block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;"
+                        >
+                          {{ trade.error.length > 20 ? trade.error.substring(0, 20) + '...' : trade.error }}
+                        </span>
+                        <span v-else style="color: #c0c4cc;">--</span>
+                      </td>
                     </tr>
                     <tr v-if="trades.length === 0">
-                      <td colspan="9" class="empty-state">暂无交易记录</td>
+                      <td colspan="10" class="empty-state">暂无交易记录</td>
                     </tr>
                   </tbody>
                 </table>
