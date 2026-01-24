@@ -261,7 +261,7 @@ class TradingEngine:
             logger.debug(f"[Model {self.model_id}] [卖出服务] [阶段2] 卖出/平仓决策处理完成")
 
             # ========== 阶段3: 账户价值快照记录说明 ==========
-            # 注意：账户价值快照现在在每次交易执行时立即记录（在 _execute_sell, _execute_stop_loss, _execute_take_profit 等方法中）
+            # 注意：账户价值快照现在在每次交易执行时立即记录（在 _execute_close, _execute_stop_loss, _execute_take_profit 等方法中）
             # 不再在批次处理完成后统一记录，确保每次交易都有对应的账户价值快照
             logger.debug(f"[Model {self.model_id}] [卖出服务] [阶段3] 账户价值快照已在每次交易时记录，无需批次记录")
             
@@ -630,7 +630,7 @@ class TradingEngine:
             logger.debug(f"[Model {self.model_id}] [买入服务] [阶段2] 买入决策处理完成")
 
             # ========== 阶段3: 账户价值快照记录说明 ==========
-            # 注意：账户价值快照现在在每次交易执行时立即记录（在 _execute_buy, _execute_sell, _execute_stop_loss, _execute_take_profit 等方法中）
+            # 注意：账户价值快照现在在每次交易执行时立即记录（在 _execute_buy, _execute_sell, _execute_close 等方法中）
             # 不再在批次处理完成后统一记录，确保每次交易都有对应的账户价值快照
             logger.debug(f"[Model {self.model_id}] [买入服务] [阶段3] 账户价值快照已在每次交易时记录，无需批次记录")
             
@@ -914,6 +914,130 @@ class TradingEngine:
         else:
             logger.info(f"TRADE: RECORDED - Model {self.model_id} {signal.upper()} {symbol}")
     
+    def _get_trade_mode(self) -> str:
+        """
+        根据model的is_virtual字段判断使用real还是test模式
+        
+        Returns:
+            'real' 如果 is_virtual 不为1，否则 'test'
+        """
+        try:
+            model = self.models_db.get_model(self.model_id)
+            if model:
+                is_virtual = model.get('is_virtual', False)
+                # 如果is_virtual不为1（即非虚拟），使用real模式
+                if not is_virtual or is_virtual == 0:
+                    return 'real'
+            return 'test'
+        except Exception as e:
+            logger.warning(f"[Model {self.model_id}] Failed to get is_virtual, defaulting to test mode: {e}")
+            return 'test'
+    
+    def _parse_sdk_response(self, sdk_response: Optional[Dict], strategy_signal: str, strategy_side: str) -> Dict[str, Any]:
+        """
+        解析SDK真实接口返回数据，提取关键字段
+        
+        Args:
+            sdk_response: SDK返回的响应数据
+            strategy_signal: 策略返回的signal值（用于错误情况下的fallback）
+            strategy_side: 策略返回的side值（用于错误情况下的fallback）
+        
+        Returns:
+            包含解析后字段的字典：
+            - executedQty: 成交量（对应quantity）
+            - avgPrice: 平均成交价（对应price）
+            - side: 买卖方向（对应signal->side）
+            - positionSide: 持仓方向（对应side->positionSide）
+            - orderId: 系统订单号
+            - type: 订单类型
+            - origType: 触发前订单类型
+            - error: 错误消息（如果有）
+        """
+        result = {
+            'executedQty': 0.0,
+            'avgPrice': 0.0,
+            'side': strategy_signal,  # 默认使用策略返回的signal
+            'positionSide': strategy_side,  # 默认使用策略返回的side
+            'orderId': None,
+            'type': None,
+            'origType': None,
+            'error': None
+        }
+        
+        if not sdk_response:
+            return result
+        
+        try:
+            # 提取executedQty（成交量）
+            if 'executedQty' in sdk_response:
+                executed_qty = sdk_response.get('executedQty')
+                if executed_qty is not None:
+                    try:
+                        result['executedQty'] = float(executed_qty)
+                    except (ValueError, TypeError):
+                        pass
+            
+            # 提取avgPrice（平均成交价）
+            if 'avgPrice' in sdk_response:
+                avg_price = sdk_response.get('avgPrice')
+                if avg_price is not None:
+                    try:
+                        result['avgPrice'] = float(avg_price)
+                    except (ValueError, TypeError):
+                        pass
+            
+            # 提取side（买卖方向），映射到signal
+            if 'side' in sdk_response:
+                side = sdk_response.get('side', '').upper()
+                # 将BUY/SELL映射到对应的signal
+                if side == 'BUY':
+                    # BUY对应buy_to_long或buy_to_short，需要根据positionSide判断
+                    position_side = sdk_response.get('positionSide', '').upper()
+                    if position_side == 'SHORT':
+                        result['side'] = 'buy_to_short'
+                    else:
+                        result['side'] = 'buy_to_long'
+                elif side == 'SELL':
+                    # SELL对应sell_to_long或sell_to_short，需要根据positionSide判断
+                    position_side = sdk_response.get('positionSide', '').upper()
+                    if position_side == 'SHORT':
+                        result['side'] = 'sell_to_short'
+                    else:
+                        result['side'] = 'sell_to_long'
+                else:
+                    result['side'] = strategy_signal  # 使用策略返回的值
+            
+            # 提取positionSide（持仓方向），映射到side字段
+            if 'positionSide' in sdk_response:
+                position_side = sdk_response.get('positionSide', '').upper()
+                if position_side in ['LONG', 'SHORT']:
+                    result['positionSide'] = position_side.lower()
+                else:
+                    result['positionSide'] = strategy_side  # 使用策略返回的值
+            
+            # 提取orderId
+            if 'orderId' in sdk_response:
+                order_id = sdk_response.get('orderId')
+                if order_id is not None:
+                    try:
+                        result['orderId'] = int(order_id)
+                    except (ValueError, TypeError):
+                        pass
+            
+            # 提取type
+            if 'type' in sdk_response:
+                result['type'] = str(sdk_response.get('type', ''))
+            
+            # 提取origType
+            if 'origType' in sdk_response:
+                result['origType'] = str(sdk_response.get('origType', ''))
+            
+        except Exception as e:
+            logger.warning(f"[Model {self.model_id}] Failed to parse SDK response: {e}")
+            result['error'] = str(e)
+        
+        return result
+    
     # ============ Binance客户端管理方法 ============
     # 管理Binance订单客户端的创建，确保使用最新的API凭证
     
@@ -934,7 +1058,7 @@ class TradingEngine:
         【使用场景】
         - _execute_buy: 调用market_trade（市场价格买入）
         - _execute_sell: 调用market_trade（市场价格卖出/平仓）
-        - _execute_sell: 调用market_trade（平仓，close_position信号也使用此方法）
+        - _execute_close: 调用close_position_trade（平仓）
         - _execute_stop_loss: 调用stop_loss_trade（止损）
         - _execute_take_profit: 调用take_profit_trade（止盈）
         
@@ -2735,15 +2859,10 @@ class TradingEngine:
         根据AI返回的signal字段，调用相应的执行方法：
         - 'buy_to_long' / 'buy_to_short': 调用 _execute_buy（市场价买入）
         - 'sell_to_long' / 'sell_to_short': 调用 _execute_sell（市场价卖出/平仓）
-        - 'close_position': 调用 _execute_sell（平仓，统一使用market_trade接口）
+        - 'close_position': 调用 _execute_close（平仓）
         - 'stop_loss': 调用 _execute_stop_loss（止损）
         - 'take_profit': 调用 _execute_take_profit（止盈）
         - 'hold': 保持观望，不执行任何操作
-        
-        【优化说明】
-        - close_position信号现在统一使用_execute_sell方法处理
-        - 根据持仓方向自动转换为sell_to_long或sell_to_short信号
-        - 统一使用market_trade SDK接口，不再使用close_position_trade接口
         
         Args:
             decisions: AI决策字典，key为交易对符号，value为决策详情
@@ -2781,33 +2900,10 @@ class TradingEngine:
                         # - sell_to_short → position_side = 'SHORT'（平空仓）
                         result = self._execute_sell(symbol, decision, market_state, portfolio)
                     elif signal == 'close_position':
-                        # 【优化】统一使用 _execute_sell 方法处理平仓，使用 market_trade 接口
-                        # 根据持仓方向自动转换为对应的 sell_to_long 或 sell_to_short 信号
                         if symbol not in positions_map:
                             result = {'symbol': symbol, 'error': 'No position to close'}
                         else:
-                            # 获取持仓方向，转换为对应的卖出信号
-                            position = positions_map[symbol]
-                            position_side = position.get('position_side', 'LONG').upper()
-                            
-                            # 根据持仓方向确定对应的卖出信号
-                            if position_side == 'LONG':
-                                # 平多仓：使用 sell_to_long 信号
-                                sell_signal = 'sell_to_long'
-                            else:  # SHORT
-                                # 平空仓：使用 sell_to_short 信号
-                                sell_signal = 'sell_to_short'
-                            
-                            # 创建新的decision，使用转换后的信号
-                            sell_decision = decision.copy()
-                            sell_decision['signal'] = sell_signal
-                            
-                            # 调用 _execute_sell 方法（统一使用 market_trade 接口）
-                            result = self._execute_sell(symbol, sell_decision, market_state, portfolio)
-                            
-                            # 如果执行成功，将返回的signal改为 close_position（保持兼容性）
-                            if 'error' not in result:
-                                result['signal'] = 'close_position'
+                            result = self._execute_close(symbol, decision, market_state, portfolio)
                     elif signal == 'stop_loss':
                         if symbol not in positions_map:
                             result = {'symbol': symbol, 'error': 'No position for stop loss'}
@@ -2939,10 +3035,14 @@ class TradingEngine:
         # 获取交易上下文
         model_uuid, trade_id = self._get_trade_context()
         
+        # 根据is_virtual判断使用real还是test模式
+        trade_mode = self._get_trade_mode()
+        
         # 调用SDK执行交易
         sdk_response = None
         sdk_call_skipped = False
         sdk_skip_reason = None
+        sdk_error = None
         binance_client = self._create_binance_order_client()
         if binance_client:
             try:
@@ -2962,7 +3062,7 @@ class TradingEngine:
                 # SDK 调用时使用合约数量（position_amt），不是 USDT 数量（quantity）
                 logger.info(f"@API@ [Model {self.model_id}] [market_trade] === 准备调用接口 ===" 
                           f" | symbol={symbol} | side={sdk_side} | position_side={position_side} | "
-                          f"quantity={position_amt} (合约数量) | price={price} | leverage={leverage}")
+                          f"quantity={position_amt} (合约数量) | price={price} | leverage={leverage} | trade_mode={trade_mode}")
                 
                 conversation_id = self._get_conversation_id()
                 
@@ -2975,12 +3075,14 @@ class TradingEngine:
                     model_id=model_uuid,
                     conversation_id=conversation_id,
                     trade_id=trade_id,
-                    db=self.binance_trade_logs_db
+                    db=self.binance_trade_logs_db,
+                    trade_mode=trade_mode  # 传递trade_mode参数
                 )
                 
                 logger.info(f"@API@ [Model {self.model_id}] [market_trade] === 接口调用成功 ==="
                           f" | symbol={symbol} | response={sdk_response}")
             except Exception as sdk_err:
+                sdk_error = str(sdk_err)
                 logger.error(f"@API@ [Model {self.model_id}] [market_trade] === 接口调用失败 ==="
                            f" | symbol={symbol} | error={sdk_err}", exc_info=True)
         else:
@@ -2999,23 +3101,77 @@ class TradingEngine:
             logger.error(f"TRADE: Update position failed ({trade_signal.upper()}) model={self.model_id} future={symbol}: {db_err}")
             raise
 
-        # 【确定trades表的side字段】统一使用'buy'（开多和开空都使用buy）
-        trade_side = 'buy'  # 统一使用buy
+        # 解析SDK返回数据（如果是real模式且调用成功）
+        parsed_response = None
+        if trade_mode == 'real' and sdk_response:
+            parsed_response = self._parse_sdk_response(sdk_response, trade_signal, position_side.lower())
+        elif trade_mode == 'real' and sdk_error:
+            # real模式调用失败，使用策略返回的值，quantity和price设置为0
+            parsed_response = {
+                'executedQty': 0.0,
+                'avgPrice': 0.0,
+                'side': trade_signal,  # 使用策略返回的signal
+                'positionSide': position_side.lower(),  # 使用策略返回的side
+                'orderId': None,
+                'type': None,
+                'origType': None,
+                'error': sdk_error
+            }
+        
+        # 【确定trades表的side字段】
+        # 如果是real模式且解析成功，使用解析后的值；否则使用策略返回的值
+        if parsed_response:
+            trade_signal_final = parsed_response.get('side', trade_signal)
+            trade_side_final = parsed_response.get('positionSide', position_side.lower())
+            trade_quantity = parsed_response.get('executedQty', 0.0) if trade_mode == 'real' else quantity
+            trade_price = parsed_response.get('avgPrice', 0.0) if trade_mode == 'real' else price
+            order_id = parsed_response.get('orderId')
+            order_type = parsed_response.get('type')
+            orig_type = parsed_response.get('origType')
+            error_msg = parsed_response.get('error')
+        else:
+            # test模式或未解析，使用策略返回的值
+            trade_signal_final = trade_signal
+            trade_side_final = position_side.lower()
+            trade_quantity = quantity
+            trade_price = price
+            order_id = None
+            order_type = None
+            orig_type = None
+            error_msg = None
         
         # 记录交易
         # quantity = 合约数量（用于 trades 表，与strategy_decisions表保持一致）
         # position_amt = 合约数量（用于 portfolios 表）
         # initial_margin = 开仓时使用的原始保证金（用于计算盈亏百分比）
-        logger.info(f"TRADE: PENDING - Model {self.model_id} {trade_signal.upper()} {symbol} position_side={position_side} quantity={quantity} (合约数量), position_amt={position_amt} (合约数量), price={price} fee={trade_fee} initial_margin={initial_margin}")
+        logger.info(f"TRADE: PENDING - Model {self.model_id} {trade_signal_final.upper()} {symbol} position_side={position_side} quantity={trade_quantity} (合约数量), position_amt={position_amt} (合约数量), price={trade_price} fee={trade_fee} initial_margin={initial_margin}")
         try:
+            # 构建插入数据的列和值
+            columns = ["id", "model_id", "future", "signal", "quantity", "price", "leverage", "side", "pnl", "fee", "initial_margin", "timestamp"]
+            values = [trade_id, model_uuid, symbol.upper(), trade_signal_final, trade_quantity, trade_price, leverage, trade_side_final, 0, trade_fee, initial_margin, datetime.now(timezone(timedelta(hours=8))).replace(tzinfo=None)]
+            
+            # 添加新字段（如果real模式有值）
+            if order_id is not None:
+                columns.append("orderId")
+                values.append(order_id)
+            if order_type is not None:
+                columns.append("type")
+                values.append(order_type)
+            if orig_type is not None:
+                columns.append("origType")
+                values.append(orig_type)
+            if error_msg is not None:
+                columns.append("error")
+                values.append(error_msg)
+            
             self.db.insert_rows(
                 self.db.trades_table,
-                [[trade_id, model_uuid, symbol.upper(), trade_signal, quantity, price, leverage, trade_side, 0, trade_fee, initial_margin, datetime.now(timezone(timedelta(hours=8))).replace(tzinfo=None)]],
-                ["id", "model_id", "future", "signal", "quantity", "price", "leverage", "side", "pnl", "fee", "initial_margin", "timestamp"]
+                [values],
+                columns
             )
-            logger.info(f"TRADE: RECORDED - Model {self.model_id} {trade_signal.upper()} {symbol}")
+            logger.info(f"TRADE: RECORDED - Model {self.model_id} {trade_signal_final.upper()} {symbol}")
         except Exception as db_err:
-            logger.error(f"TRADE: Add trade failed ({trade_signal.upper()}) model={self.model_id} future={symbol}: {db_err}")
+            logger.error(f"TRADE: Add trade failed ({trade_signal_final.upper()}) model={self.model_id} future={symbol}: {db_err}")
             raise
         
         self._log_trade_record(trade_signal, symbol, position_side, sdk_call_skipped, sdk_skip_reason)
@@ -3048,11 +3204,6 @@ class TradingEngine:
         """
         执行市场价卖出/平仓（统一方法，支持平多和平空）
         
-        【支持的信号类型】
-        - signal='sell_to_long'（平多）→ position_side='LONG'
-        - signal='sell_to_short'（平空）→ position_side='SHORT'
-        - signal='close_position'（平仓）→ 根据持仓方向自动转换为 sell_to_long 或 sell_to_short
-        
         【signal与position_side的映射关系】
         根据AI模型返回的signal字段自动确定position_side：
         - signal='sell_to_long'（平多）→ position_side='LONG'
@@ -3062,12 +3213,10 @@ class TradingEngine:
         - AI模型不再返回position_side字段，只需要返回signal字段
         - 系统会根据signal自动确定position_side
         - trades表中记录的signal字段：sell_to_long 或 sell_to_short
-        - close_position信号会在_execute_decisions中转换为对应的sell_to_long或sell_to_short
         
         【SDK接口参数说明】
         - SDK调用的side参数：统一使用'SELL'（平多和平空都使用SELL）
         - SDK调用的positionSide参数：根据signal自动确定（LONG或SHORT）
-        - SDK接口：统一使用market_trade（市场价交易接口）
         - 数据库记录的position_side：根据signal自动确定
         - trades表的side字段：统一使用'sell'（平多和平空都使用sell）
         
@@ -3105,10 +3254,14 @@ class TradingEngine:
         # 获取交易上下文
         model_uuid, trade_id = self._get_trade_context()
         
+        # 根据is_virtual判断使用real还是test模式
+        trade_mode = self._get_trade_mode()
+        
         # 调用SDK执行交易
         sdk_response = None
         sdk_call_skipped = False
         sdk_skip_reason = None
+        sdk_error = None
         binance_client = self._create_binance_order_client()
         if binance_client:
             try:
@@ -3129,7 +3282,7 @@ class TradingEngine:
                 # 然后执行交易
                 logger.info(f"@API@ [Model {self.model_id}] [market_trade] === 准备调用接口 ===" 
                           f" | symbol={symbol} | side={sdk_side} | position_side={position_side} | "
-                          f"quantity={position_amt} | price={current_price} | leverage={leverage}")
+                          f"quantity={position_amt} | price={current_price} | leverage={leverage} | trade_mode={trade_mode}")
                 
                 conversation_id = self._get_conversation_id()
                 
@@ -3142,12 +3295,14 @@ class TradingEngine:
                     model_id=model_uuid,
                     conversation_id=conversation_id,
                     trade_id=trade_id,
-                    db=self.binance_trade_logs_db
+                    db=self.binance_trade_logs_db,
+                    trade_mode=trade_mode  # 传递trade_mode参数
                 )
                 
                 logger.info(f"@API@ [Model {self.model_id}] [market_trade] === 接口调用成功 ==="
                           f" | symbol={symbol} | response={sdk_response}")
             except Exception as sdk_err:
+                sdk_error = str(sdk_err)
                 logger.error(f"@API@ [Model {self.model_id}] [market_trade] === 接口调用失败 ==="
                            f" | symbol={symbol} | error={sdk_err}", exc_info=True)
         else:
@@ -3160,8 +3315,44 @@ class TradingEngine:
             logger.error(f"TRADE: Close position failed ({trade_signal.upper()}) model={self.model_id} future={symbol}: {db_err}")
             raise
         
-        # 【确定trades表的side字段】统一使用'sell'（平多和平空都使用sell）
-        trade_side = 'sell'  # 统一使用sell
+        # 解析SDK返回数据（如果是real模式且调用成功）
+        parsed_response = None
+        if trade_mode == 'real' and sdk_response:
+            parsed_response = self._parse_sdk_response(sdk_response, trade_signal, position_side.lower())
+        elif trade_mode == 'real' and sdk_error:
+            # real模式调用失败，使用策略返回的值，quantity和price设置为0
+            parsed_response = {
+                'executedQty': 0.0,
+                'avgPrice': 0.0,
+                'side': trade_signal,  # 使用策略返回的signal
+                'positionSide': position_side.lower(),  # 使用策略返回的side
+                'orderId': None,
+                'type': None,
+                'origType': None,
+                'error': sdk_error
+            }
+        
+        # 【确定trades表的side字段】
+        # 如果是real模式且解析成功，使用解析后的值；否则使用策略返回的值
+        if parsed_response:
+            trade_signal_final = parsed_response.get('side', trade_signal)
+            trade_side_final = parsed_response.get('positionSide', position_side.lower())
+            trade_quantity = parsed_response.get('executedQty', 0.0) if trade_mode == 'real' else position_amt
+            trade_price = parsed_response.get('avgPrice', 0.0) if trade_mode == 'real' else current_price
+            order_id = parsed_response.get('orderId')
+            order_type = parsed_response.get('type')
+            orig_type = parsed_response.get('origType')
+            error_msg = parsed_response.get('error')
+        else:
+            # test模式或未解析，使用策略返回的值
+            trade_signal_final = trade_signal
+            trade_side_final = position_side.lower()
+            trade_quantity = position_amt
+            trade_price = current_price
+            order_id = None
+            order_type = None
+            orig_type = None
+            error_msg = None
         
         # 获取持仓的initial_margin（用于计算盈亏百分比）
         # 从position中获取initial_margin，如果不存在则从portfolios表查询
@@ -3180,19 +3371,37 @@ class TradingEngine:
                 logger.warning(f"[TradingEngine] Failed to get initial_margin from portfolios table: {e}")
         
         # 记录交易（使用 _resolve_leverage 解析，优先使用 decision 中的 leverage，否则使用模型配置的 leverage）
-        logger.info(f"TRADE: PENDING - Model {self.model_id} {trade_signal.upper()} {symbol} position_side={position_side} position_amt={position_amt} price={current_price} fee={trade_fee} net_pnl={net_pnl} initial_margin={initial_margin}")
+        logger.info(f"TRADE: PENDING - Model {self.model_id} {trade_signal_final.upper()} {symbol} position_side={position_side} position_amt={trade_quantity} price={trade_price} fee={trade_fee} net_pnl={net_pnl} initial_margin={initial_margin}")
         try:
             # 使用 _resolve_leverage 解析杠杆（优先使用 decision 中的 leverage，否则使用模型配置的 leverage）
             leverage = self._resolve_leverage(decision)
             
+            # 构建插入数据的列和值
+            columns = ["id", "model_id", "future", "signal", "quantity", "price", "leverage", "side", "pnl", "fee", "initial_margin", "timestamp"]
+            values = [trade_id, model_uuid, symbol.upper(), trade_signal_final, trade_quantity, trade_price, leverage, trade_side_final, net_pnl, trade_fee, initial_margin, datetime.now(timezone(timedelta(hours=8))).replace(tzinfo=None)]
+            
+            # 添加新字段（如果real模式有值）
+            if order_id is not None:
+                columns.append("orderId")
+                values.append(order_id)
+            if order_type is not None:
+                columns.append("type")
+                values.append(order_type)
+            if orig_type is not None:
+                columns.append("origType")
+                values.append(orig_type)
+            if error_msg is not None:
+                columns.append("error")
+                values.append(error_msg)
+            
             self.db.insert_rows(
                 self.db.trades_table,
-                [[trade_id, model_uuid, symbol.upper(), trade_signal, position_amt, current_price, leverage, trade_side, net_pnl, trade_fee, initial_margin, datetime.now(timezone(timedelta(hours=8))).replace(tzinfo=None)]],
-                ["id", "model_id", "future", "signal", "quantity", "price", "leverage", "side", "pnl", "fee", "initial_margin", "timestamp"]
+                [values],
+                columns
             )
-            logger.info(f"TRADE: RECORDED - Model {self.model_id} {trade_signal.upper()} {symbol}")
+            logger.info(f"TRADE: RECORDED - Model {self.model_id} {trade_signal_final.upper()} {symbol}")
         except Exception as db_err:
-            logger.error(f"TRADE: Add trade failed ({trade_signal.upper()}) model={self.model_id} future={symbol}: {db_err}")
+            logger.error(f"TRADE: Add trade failed ({trade_signal_final.upper()}) model={self.model_id} future={symbol}: {db_err}")
             raise
         
         self._log_trade_record(trade_signal, symbol, position_side, sdk_call_skipped, sdk_skip_reason)
@@ -3222,10 +3431,7 @@ class TradingEngine:
 
     def _execute_close(self, symbol: str, decision: Dict, market_state: Dict, portfolio: Dict) -> Dict:
         """
-        【已废弃】执行平仓操作
-        
-        ⚠️ 注意：此方法已废弃，close_position信号现在统一使用_execute_sell方法处理。
-        此方法保留仅用于向后兼容，新代码不应直接调用此方法。
+        执行平仓操作
         
         根据持仓的position_side自动确定平仓方向：
         - LONG持仓：使用SELL方向平仓（平多仓）
@@ -3251,7 +3457,6 @@ class TradingEngine:
             - 使用STOP_MARKET订单类型，以当前价格作为触发价格（立即触发）
             - 计算毛盈亏和净盈亏（扣除手续费）
             - 平仓后更新数据库持仓记录
-            - 【已废弃】现在统一使用_execute_sell方法，使用market_trade接口
         """
         # 查找持仓信息
         position = self._find_position(portfolio, symbol)
@@ -3275,12 +3480,16 @@ class TradingEngine:
         # 获取交易上下文
         model_uuid, trade_id = self._get_trade_context()
         
+        # 根据is_virtual判断使用real还是test模式
+        trade_mode = self._get_trade_mode()
+        
         # 【调用SDK执行交易】使用close_position_trade
         # 注意：close_position_trade只支持STOP_MARKET或TAKE_PROFIT_MARKET，不支持MARKET
         # 对于立即平仓，使用当前价格作为stop_price的STOP_MARKET订单
         sdk_response = None
         sdk_call_skipped = False
         sdk_skip_reason = None
+        sdk_error = None
         # 【每次创建新的Binance订单客户端】确保使用最新的model对应的api_key和api_secret
         binance_client = self._create_binance_order_client()
         if binance_client:
@@ -3289,7 +3498,7 @@ class TradingEngine:
                 logger.info(f"@API@ [Model {self.model_id}] [close_position_trade] === 准备调用接口 ==="
                           f" | symbol={symbol} | side={side_for_trade} | order_type=STOP_MARKET | "
                           f"stop_price={current_price} | position_side={position_side} | "
-                          f"position_amt={position_amt} | entry_price={entry_price}")
+                          f"position_amt={position_amt} | entry_price={entry_price} | trade_mode={trade_mode}")
                 
                 conversation_id = self._get_conversation_id()
                 
@@ -3303,13 +3512,15 @@ class TradingEngine:
                     model_id=model_uuid,
                     conversation_id=conversation_id,
                     trade_id=trade_id,
-                    db=self.binance_trade_logs_db
+                    db=self.binance_trade_logs_db,
+                    trade_mode=trade_mode  # 传递trade_mode参数
                 )
                 
                 # 【调用后日志】记录接口返回内容
                 logger.info(f"@API@ [Model {self.model_id}] [close_position_trade] === 接口调用成功 ==="
                           f" | symbol={symbol} | response={sdk_response}")
             except Exception as sdk_err:
+                sdk_error = str(sdk_err)
                 logger.error(f"@API@ [Model {self.model_id}] [close_position_trade] === 接口调用失败 ==="
                            f" | symbol={symbol} | error={sdk_err}", exc_info=True)
                 # SDK调用失败不影响数据库记录，继续执行
@@ -3339,16 +3550,73 @@ class TradingEngine:
             except Exception as e:
                 logger.warning(f"[TradingEngine] Failed to get initial_margin from portfolios table: {e}")
         
+        # 解析SDK返回数据（如果是real模式且调用成功）
+        parsed_response = None
+        if trade_mode == 'real' and sdk_response:
+            parsed_response = self._parse_sdk_response(sdk_response, 'close_position', position_side.lower())
+        elif trade_mode == 'real' and sdk_error:
+            # real模式调用失败，使用策略返回的值，quantity和price设置为0
+            parsed_response = {
+                'executedQty': 0.0,
+                'avgPrice': 0.0,
+                'side': 'close_position',
+                'positionSide': position_side.lower(),
+                'orderId': None,
+                'type': None,
+                'origType': None,
+                'error': sdk_error
+            }
+        
+        # 【确定trades表的字段值】
+        # 如果是real模式且解析成功，使用解析后的值；否则使用策略返回的值
+        if parsed_response:
+            trade_signal_final = parsed_response.get('side', 'close_position')
+            trade_side_final = parsed_response.get('positionSide', position_side.lower())
+            trade_quantity = parsed_response.get('executedQty', 0.0) if trade_mode == 'real' else position_amt
+            trade_price = parsed_response.get('avgPrice', 0.0) if trade_mode == 'real' else current_price
+            order_id = parsed_response.get('orderId')
+            order_type = parsed_response.get('type')
+            orig_type = parsed_response.get('origType')
+            error_msg = parsed_response.get('error')
+        else:
+            # test模式或未解析，使用策略返回的值
+            trade_signal_final = 'close_position'
+            trade_side_final = position_side.lower()
+            trade_quantity = position_amt
+            trade_price = current_price
+            order_id = None
+            order_type = None
+            orig_type = None
+            error_msg = None
+        
         # 记录交易（使用 _resolve_leverage 解析，优先使用 decision 中的 leverage，否则使用模型配置的 leverage）
-        logger.info(f"TRADE: PENDING - Model {self.model_id} CLOSE {symbol} position_side={position_side} position_amt={position_amt} price={current_price} fee={trade_fee} net_pnl={net_pnl} initial_margin={initial_margin}")
+        logger.info(f"TRADE: PENDING - Model {self.model_id} CLOSE {symbol} position_side={position_side} position_amt={trade_quantity} price={trade_price} fee={trade_fee} net_pnl={net_pnl} initial_margin={initial_margin}")
         try:
             # 使用 _resolve_leverage 解析杠杆（优先使用 decision 中的 leverage，否则使用模型配置的 leverage）
             leverage = self._resolve_leverage(decision)
+            
+            # 构建插入数据的列和值
+            columns = ["id", "model_id", "future", "signal", "quantity", "price", "leverage", "side", "pnl", "fee", "initial_margin", "timestamp"]
+            values = [trade_id, model_uuid, symbol.upper(), trade_signal_final, trade_quantity, trade_price, leverage, trade_side_final, net_pnl, trade_fee, initial_margin, datetime.now(timezone(timedelta(hours=8))).replace(tzinfo=None)]
+            
+            # 添加新字段（如果real模式有值）
+            if order_id is not None:
+                columns.append("orderId")
+                values.append(order_id)
+            if order_type is not None:
+                columns.append("type")
+                values.append(order_type)
+            if orig_type is not None:
+                columns.append("origType")
+                values.append(orig_type)
+            if error_msg is not None:
+                columns.append("error")
+                values.append(error_msg)
                 
             self.db.insert_rows(
                 self.db.trades_table,
-                [[trade_id, model_uuid, symbol.upper(), 'close_position', position_amt, current_price, leverage, side_for_trade.lower(), net_pnl, trade_fee, initial_margin, datetime.now(timezone(timedelta(hours=8))).replace(tzinfo=None)]],
-                ["id", "model_id", "future", "signal", "quantity", "price", "leverage", "side", "pnl", "fee", "initial_margin", "timestamp"]
+                [values],
+                columns
             )
             logger.info(f"TRADE: RECORDED - Model {self.model_id} CLOSE {symbol}")
         except Exception as db_err:
@@ -3437,10 +3705,14 @@ class TradingEngine:
         # 获取交易上下文
         model_uuid, trade_id = self._get_trade_context()
         
+        # 根据is_virtual判断使用real还是test模式
+        trade_mode = self._get_trade_mode()
+        
         # 【调用SDK执行交易】使用market_trade进行市场价卖出操作（反向操作）
         sdk_response = None
         sdk_call_skipped = False
         sdk_skip_reason = None
+        sdk_error = None
         # 【每次创建新的Binance订单客户端】确保使用最新的model对应的api_key和api_secret
         binance_client = self._create_binance_order_client()
         if binance_client:
@@ -3459,7 +3731,7 @@ class TradingEngine:
                 # 【调用前日志】记录调用参数
                 logger.info(f"@API@ [Model {self.model_id}] [market_trade] === 准备调用接口（止损操作）==="
                           f" | symbol={symbol} | side={side_for_trade} | order_type=MARKET | "
-                          f"position_side={position_side} | quantity={strategy_quantity} | current_price={current_price}")
+                          f"position_side={position_side} | quantity={strategy_quantity} | current_price={current_price} | trade_mode={trade_mode}")
                 
                 conversation_id = self._get_conversation_id()
                 
@@ -3473,13 +3745,15 @@ class TradingEngine:
                     model_id=model_uuid,
                     conversation_id=conversation_id,
                     trade_id=trade_id,
-                    db=self.binance_trade_logs_db
+                    db=self.binance_trade_logs_db,
+                    trade_mode=trade_mode  # 传递trade_mode参数
                 )
                 
                 # 【调用后日志】记录接口返回内容
                 logger.info(f"@API@ [Model {self.model_id}] [market_trade] === 接口调用成功（止损操作）==="
                           f" | symbol={symbol} | response={sdk_response}")
             except Exception as sdk_err:
+                sdk_error = str(sdk_err)
                 logger.error(f"@API@ [Model {self.model_id}] [market_trade] === 接口调用失败（止损操作）==="
                            f" | symbol={symbol} | error={sdk_err}", exc_info=True)
                 # SDK调用失败不影响数据库记录，继续执行
@@ -3526,17 +3800,75 @@ class TradingEngine:
             except Exception as e:
                 logger.warning(f"[TradingEngine] Failed to get initial_margin from portfolios table: {e}")
         
+        # 解析SDK返回数据（如果是real模式且调用成功）
+        parsed_response = None
+        if trade_mode == 'real' and sdk_response:
+            parsed_response = self._parse_sdk_response(sdk_response, 'stop_loss', position_side.lower())
+        elif trade_mode == 'real' and sdk_error:
+            # real模式调用失败，使用策略返回的值，quantity和price设置为0
+            parsed_response = {
+                'executedQty': 0.0,
+                'avgPrice': 0.0,
+                'side': 'stop_loss',
+                'positionSide': position_side.lower(),
+                'orderId': None,
+                'type': None,
+                'origType': None,
+                'error': sdk_error
+            }
+        
+        # 【确定trades表的字段值】
+        # 如果是real模式且解析成功，使用解析后的值；否则使用策略返回的值
+        if parsed_response:
+            trade_signal_final = parsed_response.get('side', 'stop_loss')
+            trade_side_final = parsed_response.get('positionSide', position_side.lower())
+            trade_quantity = parsed_response.get('executedQty', 0.0) if trade_mode == 'real' else strategy_quantity
+            trade_price = parsed_response.get('avgPrice', 0.0) if trade_mode == 'real' else current_price
+            order_id = parsed_response.get('orderId')
+            order_type = parsed_response.get('type')
+            orig_type = parsed_response.get('origType')
+            error_msg = parsed_response.get('error')
+        else:
+            # test模式或未解析，使用策略返回的值
+            trade_signal_final = 'stop_loss'
+            trade_side_final = position_side.lower()
+            trade_quantity = strategy_quantity
+            trade_price = current_price
+            order_id = None
+            order_type = None
+            orig_type = None
+            error_msg = None
+        
         # 记录止损操作到trades表
-        logger.info(f"TRADE: PENDING - Model {self.model_id} STOP_LOSS {symbol} position_side={position_side} strategy_quantity={strategy_quantity} current_price={current_price} initial_margin={initial_margin}")
+        logger.info(f"TRADE: PENDING - Model {self.model_id} STOP_LOSS {symbol} position_side={position_side} strategy_quantity={trade_quantity} current_price={trade_price} initial_margin={initial_margin}")
         if sdk_call_skipped:
             logger.warning(f"TRADE: ⚠️ SDK调用被跳过，但交易记录仍将保存到数据库 | symbol={symbol} | reason={sdk_skip_reason}")
         try:
             # 【记录到trades表】quantity使用策略决策中的quantity
             leverage = self._resolve_leverage(decision)
+            
+            # 构建插入数据的列和值
+            columns = ["id", "model_id", "future", "signal", "quantity", "price", "leverage", "side", "pnl", "fee", "initial_margin", "timestamp"]
+            values = [trade_id, model_uuid, symbol.upper(), trade_signal_final, trade_quantity, trade_price, leverage, trade_side_final, calculated_pnl, trade_fee, initial_margin, datetime.now(timezone(timedelta(hours=8))).replace(tzinfo=None)]
+            
+            # 添加新字段（如果real模式有值）
+            if order_id is not None:
+                columns.append("orderId")
+                values.append(order_id)
+            if order_type is not None:
+                columns.append("type")
+                values.append(order_type)
+            if orig_type is not None:
+                columns.append("origType")
+                values.append(orig_type)
+            if error_msg is not None:
+                columns.append("error")
+                values.append(error_msg)
+            
             self.db.insert_rows(
                 self.db.trades_table,
-                [[trade_id, model_uuid, symbol.upper(), 'stop_loss', strategy_quantity, current_price, leverage, side_for_trade.lower(), calculated_pnl, trade_fee, initial_margin, datetime.now(timezone(timedelta(hours=8))).replace(tzinfo=None)]],
-                ["id", "model_id", "future", "signal", "quantity", "price", "leverage", "side", "pnl", "fee", "initial_margin", "timestamp"]
+                [values],
+                columns
             )
             if sdk_call_skipped:
                 logger.warning(f"TRADE: RECORDED (但SDK未执行) - Model {self.model_id} STOP_LOSS {symbol} | "
@@ -3659,10 +3991,14 @@ class TradingEngine:
         # 获取交易上下文
         model_uuid, trade_id = self._get_trade_context()
         
+        # 根据is_virtual判断使用real还是test模式
+        trade_mode = self._get_trade_mode()
+        
         # 【调用SDK执行交易】使用market_trade进行市场价卖出操作（反向操作）
         sdk_response = None
         sdk_call_skipped = False
         sdk_skip_reason = None
+        sdk_error = None
         # 【每次创建新的Binance订单客户端】确保使用最新的model对应的api_key和api_secret
         binance_client = self._create_binance_order_client()
         if binance_client:
@@ -3681,7 +4017,7 @@ class TradingEngine:
                 # 【调用前日志】记录调用参数
                 logger.info(f"@API@ [Model {self.model_id}] [market_trade] === 准备调用接口（止盈操作）==="
                           f" | symbol={symbol} | side={side_for_trade} | order_type=MARKET | "
-                          f"position_side={position_side} | quantity={strategy_quantity} | current_price={current_price}")
+                          f"position_side={position_side} | quantity={strategy_quantity} | current_price={current_price} | trade_mode={trade_mode}")
                 
                 conversation_id = self._get_conversation_id()
                 
@@ -3695,13 +4031,15 @@ class TradingEngine:
                     model_id=model_uuid,
                     conversation_id=conversation_id,
                     trade_id=trade_id,
-                    db=self.binance_trade_logs_db
+                    db=self.binance_trade_logs_db,
+                    trade_mode=trade_mode  # 传递trade_mode参数
                 )
                 
                 # 【调用后日志】记录接口返回内容
                 logger.info(f"@API@ [Model {self.model_id}] [market_trade] === 接口调用成功（止盈操作）==="
                           f" | symbol={symbol} | response={sdk_response}")
             except Exception as sdk_err:
+                sdk_error = str(sdk_err)
                 logger.error(f"@API@ [Model {self.model_id}] [market_trade] === 接口调用失败（止盈操作）==="
                            f" | symbol={symbol} | error={sdk_err}", exc_info=True)
                 # SDK调用失败不影响数据库记录，继续执行
@@ -3748,17 +4086,75 @@ class TradingEngine:
             except Exception as e:
                 logger.warning(f"[TradingEngine] Failed to get initial_margin from portfolios table: {e}")
         
+        # 解析SDK返回数据（如果是real模式且调用成功）
+        parsed_response = None
+        if trade_mode == 'real' and sdk_response:
+            parsed_response = self._parse_sdk_response(sdk_response, 'take_profit', position_side.lower())
+        elif trade_mode == 'real' and sdk_error:
+            # real模式调用失败，使用策略返回的值，quantity和price设置为0
+            parsed_response = {
+                'executedQty': 0.0,
+                'avgPrice': 0.0,
+                'side': 'take_profit',
+                'positionSide': position_side.lower(),
+                'orderId': None,
+                'type': None,
+                'origType': None,
+                'error': sdk_error
+            }
+        
+        # 【确定trades表的字段值】
+        # 如果是real模式且解析成功，使用解析后的值；否则使用策略返回的值
+        if parsed_response:
+            trade_signal_final = parsed_response.get('side', 'take_profit')
+            trade_side_final = parsed_response.get('positionSide', position_side.lower())
+            trade_quantity = parsed_response.get('executedQty', 0.0) if trade_mode == 'real' else strategy_quantity
+            trade_price = parsed_response.get('avgPrice', 0.0) if trade_mode == 'real' else current_price
+            order_id = parsed_response.get('orderId')
+            order_type = parsed_response.get('type')
+            orig_type = parsed_response.get('origType')
+            error_msg = parsed_response.get('error')
+        else:
+            # test模式或未解析，使用策略返回的值
+            trade_signal_final = 'take_profit'
+            trade_side_final = position_side.lower()
+            trade_quantity = strategy_quantity
+            trade_price = current_price
+            order_id = None
+            order_type = None
+            orig_type = None
+            error_msg = None
+        
         # 记录止盈操作到trades表
-        logger.info(f"TRADE: PENDING - Model {self.model_id} TAKE_PROFIT {symbol} position_side={position_side} strategy_quantity={strategy_quantity} current_price={current_price} initial_margin={initial_margin}")
+        logger.info(f"TRADE: PENDING - Model {self.model_id} TAKE_PROFIT {symbol} position_side={position_side} strategy_quantity={trade_quantity} current_price={trade_price} initial_margin={initial_margin}")
         if sdk_call_skipped:
             logger.warning(f"TRADE: ⚠️ SDK调用被跳过，但交易记录仍将保存到数据库 | symbol={symbol} | reason={sdk_skip_reason}")
         try:
             # 【记录到trades表】quantity使用策略决策中的quantity
             leverage = self._resolve_leverage(decision)
+            
+            # 构建插入数据的列和值
+            columns = ["id", "model_id", "future", "signal", "quantity", "price", "leverage", "side", "pnl", "fee", "initial_margin", "timestamp"]
+            values = [trade_id, model_uuid, symbol.upper(), trade_signal_final, trade_quantity, trade_price, leverage, trade_side_final, calculated_pnl, trade_fee, initial_margin, datetime.now(timezone(timedelta(hours=8))).replace(tzinfo=None)]
+            
+            # 添加新字段（如果real模式有值）
+            if order_id is not None:
+                columns.append("orderId")
+                values.append(order_id)
+            if order_type is not None:
+                columns.append("type")
+                values.append(order_type)
+            if orig_type is not None:
+                columns.append("origType")
+                values.append(orig_type)
+            if error_msg is not None:
+                columns.append("error")
+                values.append(error_msg)
+            
             self.db.insert_rows(
                 self.db.trades_table,
-                [[trade_id, model_uuid, symbol.upper(), 'take_profit', strategy_quantity, current_price, leverage, side_for_trade.lower(), calculated_pnl, trade_fee, initial_margin, datetime.now(timezone(timedelta(hours=8))).replace(tzinfo=None)]],
-                ["id", "model_id", "future", "signal", "quantity", "price", "leverage", "side", "pnl", "fee", "initial_margin", "timestamp"]
+                [values],
+                columns
             )
             logger.info(f"TRADE: RECORDED - Model {self.model_id} TAKE_PROFIT {symbol}")
         except Exception as db_err:

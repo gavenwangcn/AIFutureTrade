@@ -156,6 +156,11 @@ public class AutoCloseServiceImpl implements AutoCloseService {
                         continue;
                     }
                     
+                    // 根据is_virtual判断使用real还是test模式
+                    // 如果is_virtual不为1（即非虚拟），使用real模式
+                    boolean useRealMode = (model.getIsVirtual() == null || model.getIsVirtual() == 0);
+                    String modelTradeMode = useRealMode ? "real" : "test";
+                    
                     // 检查配置
                     if (autoClosePercent == null || autoClosePercent <= 0) {
                         log.debug("[AutoClose] 跳过 {} (模型: {}): auto_close_percent 未配置或为0", 
@@ -184,8 +189,8 @@ public class AutoCloseServiceImpl implements AutoCloseService {
                         log.warn("[AutoClose] 🚨 {} (模型: {}) 触发自动平仓: 损失 {:.2f}% >= 阈值 {:.2f}%", 
                                 symbol, modelId, String.format("%.2f", lossPercent), String.format("%.2f", autoClosePercent));
                         
-                        // 执行平仓
-                        boolean success = executeClosePosition(model, symbol, positionSide, positionAmt);
+                        // 执行平仓（传递trade_mode）
+                        boolean success = executeClosePosition(model, symbol, positionSide, positionAmt, modelTradeMode);
                         if (success) {
                             closedCount++;
                             log.info("[AutoClose] ✅ {} (模型: {}) 自动平仓成功", symbol, modelId);
@@ -309,9 +314,15 @@ public class AutoCloseServiceImpl implements AutoCloseService {
     /**
      * 执行平仓操作
      * 
-     * 根据配置选择使用测试接口或真实交易接口
+     * 根据model的is_virtual字段判断使用测试接口或真实交易接口
+     * 
+     * @param model 模型信息
+     * @param symbol 交易对符号
+     * @param positionSide 持仓方向
+     * @param positionAmt 持仓数量
+     * @param modelTradeMode 模型交易模式（'real'或'test'），根据is_virtual判断
      */
-    private boolean executeClosePosition(ModelDO model, String symbol, String positionSide, Double positionAmt) {
+    private boolean executeClosePosition(ModelDO model, String symbol, String positionSide, Double positionAmt, String modelTradeMode) {
         try {
             BinanceFuturesBase client = getOrCreateClient(model);
             if (client == null) {
@@ -319,8 +330,8 @@ public class AutoCloseServiceImpl implements AutoCloseService {
                 return false;
             }
             
-            // 判断是否使用测试模式
-            boolean useTestMode = "test".equalsIgnoreCase(tradeMode);
+            // 判断是否使用测试模式（使用模型自己的trade_mode，而不是全局配置）
+            boolean useTestMode = "test".equalsIgnoreCase(modelTradeMode);
             
             if (useTestMode) {
                 // 使用测试接口（不会真实成交）

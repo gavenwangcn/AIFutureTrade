@@ -1306,7 +1306,7 @@ class BinanceFuturesOrderClient(_BinanceFuturesBase):
     
     def _execute_order(self, order_params: Dict[str, Any], context: str = "交易", 
                       model_id: Optional[str] = None, conversation_id: Optional[str] = None,
-                      trade_id: Optional[str] = None, method_name: str = "", db = None) -> Dict[str, Any]:
+                      trade_id: Optional[str] = None, method_name: str = "", db = None, **kwargs) -> Dict[str, Any]:
         """
         执行订单的统一方法，根据配置选择使用测试接口或真实交易接口
         
@@ -1351,7 +1351,12 @@ class BinanceFuturesOrderClient(_BinanceFuturesBase):
             }
         """
         # 【交易模式切换】根据配置选择使用测试接口或真实交易接口
-        trade_mode = getattr(app_config, 'BINANCE_TRADE_MODE', 'test').lower()
+        # 如果kwargs中传递了trade_mode，优先使用传递的值，否则使用全局配置
+        trade_mode = kwargs.pop('trade_mode', None)
+        if trade_mode is None:
+            trade_mode = getattr(app_config, 'BINANCE_TRADE_MODE', 'test').lower()
+        else:
+            trade_mode = str(trade_mode).lower()
         
         # 初始化响应相关变量
         response = None
@@ -1869,7 +1874,12 @@ class BinanceFuturesOrderClient(_BinanceFuturesBase):
         try:
             formatted_symbol = self.format_symbol(symbol)
             position_side = self._validate_position_side(position_side)
-            trade_mode = getattr(app_config, 'BINANCE_TRADE_MODE', 'test').lower()
+            # 如果kwargs中传递了trade_mode，优先使用传递的值，否则使用全局配置
+            trade_mode = kwargs.pop('trade_mode', None)
+            if trade_mode is None:
+                trade_mode = getattr(app_config, 'BINANCE_TRADE_MODE', 'test').lower()
+            else:
+                trade_mode = str(trade_mode).lower()
             
             if trade_mode == 'test':
                 order_params = self._build_order_params(
@@ -1878,7 +1888,7 @@ class BinanceFuturesOrderClient(_BinanceFuturesBase):
                 )
                 return self._execute_order(order_params, context="止损交易",
                                          model_id=model_id, conversation_id=conversation_id,
-                                         trade_id=trade_id, method_name="stop_loss_trade", db=db)
+                                         trade_id=trade_id, method_name="stop_loss_trade", db=db, trade_mode=trade_mode)
             else:
                 algo_params = self._build_algo_params(
                     quantity, price, stop_price, position_side, **kwargs
@@ -1940,7 +1950,12 @@ class BinanceFuturesOrderClient(_BinanceFuturesBase):
         try:
             formatted_symbol = self.format_symbol(symbol)
             position_side = self._validate_position_side(position_side)
-            trade_mode = getattr(app_config, 'BINANCE_TRADE_MODE', 'test').lower()
+            # 如果kwargs中传递了trade_mode，优先使用传递的值，否则使用全局配置
+            trade_mode = kwargs.pop('trade_mode', None)
+            if trade_mode is None:
+                trade_mode = getattr(app_config, 'BINANCE_TRADE_MODE', 'test').lower()
+            else:
+                trade_mode = str(trade_mode).lower()
             
             if trade_mode == 'test':
                 order_params = self._build_order_params(
@@ -1949,7 +1964,7 @@ class BinanceFuturesOrderClient(_BinanceFuturesBase):
                 )
                 return self._execute_order(order_params, context="止盈交易",
                                          model_id=model_id, conversation_id=conversation_id,
-                                         trade_id=trade_id, method_name="take_profit_trade", db=db)
+                                         trade_id=trade_id, method_name="take_profit_trade", db=db, trade_mode=trade_mode)
             else:
                 algo_params = self._build_algo_params(
                     quantity, price, stop_price, position_side, **kwargs
@@ -2008,7 +2023,7 @@ class BinanceFuturesOrderClient(_BinanceFuturesBase):
             
             return self._execute_order(order_params, context="市场交易",
                                      model_id=model_id, conversation_id=conversation_id,
-                                     trade_id=trade_id, method_name="market_trade", db=db)
+                                     trade_id=trade_id, method_name="market_trade", db=db, **kwargs)
         except Exception as exc:
             logger.error(f"[Binance Futures] 市场交易失败: {exc}", exc_info=True)
             raise
@@ -2057,7 +2072,12 @@ class BinanceFuturesOrderClient(_BinanceFuturesBase):
                 if position_side == "SHORT" and side_upper == "SELL":
                     raise ValueError(f"双开模式下，SHORT方向上不支持SELL操作。平空仓应使用BUY，当前side={side}, position_side={position_side}")
             
-            trade_mode = getattr(app_config, 'BINANCE_TRADE_MODE', 'test').lower()
+            # 如果kwargs中传递了trade_mode，优先使用传递的值，否则使用全局配置
+            trade_mode = kwargs.pop('trade_mode', None)
+            if trade_mode is None:
+                trade_mode = getattr(app_config, 'BINANCE_TRADE_MODE', 'test').lower()
+            else:
+                trade_mode = str(trade_mode).lower()
             order_type_upper = order_type.upper()
             
             if trade_mode == 'test':

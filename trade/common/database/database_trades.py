@@ -169,7 +169,8 @@ class TradesDatabase:
     
     def add_trade(self, model_id: int, future: str, signal: str, quantity: float,
               price: float, leverage: int = 1, side: str = 'long', pnl: float = 0, fee: float = 0,
-              model_id_mapping: Dict[int, str] = None):
+              model_id_mapping: Dict[int, str] = None, orderId: Optional[int] = None,
+              type: Optional[str] = None, origType: Optional[str] = None, error: Optional[str] = None):
         """
         Add trade record with fee
         
@@ -184,6 +185,10 @@ class TradesDatabase:
             pnl: Profit and loss
             fee: Transaction fee
             model_id_mapping: Optional model ID mapping dictionary
+            orderId: System order ID (optional, for real mode)
+            type: Order type (optional, for real mode)
+            origType: Original order type before trigger (optional, for real mode)
+            error: Error message if API call failed (optional)
         """
         try:
             if model_id_mapping is None:
@@ -204,10 +209,28 @@ class TradesDatabase:
             current_time = datetime.now(beijing_tz).replace(tzinfo=None)
             
             trade_id = self._generate_id()
+            # Build columns and values lists, including new optional fields
+            columns = ["id", "model_id", "future", "signal", "quantity", "price", "leverage", "side", "pnl", "fee", "timestamp"]
+            values = [trade_id, model_uuid, future.upper(), signal, quantity, price, leverage, side, pnl, fee, current_time]
+            
+            # Add new fields if provided
+            if orderId is not None:
+                columns.append("orderId")
+                values.append(orderId)
+            if type is not None:
+                columns.append("type")
+                values.append(type)
+            if origType is not None:
+                columns.append("origType")
+                values.append(origType)
+            if error is not None:
+                columns.append("error")
+                values.append(error)
+            
             self.insert_rows(
                 self.trades_table,
-                [[trade_id, model_uuid, future.upper(), signal, quantity, price, leverage, side, pnl, fee, current_time]],
-                ["id", "model_id", "future", "signal", "quantity", "price", "leverage", "side", "pnl", "fee", "timestamp"]
+                [values],
+                columns
             )
         except Exception as e:
             logger.error(f"[Trades] Failed to add trade: {e}")

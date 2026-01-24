@@ -232,16 +232,46 @@ class DatabaseInitializer:
             `pnl` DOUBLE DEFAULT 0,
             `fee` DOUBLE DEFAULT 0,
             `initial_margin` DOUBLE DEFAULT 0.0,
+            `orderId` BIGINT DEFAULT NULL COMMENT '系统订单号',
+            `type` VARCHAR(50) DEFAULT NULL COMMENT '订单类型',
+            `origType` VARCHAR(50) DEFAULT NULL COMMENT '触发前订单类型',
+            `error` TEXT DEFAULT NULL COMMENT '接口返回错误消息',
             `timestamp` DATETIME DEFAULT CURRENT_TIMESTAMP,
             INDEX `idx_model_timestamp` (`model_id`, `timestamp`),
             INDEX `idx_future` (`future`),
             INDEX `idx_signal` (`signal`),
             INDEX `idx_side` (`side`),
-            INDEX `idx_timestamp` (`timestamp`)
+            INDEX `idx_timestamp` (`timestamp`),
+            INDEX `idx_orderId` (`orderId`)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
         """
         self.command(ddl)
         logger.debug(f"[DatabaseInit] Ensured table {table_name} exists")
+        
+        # Check and add new fields (orderId, type, origType, error) if table exists but fields don't exist
+        try:
+            # Check if orderId field exists
+            check_orderId_sql = f"""
+            SELECT COUNT(*) FROM information_schema.COLUMNS 
+            WHERE TABLE_SCHEMA = DATABASE() 
+            AND TABLE_NAME = '{table_name}' 
+            AND COLUMN_NAME = 'orderId'
+            """
+            result = self.command(check_orderId_sql)
+            # If field doesn't exist, add fields
+            if isinstance(result, list) and len(result) > 0 and result[0][0] == 0:
+                alter_sql = f"""
+                ALTER TABLE `{table_name}` 
+                ADD COLUMN `orderId` BIGINT DEFAULT NULL COMMENT '系统订单号' AFTER `initial_margin`,
+                ADD COLUMN `type` VARCHAR(50) DEFAULT NULL COMMENT '订单类型' AFTER `orderId`,
+                ADD COLUMN `origType` VARCHAR(50) DEFAULT NULL COMMENT '触发前订单类型' AFTER `type`,
+                ADD COLUMN `error` TEXT DEFAULT NULL COMMENT '接口返回错误消息' AFTER `origType`,
+                ADD INDEX `idx_orderId` (`orderId`)
+                """
+                self.command(alter_sql)
+                logger.info(f"[DatabaseInit] Added orderId, type, origType, error columns to {table_name} table")
+        except Exception as e:
+            logger.warning(f"[DatabaseInit] Failed to check/add orderId/type/origType/error columns to {table_name}: {e}")
     
     def ensure_conversations_table(self, table_name: str = "conversations"):
         """Create conversations table if not exists"""
