@@ -994,6 +994,10 @@ public class ModelServiceImpl implements ModelService {
             trade.put("initialMargin", tradeDO.getInitialMargin() != null ? tradeDO.getInitialMargin() : 0.0);  // 添加initialMargin字段
             trade.put("initial_margin", tradeDO.getInitialMargin() != null ? tradeDO.getInitialMargin() : 0.0);  // 兼容字段名
             trade.put("status", tradeDO.getStatus());
+            // 添加side和position_side字段
+            trade.put("side", tradeDO.getSide());  // 交易方向（buy/sell）
+            trade.put("position_side", tradeDO.getPositionSide());  // 持仓方向（LONG/SHORT）
+            trade.put("positionSide", tradeDO.getPositionSide());  // 兼容字段名
             
             // 格式化timestamp字段为字符串（北京时间）
             if (tradeDO.getTimestamp() != null) {

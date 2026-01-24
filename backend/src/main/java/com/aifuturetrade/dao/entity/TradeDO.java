@@ -120,10 +120,16 @@ public class TradeDO implements Serializable {
     private String error;
 
     /**
-     * 持仓方向（long/short）
+     * 交易方向（buy/sell）
      */
     @TableField("side")
     private String side;
+
+    /**
+     * 持仓方向（LONG/SHORT）
+     */
+    @TableField("position_side")
+    private String positionSide;
 
     /**
      * 杠杆倍数

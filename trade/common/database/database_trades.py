@@ -168,7 +168,7 @@ class TradesDatabase:
         self._with_connection(_execute_insert)
     
     def add_trade(self, model_id: int, future: str, signal: str, quantity: float,
-              price: float, leverage: int = 1, side: str = 'long', pnl: float = 0, fee: float = 0,
+              price: float, leverage: int = 1, side: str = 'buy', position_side: str = 'LONG', pnl: float = 0, fee: float = 0,
               model_id_mapping: Dict[int, str] = None, orderId: Optional[int] = None,
               type: Optional[str] = None, origType: Optional[str] = None, error: Optional[str] = None):
         """
@@ -181,7 +181,8 @@ class TradesDatabase:
             quantity: Quantity
             price: Price
             leverage: Leverage multiplier
-            side: Direction (long/short)
+            side: Trading direction (buy/sell)
+            position_side: Position direction (LONG/SHORT)
             pnl: Profit and loss
             fee: Transaction fee
             model_id_mapping: Optional model ID mapping dictionary
@@ -209,9 +210,23 @@ class TradesDatabase:
             current_time = datetime.now(beijing_tz).replace(tzinfo=None)
             
             trade_id = self._generate_id()
+            # 从signal中提取交易方向（buy/sell），如果没有提供side参数
+            if not side or side in ['long', 'short']:
+                # 如果side是旧的值（long/short），从signal中提取
+                signal_lower = signal.lower() if signal else ''
+                if signal_lower.startswith('buy'):
+                    side = 'buy'
+                elif signal_lower.startswith('sell') or signal_lower in ['close_position', 'stop_loss', 'take_profit']:
+                    side = 'sell'
+                else:
+                    side = 'buy'  # 默认值
+            
+            # 确保position_side为大写（LONG/SHORT）
+            position_side_upper = position_side.upper() if position_side else 'LONG'
+            
             # Build columns and values lists, including new optional fields
-            columns = ["id", "model_id", "future", "signal", "quantity", "price", "leverage", "side", "pnl", "fee", "timestamp"]
-            values = [trade_id, model_uuid, future.upper(), signal, quantity, price, leverage, side, pnl, fee, current_time]
+            columns = ["id", "model_id", "future", "signal", "quantity", "price", "leverage", "side", "position_side", "pnl", "fee", "timestamp"]
+            values = [trade_id, model_uuid, future.upper(), signal, quantity, price, leverage, side, position_side_upper, pnl, fee, current_time]
             
             # Add new fields if provided
             if orderId is not None:
@@ -261,20 +276,17 @@ class TradesDatabase:
                     if now.hour < 8:
                         today_start = today_start - timedelta(days=1)
                     
-                    # 卖出交易信号列表
-                    sell_signals = ['sell_to_long', 'sell_to_short', 'close_position', 'stop_loss', 'take_profit']
-                    signals_placeholders = ','.join(['%s'] * len(sell_signals))
-                    
-                    # 查询当天的卖出交易记录，按时间倒序排列
+                    # 查询当天的卖出交易记录，使用side字段（buy/sell）来过滤
+                    # side字段存储交易方向：buy（买入）或sell（卖出）
                     sql = f"""
                     SELECT `id`, `signal`, `pnl`, `timestamp`
                     FROM `{self.trades_table}`
                     WHERE `model_id` = %s 
-                    AND `signal` IN ({signals_placeholders})
+                    AND `side` = 'sell'
                     AND `timestamp` >= %s
                     ORDER BY `timestamp` DESC
                     """
-                    params = [model_id] + sell_signals + [today_start]
+                    params = [model_id, today_start]
                     cursor.execute(sql, params)
                     rows = cursor.fetchall()
                     

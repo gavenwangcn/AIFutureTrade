@@ -191,7 +191,8 @@ public class BinanceFuturesOrderServiceImpl implements BinanceFuturesOrderServic
 
             // 8. 解析SDK返回数据（如果是real模式且调用成功）
             String finalSignal = signal;
-            String finalSide = positionSide.toLowerCase();
+            String finalPositionSide = positionSide;  // 持仓方向（LONG/SHORT）
+            String finalSideDirection = "sell";  // 交易方向（buy/sell），默认sell
             Double finalQuantity = positionAmt;
             Double finalPrice = currentPrice;
             Long orderId = null;
@@ -227,10 +228,11 @@ public class BinanceFuturesOrderServiceImpl implements BinanceFuturesOrderServic
                     }
                 }
                 
-                // 提取side（买卖方向），映射到signal
+                // 提取side（买卖方向），映射到signal和交易方向
                 if (sideObj != null) {
                     String sideStr = sideObj.toString().toUpperCase();
                     if ("BUY".equals(sideStr)) {
+                        finalSideDirection = "buy";
                         String posSide = positionSideObj != null ? positionSideObj.toString().toUpperCase() : "";
                         if ("SHORT".equals(posSide)) {
                             finalSignal = "buy_to_short";
@@ -238,6 +240,7 @@ public class BinanceFuturesOrderServiceImpl implements BinanceFuturesOrderServic
                             finalSignal = "buy_to_long";
                         }
                     } else if ("SELL".equals(sideStr)) {
+                        finalSideDirection = "sell";
                         String posSide = positionSideObj != null ? positionSideObj.toString().toUpperCase() : "";
                         if ("SHORT".equals(posSide)) {
                             finalSignal = "sell_to_short";
@@ -247,11 +250,11 @@ public class BinanceFuturesOrderServiceImpl implements BinanceFuturesOrderServic
                     }
                 }
                 
-                // 提取positionSide（持仓方向），映射到side字段
+                // 提取positionSide（持仓方向），存储到position_side字段
                 if (positionSideObj != null) {
                     String posSide = positionSideObj.toString().toUpperCase();
                     if ("LONG".equals(posSide) || "SHORT".equals(posSide)) {
-                        finalSide = posSide.toLowerCase();
+                        finalPositionSide = posSide;
                     }
                 }
                 
@@ -278,7 +281,20 @@ public class BinanceFuturesOrderServiceImpl implements BinanceFuturesOrderServic
                 finalQuantity = 0.0;
                 finalPrice = 0.0;
                 errorMsg = sdkError;
+                // 从signal中提取交易方向
+                if (signal != null && signal.toLowerCase().startsWith("buy")) {
+                    finalSideDirection = "buy";
+                } else {
+                    finalSideDirection = "sell";
+                }
                 log.warn("[BinanceFuturesOrderService] real模式调用失败，quantity和price设置为0，signal和side使用策略返回的值");
+            } else {
+                // test模式，从signal中提取交易方向
+                if (signal != null && signal.toLowerCase().startsWith("buy")) {
+                    finalSideDirection = "buy";
+                } else {
+                    finalSideDirection = "sell";
+                }
             }
             
             // 9. 插入trades表记录（使用传入的modelId，而不是system_user）
@@ -288,7 +304,8 @@ public class BinanceFuturesOrderServiceImpl implements BinanceFuturesOrderServic
             trade.setSignal(finalSignal);  // 使用解析后的signal
             trade.setPrice(finalPrice);  // 使用解析后的price
             trade.setQuantity(finalQuantity);  // 使用解析后的quantity
-            trade.setSide(finalSide);  // 使用解析后的side
+            trade.setSide(finalSideDirection);  // 交易方向（buy/sell）
+            trade.setPositionSide(finalPositionSide);  // 持仓方向（LONG/SHORT）
             trade.setPnl(netPnl);  // 设置净盈亏
             trade.setFee(fee);      // 设置手续费
             // 设置原始保证金（从portfolio中获取，用于计算盈亏百分比）

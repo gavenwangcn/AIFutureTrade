@@ -603,8 +603,8 @@
                       <td>{{ trade.timestamp || trade.time || '' }}</td>
                       <td><strong>{{ trade.future || trade.symbol }}</strong></td>
                       <td>
-                        <span :class="['badge', getSignalBadgeClass(trade.signal || trade.side)]">
-                          {{ formatSignal(trade.signal || trade.side) }}
+                        <span :class="['badge', getSignalBadgeClass(trade.signal || (trade.position_side || trade.positionSide || '').toLowerCase())]">
+                          {{ formatSignal(trade.signal || (trade.position_side || trade.positionSide || '').toLowerCase()) }}
                         </span>
                       </td>
                       <td>{{ (trade.quantity || 0).toFixed(4) }}</td>

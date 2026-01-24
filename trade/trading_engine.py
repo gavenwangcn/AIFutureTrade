@@ -3163,11 +3163,13 @@ class TradingEngine:
                 logger.error(f"TRADE: Update position failed ({trade_signal.upper()}) model={self.model_id} future={symbol}: {db_err}")
                 raise
         
-        # 【确定trades表的side字段】
+        # 【确定trades表的字段】
+        # side字段：交易方向（buy/sell），从signal中提取
+        # position_side字段：持仓方向（LONG/SHORT）
         # 如果是real模式且解析成功，使用解析后的值；否则使用策略返回的值
         if parsed_response:
             trade_signal_final = parsed_response.get('side', trade_signal)
-            trade_side_final = parsed_response.get('positionSide', position_side.lower())
+            trade_position_side_final = parsed_response.get('positionSide', position_side.lower())
             trade_quantity = parsed_response.get('executedQty', 0.0) if trade_mode == 'real' else quantity
             trade_price = parsed_response.get('avgPrice', 0.0) if trade_mode == 'real' else price
             order_id = parsed_response.get('orderId')
@@ -3177,7 +3179,7 @@ class TradingEngine:
         else:
             # test模式或未解析，使用策略返回的值
             trade_signal_final = trade_signal
-            trade_side_final = position_side.lower()
+            trade_position_side_final = position_side.lower()
             trade_quantity = quantity
             trade_price = price
             order_id = None
@@ -3185,15 +3187,29 @@ class TradingEngine:
             orig_type = None
             error_msg = None
         
+        # 从signal中提取交易方向（buy/sell）
+        # buy_to_long, buy_to_short -> buy
+        # sell_to_long, sell_to_short, close_position, stop_loss, take_profit -> sell
+        trade_side_direction = 'buy'  # 默认值
+        if trade_signal_final:
+            signal_lower = trade_signal_final.lower()
+            if signal_lower.startswith('buy'):
+                trade_side_direction = 'buy'
+            elif signal_lower.startswith('sell') or signal_lower in ['close_position', 'stop_loss', 'take_profit']:
+                trade_side_direction = 'sell'
+        
+        # 确保position_side为大写（LONG/SHORT）
+        trade_position_side_final_upper = trade_position_side_final.upper() if trade_position_side_final else position_side
+        
         # 记录交易
         # quantity = 合约数量（用于 trades 表，与strategy_decisions表保持一致）
         # position_amt = 合约数量（用于 portfolios 表）
         # initial_margin = 开仓时使用的原始保证金（用于计算盈亏百分比）
-        logger.info(f"TRADE: PENDING - Model {self.model_id} {trade_signal_final.upper()} {symbol} position_side={position_side} quantity={trade_quantity} (合约数量), position_amt={position_amt} (合约数量), price={trade_price} fee={trade_fee} initial_margin={initial_margin}")
+        logger.info(f"TRADE: PENDING - Model {self.model_id} {trade_signal_final.upper()} {symbol} position_side={trade_position_side_final_upper} side={trade_side_direction} quantity={trade_quantity} (合约数量), position_amt={position_amt} (合约数量), price={trade_price} fee={trade_fee} initial_margin={initial_margin}")
         try:
             # 构建插入数据的列和值
-            columns = ["id", "model_id", "future", "signal", "quantity", "price", "leverage", "side", "pnl", "fee", "initial_margin", "timestamp"]
-            values = [trade_id, model_uuid, symbol.upper(), trade_signal_final, trade_quantity, trade_price, leverage, trade_side_final, 0, trade_fee, initial_margin, datetime.now(timezone(timedelta(hours=8))).replace(tzinfo=None)]
+            columns = ["id", "model_id", "future", "signal", "quantity", "price", "leverage", "side", "position_side", "pnl", "fee", "initial_margin", "timestamp"]
+            values = [trade_id, model_uuid, symbol.upper(), trade_signal_final, trade_quantity, trade_price, leverage, trade_side_direction, trade_position_side_final_upper, 0, trade_fee, initial_margin, datetime.now(timezone(timedelta(hours=8))).replace(tzinfo=None)]
             
             # 添加新字段（如果real模式有值）
             if order_id is not None:
@@ -3392,11 +3408,13 @@ class TradingEngine:
                 logger.error(f"TRADE: Close position failed ({trade_signal.upper()}) model={self.model_id} future={symbol}: {db_err}")
                 raise
         
-        # 【确定trades表的side字段】
+        # 【确定trades表的字段】
+        # side字段：交易方向（buy/sell），从signal中提取
+        # position_side字段：持仓方向（LONG/SHORT）
         # 如果是real模式且解析成功，使用解析后的值；否则使用策略返回的值
         if parsed_response:
             trade_signal_final = parsed_response.get('side', trade_signal)
-            trade_side_final = parsed_response.get('positionSide', position_side.lower())
+            trade_position_side_final = parsed_response.get('positionSide', position_side.lower())
             trade_quantity = parsed_response.get('executedQty', 0.0) if trade_mode == 'real' else position_amt
             trade_price = parsed_response.get('avgPrice', 0.0) if trade_mode == 'real' else current_price
             order_id = parsed_response.get('orderId')
@@ -3406,13 +3424,27 @@ class TradingEngine:
         else:
             # test模式或未解析，使用策略返回的值
             trade_signal_final = trade_signal
-            trade_side_final = position_side.lower()
+            trade_position_side_final = position_side.lower()
             trade_quantity = position_amt
             trade_price = current_price
             order_id = None
             order_type = None
             orig_type = None
             error_msg = None
+        
+        # 从signal中提取交易方向（buy/sell）
+        # buy_to_long, buy_to_short -> buy
+        # sell_to_long, sell_to_short, close_position, stop_loss, take_profit -> sell
+        trade_side_direction = 'sell'  # 默认值（卖出）
+        if trade_signal_final:
+            signal_lower = trade_signal_final.lower()
+            if signal_lower.startswith('buy'):
+                trade_side_direction = 'buy'
+            elif signal_lower.startswith('sell') or signal_lower in ['close_position', 'stop_loss', 'take_profit']:
+                trade_side_direction = 'sell'
+        
+        # 确保position_side为大写（LONG/SHORT）
+        trade_position_side_final_upper = trade_position_side_final.upper() if trade_position_side_final else position_side
         
         # 获取持仓的initial_margin（用于计算盈亏百分比）
         # 从position中获取initial_margin，如果不存在则从portfolios表查询
@@ -3431,14 +3463,14 @@ class TradingEngine:
                 logger.warning(f"[TradingEngine] Failed to get initial_margin from portfolios table: {e}")
         
         # 记录交易（使用 _resolve_leverage 解析，优先使用 decision 中的 leverage，否则使用模型配置的 leverage）
-        logger.info(f"TRADE: PENDING - Model {self.model_id} {trade_signal_final.upper()} {symbol} position_side={position_side} position_amt={trade_quantity} price={trade_price} fee={trade_fee} net_pnl={net_pnl} initial_margin={initial_margin}")
+        logger.info(f"TRADE: PENDING - Model {self.model_id} {trade_signal_final.upper()} {symbol} position_side={trade_position_side_final_upper} side={trade_side_direction} position_amt={trade_quantity} price={trade_price} fee={trade_fee} net_pnl={net_pnl} initial_margin={initial_margin}")
         try:
             # 使用 _resolve_leverage 解析杠杆（优先使用 decision 中的 leverage，否则使用模型配置的 leverage）
             leverage = self._resolve_leverage(decision)
             
             # 构建插入数据的列和值
-            columns = ["id", "model_id", "future", "signal", "quantity", "price", "leverage", "side", "pnl", "fee", "initial_margin", "timestamp"]
-            values = [trade_id, model_uuid, symbol.upper(), trade_signal_final, trade_quantity, trade_price, leverage, trade_side_final, net_pnl, trade_fee, initial_margin, datetime.now(timezone(timedelta(hours=8))).replace(tzinfo=None)]
+            columns = ["id", "model_id", "future", "signal", "quantity", "price", "leverage", "side", "position_side", "pnl", "fee", "initial_margin", "timestamp"]
+            values = [trade_id, model_uuid, symbol.upper(), trade_signal_final, trade_quantity, trade_price, leverage, trade_side_direction, trade_position_side_final_upper, net_pnl, trade_fee, initial_margin, datetime.now(timezone(timedelta(hours=8))).replace(tzinfo=None)]
             
             # 添加新字段（如果real模式有值）
             if order_id is not None:
@@ -3628,10 +3660,12 @@ class TradingEngine:
             }
         
         # 【确定trades表的字段值】
+        # side字段：交易方向（buy/sell），从signal中提取
+        # position_side字段：持仓方向（LONG/SHORT）
         # 如果是real模式且解析成功，使用解析后的值；否则使用策略返回的值
         if parsed_response:
             trade_signal_final = parsed_response.get('side', 'close_position')
-            trade_side_final = parsed_response.get('positionSide', position_side.lower())
+            trade_position_side_final = parsed_response.get('positionSide', position_side.lower())
             trade_quantity = parsed_response.get('executedQty', 0.0) if trade_mode == 'real' else position_amt
             trade_price = parsed_response.get('avgPrice', 0.0) if trade_mode == 'real' else current_price
             order_id = parsed_response.get('orderId')
@@ -3641,7 +3675,7 @@ class TradingEngine:
         else:
             # test模式或未解析，使用策略返回的值
             trade_signal_final = 'close_position'
-            trade_side_final = position_side.lower()
+            trade_position_side_final = position_side.lower()
             trade_quantity = position_amt
             trade_price = current_price
             order_id = None
@@ -3649,15 +3683,28 @@ class TradingEngine:
             orig_type = None
             error_msg = None
         
+        # 从signal中提取交易方向（buy/sell）
+        # close_position, stop_loss, take_profit -> sell
+        trade_side_direction = 'sell'  # 默认值（卖出）
+        if trade_signal_final:
+            signal_lower = trade_signal_final.lower()
+            if signal_lower.startswith('buy'):
+                trade_side_direction = 'buy'
+            elif signal_lower.startswith('sell') or signal_lower in ['close_position', 'stop_loss', 'take_profit']:
+                trade_side_direction = 'sell'
+        
+        # 确保position_side为大写（LONG/SHORT）
+        trade_position_side_final_upper = trade_position_side_final.upper() if trade_position_side_final else position_side
+        
         # 记录交易（使用 _resolve_leverage 解析，优先使用 decision 中的 leverage，否则使用模型配置的 leverage）
-        logger.info(f"TRADE: PENDING - Model {self.model_id} CLOSE {symbol} position_side={position_side} position_amt={trade_quantity} price={trade_price} fee={trade_fee} net_pnl={net_pnl} initial_margin={initial_margin}")
+        logger.info(f"TRADE: PENDING - Model {self.model_id} CLOSE {symbol} position_side={trade_position_side_final_upper} side={trade_side_direction} position_amt={trade_quantity} price={trade_price} fee={trade_fee} net_pnl={net_pnl} initial_margin={initial_margin}")
         try:
             # 使用 _resolve_leverage 解析杠杆（优先使用 decision 中的 leverage，否则使用模型配置的 leverage）
             leverage = self._resolve_leverage(decision)
             
             # 构建插入数据的列和值
-            columns = ["id", "model_id", "future", "signal", "quantity", "price", "leverage", "side", "pnl", "fee", "initial_margin", "timestamp"]
-            values = [trade_id, model_uuid, symbol.upper(), trade_signal_final, trade_quantity, trade_price, leverage, trade_side_final, net_pnl, trade_fee, initial_margin, datetime.now(timezone(timedelta(hours=8))).replace(tzinfo=None)]
+            columns = ["id", "model_id", "future", "signal", "quantity", "price", "leverage", "side", "position_side", "pnl", "fee", "initial_margin", "timestamp"]
+            values = [trade_id, model_uuid, symbol.upper(), trade_signal_final, trade_quantity, trade_price, leverage, trade_side_direction, trade_position_side_final_upper, net_pnl, trade_fee, initial_margin, datetime.now(timezone(timedelta(hours=8))).replace(tzinfo=None)]
             
             # 添加新字段（如果real模式有值）
             if order_id is not None:
@@ -3878,10 +3925,12 @@ class TradingEngine:
             }
         
         # 【确定trades表的字段值】
+        # side字段：交易方向（buy/sell），从signal中提取
+        # position_side字段：持仓方向（LONG/SHORT）
         # 如果是real模式且解析成功，使用解析后的值；否则使用策略返回的值
         if parsed_response:
             trade_signal_final = parsed_response.get('side', 'stop_loss')
-            trade_side_final = parsed_response.get('positionSide', position_side.lower())
+            trade_position_side_final = parsed_response.get('positionSide', position_side.lower())
             trade_quantity = parsed_response.get('executedQty', 0.0) if trade_mode == 'real' else strategy_quantity
             trade_price = parsed_response.get('avgPrice', 0.0) if trade_mode == 'real' else current_price
             order_id = parsed_response.get('orderId')
@@ -3891,7 +3940,7 @@ class TradingEngine:
         else:
             # test模式或未解析，使用策略返回的值
             trade_signal_final = 'stop_loss'
-            trade_side_final = position_side.lower()
+            trade_position_side_final = position_side.lower()
             trade_quantity = strategy_quantity
             trade_price = current_price
             order_id = None
@@ -3899,8 +3948,21 @@ class TradingEngine:
             orig_type = None
             error_msg = None
         
+        # 从signal中提取交易方向（buy/sell）
+        # stop_loss -> sell
+        trade_side_direction = 'sell'  # 默认值（卖出）
+        if trade_signal_final:
+            signal_lower = trade_signal_final.lower()
+            if signal_lower.startswith('buy'):
+                trade_side_direction = 'buy'
+            elif signal_lower.startswith('sell') or signal_lower in ['close_position', 'stop_loss', 'take_profit']:
+                trade_side_direction = 'sell'
+        
+        # 确保position_side为大写（LONG/SHORT）
+        trade_position_side_final_upper = trade_position_side_final.upper() if trade_position_side_final else position_side
+        
         # 记录止损操作到trades表
-        logger.info(f"TRADE: PENDING - Model {self.model_id} STOP_LOSS {symbol} position_side={position_side} strategy_quantity={trade_quantity} current_price={trade_price} initial_margin={initial_margin}")
+        logger.info(f"TRADE: PENDING - Model {self.model_id} STOP_LOSS {symbol} position_side={trade_position_side_final_upper} side={trade_side_direction} strategy_quantity={trade_quantity} current_price={trade_price} initial_margin={initial_margin}")
         if sdk_call_skipped:
             logger.warning(f"TRADE: ⚠️ SDK调用被跳过，但交易记录仍将保存到数据库 | symbol={symbol} | reason={sdk_skip_reason}")
         try:
@@ -3908,8 +3970,8 @@ class TradingEngine:
             leverage = self._resolve_leverage(decision)
             
             # 构建插入数据的列和值
-            columns = ["id", "model_id", "future", "signal", "quantity", "price", "leverage", "side", "pnl", "fee", "initial_margin", "timestamp"]
-            values = [trade_id, model_uuid, symbol.upper(), trade_signal_final, trade_quantity, trade_price, leverage, trade_side_final, calculated_pnl, trade_fee, initial_margin, datetime.now(timezone(timedelta(hours=8))).replace(tzinfo=None)]
+            columns = ["id", "model_id", "future", "signal", "quantity", "price", "leverage", "side", "position_side", "pnl", "fee", "initial_margin", "timestamp"]
+            values = [trade_id, model_uuid, symbol.upper(), trade_signal_final, trade_quantity, trade_price, leverage, trade_side_direction, trade_position_side_final_upper, calculated_pnl, trade_fee, initial_margin, datetime.now(timezone(timedelta(hours=8))).replace(tzinfo=None)]
             
             # 添加新字段（如果real模式有值）
             if order_id is not None:
@@ -4164,10 +4226,12 @@ class TradingEngine:
             }
         
         # 【确定trades表的字段值】
+        # side字段：交易方向（buy/sell），从signal中提取
+        # position_side字段：持仓方向（LONG/SHORT）
         # 如果是real模式且解析成功，使用解析后的值；否则使用策略返回的值
         if parsed_response:
             trade_signal_final = parsed_response.get('side', 'take_profit')
-            trade_side_final = parsed_response.get('positionSide', position_side.lower())
+            trade_position_side_final = parsed_response.get('positionSide', position_side.lower())
             trade_quantity = parsed_response.get('executedQty', 0.0) if trade_mode == 'real' else strategy_quantity
             trade_price = parsed_response.get('avgPrice', 0.0) if trade_mode == 'real' else current_price
             order_id = parsed_response.get('orderId')
@@ -4177,7 +4241,7 @@ class TradingEngine:
         else:
             # test模式或未解析，使用策略返回的值
             trade_signal_final = 'take_profit'
-            trade_side_final = position_side.lower()
+            trade_position_side_final = position_side.lower()
             trade_quantity = strategy_quantity
             trade_price = current_price
             order_id = None
@@ -4185,8 +4249,21 @@ class TradingEngine:
             orig_type = None
             error_msg = None
         
+        # 从signal中提取交易方向（buy/sell）
+        # take_profit -> sell
+        trade_side_direction = 'sell'  # 默认值（卖出）
+        if trade_signal_final:
+            signal_lower = trade_signal_final.lower()
+            if signal_lower.startswith('buy'):
+                trade_side_direction = 'buy'
+            elif signal_lower.startswith('sell') or signal_lower in ['close_position', 'stop_loss', 'take_profit']:
+                trade_side_direction = 'sell'
+        
+        # 确保position_side为大写（LONG/SHORT）
+        trade_position_side_final_upper = trade_position_side_final.upper() if trade_position_side_final else position_side
+        
         # 记录止盈操作到trades表
-        logger.info(f"TRADE: PENDING - Model {self.model_id} TAKE_PROFIT {symbol} position_side={position_side} strategy_quantity={trade_quantity} current_price={trade_price} initial_margin={initial_margin}")
+        logger.info(f"TRADE: PENDING - Model {self.model_id} TAKE_PROFIT {symbol} position_side={trade_position_side_final_upper} side={trade_side_direction} strategy_quantity={trade_quantity} current_price={trade_price} initial_margin={initial_margin}")
         if sdk_call_skipped:
             logger.warning(f"TRADE: ⚠️ SDK调用被跳过，但交易记录仍将保存到数据库 | symbol={symbol} | reason={sdk_skip_reason}")
         try:
@@ -4194,8 +4271,8 @@ class TradingEngine:
             leverage = self._resolve_leverage(decision)
             
             # 构建插入数据的列和值
-            columns = ["id", "model_id", "future", "signal", "quantity", "price", "leverage", "side", "pnl", "fee", "initial_margin", "timestamp"]
-            values = [trade_id, model_uuid, symbol.upper(), trade_signal_final, trade_quantity, trade_price, leverage, trade_side_final, calculated_pnl, trade_fee, initial_margin, datetime.now(timezone(timedelta(hours=8))).replace(tzinfo=None)]
+            columns = ["id", "model_id", "future", "signal", "quantity", "price", "leverage", "side", "position_side", "pnl", "fee", "initial_margin", "timestamp"]
+            values = [trade_id, model_uuid, symbol.upper(), trade_signal_final, trade_quantity, trade_price, leverage, trade_side_direction, trade_position_side_final_upper, calculated_pnl, trade_fee, initial_margin, datetime.now(timezone(timedelta(hours=8))).replace(tzinfo=None)]
             
             # 添加新字段（如果real模式有值）
             if order_id is not None:
