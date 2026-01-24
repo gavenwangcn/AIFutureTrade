@@ -2534,6 +2534,7 @@ let portfolioRefreshInterval = null // 投资组合数据自动刷新定时器�
       const model = await modelApi.getById(modelId)
       console.log('[TradingApp] 加载模型信息, modelId=', modelId, 'model=', model)
       console.log('[TradingApp] 模型字段值: max_positions=', model.max_positions, 'maxPositions=', model.maxPositions, 'auto_close_percent=', model.auto_close_percent, 'autoClosePercent=', model.autoClosePercent)
+      console.log('[TradingApp] 批次配置字段值: buy_batch_size=', model.buy_batch_size, 'buyBatchSize=', model.buyBatchSize, 'sell_batch_size=', model.sell_batch_size, 'sellBatchSize=', model.sellBatchSize)
       
       // 确保 provider_id 是字符串类型（如果是 null 或 undefined，则设为空字符串）
       const providerId = model.provider_id ? String(model.provider_id) : ''
@@ -2559,6 +2560,17 @@ let portfolioRefreshInterval = null // 投资组合数据自动刷新定时器�
       const lossesNumValue = model.losses_num ?? model.lossesNum ?? null
       console.log('[TradingApp] 解析后的 losses_num 值:', lossesNumValue)
       
+      // 解析批次配置字段（兼容两种命名方式）
+      const buyBatchSizeValue = model.buy_batch_size ?? model.buyBatchSize ?? 1
+      const buyBatchExecutionIntervalValue = model.buy_batch_execution_interval ?? model.buyBatchExecutionInterval ?? 60
+      const buyBatchExecutionGroupSizeValue = model.buy_batch_execution_group_size ?? model.buyBatchExecutionGroupSize ?? 1
+      const sellBatchSizeValue = model.sell_batch_size ?? model.sellBatchSize ?? 1
+      const sellBatchExecutionIntervalValue = model.sell_batch_execution_interval ?? model.sellBatchExecutionInterval ?? 60
+      const sellBatchExecutionGroupSizeValue = model.sell_batch_execution_group_size ?? model.sellBatchExecutionGroupSize ?? 1
+      
+      console.log('[TradingApp] 解析后的批次配置值: buy_batch_size=', buyBatchSizeValue, 'buy_batch_execution_interval=', buyBatchExecutionIntervalValue, 'buy_batch_execution_group_size=', buyBatchExecutionGroupSizeValue)
+      console.log('[TradingApp] 解析后的批次配置值: sell_batch_size=', sellBatchSizeValue, 'sell_batch_execution_interval=', sellBatchExecutionIntervalValue, 'sell_batch_execution_group_size=', sellBatchExecutionGroupSizeValue)
+      
       console.log('[TradingApp] 设置模型配置, providerId=', providerId, 'modelName=', modelName, 'max_positions=', maxPositionsValue, 'auto_close_percent=', autoClosePercentValue, 'base_volume=', baseVolumeValue, 'daily_return=', dailyReturnValue, 'losses_num=', lossesNumValue)
       
       tempModelSettings.value = {
@@ -2570,12 +2582,13 @@ let portfolioRefreshInterval = null // 投资组合数据自动刷新定时器�
         base_volume: baseVolumeValue,
         daily_return: dailyReturnValue,
         losses_num: lossesNumValue,
-        buy_batch_size: model.buy_batch_size || 1,
-        buy_batch_execution_interval: model.buy_batch_execution_interval || 60,
-        buy_batch_execution_group_size: model.buy_batch_execution_group_size || 1,
-        sell_batch_size: model.sell_batch_size || 1,
-        sell_batch_execution_interval: model.sell_batch_execution_interval || 60,
-        sell_batch_execution_group_size: model.sell_batch_execution_group_size || 1
+        // 使用解析后的批次配置值
+        buy_batch_size: buyBatchSizeValue,
+        buy_batch_execution_interval: buyBatchExecutionIntervalValue,
+        buy_batch_execution_group_size: buyBatchExecutionGroupSizeValue,
+        sell_batch_size: sellBatchSizeValue,
+        sell_batch_execution_interval: sellBatchExecutionIntervalValue,
+        sell_batch_execution_group_size: sellBatchExecutionGroupSizeValue
       }
       
       console.log('[TradingApp] tempModelSettings 已设置:', tempModelSettings.value)
@@ -2614,6 +2627,14 @@ let portfolioRefreshInterval = null // 投资组合数据自动刷新定时器�
         // 优先使用 losses_num，如果没有则使用 lossesNum（兼容两种命名方式）
         const lossesNumValue = localModel.losses_num ?? localModel.lossesNum ?? null
         
+        // 解析批次配置字段（兼容两种命名方式）
+        const buyBatchSizeValue = localModel.buy_batch_size ?? localModel.buyBatchSize ?? 1
+        const buyBatchExecutionIntervalValue = localModel.buy_batch_execution_interval ?? localModel.buyBatchExecutionInterval ?? 60
+        const buyBatchExecutionGroupSizeValue = localModel.buy_batch_execution_group_size ?? localModel.buyBatchExecutionGroupSize ?? 1
+        const sellBatchSizeValue = localModel.sell_batch_size ?? localModel.sellBatchSize ?? 1
+        const sellBatchExecutionIntervalValue = localModel.sell_batch_execution_interval ?? localModel.sellBatchExecutionInterval ?? 60
+        const sellBatchExecutionGroupSizeValue = localModel.sell_batch_execution_group_size ?? localModel.sellBatchExecutionGroupSize ?? 1
+        
         tempModelSettings.value = {
           provider_id: providerId,
           model_name: localModel.model_name || '',
@@ -2623,12 +2644,13 @@ let portfolioRefreshInterval = null // 投资组合数据自动刷新定时器�
           base_volume: baseVolumeValue,
           daily_return: dailyReturnValue,
           losses_num: lossesNumValue,
-          buy_batch_size: localModel.buy_batch_size || 1,
-          buy_batch_execution_interval: localModel.buy_batch_execution_interval || 60,
-          buy_batch_execution_group_size: localModel.buy_batch_execution_group_size || 1,
-          sell_batch_size: localModel.sell_batch_size || 1,
-          sell_batch_execution_interval: localModel.sell_batch_execution_interval || 60,
-          sell_batch_execution_group_size: localModel.sell_batch_execution_group_size || 1
+          // 使用解析后的批次配置值
+          buy_batch_size: buyBatchSizeValue,
+          buy_batch_execution_interval: buyBatchExecutionIntervalValue,
+          buy_batch_execution_group_size: buyBatchExecutionGroupSizeValue,
+          sell_batch_size: sellBatchSizeValue,
+          sell_batch_execution_interval: sellBatchExecutionIntervalValue,
+          sell_batch_execution_group_size: sellBatchExecutionGroupSizeValue
         }
         
         // 加载当前提供方的可用模型列表（使用 nextTick 确保在下一个事件循环中执行）

@@ -92,32 +92,50 @@ public class ModelDTO implements Serializable {
 
     /**
      * 买入批次大小
+     * 支持两种命名方式：buy_batch_size（snake_case）和 buyBatchSize（camelCase）
      */
+    @JsonProperty("buy_batch_size")
+    @JsonAlias({"buyBatchSize"})
     private Integer buyBatchSize;
 
     /**
      * 买入批次执行间隔（秒）
+     * 支持两种命名方式：buy_batch_execution_interval（snake_case）和 buyBatchExecutionInterval（camelCase）
      */
+    @JsonProperty("buy_batch_execution_interval")
+    @JsonAlias({"buyBatchExecutionInterval"})
     private Integer buyBatchExecutionInterval;
 
     /**
      * 买入批次执行组大小
+     * 支持两种命名方式：buy_batch_execution_group_size（snake_case）和 buyBatchExecutionGroupSize（camelCase）
      */
+    @JsonProperty("buy_batch_execution_group_size")
+    @JsonAlias({"buyBatchExecutionGroupSize"})
     private Integer buyBatchExecutionGroupSize;
 
     /**
      * 卖出批次大小
+     * 支持两种命名方式：sell_batch_size（snake_case）和 sellBatchSize（camelCase）
      */
+    @JsonProperty("sell_batch_size")
+    @JsonAlias({"sellBatchSize"})
     private Integer sellBatchSize;
 
     /**
      * 卖出批次执行间隔（秒）
+     * 支持两种命名方式：sell_batch_execution_interval（snake_case）和 sellBatchExecutionInterval（camelCase）
      */
+    @JsonProperty("sell_batch_execution_interval")
+    @JsonAlias({"sellBatchExecutionInterval"})
     private Integer sellBatchExecutionInterval;
 
     /**
      * 卖出批次执行组大小
+     * 支持两种命名方式：sell_batch_execution_group_size（snake_case）和 sellBatchExecutionGroupSize（camelCase）
      */
+    @JsonProperty("sell_batch_execution_group_size")
+    @JsonAlias({"sellBatchExecutionGroupSize"})
     private Integer sellBatchExecutionGroupSize;
 
     /**
