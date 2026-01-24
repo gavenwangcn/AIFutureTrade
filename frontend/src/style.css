@@ -189,6 +189,45 @@
     min-width: auto;
 }
 
+/* 通用按钮样式 */
+.btn {
+    border: none;
+    border-radius: var(--radius);
+    cursor: pointer;
+    font-size: 14px;
+    transition: all 0.2s ease;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    user-select: none;
+    -webkit-tap-highlight-color: transparent;
+}
+
+.btn-sm {
+    padding: 4px 12px;
+    font-size: 12px;
+    min-width: auto;
+}
+
+/* 分页容器样式 */
+.pagination-container {
+    margin-top: 16px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.pagination-info {
+    color: var(--text-secondary);
+    font-size: 14px;
+}
+
+.pagination-controls {
+    display: flex;
+    gap: 8px;
+}
+
 .leaderboard-list {
     display: flex;
     flex-direction: column;

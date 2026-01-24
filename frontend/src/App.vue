@@ -718,9 +718,9 @@
                 </table>
               </div>
               <!-- 分页控件 -->
-              <div v-if="strategyDecisionsTotal > 0" class="pagination-container" style="margin-top: 16px; display: flex; justify-content: space-between; align-items: center;">
+              <div v-if="strategyDecisionsTotal > 0 || strategyDecisions.length > 0" class="pagination-container" style="margin-top: 16px; display: flex; justify-content: space-between; align-items: center;">
                 <div class="pagination-info" style="color: var(--text-secondary); font-size: 14px;">
-                  共 {{ strategyDecisionsTotal }} 条记录，第 {{ strategyDecisionsPage }} / {{ strategyDecisionsTotalPages }} 页
+                  共 {{ strategyDecisionsTotal || strategyDecisions.length }} 条记录，第 {{ strategyDecisionsPage }} / {{ strategyDecisionsTotalPages || 1 }} 页
                 </div>
                 <div class="pagination-controls" style="display: flex; gap: 8px;">
                   <button 
@@ -734,10 +734,10 @@
                   </button>
                   <button 
                     class="btn btn-sm" 
-                    :disabled="strategyDecisionsPage >= strategyDecisionsTotalPages" 
+                    :disabled="strategyDecisionsPage >= (strategyDecisionsTotalPages || 1)" 
                     @click="goToStrategyDecisionsPage(strategyDecisionsPage + 1)"
                     style="padding: 4px 12px; border: 1px solid var(--border-color); background: var(--bg-secondary); color: var(--text-primary); border-radius: 4px; cursor: pointer;"
-                    :style="{ opacity: strategyDecisionsPage >= strategyDecisionsTotalPages ? 0.5 : 1, cursor: strategyDecisionsPage >= strategyDecisionsTotalPages ? 'not-allowed' : 'pointer' }"
+                    :style="{ opacity: strategyDecisionsPage >= (strategyDecisionsTotalPages || 1) ? 0.5 : 1, cursor: strategyDecisionsPage >= (strategyDecisionsTotalPages || 1) ? 'not-allowed' : 'pointer' }"
                   >
                     下一页
                   </button>
