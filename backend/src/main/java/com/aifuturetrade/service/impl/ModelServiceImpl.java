@@ -346,6 +346,15 @@ public class ModelServiceImpl implements ModelService {
             throw new RuntimeException("Failed to delete account_values for model: " + id, e);
         }
         
+        // 2.5. 删除账户每日价值记录
+        try {
+            int count = accountValuesDailyMapper.deleteByModelId(id);
+            log.info("[ModelService] Deleted {} account_values_daily records for model: {}", count, id);
+        } catch (Exception e) {
+            log.error("[ModelService] Failed to delete account_values_daily for model {}: {}", id, e.getMessage(), e);
+            throw new RuntimeException("Failed to delete account_values_daily for model: " + id, e);
+        }
+        
         // 3. 删除币安交易日志
         try {
             int count = binanceTradeLogMapper.deleteByModelId(id);
