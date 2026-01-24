@@ -319,7 +319,7 @@ class StrategyTrader(Trader):
                     has_valid_signal = False
                     for symbol, decision in decisions.items():
                         signal = decision.get('signal', '').lower()
-                        if signal in ['close_position', 'stop_loss', 'take_profit']:
+                        if signal in ['sell_to_long', 'sell_to_short', 'close_position', 'stop_loss', 'take_profit']:
                             has_valid_signal = True
                             break
                     
