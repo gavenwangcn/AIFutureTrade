@@ -2061,13 +2061,21 @@ public class ModelServiceImpl implements ModelService {
 
     @Override
     public List<Map<String, Object>> getModelAnalysis(String modelId) {
-        log.debug("[ModelService] ========== 开始获取模型分析数据 ==========");
-        log.debug("[ModelService] modelId: {}", modelId);
+        log.info("[ModelService] ========== 开始获取模型分析数据 ==========");
+        log.info("[ModelService] 查询参数: modelId={}", modelId);
         try {
             // 调用Mapper方法获取策略分析数据
             List<Map<String, Object>> analysisList = tradeMapper.selectStrategyAnalysisByModelId(modelId);
             
-            log.debug("[ModelService] 查询到 {} 条策略分析记录", analysisList.size());
+            log.info("[ModelService] SQL查询结果: 查询到 {} 条策略分析记录", analysisList.size());
+            if (analysisList.isEmpty()) {
+                log.info("[ModelService] ⚠️  查询结果为空，可能原因: 1) 该模型没有交易记录 2) 该模型没有策略决策记录 3) strategy_decisions表和trades表无法匹配（时间窗口5分钟内）");
+            } else {
+                log.info("[ModelService] 查询结果详情: {}", analysisList.stream()
+                    .map(item -> String.format("策略=%s, 交易次数=%s", 
+                        item.get("strategy_name"), item.get("trade_count")))
+                    .collect(Collectors.joining("; ")));
+            }
             
             // 处理数据格式，确保返回的数据符合前端要求
             List<Map<String, Object>> result = new ArrayList<>();
@@ -2139,24 +2147,40 @@ public class ModelServiceImpl implements ModelService {
                 result.add(analysisItem);
             }
             
-            log.debug("[ModelService] 处理完成，共 {} 条分析记录", result.size());
-            log.debug("[ModelService] ========== 获取模型分析数据完成 ==========");
+            log.info("[ModelService] 数据处理完成，共 {} 条分析记录", result.size());
+            if (result.isEmpty()) {
+                log.info("[ModelService] ⚠️  返回数据为空，前端将显示'暂无数据'");
+            } else {
+                log.info("[ModelService] 返回数据摘要: {}", result.stream()
+                    .map(item -> String.format("策略=%s, 交易次数=%s, 胜率=%s", 
+                        item.get("strategy_name"), item.get("trade_count"), item.get("win_rate")))
+                    .collect(Collectors.joining("; ")));
+            }
+            log.info("[ModelService] ========== 获取模型分析数据完成 ==========");
             
             return result;
         } catch (Exception e) {
-            log.error("[ModelService] 获取模型分析数据失败: {}", e.getMessage(), e);
+            log.error("[ModelService] 获取模型分析数据失败: modelId={}, error={}", modelId, e.getMessage(), e);
             return new ArrayList<>();
         }
     }
 
     @Override
     public List<Map<String, Object>> getAllModelsAnalysis() {
-        log.debug("[ModelService] ========== 开始获取所有模型分析数据 ==========");
+        log.info("[ModelService] ========== 开始获取所有模型分析数据 ==========");
         try {
             // 调用Mapper方法获取所有模型的分析数据
             List<Map<String, Object>> analysisList = tradeMapper.selectAllModelsAnalysis();
             
-            log.debug("[ModelService] 查询到 {} 条模型分析记录", analysisList.size());
+            log.info("[ModelService] SQL查询结果: 查询到 {} 条模型分析记录", analysisList.size());
+            if (analysisList.isEmpty()) {
+                log.info("[ModelService] ⚠️  查询结果为空，可能原因: 1) trades表中没有side='sell'的交易记录（只统计卖出交易） 2) 没有模型有卖出交易");
+            } else {
+                log.info("[ModelService] 查询结果详情: {}", analysisList.stream()
+                    .map(item -> String.format("模型=%s, 交易次数=%s", 
+                        item.get("model_name"), item.get("trade_count")))
+                    .collect(Collectors.joining("; ")));
+            }
             
             // 处理数据格式，确保返回的数据符合前端要求
             List<Map<String, Object>> result = new ArrayList<>();
@@ -2232,12 +2256,20 @@ public class ModelServiceImpl implements ModelService {
                 result.add(analysisItem);
             }
             
-            log.debug("[ModelService] 处理完成，共 {} 条分析记录", result.size());
-            log.debug("[ModelService] ========== 获取所有模型分析数据完成 ==========");
+            log.info("[ModelService] 数据处理完成，共 {} 条分析记录", result.size());
+            if (result.isEmpty()) {
+                log.info("[ModelService] ⚠️  返回数据为空，前端将显示'暂无数据'");
+            } else {
+                log.info("[ModelService] 返回数据摘要: {}", result.stream()
+                    .map(item -> String.format("模型=%s, 交易次数=%s, 胜率=%s", 
+                        item.get("model_name"), item.get("trade_count"), item.get("win_rate")))
+                    .collect(Collectors.joining("; ")));
+            }
+            log.info("[ModelService] ========== 获取所有模型分析数据完成 ==========");
             
             return result;
         } catch (Exception e) {
-            log.error("[ModelService] 获取所有模型分析数据失败: {}", e.getMessage(), e);
+            log.error("[ModelService] 获取所有模型分析数据失败: error={}", e.getMessage(), e);
             return new ArrayList<>();
         }
     }

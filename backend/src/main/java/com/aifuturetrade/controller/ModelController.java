@@ -660,14 +660,18 @@ public class ModelController {
     @GetMapping("/{modelId}/analysis")
     @Operation(summary = "获取模型的交易数据分析")
     public ResponseEntity<List<Map<String, Object>>> getModelAnalysis(@PathVariable(value = "modelId") String modelId) {
+        log.info("[ModelController] 收到获取模型分析数据请求: modelId={}", modelId);
         List<Map<String, Object>> analysis = modelService.getModelAnalysis(modelId);
+        log.info("[ModelController] 返回模型分析数据: modelId={}, 数据条数={}", modelId, analysis != null ? analysis.size() : 0);
         return new ResponseEntity<>(analysis, HttpStatus.OK);
     }
 
     @GetMapping("/analysis/all")
     @Operation(summary = "获取所有模型的交易数据分析", description = "获取所有模型的交易数据分析（按模型ID和策略名称分组统计）")
     public ResponseEntity<List<Map<String, Object>>> getAllModelsAnalysis() {
+        log.info("[ModelController] 收到获取所有模型分析数据请求");
         List<Map<String, Object>> analysis = modelService.getAllModelsAnalysis();
+        log.info("[ModelController] 返回所有模型分析数据: 数据条数={}", analysis != null ? analysis.size() : 0);
         return new ResponseEntity<>(analysis, HttpStatus.OK);
     }
 
