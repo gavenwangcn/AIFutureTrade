@@ -249,53 +249,7 @@ class DatabaseInitializer:
         """
         self.command(ddl)
         logger.debug(f"[DatabaseInit] Ensured table {table_name} exists")
-        
-        # Check and add position_side field if table exists but field doesn't exist
-        try:
-            # Check if position_side field exists
-            check_position_side_sql = f"""
-            SELECT COUNT(*) FROM information_schema.COLUMNS 
-            WHERE TABLE_SCHEMA = DATABASE() 
-            AND TABLE_NAME = '{table_name}' 
-            AND COLUMN_NAME = 'position_side'
-            """
-            result = self.command(check_position_side_sql)
-            # If field doesn't exist, add field and migrate data
-            if isinstance(result, list) and len(result) > 0 and result[0][0] == 0:
-                # First, add position_side field and copy data from side
-                alter_sql = f"""
-                ALTER TABLE `{table_name}` 
-                ADD COLUMN `position_side` VARCHAR(10) DEFAULT 'LONG' COMMENT '持仓方向：LONG（做多）或SHORT（做空）' AFTER `side`,
-                ADD INDEX `idx_position_side` (`position_side`)
-                """
-                self.command(alter_sql)
-                logger.info(f"[DatabaseInit] Added position_side column to {table_name} table")
-                
-                # Migrate data: copy side values to position_side
-                migrate_sql = f"""
-                UPDATE `{table_name}` 
-                SET `position_side` = UPPER(`side`)
-                WHERE `position_side` IS NULL OR `position_side` = ''
-                """
-                self.command(migrate_sql)
-                logger.info(f"[DatabaseInit] Migrated side values to position_side in {table_name} table")
-                
-                # Update side field: convert position_side values to buy/sell based on signal
-                # buy_to_long, buy_to_short -> buy
-                # sell_to_long, sell_to_short, close_position, stop_loss, take_profit -> sell
-                update_side_sql = f"""
-                UPDATE `{table_name}` 
-                SET `side` = CASE 
-                    WHEN `signal` LIKE 'buy%' THEN 'buy'
-                    WHEN `signal` LIKE 'sell%' OR `signal` = 'close_position' OR `signal` = 'stop_loss' OR `signal` = 'take_profit' THEN 'sell'
-                    ELSE 'buy'
-                END
-                """
-                self.command(update_side_sql)
-                logger.info(f"[DatabaseInit] Updated side field to buy/sell based on signal in {table_name} table")
-        except Exception as e:
-            logger.warning(f"[DatabaseInit] Failed to check/add position_side column to {table_name}: {e}")
-        
+       
     def ensure_conversations_table(self, table_name: str = "conversations"):
         """Create conversations table if not exists"""
         ddl = f"""
