@@ -1699,68 +1699,52 @@ let portfolioRefreshInterval = null // 投资组合数据自动刷新定时器�
 
   /**
    * 加载策略决策记录（分页）
-   * 只加载当前选中模型（currentModelId）的策略决策记录
-   * @param {number} page - 页码（可选，默认使用当前页码）
-   * @param {number} pageSize - 每页记录数（可选，默认使用当前每页记录数）
+   * 完全参照交易记录模块的实现方式
+   * @param {number} page - 页码，从1开始，默认为当前页
+   * @param {number} pageSize - 每页记录数，默认为10
    */
   const loadStrategyDecisions = async (page = null, pageSize = null) => {
-    if (!currentModelId.value) {
-      strategyDecisions.value = []
-      strategyDecisionsTotal.value = 0
-      strategyDecisionsTotalPages.value = 0
-      return
-    }
+    if (!currentModelId.value) return
     
-    // 如果没有指定页码，使用当前页码；如果当前页码为0或未初始化，使用第一页
-    const targetPage = page !== null ? page : (strategyDecisionsPage.value > 0 ? strategyDecisionsPage.value : 1)
-    // 如果没有指定每页记录数，使用当前每页记录数；如果未初始化，使用默认10条
-    const targetPageSize = pageSize !== null ? pageSize : (strategyDecisionsPageSize.value > 0 ? strategyDecisionsPageSize.value : 10)
+    // 使用传入的参数或当前状态
+    const targetPage = page !== null ? page : strategyDecisionsPage.value
+    const targetPageSize = pageSize !== null ? pageSize : strategyDecisionsPageSize.value
     
     loading.value.conversations = true
     isRefreshingStrategyDecisions.value = true
     errors.value.conversations = null
-    
-    const requestedModelId = currentModelId.value
-    // 获取当前模型的UUID（使用currentModel.value.id，因为这是后端返回的UUID格式）
-    const currentModelData = currentModel.value
-    const modelUuid = currentModelData?.id || requestedModelId
-    
-    console.log(`[TradingApp] Loading strategy decisions for model: requestedModelId=${requestedModelId}, modelUuid=${modelUuid}, currentModelData=`, currentModelData)
-    
     try {
+      console.log('[TradingApp] 开始加载策略决策记录（分页）, modelId:', currentModelId.value, 'page:', targetPage, 'pageSize:', targetPageSize)
       const { strategyDecisionApi } = await import('../services/api.js')
-      // 使用modelUuid（UUID格式）而不是requestedModelId（可能是整数）
-      console.log(`[TradingApp] 准备调用API: modelUuid=${modelUuid}, page=${targetPage}, pageSize=${targetPageSize}`)
-      const response = await strategyDecisionApi.getByModelId(modelUuid, targetPage, targetPageSize)
+      const data = await strategyDecisionApi.getByModelId(currentModelId.value, targetPage, targetPageSize)
+      console.log('[TradingApp] 收到策略决策API响应:', data)
       
-      console.log(`[TradingApp] ========== Strategy decisions API 响应 ==========`)
-      console.log(`[TradingApp] 完整响应对象:`, JSON.stringify(response, null, 2))
-      console.log(`[TradingApp] 响应类型:`, typeof response)
-      console.log(`[TradingApp] response.data:`, response?.data)
-      console.log(`[TradingApp] response.data类型:`, Array.isArray(response?.data) ? 'Array' : typeof response?.data)
-      console.log(`[TradingApp] response.data长度:`, Array.isArray(response?.data) ? response.data.length : 'N/A')
-      console.log(`[TradingApp] response.pageNum:`, response?.pageNum)
-      console.log(`[TradingApp] response.pageSize:`, response?.pageSize)
-      console.log(`[TradingApp] response.total:`, response?.total)
-      console.log(`[TradingApp] response.totalPages:`, response?.totalPages)
-      
-      if (currentModelId.value !== requestedModelId) {
-        console.log(`[TradingApp] Model changed during strategy decisions load (${requestedModelId} -> ${currentModelId.value}), ignoring response`)
-        return
+      // 后端返回分页格式：{ data: [], pageNum: 1, pageSize: 10, total: 100, totalPages: 10 }
+      let decisionsList = []
+      if (data && typeof data === 'object') {
+        if (Array.isArray(data)) {
+          // 兼容旧格式：直接返回数组
+          decisionsList = data
+        } else if (data.data && Array.isArray(data.data)) {
+          // 新格式：分页数据
+          decisionsList = data.data
+          strategyDecisionsPage.value = data.pageNum || targetPage
+          strategyDecisionsPageSize.value = data.pageSize || targetPageSize
+          strategyDecisionsTotal.value = data.total || 0
+          strategyDecisionsTotalPages.value = data.totalPages || 0
+          console.log('[TradingApp] 分页信息: page=', strategyDecisionsPage.value, 'pageSize=', strategyDecisionsPageSize.value, 'total=', strategyDecisionsTotal.value, 'totalPages=', strategyDecisionsTotalPages.value)
+        } else if (data.decisions && Array.isArray(data.decisions)) {
+          // 兼容格式：{ decisions: [] }
+          decisionsList = data.decisions
+        }
       }
       
-      // 处理分页响应
-      const decisionsList = response.data || []
-      console.log(`[TradingApp] 提取的decisionsList:`, decisionsList)
-      console.log(`[TradingApp] decisionsList类型:`, Array.isArray(decisionsList) ? 'Array' : typeof decisionsList)
-      console.log(`[TradingApp] decisionsList长度:`, Array.isArray(decisionsList) ? decisionsList.length : 'N/A')
-      if (decisionsList.length > 0) {
-        console.log(`[TradingApp] 第一条决策数据:`, JSON.stringify(decisionsList[0], null, 2))
-      }
+      console.log('[TradingApp] 策略决策数据数量:', decisionsList.length)
+      console.log('[TradingApp] 策略决策原始数据:', JSON.stringify(decisionsList, null, 2))
       
-      console.log(`[TradingApp] 开始映射决策数据...`)
+      // 映射数据格式以匹配前端显示
       strategyDecisions.value = decisionsList.map((decision, index) => {
-        const mapped = {
+        console.log(`[TradingApp] 策略决策[${index + 1}] 原始数据:`, {
           id: decision.id,
           strategyName: decision.strategyName || decision.strategy_name,
           strategyType: decision.strategyType || decision.strategy_type,
@@ -1770,36 +1754,44 @@ let portfolioRefreshInterval = null // 投资组合数据自动刷新定时器�
           leverage: decision.leverage,
           price: decision.price,
           stopPrice: decision.stopPrice || decision.stop_price,
-          justification: decision.justification,
-          createdAt: decision.createdAt || decision.created_at,
+          createdAt: decision.createdAt || decision.created_at
+        })
+        
+        const mapped = {
+          id: decision.id || `${decision.createdAt || decision.created_at}_${decision.symbol || ''}`,
+          createdAt: decision.createdAt || decision.created_at || '',
+          strategyName: decision.strategyName || decision.strategy_name || '',
+          strategyType: decision.strategyType || decision.strategy_type || '',
+          signal: decision.signal || '',
+          symbol: decision.symbol || '',
+          quantity: decision.quantity || 0,
+          leverage: decision.leverage || 0,
+          price: decision.price || 0,
+          stopPrice: decision.stopPrice || decision.stop_price || 0,
+          justification: decision.justification || '',
+          // 保留原始数据
           ...decision
         }
-        if (index === 0) {
-          console.log(`[TradingApp] 第一条映射后的决策数据:`, JSON.stringify(mapped, null, 2))
-        }
+        
+        console.log(`[TradingApp] 策略决策[${index + 1}] 映射后数据:`, {
+          id: mapped.id,
+          strategyName: mapped.strategyName,
+          symbol: mapped.symbol,
+          signal: mapped.signal,
+          quantity: mapped.quantity,
+          price: mapped.price
+        })
+        
         return mapped
       })
       
-      console.log(`[TradingApp] 映射完成，strategyDecisions.value长度:`, strategyDecisions.value.length)
+      console.log('[TradingApp] 映射完成，最终策略决策数据数量:', strategyDecisions.value.length)
+      console.log('[TradingApp] 最终策略决策数据:', JSON.stringify(strategyDecisions.value, null, 2))
       
-      // 更新分页信息
-      strategyDecisionsPage.value = response.pageNum || targetPage
-      strategyDecisionsPageSize.value = response.pageSize || targetPageSize
-      strategyDecisionsTotal.value = response.total || 0
-      strategyDecisionsTotalPages.value = response.totalPages || 0
-      
-      console.log(`[TradingApp] ========== 策略决策加载完成 ==========`)
-      console.log(`[TradingApp] 加载结果: ${strategyDecisions.value.length} 条决策`)
-      console.log(`[TradingApp] 分页信息: page=${strategyDecisionsPage.value}/${strategyDecisionsTotalPages.value}, total=${strategyDecisionsTotal.value}`)
+      // 显示当前页的所有记录
+      console.log('[TradingApp] 显示的策略决策数量:', strategyDecisions.value.length)
     } catch (error) {
-      console.error(`[TradingApp] Error loading strategy decisions for model ${modelUuid}:`, error)
-      console.error(`[TradingApp] Error details:`, {
-        message: error.message,
-        stack: error.stack,
-        requestedModelId,
-        modelUuid,
-        currentModelData
-      })
+      console.error('[TradingApp] Error loading strategy decisions:', error)
       errors.value.conversations = error.message
       strategyDecisions.value = []
       strategyDecisionsTotal.value = 0
@@ -1811,10 +1803,13 @@ let portfolioRefreshInterval = null // 投资组合数据自动刷新定时器�
   }
 
   /**
-   * 跳转到策略决策指定页码
+   * 切换到策略决策指定页码
    */
   const goToStrategyDecisionsPage = async (page) => {
-    if (page < 1 || page > strategyDecisionsTotalPages.value) return
+    if (page < 1 || (strategyDecisionsTotalPages.value > 0 && page > strategyDecisionsTotalPages.value)) {
+      return
+    }
+    strategyDecisionsPage.value = page
     await loadStrategyDecisions(page, strategyDecisionsPageSize.value)
   }
 

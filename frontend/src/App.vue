@@ -671,50 +671,52 @@
           <div v-show="!isAggregatedView && activeTab === 'conversations' && currentModel && (currentModel.trade_type || currentModel.tradeType) === 'strategy'" class="tab-content active">
             <div v-if="loading.conversations" class="loading-container">
               <i class="bi bi-arrow-repeat spin" style="font-size: 24px; color: var(--primary-color);"></i>
-              <p style="margin-top: 12px; color: var(--text-secondary);">加载策略决策数据中...</p>
+              <p style="margin-top: 12px; color: var(--text-secondary);">加载策略决策记录中...</p>
             </div>
-            <div v-else class="table-container">
-              <table class="data-table">
-                <thead>
-                  <tr>
-                    <th>时间</th>
-                    <th>策略名称</th>
-                    <th>策略类型</th>
-                    <th>交易信号</th>
-                    <th>合约名称</th>
-                    <th>数量</th>
-                    <th>杠杆</th>
-                    <th>期望价格</th>
-                    <th>触发价格</th>
-                    <th>触发理由</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr v-for="decision in strategyDecisions" :key="decision.id">
-                    <td>{{ decision.createdAt || decision.created_at || '' }}</td>
-                    <td><strong>{{ decision.strategyName || decision.strategy_name }}</strong></td>
-                    <td>
-                      <span :class="['badge', (decision.strategyType || decision.strategy_type) === 'buy' ? 'badge-long' : 'badge-short']">
-                        {{ (decision.strategyType || decision.strategy_type) === 'buy' ? '买入' : '卖出' }}
-                      </span>
-                    </td>
-                    <td>
-                      <span :class="['badge', getSignalBadgeClass(decision.signal)]">
-                        {{ formatSignal(decision.signal) }}
-                      </span>
-                    </td>
-                    <td><strong>{{ decision.symbol || '-' }}</strong></td>
-                    <td>{{ decision.quantity ? decision.quantity.toFixed(4) : '-' }}</td>
-                    <td>{{ decision.leverage ? decision.leverage + 'x' : '-' }}</td>
-                    <td>{{ decision.price ? '$' + formatPrice6(decision.price) : '-' }}</td>
-                    <td>{{ decision.stopPrice || decision.stop_price ? '$' + formatPrice6(decision.stopPrice || decision.stop_price) : '-' }}</td>
-                    <td style="max-width: 300px; word-break: break-word;">{{ decision.justification || '-' }}</td>
-                  </tr>
-                  <tr v-if="strategyDecisions.length === 0">
-                    <td colspan="10" class="empty-state">暂无策略决策记录</td>
-                  </tr>
-                </tbody>
-              </table>
+            <div v-else>
+              <div class="table-container">
+                <table class="data-table">
+                  <thead>
+                    <tr>
+                      <th>时间</th>
+                      <th>策略名称</th>
+                      <th>策略类型</th>
+                      <th>交易信号</th>
+                      <th>合约名称</th>
+                      <th>数量</th>
+                      <th>杠杆</th>
+                      <th>期望价格</th>
+                      <th>触发价格</th>
+                      <th>触发理由</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr v-for="decision in strategyDecisions" :key="decision.id">
+                      <td>{{ decision.createdAt || decision.created_at || '' }}</td>
+                      <td><strong>{{ decision.strategyName || decision.strategy_name }}</strong></td>
+                      <td>
+                        <span :class="['badge', (decision.strategyType || decision.strategy_type) === 'buy' ? 'badge-long' : 'badge-short']">
+                          {{ (decision.strategyType || decision.strategy_type) === 'buy' ? '买入' : '卖出' }}
+                        </span>
+                      </td>
+                      <td>
+                        <span :class="['badge', getSignalBadgeClass(decision.signal)]">
+                          {{ formatSignal(decision.signal) }}
+                        </span>
+                      </td>
+                      <td><strong>{{ decision.symbol || '-' }}</strong></td>
+                      <td>{{ decision.quantity ? decision.quantity.toFixed(4) : '-' }}</td>
+                      <td>{{ decision.leverage ? decision.leverage + 'x' : '-' }}</td>
+                      <td>{{ decision.price ? '$' + formatPrice6(decision.price) : '-' }}</td>
+                      <td>{{ decision.stopPrice || decision.stop_price ? '$' + formatPrice6(decision.stopPrice || decision.stop_price) : '-' }}</td>
+                      <td style="max-width: 300px; word-break: break-word;">{{ decision.justification || '-' }}</td>
+                    </tr>
+                    <tr v-if="strategyDecisions.length === 0">
+                      <td colspan="10" class="empty-state">暂无策略决策记录</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
               <!-- 分页控件 -->
               <div v-if="strategyDecisionsTotal > 0" class="pagination-container" style="margin-top: 16px; display: flex; justify-content: space-between; align-items: center;">
                 <div class="pagination-info" style="color: var(--text-secondary); font-size: 14px;">
