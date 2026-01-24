@@ -1718,6 +1718,7 @@ let portfolioRefreshInterval = null // 投资组合数据自动刷新定时器�
       const { strategyDecisionApi } = await import('../services/api.js')
       const data = await strategyDecisionApi.getByModelId(currentModelId.value, targetPage, targetPageSize)
       console.log('[TradingApp] 收到策略决策API响应:', data)
+      console.log('[TradingApp] API响应数据类型:', typeof data, '是否为数组:', Array.isArray(data), '包含data字段:', data && data.data !== undefined, '包含total字段:', data && data.total !== undefined)
       
       // 后端返回分页格式：{ data: [], pageNum: 1, pageSize: 10, total: 100, totalPages: 10 }
       let decisionsList = []
@@ -1725,22 +1726,49 @@ let portfolioRefreshInterval = null // 投资组合数据自动刷新定时器�
         if (Array.isArray(data)) {
           // 兼容旧格式：直接返回数组
           decisionsList = data
+          // 即使旧格式，也设置分页信息（使用数据长度作为总数）
+          strategyDecisionsTotal.value = decisionsList.length
+          strategyDecisionsTotalPages.value = Math.ceil(decisionsList.length / targetPageSize) || 1
+          strategyDecisionsPage.value = targetPage
+          strategyDecisionsPageSize.value = targetPageSize
         } else if (data.data && Array.isArray(data.data)) {
           // 新格式：分页数据
           decisionsList = data.data
           strategyDecisionsPage.value = data.pageNum || targetPage
           strategyDecisionsPageSize.value = data.pageSize || targetPageSize
-          strategyDecisionsTotal.value = data.total || 0
-          strategyDecisionsTotalPages.value = data.totalPages || 0
+          strategyDecisionsTotal.value = data.total !== undefined && data.total !== null ? data.total : 0
+          strategyDecisionsTotalPages.value = data.totalPages !== undefined && data.totalPages !== null ? data.totalPages : (strategyDecisionsTotal.value > 0 ? Math.ceil(strategyDecisionsTotal.value / strategyDecisionsPageSize.value) : 0)
           console.log('[TradingApp] 分页信息: page=', strategyDecisionsPage.value, 'pageSize=', strategyDecisionsPageSize.value, 'total=', strategyDecisionsTotal.value, 'totalPages=', strategyDecisionsTotalPages.value)
         } else if (data.decisions && Array.isArray(data.decisions)) {
           // 兼容格式：{ decisions: [] }
           decisionsList = data.decisions
+          // 尝试从 data 中获取分页信息，如果没有则使用数据长度
+          strategyDecisionsTotal.value = data.total !== undefined && data.total !== null ? data.total : decisionsList.length
+          strategyDecisionsTotalPages.value = data.totalPages !== undefined && data.totalPages !== null ? data.totalPages : (strategyDecisionsTotal.value > 0 ? Math.ceil(strategyDecisionsTotal.value / targetPageSize) : 0)
+          strategyDecisionsPage.value = data.pageNum || targetPage
+          strategyDecisionsPageSize.value = data.pageSize || targetPageSize
+        } else if (data.total !== undefined || data.pageNum !== undefined) {
+          // 如果数据对象包含分页字段，即使没有 data 数组，也尝试设置分页信息
+          strategyDecisionsTotal.value = data.total !== undefined && data.total !== null ? data.total : 0
+          strategyDecisionsTotalPages.value = data.totalPages !== undefined && data.totalPages !== null ? data.totalPages : (strategyDecisionsTotal.value > 0 ? Math.ceil(strategyDecisionsTotal.value / targetPageSize) : 0)
+          strategyDecisionsPage.value = data.pageNum || targetPage
+          strategyDecisionsPageSize.value = data.pageSize || targetPageSize
+          console.log('[TradingApp] 从数据对象中提取分页信息: total=', strategyDecisionsTotal.value, 'totalPages=', strategyDecisionsTotalPages.value)
         }
+      }
+      
+      // 如果仍然没有设置分页信息，但有数据，则使用数据长度作为总数
+      if (decisionsList.length > 0 && strategyDecisionsTotal.value === 0) {
+        strategyDecisionsTotal.value = decisionsList.length
+        strategyDecisionsTotalPages.value = Math.ceil(decisionsList.length / targetPageSize) || 1
+        strategyDecisionsPage.value = targetPage
+        strategyDecisionsPageSize.value = targetPageSize
+        console.log('[TradingApp] 使用数据长度作为分页信息: total=', strategyDecisionsTotal.value, 'totalPages=', strategyDecisionsTotalPages.value)
       }
       
       console.log('[TradingApp] 策略决策数据数量:', decisionsList.length)
       console.log('[TradingApp] 策略决策原始数据:', JSON.stringify(decisionsList, null, 2))
+      console.log('[TradingApp] 当前分页状态: total=', strategyDecisionsTotal.value, 'totalPages=', strategyDecisionsTotalPages.value, 'page=', strategyDecisionsPage.value, 'pageSize=', strategyDecisionsPageSize.value)
       
       // 映射数据格式以匹配前端显示
       strategyDecisions.value = decisionsList.map((decision, index) => {
@@ -1787,6 +1815,16 @@ let portfolioRefreshInterval = null // 投资组合数据自动刷新定时器�
       
       console.log('[TradingApp] 映射完成，最终策略决策数据数量:', strategyDecisions.value.length)
       console.log('[TradingApp] 最终策略决策数据:', JSON.stringify(strategyDecisions.value, null, 2))
+      
+      // 最终检查：确保分页信息已正确设置
+      if (strategyDecisionsTotal.value === 0 && strategyDecisions.value.length > 0) {
+        // 如果仍然没有设置总数，但有数据，使用数据长度作为总数
+        strategyDecisionsTotal.value = strategyDecisions.value.length
+        strategyDecisionsTotalPages.value = Math.ceil(strategyDecisions.value.length / strategyDecisionsPageSize.value) || 1
+        console.log('[TradingApp] 最终检查：使用数据长度设置分页信息: total=', strategyDecisionsTotal.value, 'totalPages=', strategyDecisionsTotalPages.value)
+      }
+      
+      console.log('[TradingApp] 最终分页状态: total=', strategyDecisionsTotal.value, 'totalPages=', strategyDecisionsTotalPages.value, 'page=', strategyDecisionsPage.value, 'pageSize=', strategyDecisionsPageSize.value)
       
       // 显示当前页的所有记录
       console.log('[TradingApp] 显示的策略决策数量:', strategyDecisions.value.length)
