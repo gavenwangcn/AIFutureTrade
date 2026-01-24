@@ -590,6 +590,7 @@
                     <tr>
                       <th>时间</th>
                       <th>币种</th>
+                      <th>交易类型</th>
                       <th>操作</th>
                       <th>数量</th>
                       <th>价格</th>
@@ -602,6 +603,11 @@
                     <tr v-for="trade in trades" :key="trade.id">
                       <td>{{ trade.timestamp || trade.time || '' }}</td>
                       <td><strong>{{ trade.future || trade.symbol }}</strong></td>
+                      <td>
+                        <span :class="['badge', formatTradeSideClass(trade.side)]">
+                          {{ formatTradeSide(trade.side) }}
+                        </span>
+                      </td>
                       <td>
                         <span :class="['badge', getSignalBadgeClass(trade.signal || (trade.position_side || trade.positionSide || '').toLowerCase())]">
                           {{ formatSignal(trade.signal || (trade.position_side || trade.positionSide || '').toLowerCase()) }}
@@ -616,7 +622,7 @@
                       <td>${{ formatCurrency(trade.fee || 0) }}</td>
                     </tr>
                     <tr v-if="trades.length === 0">
-                      <td colspan="8" class="empty-state">暂无交易记录</td>
+                      <td colspan="9" class="empty-state">暂无交易记录</td>
                     </tr>
                   </tbody>
                 </table>
@@ -1256,6 +1262,8 @@ const {
   formatPercentage,
   formatSignal,
   getSignalBadgeClass,
+  formatTradeSide,
+  formatTradeSideClass,
   modelPortfolioSymbols,
   lastPortfolioSymbolsRefreshTime,
   loadSettings,

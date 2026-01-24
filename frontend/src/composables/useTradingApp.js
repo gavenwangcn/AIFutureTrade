@@ -1619,7 +1619,8 @@ let portfolioRefreshInterval = null // 投资组合数据自动刷新定时器�
           timestamp: trade.timestamp || '',  // 确保timestamp字段存在
           symbol: trade.future || trade.symbol || '',  // trades表使用future字段
           signal: trade.signal || '',  // 使用signal字段
-          side: trade.signal || '',  // 兼容旧代码，保留side字段
+          side: trade.side || '',  // 交易类型（buy/sell），对应trades表的side字段
+          position_side: trade.position_side || trade.positionSide || '',  // 持仓方向（LONG/SHORT）
           quantity: trade.quantity || 0,  // trades表使用quantity字段
           price: trade.price || 0,
           current_price: trade.current_price || 0,  // 实时价格（如果有）
@@ -3083,6 +3084,28 @@ let portfolioRefreshInterval = null // 投资组合数据自动刷新定时器�
   }
 
   /**
+   * 格式化交易类型（side字段：buy/sell）
+   */
+  const formatTradeSide = (side) => {
+    if (!side) return '未知'
+    const sideLower = side.toLowerCase()
+    if (sideLower === 'buy') return '买入'
+    if (sideLower === 'sell') return '卖出'
+    return side
+  }
+
+  /**
+   * 获取交易类型的样式类
+   */
+  const formatTradeSideClass = (side) => {
+    if (!side) return 'badge-close'
+    const sideLower = side.toLowerCase()
+    if (sideLower === 'buy') return 'badge-buy'
+    if (sideLower === 'sell') return 'badge-sell'
+    return 'badge-close'
+  }
+
+  /**
    * 格式化时间
    * 注意：数据库存储的是UTC+8时区（北京时间）的naive datetime
    * 前端应该将其当作本地时间（北京时间）处理，不需要再进行时区转换
@@ -3334,6 +3357,8 @@ let portfolioRefreshInterval = null // 投资组合数据自动刷新定时器�
     formatPercentage,
     formatSignal,
     getSignalBadgeClass,
+    formatTradeSide,
+    formatTradeSideClass,
     
     // 数据加载方法（供外部调用）
     loadModels,
