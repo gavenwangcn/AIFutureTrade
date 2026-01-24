@@ -261,7 +261,7 @@ class TradingEngine:
             logger.debug(f"[Model {self.model_id}] [卖出服务] [阶段2] 卖出/平仓决策处理完成")
 
             # ========== 阶段3: 账户价值快照记录说明 ==========
-            # 注意：账户价值快照现在在每次交易执行时立即记录（在 _execute_close, _execute_stop_loss, _execute_take_profit 等方法中）
+            # 注意：账户价值快照现在在每次交易执行时立即记录（在 _execute_sell, _execute_stop_loss, _execute_take_profit 等方法中）
             # 不再在批次处理完成后统一记录，确保每次交易都有对应的账户价值快照
             logger.debug(f"[Model {self.model_id}] [卖出服务] [阶段3] 账户价值快照已在每次交易时记录，无需批次记录")
             
@@ -630,7 +630,7 @@ class TradingEngine:
             logger.debug(f"[Model {self.model_id}] [买入服务] [阶段2] 买入决策处理完成")
 
             # ========== 阶段3: 账户价值快照记录说明 ==========
-            # 注意：账户价值快照现在在每次交易执行时立即记录（在 _execute_buy, _execute_sell, _execute_close 等方法中）
+            # 注意：账户价值快照现在在每次交易执行时立即记录（在 _execute_buy, _execute_sell, _execute_stop_loss, _execute_take_profit 等方法中）
             # 不再在批次处理完成后统一记录，确保每次交易都有对应的账户价值快照
             logger.debug(f"[Model {self.model_id}] [买入服务] [阶段3] 账户价值快照已在每次交易时记录，无需批次记录")
             
@@ -934,7 +934,7 @@ class TradingEngine:
         【使用场景】
         - _execute_buy: 调用market_trade（市场价格买入）
         - _execute_sell: 调用market_trade（市场价格卖出/平仓）
-        - _execute_close: 调用close_position_trade（平仓）
+        - _execute_sell: 调用market_trade（平仓，close_position信号也使用此方法）
         - _execute_stop_loss: 调用stop_loss_trade（止损）
         - _execute_take_profit: 调用take_profit_trade（止盈）
         
@@ -2735,10 +2735,15 @@ class TradingEngine:
         根据AI返回的signal字段，调用相应的执行方法：
         - 'buy_to_long' / 'buy_to_short': 调用 _execute_buy（市场价买入）
         - 'sell_to_long' / 'sell_to_short': 调用 _execute_sell（市场价卖出/平仓）
-        - 'close_position': 调用 _execute_close（平仓）
+        - 'close_position': 调用 _execute_sell（平仓，统一使用market_trade接口）
         - 'stop_loss': 调用 _execute_stop_loss（止损）
         - 'take_profit': 调用 _execute_take_profit（止盈）
         - 'hold': 保持观望，不执行任何操作
+        
+        【优化说明】
+        - close_position信号现在统一使用_execute_sell方法处理
+        - 根据持仓方向自动转换为sell_to_long或sell_to_short信号
+        - 统一使用market_trade SDK接口，不再使用close_position_trade接口
         
         Args:
             decisions: AI决策字典，key为交易对符号，value为决策详情
@@ -2776,10 +2781,33 @@ class TradingEngine:
                         # - sell_to_short → position_side = 'SHORT'（平空仓）
                         result = self._execute_sell(symbol, decision, market_state, portfolio)
                     elif signal == 'close_position':
+                        # 【优化】统一使用 _execute_sell 方法处理平仓，使用 market_trade 接口
+                        # 根据持仓方向自动转换为对应的 sell_to_long 或 sell_to_short 信号
                         if symbol not in positions_map:
                             result = {'symbol': symbol, 'error': 'No position to close'}
                         else:
-                            result = self._execute_close(symbol, decision, market_state, portfolio)
+                            # 获取持仓方向，转换为对应的卖出信号
+                            position = positions_map[symbol]
+                            position_side = position.get('position_side', 'LONG').upper()
+                            
+                            # 根据持仓方向确定对应的卖出信号
+                            if position_side == 'LONG':
+                                # 平多仓：使用 sell_to_long 信号
+                                sell_signal = 'sell_to_long'
+                            else:  # SHORT
+                                # 平空仓：使用 sell_to_short 信号
+                                sell_signal = 'sell_to_short'
+                            
+                            # 创建新的decision，使用转换后的信号
+                            sell_decision = decision.copy()
+                            sell_decision['signal'] = sell_signal
+                            
+                            # 调用 _execute_sell 方法（统一使用 market_trade 接口）
+                            result = self._execute_sell(symbol, sell_decision, market_state, portfolio)
+                            
+                            # 如果执行成功，将返回的signal改为 close_position（保持兼容性）
+                            if 'error' not in result:
+                                result['signal'] = 'close_position'
                     elif signal == 'stop_loss':
                         if symbol not in positions_map:
                             result = {'symbol': symbol, 'error': 'No position for stop loss'}
@@ -3020,6 +3048,11 @@ class TradingEngine:
         """
         执行市场价卖出/平仓（统一方法，支持平多和平空）
         
+        【支持的信号类型】
+        - signal='sell_to_long'（平多）→ position_side='LONG'
+        - signal='sell_to_short'（平空）→ position_side='SHORT'
+        - signal='close_position'（平仓）→ 根据持仓方向自动转换为 sell_to_long 或 sell_to_short
+        
         【signal与position_side的映射关系】
         根据AI模型返回的signal字段自动确定position_side：
         - signal='sell_to_long'（平多）→ position_side='LONG'
@@ -3029,10 +3062,12 @@ class TradingEngine:
         - AI模型不再返回position_side字段，只需要返回signal字段
         - 系统会根据signal自动确定position_side
         - trades表中记录的signal字段：sell_to_long 或 sell_to_short
+        - close_position信号会在_execute_decisions中转换为对应的sell_to_long或sell_to_short
         
         【SDK接口参数说明】
         - SDK调用的side参数：统一使用'SELL'（平多和平空都使用SELL）
         - SDK调用的positionSide参数：根据signal自动确定（LONG或SHORT）
+        - SDK接口：统一使用market_trade（市场价交易接口）
         - 数据库记录的position_side：根据signal自动确定
         - trades表的side字段：统一使用'sell'（平多和平空都使用sell）
         
@@ -3187,7 +3222,10 @@ class TradingEngine:
 
     def _execute_close(self, symbol: str, decision: Dict, market_state: Dict, portfolio: Dict) -> Dict:
         """
-        执行平仓操作
+        【已废弃】执行平仓操作
+        
+        ⚠️ 注意：此方法已废弃，close_position信号现在统一使用_execute_sell方法处理。
+        此方法保留仅用于向后兼容，新代码不应直接调用此方法。
         
         根据持仓的position_side自动确定平仓方向：
         - LONG持仓：使用SELL方向平仓（平多仓）
@@ -3213,6 +3251,7 @@ class TradingEngine:
             - 使用STOP_MARKET订单类型，以当前价格作为触发价格（立即触发）
             - 计算毛盈亏和净盈亏（扣除手续费）
             - 平仓后更新数据库持仓记录
+            - 【已废弃】现在统一使用_execute_sell方法，使用market_trade接口
         """
         # 查找持仓信息
         position = self._find_position(portfolio, symbol)
