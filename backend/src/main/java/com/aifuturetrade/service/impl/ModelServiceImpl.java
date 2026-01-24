@@ -2073,7 +2073,7 @@ public class ModelServiceImpl implements ModelService {
             
             log.info("[ModelService] SQL查询结果: 查询到 {} 条策略分析记录", analysisList.size());
             if (analysisList.isEmpty()) {
-                log.info("[ModelService] ⚠️  查询结果为空，可能原因: 1) 该模型没有交易记录 2) 该模型没有策略决策记录 3) strategy_decisions表和trades表无法匹配（时间窗口5分钟内）");
+                log.info("[ModelService] ⚠️  查询结果为空，可能原因: 1) 该模型没有卖出交易记录（side='sell'） 2) 该模型只有买入交易，没有卖出交易");
             } else {
                 log.info("[ModelService] 查询结果详情: {}", analysisList.stream()
                     .map(item -> String.format("策略=%s, 交易次数=%s", 
