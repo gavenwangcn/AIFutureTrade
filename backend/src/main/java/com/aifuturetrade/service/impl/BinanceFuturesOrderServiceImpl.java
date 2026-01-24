@@ -139,7 +139,61 @@ public class BinanceFuturesOrderServiceImpl implements BinanceFuturesOrderServic
             log.info("[BinanceFuturesOrderService] 计算盈亏: 开仓价={}, 当前价={}, 数量={}, 方向={}, 毛盈亏={}, 手续费={}, 净盈亏={}", 
                     entryPrice, currentPrice, positionAmt, positionSide, grossPnl, fee, netPnl);
 
-            // 6. 解析SDK返回数据（如果是real模式且调用成功）
+            // 6. 删除portfolios表记录
+            portfolioMapper.deleteById(portfolio.getId());
+            log.info("[BinanceFuturesOrderService] 删除portfolios表记录成功: portfolioId={}", portfolio.getId());
+
+            // 7. 调用SDK执行卖出
+            BinanceFuturesOrderClient orderClient = new BinanceFuturesOrderClient(
+                    model.getApiKey(),
+                    model.getApiSecret(),
+                    binanceConfig.getQuoteAsset(),
+                    binanceConfig.getBaseUrl(),
+                    binanceConfig.getTestnet()
+            );
+
+            // 根据is_virtual判断使用real还是test模式
+            // 如果is_virtual不为true（即非虚拟），使用real模式
+            Boolean isVirtual = model.getIsVirtual();
+            boolean useTestMode = (isVirtual != null && isVirtual);
+            String modelTradeMode = useTestMode ? "test" : "real";
+            
+            Map<String, Object> orderParams = new HashMap<>();
+            orderParams.put("symbol", formattedSymbol);
+            orderParams.put("side", "SELL");
+            orderParams.put("quantity", positionAmt);
+            orderParams.put("orderType", "MARKET");
+            orderParams.put("positionSide", oppositePositionSide);
+            orderParams.put("testMode", useTestMode);
+
+            log.info("[BinanceFuturesOrderService] 调用SDK执行卖出，交易模式: {} (is_virtual={}, {})", 
+                    modelTradeMode, isVirtual, useTestMode ? "测试接口，不会真实成交" : "真实交易接口");
+            log.info("[BinanceFuturesOrderService] 调用SDK执行卖出，参数: {}", orderParams);
+
+            Map<String, Object> sdkResponse = null;
+            String responseType = "200";
+            String sdkError = null;
+            
+            try {
+                sdkResponse = orderClient.marketTrade(
+                        formattedSymbol,
+                        "SELL",
+                        positionAmt,
+                        "MARKET",
+                        oppositePositionSide,
+                        useTestMode
+                );
+                log.info("[BinanceFuturesOrderService] SDK调用成功: {}", sdkResponse);
+            } catch (Exception e) {
+                sdkError = e.getMessage();
+                log.error("[BinanceFuturesOrderService] SDK调用失败: {}", sdkError, e);
+                responseType = "500";
+                // real模式调用失败时，不抛出异常，继续执行数据库记录（quantity和price设置为0，error字段记录错误）
+                // test模式失败时也不抛出异常，继续执行（保持一致性）
+                log.warn("[BinanceFuturesOrderService] SDK调用失败，将继续记录到trades表（{}模式）", modelTradeMode);
+            }
+
+            // 8. 解析SDK返回数据（如果是real模式且调用成功）
             String finalSignal = signal;
             String finalSide = positionSide.toLowerCase();
             Double finalQuantity = positionAmt;
@@ -231,7 +285,7 @@ public class BinanceFuturesOrderServiceImpl implements BinanceFuturesOrderServic
                 log.warn("[BinanceFuturesOrderService] real模式调用失败，quantity和price设置为0，signal和side使用策略返回的值");
             }
             
-            // 7. 插入trades表记录（使用传入的modelId，而不是system_user）
+            // 9. 插入trades表记录（使用传入的modelId，而不是system_user）
             TradeDO trade = new TradeDO();
             trade.setModelId(modelId);  // 使用传入的modelId
             trade.setFuture(symbol);
@@ -263,61 +317,6 @@ public class BinanceFuturesOrderServiceImpl implements BinanceFuturesOrderServic
 
             log.info("[BinanceFuturesOrderService] 插入trades表记录成功: tradeId={}, modelId={}, signal={}, quantity={}, price={}, pnl={}, fee={}", 
                     trade.getId(), modelId, finalSignal, finalQuantity, finalPrice, netPnl, fee);
-
-            // 8. 删除portfolios表记录
-            portfolioMapper.deleteById(portfolio.getId());
-
-            log.info("[BinanceFuturesOrderService] 删除portfolios表记录成功: portfolioId={}", portfolio.getId());
-
-            // 9. 调用SDK执行卖出
-            BinanceFuturesOrderClient orderClient = new BinanceFuturesOrderClient(
-                    model.getApiKey(),
-                    model.getApiSecret(),
-                    binanceConfig.getQuoteAsset(),
-                    binanceConfig.getBaseUrl(),
-                    binanceConfig.getTestnet()
-            );
-
-            // 根据is_virtual判断使用real还是test模式
-            // 如果is_virtual不为true（即非虚拟），使用real模式
-            Boolean isVirtual = model.getIsVirtual();
-            boolean useTestMode = (isVirtual != null && isVirtual);
-            String modelTradeMode = useTestMode ? "test" : "real";
-            
-            Map<String, Object> orderParams = new HashMap<>();
-            orderParams.put("symbol", formattedSymbol);
-            orderParams.put("side", "SELL");
-            orderParams.put("quantity", positionAmt);
-            orderParams.put("orderType", "MARKET");
-            orderParams.put("positionSide", oppositePositionSide);
-            orderParams.put("testMode", useTestMode);
-
-            log.info("[BinanceFuturesOrderService] 调用SDK执行卖出，交易模式: {} (is_virtual={}, {})", 
-                    modelTradeMode, isVirtual, useTestMode ? "测试接口，不会真实成交" : "真实交易接口");
-            log.info("[BinanceFuturesOrderService] 调用SDK执行卖出，参数: {}", orderParams);
-
-            Map<String, Object> sdkResponse = null;
-            String responseType = "200";
-            String sdkError = null;
-            
-            try {
-                sdkResponse = orderClient.marketTrade(
-                        formattedSymbol,
-                        "SELL",
-                        positionAmt,
-                        "MARKET",
-                        oppositePositionSide,
-                        useTestMode
-                );
-                log.info("[BinanceFuturesOrderService] SDK调用成功: {}", sdkResponse);
-            } catch (Exception e) {
-                sdkError = e.getMessage();
-                log.error("[BinanceFuturesOrderService] SDK调用失败: {}", sdkError, e);
-                responseType = "500";
-                // real模式调用失败时，不抛出异常，继续执行数据库记录（quantity和price设置为0，error字段记录错误）
-                // test模式失败时也不抛出异常，继续执行（保持一致性）
-                log.warn("[BinanceFuturesOrderService] SDK调用失败，将继续记录到trades表（{}模式）", modelTradeMode);
-            }
 
             // 10. 记录binance_trade_logs（model_id仍然使用system_user）
             BinanceTradeLogDO tradeLog = new BinanceTradeLogDO();
