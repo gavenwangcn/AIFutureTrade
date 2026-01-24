@@ -163,6 +163,8 @@ binance:
 # 应用配置（可通过环境变量覆盖）
 app:
   auto-trading: ${APP_AUTO_TRADING:true}
+  # 一键卖出交易模式：'test' 使用测试接口（默认，不会真实成交），'real' 使用真实交易接口
+  sell-position-trade-mode: ${APP_SELL_POSITION_TRADE_MODE:test}
 
 # Socket.IO 配置（可通过环境变量覆盖）
 socketio:

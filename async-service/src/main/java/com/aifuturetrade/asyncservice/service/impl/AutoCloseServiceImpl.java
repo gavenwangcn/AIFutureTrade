@@ -10,6 +10,9 @@ import com.aifuturetrade.asyncservice.service.AutoCloseService;
 import com.binance.connector.client.common.ApiResponse;
 import com.binance.connector.client.derivatives_trading_usds_futures.rest.model.NewOrderRequest;
 import com.binance.connector.client.derivatives_trading_usds_futures.rest.model.NewOrderResponse;
+import com.binance.connector.client.derivatives_trading_usds_futures.rest.model.TestOrderRequest;
+import com.binance.connector.client.derivatives_trading_usds_futures.rest.model.Side;
+import com.binance.connector.client.derivatives_trading_usds_futures.rest.model.PositionSide;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
@@ -53,6 +56,9 @@ public class AutoCloseServiceImpl implements AutoCloseService {
     @Value("${binance.quote-asset:USDT}")
     private String quoteAsset;
     
+    @Value("${async.auto-close.trade-mode:test}")
+    private String tradeMode;
+    
     private final AtomicBoolean schedulerRunning = new AtomicBoolean(false);
     
     // 缓存每个模型的 Binance 客户端（使用模型自己的 API Key）
@@ -62,6 +68,8 @@ public class AutoCloseServiceImpl implements AutoCloseService {
     public void init() {
         log.info("[AutoCloseService] 🛠️ 自动平仓服务初始化完成");
         log.info("[AutoCloseService] ⏱️ 执行周期: {} 秒", intervalSeconds);
+        log.info("[AutoCloseService] 💰 交易模式: {} ({})", 
+                tradeMode, "test".equalsIgnoreCase(tradeMode) ? "测试接口，不会真实成交" : "真实交易接口");
     }
     
     @PreDestroy
@@ -300,6 +308,8 @@ public class AutoCloseServiceImpl implements AutoCloseService {
     
     /**
      * 执行平仓操作
+     * 
+     * 根据配置选择使用测试接口或真实交易接口
      */
     private boolean executeClosePosition(ModelDO model, String symbol, String positionSide, Double positionAmt) {
         try {
@@ -309,46 +319,88 @@ public class AutoCloseServiceImpl implements AutoCloseService {
                 return false;
             }
             
-            // 构建平仓订单
-            NewOrderRequest orderRequest = new NewOrderRequest();
-            orderRequest.setSymbol(symbol.toUpperCase());
-            orderRequest.setSide(com.binance.connector.client.derivatives_trading_usds_futures.rest.model.Side.SELL); // 平仓统一使用 SELL
-            orderRequest.setType("MARKET");
-            // quantity 需要是 Double 类型
-            orderRequest.setQuantity(positionAmt);
+            // 判断是否使用测试模式
+            boolean useTestMode = "test".equalsIgnoreCase(tradeMode);
             
-            // 设置持仓方向
-            if ("LONG".equalsIgnoreCase(positionSide)) {
-                orderRequest.setPositionSide(com.binance.connector.client.derivatives_trading_usds_futures.rest.model.PositionSide.LONG);
-            } else if ("SHORT".equalsIgnoreCase(positionSide)) {
-                orderRequest.setPositionSide(com.binance.connector.client.derivatives_trading_usds_futures.rest.model.PositionSide.SHORT);
-            }
-            
-            // 执行订单
-            ApiResponse<NewOrderResponse> response = client.getRestApi().newOrder(orderRequest);
-            
-            if (response != null && response.getData() != null) {
-                log.info("[AutoClose] ✅ 平仓订单提交成功: {}", response.getData());
+            if (useTestMode) {
+                // 使用测试接口（不会真实成交）
+                log.info("[AutoClose] 使用测试接口执行平仓（不会真实成交）: symbol={}, positionSide={}, quantity={}", 
+                        symbol, positionSide, positionAmt);
                 
-                // 更新 portfolios 表：删除持仓记录
-                try {
-                    int deleted = portfolioMapper.deletePosition(model.getId(), symbol.toUpperCase(), positionSide);
-                    if (deleted > 0) {
-                        log.info("[AutoClose] ✅ 已更新 portfolios 表，删除持仓记录: modelId={}, symbol={}, positionSide={}", 
-                                model.getId(), symbol, positionSide);
-                    } else {
-                        log.warn("[AutoClose] ⚠️  未找到要删除的持仓记录: modelId={}, symbol={}, positionSide={}", 
-                                model.getId(), symbol, positionSide);
-                    }
-                } catch (Exception dbErr) {
-                    log.error("[AutoClose] ❌ 更新 portfolios 表失败: {}", dbErr.getMessage(), dbErr);
-                    // 不返回 false，因为订单已经提交成功
+                // 构建测试订单请求
+                TestOrderRequest testRequest = new TestOrderRequest();
+                testRequest.setSymbol(symbol.toUpperCase());
+                testRequest.setSide(Side.SELL); // 平仓统一使用 SELL
+                testRequest.setType("MARKET");
+                testRequest.setQuantity(positionAmt);
+                
+                // 设置持仓方向
+                if ("LONG".equalsIgnoreCase(positionSide)) {
+                    testRequest.setPositionSide(PositionSide.LONG);
+                } else if ("SHORT".equalsIgnoreCase(positionSide)) {
+                    testRequest.setPositionSide(PositionSide.SHORT);
                 }
                 
-                return true;
+                // 调用测试订单接口
+                ApiResponse<?> response = client.getRestApi().testOrder(testRequest);
+                
+                if (response != null) {
+                    log.info("[AutoClose] ✅ 测试平仓订单提交成功（未真实成交）: {}", response.getData());
+                    
+                    // 测试模式下不更新数据库，因为不是真实交易
+                    log.info("[AutoClose] ℹ️  测试模式：跳过数据库更新（非真实交易）");
+                    
+                    return true;
+                } else {
+                    log.error("[AutoClose] ❌ 测试平仓订单提交失败: 响应为空");
+                    return false;
+                }
             } else {
-                log.error("[AutoClose] ❌ 平仓订单提交失败: 响应为空");
-                return false;
+                // 使用真实交易接口
+                log.info("[AutoClose] 使用真实交易接口执行平仓: symbol={}, positionSide={}, quantity={}", 
+                        symbol, positionSide, positionAmt);
+                
+                // 构建平仓订单
+                NewOrderRequest orderRequest = new NewOrderRequest();
+                orderRequest.setSymbol(symbol.toUpperCase());
+                orderRequest.setSide(Side.SELL); // 平仓统一使用 SELL
+                orderRequest.setType("MARKET");
+                // quantity 需要是 Double 类型
+                orderRequest.setQuantity(positionAmt);
+                
+                // 设置持仓方向
+                if ("LONG".equalsIgnoreCase(positionSide)) {
+                    orderRequest.setPositionSide(PositionSide.LONG);
+                } else if ("SHORT".equalsIgnoreCase(positionSide)) {
+                    orderRequest.setPositionSide(PositionSide.SHORT);
+                }
+                
+                // 执行订单
+                ApiResponse<NewOrderResponse> response = client.getRestApi().newOrder(orderRequest);
+                
+                if (response != null && response.getData() != null) {
+                    log.info("[AutoClose] ✅ 平仓订单提交成功: {}", response.getData());
+                    
+                    // 更新 portfolios 表：删除持仓记录
+                    try {
+                        int deleted = portfolioMapper.deletePosition(model.getId(), symbol.toUpperCase(), positionSide);
+                        if (deleted > 0) {
+                            log.info("[AutoClose] ✅ 已更新 portfolios 表，删除持仓记录: modelId={}, symbol={}, positionSide={}", 
+                                    model.getId(), symbol, positionSide);
+                        } else {
+                            log.warn("[AutoClose] ⚠️  未找到要删除的持仓记录: modelId={}, symbol={}, positionSide={}", 
+                                    model.getId(), symbol, positionSide);
+                        }
+                    } catch (Exception dbErr) {
+                        log.error("[AutoClose] ❌ 更新 portfolios 表失败: {}", dbErr.getMessage(), dbErr);
+                        // 不返回 false，因为订单已经提交成功
+                    }
+                    
+                    return true;
+                } else {
+                    log.error("[AutoClose] ❌ 平仓订单提交失败: 响应为空");
+                    return false;
+                }
             }
             
         } catch (Exception e) {

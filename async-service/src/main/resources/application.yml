@@ -158,8 +158,10 @@ async:
   auto-close:
     # 执行周期（秒），默认3秒
     interval-seconds: ${ASYNC_AUTO_CLOSE_INTERVAL_SECONDS:3}
+    # 交易模式：'test' 使用测试接口（默认，不会真实成交），'real' 使用真实交易接口
+    trade-mode: ${ASYNC_AUTO_CLOSE_TRADE_MODE:test}
   
   # 账户每日价值服务配置
   account-values-daily:
-    # Cron表达式（每天8点执行，格式：秒 分 时 日 月 周）
-    cron: "0 0 8 * * ?"
+    # Cron表达式（每天0点执行，格式：秒 分 时 日 月 周）由于是香港服务器 时区差8小时
+    cron: "0 0 0 * * ?"

@@ -14,6 +14,7 @@ import com.aifuturetrade.service.BinanceFuturesOrderService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -44,6 +45,9 @@ public class BinanceFuturesOrderServiceImpl implements BinanceFuturesOrderServic
 
     @Autowired
     private BinanceConfig binanceConfig;
+
+    @Value("${app.sell-position-trade-mode:test}")
+    private String sellPositionTradeMode;
 
     private final ObjectMapper objectMapper = new ObjectMapper();
 
@@ -168,14 +172,19 @@ public class BinanceFuturesOrderServiceImpl implements BinanceFuturesOrderServic
                     binanceConfig.getTestnet()
             );
 
+            // 判断是否使用测试模式（根据配置）
+            boolean useTestMode = "test".equalsIgnoreCase(sellPositionTradeMode);
+            
             Map<String, Object> orderParams = new HashMap<>();
             orderParams.put("symbol", formattedSymbol);
             orderParams.put("side", "SELL");
             orderParams.put("quantity", positionAmt);
             orderParams.put("orderType", "MARKET");
             orderParams.put("positionSide", oppositePositionSide);
-            orderParams.put("testMode", true);
+            orderParams.put("testMode", useTestMode);
 
+            log.info("[BinanceFuturesOrderService] 调用SDK执行卖出，交易模式: {} ({})", 
+                    sellPositionTradeMode, useTestMode ? "测试接口，不会真实成交" : "真实交易接口");
             log.info("[BinanceFuturesOrderService] 调用SDK执行卖出，参数: {}", orderParams);
 
             Map<String, Object> sdkResponse = null;
@@ -188,7 +197,7 @@ public class BinanceFuturesOrderServiceImpl implements BinanceFuturesOrderServic
                         positionAmt,
                         "MARKET",
                         oppositePositionSide,
-                        true
+                        useTestMode
                 );
                 log.info("[BinanceFuturesOrderService] SDK调用成功: {}", sdkResponse);
             } catch (Exception e) {
@@ -201,7 +210,7 @@ public class BinanceFuturesOrderServiceImpl implements BinanceFuturesOrderServic
             BinanceTradeLogDO tradeLog = new BinanceTradeLogDO();
             tradeLog.setModelId("system_user");  // binance_trade_logs表仍然使用system_user
             tradeLog.setTradeId(trade.getId());
-            tradeLog.setType("test");
+            tradeLog.setType(useTestMode ? "test" : "real");  // 根据配置设置类型
             tradeLog.setMethodName("marketTrade");
             
             try {
