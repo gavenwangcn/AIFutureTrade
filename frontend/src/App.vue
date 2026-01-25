@@ -681,6 +681,7 @@
                       <th>时间</th>
                       <th>策略名称</th>
                       <th>策略类型</th>
+                      <th>状态</th>
                       <th>交易信号</th>
                       <th>合约名称</th>
                       <th>数量</th>
@@ -688,6 +689,8 @@
                       <th>期望价格</th>
                       <th>触发价格</th>
                       <th>触发理由</th>
+                      <th>交易ID</th>
+                      <th>错误信息</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -697,6 +700,11 @@
                       <td>
                         <span :class="['badge', (decision.strategyType || decision.strategy_type) === 'buy' ? 'badge-long' : 'badge-short']">
                           {{ (decision.strategyType || decision.strategy_type) === 'buy' ? '买入' : '卖出' }}
+                        </span>
+                      </td>
+                      <td>
+                        <span class="badge" :class="(String(decision.status || decision.status_code || '').toUpperCase() === 'EXECUTED' ? 'badge-long' : (String(decision.status || decision.status_code || '').toUpperCase() === 'REJECTED' ? 'badge-short' : ''))">
+                          {{ formatStrategyDecisionStatus(decision.status || decision.status_code) }}
                         </span>
                       </td>
                       <td>
@@ -710,9 +718,20 @@
                       <td>{{ decision.price ? '$' + formatPrice6(decision.price) : '-' }}</td>
                       <td>{{ decision.stopPrice || decision.stop_price ? '$' + formatPrice6(decision.stopPrice || decision.stop_price) : '-' }}</td>
                       <td style="max-width: 300px; word-break: break-word;">{{ decision.justification || '-' }}</td>
+                      <td>
+                        <span
+                          :title="decision.tradeId || decision.trade_id || '--'"
+                          style="max-width: 220px; display: inline-block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;"
+                        >
+                          {{ decision.tradeId || decision.trade_id || '--' }}
+                        </span>
+                      </td>
+                      <td style="max-width: 240px; word-break: break-word;">
+                        {{ decision.errorReason || decision.error_reason || '--' }}
+                      </td>
                     </tr>
                     <tr v-if="strategyDecisions.length === 0">
-                      <td colspan="10" class="empty-state">暂无策略决策记录</td>
+                      <td colspan="13" class="empty-state">暂无策略决策记录</td>
                     </tr>
                   </tbody>
                 </table>
@@ -1266,6 +1285,7 @@ const {
   formatPrice,
   formatPrice5,
   formatPrice6,
+  formatStrategyDecisionStatus,
   formatLeaderboardPrice,
   formatCurrency,
   formatCurrency5,

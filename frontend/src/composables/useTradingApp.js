@@ -3000,6 +3000,17 @@ let portfolioRefreshInterval = null // 投资组合数据自动刷新定时器�
   }
 
   /**
+   * 策略决策状态中文映射
+   */
+  const formatStrategyDecisionStatus = (status) => {
+    const s = String(status || '').toUpperCase()
+    if (s === 'TRIGGERED') return '已触发'
+    if (s === 'EXECUTED') return '已执行'
+    if (s === 'REJECTED') return '已拒绝'
+    return status || '--'
+  }
+
+  /**
    * 格式化涨跌榜价格（保留6位小数，去除尾部0）
    */
   const formatLeaderboardPrice = (price) => {
@@ -3443,6 +3454,7 @@ let portfolioRefreshInterval = null // 投资组合数据自动刷新定时器�
     formatPrice,
     formatPrice5,
     formatPrice6,
+    formatStrategyDecisionStatus,
     formatLeaderboardPrice,
     formatCurrency,
     formatCurrency5,
