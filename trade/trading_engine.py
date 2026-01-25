@@ -3122,19 +3122,22 @@ class TradingEngine:
                             if isinstance(result, dict):
                                 trade_id = result.get('trade_id') or result.get('tradeId')
                                 err = result.get('error')
-                            if trade_id:
+                            # 重要：error 优先级高于 trade_id
+                            # - SDK 调用失败等场景可能仍会生成 trade_id 并落库 trades（用于审计/排查）
+                            # - 但策略执行应视为失败：status=REJECTED，并写入 error_reason（同时保留 trade_id 以便追踪）
+                            if err:
+                                self.strategy_decisions_db.update_strategy_decision_status(
+                                    decision_id=decision_id,
+                                    status="REJECTED",
+                                    trade_id=trade_id,
+                                    error_reason=str(err)
+                                )
+                            elif trade_id:
                                 self.strategy_decisions_db.update_strategy_decision_status(
                                     decision_id=decision_id,
                                     status="EXECUTED",
                                     trade_id=trade_id,
                                     error_reason=None
-                                )
-                            elif err:
-                                self.strategy_decisions_db.update_strategy_decision_status(
-                                    decision_id=decision_id,
-                                    status="REJECTED",
-                                    trade_id=None,
-                                    error_reason=str(err)
                                 )
                         except Exception as update_err:
                             logger.warning(
@@ -3404,6 +3407,10 @@ class TradingEngine:
             order_type = None
             orig_type = None
             error_msg = None
+
+        # real 模式下 SDK 调用被跳过（如无法创建客户端）时，也应记录/回填错误信息
+        if trade_mode == 'real' and (not error_msg) and sdk_call_skipped and sdk_skip_reason:
+            error_msg = sdk_skip_reason
         
         # 从signal中提取交易方向（buy/sell）
         # buy_to_long, buy_to_short -> buy
@@ -3483,6 +3490,7 @@ class TradingEngine:
             'price': price,
             'leverage': leverage,
             'fee': trade_fee,
+            'error': error_msg,
             'message': f'开仓 {symbol} {position_side} 合约数量={position_amt:.2f} @ ${price:.2f} (手续费: ${trade_fee:.2f})'
         }
 
@@ -3659,6 +3667,10 @@ class TradingEngine:
             order_type = None
             orig_type = None
             error_msg = None
+
+        # real 模式下 SDK 调用被跳过（如无法创建客户端）时，也应记录/回填错误信息
+        if trade_mode == 'real' and (not error_msg) and sdk_call_skipped and sdk_skip_reason:
+            error_msg = sdk_skip_reason
         
         # 从signal中提取交易方向（buy/sell）
         # buy_to_long, buy_to_short -> buy
@@ -3753,6 +3765,7 @@ class TradingEngine:
             'price': current_price,
             'pnl': net_pnl,
             'fee': trade_fee,
+            'error': error_msg,
             'message': f'平仓 {symbol} {position_side}, 毛收益 ${gross_pnl:.2f}, 手续费 ${trade_fee:.2f}, 净收益 ${net_pnl:.2f}'
         }
 
@@ -3920,6 +3933,10 @@ class TradingEngine:
             order_type = None
             orig_type = None
             error_msg = None
+
+        # real 模式下 SDK 调用被跳过（如无法创建客户端）时，也应记录/回填错误信息
+        if trade_mode == 'real' and (not error_msg) and sdk_call_skipped and sdk_skip_reason:
+            error_msg = sdk_skip_reason
         
         # 从signal中提取交易方向（buy/sell）
         # close_position, stop_loss, take_profit -> sell
@@ -3995,6 +4012,7 @@ class TradingEngine:
             'price': current_price,
             'pnl': net_pnl,
             'fee': trade_fee,
+            'error': error_msg,
             'message': f'平仓 {symbol}, 毛收益 ${gross_pnl:.2f}, 手续费 ${trade_fee:.2f}, 净收益 ${net_pnl:.2f}'
         }
 
@@ -4195,6 +4213,10 @@ class TradingEngine:
             order_type = None
             orig_type = None
             error_msg = None
+
+        # real 模式下 SDK 调用被跳过（如无法创建客户端）时，也应记录/回填错误信息
+        if trade_mode == 'real' and (not error_msg) and sdk_call_skipped and sdk_skip_reason:
+            error_msg = sdk_skip_reason
         
         # 从signal中提取交易方向（buy/sell）
         # stop_loss -> sell
@@ -4306,6 +4328,7 @@ class TradingEngine:
             'side': side_for_trade.lower(),
             'fee': trade_fee,
             'pnl': calculated_pnl,
+            'error': error_msg,
             'message': f'止损操作 {symbol}, 持仓方向: {position_side}, 数量: {strategy_quantity}, 当前价格: ${current_price:.4f}'
         }
 
@@ -4506,6 +4529,10 @@ class TradingEngine:
             order_type = None
             orig_type = None
             error_msg = None
+
+        # real 模式下 SDK 调用被跳过（如无法创建客户端）时，也应记录/回填错误信息
+        if trade_mode == 'real' and (not error_msg) and sdk_call_skipped and sdk_skip_reason:
+            error_msg = sdk_skip_reason
         
         # 从signal中提取交易方向（buy/sell）
         # take_profit -> sell
@@ -4613,6 +4640,7 @@ class TradingEngine:
             'side': side_for_trade.lower(),
             'fee': trade_fee,
             'pnl': calculated_pnl,
+            'error': error_msg,
             'message': f'止盈操作 {symbol}, 持仓方向: {position_side}, 数量: {strategy_quantity}, 当前价格: ${current_price:.4f}'
         }
 
