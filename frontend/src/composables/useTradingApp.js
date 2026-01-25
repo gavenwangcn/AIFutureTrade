@@ -14,7 +14,6 @@ export function useTradingApp() {
   // 模型相关状态
   const currentModelId = ref(null)
   const models = ref([])
-  const isAggregatedView = ref(false)
   const modelLeverageMap = ref({})
   const providers = ref([]) // 用于获取提供方名称
   
@@ -53,7 +52,6 @@ export function useTradingApp() {
     dailyReturnRate: null  // 每日收益率（百分比）
   })
   const accountValueHistory = ref([]) // 账户价值历史数据（用于图表）
-  const aggregatedChartData = ref([]) // 聚合视图图表数据
   // 时间选择相关状态
   const timeRangePreset = ref('5days') // 快速选择：'5days', '10days', '30days', 'custom'
   const customStartTime = ref('') // 自定义开始时间
@@ -916,53 +914,6 @@ let portfolioRefreshInterval = null // 投资组合数据自动刷新定时器�
   }
   
   /**
-   * 加载聚合数据
-   */
-  const loadAggregatedData = async () => {
-    loading.value.portfolio = true
-    errors.value.portfolio = null
-    try {
-      const data = await modelApi.getAggregatedPortfolio()
-      if (data.portfolio) {
-        portfolio.value = {
-          totalValue: data.portfolio.total_value || 0,
-          availableCash: data.portfolio.cash || 0,
-          realizedPnl: data.portfolio.realized_pnl || 0,
-          unrealizedPnl: data.portfolio.unrealized_pnl || 0
-        }
-        positions.value = data.portfolio.positions || []
-      }
-      // 保存聚合图表数据
-      if (data.chart_data) {
-        aggregatedChartData.value = data.chart_data
-        await nextTick()
-        updateAccountChart(data.chart_data, null, true)
-      }
-    } catch (error) {
-      console.error('[TradingApp] Error loading aggregated data:', error)
-      errors.value.portfolio = error.message
-    } finally {
-      loading.value.portfolio = false
-    }
-  }
-  
-  /**
-   * 显示聚合视图
-   */
-  const showAggregatedView = async () => {
-    // 切换到聚合视图时，停止投资组合数据自动刷新（聚合视图不需要自动刷新）
-    stopPortfolioAutoRefresh()
-    
-    // 切换到聚合视图时，清空单个模型的数据，确保只显示聚合数据
-    accountValueHistory.value = []
-    currentModelId.value = null
-    isAggregatedView.value = true
-    await loadAggregatedData()
-    // 切换到聚合视图时停止模型持仓合约列表自动刷新
-    stopPortfolioSymbolsAutoRefresh()
-  }
-  
-  /**
    * 更新账户价值图表
    */
   const updateAccountChart = (history, currentValue, isMultiModel = false) => {
@@ -1681,8 +1632,9 @@ let portfolioRefreshInterval = null // 投资组合数据自动刷新定时器�
     try {
       console.log('[TradingApp] 开始加载策略决策记录（分页）, modelId:', currentModelId.value, 'page:', targetPage, 'pageSize:', targetPageSize)
       const { strategyDecisionApi } = await import('../services/api.js')
-      // 默认仅查看 EXECUTED（与交易记录 1:1 对齐）；后端未支持 status 参数时也不会报错（会忽略该 query）
-      const data = await strategyDecisionApi.getByModelId(currentModelId.value, targetPage, targetPageSize, 'EXECUTED')
+      // 按“模型ID + 分页”查询全部策略决策记录（包含 trade_id 为空的记录）
+      // 如需过滤状态，可在此传入 status 参数（TRIGGERED/EXECUTED/REJECTED）
+      const data = await strategyDecisionApi.getByModelId(currentModelId.value, targetPage, targetPageSize)
       console.log('[TradingApp] 收到策略决策API响应:', data)
       console.log('[TradingApp] API响应数据类型:', typeof data, '是否为数组:', Array.isArray(data), '包含data字段:', data && data.data !== undefined, '包含total字段:', data && data.total !== undefined)
       
@@ -1977,9 +1929,9 @@ let portfolioRefreshInterval = null // 投资组合数据自动刷新定时器�
       
       console.log('[TradingApp] ✅ 初始数据加载完成')
       
-      // 如果没有选中的模型，默认显示聚合视图
+      // 没有选中模型时：默认选中第一个模型（已移除“聚合账户总览”模块）
       if (!currentModelId.value && models.value.length > 0) {
-        await showAggregatedView()
+        await selectModel(models.value[0].id)
       } else if (currentModelId.value) {
         await Promise.all([
           loadPortfolio(),
@@ -2347,9 +2299,6 @@ let portfolioRefreshInterval = null // 投资组合数据自动刷新定时器�
           isRefreshingConversations.value = false
           throw error
         }
-      } else if (isAggregatedView.value) {
-        // 聚合视图模式，刷新聚合数据
-        await loadAggregatedData()
       }
     } finally {
       isRefreshingAll.value = false
@@ -2360,9 +2309,8 @@ let portfolioRefreshInterval = null // 投资组合数据自动刷新定时器�
    * 选择模型
    */
   const selectModel = async (modelId) => {
-    // 切换模型时，立即清空旧的对话数据和聚合图表数据，避免显示错误的数据
+    // 切换模型时，立即清空旧的对话数据，避免显示错误的数据
     conversations.value = []
-    aggregatedChartData.value = [] // 清空聚合图表数据，确保只显示当前模型的数据
     
     // 重置所有分页到第一页
     strategyDecisions.value = []
@@ -2380,7 +2328,6 @@ let portfolioRefreshInterval = null // 投资组合数据自动刷新定时器�
     positions.value = []
     
     currentModelId.value = modelId
-    isAggregatedView.value = false
     // 加载模型相关数据（从第一页开始加载）
     await Promise.all([
       loadPortfolio(),
@@ -2441,9 +2388,20 @@ let portfolioRefreshInterval = null // 投资组合数据自动刷新定时器�
       // 先刷新模型列表
       await loadModels()
       
-      // 如果删除的是当前选中的模型，或者模型列表为空（删除的是最后一个模型），切换到聚合视图
-      if (currentModelId.value === deletedModelId || models.value.length === 0) {
-        await showAggregatedView()
+      // 如果删除的是当前选中的模型：自动切到剩余的第一个模型；若已无模型则清空页面数据
+      if (currentModelId.value === deletedModelId) {
+        if (models.value.length > 0) {
+          await selectModel(models.value[0].id)
+        } else {
+          stopPortfolioAutoRefresh()
+          stopPortfolioSymbolsAutoRefresh()
+          currentModelId.value = null
+          accountValueHistory.value = []
+          positions.value = []
+          trades.value = []
+          conversations.value = []
+          strategyDecisions.value = []
+        }
       }
       
       alert('模型删除成功')
@@ -3247,7 +3205,6 @@ let portfolioRefreshInterval = null // 投资组合数据自动刷新定时器�
     currentModelId,
     currentModel,
     models,
-    isAggregatedView,
     modelLeverageMap,
     providers,
     marketPrices,
@@ -3275,7 +3232,6 @@ let portfolioRefreshInterval = null // 投资组合数据自动刷新定时器�
     isRefreshingConversations,
     portfolio,
     accountValueHistory,
-    aggregatedChartData,
     // 时间选择相关
     timeRangePreset,
     customStartTime,
@@ -3339,7 +3295,6 @@ let portfolioRefreshInterval = null // 投资组合数据自动刷新定时器�
     handleSellPosition,
     refreshLeaderboard,
     selectModel,
-    showAggregatedView,
     deleteModel,
     openLeverageModal,
     saveModelLeverage,
@@ -3405,7 +3360,6 @@ let portfolioRefreshInterval = null // 投资组合数据自动刷新定时器�
     loadLosers,
     loadLeaderboard, // 已废弃，保留以兼容旧代码
     loadPortfolio,
-    loadAggregatedData,
     loadPositions,
     loadTrades,
     loadConversations,

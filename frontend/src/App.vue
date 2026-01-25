@@ -116,25 +116,11 @@
             </button>
           </div>
           <div class="model-list">
-            <!-- 聚合视图选项 -->
-            <div
-              v-if="models.length > 0"
-              :class="['model-item', { active: isAggregatedView }]"
-              @click="showAggregatedView"
-            >
-              <div class="model-header">
-                <div class="model-name"><i class="bi bi-bar-chart"></i> 聚合视图</div>
-              </div>
-              <div class="model-meta">
-                <span>所有模型总览</span>
-              </div>
-            </div>
-            
             <!-- 模型列表 -->
             <div
               v-for="model in models"
               :key="model.id"
-              :class="['model-item', { active: currentModelId === model.id && !isAggregatedView }]"
+              :class="['model-item', { active: currentModelId === model.id }]"
               @click="selectModel(model.id)"
             >
               <div class="model-header">
@@ -222,7 +208,7 @@
 
       <!-- Main Content -->
       <main class="app-main">
-        <section v-if="!currentModelId || isAggregatedView" class="hero-banner glass-panel">
+        <section v-if="!currentModelId" class="hero-banner glass-panel">
           <div class="hero-copy">
             <p class="hero-subtitle">实时 AI 交易驾驶舱</p>
             <h2>立体监控资金 · 沉浸式AI资产交易管理</h2>
@@ -359,7 +345,7 @@
         </section>
 
         <!-- Stats Cards -->
-        <div v-if="currentModelId || isAggregatedView" class="stats-grid">
+        <div v-if="currentModelId" class="stats-grid">
           <div class="stat-card">
             <div class="stat-header">
               <span class="stat-label">账户总值</span>
@@ -400,11 +386,11 @@
         </div>
 
         <!-- Chart -->
-        <div v-if="currentModelId || isAggregatedView" class="content-card">
+        <div v-if="currentModelId" class="content-card">
           <div class="card-header" style="display: flex; justify-content: space-between; align-items: center;">
-            <h3 class="card-title">{{ isAggregatedView ? '聚合账户总览' : '账户价值走势' }}</h3>
+            <h3 class="card-title">账户价值走势</h3>
             <!-- 时间选择控件（仅单模型视图显示） -->
-            <div v-if="!isAggregatedView && currentModelId" style="display: flex; gap: 10px; align-items: center;">
+            <div v-if="currentModelId" style="display: flex; gap: 10px; align-items: center;">
               <!-- 快速选择下拉框 -->
               <select 
                 v-model="timeRangePreset" 
@@ -448,7 +434,7 @@
         </div>
 
         <!-- Model Portfolio Symbols -->
-        <div v-show="currentModelId && !isAggregatedView" class="content-card">
+        <div v-show="currentModelId" class="content-card">
           <div class="card-header">
             <h3 class="card-title" title="展示该模型持仓合约的实时数据走势">
               {{ getModelDisplayName(currentModelId) }} - 
@@ -506,7 +492,7 @@
         </div>
 
         <!-- Tabs -->
-        <div v-show="currentModelId && !isAggregatedView" class="content-card">
+        <div v-show="currentModelId" class="content-card">
           <div class="card-tabs">
             <button :class="['tab-btn', { active: activeTab === 'positions' }]" @click="activeTab = 'positions'">
               <i v-if="isRefreshingPositions" class="bi bi-arrow-repeat spin" style="margin-right: 4px;"></i>
@@ -534,7 +520,7 @@
             </button>
           </div>
 
-          <div v-show="!isAggregatedView && activeTab === 'positions'" class="tab-content active">
+          <div v-show="activeTab === 'positions'" class="tab-content active">
             <div v-if="loading.positions" class="loading-container">
               <i class="bi bi-arrow-repeat spin" style="font-size: 24px; color: var(--primary-color);"></i>
               <p style="margin-top: 12px; color: var(--text-secondary);">加载持仓数据中...</p>
@@ -578,12 +564,18 @@
             </div>
           </div>
 
-          <div v-show="!isAggregatedView && activeTab === 'trades'" class="tab-content active">
+          <div v-show="activeTab === 'trades'" class="tab-content active">
             <div v-if="loading.trades" class="loading-container">
               <i class="bi bi-arrow-repeat spin" style="font-size: 24px; color: var(--primary-color);"></i>
               <p style="margin-top: 12px; color: var(--text-secondary);">加载交易记录中...</p>
             </div>
             <div v-else>
+              <div
+                v-if="errors && errors.conversations"
+                style="margin-bottom: 12px; padding: 12px 14px; border-radius: 10px; border: 1px solid rgba(245, 34, 45, 0.25); background: rgba(245, 34, 45, 0.08); color: var(--danger); font-size: 14px;"
+              >
+                {{ errors.conversations }}
+              </div>
               <div class="table-container">
                 <table class="data-table">
                   <thead>
@@ -668,7 +660,7 @@
           </div>
 
           <!-- 策略决策模块（当trade_type为strategy时显示） -->
-          <div v-show="!isAggregatedView && activeTab === 'conversations' && currentModel && (currentModel.trade_type || currentModel.tradeType) === 'strategy'" class="tab-content active">
+          <div v-show="activeTab === 'conversations' && currentModel && (currentModel.trade_type || currentModel.tradeType) === 'strategy'" class="tab-content active">
             <div v-if="loading.conversations" class="loading-container">
               <i class="bi bi-arrow-repeat spin" style="font-size: 24px; color: var(--primary-color);"></i>
               <p style="margin-top: 12px; color: var(--text-secondary);">加载策略决策记录中...</p>
@@ -766,7 +758,7 @@
           </div>
 
           <!-- AI对话模块（当trade_type为ai时显示） -->
-          <div v-show="!isAggregatedView && activeTab === 'conversations' && (!currentModel || (currentModel.trade_type || currentModel.tradeType) !== 'strategy')" class="tab-content active">
+          <div v-show="activeTab === 'conversations' && (!currentModel || (currentModel.trade_type || currentModel.tradeType) !== 'strategy')" class="tab-content active">
             <div v-if="loading.conversations" class="loading-container">
               <i class="bi bi-arrow-repeat spin" style="font-size: 24px; color: var(--primary-color);"></i>
               <p style="margin-top: 12px; color: var(--text-secondary);">加载AI对话数据中...</p>
@@ -1170,7 +1162,6 @@ const {
   currentModelId,
   currentModel,
   models,
-  isAggregatedView,
   marketPrices,
   leaderboardGainers,
   leaderboardLosers,
@@ -1189,7 +1180,6 @@ const {
   isRefreshingConversations,
   portfolio,
   accountValueHistory,
-  aggregatedChartData,
   timeRangePreset,
   customStartTime,
   customEndTime,
@@ -1215,6 +1205,7 @@ const {
   strategyDecisionsHasNext,
   goToStrategyDecisionsPage,
   loading,
+  errors,
   loadPositions,
   loadTrades,
   loadConversations,
@@ -1275,7 +1266,6 @@ const {
   loadGainers,
   loadLosers,
   selectModel,
-  showAggregatedView,
   deleteModel,
   openLeverageModal,
   saveModelLeverage,
@@ -1334,7 +1324,7 @@ const tempLeverage = ref(10) // 临时杠杆值
 // 监听模型切换，自动切换到持仓模块并重置分页
 watch(currentModelId, async (newModelId, oldModelId) => {
   // 当模型切换时（从无模型到有模型，或从一个模型切换到另一个模型）
-  if (newModelId && newModelId !== oldModelId && !isAggregatedView.value) {
+  if (newModelId && newModelId !== oldModelId) {
     console.log(`[App] Model changed: ${oldModelId} -> ${newModelId}, switching to positions tab`)
     // 自动切换到持仓模块
     activeTab.value = 'positions'
@@ -1343,8 +1333,8 @@ watch(currentModelId, async (newModelId, oldModelId) => {
 
 // 监听标签切换，动态重新加载数据
 watch(activeTab, async (newTab, oldTab) => {
-  // 只在选中模型且非聚合视图时加载数据
-  if (!currentModelId.value || isAggregatedView.value) {
+  // 只在选中模型时加载数据
+  if (!currentModelId.value) {
     return
   }
   
