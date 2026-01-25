@@ -1060,12 +1060,10 @@
             <div class="form-group">
               <label>禁止买入开始</label>
               <TimePicker v-model="tempModelSettings.forbid_buy_start" />
-              <small class="form-help">UTC+8 时间段内禁止执行买入循环（必须与“禁止买入结束”同时设置）。</small>
             </div>
             <div class="form-group">
               <label>禁止买入结束</label>
               <TimePicker v-model="tempModelSettings.forbid_buy_end" />
-              <small class="form-help">请输入有效时间（例如：19:00:00 ~ 23:59:59）。</small>
             </div>
             <div class="form-group">
               <label style="font-weight: 600; margin-bottom: 12px; display: block;">买入批次配置</label>

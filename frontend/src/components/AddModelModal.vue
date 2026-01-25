@@ -61,12 +61,10 @@
       <div class="form-group">
         <label>禁止买入开始</label>
         <TimePicker v-model="formData.forbidBuyStart" />
-        <small class="form-help">UTC+8 时间段内禁止执行买入循环（必须与“禁止买入结束”同时设置）。</small>
       </div>
       <div class="form-group">
         <label>禁止买入结束</label>
         <TimePicker v-model="formData.forbidBuyEnd" />
-        <small class="form-help">请输入有效时间（例如：19:00:00 ~ 23:59:59）。</small>
       </div>
     </div>
     <div v-if="timeRangeError" class="form-help" style="color: #dc3545; margin-top: 8px;">
