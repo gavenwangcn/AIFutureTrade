@@ -182,6 +182,22 @@ public class ModelDTO implements Serializable {
     private Integer lossesNum;
 
     /**
+     * 禁止买入开始小时（0-23），NULL表示不限制
+     * 支持两种命名方式：forbid_buy_start（snake_case）和 forbidBuyStart（camelCase）
+     */
+    @JsonProperty("forbid_buy_start")
+    @JsonAlias({"forbidBuyStart"})
+    private String forbidBuyStart;
+
+    /**
+     * 禁止买入结束小时（1-24），NULL表示不限制
+     * 支持两种命名方式：forbid_buy_end（snake_case）和 forbidBuyEnd（camelCase）
+     */
+    @JsonProperty("forbid_buy_end")
+    @JsonAlias({"forbidBuyEnd"})
+    private String forbidBuyEnd;
+
+    /**
      * 创建时间
      */
     private LocalDateTime createdAt;

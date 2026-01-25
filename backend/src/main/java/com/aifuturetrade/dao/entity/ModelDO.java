@@ -172,6 +172,18 @@ public class ModelDO implements Serializable {
     private Integer lossesNum;
 
     /**
+     * 禁止买入开始小时（0-23），NULL表示不限制
+     */
+    @TableField("forbid_buy_start")
+    private String forbidBuyStart;
+
+    /**
+     * 禁止买入结束小时（1-24），NULL表示不限制
+     */
+    @TableField("forbid_buy_end")
+    private String forbidBuyEnd;
+
+    /**
      * 创建时间
      */
     @TableField("created_at")

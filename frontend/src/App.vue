@@ -1058,6 +1058,16 @@
               <small class="form-help">设置连续亏损次数阈值（例如：3 表示连续3笔亏损后暂停买入交易）。留空或0表示不限制。</small>
             </div>
             <div class="form-group">
+              <label>禁止买入开始</label>
+              <TimePicker v-model="tempModelSettings.forbid_buy_start" />
+              <small class="form-help">UTC+8 时间段内禁止执行买入循环（必须与“禁止买入结束”同时设置）。</small>
+            </div>
+            <div class="form-group">
+              <label>禁止买入结束</label>
+              <TimePicker v-model="tempModelSettings.forbid_buy_end" />
+              <small class="form-help">支持设置到 24:00:00（例如：19:00:00 ~ 24:00:00）。</small>
+            </div>
+            <div class="form-group">
               <label style="font-weight: 600; margin-bottom: 12px; display: block;">买入批次配置</label>
               <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px;">
                 <div>
@@ -1151,6 +1161,7 @@ import FutureConfigModal from './components/FutureConfigModal.vue'
 import ApiProviderModal from './components/ApiProviderModal.vue'
 import AccountModal from './components/AccountModal.vue'
 import AddModelModal from './components/AddModelModal.vue'
+import TimePicker from './components/TimePicker.vue'
 import ModelStrategyConfigModal from './components/ModelStrategyConfigModal.vue'
 import TradeLogsModal from './components/TradeLogsModal.vue'
 import BuyLogsModal from './components/BuyLogsModal.vue'

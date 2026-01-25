@@ -409,6 +409,34 @@ public class ModelController {
     }
 
     /**
+     * 更新模型的禁止买入时间段（UTC+8，HH:mm:ss）
+     * @param modelId 模型ID
+     * @param requestBody 请求体，包含 forbid_buy_start / forbid_buy_end
+     * @return 更新操作结果
+     */
+    @PostMapping("/{modelId}/forbid_buy_time")
+    @Operation(summary = "更新模型的禁止买入时间段（UTC+8）")
+    public ResponseEntity<Map<String, Object>> updateModelForbidBuyTime(@PathVariable(value = "modelId") String modelId, @RequestBody Map<String, Object> requestBody) {
+        Object startObj = requestBody.get("forbid_buy_start");
+        Object endObj = requestBody.get("forbid_buy_end");
+
+        String start = null;
+        String end = null;
+
+        if (startObj != null) {
+            start = String.valueOf(startObj).trim();
+            if (start.isEmpty()) start = null;
+        }
+        if (endObj != null) {
+            end = String.valueOf(endObj).trim();
+            if (end.isEmpty()) end = null;
+        }
+
+        Map<String, Object> result = modelService.updateModelForbidBuyTime(modelId, start, end);
+        return new ResponseEntity<>(result, HttpStatus.OK);
+    }
+
+    /**
      * 更新模型的API提供方和模型名称
      * @param modelId 模型ID
      * @param requestBody 请求体，包含provider_id和model_name

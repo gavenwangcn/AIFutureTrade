@@ -153,6 +153,8 @@ const lastPortfolioSymbolsRefreshTime = ref(null) // 持仓合约列表最后刷
     base_volume: null,
     daily_return: null,
     losses_num: null,
+    forbid_buy_start: null,
+    forbid_buy_end: null,
     buy_batch_size: 1,
     buy_batch_execution_interval: 60,
     buy_batch_execution_group_size: 1,
@@ -2533,6 +2535,10 @@ let portfolioRefreshInterval = null // 投资组合数据自动刷新定时器�
       // 优先使用 losses_num，如果没有则使用 lossesNum（兼容两种命名方式）
       const lossesNumValue = model.losses_num ?? model.lossesNum ?? null
       console.log('[TradingApp] 解析后的 losses_num 值:', lossesNumValue)
+
+      // 禁止买入时间段（兼容两种命名方式）
+      const forbidBuyStartValue = model.forbid_buy_start ?? model.forbidBuyStart ?? null
+      const forbidBuyEndValue = model.forbid_buy_end ?? model.forbidBuyEnd ?? null
       
       // 解析批次配置字段（兼容两种命名方式）
       const buyBatchSizeValue = model.buy_batch_size ?? model.buyBatchSize ?? 1
@@ -2556,6 +2562,8 @@ let portfolioRefreshInterval = null // 投资组合数据自动刷新定时器�
         base_volume: baseVolumeValue,
         daily_return: dailyReturnValue,
         losses_num: lossesNumValue,
+        forbid_buy_start: forbidBuyStartValue,
+        forbid_buy_end: forbidBuyEndValue,
         // 使用解析后的批次配置值
         buy_batch_size: buyBatchSizeValue,
         buy_batch_execution_interval: buyBatchExecutionIntervalValue,
@@ -2618,6 +2626,8 @@ let portfolioRefreshInterval = null // 投资组合数据自动刷新定时器�
           base_volume: baseVolumeValue,
           daily_return: dailyReturnValue,
           losses_num: lossesNumValue,
+          forbid_buy_start: localModel.forbid_buy_start ?? localModel.forbidBuyStart ?? null,
+          forbid_buy_end: localModel.forbid_buy_end ?? localModel.forbidBuyEnd ?? null,
           // 使用解析后的批次配置值
           buy_batch_size: buyBatchSizeValue,
           buy_batch_execution_interval: buyBatchExecutionIntervalValue,
@@ -2728,6 +2738,14 @@ let portfolioRefreshInterval = null // 投资组合数据自动刷新定时器�
       const baseVolumeValue = tempModelSettings.value.base_volume
       const dailyReturnValue = tempModelSettings.value.daily_return
       const lossesNumValue = tempModelSettings.value.losses_num
+      const forbidBuyStartValue = tempModelSettings.value.forbid_buy_start
+      const forbidBuyEndValue = tempModelSettings.value.forbid_buy_end
+
+      // 禁止买入时间段必须成对设置
+      if ((forbidBuyStartValue && !forbidBuyEndValue) || (!forbidBuyStartValue && forbidBuyEndValue)) {
+        alert('禁止买入开始/结束必须同时设置（或同时清空）')
+        return
+      }
       // 确保 maxPositionsValue 是有效的整数
       const validMaxPositions = Number.isInteger(maxPositionsValue) ? maxPositionsValue : Math.floor(maxPositionsValue)
       promises.push(
@@ -2736,7 +2754,8 @@ let portfolioRefreshInterval = null // 投资组合数据自动刷新定时器�
         modelApi.setAutoClosePercent(pendingModelSettingsId.value, autoClosePercentValue || null),
         modelApi.setBaseVolume(pendingModelSettingsId.value, baseVolumeValue || null),
         modelApi.setDailyReturn(pendingModelSettingsId.value, dailyReturnValue || null),
-        modelApi.setLossesNum(pendingModelSettingsId.value, lossesNumValue || null)
+        modelApi.setLossesNum(pendingModelSettingsId.value, lossesNumValue || null),
+        modelApi.setForbidBuyTime(pendingModelSettingsId.value, forbidBuyStartValue || null, forbidBuyEndValue || null)
       )
       
       // 更新批次配置

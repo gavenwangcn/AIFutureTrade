@@ -105,6 +105,8 @@ class DatabaseInitializer:
             `base_volume` DOUBLE DEFAULT NULL COMMENT '每日成交量过滤阈值（以千万为单位），NULL表示不过滤',
             `daily_return` DOUBLE DEFAULT NULL COMMENT '目标每日收益率（百分比），NULL表示不限制',
             `losses_num` INT UNSIGNED DEFAULT NULL COMMENT '连续亏损次数阈值，达到此值后暂停买入交易，NULL表示不限制',
+            `forbid_buy_start` VARCHAR(8) DEFAULT NULL COMMENT '禁止买入开始时间（HH:mm:ss，UTC+8），NULL表示不限制',
+            `forbid_buy_end` VARCHAR(8) DEFAULT NULL COMMENT '禁止买入结束时间（HH:mm:ss，UTC+8），NULL表示不限制',
             `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP,
             INDEX `idx_provider_id` (`provider_id`),
             INDEX `idx_account_alias` (`account_alias`),
@@ -186,8 +188,82 @@ class DatabaseInitializer:
                 """
                 self.command(alter_losses_num_sql)
                 logger.info(f"[DatabaseInit] Added losses_num column to {table_name} table")
+
+            # Check and add/modify forbid_buy_start / forbid_buy_end fields
+            check_forbid_buy_start_sql = f"""
+            SELECT COUNT(*) FROM information_schema.COLUMNS
+            WHERE TABLE_SCHEMA = DATABASE()
+            AND TABLE_NAME = '{table_name}'
+            AND COLUMN_NAME = 'forbid_buy_start'
+            """
+            forbid_buy_start_result = self.command(check_forbid_buy_start_sql)
+            if isinstance(forbid_buy_start_result, list) and len(forbid_buy_start_result) > 0 and forbid_buy_start_result[0][0] == 0:
+                alter_forbid_buy_start_sql = f"""
+                ALTER TABLE `{table_name}`
+                ADD COLUMN `forbid_buy_start` VARCHAR(8) DEFAULT NULL COMMENT '禁止买入开始时间（HH:mm:ss，UTC+8），NULL表示不限制' AFTER `losses_num`
+                """
+                self.command(alter_forbid_buy_start_sql)
+                logger.info(f"[DatabaseInit] Added forbid_buy_start column to {table_name} table")
+            else:
+                # If exists but type is not VARCHAR, try to modify to VARCHAR(8) (to support HH:mm:ss and 24:00:00)
+                try:
+                    check_type_sql = f"""
+                    SELECT DATA_TYPE, CHARACTER_MAXIMUM_LENGTH FROM information_schema.COLUMNS
+                    WHERE TABLE_SCHEMA = DATABASE()
+                    AND TABLE_NAME = '{table_name}'
+                    AND COLUMN_NAME = 'forbid_buy_start'
+                    """
+                    type_rows = self.command(check_type_sql)
+                    if isinstance(type_rows, list) and len(type_rows) > 0:
+                        data_type = (type_rows[0][0] or '').lower()
+                        char_len = type_rows[0][1]
+                        if data_type != 'varchar' or (char_len is not None and int(char_len) < 8):
+                            modify_sql = f"""
+                            ALTER TABLE `{table_name}`
+                            MODIFY COLUMN `forbid_buy_start` VARCHAR(8) DEFAULT NULL COMMENT '禁止买入开始时间（HH:mm:ss，UTC+8），NULL表示不限制'
+                            """
+                            self.command(modify_sql)
+                            logger.info(f"[DatabaseInit] Modified forbid_buy_start column type to VARCHAR(8) in {table_name} table")
+                except Exception as _e:
+                    logger.warning(f"[DatabaseInit] Failed to modify forbid_buy_start column type in {table_name}: {_e}")
+
+            check_forbid_buy_end_sql = f"""
+            SELECT COUNT(*) FROM information_schema.COLUMNS
+            WHERE TABLE_SCHEMA = DATABASE()
+            AND TABLE_NAME = '{table_name}'
+            AND COLUMN_NAME = 'forbid_buy_end'
+            """
+            forbid_buy_end_result = self.command(check_forbid_buy_end_sql)
+            if isinstance(forbid_buy_end_result, list) and len(forbid_buy_end_result) > 0 and forbid_buy_end_result[0][0] == 0:
+                alter_forbid_buy_end_sql = f"""
+                ALTER TABLE `{table_name}`
+                ADD COLUMN `forbid_buy_end` VARCHAR(8) DEFAULT NULL COMMENT '禁止买入结束时间（HH:mm:ss，UTC+8），NULL表示不限制' AFTER `forbid_buy_start`
+                """
+                self.command(alter_forbid_buy_end_sql)
+                logger.info(f"[DatabaseInit] Added forbid_buy_end column to {table_name} table")
+            else:
+                try:
+                    check_type_sql = f"""
+                    SELECT DATA_TYPE, CHARACTER_MAXIMUM_LENGTH FROM information_schema.COLUMNS
+                    WHERE TABLE_SCHEMA = DATABASE()
+                    AND TABLE_NAME = '{table_name}'
+                    AND COLUMN_NAME = 'forbid_buy_end'
+                    """
+                    type_rows = self.command(check_type_sql)
+                    if isinstance(type_rows, list) and len(type_rows) > 0:
+                        data_type = (type_rows[0][0] or '').lower()
+                        char_len = type_rows[0][1]
+                        if data_type != 'varchar' or (char_len is not None and int(char_len) < 8):
+                            modify_sql = f"""
+                            ALTER TABLE `{table_name}`
+                            MODIFY COLUMN `forbid_buy_end` VARCHAR(8) DEFAULT NULL COMMENT '禁止买入结束时间（HH:mm:ss，UTC+8），NULL表示不限制'
+                            """
+                            self.command(modify_sql)
+                            logger.info(f"[DatabaseInit] Modified forbid_buy_end column type to VARCHAR(8) in {table_name} table")
+                except Exception as _e:
+                    logger.warning(f"[DatabaseInit] Failed to modify forbid_buy_end column type in {table_name}: {_e}")
         except Exception as e:
-            logger.warning(f"[DatabaseInit] Failed to check/add base_volume/daily_return/losses_num column to {table_name}: {e}")
+            logger.warning(f"[DatabaseInit] Failed to check/add base_volume/daily_return/losses_num/forbid_buy_* column to {table_name}: {e}")
         
   
     def ensure_portfolios_table(self, table_name: str = "portfolios"):

@@ -65,6 +65,12 @@ public class ModelDO implements Serializable {
     @TableField("auto_close_percent")
     private Double autoClosePercent;
 
+    @TableField("forbid_buy_start")
+    private String forbidBuyStart;
+
+    @TableField("forbid_buy_end")
+    private String forbidBuyEnd;
+
     @TableField("created_at")
     private LocalDateTime createdAt;
 }

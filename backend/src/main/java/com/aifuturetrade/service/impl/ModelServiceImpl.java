@@ -1729,6 +1729,99 @@ public class ModelServiceImpl implements ModelService {
         }
     }
 
+    @Override
+    public Map<String, Object> updateModelForbidBuyTime(String modelId, String forbidBuyStart, String forbidBuyEnd) {
+        log.debug("[ModelService] 更新模型禁止买入时间段, modelId={}, forbidBuyStart={}, forbidBuyEnd={}", modelId, forbidBuyStart, forbidBuyEnd);
+        Map<String, Object> response = new HashMap<>();
+        try {
+            ModelDO model = modelMapper.selectModelById(modelId);
+            if (model == null) {
+                response.put("success", false);
+                response.put("error", "Model not found");
+                return response;
+            }
+
+            String start = normalizeTimeOrNull(forbidBuyStart);
+            String end = normalizeTimeOrNull(forbidBuyEnd);
+
+            // 两者必须同时设置或同时为空
+            if ((start == null) != (end == null)) {
+                response.put("success", false);
+                response.put("error", "forbid_buy_start and forbid_buy_end must both be provided (or both null)");
+                return response;
+            }
+
+            if (start != null && start.equals(end)) {
+                response.put("success", false);
+                response.put("error", "forbid_buy_start and forbid_buy_end cannot be equal");
+                return response;
+            }
+
+            UpdateWrapper<ModelDO> updateWrapper = new UpdateWrapper<>();
+            updateWrapper.eq("id", modelId);
+            updateWrapper.set("forbid_buy_start", start);
+            updateWrapper.set("forbid_buy_end", end);
+
+            int result = modelMapper.update(null, updateWrapper);
+            if (result > 0) {
+                response.put("success", true);
+                response.put("message", "Forbid buy time updated successfully");
+                response.put("forbid_buy_start", start);
+                response.put("forbid_buy_end", end);
+                log.info("[ModelService] 更新模型禁止买入时间段成功, modelId={}, forbid_buy_start={}, forbid_buy_end={}", modelId, start, end);
+            } else {
+                response.put("success", false);
+                response.put("error", "Failed to update forbid buy time");
+                log.warn("[ModelService] 更新模型禁止买入时间段失败, modelId={}", modelId);
+            }
+            return response;
+        } catch (Exception e) {
+            log.error("[ModelService] 更新模型禁止买入时间段失败: {}", e.getMessage(), e);
+            response.put("success", false);
+            response.put("error", e.getMessage());
+            return response;
+        }
+    }
+
+    /**
+     * 规范化时间字符串为 HH:mm:ss，支持 24:00:00；空字符串返回 null。
+     * - 支持输入：HH、HH:mm、HH:mm:ss
+     * - 约束：hour 0-24；minute/second 0-59；若 hour==24 则 minute/second 必须为 0
+     */
+    private String normalizeTimeOrNull(String raw) {
+        if (raw == null) return null;
+        String s = raw.trim();
+        if (s.isEmpty()) return null;
+
+        String[] parts = s.split(":");
+        int h;
+        int m = 0;
+        int sec = 0;
+        try {
+            if (parts.length == 1) {
+                h = Integer.parseInt(parts[0]);
+            } else if (parts.length == 2) {
+                h = Integer.parseInt(parts[0]);
+                m = Integer.parseInt(parts[1]);
+            } else if (parts.length == 3) {
+                h = Integer.parseInt(parts[0]);
+                m = Integer.parseInt(parts[1]);
+                sec = Integer.parseInt(parts[2]);
+            } else {
+                throw new IllegalArgumentException("Invalid time format: " + s);
+            }
+        } catch (NumberFormatException nfe) {
+            throw new IllegalArgumentException("Invalid time format: " + s);
+        }
+
+        if (h < 0 || h > 24) throw new IllegalArgumentException("Hour must be between 0 and 24");
+        if (m < 0 || m > 59) throw new IllegalArgumentException("Minute must be between 0 and 59");
+        if (sec < 0 || sec > 59) throw new IllegalArgumentException("Second must be between 0 and 59");
+        if (h == 24 && (m != 0 || sec != 0)) throw new IllegalArgumentException("24 hour only allows 24:00:00");
+
+        return String.format("%02d:%02d:%02d", h, m, sec);
+    }
+
     private ModelDTO convertToDTO(ModelDO modelDO) {
         ModelDTO modelDTO = new ModelDTO();
         BeanUtils.copyProperties(modelDO, modelDTO);

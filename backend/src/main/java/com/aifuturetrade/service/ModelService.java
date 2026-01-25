@@ -187,6 +187,15 @@ public interface ModelService {
     Map<String, Object> updateModelLossesNum(String modelId, Integer lossesNum);
 
     /**
+     * 更新模型的禁止买入时间段（小时，UTC+8）
+     * @param modelId 模型ID（UUID格式）
+     * @param forbidBuyStart 禁止买入开始小时（0-23，null表示不限制）
+     * @param forbidBuyEnd 禁止买入结束小时（1-24，null表示不限制）
+     * @return 更新结果
+     */
+    Map<String, Object> updateModelForbidBuyTime(String modelId, String forbidBuyStart, String forbidBuyEnd);
+
+    /**
      * 更新模型的API提供方和模型名称
      * @param modelId 模型ID（UUID格式）
      * @param providerId 新的API提供方ID（UUID格式）

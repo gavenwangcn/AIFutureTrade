@@ -136,6 +136,12 @@ export const modelApi = {
   setLossesNum: (modelId, lossesNum) => apiPost(`/api/models/${modelId}/losses_num`, { losses_num: lossesNum }),
 
   /**
+   * 设置模型禁止买入时间段（UTC+8，HH:mm:ss；两者必须同时设置或同时为空）
+   */
+  setForbidBuyTime: (modelId, forbidBuyStart, forbidBuyEnd) =>
+    apiPost(`/api/models/${modelId}/forbid_buy_time`, { forbid_buy_start: forbidBuyStart, forbid_buy_end: forbidBuyEnd }),
+
+  /**
    * 更新模型的API提供方和模型名称
    */
   updateProvider: (modelId, providerId, modelName) => apiPut(`/api/models/${modelId}/provider`, { provider_id: providerId, model_name: modelName }),

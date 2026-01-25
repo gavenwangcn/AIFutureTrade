@@ -343,6 +343,98 @@ class TradingEngine:
                     'conversations': [],
                     'error': f"Model {self.model_id} not found"
                 }
+
+            # ========== 模型禁止买入时间段控制（UTC+8）==========
+            # forbid_buy_start/forbid_buy_end 为空 -> 不控制
+            # 两者都存在时（单位：一天内秒数）：
+            # - start < end : [start, end) 禁止买入
+            # - start > end : 跨天 => now >= start 或 now < end 禁止买入
+            # - start == end : 视为无效配置，不拦截（避免误伤全日）
+            try:
+                forbid_buy_start = model.get('forbid_buy_start')
+                forbid_buy_end = model.get('forbid_buy_end')
+
+                if forbid_buy_start is not None or forbid_buy_end is not None:
+                    # 必须成对出现，否则视为配置不完整：不执行买入并提示
+                    if forbid_buy_start is None or forbid_buy_end is None:
+                        logger.warning(
+                            f"[Model {self.model_id}] [买入服务] 禁止买入时间段配置不完整，跳过本次买入周期 | "
+                            f"forbid_buy_start={forbid_buy_start}, forbid_buy_end={forbid_buy_end}"
+                        )
+                        portfolio_for_skip = self._get_portfolio(self.model_id, {})
+                        return {
+                            'success': True,
+                            'executions': [],
+                            'portfolio': portfolio_for_skip,
+                            'conversations': [],
+                            'skipped': True,
+                            'skip_reason': '禁止买入时间段配置不完整（必须同时设置开始/结束）'
+                        }
+
+                    def _time_to_seconds(value):
+                        if value is None:
+                            return None
+                        # 兼容旧数据：数字/数字字符串按小时处理
+                        if isinstance(value, (int, float)):
+                            h = int(value)
+                            return max(0, min(24, h)) * 3600
+                        s = str(value).strip()
+                        if not s:
+                            return None
+                        # 兼容：'19' -> 19:00:00
+                        if ':' not in s:
+                            h = int(float(s))
+                            return max(0, min(24, h)) * 3600
+                        parts = s.split(':')
+                        h = int(parts[0]) if len(parts) > 0 else 0
+                        m = int(parts[1]) if len(parts) > 1 else 0
+                        sec = int(parts[2]) if len(parts) > 2 else 0
+                        if h == 24:
+                            # 仅允许 24:00:00
+                            if m != 0 or sec != 0:
+                                raise ValueError("24 hour only allows 24:00:00")
+                            return 24 * 3600
+                        if not (0 <= h <= 23):
+                            raise ValueError("Hour must be between 0 and 23 (or 24:00:00)")
+                        if not (0 <= m <= 59) or not (0 <= sec <= 59):
+                            raise ValueError("Minute/second must be between 0 and 59")
+                        return h * 3600 + m * 60 + sec
+
+                    start_s = _time_to_seconds(forbid_buy_start)
+                    end_s = _time_to_seconds(forbid_buy_end)
+
+                    # 基础范围校验（前端也会校验，这里再兜底）
+                    if start_s is None or end_s is None or start_s == end_s:
+                        logger.warning(
+                            f"[Model {self.model_id}] [买入服务] 禁止买入时间段配置非法，忽略该配置 | "
+                            f"forbid_buy_start={forbid_buy_start}, forbid_buy_end={forbid_buy_end}"
+                        )
+                    else:
+                        now_cn = datetime.now(timezone(timedelta(hours=8)))
+                        now_sec = now_cn.hour * 3600 + now_cn.minute * 60 + now_cn.second
+                        in_forbid = False
+                        if start_s < end_s:
+                            in_forbid = (start_s <= now_sec < end_s)
+                        else:
+                            # 跨天
+                            in_forbid = (now_sec >= start_s) or (now_sec < end_s)
+
+                        if in_forbid:
+                            logger.info(
+                                f"[Model {self.model_id}] [买入服务] 当前时间处于禁止买入时段，跳过本次买入周期 | "
+                                f"now={now_cn.strftime('%H:%M:%S')} (UTC+8), forbid=[{forbid_buy_start}, {forbid_buy_end})"
+                            )
+                            portfolio_for_skip = self._get_portfolio(self.model_id, {})
+                            return {
+                                'success': True,
+                                'executions': [],
+                                'portfolio': portfolio_for_skip,
+                                'conversations': [],
+                                'skipped': True,
+                                'skip_reason': f'当前时间处于禁止买入时段（UTC+8）：[{forbid_buy_start}, {forbid_buy_end})'
+                            }
+            except Exception as forbid_err:
+                logger.warning(f"[Model {self.model_id}] [买入服务] 禁止买入时间段检查失败（将继续执行买入周期）: {forbid_err}")
             
             # 记录模型的trade_type信息
             trade_type = model.get('trade_type', 'ai')

@@ -58,6 +58,19 @@
         <input v-model.number="formData.lossesNum" type="number" class="form-input" min="1" />
         <small class="form-help">设置连续亏损次数阈值（例如：3 表示连续3笔亏损后暂停买入交易）。留空或0表示不限制。</small>
       </div>
+      <div class="form-group">
+        <label>禁止买入开始</label>
+        <TimePicker v-model="formData.forbidBuyStart" />
+        <small class="form-help">UTC+8 时间段内禁止执行买入循环（必须与“禁止买入结束”同时设置）。</small>
+      </div>
+      <div class="form-group">
+        <label>禁止买入结束</label>
+        <TimePicker v-model="formData.forbidBuyEnd" />
+        <small class="form-help">支持设置到 24:00:00（例如：19:00:00 ~ 24:00:00）。</small>
+      </div>
+    </div>
+    <div v-if="timeRangeError" class="form-help" style="color: #dc3545; margin-top: 8px;">
+      {{ timeRangeError }}
     </div>
     <div class="form-group">
       <label>选择账户 <span style="color: red;">*</span></label>
@@ -168,6 +181,7 @@
 <script setup>
 import { ref, watch } from 'vue'
 import Modal from './Modal.vue'
+import TimePicker from './TimePicker.vue'
 import { providerApi, modelApi, accountApi } from '../services/api.js'
 
 const props = defineProps({
@@ -189,6 +203,8 @@ const formData = ref({
   baseVolume: null,  // 每日成交量过滤阈值（千万单位），默认不过滤
   dailyReturn: null,  // 目标每日收益率（百分比），默认不限制
   lossesNum: null,  // 连续亏损次数阈值，默认不限制
+  forbidBuyStart: null, // 禁止买入开始时间 HH:mm:ss（UTC+8）
+  forbidBuyEnd: null, // 禁止买入结束时间 HH:mm:ss（UTC+8）
   accountAlias: '',
   isVirtual: true,  // 默认值为 true（虚拟账户）
   symbolSource: 'leaderboard',  // 默认使用涨跌榜
@@ -199,6 +215,8 @@ const formData = ref({
   sellBatchExecutionInterval: 60,
   sellBatchExecutionGroupSize: 1
 })
+
+const timeRangeError = ref('')
 
 const providers = ref([])
 const accounts = ref([])
@@ -264,6 +282,16 @@ const handleSubmit = async () => {
     alert('请输入有效的最大持仓数量（必须 >= 1）')
     return
   }
+
+  // 禁止买入时间段必须成对设置
+  const start = formData.value.forbidBuyStart
+  const end = formData.value.forbidBuyEnd
+  timeRangeError.value = ''
+  if ((start && !end) || (!start && end)) {
+    timeRangeError.value = '禁止买入开始/结束必须同时设置（或同时清空）'
+    alert(timeRangeError.value)
+    return
+  }
   
   loading.value = true
   try {
@@ -277,6 +305,8 @@ const handleSubmit = async () => {
       baseVolume: formData.value.baseVolume || null,
       dailyReturn: formData.value.dailyReturn || null,
       lossesNum: formData.value.lossesNum || null,
+      forbidBuyStart: formData.value.forbidBuyStart || null,
+      forbidBuyEnd: formData.value.forbidBuyEnd || null,
       accountAlias: formData.value.accountAlias,
       isVirtual: formData.value.isVirtual,
       symbolSource: formData.value.symbolSource,
@@ -311,6 +341,8 @@ const clearForm = () => {
     baseVolume: null,  // 重置为默认值
     dailyReturn: null,  // 重置为默认值
     lossesNum: null,  // 重置为默认值
+    forbidBuyStart: null,
+    forbidBuyEnd: null,
     accountAlias: '',
     isVirtual: true,  // 重置为默认值 true（虚拟账户）
     symbolSource: 'leaderboard',  // 重置为默认值
@@ -322,6 +354,7 @@ const clearForm = () => {
     sellBatchExecutionGroupSize: 1
   }
   availableModels.value = []
+  timeRangeError.value = ''
 }
 
 const handleClose = () => {
