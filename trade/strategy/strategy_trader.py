@@ -130,15 +130,116 @@ class StrategyTrader(Trader):
         
         logger.info(f"[StrategyTrader] [Model {effective_model_id}] 找到 {len(strategies)} 个买入类型策略，开始按优先级执行")
 
-        # 语义要求：按优先级对“每个symbol”判定，某个symbol命中后不再继续判断后续策略；
-        # 但对未命中的其他symbol仍继续执行后续策略。
-        candidate_symbols = []
-        try:
-            candidate_symbols = [str(c.get('symbol') or c.get('contract_symbol') or '').upper() for c in candidates]
-            candidate_symbols = [s for s in candidate_symbols if s]
-        except Exception:
-            candidate_symbols = []
-        candidate_symbol_set = set(candidate_symbols)
+        # 语义要求：
+        # - 按优先级逐个执行策略
+        # - 一旦某个symbol在较高优先级策略中命中（产生买入决策），该symbol需要从后续策略的 candidates/market_state 中扣除
+        # - account_info.available_balance（以及portfolio.cash）需要按已命中的买入决策预扣资金，避免后续策略重复/超额决策
+        #
+        # 注意：这里是“决策生成阶段”的预扣，用于策略间约束；真实下单阶段仍以交易执行模块的风控/资金校验为准。
+        #
+        # 规范化 & 去重 candidates（按symbol去重，保留顺序）
+        remaining_candidates: List[Dict] = []
+        remaining_symbol_set: set = set()
+        for c in candidates:
+            try:
+                sym = str(c.get('symbol') or c.get('contract_symbol') or '').upper()
+            except Exception:
+                sym = ''
+            if not sym or sym in remaining_symbol_set:
+                continue
+            remaining_symbol_set.add(sym)
+            remaining_candidates.append(c)
+
+        # market_state 过滤将基于 remaining_symbol_set 进行（key 可能是任意大小写）
+        def _filter_market_state(ms: Dict, allowed_symbols: set) -> Dict:
+            if not ms or not isinstance(ms, dict) or not allowed_symbols:
+                return {}
+            filtered = {}
+            for k, v in ms.items():
+                try:
+                    if str(k).upper() in allowed_symbols:
+                        filtered[k] = v
+                except Exception:
+                    continue
+            return filtered
+
+        # 使用工作副本（避免污染外部对象）
+        working_account_info: Dict = dict(account_info) if isinstance(account_info, dict) else {}
+        working_portfolio: Dict = dict(portfolio) if isinstance(portfolio, dict) else {}
+
+        def _get_available_balance() -> float:
+            # account_info 主字段：available_balance
+            # 若缺失，fallback 到 portfolio.cash（策略模板也会使用该字段）
+            candidates_keys = [
+                ('available_balance', working_account_info),
+                ('availableBalance', working_account_info),
+                ('available_cash', working_account_info),
+                ('cash', working_portfolio),
+            ]
+            for key, obj in candidates_keys:
+                try:
+                    if isinstance(obj, dict) and obj.get(key) is not None:
+                        return float(obj.get(key))
+                except Exception:
+                    continue
+            return 0.0
+
+        def _set_available_balance(v: float) -> None:
+            # 同步写回 account_info.available_balance 与 portfolio.cash（仅工作副本）
+            try:
+                working_account_info['available_balance'] = float(v)
+            except Exception:
+                pass
+            try:
+                if 'cash' in working_portfolio:
+                    working_portfolio['cash'] = float(v)
+            except Exception:
+                pass
+
+        def _estimate_required_capital(sym_upper: str, dec: Dict, ms: Dict) -> float:
+            """
+            预估需要占用的本金（USDT），与交易执行模块一致采用：
+            required_capital_usdt = (position_amt * price) / leverage
+            """
+            try:
+                qty = int(float(dec.get('quantity') or 0))
+                if qty <= 0:
+                    return 0.0
+            except Exception:
+                return 0.0
+
+            # leverage：优先取决策字段，其次fallback为1
+            try:
+                lev = int(float(dec.get('leverage') or 0))
+                if lev <= 0:
+                    lev = 1
+            except Exception:
+                lev = 1
+
+            # price：优先从 market_state[symbol].price 取（注意 key 可能不是大写）
+            price = None
+            if isinstance(ms, dict):
+                # 先直接按大写找
+                payload = ms.get(sym_upper)
+                if payload is None:
+                    # 再遍历找 key 大小写不同的情况
+                    for k, v in ms.items():
+                        try:
+                            if str(k).upper() == sym_upper:
+                                payload = v
+                                break
+                        except Exception:
+                            continue
+                if isinstance(payload, dict):
+                    price = payload.get('price')
+            try:
+                price_f = float(price) if price is not None else 0.0
+            except Exception:
+                price_f = 0.0
+            if price_f <= 0:
+                return 0.0
+
+            return (qty * price_f) / lev
 
         final_decisions: Dict[str, Dict] = {}
         used_strategy_names: List[str] = []
@@ -147,6 +248,14 @@ class StrategyTrader(Trader):
 
         # 按优先级顺序执行策略（对每个symbol单独“短路”）
         for strategy in strategies:
+            # 没有剩余候选时直接结束
+            if not remaining_candidates or not remaining_symbol_set:
+                break
+
+            # 可用余额耗尽时，停止继续生成买入决策
+            if _get_available_balance() <= 0:
+                break
+
             strategy_name = strategy.get('strategy_name', '未知策略')
             strategy_code = strategy.get('strategy_code', '')
             priority = strategy.get('priority', 0)
@@ -155,9 +264,8 @@ class StrategyTrader(Trader):
                 logger.debug(f"[StrategyTrader] [Model {effective_model_id}] 策略 {strategy_name} (优先级: {priority}) 代码为空，跳过")
                 continue
 
-            # 如果已经对所有候选symbol产生了决策，提前结束
-            if candidate_symbol_set and len(final_decisions) >= len(candidate_symbol_set):
-                break
+            # 为下一策略准备扣除后的 candidates & market_state
+            filtered_market_state = _filter_market_state(market_state, remaining_symbol_set)
 
             logger.debug(f"[StrategyTrader] [Model {effective_model_id}] 执行策略: {strategy_name} (优先级: {priority})")
 
@@ -165,10 +273,10 @@ class StrategyTrader(Trader):
                 decision_result = self.code_executor.execute_strategy_code(
                     strategy_code=strategy_code,
                     strategy_name=strategy_name,
-                    candidates=candidates,
-                    portfolio=portfolio,
-                    account_info=account_info,
-                    market_state=market_state,
+                    candidates=remaining_candidates,
+                    portfolio=working_portfolio,
+                    account_info=working_account_info,
+                    market_state=filtered_market_state,
                     decision_type='buy'
                 )
 
@@ -183,32 +291,45 @@ class StrategyTrader(Trader):
                 # 规范化quantity为整数
                 normalized_decisions = self._normalize_quantity_to_int(decisions)
 
-                added_any = False
+                # 将策略返回的 decisions 按 symbol 归一化为 upper key，方便与 remaining_candidates 对齐
+                decisions_by_symbol: Dict[str, Dict] = {}
                 for sym, dec in normalized_decisions.items():
                     if not isinstance(dec, dict):
                         continue
-
                     sym_upper = str(sym).upper()
                     if not sym_upper:
                         continue
+                    decisions_by_symbol[sym_upper] = dec
 
-                    # 如果给了候选列表，则只接受候选里的symbol
-                    if candidate_symbol_set and sym_upper not in candidate_symbol_set:
+                selected_symbols_this_strategy: List[str] = []
+                spent_this_strategy = 0.0
+                available_before = _get_available_balance()
+
+                # 按 remaining_candidates 顺序挑选（更符合“候选集顺序”语义）
+                for c in remaining_candidates:
+                    try:
+                        sym_upper = str(c.get('symbol') or c.get('contract_symbol') or '').upper()
+                    except Exception:
+                        continue
+                    if not sym_upper or sym_upper not in remaining_symbol_set:
+                        continue
+                    if sym_upper in final_decisions:
                         continue
 
-                    # per-symbol短路：已命中过就不再覆盖
-                    if sym_upper in final_decisions:
+                    dec = decisions_by_symbol.get(sym_upper)
+                    if not isinstance(dec, dict):
                         continue
 
                     sig = (dec.get('signal') or '').lower()
                     if sig not in valid_signals:
                         continue
 
-                    qty = dec.get('quantity')
-                    try:
-                        if qty is None or float(qty) <= 0:
-                            continue
-                    except Exception:
+                    # 预估资金占用，若超过剩余余额则跳过该symbol（不影响其他symbol）
+                    required_capital = _estimate_required_capital(sym_upper, dec, filtered_market_state)
+                    if required_capital <= 0:
+                        continue
+
+                    if available_before - spent_this_strategy < required_capital:
                         continue
 
                     # 回填策略追踪信息（供后续策略记录/落库使用）
@@ -216,10 +337,22 @@ class StrategyTrader(Trader):
                     dec.setdefault('_strategy_type', 'buy')
 
                     final_decisions[sym_upper] = dec
-                    added_any = True
+                    selected_symbols_this_strategy.append(sym_upper)
+                    spent_this_strategy += required_capital
 
-                if added_any:
+                # 若本策略命中，则扣除 candidates/market_state，并预扣余额（供后续策略使用）
+                if selected_symbols_this_strategy:
                     used_strategy_names.append(strategy_name)
+
+                    remaining_symbol_set = set(s for s in remaining_symbol_set if s not in set(selected_symbols_this_strategy))
+                    remaining_candidates = [
+                        c for c in remaining_candidates
+                        if str(c.get('symbol') or c.get('contract_symbol') or '').upper() in remaining_symbol_set
+                    ]
+
+                    # 预扣余额并写回工作副本
+                    new_available = max(0.0, available_before - spent_this_strategy)
+                    _set_available_balance(new_available)
 
             except Exception as e:
                 logger.error(f"[StrategyTrader] [Model {effective_model_id}] 执行策略 {strategy_name} 失败: {e}")
@@ -232,7 +365,12 @@ class StrategyTrader(Trader):
             return {
                 'decisions': final_decisions,
                 'prompt': None,
-                'raw_response': json.dumps({'strategies': used_strategy_names, 'decisions': final_decisions}, ensure_ascii=False),
+                'raw_response': json.dumps({
+                    'strategies': used_strategy_names,
+                    'decisions': final_decisions,
+                    'remaining_candidate_count': len(remaining_candidates),
+                    'remaining_available_balance': _get_available_balance()
+                }, ensure_ascii=False),
                 'cot_trace': trace,
                 'skipped': False
             }
@@ -297,19 +435,49 @@ class StrategyTrader(Trader):
         
         logger.info(f"[StrategyTrader] [Model {effective_model_id}] 找到 {len(strategies)} 个卖出类型策略，开始按优先级执行")
 
-        position_symbols = []
-        try:
-            position_symbols = [str(p.get('symbol') or '').upper() for p in (portfolio.get('positions') or [])]
-            position_symbols = [s for s in position_symbols if s]
-        except Exception:
-            position_symbols = []
-        position_symbol_set = set(position_symbols)
+        # 语义要求（卖出）：
+        # - 按优先级逐个执行策略
+        # - 一旦某个symbol在较高优先级策略中命中（产生卖出/平仓/止损/止盈决策），该symbol需要从后续策略的 portfolio.positions 和 market_state 中扣除
+        # - account_info 不需要更新（卖出不做预扣资金）
+        positions = portfolio.get('positions') or []
+
+        # 规范化 & 去重 positions（按symbol去重，保留顺序）
+        remaining_positions: List[Dict] = []
+        remaining_symbol_set: set = set()
+        for p in positions:
+            try:
+                sym = str(p.get('symbol') or '').upper()
+            except Exception:
+                sym = ''
+            if not sym or sym in remaining_symbol_set:
+                continue
+            remaining_symbol_set.add(sym)
+            remaining_positions.append(p)
+
+        # market_state 过滤将基于 remaining_symbol_set 进行（key 可能是任意大小写）
+        def _filter_market_state(ms: Dict, allowed_symbols: set) -> Dict:
+            if not ms or not isinstance(ms, dict) or not allowed_symbols:
+                return {}
+            filtered = {}
+            for k, v in ms.items():
+                try:
+                    if str(k).upper() in allowed_symbols:
+                        filtered[k] = v
+                except Exception:
+                    continue
+            return filtered
+
+        # portfolio 工作副本（仅用于策略间扣除）
+        base_portfolio: Dict = dict(portfolio) if isinstance(portfolio, dict) else {}
 
         final_decisions: Dict[str, Dict] = {}
         used_strategy_names: List[str] = []
         valid_signals = {'sell_to_long', 'sell_to_short', 'close_position', 'stop_loss', 'take_profit'}
 
         for strategy in strategies:
+            if not remaining_positions or not remaining_symbol_set:
+                break
+
             strategy_name = strategy.get('strategy_name', '未知策略')
             strategy_code = strategy.get('strategy_code', '')
             priority = strategy.get('priority', 0)
@@ -318,8 +486,10 @@ class StrategyTrader(Trader):
                 logger.debug(f"[StrategyTrader] [Model {effective_model_id}] 策略 {strategy_name} (优先级: {priority}) 代码为空，跳过")
                 continue
 
-            if position_symbol_set and len(final_decisions) >= len(position_symbol_set):
-                break
+            # 为下一策略准备扣除后的 portfolio.positions & market_state
+            working_portfolio = dict(base_portfolio)
+            working_portfolio['positions'] = remaining_positions
+            filtered_market_state = _filter_market_state(market_state, remaining_symbol_set)
 
             logger.debug(f"[StrategyTrader] [Model {effective_model_id}] 执行策略: {strategy_name} (优先级: {priority})")
 
@@ -328,9 +498,9 @@ class StrategyTrader(Trader):
                     strategy_code=strategy_code,
                     strategy_name=strategy_name,
                     candidates=None,
-                    portfolio=portfolio,
+                    portfolio=working_portfolio,
                     account_info=account_info,
-                    market_state=market_state,
+                    market_state=filtered_market_state,
                     decision_type='sell'
                 )
 
@@ -344,19 +514,31 @@ class StrategyTrader(Trader):
 
                 normalized_decisions = self._normalize_quantity_to_int(decisions)
 
-                added_any = False
+                # 将策略返回的 decisions 按 symbol 归一化为 upper key，方便与 remaining_positions 对齐
+                decisions_by_symbol: Dict[str, Dict] = {}
                 for sym, dec in normalized_decisions.items():
                     if not isinstance(dec, dict):
                         continue
-
                     sym_upper = str(sym).upper()
                     if not sym_upper:
                         continue
+                    decisions_by_symbol[sym_upper] = dec
 
-                    if position_symbol_set and sym_upper not in position_symbol_set:
+                selected_symbols_this_strategy: List[str] = []
+
+                # 按 remaining_positions 顺序挑选（更符合“持仓顺序”语义）
+                for p in remaining_positions:
+                    try:
+                        sym_upper = str(p.get('symbol') or '').upper()
+                    except Exception:
+                        continue
+                    if not sym_upper or sym_upper not in remaining_symbol_set:
+                        continue
+                    if sym_upper in final_decisions:
                         continue
 
-                    if sym_upper in final_decisions:
+                    dec = decisions_by_symbol.get(sym_upper)
+                    if not isinstance(dec, dict):
                         continue
 
                     sig = (dec.get('signal') or '').lower()
@@ -367,10 +549,18 @@ class StrategyTrader(Trader):
                     dec.setdefault('_strategy_type', 'sell')
 
                     final_decisions[sym_upper] = dec
-                    added_any = True
+                    selected_symbols_this_strategy.append(sym_upper)
 
-                if added_any:
+                # 若本策略命中，则扣除 portfolio.positions & market_state（通过 remaining_symbol_set 实现）
+                if selected_symbols_this_strategy:
                     used_strategy_names.append(strategy_name)
+
+                    selected_set = set(selected_symbols_this_strategy)
+                    remaining_symbol_set = set(s for s in remaining_symbol_set if s not in selected_set)
+                    remaining_positions = [
+                        p for p in remaining_positions
+                        if str(p.get('symbol') or '').upper() in remaining_symbol_set
+                    ]
 
             except Exception as e:
                 logger.error(f"[StrategyTrader] [Model {effective_model_id}] 执行策略 {strategy_name} 失败: {e}")
@@ -383,7 +573,11 @@ class StrategyTrader(Trader):
             return {
                 'decisions': final_decisions,
                 'prompt': None,
-                'raw_response': json.dumps({'strategies': used_strategy_names, 'decisions': final_decisions}, ensure_ascii=False),
+                'raw_response': json.dumps({
+                    'strategies': used_strategy_names,
+                    'decisions': final_decisions,
+                    'remaining_position_count': len(remaining_positions)
+                }, ensure_ascii=False),
                 'cot_trace': trace,
                 'skipped': False
             }
