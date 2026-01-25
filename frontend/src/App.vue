@@ -999,7 +999,7 @@
               <small class="form-help">输入0表示由AI自行决定杠杆。</small>
             </div>
             <div class="form-group">
-              <label for="settingsMaxPositionsInput">最大持仓数量 (>= 1)</label>
+              <label for="settingsMaxPositionsInput" title="设置该模型最多可以同时持有的合约数量，默认为3。">最大持仓数量 (>= 1)</label>
               <input 
                 type="number" 
                 id="settingsMaxPositionsInput" 
@@ -1007,10 +1007,9 @@
                 min="1" 
                 v-model.number="tempModelSettings.max_positions"
               >
-              <small class="form-help">设置该模型最多可以同时持有的合约数量，默认为3。</small>
             </div>
             <div class="form-group">
-              <label for="settingsAutoClosePercentInput">自动平仓百分比</label>
+              <label for="settingsAutoClosePercentInput" title="当损失本金达到此百分比时自动平仓（例如：10 表示损失10%本金时自动平仓）。留空或0表示不启用自动平仓。">自动平仓百分比</label>
               <input 
                 type="number" 
                 id="settingsAutoClosePercentInput" 
@@ -1020,10 +1019,9 @@
                 step="0.1"
                 v-model.number="tempModelSettings.auto_close_percent"
               >
-              <small class="form-help">当损失本金达到此百分比时自动平仓（例如：10 表示损失10%本金时自动平仓）。留空或0表示不启用自动平仓。</small>
             </div>
             <div class="form-group">
-              <label for="settingsBaseVolumeInput">每日成交量过滤阈值（千万单位）</label>
+              <label for="settingsBaseVolumeInput" title="只交易每日成交量大于此阈值的合约（以千万为单位，例如：10 表示1亿成交量）。留空或0表示不过滤。">每日成交量过滤阈值（千万单位）</label>
               <input 
                 type="number" 
                 id="settingsBaseVolumeInput" 
@@ -1032,10 +1030,9 @@
                 step="0.1"
                 v-model.number="tempModelSettings.base_volume"
               >
-              <small class="form-help">只交易每日成交量大于此阈值的合约（以千万为单位，例如：10 表示1亿成交量）。留空或0表示不过滤。</small>
             </div>
             <div class="form-group">
-              <label for="settingsDailyReturnInput">目标每日收益率（百分比）</label>
+              <label for="settingsDailyReturnInput" title="设置目标每日收益率（百分比，例如：5 表示5%）。当当日收益率达到此值时，将不再进行买入交易。留空或0表示不限制。">目标每日收益率（百分比）</label>
               <input 
                 type="number" 
                 id="settingsDailyReturnInput" 
@@ -1044,10 +1041,9 @@
                 step="0.1"
                 v-model.number="tempModelSettings.daily_return"
               >
-              <small class="form-help">设置目标每日收益率（百分比，例如：5 表示5%）。当当日收益率达到此值时，将不再进行买入交易。留空或0表示不限制。</small>
             </div>
             <div class="form-group">
-              <label for="settingsLossesNumInput">连续亏损次数阈值</label>
+              <label for="settingsLossesNumInput" title="设置连续亏损次数阈值（例如：3 表示连续3笔亏损后暂停买入交易）。留空或0表示不限制。">连续亏损次数阈值</label>
               <input 
                 type="number" 
                 id="settingsLossesNumInput" 
@@ -1055,7 +1051,6 @@
                 min="1"
                 v-model.number="tempModelSettings.losses_num"
               >
-              <small class="form-help">设置连续亏损次数阈值（例如：3 表示连续3笔亏损后暂停买入交易）。留空或0表示不限制。</small>
             </div>
             <div class="form-group">
               <label>禁止买入开始</label>
