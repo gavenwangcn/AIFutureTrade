@@ -78,6 +78,45 @@ export function useTradingApp() {
   const strategyDecisionsPageSize = ref(10)  // 每页记录数
   const strategyDecisionsTotal = ref(0)  // 总记录数
   const strategyDecisionsTotalPages = ref(0)  // 总页数
+  
+  /**
+   * 策略决策分页展示（兼容后端未返回 total/totalPages 的情况）
+   * - total/totalPages 正常情况下应由后端返回 PageResult 提供
+   * - 若缺失，则基于当前页数据给出“下界展示值”，并尽量保证按钮可用性
+   */
+  const strategyDecisionsDisplayTotal = computed(() => {
+    if (Number(strategyDecisionsTotal.value) > 0) return Number(strategyDecisionsTotal.value)
+    if (strategyDecisions.value.length > 0) {
+      const pageNum = Number(strategyDecisionsPage.value) || 1
+      const size = Number(strategyDecisionsPageSize.value) || 10
+      const lowerBound = (pageNum - 1) * size + strategyDecisions.value.length
+      return Math.max(lowerBound, strategyDecisions.value.length)
+    }
+    return 0
+  })
+  
+  const strategyDecisionsDisplayTotalPages = computed(() => {
+    const totalPages = Number(strategyDecisionsTotalPages.value) || 0
+    if (totalPages > 0) return totalPages
+    
+    const total = Number(strategyDecisionsTotal.value) || 0
+    const size = Number(strategyDecisionsPageSize.value) || 10
+    if (total > 0) return Math.max(1, Math.ceil(total / size))
+    
+    return strategyDecisions.value.length > 0 ? 1 : 0
+  })
+  
+  const strategyDecisionsHasPrev = computed(() => (Number(strategyDecisionsPage.value) || 1) > 1)
+  
+  const strategyDecisionsHasNext = computed(() => {
+    const pageNum = Number(strategyDecisionsPage.value) || 1
+    const pages = strategyDecisionsDisplayTotalPages.value
+    if (pages > 0) return pageNum < pages
+    
+    // totalPages 未知时：如果本页返回满页数据，允许继续翻页尝试
+    const size = Number(strategyDecisionsPageSize.value) || 10
+    return strategyDecisions.value.length === size
+  })
   const modelPortfolioSymbols = ref([]) // 模型持仓合约列表
 const lastPortfolioSymbolsRefreshTime = ref(null) // 持仓合约列表最后刷新时间
   
@@ -3299,6 +3338,16 @@ let portfolioRefreshInterval = null // 投资组合数据自动刷新定时器�
     goToTradesPage,
     conversations,
     strategyDecisions,
+    // 策略决策分页相关状态（供 App.vue 分页展示/按钮状态使用）
+    strategyDecisionsPage,
+    strategyDecisionsPageSize,
+    strategyDecisionsTotal,
+    strategyDecisionsTotalPages,
+    // 策略决策分页展示计算值
+    strategyDecisionsDisplayTotal,
+    strategyDecisionsDisplayTotalPages,
+    strategyDecisionsHasPrev,
+    strategyDecisionsHasNext,
     isRefreshingStrategyDecisions,
     settings,
     modelPortfolioSymbols,
