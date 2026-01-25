@@ -179,26 +179,6 @@ class DatabaseInitializer:
         """
         self.command(ddl)
         logger.debug(f"[DatabaseInit] Ensured table {table_name} exists")
-        
-        # Check and add strategy_decision_id field (if table exists but field doesn't exist)
-        try:
-            check_column_sql = f"""
-            SELECT COUNT(*) FROM information_schema.COLUMNS 
-            WHERE TABLE_SCHEMA = DATABASE() 
-            AND TABLE_NAME = '{table_name}' 
-            AND COLUMN_NAME = 'strategy_decision_id'
-            """
-            result = self.command(check_column_sql)
-            if isinstance(result, list) and len(result) > 0 and result[0][0] == 0:
-                alter_sql = f"""
-                ALTER TABLE `{table_name}` 
-                ADD COLUMN `strategy_decision_id` VARCHAR(36) DEFAULT NULL COMMENT '关联的策略决策ID（strategy_decisions.id）' AFTER `initial_margin`,
-                ADD INDEX `idx_strategy_decision_id` (`strategy_decision_id`)
-                """
-                self.command(alter_sql)
-                logger.info(f"[DatabaseInit] Added strategy_decision_id column to {table_name} table")
-        except Exception as e:
-            logger.warning(f"[DatabaseInit] Failed to check/add strategy_decision_id column to {table_name}: {e}")
        
     def ensure_conversations_table(self, table_name: str = "conversations"):
         """Create conversations table if not exists"""
@@ -260,28 +240,6 @@ class DatabaseInitializer:
         """
         self.command(ddl)
         logger.debug(f"[DatabaseInit] Ensured table {table_name} exists")
-        
-        # Check and add trade_id field (if table exists but field doesn't exist)
-        try:
-            # Check if trade_id field exists
-            check_column_sql = f"""
-            SELECT COUNT(*) FROM information_schema.COLUMNS 
-            WHERE TABLE_SCHEMA = DATABASE() 
-            AND TABLE_NAME = '{table_name}' 
-            AND COLUMN_NAME = 'trade_id'
-            """
-            result = self.command(check_column_sql)
-            # If field doesn't exist, add field
-            if isinstance(result, list) and len(result) > 0 and result[0][0] == 0:
-                alter_sql = f"""
-                ALTER TABLE `{table_name}` 
-                ADD COLUMN `trade_id` VARCHAR(36) DEFAULT NULL COMMENT '关联的trade记录ID，NULL表示非交易触发的账户价值记录' AFTER `cross_un_pnl`,
-                ADD INDEX `idx_trade_id` (`trade_id`)
-                """
-                self.command(alter_sql)
-                logger.info(f"[DatabaseInit] Added trade_id column to {table_name} table")
-        except Exception as e:
-            logger.warning(f"[DatabaseInit] Failed to check/add trade_id column to {table_name}: {e}")
     
     def ensure_account_values_daily_table(self, table_name: str = "account_values_daily"):
         """Create account_values_daily table if not exists"""
@@ -535,84 +493,6 @@ class DatabaseInitializer:
         """
         self.command(ddl)
         logger.debug(f"[DatabaseInit] Ensured table {table_name} exists")
-        
-        # Check and add symbol field (if table exists but field doesn't exist)
-        try:
-            # Check if symbol field exists
-            check_column_sql = f"""
-            SELECT COUNT(*) FROM information_schema.COLUMNS 
-            WHERE TABLE_SCHEMA = DATABASE() 
-            AND TABLE_NAME = '{table_name}' 
-            AND COLUMN_NAME = 'symbol'
-            """
-            result = self.command(check_column_sql)
-            # If field doesn't exist, add field
-            if isinstance(result, list) and len(result) > 0 and result[0][0] == 0:
-                alter_sql = f"""
-                ALTER TABLE `{table_name}` 
-                ADD COLUMN `symbol` VARCHAR(50) COMMENT 'Contract name (nullable)' AFTER `signal`,
-                ADD INDEX `idx_symbol` (`symbol`)
-                """
-                self.command(alter_sql)
-                logger.info(f"[DatabaseInit] Added symbol column to {table_name} table")
-        except Exception as e:
-            logger.warning(f"[DatabaseInit] Failed to check/add symbol column to {table_name}: {e}")
-        
-        # Check and add state-machine related columns (for existing databases)
-        try:
-            def _ensure_column(column_name: str, alter_sql: str):
-                check_sql = f"""
-                SELECT COUNT(*) FROM information_schema.COLUMNS 
-                WHERE TABLE_SCHEMA = DATABASE() 
-                AND TABLE_NAME = '{table_name}' 
-                AND COLUMN_NAME = '{column_name}'
-                """
-                r = self.command(check_sql)
-                if isinstance(r, list) and len(r) > 0 and r[0][0] == 0:
-                    self.command(alter_sql)
-                    logger.info(f"[DatabaseInit] Added {column_name} column to {table_name} table")
-            
-            _ensure_column(
-                "cycle_id",
-                f"""
-                ALTER TABLE `{table_name}` 
-                ADD COLUMN `cycle_id` VARCHAR(36) DEFAULT NULL COMMENT '一次交易循环ID（用于关联同一轮触发/执行）' AFTER `model_id`,
-                ADD INDEX `idx_cycle_id` (`cycle_id`)
-                """
-            )
-            _ensure_column(
-                "status",
-                f"""
-                ALTER TABLE `{table_name}` 
-                ADD COLUMN `status` VARCHAR(20) NOT NULL DEFAULT 'TRIGGERED' COMMENT '状态：TRIGGERED/EXECUTED/REJECTED' AFTER `strategy_type`,
-                ADD INDEX `idx_status` (`status`)
-                """
-            )
-            _ensure_column(
-                "trade_id",
-                f"""
-                ALTER TABLE `{table_name}` 
-                ADD COLUMN `trade_id` VARCHAR(36) DEFAULT NULL COMMENT '关联的trades.id（当EXECUTED时写入）' AFTER `justification`,
-                ADD INDEX `idx_trade_id` (`trade_id`)
-                """
-            )
-            _ensure_column(
-                "error_reason",
-                f"""
-                ALTER TABLE `{table_name}` 
-                ADD COLUMN `error_reason` TEXT DEFAULT NULL COMMENT '拒绝/失败原因（当REJECTED时写入）' AFTER `trade_id`
-                """
-            )
-            _ensure_column(
-                "updated_at",
-                f"""
-                ALTER TABLE `{table_name}` 
-                ADD COLUMN `updated_at` DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP AFTER `created_at`,
-                ADD INDEX `idx_updated_at` (`updated_at`)
-                """
-            )
-        except Exception as e:
-            logger.warning(f"[DatabaseInit] Failed to check/add state-machine columns to {table_name}: {e}")
     
     # ============ Market Data Table Initialization Methods ============
     
