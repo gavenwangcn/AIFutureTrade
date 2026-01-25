@@ -430,8 +430,10 @@ export const strategyDecisionApi = {
    * @param {string} modelId - 模型ID
    * @param {number} page - 页码，从1开始，默认为1
    * @param {number} pageSize - 每页记录数，默认为10
+   * @param {string} status - 可选：状态过滤（TRIGGERED/EXECUTED/REJECTED），默认只看 EXECUTED 以对齐交易记录
    */
-  getByModelId: (modelId, page = 1, pageSize = 10) => apiGet(`/api/strategy-decisions/model/${modelId}`, { page, pageSize })
+  getByModelId: (modelId, page = 1, pageSize = 10, status = 'EXECUTED') =>
+    apiGet(`/api/strategy-decisions/model/${modelId}`, { page, pageSize, status })
 }
 
 /**

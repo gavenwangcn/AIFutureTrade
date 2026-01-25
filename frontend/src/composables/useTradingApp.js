@@ -1755,7 +1755,8 @@ let portfolioRefreshInterval = null // 投资组合数据自动刷新定时器�
     try {
       console.log('[TradingApp] 开始加载策略决策记录（分页）, modelId:', currentModelId.value, 'page:', targetPage, 'pageSize:', targetPageSize)
       const { strategyDecisionApi } = await import('../services/api.js')
-      const data = await strategyDecisionApi.getByModelId(currentModelId.value, targetPage, targetPageSize)
+      // 默认仅查看 EXECUTED（与交易记录 1:1 对齐）；后端未支持 status 参数时也不会报错（会忽略该 query）
+      const data = await strategyDecisionApi.getByModelId(currentModelId.value, targetPage, targetPageSize, 'EXECUTED')
       console.log('[TradingApp] 收到策略决策API响应:', data)
       console.log('[TradingApp] API响应数据类型:', typeof data, '是否为数组:', Array.isArray(data), '包含data字段:', data && data.data !== undefined, '包含total字段:', data && data.total !== undefined)
       
@@ -1773,10 +1774,17 @@ let portfolioRefreshInterval = null // 投资组合数据自动刷新定时器�
         } else if (data.data && Array.isArray(data.data)) {
           // 新格式：分页数据
           decisionsList = data.data
-          strategyDecisionsPage.value = data.pageNum || targetPage
-          strategyDecisionsPageSize.value = data.pageSize || targetPageSize
-          strategyDecisionsTotal.value = data.total !== undefined && data.total !== null ? data.total : 0
-          strategyDecisionsTotalPages.value = data.totalPages !== undefined && data.totalPages !== null ? data.totalPages : (strategyDecisionsTotal.value > 0 ? Math.ceil(strategyDecisionsTotal.value / strategyDecisionsPageSize.value) : 0)
+          const safePageNum = Number(data.pageNum ?? targetPage) || 1
+          const safePageSize = Number(data.pageSize ?? targetPageSize) || 10
+          const safeTotal = Number(data.total ?? 0) || 0
+          const safeTotalPages =
+            Number(data.totalPages ?? 0) ||
+            (safeTotal > 0 ? Math.max(1, Math.ceil(safeTotal / safePageSize)) : 0)
+
+          strategyDecisionsPage.value = safePageNum
+          strategyDecisionsPageSize.value = safePageSize
+          strategyDecisionsTotal.value = safeTotal
+          strategyDecisionsTotalPages.value = safeTotalPages
           console.log('[TradingApp] 分页信息: page=', strategyDecisionsPage.value, 'pageSize=', strategyDecisionsPageSize.value, 'total=', strategyDecisionsTotal.value, 'totalPages=', strategyDecisionsTotalPages.value)
         } else if (data.decisions && Array.isArray(data.decisions)) {
           // 兼容格式：{ decisions: [] }
@@ -1788,10 +1796,17 @@ let portfolioRefreshInterval = null // 投资组合数据自动刷新定时器�
           strategyDecisionsPageSize.value = data.pageSize || targetPageSize
         } else if (data.total !== undefined || data.pageNum !== undefined) {
           // 如果数据对象包含分页字段，即使没有 data 数组，也尝试设置分页信息
-          strategyDecisionsTotal.value = data.total !== undefined && data.total !== null ? data.total : 0
-          strategyDecisionsTotalPages.value = data.totalPages !== undefined && data.totalPages !== null ? data.totalPages : (strategyDecisionsTotal.value > 0 ? Math.ceil(strategyDecisionsTotal.value / targetPageSize) : 0)
-          strategyDecisionsPage.value = data.pageNum || targetPage
-          strategyDecisionsPageSize.value = data.pageSize || targetPageSize
+          const safePageNum = Number(data.pageNum ?? targetPage) || 1
+          const safePageSize = Number(data.pageSize ?? targetPageSize) || 10
+          const safeTotal = Number(data.total ?? 0) || 0
+          const safeTotalPages =
+            Number(data.totalPages ?? 0) ||
+            (safeTotal > 0 ? Math.max(1, Math.ceil(safeTotal / safePageSize)) : 0)
+
+          strategyDecisionsTotal.value = safeTotal
+          strategyDecisionsTotalPages.value = safeTotalPages
+          strategyDecisionsPage.value = safePageNum
+          strategyDecisionsPageSize.value = safePageSize
           console.log('[TradingApp] 从数据对象中提取分页信息: total=', strategyDecisionsTotal.value, 'totalPages=', strategyDecisionsTotalPages.value)
         }
       }
@@ -1883,7 +1898,9 @@ let portfolioRefreshInterval = null // 投资组合数据自动刷新定时器�
    * 切换到策略决策指定页码
    */
   const goToStrategyDecisionsPage = async (page) => {
-    if (page < 1 || (strategyDecisionsTotalPages.value > 0 && page > strategyDecisionsTotalPages.value)) {
+    // 注意：优先使用展示页数（策略决策接口在异常情况下可能不返回 totalPages）
+    const pages = strategyDecisionsDisplayTotalPages.value
+    if (page < 1 || (pages > 0 && page > pages)) {
       return
     }
     strategyDecisionsPage.value = page

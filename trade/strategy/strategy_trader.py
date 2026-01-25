@@ -18,7 +18,6 @@ from trade.trader import Trader
 from trade.strategy.strategy_code_executor import StrategyCodeExecutor
 from trade.common.database.database_strategys import StrategysDatabase
 from trade.common.database.database_models import ModelsDatabase
-from trade.common.database.database_strategy_decisions import StrategyDecisionsDatabase
 
 logger = logging.getLogger(__name__)
 
@@ -50,8 +49,6 @@ class StrategyTrader(Trader):
         # 初始化 StrategysDatabase 和 ModelsDatabase 实例
         self.strategys_db = StrategysDatabase(pool=db._pool if db and hasattr(db, '_pool') else None)
         self.models_db = ModelsDatabase(pool=db._pool if db and hasattr(db, '_pool') else None)
-        # 初始化 StrategyDecisionsDatabase 实例
-        self.strategy_decisions_db = StrategyDecisionsDatabase(pool=db._pool if db and hasattr(db, '_pool') else None)
     
     def _normalize_quantity_to_int(self, decisions: Dict) -> Dict:
         """
@@ -132,106 +129,121 @@ class StrategyTrader(Trader):
             }
         
         logger.info(f"[StrategyTrader] [Model {effective_model_id}] 找到 {len(strategies)} 个买入类型策略，开始按优先级执行")
-        
-        # 按优先级顺序执行策略
+
+        # 语义要求：按优先级对“每个symbol”判定，某个symbol命中后不再继续判断后续策略；
+        # 但对未命中的其他symbol仍继续执行后续策略。
+        candidate_symbols = []
+        try:
+            candidate_symbols = [str(c.get('symbol') or c.get('contract_symbol') or '').upper() for c in candidates]
+            candidate_symbols = [s for s in candidate_symbols if s]
+        except Exception:
+            candidate_symbols = []
+        candidate_symbol_set = set(candidate_symbols)
+
+        final_decisions: Dict[str, Dict] = {}
+        used_strategy_names: List[str] = []
+
+        valid_signals = {'buy_to_long', 'buy_to_short'}
+
+        # 按优先级顺序执行策略（对每个symbol单独“短路”）
         for strategy in strategies:
             strategy_name = strategy.get('strategy_name', '未知策略')
             strategy_code = strategy.get('strategy_code', '')
             priority = strategy.get('priority', 0)
-            
+
             if not strategy_code or not strategy_code.strip():
                 logger.debug(f"[StrategyTrader] [Model {effective_model_id}] 策略 {strategy_name} (优先级: {priority}) 代码为空，跳过")
                 continue
-            
+
+            # 如果已经对所有候选symbol产生了决策，提前结束
+            if candidate_symbol_set and len(final_decisions) >= len(candidate_symbol_set):
+                break
+
             logger.debug(f"[StrategyTrader] [Model {effective_model_id}] 执行策略: {strategy_name} (优先级: {priority})")
-            
+
             try:
-                # 执行策略代码（使用StrategyCodeExecutor，统一使用market_state）
-                # 注意：策略代码执行可能会调用外部API（如Binance），如果发生异常，
-                # 数据库连接会在 _with_connection 的 finally 块中自动释放
                 decision_result = self.code_executor.execute_strategy_code(
                     strategy_code=strategy_code,
                     strategy_name=strategy_name,
                     candidates=candidates,
                     portfolio=portfolio,
                     account_info=account_info,
-                    market_state=market_state,  # 统一使用market_state
+                    market_state=market_state,
                     decision_type='buy'
                 )
-                
-                # 检查是否有有效的决策信号
-                if decision_result and isinstance(decision_result, dict):
-                    decisions = decision_result.get('decisions', {})
-                    
-                    # 检查是否有有效的买入/卖出信号
-                    has_valid_signal = False
-                    for symbol, decision in decisions.items():
-                        signal = decision.get('signal', '').lower()
-                        if signal in ['buy_to_long', 'buy_to_short']:
-                            has_valid_signal = True
-                            break
-                    
-                    if has_valid_signal:
-                        logger.info(f"[StrategyTrader] [Model {effective_model_id}] 策略 {strategy_name} 返回有效决策信号")
-                        
-                        # 规范化decisions中的quantity为整数
-                        normalized_decisions = self._normalize_quantity_to_int(decisions)
-                        
-                        # 保存策略决策到数据库（使用规范化后的decisions）
-                        try:
-                            model_mapping = self.models_db._get_model_id_mapping()
-                            model_uuid = model_mapping.get(effective_model_id)
-                            if model_uuid:
-                                # 将normalized_decisions字典转换为列表格式，并添加symbol字段
-                                decisions_list = []
-                                for symbol_key, decision in normalized_decisions.items():
-                                    # 确保decision中包含symbol字段
-                                    decision_with_symbol = decision.copy()
-                                    decision_with_symbol['symbol'] = symbol_key
-                                    decisions_list.append(decision_with_symbol)
-                                
-                                # 批量保存决策
-                                if decisions_list:
-                                    self.strategy_decisions_db.add_strategy_decisions_batch(
-                                        model_id=model_uuid,
-                                        strategy_name=strategy_name,
-                                        strategy_type='buy',
-                                        decisions=decisions_list
-                                    )
-                                    logger.info(f"[StrategyTrader] [Model {effective_model_id}] 已保存 {len(decisions_list)} 条买入决策到数据库")
-                        except Exception as e:
-                            logger.warning(f"[StrategyTrader] [Model {effective_model_id}] 保存策略决策失败: {e}")
-                            # 不影响主流程，继续返回决策结果
-                        
-                        return {
-                            'decisions': normalized_decisions,
-                            'prompt': None,
-                            'raw_response': json.dumps(decision_result, ensure_ascii=False),
-                            'cot_trace': strategy_name,
-                            'skipped': False
-                        }
-                    else:
-                        logger.debug(f"[StrategyTrader] [Model {effective_model_id}] 策略 {strategy_name} 未返回有效信号，继续下一个策略")
-                else:
+
+                if not decision_result or not isinstance(decision_result, dict):
                     logger.debug(f"[StrategyTrader] [Model {effective_model_id}] 策略 {strategy_name} 返回结果无效，继续下一个策略")
-            
+                    continue
+
+                decisions = decision_result.get('decisions', {}) or {}
+                if not isinstance(decisions, dict) or not decisions:
+                    continue
+
+                # 规范化quantity为整数
+                normalized_decisions = self._normalize_quantity_to_int(decisions)
+
+                added_any = False
+                for sym, dec in normalized_decisions.items():
+                    if not isinstance(dec, dict):
+                        continue
+
+                    sym_upper = str(sym).upper()
+                    if not sym_upper:
+                        continue
+
+                    # 如果给了候选列表，则只接受候选里的symbol
+                    if candidate_symbol_set and sym_upper not in candidate_symbol_set:
+                        continue
+
+                    # per-symbol短路：已命中过就不再覆盖
+                    if sym_upper in final_decisions:
+                        continue
+
+                    sig = (dec.get('signal') or '').lower()
+                    if sig not in valid_signals:
+                        continue
+
+                    qty = dec.get('quantity')
+                    try:
+                        if qty is None or float(qty) <= 0:
+                            continue
+                    except Exception:
+                        continue
+
+                    # 回填策略追踪信息（供后续策略记录/落库使用）
+                    dec.setdefault('_strategy_name', strategy_name)
+                    dec.setdefault('_strategy_type', 'buy')
+
+                    final_decisions[sym_upper] = dec
+                    added_any = True
+
+                if added_any:
+                    used_strategy_names.append(strategy_name)
+
             except Exception as e:
-                # 记录异常，但继续执行下一个策略
-                # 数据库连接会在 _with_connection 的异常处理和 finally 块中自动释放
                 logger.error(f"[StrategyTrader] [Model {effective_model_id}] 执行策略 {strategy_name} 失败: {e}")
                 import traceback
                 logger.debug(f"[StrategyTrader] 异常堆栈:\n{traceback.format_exc()}")
-                # 继续执行下一个策略，不中断整个决策流程
                 continue
-        
-        # 所有策略都未返回有效信号，返回hold决策
+
+        if final_decisions:
+            trace = ','.join(used_strategy_names) if used_strategy_names else '策略命中'
+            return {
+                'decisions': final_decisions,
+                'prompt': None,
+                'raw_response': json.dumps({'strategies': used_strategy_names, 'decisions': final_decisions}, ensure_ascii=False),
+                'cot_trace': trace,
+                'skipped': False
+            }
+
         logger.info(f"[StrategyTrader] [Model {effective_model_id}] 所有策略都未返回有效信号，返回hold决策")
         return {
             'decisions': {},
             'prompt': None,
             'raw_response': None,
             'cot_trace': '所有策略未命中',
-            'skipped': False  # 不是跳过，而是所有策略都未命中
+            'skipped': False
         }
     
     def make_sell_decision(
@@ -284,105 +296,104 @@ class StrategyTrader(Trader):
             }
         
         logger.info(f"[StrategyTrader] [Model {effective_model_id}] 找到 {len(strategies)} 个卖出类型策略，开始按优先级执行")
-        
-        # 按优先级顺序执行策略
+
+        position_symbols = []
+        try:
+            position_symbols = [str(p.get('symbol') or '').upper() for p in (portfolio.get('positions') or [])]
+            position_symbols = [s for s in position_symbols if s]
+        except Exception:
+            position_symbols = []
+        position_symbol_set = set(position_symbols)
+
+        final_decisions: Dict[str, Dict] = {}
+        used_strategy_names: List[str] = []
+        valid_signals = {'sell_to_long', 'sell_to_short', 'close_position', 'stop_loss', 'take_profit'}
+
         for strategy in strategies:
             strategy_name = strategy.get('strategy_name', '未知策略')
             strategy_code = strategy.get('strategy_code', '')
             priority = strategy.get('priority', 0)
-            
+
             if not strategy_code or not strategy_code.strip():
                 logger.debug(f"[StrategyTrader] [Model {effective_model_id}] 策略 {strategy_name} (优先级: {priority}) 代码为空，跳过")
                 continue
-            
+
+            if position_symbol_set and len(final_decisions) >= len(position_symbol_set):
+                break
+
             logger.debug(f"[StrategyTrader] [Model {effective_model_id}] 执行策略: {strategy_name} (优先级: {priority})")
-            
+
             try:
-                # 执行策略代码（使用StrategyCodeExecutor）
-                # 注意：策略代码执行可能会调用外部API（如Binance），如果发生异常，
-                # 数据库连接会在 _with_connection 的 finally 块中自动释放
                 decision_result = self.code_executor.execute_strategy_code(
                     strategy_code=strategy_code,
                     strategy_name=strategy_name,
-                    candidates=None,  # 卖出决策不需要candidates
+                    candidates=None,
                     portfolio=portfolio,
                     account_info=account_info,
                     market_state=market_state,
                     decision_type='sell'
                 )
-                
-                # 检查是否有有效的决策信号
-                if decision_result and isinstance(decision_result, dict):
-                    decisions = decision_result.get('decisions', {})
-                    
-                    # 检查是否有有效的卖出/平仓信号
-                    has_valid_signal = False
-                    for symbol, decision in decisions.items():
-                        signal = decision.get('signal', '').lower()
-                        if signal in ['sell_to_long', 'sell_to_short', 'close_position', 'stop_loss', 'take_profit']:
-                            has_valid_signal = True
-                            break
-                    
-                    if has_valid_signal:
-                        logger.info(f"[StrategyTrader] [Model {effective_model_id}] 策略 {strategy_name} 返回有效决策信号")
-                        
-                        # 规范化decisions中的quantity为整数
-                        normalized_decisions = self._normalize_quantity_to_int(decisions)
-                        
-                        # 保存策略决策到数据库（使用规范化后的decisions）
-                        try:
-                            model_mapping = self.models_db._get_model_id_mapping()
-                            model_uuid = model_mapping.get(effective_model_id)
-                            if model_uuid:
-                                # 将normalized_decisions字典转换为列表格式，并添加symbol字段
-                                decisions_list = []
-                                for symbol_key, decision in normalized_decisions.items():
-                                    # 确保decision中包含symbol字段
-                                    decision_with_symbol = decision.copy()
-                                    decision_with_symbol['symbol'] = symbol_key
-                                    decisions_list.append(decision_with_symbol)
-                                
-                                # 批量保存决策
-                                if decisions_list:
-                                    self.strategy_decisions_db.add_strategy_decisions_batch(
-                                        model_id=model_uuid,
-                                        strategy_name=strategy_name,
-                                        strategy_type='sell',
-                                        decisions=decisions_list
-                                    )
-                                    logger.info(f"[StrategyTrader] [Model {effective_model_id}] 已保存 {len(decisions_list)} 条卖出决策到数据库")
-                        except Exception as e:
-                            logger.warning(f"[StrategyTrader] [Model {effective_model_id}] 保存策略决策失败: {e}")
-                            # 不影响主流程，继续返回决策结果
-                        
-                        return {
-                            'decisions': normalized_decisions,
-                            'prompt': None,
-                            'raw_response': json.dumps(decision_result, ensure_ascii=False),
-                            'cot_trace': strategy_name,
-                            'skipped': False
-                        }
-                    else:
-                        logger.debug(f"[StrategyTrader] [Model {effective_model_id}] 策略 {strategy_name} 未返回有效信号，继续下一个策略")
-                else:
+
+                if not decision_result or not isinstance(decision_result, dict):
                     logger.debug(f"[StrategyTrader] [Model {effective_model_id}] 策略 {strategy_name} 返回结果无效，继续下一个策略")
-            
+                    continue
+
+                decisions = decision_result.get('decisions', {}) or {}
+                if not isinstance(decisions, dict) or not decisions:
+                    continue
+
+                normalized_decisions = self._normalize_quantity_to_int(decisions)
+
+                added_any = False
+                for sym, dec in normalized_decisions.items():
+                    if not isinstance(dec, dict):
+                        continue
+
+                    sym_upper = str(sym).upper()
+                    if not sym_upper:
+                        continue
+
+                    if position_symbol_set and sym_upper not in position_symbol_set:
+                        continue
+
+                    if sym_upper in final_decisions:
+                        continue
+
+                    sig = (dec.get('signal') or '').lower()
+                    if sig not in valid_signals:
+                        continue
+
+                    dec.setdefault('_strategy_name', strategy_name)
+                    dec.setdefault('_strategy_type', 'sell')
+
+                    final_decisions[sym_upper] = dec
+                    added_any = True
+
+                if added_any:
+                    used_strategy_names.append(strategy_name)
+
             except Exception as e:
-                # 记录异常，但继续执行下一个策略
-                # 数据库连接会在 _with_connection 的异常处理和 finally 块中自动释放
                 logger.error(f"[StrategyTrader] [Model {effective_model_id}] 执行策略 {strategy_name} 失败: {e}")
                 import traceback
                 logger.debug(f"[StrategyTrader] 异常堆栈:\n{traceback.format_exc()}")
-                # 继续执行下一个策略，不中断整个决策流程
                 continue
-        
-        # 所有策略都未返回有效信号，返回hold决策
+
+        if final_decisions:
+            trace = ','.join(used_strategy_names) if used_strategy_names else '策略命中'
+            return {
+                'decisions': final_decisions,
+                'prompt': None,
+                'raw_response': json.dumps({'strategies': used_strategy_names, 'decisions': final_decisions}, ensure_ascii=False),
+                'cot_trace': trace,
+                'skipped': False
+            }
+
         logger.info(f"[StrategyTrader] [Model {effective_model_id}] 所有策略都未返回有效信号，返回hold决策")
         return {
             'decisions': {},
             'prompt': None,
             'raw_response': None,
             'cot_trace': '所有策略未命中',
-            'skipped': False  # 不是跳过，而是所有策略都未命中
+            'skipped': False
         }
 

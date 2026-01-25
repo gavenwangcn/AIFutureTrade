@@ -27,26 +27,53 @@ public class StrategyDecisionServiceImpl implements StrategyDecisionService {
     private StrategyDecisionMapper strategyDecisionMapper;
 
     @Override
-    public PageResult<Map<String, Object>> getDecisionsByPage(String modelId, PageRequest pageRequest) {
+    public PageResult<Map<String, Object>> getDecisionsByPage(String modelId, PageRequest pageRequest, String status) {
         log.debug("[StrategyDecisionService] ========== 开始获取策略决策记录（分页） ==========");
-        log.debug("[StrategyDecisionService] modelId: {}, pageNum: {}, pageSize: {}", modelId, pageRequest.getPageNum(), pageRequest.getPageSize());
+        log.debug("[StrategyDecisionService] modelId: {}, pageNum: {}, pageSize: {}, status: {}", modelId, pageRequest.getPageNum(), pageRequest.getPageSize(), status);
         try {
             // 设置默认值
             Integer pageNum = pageRequest.getPageNum() != null && pageRequest.getPageNum() > 0 ? pageRequest.getPageNum() : 1;
             Integer pageSize = pageRequest.getPageSize() != null && pageRequest.getPageSize() > 0 ? pageRequest.getPageSize() : 10;
             
-            // 查询总数
-            Long total = strategyDecisionMapper.countDecisionsByModelId(modelId);
+            String normalizedStatus = status == null ? null : status.trim();
+            boolean hasStatus = normalizedStatus != null && !normalizedStatus.isEmpty();
+            // 查询总数（与列表查询条件保持一致）
+            QueryWrapper<StrategyDecisionDO> countWrapper = new QueryWrapper<>();
+            countWrapper.eq("model_id", modelId);
+            if (hasStatus) {
+                countWrapper.eq("status", normalizedStatus);
+            }
+            Long total = strategyDecisionMapper.selectCount(countWrapper);
             log.debug("[StrategyDecisionService] 策略决策记录总数: {}", total);
             
             // 使用MyBatis-Plus的Page进行分页查询
             Page<StrategyDecisionDO> page = new Page<>(pageNum, pageSize);
             QueryWrapper<StrategyDecisionDO> queryWrapper = new QueryWrapper<>();
             queryWrapper.eq("model_id", modelId);
+            if (hasStatus) {
+                queryWrapper.eq("status", normalizedStatus);
+            }
             queryWrapper.orderByDesc("created_at");
             // 明确指定需要查询的字段，确保保留关键字用反引号包裹
-            queryWrapper.select("id", "model_id", "strategy_name", "strategy_type", "`signal`", "`symbol`", 
-                              "quantity", "leverage", "price", "stop_price", "justification", "created_at");
+            queryWrapper.select(
+                    "id",
+                    "model_id",
+                    "cycle_id",
+                    "strategy_name",
+                    "strategy_type",
+                    "status",
+                    "`signal`",
+                    "`symbol`",
+                    "quantity",
+                    "leverage",
+                    "price",
+                    "stop_price",
+                    "justification",
+                    "trade_id",
+                    "error_reason",
+                    "created_at",
+                    "updated_at"
+            );
             
             Page<StrategyDecisionDO> decisionDOPage = strategyDecisionMapper.selectPage(page, queryWrapper);
             
@@ -91,8 +118,10 @@ public class StrategyDecisionServiceImpl implements StrategyDecisionService {
             Map<String, Object> decisionMap = new HashMap<>();
             decisionMap.put("id", decision.getId());
             decisionMap.put("modelId", decision.getModelId());
+            decisionMap.put("cycleId", decision.getCycleId());
             decisionMap.put("strategyName", decision.getStrategyName());
             decisionMap.put("strategyType", decision.getStrategyType());
+            decisionMap.put("status", decision.getStatus());
             decisionMap.put("signal", decision.getSignal());
             decisionMap.put("symbol", decision.getSymbol());
             decisionMap.put("quantity", decision.getQuantity());
@@ -100,7 +129,10 @@ public class StrategyDecisionServiceImpl implements StrategyDecisionService {
             decisionMap.put("price", decision.getPrice());
             decisionMap.put("stopPrice", decision.getStopPrice());
             decisionMap.put("justification", decision.getJustification());
+            decisionMap.put("tradeId", decision.getTradeId());
+            decisionMap.put("errorReason", decision.getErrorReason());
             decisionMap.put("createdAt", decision.getCreatedAt());
+            decisionMap.put("updatedAt", decision.getUpdatedAt());
             result.add(decisionMap);
             
             if (i == 0) {

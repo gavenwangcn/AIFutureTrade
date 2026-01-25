@@ -259,6 +259,118 @@ class StrategyDecisionsDatabase:
         except Exception as e:
             logger.error(f"[StrategyDecisions] Failed to add strategy decisions batch: {e}")
             raise
+
+    def add_strategy_decisions_triggered(
+        self,
+        model_id: str,
+        cycle_id: str,
+        strategy_name: str,
+        strategy_type: str,
+        decisions: List[Dict]
+    ) -> Dict[str, str]:
+        """
+        在“策略生成阶段”批量写入策略执行记录（status=TRIGGERED），并返回 symbol -> decision_id 的映射。
+        
+        Args:
+            model_id: Model ID (UUID string)
+            cycle_id: 一次交易循环ID（UUID string）
+            strategy_name: Strategy name
+            strategy_type: Strategy type ('buy' or 'sell')
+            decisions: Decision list，每个decision至少包含 signal/symbol，可包含 quantity/leverage/price/stop_price/justification
+        
+        Returns:
+            Dict[str, str]: {symbol: decision_id}
+        """
+        if not decisions:
+            return {}
+        
+        beijing_tz = timezone(timedelta(hours=8))
+        current_time = datetime.now(beijing_tz).replace(tzinfo=None)
+        
+        rows = []
+        mapping: Dict[str, str] = {}
+        
+        for decision in decisions:
+            decision_id = self._generate_id()
+            signal = decision.get('signal', '')
+            symbol = decision.get('symbol')
+            if symbol:
+                symbol = str(symbol).upper()
+            quantity = decision.get('quantity')
+            if quantity is not None:
+                quantity = int(float(quantity))
+            leverage = decision.get('leverage')
+            price = decision.get('price')
+            stop_price = decision.get('stop_price') if decision.get('stop_price') is not None else decision.get('stopPrice')
+            justification = decision.get('justification') or decision.get('reason')
+            
+            rows.append([
+                decision_id,
+                model_id,
+                cycle_id,
+                strategy_name,
+                strategy_type,
+                "TRIGGERED",
+                signal,
+                symbol,
+                quantity,
+                leverage,
+                price,
+                stop_price,
+                justification,
+                None,  # trade_id
+                None,  # error_reason
+                current_time,
+                current_time  # updated_at
+            ])
+            if symbol:
+                mapping[symbol] = decision_id
+        
+        if rows:
+            self.insert_rows(
+                self.strategy_decisions_table,
+                rows,
+                [
+                    "id", "model_id", "cycle_id", "strategy_name", "strategy_type", "status",
+                    "signal", "symbol", "quantity", "leverage", "price", "stop_price", "justification",
+                    "trade_id", "error_reason", "created_at", "updated_at"
+                ]
+            )
+            logger.info(
+                f"[StrategyDecisions] Added {len(rows)} TRIGGERED strategy decisions: "
+                f"model_id={model_id}, cycle_id={cycle_id}, strategy_name={strategy_name}, strategy_type={strategy_type}"
+            )
+        
+        return mapping
+
+    def update_strategy_decision_status(
+        self,
+        decision_id: str,
+        status: str,
+        trade_id: Optional[str] = None,
+        error_reason: Optional[str] = None
+    ) -> None:
+        """
+        更新策略执行记录状态，并可选写入 trade_id / error_reason。
+        """
+        def _execute_update(conn):
+            cursor = conn.cursor()
+            try:
+                sql = f"""
+                UPDATE `{self.strategy_decisions_table}`
+                SET `status`=%s,
+                    `trade_id`=%s,
+                    `error_reason`=%s,
+                    `updated_at`=%s
+                WHERE `id`=%s
+                """
+                beijing_tz = timezone(timedelta(hours=8))
+                now_time = datetime.now(beijing_tz).replace(tzinfo=None)
+                cursor.execute(sql, (status, trade_id, error_reason, now_time, decision_id))
+            finally:
+                cursor.close()
+        
+        self._with_connection(_execute_update)
     
     def get_strategy_decisions_by_model_id(
         self,
@@ -283,8 +395,8 @@ class StrategyDecisionsDatabase:
                 cursor = conn.cursor(cursors.DictCursor)
                 try:
                     sql = f"""
-                        SELECT id, model_id, strategy_name, strategy_type, signal, symbol, quantity, 
-                               leverage, price, stop_price, justification, created_at
+                        SELECT id, model_id, cycle_id, strategy_name, strategy_type, status, trade_id, error_reason,
+                               signal, symbol, quantity, leverage, price, stop_price, justification, created_at, updated_at
                         FROM {self.strategy_decisions_table}
                         WHERE model_id = %s
                         ORDER BY {order_by}

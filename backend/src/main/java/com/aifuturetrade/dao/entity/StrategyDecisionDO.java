@@ -37,6 +37,12 @@ public class StrategyDecisionDO implements Serializable {
     private String modelId;
 
     /**
+     * 一次交易循环ID（用于关联同一轮触发/执行）
+     */
+    @TableField("cycle_id")
+    private String cycleId;
+
+    /**
      * 策略名称
      */
     @TableField("strategy_name")
@@ -47,6 +53,12 @@ public class StrategyDecisionDO implements Serializable {
      */
     @TableField("strategy_type")
     private String strategyType;
+
+    /**
+     * 状态：TRIGGERED/EXECUTED/REJECTED
+     */
+    @TableField("status")
+    private String status;
 
     /**
      * 交易信号
@@ -87,10 +99,28 @@ public class StrategyDecisionDO implements Serializable {
     private String justification;
 
     /**
+     * 关联的trades.id（当EXECUTED时写入）
+     */
+    @TableField("trade_id")
+    private String tradeId;
+
+    /**
+     * 拒绝/失败原因（当REJECTED时写入）
+     */
+    @TableField("error_reason")
+    private String errorReason;
+
+    /**
      * 创建时间
      */
     @TableField("created_at")
     private LocalDateTime createdAt;
+
+    /**
+     * 更新时间
+     */
+    @TableField("updated_at")
+    private LocalDateTime updatedAt;
 
 }
 

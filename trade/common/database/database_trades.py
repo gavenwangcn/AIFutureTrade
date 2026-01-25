@@ -170,7 +170,8 @@ class TradesDatabase:
     def add_trade(self, model_id: int, future: str, signal: str, quantity: float,
               price: float, leverage: int = 1, side: str = 'buy', position_side: str = 'LONG', pnl: float = 0, fee: float = 0,
               model_id_mapping: Dict[int, str] = None, orderId: Optional[int] = None,
-              type: Optional[str] = None, origType: Optional[str] = None, error: Optional[str] = None):
+              type: Optional[str] = None, origType: Optional[str] = None, error: Optional[str] = None,
+              strategy_decision_id: Optional[str] = None):
         """
         Add trade record with fee
         
@@ -227,6 +228,11 @@ class TradesDatabase:
             # Build columns and values lists, including new optional fields
             columns = ["id", "model_id", "future", "signal", "quantity", "price", "leverage", "side", "position_side", "pnl", "fee", "timestamp"]
             values = [trade_id, model_uuid, future.upper(), signal, quantity, price, leverage, side, position_side_upper, pnl, fee, current_time]
+
+            # Link to strategy decision if provided
+            if strategy_decision_id is not None:
+                columns.append("strategy_decision_id")
+                values.append(strategy_decision_id)
             
             # Add new fields if provided
             if orderId is not None:

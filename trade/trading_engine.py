@@ -19,6 +19,7 @@ import json
 import logging
 import threading
 import time
+import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import trade.common.config as app_config
 from trade.ai.prompt_defaults import DEFAULT_BUY_CONSTRAINTS, DEFAULT_SELL_CONSTRAINTS, PROMPT_JSON_OUTPUT_SUFFIX
@@ -33,6 +34,7 @@ from trade.common.database.database_futures import FuturesDatabase
 from trade.common.database.database_account_asset import AccountAssetDatabase
 from trade.common.database.database_trades import TradesDatabase
 from trade.common.database.database_binance_trade_logs import BinanceTradeLogsDatabase
+from trade.common.database.database_strategy_decisions import StrategyDecisionsDatabase
 from trade.trading.trading_utils import (
     parse_signal_to_position_side,
     get_side_for_trade,
@@ -90,6 +92,7 @@ class TradingEngine:
         self.account_asset_db = AccountAssetDatabase(pool=db._pool if hasattr(db, '_pool') else None)
         self.trades_db = TradesDatabase(pool=db._pool if hasattr(db, '_pool') else None)
         self.binance_trade_logs_db = BinanceTradeLogsDatabase(pool=db._pool if hasattr(db, '_pool') else None)
+        self.strategy_decisions_db = StrategyDecisionsDatabase(pool=db._pool if hasattr(db, '_pool') else None)
         # 从数据库获取 max_positions（最大持仓数量），如果获取失败则使用默认值3
         try:
             model = self.models_db.get_model(model_id)
@@ -178,6 +181,7 @@ class TradingEngine:
         """
         logger.info(f"[Model {self.model_id}] [卖出服务] ========== 开始执行卖出决策周期 ==========")
         cycle_start_time = datetime.now(timezone(timedelta(hours=8)))
+        cycle_id = str(uuid.uuid4())
         
         try:
             # 检查模型是否存在
@@ -253,7 +257,8 @@ class TradingEngine:
                     market_state,
                     executions,
                     conversation_prompts,
-                    current_prices
+                    current_prices,
+                    cycle_id=cycle_id
                 )
             else:
                 logger.debug(f"[Model {self.model_id}] [卖出服务] [阶段2] 无持仓，跳过卖出决策处理")
@@ -324,6 +329,7 @@ class TradingEngine:
         """
         logger.info(f"[Model {self.model_id}] [买入服务] ========== 开始执行买入决策周期 ==========")
         cycle_start_time = datetime.now(timezone(timedelta(hours=8)))
+        cycle_id = str(uuid.uuid4())
         
         try:
             # 检查模型是否存在
@@ -619,7 +625,8 @@ class TradingEngine:
                     executions,
                     conversation_prompts,
                     current_prices,
-                    symbol_source
+                    symbol_source,
+                    cycle_id=cycle_id
                 )
                 logger.debug(f"[Model {self.model_id}] [买入服务] [阶段2.5] 分批买入决策处理完成")
             else:
@@ -1631,7 +1638,8 @@ class TradingEngine:
         executions: List,
         conversation_prompts: List,
         current_prices: Dict[str, float],
-        symbol_source: str = 'leaderboard'
+        symbol_source: str = 'leaderboard',
+        cycle_id: Optional[str] = None
     ):
         """
         分批处理买入决策（顺序执行，按单元分组统一处理）
@@ -1648,6 +1656,23 @@ class TradingEngine:
         if not candidates:
             logger.debug(f"[Model {self.model_id}] [分批买入] 无候选合约，跳过处理")
             return
+        
+        # 去重：确保同一轮循环中同一symbol只出现一次（避免一个symbol被分到不同批次导致多条策略执行记录/重复执行）
+        unique_candidates = []
+        seen_symbols = set()
+        for c in candidates:
+            sym = (c.get('symbol') or '').upper()
+            if not sym:
+                continue
+            if sym in seen_symbols:
+                continue
+            seen_symbols.add(sym)
+            unique_candidates.append(c)
+        if len(unique_candidates) != len(candidates):
+            logger.info(
+                f"[Model {self.model_id}] [分批买入] 候选symbol去重: {len(candidates)} -> {len(unique_candidates)}"
+            )
+        candidates = unique_candidates
 
         # 从模型配置获取批次大小、批次间隔、分组大小（买入配置）
         model = self.models_db.get_model(self.model_id)
@@ -1692,6 +1717,8 @@ class TradingEngine:
         
         # 存储所有批次的决策结果（用于分组处理）
         all_batch_decisions = []
+        # 记录本轮循环已经写入过策略执行记录的symbol，保证每轮每symbol最多1条记录
+        recorded_strategy_symbols = set()
         
         # 顺序执行各批次
         for batch_idx, batch in enumerate(batches):
@@ -1773,7 +1800,9 @@ class TradingEngine:
                         account_info,
                         constraints,
                         current_prices,
-                        executions
+                        executions,
+                        recorded_strategy_symbols=recorded_strategy_symbols,
+                        cycle_id=cycle_id
                     )
                     logger.debug(f"[Model {self.model_id}] [分批买入] 批次组 {group_start+1}-{group_end} 处理完成")
                     
@@ -1946,6 +1975,18 @@ class TradingEngine:
                 market_state,  # 统一使用market_state，其中已包含source信息
                 model_id=self.model_id
             )
+            
+            # 策略交易模式：把命中的策略名写入每个symbol的decision里（后续统一落库时使用）
+            try:
+                strategy_name = buy_payload.get('cot_trace')
+                decisions = buy_payload.get('decisions') or {}
+                if strategy_name and isinstance(decisions, dict):
+                    for sym, dec in decisions.items():
+                        if isinstance(dec, dict):
+                            dec.setdefault('_strategy_name', strategy_name)
+                            dec.setdefault('_strategy_type', 'buy')
+            except Exception:
+                pass
             ai_call_duration = (datetime.now(timezone(timedelta(hours=8))) - ai_call_start).total_seconds()
             
             is_skipped = buy_payload.get('skipped', False)
@@ -1975,7 +2016,9 @@ class TradingEngine:
         account_info: Dict,
         constraints: Dict,
         current_prices: Dict[str, float],
-        executions: List
+        executions: List,
+        recorded_strategy_symbols: Optional[set] = None,
+        cycle_id: Optional[str] = None
     ):
         """
         统一处理一组批次的决策（插入数据库和调用SDK）- 顺序执行版本
@@ -2004,6 +2047,14 @@ class TradingEngine:
                 logger.debug(f"[Model {self.model_id}] [批次组处理] 无有效决策，跳过执行")
                 return
             
+            # 策略执行记录：保证同一轮循环、同一symbol最多记录1条
+            self._record_strategy_decisions_once(
+                decisions=all_decisions,
+                default_strategy_type='buy',
+                recorded_strategy_symbols=recorded_strategy_symbols,
+                cycle_id=cycle_id
+            )
+            
             logger.debug(f"[Model {self.model_id}] [批次组处理] 合并完成: 决策数={len(all_decisions)}, 对话数={len(all_payloads)}")
             
             # ========== 步骤1: 记录所有批次的AI对话到数据库 ==========
@@ -2030,6 +2081,120 @@ class TradingEngine:
             # 即使发生异常，也不抛出，让主流程继续执行，确保阶段3的账户价值快照检查能够执行
             # 这样即使批次组处理失败，已经添加到executions的结果仍然可以被检查
 
+    def _record_strategy_decisions_once(
+        self,
+        decisions: Dict,
+        default_strategy_type: str,
+        recorded_strategy_symbols: Optional[set] = None,
+        cycle_id: Optional[str] = None
+    ) -> Dict[str, str]:
+        """
+        记录策略执行记录（strategy_decisions），并保证：
+        - 同一轮循环中，同一symbol最多记录1条
+        - 仅在模型 trade_type == 'strategy' 时记录
+        
+        注意：
+        - 策略名来自 decision['_strategy_name']（由 _process_*_batch_decision_only 注入）
+        - strategy_type 来自 decision['_strategy_type']，否则使用 default_strategy_type
+        - 会把写入后的 decision_id 回填到 decisions[symbol]['_strategy_decision_id']，用于后续 trades 关联与状态流转
+        """
+        try:
+            model = self.models_db.get_model(self.model_id)
+            trade_type = (model.get('trade_type', 'ai') if model else 'ai')
+            if trade_type != 'strategy':
+                return {}
+        except Exception:
+            return {}
+        
+        if not decisions or not isinstance(decisions, dict):
+            return {}
+        
+        if recorded_strategy_symbols is None:
+            recorded_strategy_symbols = set()
+        
+        # 获取 model_id 映射（int -> uuid）
+        model_mapping = self.models_db._get_model_id_mapping()
+        model_uuid = model_mapping.get(self.model_id)
+        if not model_uuid:
+            return {}
+
+        # cycle_id 必须存在（用于关联同一轮触发/执行）
+        if not cycle_id:
+            cycle_id = str(uuid.uuid4())
+
+        # decisions key 可能不是大写，建立 upper -> 原key 映射用于回填 decision_id
+        symbol_key_by_upper: Dict[str, str] = {}
+        for k in decisions.keys():
+            try:
+                symbol_key_by_upper[str(k).upper()] = k
+            except Exception:
+                continue
+        
+        # 按 (strategy_name, strategy_type) 分组批量写入
+        grouped: Dict[tuple[str, str], List[Dict]] = {}
+        
+        for symbol, decision in decisions.items():
+            sym = (symbol or '').upper()
+            if not sym:
+                continue
+            if sym in recorded_strategy_symbols:
+                continue
+            if not isinstance(decision, dict):
+                continue
+            
+            signal = (decision.get('signal') or '').lower()
+            if not signal or signal == 'hold':
+                # hold 不计入“策略执行记录”
+                continue
+            
+            recorded_strategy_symbols.add(sym)
+            
+            strategy_name = decision.get('_strategy_name') or decision.get('strategy_name') or '未知策略'
+            strategy_type = decision.get('_strategy_type') or default_strategy_type
+            
+            row = dict(decision)
+            row['symbol'] = sym
+            # 兼容 stopPrice -> stop_price
+            if 'stopPrice' in row and 'stop_price' not in row:
+                row['stop_price'] = row.get('stopPrice')
+            
+            grouped.setdefault((str(strategy_name), str(strategy_type)), []).append(row)
+
+        all_mapping: Dict[str, str] = {}
+        for (strategy_name, strategy_type), rows in grouped.items():
+            if not rows:
+                continue
+            try:
+                mapping = self.strategy_decisions_db.add_strategy_decisions_triggered(
+                    model_id=model_uuid,
+                    cycle_id=cycle_id,
+                    strategy_name=strategy_name,
+                    strategy_type=strategy_type,
+                    decisions=rows
+                )
+                if mapping:
+                    all_mapping.update(mapping)
+            except Exception as e:
+                logger.warning(
+                    f"[Model {self.model_id}] 保存策略执行记录失败: strategy_name={strategy_name}, "
+                    f"strategy_type={strategy_type}, rows={len(rows)}, err={e}"
+                )
+
+        # 回填 decision_id（用于后续 trades 关联）
+        if all_mapping:
+            for sym_upper, decision_id in all_mapping.items():
+                key = symbol_key_by_upper.get(sym_upper)
+                if not key:
+                    continue
+                try:
+                    dec = decisions.get(key)
+                    if isinstance(dec, dict):
+                        dec['_strategy_decision_id'] = decision_id
+                except Exception:
+                    continue
+
+        return all_mapping
+
     def _make_batch_sell_decisions(
         self,
         positions: List[Dict],
@@ -2039,7 +2204,8 @@ class TradingEngine:
         market_state: Dict,
         executions: List,
         conversation_prompts: List,
-        current_prices: Dict[str, float]
+        current_prices: Dict[str, float],
+        cycle_id: Optional[str] = None
     ):
         """
         分批处理卖出决策（与买入决策使用相同的批次执行逻辑）
@@ -2056,6 +2222,9 @@ class TradingEngine:
         if not positions:
             logger.debug(f"[Model {self.model_id}] [分批卖出] 无持仓，跳过处理")
             return
+
+        # 记录本轮循环已经写入过策略执行记录的symbol，保证每轮每symbol最多1条记录
+        recorded_strategy_symbols: set = set()
 
         # 从模型配置获取批次大小、批次间隔、分组大小（卖出配置）
         model = self.models_db.get_model(self.model_id)
@@ -2186,7 +2355,9 @@ class TradingEngine:
                     portfolio,
                     account_info,
                     current_prices,
-                    executions
+                    executions,
+                    recorded_strategy_symbols=recorded_strategy_symbols,
+                    cycle_id=cycle_id
                 )
                 
                 logger.debug(f"[Model {self.model_id}] [分批卖出] 批次组 {group_start+1}-{group_end} 处理完成")
@@ -2231,7 +2402,9 @@ class TradingEngine:
         portfolio: Dict,
         account_info: Dict,
         current_prices: Dict[str, float],
-        executions: List
+        executions: List,
+        recorded_strategy_symbols: Optional[set] = None,
+        cycle_id: Optional[str] = None
     ):
         """
         统一处理一组批次的卖出决策（插入数据库和调用SDK）- 顺序执行版本
@@ -2257,6 +2430,14 @@ class TradingEngine:
         if not all_decisions:
             logger.debug(f"[Model {self.model_id}] [卖出批次组处理] 无有效卖出决策，跳过执行")
             return
+
+        # 策略执行记录：保证同一轮循环、同一symbol最多记录1条
+        self._record_strategy_decisions_once(
+            decisions=all_decisions,
+            default_strategy_type='sell',
+            recorded_strategy_symbols=recorded_strategy_symbols,
+            cycle_id=cycle_id
+        )
         
         logger.debug(f"[Model {self.model_id}] [卖出批次组处理] 合并完成: 卖出决策数={len(all_decisions)}, 对话数={len(all_payloads)}")
         
@@ -2376,6 +2557,18 @@ class TradingEngine:
                 account_info,
                 model_id=self.model_id
             )
+            
+            # 策略交易模式：把命中的策略名写入每个symbol的decision里（后续统一落库时使用）
+            try:
+                strategy_name = sell_payload.get('cot_trace')
+                decisions = sell_payload.get('decisions') or {}
+                if strategy_name and isinstance(decisions, dict):
+                    for sym, dec in decisions.items():
+                        if isinstance(dec, dict):
+                            dec.setdefault('_strategy_name', strategy_name)
+                            dec.setdefault('_strategy_type', 'sell')
+            except Exception:
+                pass
             ai_call_duration = (datetime.now(timezone(timedelta(hours=8))) - ai_call_start).total_seconds()
             
             is_skipped = sell_payload.get('skipped', False)
@@ -2884,20 +3077,16 @@ class TradingEngine:
             logger.debug(f"[Model {self.model_id}] [交易执行] 获取到交易锁，=====开始执行SDK交易决策=====")
             
             for symbol, decision in decisions.items():
-                signal = decision.get('signal', '').lower()
+                signal = (decision.get('signal', '') if isinstance(decision, dict) else '').lower()
+                decision_id = None
+                if isinstance(decision, dict):
+                    decision_id = decision.get('_strategy_decision_id') or decision.get('strategy_decision_id')
 
+                result = None
                 try:
                     if signal == 'buy_to_long' or signal == 'buy_to_short':
-                        # 【市场价买入】buy_to_long（开多）和buy_to_short（开空）都调用_execute_buy方法
-                        # _execute_buy方法会根据signal自动确定position_side：
-                        # - buy_to_long → position_side = 'LONG'
-                        # - buy_to_short → position_side = 'SHORT'
                         result = self._execute_buy(symbol, decision, market_state, portfolio)
                     elif signal == 'sell_to_long' or signal == 'sell_to_short':
-                        # 【市场价卖出/平仓】sell_to_long（平多）和sell_to_short（平空）都调用_execute_sell方法
-                        # _execute_sell方法会根据signal自动确定position_side：
-                        # - sell_to_long → position_side = 'LONG'（平多仓）
-                        # - sell_to_short → position_side = 'SHORT'（平空仓）
                         result = self._execute_sell(symbol, decision, market_state, portfolio)
                     elif signal == 'close_position':
                         if symbol not in positions_map:
@@ -2918,16 +3107,42 @@ class TradingEngine:
                         result = {'symbol': symbol, 'signal': 'hold', 'message': '保持观望'}
                     else:
                         result = {'symbol': symbol, 'error': f'Unknown signal: {signal}'}
-
-                    results.append(result)
-
                 except Exception as e:
                     # 记录异常，但继续执行其他交易决策
-                    # 注意：所有数据库操作都通过 _with_connection 方法执行，连接会在异常时自动释放
                     logger.error(f"[Model {self.model_id}] [交易执行] 执行交易决策失败 (symbol={symbol}): {e}")
                     import traceback
                     logger.debug(f"[Model {self.model_id}] [交易执行] 异常堆栈:\n{traceback.format_exc()}")
-                    results.append({'symbol': symbol, 'error': str(e)})
+                    result = {'symbol': symbol, 'error': str(e)}
+                finally:
+                    # 策略交易模式：把 TRIGGERED 的 decision 更新为 EXECUTED/REJECTED，并写入 trade_id/error_reason
+                    if decision_id:
+                        try:
+                            trade_id = None
+                            err = None
+                            if isinstance(result, dict):
+                                trade_id = result.get('trade_id') or result.get('tradeId')
+                                err = result.get('error')
+                            if trade_id:
+                                self.strategy_decisions_db.update_strategy_decision_status(
+                                    decision_id=decision_id,
+                                    status="EXECUTED",
+                                    trade_id=trade_id,
+                                    error_reason=None
+                                )
+                            elif err:
+                                self.strategy_decisions_db.update_strategy_decision_status(
+                                    decision_id=decision_id,
+                                    status="REJECTED",
+                                    trade_id=None,
+                                    error_reason=str(err)
+                                )
+                        except Exception as update_err:
+                            logger.warning(
+                                f"[Model {self.model_id}] 更新策略执行记录状态失败: symbol={symbol}, "
+                                f"decision_id={decision_id}, err={update_err}"
+                            )
+
+                results.append(result)
             
             logger.debug(f"[Model {self.model_id}] [交易执行] 交易决策执行完成，释放交易锁")
 
@@ -3034,6 +3249,9 @@ class TradingEngine:
         
         # 获取交易上下文
         model_uuid, trade_id = self._get_trade_context()
+        strategy_decision_id = None
+        if isinstance(decision, dict):
+            strategy_decision_id = decision.get('_strategy_decision_id') or decision.get('strategy_decision_id')
         
         # 根据is_virtual判断使用real还是test模式
         trade_mode = self._get_trade_mode()
@@ -3210,6 +3428,11 @@ class TradingEngine:
             # 构建插入数据的列和值
             columns = ["id", "model_id", "future", "signal", "quantity", "price", "leverage", "side", "position_side", "pnl", "fee", "initial_margin", "timestamp"]
             values = [trade_id, model_uuid, symbol.upper(), trade_signal_final, trade_quantity, trade_price, leverage, trade_side_direction, trade_position_side_final_upper, 0, trade_fee, initial_margin, datetime.now(timezone(timedelta(hours=8))).replace(tzinfo=None)]
+
+            # 关联策略执行记录（strategy_decisions.id）
+            if strategy_decision_id:
+                columns.append("strategy_decision_id")
+                values.append(strategy_decision_id)
             
             # 添加新字段（如果real模式有值）
             if order_id is not None:
@@ -3251,6 +3474,8 @@ class TradingEngine:
 
         return {
             'symbol': symbol,
+            'trade_id': trade_id,
+            'strategy_decision_id': strategy_decision_id,
             'signal': trade_signal,  # 返回实际的signal（buy_to_long或buy_to_short）
             'position_amt': position_amt,  # 合约数量
             'quantity': quantity,  # 合约数量（与strategy_decisions表保持一致）
@@ -3314,6 +3539,9 @@ class TradingEngine:
         
         # 获取交易上下文
         model_uuid, trade_id = self._get_trade_context()
+        strategy_decision_id = None
+        if isinstance(decision, dict):
+            strategy_decision_id = decision.get('_strategy_decision_id') or decision.get('strategy_decision_id')
         
         # 根据is_virtual判断使用real还是test模式
         trade_mode = self._get_trade_mode()
@@ -3471,6 +3699,11 @@ class TradingEngine:
             # 构建插入数据的列和值
             columns = ["id", "model_id", "future", "signal", "quantity", "price", "leverage", "side", "position_side", "pnl", "fee", "initial_margin", "timestamp"]
             values = [trade_id, model_uuid, symbol.upper(), trade_signal_final, trade_quantity, trade_price, leverage, trade_side_direction, trade_position_side_final_upper, net_pnl, trade_fee, initial_margin, datetime.now(timezone(timedelta(hours=8))).replace(tzinfo=None)]
+
+            # 关联策略执行记录（strategy_decisions.id）
+            if strategy_decision_id:
+                columns.append("strategy_decision_id")
+                values.append(strategy_decision_id)
             
             # 添加新字段（如果real模式有值）
             if order_id is not None:
@@ -3512,6 +3745,8 @@ class TradingEngine:
         
         return {
             'symbol': symbol,
+            'trade_id': trade_id,
+            'strategy_decision_id': strategy_decision_id,
             'signal': trade_signal,  # 返回实际的signal（sell_to_long或sell_to_short）
             'position_amt': position_amt,
             'position_side': position_side,  # 返回position_side信息
@@ -3571,6 +3806,9 @@ class TradingEngine:
 
         # 获取交易上下文
         model_uuid, trade_id = self._get_trade_context()
+        strategy_decision_id = None
+        if isinstance(decision, dict):
+            strategy_decision_id = decision.get('_strategy_decision_id') or decision.get('strategy_decision_id')
         
         # 根据is_virtual判断使用real还是test模式
         trade_mode = self._get_trade_mode()
@@ -3705,6 +3943,11 @@ class TradingEngine:
             # 构建插入数据的列和值
             columns = ["id", "model_id", "future", "signal", "quantity", "price", "leverage", "side", "position_side", "pnl", "fee", "initial_margin", "timestamp"]
             values = [trade_id, model_uuid, symbol.upper(), trade_signal_final, trade_quantity, trade_price, leverage, trade_side_direction, trade_position_side_final_upper, net_pnl, trade_fee, initial_margin, datetime.now(timezone(timedelta(hours=8))).replace(tzinfo=None)]
+
+            # 关联策略执行记录（strategy_decisions.id）
+            if strategy_decision_id:
+                columns.append("strategy_decision_id")
+                values.append(strategy_decision_id)
             
             # 添加新字段（如果real模式有值）
             if order_id is not None:
@@ -3745,6 +3988,8 @@ class TradingEngine:
 
         return {
             'symbol': symbol,
+            'trade_id': trade_id,
+            'strategy_decision_id': strategy_decision_id,
             'signal': 'close_position',
             'position_amt': position_amt,
             'price': current_price,
@@ -3811,6 +4056,9 @@ class TradingEngine:
 
         # 获取交易上下文
         model_uuid, trade_id = self._get_trade_context()
+        strategy_decision_id = None
+        if isinstance(decision, dict):
+            strategy_decision_id = decision.get('_strategy_decision_id') or decision.get('strategy_decision_id')
         
         # 根据is_virtual判断使用real还是test模式
         trade_mode = self._get_trade_mode()
@@ -3972,6 +4220,11 @@ class TradingEngine:
             # 构建插入数据的列和值
             columns = ["id", "model_id", "future", "signal", "quantity", "price", "leverage", "side", "position_side", "pnl", "fee", "initial_margin", "timestamp"]
             values = [trade_id, model_uuid, symbol.upper(), trade_signal_final, trade_quantity, trade_price, leverage, trade_side_direction, trade_position_side_final_upper, calculated_pnl, trade_fee, initial_margin, datetime.now(timezone(timedelta(hours=8))).replace(tzinfo=None)]
+
+            # 关联策略执行记录（strategy_decisions.id）
+            if strategy_decision_id:
+                columns.append("strategy_decision_id")
+                values.append(strategy_decision_id)
             
             # 添加新字段（如果real模式有值）
             if order_id is not None:
@@ -4042,6 +4295,8 @@ class TradingEngine:
 
         return {
             'symbol': symbol,
+            'trade_id': trade_id,
+            'strategy_decision_id': strategy_decision_id,
             'signal': 'stop_loss',
             'quantity': strategy_quantity,
             'position_amt': new_position_amt if new_position_amt > 0 else 0,
@@ -4112,6 +4367,9 @@ class TradingEngine:
 
         # 获取交易上下文
         model_uuid, trade_id = self._get_trade_context()
+        strategy_decision_id = None
+        if isinstance(decision, dict):
+            strategy_decision_id = decision.get('_strategy_decision_id') or decision.get('strategy_decision_id')
         
         # 根据is_virtual判断使用real还是test模式
         trade_mode = self._get_trade_mode()
@@ -4273,6 +4531,11 @@ class TradingEngine:
             # 构建插入数据的列和值
             columns = ["id", "model_id", "future", "signal", "quantity", "price", "leverage", "side", "position_side", "pnl", "fee", "initial_margin", "timestamp"]
             values = [trade_id, model_uuid, symbol.upper(), trade_signal_final, trade_quantity, trade_price, leverage, trade_side_direction, trade_position_side_final_upper, calculated_pnl, trade_fee, initial_margin, datetime.now(timezone(timedelta(hours=8))).replace(tzinfo=None)]
+
+            # 关联策略执行记录（strategy_decisions.id）
+            if strategy_decision_id:
+                columns.append("strategy_decision_id")
+                values.append(strategy_decision_id)
             
             # 添加新字段（如果real模式有值）
             if order_id is not None:
@@ -4339,6 +4602,8 @@ class TradingEngine:
 
         return {
             'symbol': symbol,
+            'trade_id': trade_id,
+            'strategy_decision_id': strategy_decision_id,
             'signal': 'take_profit',
             'quantity': strategy_quantity,
             'position_amt': new_position_amt if new_position_amt > 0 else 0,

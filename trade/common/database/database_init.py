@@ -233,6 +233,7 @@ class DatabaseInitializer:
             `pnl` DOUBLE DEFAULT 0,
             `fee` DOUBLE DEFAULT 0,
             `initial_margin` DOUBLE DEFAULT 0.0,
+            `strategy_decision_id` VARCHAR(36) DEFAULT NULL COMMENT '关联的策略决策ID（strategy_decisions.id）',
             `orderId` BIGINT DEFAULT NULL COMMENT '系统订单号',
             `type` VARCHAR(50) DEFAULT NULL COMMENT '订单类型',
             `origType` VARCHAR(50) DEFAULT NULL COMMENT '触发前订单类型',
@@ -244,11 +245,32 @@ class DatabaseInitializer:
             INDEX `idx_side` (`side`),
             INDEX `idx_position_side` (`position_side`),
             INDEX `idx_timestamp` (`timestamp`),
-            INDEX `idx_orderId` (`orderId`)
+            INDEX `idx_orderId` (`orderId`),
+            INDEX `idx_strategy_decision_id` (`strategy_decision_id`)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
         """
         self.command(ddl)
         logger.debug(f"[DatabaseInit] Ensured table {table_name} exists")
+        
+        # Check and add strategy_decision_id field (if table exists but field doesn't exist)
+        try:
+            check_column_sql = f"""
+            SELECT COUNT(*) FROM information_schema.COLUMNS 
+            WHERE TABLE_SCHEMA = DATABASE() 
+            AND TABLE_NAME = '{table_name}' 
+            AND COLUMN_NAME = 'strategy_decision_id'
+            """
+            result = self.command(check_column_sql)
+            if isinstance(result, list) and len(result) > 0 and result[0][0] == 0:
+                alter_sql = f"""
+                ALTER TABLE `{table_name}` 
+                ADD COLUMN `strategy_decision_id` VARCHAR(36) DEFAULT NULL COMMENT '关联的策略决策ID（strategy_decisions.id）' AFTER `initial_margin`,
+                ADD INDEX `idx_strategy_decision_id` (`strategy_decision_id`)
+                """
+                self.command(alter_sql)
+                logger.info(f"[DatabaseInit] Added strategy_decision_id column to {table_name} table")
+        except Exception as e:
+            logger.warning(f"[DatabaseInit] Failed to check/add strategy_decision_id column to {table_name}: {e}")
        
     def ensure_conversations_table(self, table_name: str = "conversations"):
         """Create conversations table if not exists"""
@@ -556,8 +578,10 @@ class DatabaseInitializer:
         CREATE TABLE IF NOT EXISTS `{table_name}` (
             `id` VARCHAR(36) PRIMARY KEY,
             `model_id` VARCHAR(36) NOT NULL COMMENT 'Model ID',
+            `cycle_id` VARCHAR(36) DEFAULT NULL COMMENT '一次交易循环ID（用于关联同一轮触发/执行）',
             `strategy_name` VARCHAR(200) NOT NULL COMMENT 'Strategy name',
             `strategy_type` VARCHAR(10) NOT NULL COMMENT 'Strategy type: buy-buy, sell-sell',
+            `status` VARCHAR(20) NOT NULL DEFAULT 'TRIGGERED' COMMENT '状态：TRIGGERED/EXECUTED/REJECTED',
             `signal` VARCHAR(50) NOT NULL COMMENT 'Trading signal',
             `symbol` VARCHAR(50) COMMENT 'Contract name (nullable)',
             `quantity` DECIMAL(20, 8) COMMENT 'Quantity',
@@ -565,11 +589,17 @@ class DatabaseInitializer:
             `price` DECIMAL(20, 8) COMMENT 'Expected price (nullable)',
             `stop_price` DECIMAL(20, 8) COMMENT 'Trigger price (nullable)',
             `justification` TEXT COMMENT 'Trigger reason (nullable)',
+            `trade_id` VARCHAR(36) DEFAULT NULL COMMENT '关联的trades.id（当EXECUTED时写入）',
+            `error_reason` TEXT DEFAULT NULL COMMENT '拒绝/失败原因（当REJECTED时写入）',
             `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP,
+            `updated_at` DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
             INDEX `idx_model_id` (`model_id`),
             INDEX `idx_model_created_at` (`model_id`, `created_at`),
+            INDEX `idx_cycle_id` (`cycle_id`),
             INDEX `idx_strategy_name` (`strategy_name`),
             INDEX `idx_strategy_type` (`strategy_type`),
+            INDEX `idx_status` (`status`),
+            INDEX `idx_trade_id` (`trade_id`),
             INDEX `idx_signal` (`signal`),
             INDEX `idx_symbol` (`symbol`),
             INDEX `idx_created_at` (`created_at`)
@@ -599,6 +629,62 @@ class DatabaseInitializer:
                 logger.info(f"[DatabaseInit] Added symbol column to {table_name} table")
         except Exception as e:
             logger.warning(f"[DatabaseInit] Failed to check/add symbol column to {table_name}: {e}")
+        
+        # Check and add state-machine related columns (for existing databases)
+        try:
+            def _ensure_column(column_name: str, alter_sql: str):
+                check_sql = f"""
+                SELECT COUNT(*) FROM information_schema.COLUMNS 
+                WHERE TABLE_SCHEMA = DATABASE() 
+                AND TABLE_NAME = '{table_name}' 
+                AND COLUMN_NAME = '{column_name}'
+                """
+                r = self.command(check_sql)
+                if isinstance(r, list) and len(r) > 0 and r[0][0] == 0:
+                    self.command(alter_sql)
+                    logger.info(f"[DatabaseInit] Added {column_name} column to {table_name} table")
+            
+            _ensure_column(
+                "cycle_id",
+                f"""
+                ALTER TABLE `{table_name}` 
+                ADD COLUMN `cycle_id` VARCHAR(36) DEFAULT NULL COMMENT '一次交易循环ID（用于关联同一轮触发/执行）' AFTER `model_id`,
+                ADD INDEX `idx_cycle_id` (`cycle_id`)
+                """
+            )
+            _ensure_column(
+                "status",
+                f"""
+                ALTER TABLE `{table_name}` 
+                ADD COLUMN `status` VARCHAR(20) NOT NULL DEFAULT 'TRIGGERED' COMMENT '状态：TRIGGERED/EXECUTED/REJECTED' AFTER `strategy_type`,
+                ADD INDEX `idx_status` (`status`)
+                """
+            )
+            _ensure_column(
+                "trade_id",
+                f"""
+                ALTER TABLE `{table_name}` 
+                ADD COLUMN `trade_id` VARCHAR(36) DEFAULT NULL COMMENT '关联的trades.id（当EXECUTED时写入）' AFTER `justification`,
+                ADD INDEX `idx_trade_id` (`trade_id`)
+                """
+            )
+            _ensure_column(
+                "error_reason",
+                f"""
+                ALTER TABLE `{table_name}` 
+                ADD COLUMN `error_reason` TEXT DEFAULT NULL COMMENT '拒绝/失败原因（当REJECTED时写入）' AFTER `trade_id`
+                """
+            )
+            _ensure_column(
+                "updated_at",
+                f"""
+                ALTER TABLE `{table_name}` 
+                ADD COLUMN `updated_at` DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP AFTER `created_at`,
+                ADD INDEX `idx_updated_at` (`updated_at`)
+                """
+            )
+        except Exception as e:
+            logger.warning(f"[DatabaseInit] Failed to check/add state-machine columns to {table_name}: {e}")
     
     # ============ Market Data Table Initialization Methods ============
     
