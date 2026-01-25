@@ -1005,7 +1005,7 @@ let portfolioRefreshInterval = null // 投资组合数据自动刷新定时器�
     }
     
     if (isMultiModel) {
-      // 多模型图表
+      // 多模型图表 - 参考官方示例，简化配置
       if (!history || history.length === 0) {
         try {
           accountChart.value.setOption({
@@ -1018,12 +1018,14 @@ let portfolioRefreshInterval = null // 投资组合数据自动刷新定时器�
             xAxis: { show: false },
             yAxis: { show: false },
             series: []
-          }, true) // 第二个参数 true 表示不合并，完全替换
+          }, true)
         } catch (error) {
           console.error('[TradingApp] Error setting chart option (multi-model empty):', error)
         }
         return
       }
+      
+      console.log('[TradingApp] 多模型图表数据:', history.length, '个模型')
       
       const colors = [
         '#3370ff', '#ff6b35', '#00b96b', '#722ed1', '#fa8c16',
@@ -1033,186 +1035,110 @@ let portfolioRefreshInterval = null // 投资组合数据自动刷新定时器�
       // 收集所有时间点
       const allTimestamps = new Set()
       history.forEach(model => {
-        if (model.data) {
+        if (model.data && Array.isArray(model.data)) {
           model.data.forEach(point => {
-            allTimestamps.add(point.timestamp)
+            if (point && point.timestamp) {
+              allTimestamps.add(point.timestamp)
+            }
           })
         }
       })
       
-      // 处理时间轴：后端已返回UTC+8时区的ISO格式字符串（如 '2024-01-01T12:00:00+08:00'）
+      // 处理时间轴
       const timeAxis = Array.from(allTimestamps).sort((a, b) => {
-        // 直接解析ISO格式字符串（包含时区信息）
         const timeA = new Date(a).getTime()
         const timeB = new Date(b).getTime()
         if (isNaN(timeA) || isNaN(timeB)) {
-          console.warn('[TradingApp] Invalid timestamp format:', a, b)
           return 0
         }
         return timeA - timeB
       })
       
       const formattedTimeAxis = timeAxis.map(timestamp => {
-        // 后端返回的是UTC+8时区的ISO格式字符串，直接解析并格式化显示
         const date = new Date(timestamp)
         if (isNaN(date.getTime())) {
-          console.warn('[TradingApp] Invalid timestamp:', timestamp)
-          return timestamp // 如果解析失败，返回原始字符串
+          return timestamp
         }
-        // 格式化为本地时间显示（后端已经是UTC+8，所以直接显示即可）
         return date.toLocaleTimeString('zh-CN', {
           hour: '2-digit',
           minute: '2-digit'
         })
       })
       
+      console.log('[TradingApp] 时间轴数量:', formattedTimeAxis.length)
+      
+      // 为每个模型创建series
       const series = history.map((model, index) => {
         const color = colors[index % colors.length]
+        const modelName = model.model_name || model.name || `模型 ${index + 1}`
+        
+        // 为每个时间点创建数据点
         const dataPoints = timeAxis.map(time => {
-          const point = model.data?.find(p => p.timestamp === time)
-          if (!point) return null
-          
-          // 保留完整的point对象，包括trade信息
-          const dataPoint = {
-            value: point.value,
-            tradeId: point.tradeId,
-            timestamp: point.timestamp
+          const point = model.data?.find(p => p && p.timestamp === time)
+          if (!point || point.value === null || point.value === undefined) {
+            return null
           }
-          
-          // 如果有trade_id，添加trade信息到extra字段
-          if (point.tradeId) {
-            let symbol = '未知'
-            let signal = '未知'
-            let quantity = 0
-            
-            // 优先使用后端返回的trade信息
-            if (point.tradeFuture || point.tradeSignal !== null || point.tradeQuantity !== null) {
-              symbol = point.tradeFuture || '未知'
-              signal = point.tradeSignal || '未知'
-              quantity = point.tradeQuantity || 0
-            }
-            
-            // 翻译signal为中文
-            const translatedSignal = translateSignalForChart(signal)
-            
-            // 将trade信息保存到extra字段
-            dataPoint.extra = `${symbol} | ${translatedSignal} | ${quantity}`
-          }
-          
-          return dataPoint
+          return point.value
         })
         
-        // 确保 series 对象包含所有必需的属性
+        console.log(`[TradingApp] 模型 ${modelName} 数据点数量:`, dataPoints.filter(d => d !== null).length)
+        
         return {
-          name: model.model_name || `模型 ${index + 1}`,
-          type: 'line', // 确保 type 属性存在
-          data: dataPoints || [],
+          name: modelName,
+          type: 'line',
+          data: dataPoints,
           smooth: true,
-          symbol: (value, params) => {
-            // 如果有trade信息，显示稍大的点
-            return params.data && params.data.tradeId ? 'circle' : 'none'
+          symbol: 'circle',
+          symbolSize: 0,
+          lineStyle: { 
+            color: color, 
+            width: 2 
           },
-          symbolSize: (value, params) => {
-            // 如果有trade信息，显示稍大的点
-            return params.data && params.data.tradeId ? 8 : 0
+          itemStyle: { 
+            color: color 
           },
-          lineStyle: { color: color, width: 2 },
-          itemStyle: { color: color },
-          connectNulls: true,
-          emphasis: {
-            focus: 'series',
-            itemStyle: {
-              borderWidth: 2,
-              borderColor: color,
-              shadowBlur: 10,
-              shadowColor: `${color}4D` // 50% opacity
-            }
-          }
+          connectNulls: true
         }
-      }).filter(s => s && s.type) // 过滤掉无效的 series
+      })
       
-      // 确保 series 数组有效且不为空
-      if (!series || series.length === 0) {
-        console.warn('[TradingApp] No valid series data for multi-model chart')
-        return
-      }
+      console.log('[TradingApp] 创建的series数量:', series.length)
       
+      // 参考官方示例构建option
       const option = {
-        title: {
-          text: '模型表现对比',
-          left: 'center',
-          top: 10,
-          textStyle: { color: '#1d2129', fontSize: 16, fontWeight: 'normal' }
+        tooltip: {
+          trigger: 'axis'
+        },
+        legend: {
+          data: series.map(s => s.name),
+          bottom: 10
         },
         grid: {
-          left: '60',
-          right: '20',
-          bottom: '80',
-          top: '50',
-          containLabel: false
+          left: '3%',
+          right: '4%',
+          bottom: '15%',
+          top: '10%',
+          containLabel: true
         },
         xAxis: {
           type: 'category',
           boundaryGap: false,
-          data: formattedTimeAxis || [],
-          axisLine: { lineStyle: { color: '#e5e6eb' } },
-          axisLabel: { color: '#86909c', fontSize: 11, rotate: 45 }
+          data: formattedTimeAxis
         },
         yAxis: {
-          type: 'value',
-          scale: true,
-          axisLine: { lineStyle: { color: '#e5e6eb' } },
-          axisLabel: {
-            color: '#86909c',
-            fontSize: 11,
-            formatter: (value) => `$${value.toLocaleString()}`
-          },
-          splitLine: { lineStyle: { color: '#f2f3f5' } }
+          type: 'value'
         },
-        legend: {
-          data: history.map(model => model.model_name || '模型').filter(Boolean),
-          bottom: 10,
-          itemGap: 20,
-          textStyle: { color: '#1d2129', fontSize: 12 }
-        },
-        series: series,
-        tooltip: {
-          trigger: 'axis',
-          backgroundColor: 'rgba(255, 255, 255, 0.95)',
-          borderColor: '#e5e6eb',
-          borderWidth: 1,
-          textStyle: { color: '#1d2129' },
-          formatter: (params) => {
-            if (!params || !params[0]) return ''
-            
-            // 只显示交易信息，按照指定格式输出
-            for (const param of params) {
-              if (!param || param.value === null || param.value === undefined) continue
-              
-              // 尝试多种方式获取extra信息
-              let extraInfo = null
-              
-              // 处理value为对象的情况
-              if (typeof param.value === 'object' && param.value.extra) {
-                extraInfo = param.value.extra
-              } else if (param.data && typeof param.data === 'object') {
-                extraInfo = param.data.extra || null
-              }
-              
-              // 如果找到了extra信息，按照指定格式输出
-              if (extraInfo) {
-                return `"交易信息":"${extraInfo}"`
-              }
-            }
-            
-            // 如果没有交易信息，不显示tooltip
-            return null
-          }
-        }
+        series: series
       }
+      
       try {
         if (accountChart.value && typeof accountChart.value.setOption === 'function') {
-          accountChart.value.setOption(option, true) // 第二个参数 true 表示不合并，完全替换
+          accountChart.value.setOption(option, true)
+          // 确保图表尺寸正确
+          setTimeout(() => {
+            if (accountChart.value && typeof accountChart.value.resize === 'function') {
+              accountChart.value.resize()
+            }
+          }, 100)
         }
       } catch (error) {
         console.error('[TradingApp] Error setting chart option (multi-model):', error)
