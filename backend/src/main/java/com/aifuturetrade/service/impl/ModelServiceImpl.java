@@ -809,7 +809,7 @@ public class ModelServiceImpl implements ModelService {
             log.debug("[ModelService] 提取的持仓symbol列表: {}", symbols);
             
             if (symbols.isEmpty()) {
-                log.warn("[ModelService] 持仓symbol列表为空，返回空数据");
+                log.debug("[ModelService] 持仓symbol列表为空，返回空数据");
                 Map<String, Object> result = new HashMap<>();
                 result.put("data", new ArrayList<>());
                 return result;
