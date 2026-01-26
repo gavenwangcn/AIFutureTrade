@@ -163,6 +163,43 @@ class StrategyTrader(Trader):
                     continue
             return filtered
 
+        def _log_close_prices_for_symbols(
+            context: str, symbols: List[str], ms: Dict
+        ) -> None:
+            """
+            在提交给策略代码前，打印每个symbol的收盘价信息。
+            目前收盘价使用 TradingEngine 注入的 previous_close_prices（上一根K线收盘价，按 timeframe 映射）。
+            """
+            try:
+                if not symbols or not ms or not isinstance(ms, dict):
+                    return
+                # 将 market_state key 归一化为 upper，便于按 symbol 查找
+                ms_by_upper = {}
+                for k, v in ms.items():
+                    try:
+                        ms_by_upper[str(k).upper()] = v
+                    except Exception:
+                        continue
+
+                lines: List[str] = []
+                for sym in symbols:
+                    sym_u = str(sym).upper()
+                    payload = ms_by_upper.get(sym_u) or {}
+                    prev_close = payload.get('previous_close_prices') if isinstance(payload, dict) else None
+                    price = payload.get('price') if isinstance(payload, dict) else None
+                    prev_close_json = json.dumps(prev_close, ensure_ascii=False, default=str)
+                    lines.append(
+                        f"symbol={sym_u} | price实时价={price} | previous_close_prices收盘价={prev_close_json}"
+                    )
+
+                if lines:
+                    logger.info(
+                        f"[StrategyTrader] [Model {effective_model_id}] 提交到策略代码({context}) 收盘价信息:\n"
+                        + "\n".join(lines)
+                    )
+            except Exception as e:
+                logger.debug(f"[StrategyTrader] 打印收盘价日志失败: {e}")
+
         # 使用工作副本（避免污染外部对象）
         working_account_info: Dict = dict(account_info) if isinstance(account_info, dict) else {}
         working_portfolio: Dict = dict(portfolio) if isinstance(portfolio, dict) else {}
@@ -270,6 +307,20 @@ class StrategyTrader(Trader):
             logger.debug(f"[StrategyTrader] [Model {effective_model_id}] 执行策略: {strategy_name} (优先级: {priority})")
 
             try:
+                # 在提交给策略代码前打印候选symbol的收盘价信息（上一根K线收盘价）
+                try:
+                    symbols_for_log = []
+                    for c in remaining_candidates:
+                        sym_u = str(c.get('symbol') or c.get('contract_symbol') or '').upper()
+                        if sym_u:
+                            symbols_for_log.append(sym_u)
+                    # 去重保序
+                    seen = set()
+                    symbols_for_log = [s for s in symbols_for_log if not (s in seen or seen.add(s))]
+                    _log_close_prices_for_symbols(f"buy/{strategy_name}", symbols_for_log, filtered_market_state)
+                except Exception:
+                    pass
+
                 decision_result = self.code_executor.execute_strategy_code(
                     strategy_code=strategy_code,
                     strategy_name=strategy_name,
@@ -494,6 +545,43 @@ class StrategyTrader(Trader):
             logger.debug(f"[StrategyTrader] [Model {effective_model_id}] 执行策略: {strategy_name} (优先级: {priority})")
 
             try:
+                # 在提交给策略代码前打印持仓symbol的收盘价信息（上一根K线收盘价）
+                try:
+                    symbols_for_log = []
+                    for p in remaining_positions:
+                        sym_u = str(p.get('symbol') or '').upper()
+                        if sym_u:
+                            symbols_for_log.append(sym_u)
+                    # 去重保序
+                    seen = set()
+                    symbols_for_log = [s for s in symbols_for_log if not (s in seen or seen.add(s))]
+
+                    # 将 market_state key 归一化为 upper，便于按 symbol 查找
+                    ms_by_upper = {}
+                    for k, v in (filtered_market_state or {}).items():
+                        try:
+                            ms_by_upper[str(k).upper()] = v
+                        except Exception:
+                            continue
+
+                    lines = []
+                    for sym_u in symbols_for_log:
+                        payload = ms_by_upper.get(sym_u) or {}
+                        prev_close = payload.get('previous_close_prices') if isinstance(payload, dict) else None
+                        price = payload.get('price') if isinstance(payload, dict) else None
+                        prev_close_json = json.dumps(prev_close, ensure_ascii=False, default=str)
+                        lines.append(
+                            f"symbol={sym_u} | price实时价={price} | previous_close_prices收盘价={prev_close_json}"
+                        )
+
+                    if lines:
+                        logger.info(
+                            f"[StrategyTrader] [Model {effective_model_id}] 提交到策略代码(sell/{strategy_name}) 收盘价信息:\n"
+                            + "\n".join(lines)
+                        )
+                except Exception:
+                    pass
+
                 decision_result = self.code_executor.execute_strategy_code(
                     strategy_code=strategy_code,
                     strategy_name=strategy_name,
