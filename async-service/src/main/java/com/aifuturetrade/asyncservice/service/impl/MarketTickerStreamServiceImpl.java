@@ -5,7 +5,6 @@ import com.aifuturetrade.asyncservice.dao.mapper.MarketTickerMapper;
 import com.aifuturetrade.asyncservice.entity.ExistingSymbolData;
 import com.aifuturetrade.asyncservice.entity.MarketTickerDO;
 import com.aifuturetrade.asyncservice.service.MarketTickerStreamService;
-import com.binance.connector.client.common.websocket.adapter.stream.StreamConnectionWrapper;
 import com.binance.connector.client.common.websocket.configuration.WebSocketClientConfiguration;
 import com.binance.connector.client.common.websocket.service.StreamBlockingQueueWrapper;
 import com.binance.connector.client.derivatives_trading_usds_futures.websocket.stream.DerivativesTradingUsdsFuturesWebSocketStreamsUtil;
@@ -32,6 +31,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicReference;
 import org.eclipse.jetty.websocket.api.exceptions.MessageTooLargeException;
 import org.eclipse.jetty.websocket.client.WebSocketClient;
 
@@ -56,6 +56,12 @@ public class MarketTickerStreamServiceImpl implements MarketTickerStreamService 
     private StreamBlockingQueueWrapper<AllMarketTickersStreamsResponse> response;
     private ExecutorService streamExecutor;
     private final AtomicBoolean running = new AtomicBoolean(false);
+    private final AtomicBoolean reconnectRequested = new AtomicBoolean(false);
+    private final AtomicLong lastReconnectAtMs = new AtomicLong(0);
+    private final AtomicReference<Thread> streamThread = new AtomicReference<>();
+
+    // 由本服务创建并持有，用于在重连前显式关闭旧连接，避免连接/线程泄漏
+    private volatile WebSocketClient currentWebSocketClient;
     
     // 动态调整的最大消息大小（初始值为配置值，遇到MessageTooLargeException时自动增加）
     private final AtomicLong currentMaxMessageSize;
@@ -104,7 +110,7 @@ public class MarketTickerStreamServiceImpl implements MarketTickerStreamService 
      * 使用动态调整的最大消息大小
      */
     @Override
-    public DerivativesTradingUsdsFuturesWebSocketStreams getApi() {
+    public synchronized DerivativesTradingUsdsFuturesWebSocketStreams getApi() {
         if (api == null) {
             WebSocketClientConfiguration clientConfiguration =
                     DerivativesTradingUsdsFuturesWebSocketStreamsUtil.getClientConfiguration();
@@ -113,11 +119,43 @@ public class MarketTickerStreamServiceImpl implements MarketTickerStreamService 
             clientConfiguration.setMessageMaxSize(maxSize);
             clientConfiguration.setReconnectBatchSize(365);
             WebSocketClient webSocketClient = new WebSocketClient();
-            StreamConnectionWrapper connectionWrapper = new StreamConnectionWrapper(clientConfiguration, webSocketClient);
+            MarketTickerStreamConnectionWrapper connectionWrapper =
+                    new MarketTickerStreamConnectionWrapper(
+                            clientConfiguration, webSocketClient, this::onWrapperWebSocketError);
             api = new DerivativesTradingUsdsFuturesWebSocketStreams(connectionWrapper);
+            currentWebSocketClient = webSocketClient;
             log.info("[MarketTickerStreamService] 创建API实例，最大消息大小: {} bytes", maxSize);
         }
         return api;
+    }
+
+    /**
+     * SDK ConnectionWrapper.onWebSocketError 回调：触发业务侧重连。
+     * 说明：此回调可能发生在 Jetty/WebSocket 线程；这里不做重连耗时操作，只做“去抖 + 唤醒流线程”。
+     */
+    private void onWrapperWebSocketError(Throwable cause) {
+        if (!running.get()) {
+            return;
+        }
+
+        long now = System.currentTimeMillis();
+        long last = lastReconnectAtMs.get();
+        // 1 秒内多次错误只触发一次，避免风暴
+        if (now - last < 1000) {
+            return;
+        }
+        lastReconnectAtMs.set(now);
+
+        log.warn("[MarketTickerStreamService] ⚠️ WebSocketError(断链/异常)触发重连: {}",
+                cause != null ? cause.getMessage() : "null", cause);
+
+        reconnectRequested.set(true);
+
+        // 唤醒正在 response.take() 阻塞的流线程，让其切换到新连接
+        Thread t = streamThread.get();
+        if (t != null) {
+            t.interrupt();
+        }
     }
     
     /**
@@ -125,8 +163,29 @@ public class MarketTickerStreamServiceImpl implements MarketTickerStreamService 
      */
     private void recreateApi() {
         log.info("[MarketTickerStreamService] 🔄 重新创建API实例...");
+        closeCurrentConnectionNoThrow();
         api = null; // 强制重新创建
         getApi(); // 触发重新创建
+    }
+
+    /**
+     * 重连/停止前显式关闭当前连接，避免旧 WebSocketClient/Session 残留。
+     * 说明：binance-connector 的 Streams API 本身未暴露 close 方法，这里通过停止我们创建的 Jetty WebSocketClient 来释放资源。
+     */
+    private void closeCurrentConnectionNoThrow() {
+        // 先断开引用，避免并发重复 stop
+        WebSocketClient ws = currentWebSocketClient;
+        currentWebSocketClient = null;
+
+        if (ws == null) {
+            return;
+        }
+        try {
+            ws.stop();
+            log.info("[MarketTickerStreamService] 🧹 已停止旧 WebSocketClient，释放旧连接资源");
+        } catch (Exception e) {
+            log.warn("[MarketTickerStreamService] ⚠️ 停止旧 WebSocketClient 失败（忽略）", e);
+        }
     }
     
     /**
@@ -373,6 +432,7 @@ public class MarketTickerStreamServiceImpl implements MarketTickerStreamService 
                 runSeconds != null ? runSeconds : "无限");
         
         try {
+            streamThread.set(Thread.currentThread());
             log.debug("[MarketTickerStreamService] Creating WebSocket connection");
             
             // 创建请求并获取流
@@ -395,12 +455,26 @@ public class MarketTickerStreamServiceImpl implements MarketTickerStreamService 
                 }
                 
                 try {
+                    // 若 SDK 回调触发了重连请求，则优先重连再取数据，避免继续阻塞旧连接
+                    if (reconnectRequested.getAndSet(false)) {
+                        log.info("[MarketTickerStreamService] 🔄 收到断链重连请求，开始重建连接...");
+                        reconnectStream();
+                        continue;
+                    }
+
                     AllMarketTickersStreamsResponse tickerResponse = response.take();
                     handleMessage(tickerResponse);
                 } catch (InterruptedException e) {
-                    log.warn("[MarketTickerStreamService] ⚠️ 流处理被中断");
-                    Thread.currentThread().interrupt();
-                    break;
+                    if (!running.get()) {
+                        log.warn("[MarketTickerStreamService] ⚠️ 流处理被中断（服务停止）");
+                        Thread.currentThread().interrupt();
+                        break;
+                    }
+                    // 通常是 onWebSocketError 触发的 interrupt，用于打断 take()，以便重连后继续运行
+                    log.warn("[MarketTickerStreamService] ⚠️ 流处理被中断（触发重连）");
+                    reconnectRequested.set(false); // 避免重复
+                    reconnectStream();
+                    continue;
                 } catch (Exception e) {
                     log.info("[MarketTickerStreamService] ⚠️ 流处理出现异常: {}", e.getMessage());
                     // 处理所有WebSocket异常（包括MessageTooLargeException），并重新建立连接
@@ -419,6 +493,8 @@ public class MarketTickerStreamServiceImpl implements MarketTickerStreamService 
         } catch (Exception e) {
             log.error("[MarketTickerStreamService] ❌ 流处理失败", e);
             throw e;
+        } finally {
+            streamThread.set(null);
         }
     }
     
@@ -868,6 +944,11 @@ public class MarketTickerStreamServiceImpl implements MarketTickerStreamService 
         log.info("[MarketTickerStreamService] 🛑 正在停止ticker流...");
         
         running.set(false);
+        Thread t = streamThread.get();
+        if (t != null) {
+            t.interrupt();
+        }
+        closeCurrentConnectionNoThrow();
         
         if (streamExecutor != null && !streamExecutor.isShutdown()) {
             streamExecutor.shutdown();
