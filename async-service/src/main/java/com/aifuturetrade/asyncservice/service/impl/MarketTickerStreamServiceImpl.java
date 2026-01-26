@@ -335,6 +335,23 @@ public class MarketTickerStreamServiceImpl implements MarketTickerStreamService 
      */
     private boolean reconnectStream() {
         try {
+            // 断链后不要立即重连：休息30秒再重建，避免频繁重连风暴
+            if (running.get()) {
+                log.warn("[MarketTickerStreamService] ⏳ 30秒后重建WebSocket连接（可被停止/中断提前结束等待）");
+                try {
+                    // 分段睡眠，便于 stopStream() interrupt 及时生效
+                    for (int i = 0; i < 30 && running.get(); i++) {
+                        TimeUnit.SECONDS.sleep(1);
+                    }
+                } catch (InterruptedException ie) {
+                    // stopStream() 或其他重连信号会中断等待；若仍在运行则继续执行重连
+                    if (!running.get()) {
+                        Thread.currentThread().interrupt();
+                        return false;
+                    }
+                }
+            }
+
             log.info("[MarketTickerStreamService] 🔄 开始重新建立WebSocket连接...");
             
             // 重新创建API实例（使用当前的最大消息大小）
