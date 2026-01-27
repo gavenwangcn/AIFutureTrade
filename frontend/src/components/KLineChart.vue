@@ -45,11 +45,15 @@
 <script setup>
 import { ref, watch, nextTick, onUnmounted } from 'vue'
 import { createDataLoader } from '../utils/customDatafeed.js'
+import { registerATRIndicator } from '../utils/registerATRIndicator.js'
 
 // 获取 KLineChart 库（UMD 方式）
 const getKLineCharts = () => {
   if (typeof window !== 'undefined' && window.klinecharts) {
-    return window.klinecharts
+    const klinecharts = window.klinecharts
+    // 在首次获取时注册ATR指标（如果尚未注册）
+    registerATRIndicator(klinecharts)
+    return klinecharts
   }
   throw new Error(
     'klinecharts (UMD) is not available. ' +
@@ -250,7 +254,7 @@ const initChart = async () => {
     chartInstance.value.createIndicator('KDJ', false)
     //chartInstance.value.createIndicator('RSI', false)
     
-    // 检查ATR指标是否已注册（重用之前声明的klinecharts变量）
+    // 创建ATR指标（已通过getKLineCharts()中的registerATRIndicator注册）
     const supportedIndicators = klinecharts.getSupportedIndicators()
     console.log('[KLineChart] Supported indicators:', supportedIndicators)
     
@@ -258,7 +262,12 @@ const initChart = async () => {
       const atrIndicatorId = chartInstance.value.createIndicator('ATR', false)
       console.log('[KLineChart] ATR indicator created with id:', atrIndicatorId)
     } else {
-      console.warn('[KLineChart] ATR indicator is not registered!')
+      console.warn('[KLineChart] ATR indicator is not registered! Attempting to register...')
+      // 尝试再次注册
+      if (registerATRIndicator(klinecharts)) {
+        const atrIndicatorId = chartInstance.value.createIndicator('ATR', false)
+        console.log('[KLineChart] ATR indicator registered and created with id:', atrIndicatorId)
+      }
     }
 
     console.log('[KLineChart] Chart initialized successfully')
