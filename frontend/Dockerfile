@@ -40,7 +40,20 @@ RUN if [ -f pnpm-lock.yaml ]; then \
         npm install --no-fund --no-audit --ignore-scripts; \
     fi
 
+# 验证indicators目录存在且包含ATR指标
+RUN if [ ! -f indicators/atr.ts ] || [ ! -f indicators/index.ts ]; then \
+        echo "ERROR: Custom indicators directory is missing or incomplete" && \
+        echo "Checking indicators directory:" && \
+        ls -la indicators/ 2>/dev/null || echo "indicators directory not found" && \
+        exit 1; \
+    else \
+        echo "✓ Custom indicators directory verified:" && \
+        ls -lh indicators/ && \
+        echo ""; \
+    fi
+
 # 构建 KLineChart（构建 UMD 版本用于浏览器）
+# 注意：构建时会自动包含indicators目录中的自定义指标
 RUN if command -v pnpm > /dev/null && [ -f pnpm-lock.yaml ]; then \
         pnpm run build-umd:prod; \
     else \
@@ -52,6 +65,10 @@ RUN if [ ! -d dist ] || [ ! -f dist/umd/klinecharts.min.js ]; then \
         echo "ERROR: KLineChart build failed" && \
         ls -la dist/ 2>/dev/null || echo "dist directory not found" && \
         exit 1; \
+    else \
+        echo "✓ KLineChart UMD build successful" && \
+        ls -lh dist/umd/klinecharts.min.js && \
+        echo ""; \
     fi
 
 # ==============================================================================
