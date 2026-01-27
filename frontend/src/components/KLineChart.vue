@@ -248,8 +248,19 @@ const initChart = async () => {
     chartInstance.value.createIndicator('VOL', false)
     chartInstance.value.createIndicator('MACD', false)
     chartInstance.value.createIndicator('KDJ', false)
-    chartInstance.value.createIndicator('RSI', false)
-    chartInstance.value.createIndicator('ATR', false)
+    //chartInstance.value.createIndicator('RSI', false)
+    
+    // 检查ATR指标是否已注册
+    const klinecharts = getKLineCharts()
+    const supportedIndicators = klinecharts.getSupportedIndicators()
+    console.log('[KLineChart] Supported indicators:', supportedIndicators)
+    
+    if (supportedIndicators.includes('ATR')) {
+      const atrIndicatorId = chartInstance.value.createIndicator('ATR', false)
+      console.log('[KLineChart] ATR indicator created with id:', atrIndicatorId)
+    } else {
+      console.warn('[KLineChart] ATR indicator is not registered!')
+    }
 
     console.log('[KLineChart] Chart initialized successfully')
   } catch (error) {
