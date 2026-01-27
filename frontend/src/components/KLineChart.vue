@@ -249,6 +249,7 @@ const initChart = async () => {
     chartInstance.value.createIndicator('MACD', false)
     chartInstance.value.createIndicator('KDJ', false)
     chartInstance.value.createIndicator('RSI', false)
+    chartInstance.value.createIndicator('ATR', false)
 
     console.log('[KLineChart] Chart initialized successfully')
   } catch (error) {

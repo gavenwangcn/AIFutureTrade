@@ -11,6 +11,7 @@ KLineChart/
 │   ├── ma.ts          # MA（移动平均线）指标
 │   ├── macd.ts        # MACD 指标
 │   ├── rsi.ts         # RSI（相对强弱指数）指标
+│   ├── atr.ts         # ATR（平均真实波幅）指标
 │   └── vol.ts         # VOL（成交量）指标
 └── src/
     └── index.ts        # KLineChart 入口文件（导入 indicators/index.ts）
@@ -27,12 +28,14 @@ import { registerIndicator } from '../src/extension/indicator/index'
 import ma from './ma'
 import macd from './macd'
 import rsi from './rsi'
+import atr from './atr'
 import vol from './vol'
 
 // 注册自定义指标
 registerIndicator(ma)
 registerIndicator(macd)
 registerIndicator(rsi)
+registerIndicator(atr)
 registerIndicator(vol)
 ```
 
@@ -74,6 +77,15 @@ COPY frontend/KLineChart/indicators/ ./KLineChart/indicators/
 - **图形**: 2条RSI线
 - **范围**: 0-100
 
+### ATR（平均真实波幅）
+- **名称**: ATR
+- **类型**: 普通指标（独立面板）
+- **参数**: [7, 14, 21]（ATR7、ATR14、ATR21）
+- **图形**: 3条ATR线
+- **计算方式**:
+  1. 计算真实波幅（TR）：TR = max(当日最高价 - 当日最低价, |当日最高价 - 前日收盘价|, |当日最低价 - 前日收盘价|)
+  2. 计算ATR：ATR = SMA(TR, N)，其中N为周期
+
 ### VOL（成交量）
 - **名称**: VOL
 - **类型**: 成交量指标（独立面板）
@@ -97,6 +109,7 @@ chart.createIndicator('MA', false, { id: 'candle_pane' })
 chart.createIndicator('VOL', false)
 chart.createIndicator('MACD', false)
 chart.createIndicator('RSI', false)
+chart.createIndicator('ATR', false)
 ```
 
 ## 注意事项
@@ -126,6 +139,6 @@ chart.createIndicator('RSI', false)
 const klinecharts = window.klinecharts
 const supportedIndicators = klinecharts.getSupportedIndicators()
 console.log('支持的指标:', supportedIndicators)
-// 应该包含: ['MA', 'MACD', 'RSI', 'VOL', ...]
+// 应该包含: ['MA', 'MACD', 'RSI', 'ATR', 'VOL', ...]
 ```
 

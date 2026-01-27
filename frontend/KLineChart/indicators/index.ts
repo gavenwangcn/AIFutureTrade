@@ -22,6 +22,7 @@ import macd from './macd'
 import rsi from './rsi'
 import vol from './vol'
 import kdj from './kdj'
+import atr from './atr'
 
 // 注册自定义指标
 registerIndicator(ma)
@@ -30,6 +31,7 @@ registerIndicator(macd)
 registerIndicator(rsi)
 registerIndicator(vol)
 registerIndicator(kdj)
+registerIndicator(atr)
 
 export {
   ma,
@@ -37,6 +39,7 @@ export {
   macd,
   rsi,
   vol,
-  kdj
+  kdj,
+  atr
 }
 
