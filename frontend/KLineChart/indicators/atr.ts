@@ -32,6 +32,10 @@ const ATR_COLORS = ['#2DC08E', '#935EBD', '#FF9600']
  * ATR（平均真实波幅）指标
  * 支持 ATR7、ATR14、ATR21
  * 
+ * 参考官方API文档：
+ * - https://klinecharts.com/api/chart/registerIndicator
+ * - https://klinecharts.com/guide/indicator
+ * 
  * ATR 的计算分为三步：
  * 1. 计算真实波幅（TR）：
  *    TR = max(以下三者)：
@@ -47,15 +51,26 @@ const ATR_COLORS = ['#2DC08E', '#935EBD', '#FF9600']
  * - 曲线平滑，便于观察波动率趋势
  */
 const atr: IndicatorTemplate<Atr, number> = {
+  // 必需字段：指标名称，用于创建或修改的唯一标识
   name: 'ATR',
+  // 简短名称，用于提示显示
   shortName: 'ATR',
+  // 精度：小数位数
   precision: 4,
+  // 计算参数：ATR的周期数组 [7, 14, 21]
   calcParams: [7, 14, 21],
+  // 图形配置数组
+  // 参考：https://klinecharts.com/api/chart/registerIndicator#figures
   figures: [
     {
+      // 数据取值的标识，与 calc 返回的数据子项的 key 对应
       key: 'atr1',
+      // 标题，用于提示显示
       title: 'ATR7: ',
+      // 图形类型：line（线条）
       type: 'line',
+      // 样式函数：返回图形样式配置
+      // 参数：{ data: { prev, current, next }, indicator, defaultStyles }
       styles: ({ indicator }): IndicatorFigureStyle => {
         // ATR7使用绿色，线条稍细
         const color = formatValue(indicator.styles, 'lines[0].color', ATR_COLORS[0]) as string
@@ -92,6 +107,9 @@ const atr: IndicatorTemplate<Atr, number> = {
       }
     }
   ],
+  // 重新生成基础图形配置
+  // 当 calcParams 变化时触发，返回值类型同 figures
+  // 参考：https://klinecharts.com/api/chart/registerIndicator#regenerateFigures
   regenerateFigures: (params) => params.map((_, index) => {
     const num = index + 1
     const period = params[index]
@@ -109,6 +127,10 @@ const atr: IndicatorTemplate<Atr, number> = {
       }
     }
   }),
+  // 计算方法：计算指标值
+  // 参数：kLineDataList（K线数据数组）, indicator（指标配置对象）
+  // 返回：Record<Timestamp, unknown> - 每个时间戳对应的指标值对象
+  // 参考：https://klinecharts.com/api/chart/registerIndicator#calc
   calc: (dataList, indicator) => {
     const { calcParams: params, figures } = indicator
     
