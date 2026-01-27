@@ -250,8 +250,7 @@ const initChart = async () => {
     chartInstance.value.createIndicator('KDJ', false)
     //chartInstance.value.createIndicator('RSI', false)
     
-    // 检查ATR指标是否已注册
-    const klinecharts = getKLineCharts()
+    // 检查ATR指标是否已注册（重用之前声明的klinecharts变量）
     const supportedIndicators = klinecharts.getSupportedIndicators()
     console.log('[KLineChart] Supported indicators:', supportedIndicators)
     
