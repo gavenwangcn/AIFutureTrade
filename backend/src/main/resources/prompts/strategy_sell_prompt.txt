@@ -64,32 +64,67 @@ def execute_sell_decision(
   - 使用 `try-except` 包装库的导入和使用，确保代码健壮性
   - 对于第三方库（talib, numpy, pandas），建议先检查是否可用或使用异常处理
 
-**完整示例代码结构：**
+**完整示例代码结构（包含详细注释）：**
 ```python
 from trade.strategy.strategy_template_sell import StrategyBaseSell
 from typing import Dict
 
 class GeneratedSellStrategy(StrategyBaseSell):
+    """
+    卖出策略类
+    
+    根据策略规则（strategy_context）生成卖出决策，包括平仓、止损、止盈。
+    """
     def execute_sell_decision(
         self,
         portfolio: Dict,
         market_state: Dict,
         account_info: Dict
     ) -> Dict[str, Dict]:
-        decisions = {}  # ⚠️ 必须初始化
+        """
+        执行卖出决策
+        
+        参数:
+            portfolio: 持仓组合信息，包含以下字段：
+                - positions: 持仓列表，每个元素包含 symbol、position_amt、position_side、avg_price、leverage 等信息
+                - cash: 可用现金（账户可用资金）
+                - positions_value: 持仓总价值（所有持仓的市值总和）
+                - margin_used: 已用保证金（所有持仓占用的保证金）
+                - total_value: 账户总价值（初始资金 + 已实现盈亏 + 未实现盈亏）
+                - realized_pnl: 已实现盈亏（已平仓交易的盈亏总和）
+                - unrealized_pnl: 未实现盈亏（当前持仓的浮动盈亏）
+                - initial_capital: 初始资金（账户初始本金）
+            market_state: 市场状态字典，包含各交易对的价格、成交量、技术指标等数据
+            account_info: 账户信息，包含 current_time、total_return、initial_capital、balance、available_balance、cross_wallet_balance、cross_pnl、cross_un_pnl
+        
+        返回:
+            Dict[str, Dict]: 卖出决策字典，key为交易对符号，value为决策详情
+                格式: {"SYMBOL": {"signal": "close_position", "quantity": 100, "leverage": 5, "justification": "理由"}}
+                如果没有决策，返回空字典 {}
+        """
+        # ⚠️ 重要：必须初始化decisions字典，且必须返回字典（不能返回None）
+        decisions = {}
+        
+        # 获取当前持仓列表
+        # positions 是一个列表，每个元素包含 symbol、position_amt、position_side、avg_price 等信息
         positions = portfolio.get('positions', []) or []
+        
+        # ⚠️ 重要：必须使用 self.log.info() 输出关键执行日志
         self.log.info(f"开始执行卖出决策，当前持仓数量: {len(positions)}")
         
+        # 遍历持仓，对每个持仓进行策略判断
         for position in positions:
+            # 获取交易对符号并转换为大写（统一格式）
             symbol = position.get('symbol', '').upper()
             if not symbol:
                 continue
             
             # 获取持仓信息
-            position_amt = abs(position.get('position_amt', 0))  # 持仓合约数量
-            position_side = position.get('position_side', 'LONG')  # 'LONG'（多单）或 'SHORT'（空单）
+            position_amt = abs(position.get('position_amt', 0))  # 持仓合约数量（可能是正数或负数，使用abs取绝对值）
+            position_side = position.get('position_side', 'LONG')  # 持仓方向：'LONG'（多单）或 'SHORT'（空单）
             avg_price = position.get('avg_price', 0)  # 持仓平均价格（开仓价格）
             
+            # 持仓数量无效则跳过
             if position_amt <= 0:
                 continue
             
@@ -98,95 +133,177 @@ class GeneratedSellStrategy(StrategyBaseSell):
             if not symbol_market_state:
                 continue
             
+            # 获取当前市场价格
             current_price = symbol_market_state.get('price', 0)
+            # 价格无效则跳过
             if current_price <= 0:
                 continue
             
-            base_volume = symbol_market_state.get('base_volume', 0)
-            quote_volume = symbol_market_state.get('quote_volume', 0)
+            # 获取成交量和成交额信息（可用于过滤或排序）
+            base_volume = symbol_market_state.get('base_volume', 0)  # 24小时成交量，单位为基础资产（如BTC、ETH等）
+            quote_volume = symbol_market_state.get('quote_volume', 0)  # 24小时成交额，单位为计价资产（如USDT）
+            
+            # ⚠️ 重要：获取上一根K线收盘价（用于策略判断）
+            # previous_close_prices 包含各时间框架的上一根K线收盘价
+            # ⚠️ 重要：K线数据共有8类interval（时间周期）：'1m'（1分钟）、'5m'（5分钟）、'15m'（15分钟）、'30m'（30分钟）、'1h'（1小时）、'4h'（4小时）、'1d'（1天）、'1w'（1周）
+            # 格式：{'1m': close_price, '5m': close_price, '15m': close_price, '30m': close_price, '1h': close_price, '4h': close_price, '1d': close_price, '1w': close_price}
+            # 使用示例：
+            #   previous_close_1m = previous_close_prices.get('1m', 0)   # 获取1分钟K线的上一根收盘价
+            #   previous_close_5m = previous_close_prices.get('5m', 0)   # 获取5分钟K线的上一根收盘价
+            #   previous_close_1h = previous_close_prices.get('1h', 0)  # 获取1小时K线的上一根收盘价
             previous_close_prices = symbol_market_state.get('previous_close_prices', {})
             
             # 获取技术指标数据
+            # indicators 包含各时间周期的K线数据和技术指标计算结果
             indicators = symbol_market_state.get('indicators', {})
+            # timeframes 包含不同时间周期的数据
+            # ⚠️ 重要：K线数据共有8类interval（时间周期）：'1m'（1分钟）、'5m'（5分钟）、'15m'（15分钟）、'30m'（30分钟）、'1h'（1小时）、'4h'（4小时）、'1d'（1天）、'1w'（1周）
             timeframes = indicators.get('timeframes', {})
             
             # 获取K线数据（优先顺序：1h > 4h > 30m > 15m）
+            # ⚠️ 重要：可以使用 30m（30分钟）K线数据
+            # ⚠️ 重要：K线数据共有8类interval：'1m', '5m', '15m', '30m', '1h', '4h', '1d', '1w'
+            # 优先顺序：1h > 4h > 30m > 15m，选择数据量足够（>=99根）的时间周期
+            # 注意：也可以使用其他时间周期（如 '1m', '5m', '1d', '1w'），根据策略需求选择
             klines_data = None
             for tf in ['1h', '4h', '30m', '15m']:
                 tf_data = timeframes.get(tf, {})
                 klines = tf_data.get('klines', [])
+                # 确保K线数据足够（至少99根，用于计算MA(99)等指标）
                 if len(klines) >= 99:
                     klines_data = klines
                     self.log.info(f"{symbol} 使用 {tf} 时间周期的K线数据，共 {len(klines)} 根")
                     break
             
+            # 数据不足则跳过该持仓
             if not klines_data or len(klines_data) < 99:
                 continue
             
-            # 提取收盘价数组
+            # 提取收盘价数组（必须验证有效性）
+            # 收盘价用于计算MA、EMA等基于价格的指标
             close_prices = []
             for kline in klines_data:
                 close = kline.get('close', 0)
+                # 验证价格数据有效性：必须是数字且大于0
                 if isinstance(close, (int, float)) and close > 0:
                     close_prices.append(float(close))
             
+            # 有效收盘价数据不足则跳过
             if len(close_prices) < 99:
                 continue
             
+            # 转换为numpy数组（np已经在执行环境中预加载，无需import）
+            # numpy数组用于talib库计算技术指标
             close_array = np.array(close_prices, dtype=float)
             
-            # 提取 high、low 数组（用于KDJ、ATR等指标）
+            # 提取 high、low 数组（用于计算 KDJ、ATR 等需要 OHLC 数据的指标）
+            # KDJ指标和ATR指标需要最高价、最低价和收盘价三个数组
             high_prices = []
             low_prices = []
             for kline in klines_data:
                 high = kline.get('high', 0)
                 low = kline.get('low', 0)
+                # 验证最高价和最低价数据有效性
                 if isinstance(high, (int, float)) and high > 0 and isinstance(low, (int, float)) and low > 0:
                     high_prices.append(float(high))
                     low_prices.append(float(low))
             
+            # 有效数据不足则跳过
             if len(high_prices) < 99 or len(low_prices) < 99:
                 continue
             
+            # 转换为numpy数组
             high_array = np.array(high_prices, dtype=float)
             low_array = np.array(low_prices, dtype=float)
             
-            # 计算技术指标（示例：MA(99)）
+            # 计算MA(99)（简单移动平均线，99周期）
+            # MA(99)用于判断长期趋势，价格低于MA(99)通常表示下跌趋势
+            # ⚠️ 重要：在计算指标值后必须输出日志，便于排查问题
+            # talib已经在执行环境中预加载，无需import
             try:
+                # 使用talib.SMA计算简单移动平均线，timeperiod=99表示99周期
                 ma99 = talib.SMA(close_array, timeperiod=99)
-                if len(ma99) == 0 or np.isnan(ma99[-1]) or ma99[-1] <= 0:
+                
+                # 检查计算结果是否为空
+                if len(ma99) == 0:
+                    self.log.warning(f"{symbol} MA(99) 计算结果为空，跳过")
                     continue
+                
+                # 检查结果是否为NaN（无效值）
+                if np.isnan(ma99[-1]):
+                    self.log.warning(f"{symbol} MA(99) 结果为NaN，跳过")
+                    continue
+                
+                # 获取最后一个值（最新的MA(99)值）
                 ma99_value = float(ma99[-1])
-                self.log.info(f"{symbol} MA(99)={ma99_value:.4f}")
+                
+                # 检查值是否有效（必须大于0）
+                if ma99_value <= 0:
+                    self.log.warning(f"{symbol} MA(99) 值无效: {ma99_value}，跳过")
+                    continue
+                
+                # ⚠️ 重要：计算指标值后必须输出日志，包含指标名称和计算值
+                self.log.info(f"{symbol} 技术指标计算完成: MA(99)={ma99_value:.4f}")
             except Exception as e:
-                self.log.error(f"{symbol} MA(99) 计算失败: {e}")
+                self.log.error(f"{symbol} MA(99) 计算失败: {e}，跳过")
                 continue
             
             # ========== 策略判断和决策生成部分 ==========
+            # 建议使用 try-except 处理异常，确保异常时继续处理下一个position
             try:
+                # ⚠️ 重要：必须使用 self.log.info() 输出关键执行日志
+                self.log.info(f"处理持仓 {symbol}，持仓方向: {position_side}，持仓数量: {position_amt}，当前价格: {current_price}，MA(99): {ma99_value}")
+                
+                # ⚠️ 重要：在进行指标值判断时，必须输出判断条件和结果，便于排查问题
                 # 根据 strategy_context 中的卖出策略规则编写代码
-                # ⚠️ 重要：在进行关键判断逻辑时，必须使用 self.log.info() 输出详细的判断信息
-                # 示例：判断多单平仓条件
+                # 示例：判断平仓条件
+                # 计算判断条件值（如：current_price < 0.98 * ma99_value）
                 # condition_value = current_price / ma99_value
-                # self.log.info(f"{symbol} 多单平仓条件判断: 持仓方向={position_side}, 价格={current_price:.4f}, MA(99)={ma99_value:.4f}, 阈值=0.98, 比值={condition_value:.4f}, 结果={current_price < 0.98 * ma99_value}")
-                # if position_side == 'LONG' and current_price < 0.98 * ma99_value:
-                #     close_quantity = position_amt  # 平仓100%
-                #     self.log.info(f"{symbol} 满足多单平仓条件，准备平仓: 持仓数量={position_amt:.2f}, 平仓数量={close_quantity:.2f}, 当前价格={current_price:.4f}")
+                # self.log.info(f"{symbol} 多单平仓条件判断: 价格/MA(99)={condition_value:.4f}, 阈值=0.98, 结果={condition_value < 0.98}")
+                # 
+                # if position_side == 'LONG' and 满足多单平仓条件:
+                #     # ⚠️ 重要：quantity 是合约数量（平仓数量），不是 USDT 数量
+                #     # 从持仓中获取合约数量
+                #     position_amt = abs(position.get('position_amt', 0))  # 持仓合约数量
+                #     # 平仓100%（或根据策略规则平仓部分）
+                #     close_quantity = position_amt  # 平仓全部持仓
+                #     # 平仓50%的示例：close_quantity = position_amt * 0.5
+                #     self.log.info(f"{symbol} 多单满足平仓条件（价格={current_price:.4f} < 0.98*MA(99)={0.98*ma99_value:.4f}），准备平仓 {close_quantity} 个合约")
                 #     decisions[symbol] = {
-                #         "signal": "close_position",  # 或 "stop_loss" 止损 或 "take_profit" 止盈
-                #         "quantity": close_quantity,  # 合约数量（平仓数量）
-                #         "price": current_price,
-                #         "leverage": position.get('leverage', 5),
-                #         "justification": "理由"
+                #         "signal": "close_position",  # 平仓信号（或 "stop_loss" 止损 或 "take_profit" 止盈）
+                #         "quantity": close_quantity,  # 合约数量（平仓数量），不是 USDT 数量
+                #         "price": current_price,  # 当前价格
+                #         "stop_price": trigger_price,  # 触发价格（止损/止盈时使用）
+                #         "leverage": position.get('leverage', 5),  # 使用持仓时的杠杆
+                #         "justification": "理由"  # 决策理由
                 #     }
+                #     self.log.info(f"{symbol} 平仓决策已添加: signal={decisions[symbol]['signal']}, quantity={decisions[symbol]['quantity']} 个合约")
+                # elif position_side == 'SHORT' and 满足空单平仓条件:
+                #     # ⚠️ 重要：quantity 是合约数量（平仓数量），不是 USDT 数量
+                #     position_amt = abs(position.get('position_amt', 0))  # 持仓合约数量
+                #     close_quantity = position_amt  # 平仓全部持仓
+                #     # 平仓50%的示例：close_quantity = position_amt * 0.5
+                #     self.log.info(f"{symbol} 空单满足平仓条件（价格={current_price:.4f} > 1.02*MA(99)={1.02*ma99_value:.4f}），准备平仓 {close_quantity} 个合约")
+                #     decisions[symbol] = {
+                #         "signal": "close_position",  # 平仓信号（或 "stop_loss" 止损 或 "take_profit" 止盈）
+                #         "quantity": close_quantity,  # 合约数量（平仓数量），不是 USDT 数量
+                #         "price": current_price,  # 当前价格
+                #         "stop_price": trigger_price,  # 触发价格（止损/止盈时使用）
+                #         "leverage": position.get('leverage', 5),  # 使用持仓时的杠杆
+                #         "justification": "理由"  # 决策理由
+                #     }
+                #     self.log.info(f"{symbol} 平仓决策已添加: signal={decisions[symbol]['signal']}, quantity={decisions[symbol]['quantity']} 个合约")
                 # else:
-                #     self.log.info(f"{symbol} 不满足多单平仓条件: 持仓方向={position_side}, 价格={current_price:.4f}, MA(99)={ma99_value:.4f}, 比值={condition_value:.4f} >= 0.98")
+                #     self.log.info(f"{symbol} 不满足任何平仓条件，跳过")
             except Exception as e:
+                # 处理单个position时发生异常，继续处理下一个，不影响其他持仓
                 self.log.error(f"处理 {symbol} 时发生异常: {e}")
                 continue
         
+        # ⚠️ 重要：必须返回decisions字典，不能返回None，即使没有决策也要返回空字典{}
+        # 必须确保所有代码路径都返回decisions，不能有任何路径返回None
         self.log.info(f"卖出决策执行完成，共生成 {len(decisions)} 个决策")
-        return decisions
+        return decisions  # 返回决策字典，格式: {"SYMBOL": {"signal": "...", "quantity": ..., "leverage": ..., "justification": "..."}}
 ```
 
 ### 2. 必须使用 TA-Lib 库计算技术指标
@@ -206,7 +323,11 @@ class GeneratedSellStrategy(StrategyBaseSell):
 - 示例：使用 MA5 和 MA20 判断，需要至少 21 根 K 线
 
 **技术指标计算注意事项：**
-1. **K线数据提取**：从 `market_state[symbol]['indicators']['timeframes']['1h']` 或 `'4h'`、`'30m'`、`'15m'` 等获取，支持时间周期：`'1m'`, `'5m'`, `'15m'`, `'30m'`, `'1h'`, `'4h'`, `'1d'`, `'1w'`，优先顺序：1h > 4h > 30m > 15m
+1. **K线数据提取**：
+   - **⚠️ 重要：K线数据共有8类interval（时间周期）**：`'1m'`（1分钟）、`'5m'`（5分钟）、`'15m'`（15分钟）、`'30m'`（30分钟）、`'1h'`（1小时）、`'4h'`（4小时）、`'1d'`（1天）、`'1w'`（1周）
+   - 从 `market_state[symbol]['indicators']['timeframes']['1h']` 或 `'4h'`、`'30m'`、`'15m'`、`'1m'`、`'5m'`、`'1d'`、`'1w'` 等获取
+   - **优先顺序建议**：1h > 4h > 30m > 15m（根据策略需求，也可以使用其他时间周期）
+   - **获取方式**：`klines_data = timeframes.get('1h', {}).get('klines', [])` 或 `timeframes.get('4h', {}).get('klines', [])` 等
 2. **数据验证**：检查K线数据是否足够（至少99根），检查价格数据是否有效（> 0）
 3. **numpy数组处理**：先收集有效数据到列表，再转换为numpy数组，检查数组长度
 4. **指标计算**：检查返回值是否为空、是否为NaN、是否有效（> 0），计算后必须使用 `self.log.info()` 输出指标名称和计算值
@@ -229,13 +350,28 @@ class GeneratedSellStrategy(StrategyBaseSell):
         "quote_volume": float,  # 24小时成交额（计价资产，如USDT金额）
         "indicators": {
             "timeframes": {
-                "1h": {"klines": [{"open": float, "high": float, "low": float, "close": float, "volume": float}, ...]},
-                "4h": {...},
-                "30m": {...},
-                "15m": {...}
+                # ⚠️ 重要：K线数据共有8类interval（时间周期）
+                "1m": {"klines": [{"open": float, "high": float, "low": float, "close": float, "volume": float}, ...]},  # 1分钟K线
+                "5m": {"klines": [...]},  # 5分钟K线
+                "15m": {"klines": [...]},  # 15分钟K线
+                "30m": {"klines": [...]},  # 30分钟K线
+                "1h": {"klines": [...]},   # 1小时K线
+                "4h": {"klines": [...]},   # 4小时K线
+                "1d": {"klines": [...]},   # 1天K线
+                "1w": {"klines": [...]}    # 1周K线
             }
         },
-        "previous_close_prices": {"1m": float, "5m": float, "15m": float, "30m": float, "1h": float, "4h": float, "1d": float, "1w": float}
+        # previous_close_prices 包含各时间周期上一根K线的收盘价
+        "previous_close_prices": {
+            "1m": float,   # 1分钟K线上一根收盘价
+            "5m": float,   # 5分钟K线上一根收盘价
+            "15m": float,  # 15分钟K线上一根收盘价
+            "30m": float,  # 30分钟K线上一根收盘价
+            "1h": float,   # 1小时K线上一根收盘价
+            "4h": float,   # 4小时K线上一根收盘价
+            "1d": float,   # 1天K线上一根收盘价
+            "1w": float    # 1周K线上一根收盘价
+        }
     }
 }
 ```
@@ -249,7 +385,16 @@ quote_volume = symbol_market_state.get('quote_volume', 0)
 previous_close_prices = symbol_market_state.get('previous_close_prices', {})
 indicators = symbol_market_state.get('indicators', {})
 timeframes = indicators.get('timeframes', {})
-klines_1h = timeframes.get('1h', {}).get('klines', [])
+# ⚠️ 重要：K线数据共有8类interval：'1m', '5m', '15m', '30m', '1h', '4h', '1d', '1w'
+# 获取不同时间周期的K线数据示例：
+klines_1m = timeframes.get('1m', {}).get('klines', [])   # 1分钟K线
+klines_5m = timeframes.get('5m', {}).get('klines', [])   # 5分钟K线
+klines_15m = timeframes.get('15m', {}).get('klines', []) # 15分钟K线
+klines_30m = timeframes.get('30m', {}).get('klines', []) # 30分钟K线
+klines_1h = timeframes.get('1h', {}).get('klines', [])    # 1小时K线
+klines_4h = timeframes.get('4h', {}).get('klines', [])   # 4小时K线
+klines_1d = timeframes.get('1d', {}).get('klines', [])  # 1天K线
+klines_1w = timeframes.get('1w', {}).get('klines', [])  # 1周K线
 ```
 
 ### 4. 决策格式要求
@@ -297,7 +442,49 @@ decisions[symbol] = {
 
 - 代码必须完整、可执行
 - 必须处理边界情况（如数据为空、价格无效、K线数据不足等）
-- **必须添加详细的中文注释说明**：类和方法注释、关键逻辑注释、计算步骤注释、条件判断注释、变量含义注释
+- **⚠️ 必须添加详细的中文注释说明（非常重要，便于阅读和理解代码逻辑）**：
+  - **类注释**：在类定义上方添加文档字符串，说明类的功能和用途
+  - **方法注释**：在方法定义上方添加文档字符串，说明方法的功能、参数、返回值
+  - **关键逻辑注释**：在重要的业务逻辑处添加注释，说明为什么这样做（如：为什么选择这个时间周期、为什么使用这个阈值）
+  - **计算步骤注释**：在复杂的计算步骤处添加注释，说明每一步的计算目的（如：计算平仓数量的逻辑）
+  - **条件判断注释**：在重要的条件判断处添加注释，说明判断条件的业务含义（如：多单平仓条件、空单平仓条件）
+  - **变量含义注释**：对于重要的变量，添加行内注释说明其含义和单位（如：quantity是合约数量，不是USDT数量）
+  - **代码块注释**：在代码块开始处添加注释，说明该代码块的功能（如：提取K线数据、计算技术指标、策略判断等）
+- **注释示例格式**：
+  ```python
+  class GeneratedSellStrategy(StrategyBaseSell):
+      """
+      卖出策略类
+      
+      根据策略规则（strategy_context）生成卖出决策，包括平仓、止损、止盈。
+      """
+      def execute_sell_decision(self, ...):
+          """
+          执行卖出决策
+          
+          参数:
+              portfolio: 持仓组合信息
+              market_state: 市场状态字典
+              account_info: 账户信息
+          返回:
+              Dict[str, Dict]: 卖出决策字典
+          """
+          # 初始化决策字典，用于存储所有卖出决策
+          decisions = {}
+          
+          # 遍历持仓，对每个持仓进行策略判断
+          for position in positions:
+              # 获取持仓信息
+              position_amt = abs(position.get('position_amt', 0))  # 持仓合约数量（绝对值）
+              position_side = position.get('position_side', 'LONG')  # 持仓方向：'LONG'（多单）或 'SHORT'（空单）
+              
+              # 判断多单平仓条件：当前价格 < 0.98 * MA(99)值
+              if position_side == 'LONG' and current_price < 0.98 * ma99_value:
+                  # 平仓100%持仓
+                  # quantity 是合约数量（平仓数量），不是 USDT 数量
+                  close_quantity = position_amt  # 平仓全部持仓
+                  decisions[symbol] = {...}
+  ```
 - 必须遵循 Python 代码规范
 - 必须正确导入 StrategyBaseSell：`from trade.strategy.strategy_template_sell import StrategyBaseSell`
 - **必须确保方法始终返回字典**：不能返回 None，不能有未定义的返回值
