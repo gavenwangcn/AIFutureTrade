@@ -45,11 +45,18 @@
 <script setup>
 import { ref, watch, nextTick, onUnmounted } from 'vue'
 import { createDataLoader } from '../utils/customDatafeed.js'
+import { registerRSIIndicator, registerATRIndicator } from '../utils/registerCustomIndicators.js'
 
 // 获取 KLineChart 库（UMD 方式）
 const getKLineCharts = () => {
   if (typeof window !== 'undefined' && window.klinecharts) {
-    return window.klinecharts
+    const klinecharts = window.klinecharts
+    // 在首次获取时注册自定义指标（如果尚未注册）
+    // 优先使用构建时包含的方式，如果未包含则使用运行时注册作为备用
+    // 注意：RSI需要覆盖默认的RSI指标，确保使用自定义版本（RSI6、RSI9）
+    registerRSIIndicator(klinecharts)
+    registerATRIndicator(klinecharts)
+    return klinecharts
   }
   throw new Error(
     'klinecharts (UMD) is not available. ' +
@@ -248,17 +255,23 @@ const initChart = async () => {
     chartInstance.value.createIndicator('VOL', false)
     chartInstance.value.createIndicator('MACD', false)
     chartInstance.value.createIndicator('KDJ', false)
-    chartInstance.value.createIndicator('RSI', false)
     
-    // 创建ATR指标（ATR指标应在构建时已包含在klinecharts.min.js中）
-    const supportedIndicators = klinecharts.getSupportedIndicators()
-    console.log('[KLineChart] Supported indicators:', supportedIndicators)
-    
-    if (supportedIndicators.includes('ATR')) {
-      const atrIndicatorId = chartInstance.value.createIndicator('ATR', false)
-      console.log('[KLineChart] ATR indicator created with id:', atrIndicatorId)
+    // 创建RSI指标（使用自定义版本：RSI6、RSI9）
+    // 直接使用运行时注册方式，确保覆盖默认的RSI（RSI6、RSI12、RSI24），使用自定义版本
+    if (registerRSIIndicator(klinecharts)) {
+      const rsiIndicatorId = chartInstance.value.createIndicator('RSI', false)
+      console.log('[KLineChart] Custom RSI indicator registered and created with id:', rsiIndicatorId)
     } else {
-      console.error('[KLineChart] ATR indicator is not registered! Please rebuild KLineChart library with custom indicators.')
+      console.error('[KLineChart] Failed to register custom RSI indicator')
+    }
+    
+    // 创建ATR指标
+    // 直接使用运行时注册方式，确保使用自定义版本
+    if (registerATRIndicator(klinecharts)) {
+      const atrIndicatorId = chartInstance.value.createIndicator('ATR', false)
+      console.log('[KLineChart] ATR indicator registered and created with id:', atrIndicatorId)
+    } else {
+      console.error('[KLineChart] Failed to register ATR indicator')
     }
 
     console.log('[KLineChart] Chart initialized successfully')
