@@ -14,7 +14,7 @@
 
 import { formatValue } from '../src/common/utils/format'
 
-import type { IndicatorTemplate } from '../src/component/Indicator'
+import type { IndicatorTemplate, IndicatorFigureStyle } from '../src/component/Indicator'
 
 interface Atr {
   atr1?: number
@@ -56,14 +56,12 @@ const atr: IndicatorTemplate<Atr, number> = {
       key: 'atr1',
       title: 'ATR7: ',
       type: 'line',
-      styles: ({ indicator, defaultStyles }) => {
+      styles: ({ indicator }): IndicatorFigureStyle => {
         // ATR7使用绿色，线条稍细
         const color = formatValue(indicator.styles, 'lines[0].color', ATR_COLORS[0]) as string
         return {
           color,
-          size: 1.5,
-          style: 'solid',
-          smooth: false
+          size: 1.5
         }
       }
     },
@@ -71,14 +69,12 @@ const atr: IndicatorTemplate<Atr, number> = {
       key: 'atr2',
       title: 'ATR14: ',
       type: 'line',
-      styles: ({ indicator, defaultStyles }) => {
+      styles: ({ indicator }): IndicatorFigureStyle => {
         // ATR14使用紫色，线条稍粗（最常用）
         const color = formatValue(indicator.styles, 'lines[1].color', ATR_COLORS[1]) as string
         return {
           color,
-          size: 2,
-          style: 'solid',
-          smooth: false
+          size: 2
         }
       }
     },
@@ -86,14 +82,12 @@ const atr: IndicatorTemplate<Atr, number> = {
       key: 'atr3',
       title: 'ATR21: ',
       type: 'line',
-      styles: ({ indicator, defaultStyles }) => {
+      styles: ({ indicator }): IndicatorFigureStyle => {
         // ATR21使用橙色，线条中等
         const color = formatValue(indicator.styles, 'lines[2].color', ATR_COLORS[2]) as string
         return {
           color,
-          size: 1.5,
-          style: 'solid',
-          smooth: false
+          size: 1.5
         }
       }
     }
@@ -105,14 +99,12 @@ const atr: IndicatorTemplate<Atr, number> = {
       key: `atr${num}`,
       title: `ATR${period}: `,
       type: 'line',
-      styles: () => {
+      styles: (): IndicatorFigureStyle => {
         // 根据索引设置颜色
         const color = ATR_COLORS[index % ATR_COLORS.length]
         return {
           color,
-          size: index === 1 ? 2 : 1.5, // ATR14（中间那个）线条稍粗
-          style: 'solid',
-          smooth: false
+          size: index === 1 ? 2 : 1.5 // ATR14（中间那个）线条稍粗
         }
       }
     }
