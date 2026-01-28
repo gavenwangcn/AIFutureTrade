@@ -107,31 +107,52 @@ def test_user_commission_rate(api_key: str, api_secret: str, symbol: str = "BTCU
         logger.info(f"响应数据类型: {type(data)}")
         logger.info(f"响应数据: {data}")
 
+        # 解析数据对象的详细字段
+        logger.info("=" * 80)
+        logger.info("手续费率详细信息解析:")
+        
+        # 提取symbol字段
+        symbol_value = getattr(data, 'symbol', None)
+        logger.info(f"  交易对 (symbol): {symbol_value}")
+        
+        # 提取maker_commission_rate字段
+        maker_rate = getattr(data, 'maker_commission_rate', None)
+        logger.info(f"  Maker手续费率 (maker_commission_rate): {maker_rate}")
+        
+        # 提取taker_commission_rate字段
+        taker_rate = getattr(data, 'taker_commission_rate', None)
+        logger.info(f"  Taker手续费率 (taker_commission_rate): {taker_rate}")
+        
+        # 提取additional_properties字段
+        additional_props = getattr(data, 'additional_properties', None)
+        if additional_props:
+            logger.info(f"  附加属性 (additional_properties):")
+            if isinstance(additional_props, dict):
+                for key, value in additional_props.items():
+                    logger.info(f"    {key}: {value}")
+            else:
+                logger.info(f"    {additional_props}")
+        
         # 尝试将数据转换为字典格式以便更好地展示
+        logger.info("=" * 80)
+        logger.info("完整数据字典格式:")
         if hasattr(data, 'model_dump'):
             data_dict = data.model_dump()
-            logger.info("=" * 80)
-            logger.info("手续费率详细信息（字典格式）:")
             logger.info(json.dumps(data_dict, indent=2, ensure_ascii=False))
         elif hasattr(data, 'to_dict'):
             data_dict = data.to_dict()
-            logger.info("=" * 80)
-            logger.info("手续费率详细信息（字典格式）:")
             logger.info(json.dumps(data_dict, indent=2, ensure_ascii=False))
         elif isinstance(data, dict):
-            logger.info("=" * 80)
-            logger.info("手续费率详细信息（字典格式）:")
             logger.info(json.dumps(data, indent=2, ensure_ascii=False))
-
-        # 打印关键字段
-        logger.info("=" * 80)
-        logger.info("关键字段提取:")
-        if hasattr(data, 'symbol'):
-            logger.info(f"  交易对: {data.symbol}")
-        if hasattr(data, 'makerCommissionRate'):
-            logger.info(f"  Maker手续费率: {data.makerCommissionRate}")
-        if hasattr(data, 'takerCommissionRate'):
-            logger.info(f"  Taker手续费率: {data.takerCommissionRate}")
+        else:
+            # 如果没有转换方法，手动构建字典
+            data_dict = {
+                'symbol': symbol_value,
+                'maker_commission_rate': maker_rate,
+                'taker_commission_rate': taker_rate,
+                'additional_properties': additional_props
+            }
+            logger.info(json.dumps(data_dict, indent=2, ensure_ascii=False))
 
         logger.info("=" * 80)
         logger.info("手续费率查询测试完成")
@@ -177,19 +198,24 @@ def test_multiple_symbols(api_key: str, api_secret: str) -> None:
                 data = response.data()
                 logger.info(f"  {symbol} 原始返回数据: {data}")
 
-                # 提取关键信息
-                if hasattr(data, 'model_dump'):
-                    data_dict = data.model_dump()
-                elif hasattr(data, 'to_dict'):
-                    data_dict = data.to_dict()
-                elif isinstance(data, dict):
-                    data_dict = data
-                else:
-                    data_dict = {}
-
-                logger.info(f"  {symbol} 手续费率:")
-                logger.info(f"    Maker: {data_dict.get('makerCommissionRate', 'N/A')}")
-                logger.info(f"    Taker: {data_dict.get('takerCommissionRate', 'N/A')}")
+                # 提取关键信息 - 使用正确的字段名
+                symbol_value = getattr(data, 'symbol', 'N/A')
+                maker_rate = getattr(data, 'maker_commission_rate', 'N/A')
+                taker_rate = getattr(data, 'taker_commission_rate', 'N/A')
+                additional_props = getattr(data, 'additional_properties', {})
+                
+                logger.info(f"  {symbol} 手续费率详情:")
+                logger.info(f"    交易对: {symbol_value}")
+                logger.info(f"    Maker手续费率: {maker_rate}")
+                logger.info(f"    Taker手续费率: {taker_rate}")
+                
+                if additional_props:
+                    logger.info(f"    附加属性:")
+                    if isinstance(additional_props, dict):
+                        for key, value in additional_props.items():
+                            logger.info(f"      {key}: {value}")
+                    else:
+                        logger.info(f"      {additional_props}")
 
             except Exception as e:
                 logger.error(f"  查询 {symbol} 失败: {e}")
