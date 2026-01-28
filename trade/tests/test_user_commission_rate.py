@@ -175,6 +175,7 @@ def test_multiple_symbols(api_key: str, api_secret: str) -> None:
             try:
                 response = client.rest_api.user_commission_rate(symbol=symbol)
                 data = response.data()
+                logger.info(f"  {symbol} 原始返回数据: {data}")
 
                 # 提取关键信息
                 if hasattr(data, 'model_dump'):
@@ -207,8 +208,8 @@ if __name__ == "__main__":
     api_key_value, api_secret_value = _load_credentials()
 
     # 测试单个交易对
-    test_user_commission_rate(api_key_value, api_secret_value, symbol="BTCUSDT")
+    #test_user_commission_rate(api_key_value, api_secret_value, symbol="BTCUSDT")
 
     # 测试多个交易对
-    print("\n")
+    #print("\n")
     test_multiple_symbols(api_key_value, api_secret_value)
