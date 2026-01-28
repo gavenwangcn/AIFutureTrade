@@ -150,7 +150,7 @@ def test_multiple_symbols(api_key: str, api_secret: str) -> None:
         api_key: Binance API密钥
         api_secret: Binance API密钥
     """
-    symbols = ["BTCUSDT", "ETHUSDT", "BNBUSDT"]
+    symbols = ["BTCUSDT", "ETHUSDT", "PIPPINUSDT", "RIVERUSDT"]
 
     logger.info("=" * 80)
     logger.info(f"开始测试多个交易对的手续费率查询")
