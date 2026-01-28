@@ -33,6 +33,7 @@ try:  # pragma: no cover - external dependency optional in many envs
         KlineCandlestickDataIntervalEnum,
         NewOrderSideEnum,
         TestOrderSideEnum,
+        ChangeMarginTypeMarginTypeEnum,
     )
 except ImportError as exc:  # pragma: no cover - handled at runtime
     BINANCE_SDK_AVAILABLE = False
@@ -42,6 +43,7 @@ except ImportError as exc:  # pragma: no cover - handled at runtime
     KlineCandlestickDataIntervalEnum = None  # type: ignore[assignment]
     NewOrderSideEnum = None  # type: ignore[assignment]
     TestOrderSideEnum = None  # type: ignore[assignment]
+    ChangeMarginTypeMarginTypeEnum = None  # type: ignore[assignment]
     DERIVATIVES_TRADING_USDS_FUTURES_REST_API_PROD_URL = None  # type: ignore[assignment]
     DERIVATIVES_TRADING_USDS_FUTURES_REST_API_TESTNET_URL = None  # type: ignore[assignment]
 
@@ -1195,6 +1197,62 @@ class BinanceFuturesOrderClient(_BinanceFuturesBase):
             raise
         except Exception as e:
             logger.error(f"[Binance Futures] 修改初始杠杆失败: {e}")
+            raise
+
+    def change_margin_isolated(self, symbol: str) -> Dict[str, Any]:
+        """
+        变换为逐仓模式
+
+        该接口用于将指定交易对的保证金模式变换为逐仓模式（ISOLATED）。
+
+        Args:
+            symbol: 交易对符号，如 'BTC' 或 'BTCUSDT'
+
+        Returns:
+            修改后的保证金模式信息
+        {
+            "code": 200,
+            "msg": "success"
+        }
+        Raises:
+            RuntimeError: 如果SDK不可用
+            ValueError: 如果参数不符合要求
+            Exception: 如果API调用失败
+        """
+        try:
+            # 验证参数
+            if not symbol:
+                raise ValueError("交易对不能为空")
+
+            # 格式化交易对
+            formatted_symbol = self.format_symbol(symbol)
+            logger.info(f"[Binance Futures] 变换为逐仓模式，交易对: {formatted_symbol}")
+
+            # 调用REST API接口，使用ISOLATED作为margin_type
+            response = self._rest.change_margin_type(
+                symbol=formatted_symbol,
+                margin_type=ChangeMarginTypeMarginTypeEnum["ISOLATED"].value
+            )
+
+            # 获取响应数据并转换为字典
+            data = self._ensure_dict(response.data())
+
+            # 解析返回状态
+            code = data.get('code')
+            msg = data.get('msg', '')
+
+            if code == 200:
+                logger.info(f"[Binance Futures] 成功变换为逐仓模式，交易对: {formatted_symbol}，响应: {msg}")
+            else:
+                logger.warning(f"[Binance Futures] 变换逐仓模式返回非200状态码，交易对: {formatted_symbol}，code: {code}，msg: {msg}")
+
+            return data
+
+        except ValueError as ve:
+            logger.error(f"[Binance Futures] 变换逐仓模式参数错误: {ve}")
+            raise
+        except Exception as e:
+            logger.error(f"[Binance Futures] 变换逐仓模式失败: {e}")
             raise
 
     # ============ 交易方法 ============
