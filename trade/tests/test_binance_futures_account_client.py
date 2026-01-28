@@ -34,8 +34,8 @@ logging.basicConfig(
 
 
 def _load_credentials() -> tuple[str, str]:
-    api_key = BINANCE_API_KEY or os.getenv("BINANCE_API_KEY")
-    api_secret = BINANCE_API_SECRET or os.getenv("BINANCE_API_SECRET")
+    api_key = "LBtjhBgX1RCksNJDdOoJPeDD30Z70YIGHHH9DrqjIDDkK7xcPRQcgydPxGRr6MN1"
+    api_secret = "55arJnwlytDflHv151UpHN1s32ACnJZEs86mbc79wGyeuSUJNHTDPN7jEgBbqO6I"
     if not api_key or not api_secret:
         raise RuntimeError(
             "Please configure BINANCE_API_KEY and BINANCE_API_SECRET in config.py or env vars before running this test."
@@ -89,7 +89,7 @@ def exercise_binance_futures_account_client(api_key: str, api_secret: str) -> No
     logging.info("=" * 60)
     
     # 测试get_account方法
-    #test_get_account(api_key, api_secret)
+    test_get_account(api_key, api_secret)
     
     # get_account_asset方法已废弃，不再测试
     
