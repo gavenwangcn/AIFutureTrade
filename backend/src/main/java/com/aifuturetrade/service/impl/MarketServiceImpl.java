@@ -59,7 +59,7 @@ public class MarketServiceImpl implements MarketService {
 
     @Override
     public Map<String, Map<String, Object>> getMarketPrices() {
-        log.info("[MarketService] 获取市场价格");
+        log.debug("[MarketService] 获取市场价格");
         try {
             // 获取配置的合约列表
             List<com.aifuturetrade.dao.entity.FutureDO> futureConfigs = futureMapper.selectList(null);
@@ -165,7 +165,7 @@ public class MarketServiceImpl implements MarketService {
 
     @Override
     public Map<String, Object> getMarketLeaderboardGainers(Integer limit) {
-        log.info("[MarketService] 获取涨幅榜, limit={}", limit);
+        log.debug("[MarketService] 获取涨幅榜, limit={}", limit);
         try {
             if (limit == null) {
                 limit = 10;
@@ -189,7 +189,7 @@ public class MarketServiceImpl implements MarketService {
 
     @Override
     public Map<String, Object> getMarketLeaderboardLosers(Integer limit) {
-        log.info("[MarketService] 获取跌幅榜, limit={}", limit);
+        log.debug("[MarketService] 获取跌幅榜, limit={}", limit);
         try {
             if (limit == null) {
                 limit = 10;
@@ -213,7 +213,7 @@ public class MarketServiceImpl implements MarketService {
 
     @Override
     public Map<String, Object> getMarketLeaderboard(Integer limit, Boolean force) {
-        log.info("[MarketService] 获取涨跌幅榜, limit={}, force={}", limit, force);
+        log.debug("[MarketService] 获取涨跌幅榜, limit={}, force={}", limit, force);
         try {
             if (limit == null) {
                 limit = 10;

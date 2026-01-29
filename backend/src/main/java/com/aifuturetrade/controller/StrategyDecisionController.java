@@ -40,7 +40,7 @@ public class StrategyDecisionController {
             @Parameter(description = "页码", required = false) @RequestParam(value = "page", defaultValue = "1") Integer page,
             @Parameter(description = "每页记录数", required = false) @RequestParam(value = "pageSize", defaultValue = "10") Integer pageSize,
             @Parameter(description = "状态过滤（TRIGGERED/EXECUTED/REJECTED）", required = false) @RequestParam(value = "status", required = false) String status) {
-        log.info("[StrategyDecisionController] 查询策略决策: modelId={}, page={}, pageSize={}, status={}", modelId, page, pageSize, status);
+        log.debug("[StrategyDecisionController] 查询策略决策: modelId={}, page={}, pageSize={}, status={}", modelId, page, pageSize, status);
         
         try {
             PageRequest pageRequest = new PageRequest();
@@ -50,7 +50,7 @@ public class StrategyDecisionController {
             log.debug("[StrategyDecisionController] 调用Service查询策略决策: modelId={}, pageRequest={}", modelId, pageRequest);
             PageResult<Map<String, Object>> result = strategyDecisionService.getDecisionsByPage(modelId, pageRequest, status);
             
-            log.info("[StrategyDecisionController] 查询成功: modelId={}, total={}, dataSize={}", 
+            log.debug("[StrategyDecisionController] 查询成功: modelId={}, total={}, dataSize={}",
                     modelId, result.getTotal(), result.getData() != null ? result.getData().size() : 0);
             
             log.debug("[StrategyDecisionController] Service返回结果详情: pageNum={}, pageSize={}, totalPages={}", 

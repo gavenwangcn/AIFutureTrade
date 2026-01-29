@@ -54,9 +54,17 @@ class StrategyCodeTesterSell:
                 print(f"  - {error}")
     """
     
-    def __init__(self):
-        """初始化测试器"""
+    def __init__(self, use_real_data: bool = False):
+        """
+        初始化测试器
+
+        Args:
+            use_real_data: 是否使用真实数据进行测试（默认False使用mock数据）
+                          True: 从币安API和数据库获取真实数据
+                          False: 使用预定义的mock数据（更快，不依赖外部服务）
+        """
         self.code_executor = StrategyCodeExecutor(preload_talib=True)
+        self.use_real_data = use_real_data
     
     def test_strategy_code(
         self,
@@ -413,7 +421,7 @@ class StrategyCodeTesterSell:
         mock_portfolio = {
             'positions': [
                 {
-                    'symbol': 'BTC',
+                    'symbol': 'BTCUSDT',
                     'position_amt': 0.1,
                     'position_side': 'LONG',
                     'avg_price': 49000.0,
@@ -424,25 +432,72 @@ class StrategyCodeTesterSell:
             'cash': 10000.0,
             'total_value': 15000.0
         }
-        
+
         mock_account_info = {
             'balance': 15000.0,
             'available_balance': 10000.0,
             'total_return': 50.0
         }
-        
+
         mock_market_state = {
-            'BTC': {
+            'BTCUSDT': {
                 'price': 50000.0,
                 'contract_symbol': 'BTCUSDT',
                 'quote_volume': 1000000.0,
+                'base_volume': 20.0,
                 'change_24h': 2.5,
+                'source': 'future',
+                'previous_close_prices': {
+                    '1m': 49950.0,
+                    '5m': 49900.0,
+                    '15m': 49800.0,
+                    '30m': 49700.0,
+                    '1h': 49500.0,
+                    '4h': 49000.0,
+                    '1d': 48000.0,
+                    '1w': 47000.0
+                },
                 'indicators': {
                     'timeframes': {
+                        '1m': {
+                            'klines': [
+                                {'open': 49000.0, 'high': 51000.0, 'low': 48000.0, 'close': 50000.0, 'volume': 1000.0}
+                            ] * 100  # 生成100根K线用于计算MA(99)
+                        },
+                        '5m': {
+                            'klines': [
+                                {'open': 49000.0, 'high': 51000.0, 'low': 48000.0, 'close': 50000.0, 'volume': 1000.0}
+                            ] * 100
+                        },
+                        '15m': {
+                            'klines': [
+                                {'open': 49000.0, 'high': 51000.0, 'low': 48000.0, 'close': 50000.0, 'volume': 1000.0}
+                            ] * 100
+                        },
+                        '30m': {
+                            'klines': [
+                                {'open': 49000.0, 'high': 51000.0, 'low': 48000.0, 'close': 50000.0, 'volume': 1000.0}
+                            ] * 100
+                        },
                         '1h': {
                             'klines': [
                                 {'open': 49000.0, 'high': 51000.0, 'low': 48000.0, 'close': 50000.0, 'volume': 1000.0}
                             ] * 100  # 生成100根K线用于计算MA(99)
+                        },
+                        '4h': {
+                            'klines': [
+                                {'open': 49000.0, 'high': 51000.0, 'low': 48000.0, 'close': 50000.0, 'volume': 1000.0}
+                            ] * 100
+                        },
+                        '1d': {
+                            'klines': [
+                                {'open': 49000.0, 'high': 51000.0, 'low': 48000.0, 'close': 50000.0, 'volume': 1000.0}
+                            ] * 100
+                        },
+                        '1w': {
+                            'klines': [
+                                {'open': 49000.0, 'high': 51000.0, 'low': 48000.0, 'close': 50000.0, 'volume': 1000.0}
+                            ] * 100
                         }
                     }
                 }

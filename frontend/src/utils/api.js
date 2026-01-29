@@ -9,22 +9,31 @@ import { API_BASE_URL } from '../config/api.js'
  * 统一的 API 请求方法
  * @param {string} endpoint - API 端点路径（如：'/api/models'）
  * @param {RequestInit} options - fetch 选项
+ * @param {number} timeout - 超时时间（毫秒），默认60秒，0表示不设置超时
  * @returns {Promise<any>} 响应数据
  */
-export async function apiRequest(endpoint, options = {}) {
+export async function apiRequest(endpoint, options = {}, timeout = 60000) {
   const url = `${API_BASE_URL}${endpoint}`
-  
+
+  // 创建 AbortController 用于超时控制
+  const controller = new AbortController()
+  const timeoutId = timeout > 0 ? setTimeout(() => controller.abort(), timeout) : null
+
   // 默认配置
   const defaultOptions = {
     headers: {
       'Content-Type': 'application/json',
       ...options.headers
     },
+    signal: controller.signal,
     ...options
   }
 
   try {
     const response = await fetch(url, defaultOptions)
+
+    // 清除超时定时器
+    if (timeoutId) clearTimeout(timeoutId)
     
     // 检查响应状态
     if (!response.ok) {
@@ -59,6 +68,14 @@ export async function apiRequest(endpoint, options = {}) {
     // 如果没有 JSON 内容，返回成功状态
     return { success: true }
   } catch (error) {
+    // 清除超时定时器
+    if (timeoutId) clearTimeout(timeoutId)
+
+    // 处理超时错误
+    if (error.name === 'AbortError') {
+      throw new Error(`请求超时（${timeout / 1000}秒），请稍后重试`)
+    }
+
     // 网络错误或其他错误
     if (error instanceof TypeError && error.message.includes('fetch')) {
       throw new Error('网络连接失败，请检查后端服务是否运行')
@@ -71,18 +88,19 @@ export async function apiRequest(endpoint, options = {}) {
  * GET 请求
  * @param {string} endpoint - API 端点路径
  * @param {URLSearchParams|Record<string, any>} params - 查询参数
+ * @param {number} timeout - 超时时间（毫秒），默认60秒
  * @returns {Promise<any>}
  */
-export async function apiGet(endpoint, params = {}) {
+export async function apiGet(endpoint, params = {}, timeout = 60000) {
   let url = endpoint
   if (Object.keys(params).length > 0) {
     // 过滤掉 undefined、null、空字符串和字符串 "undefined" 的参数
     const filteredParams = {}
     for (const [key, value] of Object.entries(params)) {
       // 检查值是否有效（不是 undefined、null、空字符串或字符串 "undefined"）
-      if (value !== undefined && 
-          value !== null && 
-          value !== '' && 
+      if (value !== undefined &&
+          value !== null &&
+          value !== '' &&
           String(value).toLowerCase() !== 'undefined') {
         filteredParams[key] = value
       }
@@ -92,7 +110,7 @@ export async function apiGet(endpoint, params = {}) {
       url = `${endpoint}?${searchParams.toString()}`
     }
   }
-  return apiRequest(url, { method: 'GET' })
+  return apiRequest(url, { method: 'GET' }, timeout)
 }
 
 /**
@@ -100,18 +118,19 @@ export async function apiGet(endpoint, params = {}) {
  * @param {string} endpoint - API 端点路径
  * @param {any} data - 请求体数据
  * @param {URLSearchParams|Record<string, any>} params - 查询参数（可选）
+ * @param {number} timeout - 超时时间（毫秒），默认60秒
  * @returns {Promise<any>}
  */
-export async function apiPost(endpoint, data = {}, params = {}) {
+export async function apiPost(endpoint, data = {}, params = {}, timeout = 60000) {
   let url = endpoint
   if (Object.keys(params).length > 0) {
     // 过滤掉 undefined、null、空字符串和字符串 "undefined" 的参数
     const filteredParams = {}
     for (const [key, value] of Object.entries(params)) {
       // 检查值是否有效（不是 undefined、null、空字符串或字符串 "undefined"）
-      if (value !== undefined && 
-          value !== null && 
-          value !== '' && 
+      if (value !== undefined &&
+          value !== null &&
+          value !== '' &&
           String(value).toLowerCase() !== 'undefined') {
         filteredParams[key] = value
       }
@@ -124,7 +143,7 @@ export async function apiPost(endpoint, data = {}, params = {}) {
   return apiRequest(url, {
     method: 'POST',
     body: JSON.stringify(data)
-  })
+  }, timeout)
 }
 
 /**

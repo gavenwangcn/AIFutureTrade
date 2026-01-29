@@ -66,6 +66,21 @@ def execute_buy_decision(
   - 使用 `try-except` 包装库的导入和使用，确保代码健壮性
   - 对于第三方库（talib, numpy, pandas），建议先检查是否可用或使用异常处理
 
+**⚠️ 关键：类型检查的正确使用方式（必须严格遵守）：**
+- **类型注解（如 `List[Dict]`, `Dict[str, Dict]`）只能用于函数签名和变量类型提示**
+- **❌ 绝对不要在运行时代码中使用泛型类型注解进行 isinstance 检查**
+- **❌ 错误示例：`isinstance(candidates, List[Dict])`** - 这会导致运行时错误
+- **❌ 错误示例：`isinstance(decisions, Dict[str, Dict])`** - 这会导致运行时错误
+- **✅ 正确示例：`isinstance(candidates, list)`** - 使用基础类型 list
+- **✅ 正确示例：`isinstance(decisions, dict)`** - 使用基础类型 dict
+- **✅ 正确示例：`isinstance(price, (int, float))`** - 检查数值类型
+- **如果需要进行类型检查，请使用以下基础类型：**
+  - 列表检查：`isinstance(x, list)` 而不是 `isinstance(x, List)` 或 `isinstance(x, List[Dict])`
+  - 字典检查：`isinstance(x, dict)` 而不是 `isinstance(x, Dict)` 或 `isinstance(x, Dict[str, Dict])`
+  - 字符串检查：`isinstance(x, str)`
+  - 数值检查：`isinstance(x, (int, float))`
+  - 布尔检查：`isinstance(x, bool)`
+
 **完整示例代码结构（包含详细注释）：**
 ```python
 from trade.strategy.strategy_template_buy import StrategyBaseBuy
@@ -100,7 +115,11 @@ class GeneratedBuyStrategy(StrategyBaseBuy):
         """
         # ⚠️ 重要：必须初始化decisions字典，且必须返回字典（不能返回None）
         decisions = {}
-        
+
+        # ⚠️ 重要：如果需要进行类型检查，使用基础类型（list, dict），不要使用泛型类型注解（List[Dict], Dict[str, Dict]）
+        # ✅ 正确：isinstance(candidates, list)
+        # ❌ 错误：isinstance(candidates, List[Dict]) - 这会导致运行时错误
+
         # ⚠️ 重要：必须使用 self.log.info() 输出关键执行日志
         self.log.info(f"开始执行买入决策，候选交易对数量: {len(candidates)}")
         
@@ -466,6 +485,12 @@ decisions[symbol] = {
 
 - 代码必须完整、可执行
 - 必须处理边界情况（如数据为空、价格无效、K线数据不足等）
+- **⚠️ 绝对禁止使用泛型类型注解进行运行时类型检查**：
+  - **❌ 禁止：`isinstance(candidates, List[Dict])`** - 会导致运行时错误
+  - **❌ 禁止：`isinstance(decisions, Dict[str, Dict])`** - 会导致运行时错误
+  - **✅ 正确：`isinstance(candidates, list)`** - 使用基础类型
+  - **✅ 正确：`isinstance(decisions, dict)`** - 使用基础类型
+  - **✅ 正确：`isinstance(price, (int, float))`** - 检查数值类型
 - **⚠️ 必须添加详细的中文注释说明（非常重要，便于阅读和理解代码逻辑）**：
   - **类注释**：在类定义上方添加文档字符串，说明类的功能和用途
   - **方法注释**：在方法定义上方添加文档字符串，说明方法的功能、参数、返回值
@@ -625,5 +650,10 @@ class GeneratedBuyStrategy(StrategyBaseBuy):
    - **不能返回 None**：即使没有决策也要返回空字典 `{}`
    - **必须确保所有代码路径都返回 decisions**：不能有任何路径返回 None 或未定义
    - **建议使用 try-except 包装主要逻辑**：确保异常时返回空字典而不是抛出异常
-5. 代码必须完整、可执行，不需要额外的实例化代码（系统会自动实例化）
-6. **直接输出Python代码，不要任何包装格式**
+5. **⚠️ 类型检查规则（关键）：**
+   - **类型注解（`List[Dict]`, `Dict[str, Dict]`）只能用于函数签名**
+   - **运行时类型检查必须使用基础类型：`isinstance(x, list)`, `isinstance(x, dict)`**
+   - **❌ 绝对禁止：`isinstance(candidates, List[Dict])`** - 会导致运行时错误
+   - **✅ 必须使用：`isinstance(candidates, list)`** - 正确的类型检查方式
+6. 代码必须完整、可执行，不需要额外的实例化代码（系统会自动实例化）
+7. **直接输出Python代码，不要任何包装格式**
