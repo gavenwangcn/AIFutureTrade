@@ -46,18 +46,21 @@ public class BinanceFuturesOrderClient extends BinanceFuturesBase {
      * @param quoteAsset 计价资产，默认为USDT
      * @param baseUrl 自定义REST API基础路径（可选）
      * @param testnet 是否使用测试网络，默认False
+     * @param connectTimeout 连接超时时间（毫秒），默认10000ms
+     * @param readTimeout 读取超时时间（毫秒），默认50000ms
      */
     public BinanceFuturesOrderClient(String apiKey, String apiSecret, String quoteAsset, 
-                                    String baseUrl, Boolean testnet) {
+                                    String baseUrl, Boolean testnet,
+                                    Integer connectTimeout, Integer readTimeout) {
         this.quoteAsset = (quoteAsset != null ? quoteAsset : "USDT").toUpperCase();
-        initRestApi(apiKey, apiSecret, null, null, baseUrl);
+        initRestApi(apiKey, apiSecret, null, null, baseUrl, connectTimeout, readTimeout);
     }
     
     /**
      * 构造函数，使用默认配置
      */
     public BinanceFuturesOrderClient(String apiKey, String apiSecret) {
-        this(apiKey, apiSecret, "USDT", null, false);
+        this(apiKey, apiSecret, "USDT", null, false, null, null);
     }
     
     /**

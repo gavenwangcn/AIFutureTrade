@@ -88,7 +88,9 @@ public class BinanceFuturesOrderServiceImpl implements BinanceFuturesOrderServic
                     model.getApiSecret(),
                     binanceConfig.getQuoteAsset(),
                     binanceConfig.getBaseUrl(),
-                    binanceConfig.getTestnet()
+                    binanceConfig.getTestnet(),
+                    binanceConfig.getConnectTimeout(),
+                    binanceConfig.getReadTimeout()
             );
             
             List<Map<String, Object>> tickerData = priceClient.getOrderBookTicker(formattedSymbol);
@@ -145,7 +147,9 @@ public class BinanceFuturesOrderServiceImpl implements BinanceFuturesOrderServic
                     model.getApiSecret(),
                     binanceConfig.getQuoteAsset(),
                     binanceConfig.getBaseUrl(),
-                    binanceConfig.getTestnet()
+                    binanceConfig.getTestnet(),
+                    binanceConfig.getConnectTimeout(),
+                    binanceConfig.getReadTimeout()
             );
 
             // 根据is_virtual判断使用real还是test模式
