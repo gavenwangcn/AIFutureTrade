@@ -54,9 +54,17 @@ class StrategyCodeTesterBuy:
                 print(f"  - {error}")
     """
     
-    def __init__(self):
-        """初始化测试器"""
+    def __init__(self, use_real_data: bool = False):
+        """
+        初始化测试器
+
+        Args:
+            use_real_data: 是否使用真实数据进行测试（默认False使用mock数据）
+                          True: 从币安API和数据库获取真实数据
+                          False: 使用预定义的mock数据（更快，不依赖外部服务）
+        """
         self.code_executor = StrategyCodeExecutor(preload_talib=True)
+        self.use_real_data = use_real_data
     
     def test_strategy_code(
         self,
@@ -405,11 +413,71 @@ class StrategyCodeTesterBuy:
         }
     
     def _test_execution(self, strategy_code: str, strategy_name: str) -> Dict:
-        """测试代码执行能力（使用模拟数据）"""
+        """测试代码执行能力（使用模拟数据或真实数据）"""
         errors = []
         warnings = []
+
+        # 根据配置选择使用mock数据还是真实数据
+        if self.use_real_data:
+            logger.info(f"[StrategyCodeTesterBuy] 使用真实数据进行测试")
+            try:
+                test_data = self._get_real_market_data()
+                if test_data is None:
+                    warnings.append("获取真实数据失败，回退到使用mock数据")
+                    test_data = self._get_mock_market_data()
+            except Exception as e:
+                logger.warning(f"[StrategyCodeTesterBuy] 获取真实数据失败: {e}，回退到使用mock数据")
+                warnings.append(f"获取真实数据失败: {str(e)}，回退到使用mock数据")
+                test_data = self._get_mock_market_data()
+        else:
+            logger.debug(f"[StrategyCodeTesterBuy] 使用mock数据进行测试")
+            test_data = self._get_mock_market_data()
+
+        mock_candidates = test_data['candidates']
+        mock_portfolio = test_data['portfolio']
+        mock_account_info = test_data['account_info']
+        mock_market_state = test_data['market_state']
         
-        # 创建模拟数据
+        # 测试买入决策执行
+        try:
+            logger.debug(f"[StrategyCodeTesterBuy] 测试买入决策执行...")
+            buy_result = self.code_executor.execute_strategy_code(
+                strategy_code=strategy_code,
+                strategy_name=strategy_name,
+                candidates=mock_candidates,
+                portfolio=mock_portfolio,
+                account_info=mock_account_info,
+                market_state=mock_market_state,
+                decision_type='buy'
+            )
+            
+            if buy_result is None:
+                errors.append("买入决策执行失败，返回 None")
+            elif not isinstance(buy_result, dict):
+                errors.append(f"买入决策返回格式不正确，期望 dict，实际 {type(buy_result)}")
+            elif 'decisions' not in buy_result:
+                errors.append("买入决策返回结果缺少 'decisions' 字段")
+            else:
+                logger.debug(f"[StrategyCodeTesterBuy] ✓ 买入决策执行成功，返回决策数: {len(buy_result.get('decisions', {}))}")
+        except Exception as e:
+            errors.append(f"买入决策执行异常: {str(e)}")
+            import traceback
+            logger.debug(f"[StrategyCodeTesterBuy] 买入决策执行异常堆栈:\n{traceback.format_exc()}")
+        
+        return {
+            'passed': len(errors) == 0,
+            'errors': errors,
+            'warnings': warnings,
+            'message': '执行测试完成'
+        }
+
+    def _get_mock_market_data(self) -> Dict:
+        """
+        获取mock测试数据
+
+        Returns:
+            Dict: 包含candidates, portfolio, account_info, market_state的测试数据
+        """
         mock_candidates = [
             {
                 'symbol': 'BTC',
@@ -418,19 +486,19 @@ class StrategyCodeTesterBuy:
                 'quote_volume': 1000000.0
             }
         ]
-        
+
         mock_portfolio = {
             'positions': [],
             'cash': 10000.0,
             'total_value': 10000.0
         }
-        
+
         mock_account_info = {
             'balance': 10000.0,
             'available_balance': 10000.0,
             'total_return': 0.0
         }
-        
+
         mock_market_state = {
             'BTCUSDT': {
                 'price': 50000.0,
@@ -495,40 +563,162 @@ class StrategyCodeTesterBuy:
                 }
             }
         }
-        
-        # 测试买入决策执行
-        try:
-            logger.debug(f"[StrategyCodeTesterBuy] 测试买入决策执行...")
-            buy_result = self.code_executor.execute_strategy_code(
-                strategy_code=strategy_code,
-                strategy_name=strategy_name,
-                candidates=mock_candidates,
-                portfolio=mock_portfolio,
-                account_info=mock_account_info,
-                market_state=mock_market_state,
-                decision_type='buy'
-            )
-            
-            if buy_result is None:
-                errors.append("买入决策执行失败，返回 None")
-            elif not isinstance(buy_result, dict):
-                errors.append(f"买入决策返回格式不正确，期望 dict，实际 {type(buy_result)}")
-            elif 'decisions' not in buy_result:
-                errors.append("买入决策返回结果缺少 'decisions' 字段")
-            else:
-                logger.debug(f"[StrategyCodeTesterBuy] ✓ 买入决策执行成功，返回决策数: {len(buy_result.get('decisions', {}))}")
-        except Exception as e:
-            errors.append(f"买入决策执行异常: {str(e)}")
-            import traceback
-            logger.debug(f"[StrategyCodeTesterBuy] 买入决策执行异常堆栈:\n{traceback.format_exc()}")
-        
+
         return {
-            'passed': len(errors) == 0,
-            'errors': errors,
-            'warnings': warnings,
-            'message': '执行测试完成'
+            'candidates': mock_candidates,
+            'portfolio': mock_portfolio,
+            'account_info': mock_account_info,
+            'market_state': mock_market_state
         }
-    
+
+    def _get_real_market_data(self) -> Optional[Dict]:
+        """
+        从币安API和数据库获取真实市场数据
+
+        Returns:
+            Dict: 包含candidates, portfolio, account_info, market_state的真实数据
+            None: 获取失败时返回None
+        """
+        try:
+            import os
+            from trade.common.binance_futures_client import BinanceFuturesClient
+
+            # 从环境变量获取API配置
+            api_key = os.getenv('BINANCE_API_KEY', '')
+            api_secret = os.getenv('BINANCE_API_SECRET', '')
+            base_url = os.getenv('BINANCE_BASE_URL', 'https://fapi.binance.com')
+
+            if not api_key or not api_secret:
+                logger.warning("[StrategyCodeTesterBuy] 未配置币安API密钥，无法获取真实数据")
+                return None
+
+            # 创建币安客户端
+            client = BinanceFuturesClient(
+                api_key=api_key,
+                api_secret=api_secret,
+                quote_asset='USDT',
+                base_url=base_url,
+                testnet=False
+            )
+
+            # 获取BTCUSDT的实时价格
+            symbol = 'BTCUSDT'
+            logger.info(f"[StrategyCodeTesterBuy] 获取 {symbol} 的真实市场数据...")
+
+            # 获取当前价格
+            try:
+                price_data = client.get_symbol_price(symbol)
+                current_price = float(price_data.get('price', 0))
+                if current_price <= 0:
+                    logger.warning(f"[StrategyCodeTesterBuy] 获取价格失败: {symbol}")
+                    return None
+            except Exception as e:
+                logger.warning(f"[StrategyCodeTesterBuy] 获取价格失败: {e}")
+                return None
+
+            # 获取24小时统计数据
+            try:
+                ticker_data = client.get_24hr_ticker(symbol)
+                quote_volume = float(ticker_data.get('quoteVolume', 0))
+                base_volume = float(ticker_data.get('volume', 0))
+                price_change_percent = float(ticker_data.get('priceChangePercent', 0))
+            except Exception as e:
+                logger.warning(f"[StrategyCodeTesterBuy] 获取24小时统计失败: {e}")
+                quote_volume = 1000000.0
+                base_volume = 20.0
+                price_change_percent = 0.0
+
+            # 获取K线数据（所有时间周期）
+            intervals = ['1m', '5m', '15m', '30m', '1h', '4h', '1d', '1w']
+            timeframes = {}
+            previous_close_prices = {}
+
+            for interval in intervals:
+                try:
+                    # 获取K线数据，limit=100以确保有足够数据计算MA(99)
+                    klines_raw = client.get_klines(symbol, interval, limit=100)
+                    if klines_raw and len(klines_raw) > 0:
+                        # 转换K线数据格式
+                        klines = []
+                        for kline in klines_raw:
+                            klines.append({
+                                'open': float(kline.get('open', 0)),
+                                'high': float(kline.get('high', 0)),
+                                'low': float(kline.get('low', 0)),
+                                'close': float(kline.get('close', 0)),
+                                'volume': float(kline.get('volume', 0))
+                            })
+                        timeframes[interval] = {'klines': klines}
+
+                        # 获取上一根K线的收盘价（倒数第二根，因为最后一根可能未完成）
+                        if len(klines) >= 2:
+                            previous_close_prices[interval] = klines[-2]['close']
+                        else:
+                            previous_close_prices[interval] = klines[-1]['close']
+
+                        logger.debug(f"[StrategyCodeTesterBuy] 获取 {symbol} {interval} K线数据成功: {len(klines)} 根")
+                    else:
+                        logger.warning(f"[StrategyCodeTesterBuy] 获取 {symbol} {interval} K线数据为空")
+                except Exception as e:
+                    logger.warning(f"[StrategyCodeTesterBuy] 获取 {symbol} {interval} K线数据失败: {e}")
+
+            # 检查是否至少获取到一个时间周期的数据
+            if not timeframes:
+                logger.warning("[StrategyCodeTesterBuy] 未能获取任何K线数据")
+                return None
+
+            # 构建测试数据
+            real_candidates = [
+                {
+                    'symbol': 'BTC',
+                    'contract_symbol': symbol,
+                    'price': current_price,
+                    'quote_volume': quote_volume
+                }
+            ]
+
+            real_portfolio = {
+                'positions': [],
+                'cash': 10000.0,
+                'total_value': 10000.0
+            }
+
+            real_account_info = {
+                'balance': 10000.0,
+                'available_balance': 10000.0,
+                'total_return': 0.0
+            }
+
+            real_market_state = {
+                symbol: {
+                    'price': current_price,
+                    'contract_symbol': symbol,
+                    'quote_volume': quote_volume,
+                    'base_volume': base_volume,
+                    'change_24h': price_change_percent,
+                    'source': 'future',
+                    'previous_close_prices': previous_close_prices,
+                    'indicators': {
+                        'timeframes': timeframes
+                    }
+                }
+            }
+
+            logger.info(f"[StrategyCodeTesterBuy] 成功获取真实市场数据: {symbol}, 价格={current_price}, K线周期数={len(timeframes)}")
+
+            return {
+                'candidates': real_candidates,
+                'portfolio': real_portfolio,
+                'account_info': real_account_info,
+                'market_state': real_market_state
+            }
+
+        except Exception as e:
+            logger.error(f"[StrategyCodeTesterBuy] 获取真实市场数据失败: {e}")
+            import traceback
+            logger.debug(f"[StrategyCodeTesterBuy] 异常堆栈:\n{traceback.format_exc()}")
+            return None
+
     def generate_test_report(self, test_result: Dict) -> str:
         """生成测试报告"""
         report_lines = []

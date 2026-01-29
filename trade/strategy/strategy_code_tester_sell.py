@@ -54,9 +54,17 @@ class StrategyCodeTesterSell:
                 print(f"  - {error}")
     """
     
-    def __init__(self):
-        """初始化测试器"""
+    def __init__(self, use_real_data: bool = False):
+        """
+        初始化测试器
+
+        Args:
+            use_real_data: 是否使用真实数据进行测试（默认False使用mock数据）
+                          True: 从币安API和数据库获取真实数据
+                          False: 使用预定义的mock数据（更快，不依赖外部服务）
+        """
         self.code_executor = StrategyCodeExecutor(preload_talib=True)
+        self.use_real_data = use_real_data
     
     def test_strategy_code(
         self,
