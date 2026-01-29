@@ -4,9 +4,13 @@ import com.aifuturetrade.dao.entity.*;
 import com.aifuturetrade.dao.mapper.*;
 import com.aifuturetrade.service.ModelService;
 import com.aifuturetrade.service.MarketService;
+import com.aifuturetrade.service.DockerContainerService;
 import com.aifuturetrade.service.dto.ModelDTO;
 import com.aifuturetrade.common.util.PageResult;
 import com.aifuturetrade.common.util.PageRequest;
+import com.aifuturetrade.common.api.binance.BinanceFuturesAccountClient;
+import com.aifuturetrade.common.api.binance.BinanceFuturesClient;
+import com.aifuturetrade.common.api.binance.BinanceConfig;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
@@ -70,10 +74,10 @@ public class ModelServiceImpl implements ModelService {
 
     @Autowired
     private AccountAssetMapper accountAssetMapper;
-    
+
     @Autowired
-    private com.aifuturetrade.service.DockerContainerService dockerContainerService;
-    
+    private DockerContainerService dockerContainerService;
+
     @Value("${docker.image.buy:aifuturetrade-model-buy}")
     private String modelBuyImageName;
     
@@ -114,16 +118,16 @@ public class ModelServiceImpl implements ModelService {
     private AccountValuesDailyMapper accountValuesDailyMapper;
 
     @Autowired
-    private com.aifuturetrade.common.api.binance.BinanceConfig binanceConfig;
+    private BinanceConfig binanceConfig;
 
     @Value("${app.trades-query-limit:10}")
     private Integer defaultTradesQueryLimit;
-    
-    private com.aifuturetrade.common.api.binance.BinanceFuturesClient binanceFuturesClient;
-    
-    private com.aifuturetrade.common.api.binance.BinanceFuturesClient getBinanceFuturesClient() {
+
+    private BinanceFuturesClient binanceFuturesClient;
+
+    private BinanceFuturesClient getBinanceFuturesClient() {
         if (binanceFuturesClient == null) {
-            binanceFuturesClient = new com.aifuturetrade.common.api.binance.BinanceFuturesClient(
+            binanceFuturesClient = new BinanceFuturesClient(
                     binanceConfig.getApiKey(),
                     binanceConfig.getSecretKey(),
                     binanceConfig.getQuoteAsset(),
@@ -230,7 +234,70 @@ public class ModelServiceImpl implements ModelService {
             accountValues.setId(UUID.randomUUID().toString());
             accountValues.setModelId(modelDO.getId());
             accountValues.setAccountAlias(modelDO.getAccountAlias() != null ? modelDO.getAccountAlias() : "");
-            Double initialCapital = modelDO.getInitialCapital() != null ? modelDO.getInitialCapital() : 10000.0;
+
+            // 获取初始资金：如果是非虚拟模型，从币安SDK获取账户余额；否则使用页面传入的值
+            Double initialCapital;
+            Boolean isVirtual = modelDO.getIsVirtual();
+
+            if (isVirtual != null && !isVirtual) {
+                // 非虚拟模型：从币安SDK获取账户余额
+                log.info("[ModelService] 非虚拟模型，从币安SDK获取账户余额, modelId={}", modelDO.getId());
+                try {
+                    // 检查是否有API密钥
+                    if (modelDO.getApiKey() == null || modelDO.getApiKey().trim().isEmpty() ||
+                        modelDO.getApiSecret() == null || modelDO.getApiSecret().trim().isEmpty()) {
+                        log.warn("[ModelService] 非虚拟模型缺少API密钥，使用默认初始资金, modelId={}", modelDO.getId());
+                        initialCapital = modelDO.getInitialCapital() != null ? modelDO.getInitialCapital() : 10000.0;
+                    } else {
+                        // 创建币安账户客户端
+                        BinanceFuturesAccountClient accountClient = new BinanceFuturesAccountClient(
+                            modelDO.getApiKey(),
+                            modelDO.getApiSecret(),
+                            binanceConfig.getQuoteAsset(),
+                            binanceConfig.getBaseUrl(),
+                            binanceConfig.getTestnet(),
+                            binanceConfig.getConnectTimeout(),
+                            binanceConfig.getReadTimeout()
+                        );
+
+                        // 调用SDK获取账户信息
+                        Map<String, Object> accountInfo = accountClient.getAccount();
+
+                        // 从返回的数据中获取totalWalletBalance
+                        Object totalWalletBalanceObj = accountInfo.get("totalWalletBalance");
+                        if (totalWalletBalanceObj != null) {
+                            if (totalWalletBalanceObj instanceof String) {
+                                initialCapital = Double.parseDouble((String) totalWalletBalanceObj);
+                            } else if (totalWalletBalanceObj instanceof Number) {
+                                initialCapital = ((Number) totalWalletBalanceObj).doubleValue();
+                            } else {
+                                log.warn("[ModelService] totalWalletBalance类型未知: {}, 使用默认值", totalWalletBalanceObj.getClass());
+                                initialCapital = modelDO.getInitialCapital() != null ? modelDO.getInitialCapital() : 10000.0;
+                            }
+                            log.info("[ModelService] 从币安SDK获取账户余额成功, modelId={}, totalWalletBalance={}",
+                                    modelDO.getId(), initialCapital);
+
+                            // 更新模型的initial_capital字段
+                            modelDO.setInitialCapital(initialCapital);
+                            modelMapper.updateById(modelDO);
+                        } else {
+                            log.warn("[ModelService] 币安SDK返回的账户信息中没有totalWalletBalance字段, 使用默认值");
+                            initialCapital = modelDO.getInitialCapital() != null ? modelDO.getInitialCapital() : 10000.0;
+                        }
+                    }
+                } catch (Exception e) {
+                    log.error("[ModelService] 从币安SDK获取账户余额失败, modelId={}, error={}",
+                            modelDO.getId(), e.getMessage(), e);
+                    // 获取失败时使用页面传入的值或默认值
+                    initialCapital = modelDO.getInitialCapital() != null ? modelDO.getInitialCapital() : 10000.0;
+                }
+            } else {
+                // 虚拟模型：使用页面传入的初始资金
+                initialCapital = modelDO.getInitialCapital() != null ? modelDO.getInitialCapital() : 10000.0;
+                log.info("[ModelService] 虚拟模型，使用页面传入的初始资金, modelId={}, initialCapital={}",
+                        modelDO.getId(), initialCapital);
+            }
+
             accountValues.setBalance(initialCapital);
             accountValues.setAvailableBalance(initialCapital);
             accountValues.setCrossWalletBalance(initialCapital);

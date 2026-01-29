@@ -23,7 +23,7 @@ import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import trade.common.config as app_config
 from trade.ai.prompt_defaults import DEFAULT_BUY_CONSTRAINTS, DEFAULT_SELL_CONSTRAINTS, PROMPT_JSON_OUTPUT_SUFFIX
-from trade.common.binance_futures import BinanceFuturesOrderClient
+from trade.common.binance_futures import BinanceFuturesOrderClient, BinanceFuturesAccountClient
 from trade.common.database.database_model_prompts import ModelPromptsDatabase
 from trade.common.database.database_models import ModelsDatabase
 from trade.common.database.database_portfolios import PortfoliosDatabase
@@ -282,7 +282,12 @@ class TradingEngine:
                         f"总耗时={cycle_duration:.2f}秒, "
                         f"执行操作数={len(executions)}, "
                         f"对话类型={conversation_prompts}")
-            
+
+            # 卖出循环结束后，再次更新账户信息
+            if model and not model.get('is_virtual', False) and model.get('account_alias'):
+                logger.info(f"[Model {self.model_id}] [卖出服务] 卖出循环结束，再次从SDK更新账户信息")
+                self._update_account_info_from_sdk(model)
+
             # 获取最终持仓信息
             updated_portfolio = self._get_portfolio(self.model_id, current_prices)
             return {
@@ -749,7 +754,13 @@ class TradingEngine:
             # 清理缓存的杠杆配置
             if hasattr(self, 'current_model_leverage'):
                 delattr(self, 'current_model_leverage')
-            
+
+            # 买入循环结束后，再次更新账户信息
+            model = self.models_db.get_model(self.model_id)
+            if model and not model.get('is_virtual', False) and model.get('account_alias'):
+                logger.info(f"[Model {self.model_id}] [买入服务] 买入循环结束，再次从SDK更新账户信息")
+                self._update_account_info_from_sdk(model)
+
             # 获取最终持仓信息
             updated_portfolio = self._get_portfolio(self.model_id, current_prices)
             return {
@@ -1494,6 +1505,98 @@ class TradingEngine:
     # ============ 账户信息管理方法 ============
     # 构建和管理账户信息，用于AI决策
     
+    def _update_account_info_from_sdk(self, model: Dict) -> bool:
+        """
+        从币安SDK获取账户信息并更新到account_asset表
+
+        Args:
+            model: 模型信息字典
+
+        Returns:
+            bool: 是否成功更新
+        """
+        try:
+            account_alias = model.get('account_alias', '')
+            if not account_alias:
+                logger.warning(f"[Model {self.model_id}] account_alias为空，无法更新账户信息")
+                return False
+
+            api_key = model.get('api_key', '')
+            api_secret = model.get('api_secret', '')
+
+            if not api_key or not api_secret:
+                logger.warning(f"[Model {self.model_id}] API密钥缺失，无法更新账户信息")
+                return False
+
+            # 创建币安账户客户端
+            account_client = BinanceFuturesAccountClient(
+                api_key=api_key,
+                api_secret=api_secret
+            )
+
+            # 调用SDK获取账户信息
+            logger.info(f"[Model {self.model_id}] 开始从币安SDK获取账户信息, account_alias={account_alias}")
+            account_info = account_client.getAccount()
+
+            if not account_info:
+                logger.error(f"[Model {self.model_id}] SDK返回的账户信息为空")
+                return False
+
+            # 提取需要的字段
+            total_wallet_balance = account_info.get('totalWalletBalance')
+            available_balance = account_info.get('availableBalance')
+            total_cross_wallet_balance = account_info.get('totalCrossWalletBalance')
+            total_cross_un_pnl = account_info.get('totalCrossUnPnl')
+
+            # 转换为float类型
+            if total_wallet_balance is not None:
+                if isinstance(total_wallet_balance, str):
+                    total_wallet_balance = float(total_wallet_balance)
+                elif isinstance(total_wallet_balance, (int, float)):
+                    total_wallet_balance = float(total_wallet_balance)
+
+            if available_balance is not None:
+                if isinstance(available_balance, str):
+                    available_balance = float(available_balance)
+                elif isinstance(available_balance, (int, float)):
+                    available_balance = float(available_balance)
+
+            if total_cross_wallet_balance is not None:
+                if isinstance(total_cross_wallet_balance, str):
+                    total_cross_wallet_balance = float(total_cross_wallet_balance)
+                elif isinstance(total_cross_wallet_balance, (int, float)):
+                    total_cross_wallet_balance = float(total_cross_wallet_balance)
+
+            if total_cross_un_pnl is not None:
+                if isinstance(total_cross_un_pnl, str):
+                    total_cross_un_pnl = float(total_cross_un_pnl)
+                elif isinstance(total_cross_un_pnl, (int, float)):
+                    total_cross_un_pnl = float(total_cross_un_pnl)
+
+            # 更新account_asset表
+            update_data = {}
+            if total_wallet_balance is not None:
+                update_data['total_wallet_balance'] = total_wallet_balance
+            if available_balance is not None:
+                update_data['available_balance'] = available_balance
+            if total_cross_wallet_balance is not None:
+                update_data['total_cross_wallet_balance'] = total_cross_wallet_balance
+            if total_cross_un_pnl is not None:
+                update_data['total_cross_un_pnl'] = total_cross_un_pnl
+
+            if update_data:
+                self.account_asset_db.update_account_asset(account_alias, update_data)
+                logger.info(f"[Model {self.model_id}] 账户信息更新成功, account_alias={account_alias}, "
+                          f"total_wallet_balance={total_wallet_balance}, available_balance={available_balance}")
+                return True
+            else:
+                logger.warning(f"[Model {self.model_id}] SDK返回的账户信息中没有可用字段")
+                return False
+
+        except Exception as e:
+            logger.error(f"[Model {self.model_id}] 从SDK更新账户信息失败: {e}", exc_info=True)
+            return False
+
     def _build_account_info(self, portfolio: Dict) -> Dict:
         """
         构建账户信息用于决策
@@ -1525,7 +1628,12 @@ class TradingEngine:
         initial_capital = model.get('initial_capital', 0)
         is_virtual = model.get('is_virtual', False)
         account_alias = model.get('account_alias', '')
-        
+
+        # 如果是非虚拟模型，先从SDK更新账户信息到account_asset表
+        if not is_virtual and account_alias:
+            logger.info(f"[Model {self.model_id}] 非虚拟模型，从SDK更新账户信息")
+            self._update_account_info_from_sdk(model)
+
         # 根据is_virtual判断数据源
         if is_virtual:
             # 从account_values表获取最新记录
@@ -1560,12 +1668,12 @@ class TradingEngine:
             else:
                 account_data = self.account_asset_db.get_account_asset(account_alias)
                 if account_data:
-                    balance = account_data.get('balance', 0.0)
+                    balance = account_data.get('total_wallet_balance', 0.0)
                     available_balance = account_data.get('available_balance', 0.0)
-                    cross_wallet_balance = account_data.get('cross_wallet_balance', 0.0)
+                    cross_wallet_balance = account_data.get('total_cross_wallet_balance', 0.0)
                     # account_asset表没有cross_pnl字段，使用portfolio的realized_pnl作为fallback
                     cross_pnl = portfolio.get('realized_pnl', 0.0)  # 已实现盈亏
-                    cross_un_pnl = account_data.get('cross_un_pnl', 0.0)
+                    cross_un_pnl = account_data.get('total_cross_un_pnl', 0.0)
                 else:
                     # 如果account_asset表中没有数据，使用portfolio数据作为fallback
                     balance = portfolio.get('total_value', 0)
