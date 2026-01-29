@@ -432,17 +432,64 @@ class StrategyCodeTesterBuy:
         }
         
         mock_market_state = {
-            'BTC': {
+            'BTCUSDT': {
                 'price': 50000.0,
                 'contract_symbol': 'BTCUSDT',
                 'quote_volume': 1000000.0,
+                'base_volume': 20.0,
                 'change_24h': 2.5,
+                'source': 'future',
+                'previous_close_prices': {
+                    '1m': 49950.0,
+                    '5m': 49900.0,
+                    '15m': 49800.0,
+                    '30m': 49700.0,
+                    '1h': 49500.0,
+                    '4h': 49000.0,
+                    '1d': 48000.0,
+                    '1w': 47000.0
+                },
                 'indicators': {
                     'timeframes': {
+                        '1m': {
+                            'klines': [
+                                {'open': 49000.0, 'high': 51000.0, 'low': 48000.0, 'close': 50000.0, 'volume': 1000.0}
+                            ] * 100  # 生成100根K线用于计算MA(99)
+                        },
+                        '5m': {
+                            'klines': [
+                                {'open': 49000.0, 'high': 51000.0, 'low': 48000.0, 'close': 50000.0, 'volume': 1000.0}
+                            ] * 100
+                        },
+                        '15m': {
+                            'klines': [
+                                {'open': 49000.0, 'high': 51000.0, 'low': 48000.0, 'close': 50000.0, 'volume': 1000.0}
+                            ] * 100
+                        },
+                        '30m': {
+                            'klines': [
+                                {'open': 49000.0, 'high': 51000.0, 'low': 48000.0, 'close': 50000.0, 'volume': 1000.0}
+                            ] * 100
+                        },
                         '1h': {
                             'klines': [
                                 {'open': 49000.0, 'high': 51000.0, 'low': 48000.0, 'close': 50000.0, 'volume': 1000.0}
                             ] * 100  # 生成100根K线用于计算MA(99)
+                        },
+                        '4h': {
+                            'klines': [
+                                {'open': 49000.0, 'high': 51000.0, 'low': 48000.0, 'close': 50000.0, 'volume': 1000.0}
+                            ] * 100
+                        },
+                        '1d': {
+                            'klines': [
+                                {'open': 49000.0, 'high': 51000.0, 'low': 48000.0, 'close': 50000.0, 'volume': 1000.0}
+                            ] * 100
+                        },
+                        '1w': {
+                            'klines': [
+                                {'open': 49000.0, 'high': 51000.0, 'low': 48000.0, 'close': 50000.0, 'volume': 1000.0}
+                            ] * 100
                         }
                     }
                 }
