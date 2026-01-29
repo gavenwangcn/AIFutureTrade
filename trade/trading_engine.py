@@ -3368,9 +3368,18 @@ class TradingEngine:
                     leverage=leverage
                 )
                 
-                logger.info(f"@API@ [Model {self.model_id}] [change_initial_leverage] === 杠杆设置成功 ===" 
+                logger.info(f"@API@ [Model {self.model_id}] [change_initial_leverage] === 杠杆设置成功 ==="
                           f" | symbol={symbol} | leverage={leverage}")
-                
+
+                # 设置为逐仓模式
+                logger.info(f"@API@ [Model {self.model_id}] [change_margin_isolated] === 准备设置逐仓模式 ==="
+                          f" | symbol={symbol}")
+
+                binance_client.change_margin_isolated(symbol=symbol)
+
+                logger.info(f"@API@ [Model {self.model_id}] [change_margin_isolated] === 逐仓模式设置成功 ==="
+                          f" | symbol={symbol}")
+
                 # 然后执行交易
                 # SDK 调用时使用合约数量（position_amt），不是 USDT 数量（quantity）
                 logger.info(f"@API@ [Model {self.model_id}] [market_trade] === 准备调用接口 ===" 
