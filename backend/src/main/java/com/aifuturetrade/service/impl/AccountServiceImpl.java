@@ -77,7 +77,9 @@ public class AccountServiceImpl implements AccountService {
                     apiSecret,
                     binanceConfig.getQuoteAsset(),
                     binanceConfig.getBaseUrl(),
-                    binanceConfig.getTestnet()
+                    binanceConfig.getTestnet(),
+                    binanceConfig.getConnectTimeout(),
+                    binanceConfig.getReadTimeout()
             );
 
             // 2. 调用 getAccount 方法获取账户数据
