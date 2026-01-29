@@ -457,6 +457,13 @@ klines_1w = timeframes.get('1w', {}).get('klines', [])  # 1周K线
 }
 ```
 
+**⚠️ 关于必填字段的重要说明：**
+- **所有字段（signal、quantity、leverage、justification）都是必填的**
+- **缺少任何必填字段将导致交易执行失败**
+- **字段作用说明：**
+  - **虚拟交易模式**：所有字段用于模拟交易计算和记录
+  - **真实交易模式**：虽然实际交易使用市场价（market order）执行，但所有字段仍需提供用于风控验证和审计追踪
+
 **⚠️ 重要：关于 quantity 字段和杠杆交易逻辑：**
 - **quantity 是合约数量**，计算公式：`quantity = (USDT数量 * leverage) / symbol价格`
 - **计算步骤**：

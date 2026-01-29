@@ -303,7 +303,7 @@ class GeneratedSellStrategy(StrategyBaseSell):
                 #         "signal": "close_position",  # 平仓信号（或 "stop_loss" 止损 或 "take_profit" 止盈）
                 #         "quantity": close_quantity,  # 合约数量（平仓数量），不是 USDT 数量
                 #         "price": current_price,  # 当前价格
-                #         "stop_price": trigger_price,  # 触发价格（止损/止盈时使用）
+                #         "stop_price": current_price,  # ⚠️ 对于 stop_loss/take_profit 必填！触发价格（通常设置为当前价格或目标价格）
                 #         "leverage": position.get('leverage', 5),  # 使用持仓时的杠杆
                 #         "justification": "理由"  # 决策理由
                 #     }
@@ -318,7 +318,7 @@ class GeneratedSellStrategy(StrategyBaseSell):
                 #         "signal": "close_position",  # 平仓信号（或 "stop_loss" 止损 或 "take_profit" 止盈）
                 #         "quantity": close_quantity,  # 合约数量（平仓数量），不是 USDT 数量
                 #         "price": current_price,  # 当前价格
-                #         "stop_price": trigger_price,  # 触发价格（止损/止盈时使用）
+                #         "stop_price": current_price,  # ⚠️ 对于 stop_loss/take_profit 必填！触发价格（通常设置为当前价格或目标价格）
                 #         "leverage": position.get('leverage', 5),  # 使用持仓时的杠杆
                 #         "justification": "理由"  # 决策理由
                 #     }
@@ -445,13 +445,24 @@ klines_1w = timeframes.get('1w', {}).get('klines', [])  # 1周K线
     "SYMBOL": {
         "signal": "close_position" | "stop_loss" | "take_profit",  # 必须
         "quantity": 100,  # 必须：合约数量（平仓数量），不是USDT数量
-        "price": 0.0345,  # 可选：期望价格
-        "stop_price": 0.0325,  # 可选：止损/止盈触发价格
+        "price": 0.0345,  # 可选：期望价格（仅用于记录，实际交易使用市场价）
+        "stop_price": 0.0325,  # ⚠️ 对于 stop_loss 和 take_profit 信号：必填！对于 close_position 信号：可选
         "leverage": 5,  # 必须：杠杆倍数（通常与持仓的杠杆一致）
         "justification": "理由说明"  # 必须：理由
     }
 }
 ```
+
+**⚠️ 关于 stop_price 字段的重要说明：**
+- **对于 `stop_loss`（止损）和 `take_profit`（止盈）信号：`stop_price` 字段是必填的**
+- **对于 `close_position`（平仓）信号：`stop_price` 字段是可选的**
+- **stop_price 的作用：**
+  - **虚拟交易模式**：使用 `stop_price` 作为触发价格进行盈亏计算和模拟交易
+  - **真实交易模式**：虽然实际交易使用市场价（market order）执行，但 `stop_price` 仍需提供用于记录触发条件和审计追踪
+- **stop_price 的设置建议：**
+  - **止损（stop_loss）**：通常设置为当前价格或略低于当前价格（多单）/ 略高于当前价格（空单）
+  - **止盈（take_profit）**：通常设置为当前价格或目标价格
+  - **示例**：如果当前价格为 0.0345，止损价可以设置为 0.0325（约 -5.8%），止盈价可以设置为 0.0365（约 +5.8%）
 
 **⚠️ 重要：关于 quantity 字段和杠杆的说明：**
 - **quantity 是合约数量（平仓数量），不是 USDT 数量**
