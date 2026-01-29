@@ -580,25 +580,25 @@ class StrategyCodeTesterBuy:
             None: 获取失败时返回None
         """
         try:
-            import os
             from trade.common.binance_futures_client import BinanceFuturesClient
+            import trade.common.config as app_config
 
-            # 从环境变量获取API配置
-            api_key = os.getenv('BINANCE_API_KEY', '')
-            api_secret = os.getenv('BINANCE_API_SECRET', '')
-            base_url = os.getenv('BINANCE_BASE_URL', 'https://fapi.binance.com')
+            # 从配置文件获取API配置（与trade服务保持一致）
+            api_key = getattr(app_config, 'BINANCE_API_KEY', '')
+            api_secret = getattr(app_config, 'BINANCE_API_SECRET', '')
+            quote_asset = getattr(app_config, 'FUTURES_QUOTE_ASSET', 'USDT')
+            testnet = getattr(app_config, 'BINANCE_TESTNET', False)
 
             if not api_key or not api_secret:
                 logger.warning("[StrategyCodeTesterBuy] 未配置币安API密钥，无法获取真实数据")
                 return None
 
-            # 创建币安客户端
+            # 创建币安客户端（使用与trade服务一致的配置）
             client = BinanceFuturesClient(
                 api_key=api_key,
                 api_secret=api_secret,
-                quote_asset='USDT',
-                base_url=base_url,
-                testnet=False
+                quote_asset=quote_asset,
+                testnet=testnet
             )
 
             # 获取BTCUSDT的实时价格
