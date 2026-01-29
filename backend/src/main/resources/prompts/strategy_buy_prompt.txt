@@ -45,7 +45,17 @@ def execute_buy_decision(
   - **`pandas`**：Pandas 数据分析库，用于数据处理和分析（如 `pd.DataFrame()`, `pd.Series()` 等）
 - **Python 内置标准库（总是可用）：**
   - **`math`**：数学函数库（如 `math.sqrt()`, `math.pow()`, `math.floor()`, `math.ceil()` 等）
-  - **`datetime`**：日期时间库（如 `datetime.datetime`, `datetime.timedelta` 等）
+  - **`datetime`**：日期时间库
+    - **⚠️ 重要：正确使用方式**
+      - ✅ **正确**：`from datetime import datetime` 然后使用 `datetime.now()`
+      - ✅ **正确**：`import datetime` 然后使用 `datetime.datetime.now()`
+      - ❌ **错误**：`import datetime` 然后使用 `datetime.now()` - 这会导致 `AttributeError: module 'datetime' has no attribute 'now'`
+    - **常用类和方法**：
+      - `datetime.datetime.now()` - 获取当前时间
+      - `datetime.datetime.strptime()` - 解析时间字符串
+      - `datetime.timedelta()` - 时间差计算
+      - `datetime.date.today()` - 获取今天日期
+    - **推荐导入方式**：`from datetime import datetime, timedelta` 然后直接使用 `datetime.now()`, `timedelta(days=1)`
   - **`json`**：JSON 处理库（如 `json.dumps()`, `json.loads()` 等）
   - **`time`**：时间库（如 `time.sleep()`, `time.time()` 等）
   - **`random`**：随机数库（如 `random.random()`, `random.randint()` 等）
@@ -608,7 +618,13 @@ class GeneratedBuyStrategy(StrategyBaseBuy):
 
 **Python 内置标准库（总是可用）：**
 - **`math`**：数学函数库（`math.sqrt()`, `math.pow()`, `math.floor()`, `math.ceil()`, `math.sin()`, `math.cos()` 等）
-- **`datetime`**：日期时间库（`datetime.datetime`, `datetime.timedelta`, `datetime.date` 等）
+- **`datetime`**：日期时间库
+  - **⚠️ 重要：正确使用方式**
+    - ✅ **正确**：`from datetime import datetime` 然后使用 `datetime.now()`
+    - ✅ **正确**：`import datetime` 然后使用 `datetime.datetime.now()`
+    - ❌ **错误**：`import datetime` 然后使用 `datetime.now()` - 这会导致 `AttributeError: module 'datetime' has no attribute 'now'`
+  - **常用类和方法**：`datetime.datetime.now()`, `datetime.datetime.strptime()`, `datetime.timedelta()`, `datetime.date.today()`
+  - **推荐导入方式**：`from datetime import datetime, timedelta` 然后直接使用 `datetime.now()`, `timedelta(days=1)`
 - **`json`**：JSON 处理库（`json.dumps()`, `json.loads()` 等）
 - **`time`**：时间库（`time.sleep()`, `time.time()`, `time.strftime()` 等）
 - **`random`**：随机数库（`random.random()`, `random.randint()`, `random.choice()` 等）
