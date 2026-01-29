@@ -41,8 +41,10 @@ binance:
   base-url: https://testnet.binancefuture.com
   testnet: true
   quote-asset: USDT
-  connect-timeout: 10000
-  read-timeout: 50000
+  # 连接超时时间（毫秒）- 增加到30秒，减少连接超时错误
+  connect-timeout: 30000
+  # 读取超时时间（毫秒）- 增加到60秒，减少读取超时错误
+  read-timeout: 60000
   retries: 3
   backoff: 200
   compression: true

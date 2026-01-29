@@ -128,7 +128,9 @@ public class ModelServiceImpl implements ModelService {
                     binanceConfig.getSecretKey(),
                     binanceConfig.getQuoteAsset(),
                     binanceConfig.getBaseUrl(),
-                    binanceConfig.getTestnet()
+                    binanceConfig.getTestnet(),
+                    binanceConfig.getConnectTimeout(),
+                    binanceConfig.getReadTimeout()
             );
         }
         return binanceFuturesClient;

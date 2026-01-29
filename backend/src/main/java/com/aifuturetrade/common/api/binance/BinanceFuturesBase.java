@@ -48,9 +48,12 @@ public abstract class BinanceFuturesBase {
      * @param privateKeyPath 私钥路径（RSA/ED25519认证方式）
      * @param privateKeyPass 私钥密码（如果私钥文件已加密）
      * @param baseUrl API基础URL
+     * @param connectTimeout 连接超时时间（毫秒），默认10000ms
+     * @param readTimeout 读取超时时间（毫秒），默认50000ms
      */
     protected void initRestApi(String apiKey, String secretKey, String privateKeyPath, 
-                               String privateKeyPass, String baseUrl) {
+                               String privateKeyPass, String baseUrl, 
+                               Integer connectTimeout, Integer readTimeout) {
         try {
             // 使用官方工具类获取客户端配置
             ClientConfiguration clientConfiguration = DerivativesTradingUsdsFuturesRestApiUtil.getClientConfiguration();
@@ -76,6 +79,17 @@ public abstract class BinanceFuturesBase {
             // 设置客户端配置
             clientConfiguration.setSignatureConfiguration(signatureConfiguration);
             
+            // 设置超时时间（参考SDK文档：binance-connector-java-master/clients/derivatives-trading-usds-futures/docs/rest-api/timeout.md）
+            // SDK默认值：connectTimeout=1000ms, readTimeout=5000ms
+            // 这里使用配置的值，如果没有配置则使用默认值
+            int connectTimeoutMs = (connectTimeout != null && connectTimeout > 0) ? connectTimeout : 10000;
+            int readTimeoutMs = (readTimeout != null && readTimeout > 0) ? readTimeout : 50000;
+            
+            clientConfiguration.setConnectTimeout(connectTimeoutMs);
+            clientConfiguration.setReadTimeout(readTimeoutMs);
+            
+            log.info("Binance API客户端超时配置: connectTimeout={}ms, readTimeout={}ms", connectTimeoutMs, readTimeoutMs);
+            
             // 如果提供了baseUrl，设置基础路径
             if (baseUrl != null && !baseUrl.isEmpty()) {
                 // 注意：ClientConfiguration 可能没有 setBasePath 方法
@@ -85,7 +99,8 @@ public abstract class BinanceFuturesBase {
             // 初始化API客户端
             restApi = new DerivativesTradingUsdsFuturesRestApi(clientConfiguration);
             
-            log.info("Binance API客户端初始化完成，baseUrl: {}, quoteAsset: {}", baseUrl, quoteAsset);
+            log.info("Binance API客户端初始化完成，baseUrl: {}, quoteAsset: {}, connectTimeout: {}ms, readTimeout: {}ms", 
+                    baseUrl, quoteAsset, connectTimeoutMs, readTimeoutMs);
         } catch (Exception e) {
             log.error("Binance API客户端初始化失败", e);
             throw new RuntimeException("Binance API客户端初始化失败: " + e.getMessage(), e);

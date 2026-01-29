@@ -49,7 +49,9 @@ public class MarketServiceImpl implements MarketService {
                     binanceConfig.getSecretKey(),
                     binanceConfig.getQuoteAsset(),
                     binanceConfig.getBaseUrl(),
-                    binanceConfig.getTestnet()
+                    binanceConfig.getTestnet(),
+                    binanceConfig.getConnectTimeout(),
+                    binanceConfig.getReadTimeout()
             );
         }
         return futuresClient;
