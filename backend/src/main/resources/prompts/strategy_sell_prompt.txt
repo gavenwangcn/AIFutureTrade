@@ -624,7 +624,7 @@ class GeneratedSellStrategy(StrategyBaseSell):
 
 **Python 内置标准库（总是可用）：**
 - **`math`**：数学函数库（`math.sqrt()`, `math.pow()`, `math.floor()`, `math.ceil()`, `math.sin()`, `math.cos()` 等）
-- **`datetime`**：日期时间。**必须与 strategy_template_sell 一致**：仅使用 `from datetime import datetime, timedelta`，再使用 `datetime.now()`, `datetime.strptime()`, `timedelta()`。禁止 `import datetime` 后使用 `datetime.now()`（会报错）。
+- **`datetime`**：日期时间。推荐使用 `from datetime import datetime, timedelta`，再使用 `datetime.now()`, `datetime.strptime()`, `timedelta()`。
 - **`json`**：JSON 处理库（`json.dumps()`, `json.loads()` 等）
 - **`time`**：时间库（`time.sleep()`, `time.time()`, `time.strftime()` 等）
 - **`random`**：随机数库（`random.random()`, `random.randint()`, `random.choice()` 等）
