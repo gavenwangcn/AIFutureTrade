@@ -39,7 +39,7 @@ def execute_buy_decision(
 
 **参数说明：**
 - `candidates: List[Dict]` - 候选交易对列表，每个元素包含 symbol、price 等信息
-- `portfolio: Dict` - 持仓组合信息，包含 cash（可用资金）、positions（持仓列表）、positions_value、margin_used、total_value、realized_pnl、unrealized_pnl、initial_capital
+- `portfolio: Dict` - 持仓组合信息，包含 cash（可用资金）、positions（持仓列表，每个元素含 symbol、**avg_price 开仓价**、**open_time 开仓时间** 等）、positions_value、margin_used、total_value、realized_pnl、unrealized_pnl、initial_capital
 - `account_info: Dict` - 账户信息，包含 current_time、total_return、initial_capital、balance、available_balance、cross_wallet_balance、cross_pnl、cross_un_pnl
 - `market_state: Dict` - 市场状态字典，格式：`{"SYMBOL": {"price": float, "base_volume": float, "quote_volume": float, "source": str, "leaderboard_source": str, "indicators": {"timeframes": {"1h": {"klines": [...]}}, ...}, "previous_close_prices": {...}}}`
 
@@ -397,7 +397,8 @@ class GeneratedBuyStrategy(StrategyBaseBuy):
         "indicators": {
             "timeframes": {
                 # ⚠️ 重要：K线数据共有8类interval（时间周期）
-                "1m": {"klines": [{"open": float, "high": float, "low": float, "close": float, "volume": float}, ...]},  # 1分钟K线
+                # 每根K线含 open_time_dt_str、close_time_dt_str（该根K线时间区间），用于与开仓时间等匹配
+                "1m": {"klines": [{"open": float, "high": float, "low": float, "close": float, "volume": float, "open_time_dt_str": str, "close_time_dt_str": str}, ...]},  # 1分钟K线
                 "5m": {"klines": [...]},  # 5分钟K线
                 "15m": {"klines": [...]},  # 15分钟K线
                 "30m": {"klines": [...]},  # 30分钟K线
@@ -445,9 +446,16 @@ klines_1d = timeframes.get('1d', {}).get('klines', [])  # 1天K线
 klines_1w = timeframes.get('1w', {}).get('klines', [])  # 1周K线
 ```
 
+**⚠️ 开仓价对应某 interval 的 K 线信息（理解与处理逻辑）：**
+- **含义**：例如「开仓价的15分钟K线最高价」指：**开仓时间（position 的 open_time）落入某根 15m K 线的时间区间内**时，该根 K 线的 **high** 即为开仓价的15分钟K线最高价。
+- **时间区间**：每根 K 线带有 **open_time_dt_str**、**close_time_dt_str**（UTC+8，格式 'YYYY-MM-DD HH:MM:SS'），表示该根 K 线的时间区间 [open_time_dt_str, close_time_dt_str]（左闭右闭）。开仓时间 open_time 若满足 **open_time_dt_str <= open_time <= close_time_dt_str**，则属于该根 K 线。
+- **查找方式**：遍历对应 interval 的 klines 列表，找到满足「open_time 落在该根 K 线的 open_time_dt_str 与 close_time_dt_str 之间」的那一根；该根 K 线上的 **open、high、low、close、volume** 等即为「开仓价在该 interval 下的 K 线信息」。
+- **若无匹配**：若没有任何一根该 interval 的 K 线的时间区间包含开仓时间，则「开仓价某某 interval K 线的 xxx 信息」（如最高价、最低价、开盘价、收盘价等）**为空/None**，策略中需做判空处理。
+- **示例**：`open_time = position.get('open_time')`，在 `klines_15m` 中查找满足 `kline['open_time_dt_str'] <= open_time <= kline['close_time_dt_str']` 的 kline，若找到则 `kline_high_at_open = kline['high']`，否则 `kline_high_at_open = None`。
+
 **约束条件获取（从 portfolio）：**
 - `portfolio.get('cash', 0)` - 可用现金
-- `portfolio.get('positions', [])` - 当前持仓列表
+- `portfolio.get('positions', [])` - 当前持仓列表；每个持仓元素包含：symbol、position_amt、**avg_price（即开仓价）**、**open_time（即开仓时间**，来自 portfolios 表 created_at，与开仓价对应，格式 'YYYY-MM-DD HH:MM:SS'）等。策略中请使用 avg_price 表示开仓价、open_time 表示开仓时间
 - `len(portfolio.get('positions', []))` - 当前持仓数量
 - `portfolio.get('positions_value', 0)` - 持仓总价值
 - `portfolio.get('margin_used', 0)` - 已用保证金

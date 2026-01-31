@@ -11,7 +11,7 @@ import logging
 import time
 import threading
 import requests
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 from typing import Any, Callable, Dict, List, Optional
 import trade.common.config as app_config
 
@@ -49,6 +49,19 @@ except ImportError as exc:  # pragma: no cover - handled at runtime
 
 
 logger = logging.getLogger(__name__)
+
+
+def _to_epoch_milli(ts: Any) -> int:
+    """将时间戳统一为毫秒，支持 10 位（秒）或 13 位（毫秒），与 Java binance-service 一致。"""
+    if ts is None:
+        return 0
+    try:
+        t = int(ts)
+        if t < 1_000_000_000_000:
+            return t * 1000
+        return t
+    except (ValueError, TypeError):
+        return 0
 
 
 # ============ Binance Service客户端（用于调用binance-service微服务） ============
@@ -860,7 +873,7 @@ class BinanceFuturesClient(_BinanceFuturesBase):
                 f"[Binance Futures] API调用完成, 耗时: {api_duration:.3f} 秒, 返回K线数量: {len(data)}"
             )
 
-            # 转换K线数据为完整格式
+            # 转换K线数据为完整格式（与 Java binance-service 一致：含 open_time_dt_str/close_time_dt_str，UTC+8）
             klines: List[Dict[str, Any]] = []
             for item in data:
                 # 如果是列表/元组格式（Binance API标准格式）
@@ -877,20 +890,24 @@ class BinanceFuturesClient(_BinanceFuturesBase):
                     taker_buy_base_volume = item[9]
                     taker_buy_quote_volume = item[10]
                     
-                    # 转换时间戳为日期格式
-                    open_time_dt = datetime.fromtimestamp(open_time / 1000) if open_time else None
-                    close_time_dt = datetime.fromtimestamp(close_time / 1000) if close_time else None
+                    open_time_ms = _to_epoch_milli(open_time)
+                    close_time_ms = _to_epoch_milli(close_time)
+                    utc8 = timezone(timedelta(hours=8))
+                    open_time_dt = datetime.fromtimestamp(open_time_ms / 1000, tz=utc8) if open_time_ms else None
+                    close_time_dt = datetime.fromtimestamp(close_time_ms / 1000, tz=utc8) if close_time_ms else None
+                    open_time_dt_str = open_time_dt.strftime('%Y-%m-%d %H:%M:%S') if open_time_dt else None
+                    close_time_dt_str = close_time_dt.strftime('%Y-%m-%d %H:%M:%S') if close_time_dt else None
                     
                     kline_dict = {
                         "open_time": open_time,
-                        "open_time_dt": open_time_dt,
+                        "open_time_dt_str": open_time_dt_str,
                         "open": open_price,
                         "high": high_price,
                         "low": low_price,
                         "close": close_price,
                         "volume": volume,
                         "close_time": close_time,
-                        "close_time_dt": close_time_dt,
+                        "close_time_dt_str": close_time_dt_str,
                         "quote_asset_volume": quote_asset_volume,
                         "number_of_trades": number_of_trades,
                         "taker_buy_base_volume": taker_buy_base_volume,
@@ -913,32 +930,24 @@ class BinanceFuturesClient(_BinanceFuturesBase):
                         taker_buy_base_volume = entry.get("taker_buy_base_volume") or entry.get("takerBuyBaseVolume") or entry.get("V")
                         taker_buy_quote_volume = entry.get("taker_buy_quote_volume") or entry.get("takerBuyQuoteVolume") or entry.get("Q")
                         
-                        # 转换时间戳为日期格式
-                        open_time_dt = None
-                        close_time_dt = None
-                        if open_time:
-                            try:
-                                open_time_ms = int(open_time)
-                                open_time_dt = datetime.fromtimestamp(open_time_ms / 1000)
-                            except (ValueError, TypeError):
-                                pass
-                        if close_time:
-                            try:
-                                close_time_ms = int(close_time)
-                                close_time_dt = datetime.fromtimestamp(close_time_ms / 1000)
-                            except (ValueError, TypeError):
-                                pass
+                        open_time_ms = _to_epoch_milli(open_time)
+                        close_time_ms = _to_epoch_milli(close_time)
+                        utc8 = timezone(timedelta(hours=8))
+                        open_time_dt = datetime.fromtimestamp(open_time_ms / 1000, tz=utc8) if open_time_ms else None
+                        close_time_dt = datetime.fromtimestamp(close_time_ms / 1000, tz=utc8) if close_time_ms else None
+                        open_time_dt_str = open_time_dt.strftime('%Y-%m-%d %H:%M:%S') if open_time_dt else None
+                        close_time_dt_str = close_time_dt.strftime('%Y-%m-%d %H:%M:%S') if close_time_dt else None
                         
                         kline_dict = {
                             "open_time": open_time,
-                            "open_time_dt": open_time_dt,
+                            "open_time_dt_str": open_time_dt_str,
                             "open": open_price,
                             "high": high_price,
                             "low": low_price,
                             "close": close_price,
                             "volume": volume,
                             "close_time": close_time,
-                            "close_time_dt": close_time_dt,
+                            "close_time_dt_str": close_time_dt_str,
                             "quote_asset_volume": quote_asset_volume,
                             "number_of_trades": number_of_trades,
                             "taker_buy_base_volume": taker_buy_base_volume,

@@ -335,14 +335,21 @@ class PortfoliosDatabase:
                     'unrealized_pnl': 0
                 }
             
-            # Get positions
+            # Get positions（含 created_at 用于派生 open_time 开仓时间，与开仓价 avg_price 对应）
             rows = self.query(f"""
                 SELECT * FROM {self.portfolios_table}
                 WHERE model_id = '{model_uuid}' AND position_amt != 0
             """)
-            columns = ["id", "model_id", "symbol", "position_amt", "avg_price", "leverage", 
-                      "position_side", "initial_margin", "unrealized_profit", "updated_at"]
+            columns = ["id", "model_id", "symbol", "position_amt", "avg_price", "leverage",
+                      "position_side", "initial_margin", "unrealized_profit", "created_at", "updated_at"]
             positions = self._rows_to_dicts(rows, columns)
+            # 为策略传递开仓时间：open_time 取自 portfolios.created_at，与 avg_price 对应
+            for pos in positions:
+                created_at = pos.get('created_at')
+                if hasattr(created_at, 'strftime'):
+                    pos['open_time'] = created_at.strftime('%Y-%m-%d %H:%M:%S')
+                else:
+                    pos['open_time'] = created_at if created_at is not None else None
             
             # Get initial capital
             if get_model_func:
