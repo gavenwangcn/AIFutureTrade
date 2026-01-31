@@ -483,16 +483,6 @@ public class BinanceFuturesClient extends BinanceFuturesBase {
                         klineDict.put("taker_buy_quote_volume", takerBuyQuoteVolume);
                         
                         klines.add(klineDict);
-                        
-                        // 首条K线打印时间转换日志，便于核对 open_time/close_time 与 UTC+8 的 open_time_dt_str/close_time_dt_str
-                        if (klines.size() == 1 && openTime != null && closeTime != null) {
-                            long openMs = toEpochMilli(openTime);
-                            long closeMs = toEpochMilli(closeTime);
-                            String utcOpenStr = Instant.ofEpochMilli(openMs).atZone(ZoneOffset.UTC).toLocalDateTime().format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"));
-                            String utcCloseStr = Instant.ofEpochMilli(closeMs).atZone(ZoneOffset.UTC).toLocalDateTime().format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"));
-                            log.info("[Binance Futures] K线时间转换(首条) open_time={} openTimeMs={} UTC={} -> UTC+8 open_time_dt_str={} | close_time={} closeTimeMs={} UTC={} -> UTC+8 close_time_dt_str={}",
-                                    openTime, openMs, utcOpenStr, openTimeDtStr, closeTime, closeMs, utcCloseStr, closeTimeDtStr);
-                        }
                     }
                 }
             }

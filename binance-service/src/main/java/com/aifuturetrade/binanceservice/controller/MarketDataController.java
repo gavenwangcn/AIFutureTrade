@@ -88,12 +88,6 @@ public class MarketDataController {
                 symbol, interval, limit);
         try {
             List<Map<String, Object>> result = marketDataService.getKlines(symbol, interval, limit, startTime, endTime);
-            // 打印首条K线时间字段，便于核对接口返回与服务端转换是否一致
-            if (result != null && !result.isEmpty()) {
-                Map<String, Object> first = result.get(0);
-                log.info("[MarketDataController] K线接口返回首条时间字段 open_time={} open_time_dt_str={} | close_time={} close_time_dt_str={}",
-                        first.get("open_time"), first.get("open_time_dt_str"), first.get("close_time"), first.get("close_time_dt_str"));
-            }
             Map<String, Object> response = new HashMap<>();
             response.put("success", true);
             response.put("data", result);
