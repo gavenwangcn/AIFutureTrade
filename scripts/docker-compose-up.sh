@@ -5,7 +5,12 @@
 # 用法：
 #   ./docker-compose-up.sh           # 启动服务（不重新构建）
 #   ./docker-compose-up.sh --build    # 启动服务并重新构建镜像
+#   ./docker-compose-up.sh --build --no-cache  # 强制无缓存重建（代码修改后仍跑旧版时使用）
 #   ./docker-compose-up.sh --build -d # 启动服务并重新构建镜像（后台运行，-d 已包含）
+#
+# 若修改了 binance-service/backend/async-service 等代码后 up --build 仍跑旧逻辑，
+# 请使用: ./docker-compose-up.sh --build --no-cache
+# 或单独强制重建: docker compose build --no-cache binance-service && docker compose up -d
 
 # 确定使用的命令（docker compose 或 docker-compose）
 if docker compose version &> /dev/null 2>&1; then
@@ -23,6 +28,15 @@ for arg in "$@"; do
     fi
 done
 
+# 检查是否包含 --no-cache 参数（强制无缓存重建，确保代码修改生效）
+HAS_NO_CACHE=false
+for arg in "$@"; do
+    if [ "$arg" = "--no-cache" ]; then
+        HAS_NO_CACHE=true
+        break
+    fi
+done
+
 # 检查镜像是否存在
 check_image_exists() {
     local image_name=$1
@@ -32,7 +46,11 @@ check_image_exists() {
 # 如果指定了 --build 参数，或者镜像不存在，先构建 model-buy 和 model-sell 镜像（避免拉取警告）
 if [ "$HAS_BUILD_FLAG" = true ]; then
     echo "检测到 --build 参数，将重新构建所有镜像..."
-    # 如果指定了 --build，让 docker-compose up --build 处理所有镜像的构建
+    # 若同时指定 --no-cache，先对 backend/binance-service/async-service 做无缓存构建，确保代码修改生效
+    if [ "$HAS_NO_CACHE" = true ]; then
+        echo "检测到 --no-cache，强制无缓存重建 backend、binance-service、async-service..."
+        $DOCKER_COMPOSE_CMD build --no-cache backend binance-service async-service || true
+    fi
     # 这里只构建 model-buy 和 model-sell，避免拉取警告
     echo "构建 model-buy 镜像..."
     $DOCKER_COMPOSE_CMD build model-buy 2>/dev/null || true
