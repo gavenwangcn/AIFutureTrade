@@ -456,27 +456,22 @@ public class BinanceFuturesClient extends BinanceFuturesBase {
                         String takerBuyBaseVolume = item.get(9);
                         String takerBuyQuoteVolume = item.get(10);
                         
-                        // 时间戳转日期（UTC+8 香港/北京时间）：open_time_dt/open_time_dt_str 由 open_time 转换，close_time_dt/close_time_dt_str 由 close_time 转换
+                        // 时间戳转日期（UTC+8 香港/北京时间）：open_time_dt_str 由 open_time 转换，close_time_dt_str 由 close_time 转换
                         // 时间戳支持：10位=秒，13位=毫秒（自1970-01-01 00:00:00 UTC）；转换后 +8 小时对应服务器香港时间
-                        LocalDateTime openTimeDt = null;
                         String openTimeDtStr = null;
                         if (openTime != null) {
                             long openTimeMs = toEpochMilli(openTime);
                             LocalDateTime openTimeLocal = Instant.ofEpochMilli(openTimeMs).atZone(ZoneOffset.ofHours(8)).toLocalDateTime();
-                            openTimeDt = openTimeLocal;
                             openTimeDtStr = openTimeLocal.format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"));
                         }
-                        LocalDateTime closeTimeDt = null;
                         String closeTimeDtStr = null;
                         if (closeTime != null) {
                             long closeTimeMs = toEpochMilli(closeTime);
                             LocalDateTime closeTimeLocal = Instant.ofEpochMilli(closeTimeMs).atZone(ZoneOffset.ofHours(8)).toLocalDateTime();
-                            closeTimeDt = closeTimeLocal;
                             closeTimeDtStr = closeTimeLocal.format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"));
                         }
                         
                         klineDict.put("open_time", openTime);
-                        klineDict.put("open_time_dt", openTimeDt);
                         klineDict.put("open_time_dt_str", openTimeDtStr);
                         klineDict.put("open", openPrice);
                         klineDict.put("high", highPrice);
@@ -484,7 +479,6 @@ public class BinanceFuturesClient extends BinanceFuturesBase {
                         klineDict.put("close", closePrice);
                         klineDict.put("volume", volume);
                         klineDict.put("close_time", closeTime);
-                        klineDict.put("close_time_dt", closeTimeDt);
                         klineDict.put("close_time_dt_str", closeTimeDtStr);
                         klineDict.put("quote_asset_volume", quoteAssetVolume);
                         klineDict.put("number_of_trades", numberOfTrades);

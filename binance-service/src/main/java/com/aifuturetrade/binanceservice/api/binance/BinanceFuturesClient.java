@@ -453,27 +453,22 @@ public class BinanceFuturesClient extends BinanceFuturesBase {
                         String takerBuyBaseVolume = item.get(9);
                         String takerBuyQuoteVolume = item.get(10);
                         
-                        // 时间戳转日期（UTC+8 香港/北京时间）：open_time_dt/open_time_dt_str 由 open_time 转换，close_time_dt/close_time_dt_str 由 close_time 转换
+                        // 时间戳转日期（UTC+8 香港/北京时间）：open_time_dt_str 由 open_time 转换，close_time_dt_str 由 close_time 转换
                         // 时间戳支持：10位=秒，13位=毫秒（自1970-01-01 00:00:00 UTC）；转换后 +8 小时对应服务器香港时间
-                        LocalDateTime openTimeDt = null;
                         String openTimeDtStr = null;
                         if (openTime != null) {
                             long openTimeMs = toEpochMilli(openTime);
                             LocalDateTime openTimeLocal = Instant.ofEpochMilli(openTimeMs).atZone(ZoneOffset.ofHours(8)).toLocalDateTime();
-                            openTimeDt = openTimeLocal;
                             openTimeDtStr = openTimeLocal.format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"));
                         }
-                        LocalDateTime closeTimeDt = null;
                         String closeTimeDtStr = null;
                         if (closeTime != null) {
                             long closeTimeMs = toEpochMilli(closeTime);
                             LocalDateTime closeTimeLocal = Instant.ofEpochMilli(closeTimeMs).atZone(ZoneOffset.ofHours(8)).toLocalDateTime();
-                            closeTimeDt = closeTimeLocal;
                             closeTimeDtStr = closeTimeLocal.format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"));
                         }
                         
                         klineDict.put("open_time", openTime);
-                        klineDict.put("open_time_dt", openTimeDt);
                         klineDict.put("open_time_dt_str", openTimeDtStr);
                         klineDict.put("open", openPrice);
                         klineDict.put("high", highPrice);
@@ -481,7 +476,6 @@ public class BinanceFuturesClient extends BinanceFuturesBase {
                         klineDict.put("close", closePrice);
                         klineDict.put("volume", volume);
                         klineDict.put("close_time", closeTime);
-                        klineDict.put("close_time_dt", closeTimeDt);
                         klineDict.put("close_time_dt_str", closeTimeDtStr);
                         klineDict.put("quote_asset_volume", quoteAssetVolume);
                         klineDict.put("number_of_trades", numberOfTrades);
@@ -489,6 +483,16 @@ public class BinanceFuturesClient extends BinanceFuturesBase {
                         klineDict.put("taker_buy_quote_volume", takerBuyQuoteVolume);
                         
                         klines.add(klineDict);
+                        
+                        // 首条K线打印时间转换日志，便于核对 open_time/close_time 与 UTC+8 的 open_time_dt_str/close_time_dt_str
+                        if (klines.size() == 1 && openTime != null && closeTime != null) {
+                            long openMs = toEpochMilli(openTime);
+                            long closeMs = toEpochMilli(closeTime);
+                            String utcOpenStr = Instant.ofEpochMilli(openMs).atZone(ZoneOffset.UTC).toLocalDateTime().format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"));
+                            String utcCloseStr = Instant.ofEpochMilli(closeMs).atZone(ZoneOffset.UTC).toLocalDateTime().format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"));
+                            log.info("[Binance Futures] K线时间转换(首条) open_time={} openTimeMs={} UTC={} -> UTC+8 open_time_dt_str={} | close_time={} closeTimeMs={} UTC={} -> UTC+8 close_time_dt_str={}",
+                                    openTime, openMs, utcOpenStr, openTimeDtStr, closeTime, closeMs, utcCloseStr, closeTimeDtStr);
+                        }
                     }
                 }
             }
