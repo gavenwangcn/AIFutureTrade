@@ -453,42 +453,35 @@ public class BinanceFuturesClient extends BinanceFuturesBase {
                         String takerBuyBaseVolume = item.get(9);
                         String takerBuyQuoteVolume = item.get(10);
                         
-                        // 转换时间戳为日期格式（转换为UTC+8时区）
-                        // 注意：open_time 和 close_time 是 UTC 时间戳（毫秒），用于API调用
-                        // open_time_dt_str 和 close_time_dt_str 是 UTC+8 格式的时间字符串，不包含时区信息
+                        // 时间戳转UTC日期：open_time_dt/open_time_dt_str 由 open_time 转换，close_time_dt/close_time_dt_str 由 close_time 转换
+                        // 时间戳支持：10位=秒，13位=毫秒（自1970-01-01 00:00:00 UTC以来的秒数/毫秒数）
                         LocalDateTime openTimeDt = null;
                         String openTimeDtStr = null;
                         if (openTime != null) {
-                            // 转换为UTC+8时区
-                            LocalDateTime openTimeLocal = Instant.ofEpochMilli(openTime).atZone(ZoneOffset.ofHours(8)).toLocalDateTime();
-                            openTimeDt = openTimeLocal;
-                            // 格式：2025-01-01 12:00:00（UTC+8时区，不包含时区信息）
-                            openTimeDtStr = openTimeLocal.format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"));
+                            long openTimeMs = toEpochMilli(openTime);
+                            LocalDateTime openTimeUtc = Instant.ofEpochMilli(openTimeMs).atZone(ZoneOffset.UTC).toLocalDateTime();
+                            openTimeDt = openTimeUtc;
+                            openTimeDtStr = openTimeUtc.format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"));
                         }
                         LocalDateTime closeTimeDt = null;
                         String closeTimeDtStr = null;
                         if (closeTime != null) {
-                            // 转换为UTC+8时区
-                            LocalDateTime closeTimeLocal = Instant.ofEpochMilli(closeTime).atZone(ZoneOffset.ofHours(8)).toLocalDateTime();
-                            closeTimeDt = closeTimeLocal;
-                            // 格式：2025-01-01 12:00:00（UTC+8时区，不包含时区信息）
-                            closeTimeDtStr = closeTimeLocal.format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"));
+                            long closeTimeMs = toEpochMilli(closeTime);
+                            LocalDateTime closeTimeUtc = Instant.ofEpochMilli(closeTimeMs).atZone(ZoneOffset.UTC).toLocalDateTime();
+                            closeTimeDt = closeTimeUtc;
+                            closeTimeDtStr = closeTimeUtc.format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"));
                         }
                         
-                        // 保留原始UTC时间戳（用于API调用和计算）
                         klineDict.put("open_time", openTime);
                         klineDict.put("open_time_dt", openTimeDt);
-                        // UTC+8格式的时间字符串（用于显示，不包含时区信息）
                         klineDict.put("open_time_dt_str", openTimeDtStr);
                         klineDict.put("open", openPrice);
                         klineDict.put("high", highPrice);
                         klineDict.put("low", lowPrice);
                         klineDict.put("close", closePrice);
                         klineDict.put("volume", volume);
-                        // 保留原始UTC时间戳（用于API调用和计算）
                         klineDict.put("close_time", closeTime);
                         klineDict.put("close_time_dt", closeTimeDt);
-                        // UTC+8格式的时间字符串（用于显示，不包含时区信息）
                         klineDict.put("close_time_dt_str", closeTimeDtStr);
                         klineDict.put("quote_asset_volume", quoteAssetVolume);
                         klineDict.put("number_of_trades", numberOfTrades);
@@ -542,6 +535,20 @@ public class BinanceFuturesClient extends BinanceFuturesBase {
             return ((Number) obj).longValue();
         }
         return null;
+    }
+    
+    /**
+     * 将时间戳统一为毫秒。支持 10 位（秒）或 13 位（毫秒），自 1970-01-01 00:00:00 UTC。
+     */
+    private long toEpochMilli(Long timestamp) {
+        if (timestamp == null) {
+            return 0L;
+        }
+        // 10位为秒级，需乘以1000；13位为毫秒级，直接使用
+        if (timestamp < 1_000_000_000_000L) {
+            return timestamp * 1000L;
+        }
+        return timestamp;
     }
     
     /**
