@@ -18,11 +18,11 @@
 
 ## 详细要求：
 
-### 策略模板提供的日期时间用法（必须遵守）
-- **模板约定**：`strategy_template_sell.py` 中已使用 `from datetime import datetime, timedelta`。生成代码中如需使用日期、时间或时间差，**必须**采用与模板相同的写法。
-- **正确写法**：在文件顶部（类定义外）写 `from datetime import datetime, timedelta`，然后使用：
-  - `datetime.now()` — 当前时间；`datetime.strptime(s, '%Y-%m-%d')` — 解析字符串；`timedelta(days=1)` — 时间差。
-- **禁止写法**：不得使用 `import datetime` 后调用 `datetime.now()` 或 `datetime.strptime()`，否则会报错 `module 'datetime' has no attribute 'now'`。不要用变量名 `datetime`/`timedelta` 遮蔽已导入的类。
+### 策略模板提供的日期时间用法（推荐遵守）
+- **模板约定**：`strategy_template_sell.py` 中已使用 `from datetime import datetime, timedelta`。生成代码中如需使用日期、时间或时间差，**推荐**采用与模板相同的写法。
+- **推荐写法**：在文件顶部（类定义外）写 `from datetime import datetime, timedelta`，然后使用：
+  - `datetime.now()` — 当前时间；`datetime.strptime(s, '%Y-%m-%d')` 或 `datetime.strptime(s, '%Y-%m-%d %H:%M:%S')` — 解析字符串；`timedelta(days=1)` — 时间差。
+- **注意**：不要用变量名 `datetime` 或 `timedelta` 遮蔽已导入的类。
 
 ### 1. 必须继承 StrategyBaseSell 类并严格实现方法签名
 
@@ -49,16 +49,13 @@ def execute_sell_decision(
   - **`pandas`**：Pandas 数据分析库，用于数据处理和分析（如 `pd.DataFrame()`, `pd.Series()` 等）
 - **Python 内置标准库（总是可用）：**
   - **`math`**：数学函数库（如 `math.sqrt()`, `math.pow()`, `math.floor()`, `math.ceil()` 等）
-  - **`datetime`**（日期时间）：**必须与 strategy_template_sell 模板一致**
-    - **模板约定**：`strategy_template_sell.py` 中已使用 `from datetime import datetime, timedelta`。生成代码中如需使用日期时间，**必须**采用与模板相同的导入和用法。
-    - **唯一正确写法**：在代码顶部（类定义外）写 `from datetime import datetime, timedelta`，然后使用：
-      - `datetime.now()` - 获取当前时间
-      - `datetime.strptime(s, '%Y-%m-%d')` 或 `datetime.strptime(s, '%Y-%m-%d %H:%M:%S')` - 解析时间字符串
-      - `timedelta(days=1)` / `timedelta(hours=1)` - 时间差
+  - **`datetime`**（日期时间）：**推荐与 strategy_template_sell 模板一致**
+    - **推荐**：在代码顶部（类定义外）写 `from datetime import datetime, timedelta`，然后使用：
+      - `datetime.now()` — 当前时间
+      - `datetime.strptime(s, '%Y-%m-%d')` 或 `datetime.strptime(s, '%Y-%m-%d %H:%M:%S')` — 解析时间字符串（如解析 `account_info['current_time']`）
+      - `timedelta(days=1)` / `timedelta(hours=1)` — 时间差
       - `datetime.date.today()` 需先 `from datetime import date` 或使用 `datetime.now().date()`
-    - **禁止写法**：
-      - ❌ `import datetime` 后使用 `datetime.now()` 或 `datetime.strptime()` — 会报错 `module 'datetime' has no attribute 'now'`
-      - ❌ 使用变量名 `datetime` 或 `timedelta` 以免遮蔽已导入的类
+    - **注意**：不要用变量名 `datetime` 或 `timedelta` 遮蔽已导入的类。
   - **`json`**：JSON 处理库（如 `json.dumps()`, `json.loads()` 等）
   - **`time`**：时间库（如 `time.sleep()`, `time.time()` 等）
   - **`random`**：随机数库（如 `random.random()`, `random.randint()` 等）
@@ -98,7 +95,7 @@ def execute_sell_decision(
 ```python
 from trade.strategy.strategy_template_sell import StrategyBaseSell
 from typing import Dict
-from datetime import datetime, timedelta  # 与模板一致：必须用 from ... import，不可用 import datetime
+from datetime import datetime, timedelta  # 与模板一致，用于 datetime.now()、datetime.strptime()、timedelta()
 
 class GeneratedSellStrategy(StrategyBaseSell):
     """
@@ -602,7 +599,7 @@ decisions[symbol] = {
 ```
 from trade.strategy.strategy_template_sell import StrategyBaseSell
 from typing import Dict
-from datetime import datetime, timedelta  # 日期时间：必须与模板一致，不可用 import datetime
+from datetime import datetime, timedelta  # 与模板一致，用于 datetime.now()、datetime.strptime()、timedelta()
 
 class GeneratedSellStrategy(StrategyBaseSell):
     def execute_sell_decision(...):

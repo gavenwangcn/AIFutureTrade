@@ -266,14 +266,12 @@ class StrategyCodeExecutor:
             self.module_counter += 1
             module_name = f"strategy_module_{self.module_counter}_{strategy_name.replace(' ', '_')}"
             
-            # 创建模块
+            # 创建模块，并以模块 __dict__ 作为 exec 的全局命名空间，使方法内对 datetime 等名的查找使用模块命名空间
             module = types.ModuleType(module_name)
-            
-            # 执行策略代码（定义策略类）
-            # 策略代码应该定义一个继承 StrategyBase 的类
-            exec(strategy_code, execution_context, module.__dict__)
-            
-            # 确保策略模块中 datetime/timedelta 为类而非模块，避免生成代码写 import datetime 后 datetime.now() 报错
+            module.__dict__.update(execution_context)
+            # 执行策略代码（定义策略类），globals=locals=module.__dict__，使方法 __globals__ 指向模块
+            exec(strategy_code, module.__dict__, module.__dict__)
+            # 执行后注入 datetime/timedelta 为类（非模块），确保方法内 datetime.now()/datetime.strptime() 可用
             module.__dict__['datetime'] = datetime.datetime
             module.__dict__['timedelta'] = datetime.timedelta
             
