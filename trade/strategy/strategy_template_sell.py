@@ -9,10 +9,16 @@ Strategy Code Template - 卖出策略代码模板基类
 2. 实现 execute_sell_decision() 方法
 3. 系统会实例化策略类并调用相应方法
 4. 使用 self.log.info() 输出关键执行日志
+
+时间相关库使用（供生成代码参考）：
+- 必须使用：from datetime import datetime, timedelta
+- 然后使用：datetime.now()、datetime.strptime(s, '%Y-%m-%d')、timedelta(days=1)
+- 禁止使用：import datetime 后调用 datetime.now() 或 datetime.strptime()（会报错 AttributeError）
 """
 from abc import ABC, abstractmethod
 from typing import Dict
 import logging
+from datetime import datetime, timedelta  # 时间处理：推荐在生成代码中也写 from datetime import datetime, timedelta
 
 
 class StrategyBaseSell(ABC):
@@ -126,7 +132,7 @@ class StrategyBaseSell(ABC):
             'numpy': 'NumPy 数值计算库（可用）' if NUMPY_AVAILABLE else 'NumPy 数值计算库（不可用）',
             'pandas': 'Pandas 数据分析库（可用）' if PANDAS_AVAILABLE else 'Pandas 数据分析库（不可用）',
             'math': 'Python 数学函数库（内置）',
-            'datetime': 'Python 日期时间库（内置）',
+            'datetime': 'Python 日期时间库（内置）。必须用 from datetime import datetime, timedelta 再使用 datetime.now()/datetime.strptime()/timedelta()；禁止 import datetime 后直接用 datetime.now()（会报错）',
             'json': 'Python JSON 处理库（内置）',
             'time': 'Python 时间库（内置）',
             'random': 'Python 随机数库（内置）',

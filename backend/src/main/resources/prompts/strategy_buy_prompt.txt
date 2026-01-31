@@ -18,6 +18,12 @@
 
 ## 详细要求：
 
+### 策略模板提供的日期时间用法（必须遵守）
+- **模板约定**：`strategy_template_buy.py` 中已使用 `from datetime import datetime, timedelta`。生成代码中如需使用日期、时间或时间差，**必须**采用与模板相同的写法。
+- **正确写法**：在文件顶部（类定义外）写 `from datetime import datetime, timedelta`，然后使用：
+  - `datetime.now()` — 当前时间；`datetime.strptime(s, '%Y-%m-%d')` — 解析字符串；`timedelta(days=1)` — 时间差。
+- **禁止写法**：不得使用 `import datetime` 后调用 `datetime.now()` 或 `datetime.strptime()`，否则会报错 `module 'datetime' has no attribute 'now'`。不要用变量名 `datetime`/`timedelta` 遮蔽已导入的类。
+
 ### 1. 必须继承 StrategyBaseBuy 类并严格实现方法签名
 
 **方法签名（必须严格遵循）：**
@@ -45,17 +51,16 @@ def execute_buy_decision(
   - **`pandas`**：Pandas 数据分析库，用于数据处理和分析（如 `pd.DataFrame()`, `pd.Series()` 等）
 - **Python 内置标准库（总是可用）：**
   - **`math`**：数学函数库（如 `math.sqrt()`, `math.pow()`, `math.floor()`, `math.ceil()` 等）
-  - **`datetime`**：日期时间库
-    - **⚠️ 重要：正确使用方式**
-      - ✅ **正确**：`from datetime import datetime` 然后使用 `datetime.now()`
-      - ✅ **正确**：`import datetime` 然后使用 `datetime.datetime.now()`
-      - ❌ **错误**：`import datetime` 然后使用 `datetime.now()` - 这会导致 `AttributeError: module 'datetime' has no attribute 'now'`
-    - **常用类和方法**：
-      - `datetime.datetime.now()` - 获取当前时间
-      - `datetime.datetime.strptime()` - 解析时间字符串
-      - `datetime.timedelta()` - 时间差计算
-      - `datetime.date.today()` - 获取今天日期
-    - **推荐导入方式**：`from datetime import datetime, timedelta` 然后直接使用 `datetime.now()`, `timedelta(days=1)`
+  - **`datetime`**（日期时间）：**必须与 strategy_template_buy 模板一致**
+    - **模板约定**：`strategy_template_buy.py` 中已使用 `from datetime import datetime, timedelta`。生成代码中如需使用日期时间，**必须**采用与模板相同的导入和用法。
+    - **唯一正确写法**：在代码顶部（类定义外）写 `from datetime import datetime, timedelta`，然后使用：
+      - `datetime.now()` - 获取当前时间
+      - `datetime.strptime(s, '%Y-%m-%d')` 或 `datetime.strptime(s, '%Y-%m-%d %H:%M:%S')` - 解析时间字符串
+      - `timedelta(days=1)` / `timedelta(hours=1)` - 时间差
+      - `datetime.date.today()` 需先 `from datetime import date` 或使用 `datetime.now().date()`
+    - **禁止写法**：
+      - ❌ `import datetime` 后使用 `datetime.now()` 或 `datetime.strptime()` — 会报错 `module 'datetime' has no attribute 'now'`
+      - ❌ 使用变量名 `datetime` 或 `timedelta` 以免遮蔽已导入的类
   - **`json`**：JSON 处理库（如 `json.dumps()`, `json.loads()` 等）
   - **`time`**：时间库（如 `time.sleep()`, `time.time()` 等）
   - **`random`**：随机数库（如 `random.random()`, `random.randint()` 等）
@@ -95,6 +100,7 @@ def execute_buy_decision(
 ```python
 from trade.strategy.strategy_template_buy import StrategyBaseBuy
 from typing import Dict, List
+from datetime import datetime, timedelta  # 与模板一致：必须用 from ... import，不可用 import datetime
 
 class GeneratedBuyStrategy(StrategyBaseBuy):
     """
@@ -597,6 +603,7 @@ decisions[symbol] = {
 ```
 from trade.strategy.strategy_template_buy import StrategyBaseBuy
 from typing import Dict, List
+from datetime import datetime, timedelta  # 日期时间：必须与模板一致，不可用 import datetime
 
 class GeneratedBuyStrategy(StrategyBaseBuy):
     def execute_buy_decision(...):
@@ -618,13 +625,7 @@ class GeneratedBuyStrategy(StrategyBaseBuy):
 
 **Python 内置标准库（总是可用）：**
 - **`math`**：数学函数库（`math.sqrt()`, `math.pow()`, `math.floor()`, `math.ceil()`, `math.sin()`, `math.cos()` 等）
-- **`datetime`**：日期时间库
-  - **⚠️ 重要：正确使用方式**
-    - ✅ **正确**：`from datetime import datetime` 然后使用 `datetime.now()`
-    - ✅ **正确**：`import datetime` 然后使用 `datetime.datetime.now()`
-    - ❌ **错误**：`import datetime` 然后使用 `datetime.now()` - 这会导致 `AttributeError: module 'datetime' has no attribute 'now'`
-  - **常用类和方法**：`datetime.datetime.now()`, `datetime.datetime.strptime()`, `datetime.timedelta()`, `datetime.date.today()`
-  - **推荐导入方式**：`from datetime import datetime, timedelta` 然后直接使用 `datetime.now()`, `timedelta(days=1)`
+- **`datetime`**：日期时间。**必须与 strategy_template_buy 一致**：仅使用 `from datetime import datetime, timedelta`，再使用 `datetime.now()`, `datetime.strptime()`, `timedelta()`。禁止 `import datetime` 后使用 `datetime.now()`（会报错）。
 - **`json`**：JSON 处理库（`json.dumps()`, `json.loads()` 等）
 - **`time`**：时间库（`time.sleep()`, `time.time()`, `time.strftime()` 等）
 - **`random`**：随机数库（`random.random()`, `random.randint()`, `random.choice()` 等）
