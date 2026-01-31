@@ -452,23 +452,23 @@ public class BinanceFuturesClient extends BinanceFuturesBase {
                         String takerBuyBaseVolume = item.get(9);
                         String takerBuyQuoteVolume = item.get(10);
                         
-                        // 时间戳转UTC日期：open_time_dt/open_time_dt_str 由 open_time 转换，close_time_dt/close_time_dt_str 由 close_time 转换
-                        // 时间戳支持：10位=秒，13位=毫秒（自1970-01-01 00:00:00 UTC以来的秒数/毫秒数）
+                        // 时间戳转日期（UTC+8 香港/北京时间）：open_time_dt/open_time_dt_str 由 open_time 转换，close_time_dt/close_time_dt_str 由 close_time 转换
+                        // 时间戳支持：10位=秒，13位=毫秒（自1970-01-01 00:00:00 UTC）；转换后 +8 小时对应服务器香港时间
                         LocalDateTime openTimeDt = null;
                         String openTimeDtStr = null;
                         if (openTime != null) {
                             long openTimeMs = toEpochMilli(openTime);
-                            LocalDateTime openTimeUtc = Instant.ofEpochMilli(openTimeMs).atZone(ZoneOffset.UTC).toLocalDateTime();
-                            openTimeDt = openTimeUtc;
-                            openTimeDtStr = openTimeUtc.format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"));
+                            LocalDateTime openTimeLocal = Instant.ofEpochMilli(openTimeMs).atZone(ZoneOffset.ofHours(8)).toLocalDateTime();
+                            openTimeDt = openTimeLocal;
+                            openTimeDtStr = openTimeLocal.format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"));
                         }
                         LocalDateTime closeTimeDt = null;
                         String closeTimeDtStr = null;
                         if (closeTime != null) {
                             long closeTimeMs = toEpochMilli(closeTime);
-                            LocalDateTime closeTimeUtc = Instant.ofEpochMilli(closeTimeMs).atZone(ZoneOffset.UTC).toLocalDateTime();
-                            closeTimeDt = closeTimeUtc;
-                            closeTimeDtStr = closeTimeUtc.format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"));
+                            LocalDateTime closeTimeLocal = Instant.ofEpochMilli(closeTimeMs).atZone(ZoneOffset.ofHours(8)).toLocalDateTime();
+                            closeTimeDt = closeTimeLocal;
+                            closeTimeDtStr = closeTimeLocal.format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"));
                         }
                         
                         klineDict.put("open_time", openTime);
