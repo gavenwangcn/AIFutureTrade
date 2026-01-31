@@ -273,6 +273,10 @@ class StrategyCodeExecutor:
             # 策略代码应该定义一个继承 StrategyBase 的类
             exec(strategy_code, execution_context, module.__dict__)
             
+            # 确保策略模块中 datetime/timedelta 为类而非模块，避免生成代码写 import datetime 后 datetime.now() 报错
+            module.__dict__['datetime'] = datetime.datetime
+            module.__dict__['timedelta'] = datetime.timedelta
+            
             # 存储模块引用
             self.modules[module_name] = module
             
