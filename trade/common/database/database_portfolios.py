@@ -252,9 +252,9 @@ class PortfoliosDatabase:
             
             # Use INSERT ... ON DUPLICATE KEY UPDATE to implement UPSERT operation
             # If record exists (same model_id, symbol, position_side), update; otherwise insert new record
-            # Use UTC+8 timezone (Beijing time), convert to naive datetime for storage
+            # created_at/updated_at 使用代码插入：获取当前 UTC+8 时间
             beijing_tz = timezone(timedelta(hours=8))
-            current_time = datetime.now(beijing_tz).replace(tzinfo=None)
+            current_time_utc8 = datetime.now(beijing_tz).replace(tzinfo=None)
             
             normalized_symbol = symbol.upper()
             position_id = self._generate_id()
@@ -267,8 +267,8 @@ class PortfoliosDatabase:
                     sql = f"""
                     INSERT INTO `{self.portfolios_table}` 
                     (`id`, `model_id`, `symbol`, `position_amt`, `avg_price`, `leverage`, 
-                     `position_side`, `initial_margin`, `unrealized_profit`, `updated_at`)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                     `position_side`, `initial_margin`, `unrealized_profit`, `created_at`, `updated_at`)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     ON DUPLICATE KEY UPDATE
                         `position_amt` = VALUES(`position_amt`),
                         `avg_price` = VALUES(`avg_price`),
@@ -278,8 +278,9 @@ class PortfoliosDatabase:
                         `updated_at` = VALUES(`updated_at`)
                     """
                     cursor.execute(sql, (
-                        position_id, model_uuid, normalized_symbol, position_amt, avg_price, 
-                        leverage, position_side_upper, initial_margin, unrealized_profit, current_time
+                        position_id, model_uuid, normalized_symbol, position_amt, avg_price,
+                        leverage, position_side_upper, initial_margin, unrealized_profit,
+                        current_time_utc8, current_time_utc8
                     ))
                     # Check if insert or update
                     if cursor.rowcount == 1:
