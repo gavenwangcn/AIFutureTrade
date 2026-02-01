@@ -3436,7 +3436,7 @@ class TradingEngine:
         total_required = initial_margin + buy_fee
         
         if total_required > available_cash:
-            return {'symbol': symbol, 'error': '可用资金不足（含手续费）'}
+            return {'symbol': symbol, 'error': f'可用资金不足（含手续费），可用资金 {available_cash:.2f} USDT，本金 {initial_margin:.2f} USDT + 手续费 {buy_fee:.2f} USDT = 需要 {total_required:.2f} USDT（合约数量 {position_amt}，价格 {price}，杠杆 {leverage}x）'}
         
         # quantity = 合约数量（与strategy_decisions表保持一致，统一使用合约数量）
         # 用于 trades 表记录，与策略执行记录中的quantity含义一致
