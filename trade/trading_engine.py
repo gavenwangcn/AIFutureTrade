@@ -4225,6 +4225,107 @@ class TradingEngine:
             'message': f'平仓 {symbol}, 毛收益 ${gross_pnl:.2f}, 手续费 ${trade_fee:.2f}, 净收益 ${net_pnl:.2f}'
         }
 
+    def _cancel_existing_algo_orders(self, symbol: str, model_uuid: str, trade_mode: str, 
+                                     binance_client=None, conversation_id: str = None, trade_id: str = None) -> bool:
+        """
+        取消已存在的条件单（状态为new的订单）
+        
+        Args:
+            symbol: 交易对符号
+            model_uuid: 模型UUID
+            trade_mode: 交易模式（'real' 或 'virtual'）
+            binance_client: Binance客户端（real模式需要）
+            conversation_id: 对话ID（可选）
+            trade_id: 交易ID（可选）
+        
+        Returns:
+            bool: 是否成功取消（real模式：SDK取消成功；virtual模式：数据库更新成功）
+        """
+        try:
+            # 查询数据库中状态为new的条件单
+            existing_orders = self.db.query(
+                f"SELECT id, algoId, orderType FROM {self.db.algo_order_table} "
+                f"WHERE model_id = %s AND symbol = %s AND algoStatus = 'new'",
+                (model_uuid, symbol.upper())
+            )
+            
+            if not existing_orders:
+                logger.debug(f"TRADE: 未找到需要取消的条件单 | model={self.model_id} symbol={symbol}")
+                return True
+            
+            logger.info(f"TRADE: 找到 {len(existing_orders)} 个待取消的条件单 | model={self.model_id} symbol={symbol}")
+            
+            if trade_mode == 'real' and binance_client:
+                # real模式：先查询SDK，再取消SDK，成功后才更新数据库
+                try:
+                    # 查询SDK中的条件单
+                    sdk_orders = binance_client.query_all_algo_orders(
+                        symbol=symbol,
+                        model_id=model_uuid,
+                        conversation_id=conversation_id,
+                        trade_id=trade_id,
+                        db=self.binance_trade_logs_db
+                    )
+                    
+                    # 检查SDK中是否有对应的条件单
+                    sdk_algo_ids = set()
+                    if sdk_orders and isinstance(sdk_orders, list):
+                        for order in sdk_orders:
+                            if isinstance(order, dict):
+                                algo_id = order.get('algoId') or order.get('algo_id')
+                                if algo_id:
+                                    sdk_algo_ids.add(int(algo_id))
+                    
+                    # 取消SDK中的条件单
+                    cancel_success = False
+                    if sdk_algo_ids:
+                        try:
+                            cancel_response = binance_client.cancel_all_algo_open_orders(
+                                symbol=symbol,
+                                model_id=model_uuid,
+                                conversation_id=conversation_id,
+                                trade_id=trade_id,
+                                db=self.binance_trade_logs_db
+                            )
+                            cancel_success = True
+                            logger.info(f"TRADE: SDK取消条件单成功 | model={self.model_id} symbol={symbol}")
+                        except Exception as cancel_err:
+                            logger.error(f"TRADE: SDK取消条件单失败 | model={self.model_id} symbol={symbol} error={cancel_err}")
+                            return False
+                    else:
+                        # SDK中没有找到条件单，但数据库中有，可能是已过期或已取消
+                        logger.warning(f"TRADE: SDK中未找到条件单，但数据库中有记录 | model={self.model_id} symbol={symbol}")
+                        cancel_success = True  # 允许继续，直接更新数据库
+                    
+                    # SDK取消成功后，更新数据库
+                    if cancel_success:
+                        for order_row in existing_orders:
+                            order_id = order_row[0]
+                            self.db.command(
+                                f"UPDATE {self.db.algo_order_table} SET algoStatus = 'cancelled', updated_at = NOW() WHERE id = %s",
+                                (order_id,)
+                            )
+                        logger.info(f"TRADE: 已更新数据库条件单状态为cancelled | model={self.model_id} symbol={symbol} count={len(existing_orders)}")
+                        return True
+                    else:
+                        return False
+                except Exception as sdk_err:
+                    logger.error(f"TRADE: real模式查询/取消条件单失败 | model={self.model_id} symbol={symbol} error={sdk_err}")
+                    return False
+            else:
+                # virtual模式：直接在数据库更新状态
+                for order_row in existing_orders:
+                    order_id = order_row[0]
+                    self.db.command(
+                        f"UPDATE {self.db.algo_order_table} SET algoStatus = 'cancelled', updated_at = NOW() WHERE id = %s",
+                        (order_id,)
+                    )
+                logger.info(f"TRADE: virtual模式已更新条件单状态为cancelled | model={self.model_id} symbol={symbol} count={len(existing_orders)}")
+                return True
+        except Exception as e:
+            logger.error(f"TRADE: 取消条件单失败 | model={self.model_id} symbol={symbol} error={e}", exc_info=True)
+            return False
+
     def _execute_stop_loss(self, symbol: str, decision: Dict, market_state: Dict, portfolio: Dict) -> Dict:
         """
         执行止损操作 - 使用条件单方式
@@ -4309,12 +4410,26 @@ class TradingEngine:
         # 确定交易方向（buy/sell）
         side_value = side_for_trade.lower()  # 'buy' or 'sell'
         
+        # 【先取消已存在的条件单】
+        binance_client = self._create_binance_order_client()
+        conversation_id = self._get_conversation_id()
+        cancel_success = self._cancel_existing_algo_orders(
+            symbol=symbol,
+            model_uuid=model_uuid,
+            trade_mode=trade_mode,
+            binance_client=binance_client if trade_mode == 'real' else None,
+            conversation_id=conversation_id,
+            trade_id=trade_id
+        )
+        
+        if not cancel_success:
+            logger.warning(f"TRADE: ⚠️ 取消旧条件单失败，但继续创建新条件单 | model={self.model_id} symbol={symbol}")
+        
         # 【调用SDK创建条件单】
         algo_id = None
         sdk_error = None
         sdk_response = None
         api_call_success = False
-        binance_client = self._create_binance_order_client()
         
         if trade_mode == 'real' and binance_client:
             try:
@@ -4333,8 +4448,6 @@ class TradingEngine:
                 logger.info(f"@API@ [Model {self.model_id}] [stop_loss_trade] === 准备调用条件单接口（止损操作）==="
                           f" | symbol={symbol} | side={side_for_trade} | order_type={order_type} | "
                           f"position_side={position_side} | quantity={strategy_quantity} | stop_price={stop_price} | price={price_value} | trade_mode={trade_mode}")
-                
-                conversation_id = self._get_conversation_id()
                 
                 # 调用stop_loss_trade创建条件单
                 sdk_response = binance_client.stop_loss_trade(
@@ -4540,12 +4653,26 @@ class TradingEngine:
         # 确定交易方向（buy/sell）
         side_value = side_for_trade.lower()  # 'buy' or 'sell'
         
+        # 【先取消已存在的条件单】
+        binance_client = self._create_binance_order_client()
+        conversation_id = self._get_conversation_id()
+        cancel_success = self._cancel_existing_algo_orders(
+            symbol=symbol,
+            model_uuid=model_uuid,
+            trade_mode=trade_mode,
+            binance_client=binance_client if trade_mode == 'real' else None,
+            conversation_id=conversation_id,
+            trade_id=trade_id
+        )
+        
+        if not cancel_success:
+            logger.warning(f"TRADE: ⚠️ 取消旧条件单失败，但继续创建新条件单 | model={self.model_id} symbol={symbol}")
+        
         # 【调用SDK创建条件单】
         algo_id = None
         sdk_error = None
         sdk_response = None
         api_call_success = False
-        binance_client = self._create_binance_order_client()
         
         if trade_mode == 'real' and binance_client:
             try:
@@ -4564,8 +4691,6 @@ class TradingEngine:
                 logger.info(f"@API@ [Model {self.model_id}] [take_profit_trade] === 准备调用条件单接口（止盈操作）==="
                           f" | symbol={symbol} | side={side_for_trade} | order_type={order_type} | "
                           f"position_side={position_side} | quantity={strategy_quantity} | stop_price={stop_price} | price={price_value} | trade_mode={trade_mode}")
-                
-                conversation_id = self._get_conversation_id()
                 
                 # 调用take_profit_trade创建条件单
                 sdk_response = binance_client.take_profit_trade(

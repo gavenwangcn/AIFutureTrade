@@ -2175,3 +2175,96 @@ class BinanceFuturesOrderClient(_BinanceFuturesBase):
         except Exception as exc:
             logger.error(f"[Binance Futures] 平仓交易失败: {exc}", exc_info=True)
             raise
+
+    def query_all_algo_orders(self, symbol: str, 
+                             model_id: Optional[str] = None, conversation_id: Optional[str] = None, 
+                             trade_id: Optional[str] = None, db = None) -> List[Dict[str, Any]]:
+        """
+        查询指定交易对的所有条件单
+        
+        Args:
+            symbol: 交易对符号（必填）
+            model_id: 模型ID（可选，用于日志记录）
+            conversation_id: 对话ID（可选，用于日志记录）
+            trade_id: 交易ID（可选，用于日志记录）
+            db: 数据库实例（可选，用于日志记录）
+        
+        Returns:
+            条件单列表
+        """
+        try:
+            if not symbol:
+                raise ValueError("symbol参数不能为空")
+            
+            formatted_symbol = self.format_symbol(symbol)
+            params = {"symbol": formatted_symbol}
+            
+            logger.info(f"[Binance Futures] 查询所有条件单，参数: {params}")
+            response = self._client.rest_api.query_all_algo_orders(**params)
+            
+            # 处理响应
+            data = response.data()
+            logger.info(f"[Binance Futures] 查询所有条件单成功: {data}")
+            response_dict = self._flatten_to_dicts(data, "query_all_algo_orders") if data else []
+            
+            # 记录日志
+            response_type = self._extract_response_type(response)
+            self._log_trade(db, "query_all_algo_orders", 'real', params, response_dict, response_type,
+                          None, model_id, conversation_id, trade_id)
+            
+            return response_dict if isinstance(response_dict, list) else [response_dict] if response_dict else []
+        except Exception as exc:
+            logger.error(f"[Binance Futures] 查询所有条件单失败: {exc}", exc_info=True)
+            
+            # 记录错误日志
+            error_context = str(exc)
+            response_type = self._extract_response_type(exc)
+            self._log_trade(db, "query_all_algo_orders", 'real', params if 'params' in locals() else {}, {}, response_type,
+                          error_context, model_id, conversation_id, trade_id)
+            
+            raise
+
+    def cancel_all_algo_open_orders(self, symbol: str, 
+                                    model_id: Optional[str] = None, conversation_id: Optional[str] = None, 
+                                    trade_id: Optional[str] = None, db = None) -> Dict[str, Any]:
+        """
+        取消指定交易对的所有条件单
+        
+        Args:
+            symbol: 交易对符号（必填）
+            model_id: 模型ID（可选，用于日志记录）
+            conversation_id: 对话ID（可选，用于日志记录）
+            trade_id: 交易ID（可选，用于日志记录）
+            db: 数据库实例（可选，用于日志记录）
+        
+        Returns:
+            取消条件单响应数据
+        """
+        try:
+            formatted_symbol = self.format_symbol(symbol)
+            params = {"symbol": formatted_symbol}
+            
+            logger.info(f"[Binance Futures] 取消所有条件单，参数: {params}")
+            response = self._client.rest_api.cancel_all_algo_open_orders(**params)
+            
+            # 处理响应
+            data = response.data()
+            logger.info(f"[Binance Futures] 取消所有条件单成功: {data}")
+            response_dict = self._flatten_to_dicts(data, "cancel_all_algo_open_orders")[0] if data else {}
+            
+            # 记录日志
+            response_type = self._extract_response_type(response)
+            self._log_trade(db, "cancel_all_algo_open_orders", 'real', params, response_dict, response_type,
+                          None, model_id, conversation_id, trade_id)
+            
+            return response_dict
+        except Exception as exc:
+            logger.error(f"[Binance Futures] 取消所有条件单失败: {exc}", exc_info=True)
+            
+            # 记录错误日志
+            error_context = str(exc)
+            response_type = self._extract_response_type(exc)
+            self._log_trade(db, "cancel_all_algo_open_orders", 'real', params if 'params' in locals() else {}, {}, response_type,
+                          error_context, model_id, conversation_id, trade_id)
+            
+            raise
