@@ -454,3 +454,16 @@ export const binanceFuturesOrderApi = {
   sellPosition: (modelId, symbol) => apiPost('/api/binance-futures-order/sell-position', null, { modelId, symbol })
 }
 
+/**
+ * 条件订单相关 API
+ */
+export const algoOrderApi = {
+  /**
+   * 根据模型ID分页查询条件订单
+   * @param {string} modelId - 模型ID
+   * @param {number} page - 页码，从1开始，默认为1
+   * @param {number} pageSize - 每页记录数，默认为10
+   */
+  getByModelId: (modelId, page = 1, pageSize = 10) => apiGet(`/api/algo-orders/model/${modelId}`, { page, pageSize })
+}
+

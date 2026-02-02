@@ -502,6 +502,10 @@
               <i v-if="isRefreshingTrades" class="bi bi-arrow-repeat spin" style="margin-right: 4px;"></i>
               交易记录
             </button>
+            <button :class="['tab-btn', { active: activeTab === 'algo-orders' }]" @click="activeTab = 'algo-orders'">
+              <i v-if="isRefreshingAlgoOrders" class="bi bi-arrow-repeat spin" style="margin-right: 4px;"></i>
+              市场挂单
+            </button>
             <button 
               v-if="currentModel && (currentModel.trade_type || currentModel.tradeType) === 'strategy'"
               :class="['tab-btn', { active: activeTab === 'conversations' }]" 
@@ -651,6 +655,91 @@
                     @click="goToTradesPage(tradesPage + 1)"
                     style="padding: 4px 12px; border: 1px solid var(--border-color); background: var(--bg-secondary); color: var(--text-primary); border-radius: 4px; cursor: pointer;"
                     :style="{ opacity: tradesPage >= tradesTotalPages ? 0.5 : 1, cursor: tradesPage >= tradesTotalPages ? 'not-allowed' : 'pointer' }"
+                  >
+                    下一页
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- 市场挂单模块 -->
+          <div v-show="activeTab === 'algo-orders'" class="tab-content active">
+            <div v-if="loading.algoOrders" class="loading-container">
+              <i class="bi bi-arrow-repeat spin" style="font-size: 24px; color: var(--primary-color);"></i>
+              <p style="margin-top: 12px; color: var(--text-secondary);">加载挂单记录中...</p>
+            </div>
+            <div v-else>
+              <div
+                v-if="errors && errors.algoOrders"
+                style="margin-bottom: 12px; padding: 12px 14px; border-radius: 10px; border: 1px solid rgba(245, 34, 45, 0.25); background: rgba(245, 34, 45, 0.08); color: var(--danger); font-size: 14px;"
+              >
+                {{ errors.algoOrders }}
+              </div>
+              <div class="table-container">
+                <table class="data-table">
+                  <thead>
+                    <tr>
+                      <th>时间</th>
+                      <th>币种</th>
+                      <th>方向</th>
+                      <th>持仓方向</th>
+                      <th>数量</th>
+                      <th>订单类型</th>
+                      <th>状态</th>
+                      <th>价格</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr v-for="order in algoOrders" :key="order.id">
+                      <td>{{ order.created_at || '' }}</td>
+                      <td><strong>{{ order.symbol }}</strong></td>
+                      <td>
+                        <span :class="['badge', formatTradeSideClass(order.side)]">
+                          {{ formatTradeSide(order.side) }}
+                        </span>
+                      </td>
+                      <td>
+                        <span :class="['badge', getSignalBadgeClass((order.positionSide || '').toLowerCase())]">
+                          {{ order.positionSide || '' }}
+                        </span>
+                      </td>
+                      <td>{{ (order.quantity || 0).toFixed(4) }}</td>
+                      <td>{{ order.type || '' }}</td>
+                      <td>
+                        <span :class="['badge', getAlgoStatusBadgeClass(order.algoStatus)]">
+                          {{ formatAlgoStatus(order.algoStatus) }}
+                        </span>
+                      </td>
+                      <td>${{ formatPrice6(order.price) }}</td>
+                    </tr>
+                    <tr v-if="algoOrders.length === 0">
+                      <td colspan="8" class="empty-state">暂无挂单记录</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+              <!-- 分页控件 -->
+              <div v-if="algoOrdersTotal > 0" class="pagination-container" style="margin-top: 16px; display: flex; justify-content: space-between; align-items: center;">
+                <div class="pagination-info" style="color: var(--text-secondary); font-size: 14px;">
+                  共 {{ algoOrdersTotal }} 条记录，第 {{ algoOrdersPage }} / {{ algoOrdersTotalPages }} 页
+                </div>
+                <div class="pagination-controls" style="display: flex; gap: 8px;">
+                  <button 
+                    class="btn btn-sm" 
+                    :disabled="algoOrdersPage <= 1" 
+                    @click="goToAlgoOrdersPage(algoOrdersPage - 1)"
+                    style="padding: 4px 12px; border: 1px solid var(--border-color); background: var(--bg-secondary); color: var(--text-primary); border-radius: 4px; cursor: pointer;"
+                    :style="{ opacity: algoOrdersPage <= 1 ? 0.5 : 1, cursor: algoOrdersPage <= 1 ? 'not-allowed' : 'pointer' }"
+                  >
+                    上一页
+                  </button>
+                  <button 
+                    class="btn btn-sm" 
+                    :disabled="algoOrdersPage >= algoOrdersTotalPages" 
+                    @click="goToAlgoOrdersPage(algoOrdersPage + 1)"
+                    style="padding: 4px 12px; border: 1px solid var(--border-color); background: var(--bg-secondary); color: var(--text-primary); border-radius: 4px; cursor: pointer;"
+                    :style="{ opacity: algoOrdersPage >= algoOrdersTotalPages ? 0.5 : 1, cursor: algoOrdersPage >= algoOrdersTotalPages ? 'not-allowed' : 'pointer' }"
                   >
                     下一页
                   </button>
@@ -1182,6 +1271,7 @@ const {
   isRefreshingPositions,
   isRefreshingTrades,
   isRefreshingConversations,
+  isRefreshingAlgoOrders,
   portfolio,
   accountValueHistory,
   timeRangePreset,
@@ -1208,6 +1298,14 @@ const {
   strategyDecisionsHasPrev,
   strategyDecisionsHasNext,
   goToStrategyDecisionsPage,
+  // 挂单相关状态
+  algoOrders,
+  algoOrdersPage,
+  algoOrdersPageSize,
+  algoOrdersTotal,
+  algoOrdersTotalPages,
+  loadAlgoOrders,
+  goToAlgoOrdersPage,
   loading,
   errors,
   loadPositions,
@@ -1335,6 +1433,31 @@ watch(currentModelId, async (newModelId, oldModelId) => {
   }
 })
 
+// 格式化挂单状态
+const formatAlgoStatus = (status) => {
+  if (!status) return '未知'
+  const statusMap = {
+    'new': '新建',
+    'triggered': '已触发',
+    'executed': '已执行',
+    'cancelled': '已取消',
+    'failed': '失败'
+  }
+  return statusMap[status.toLowerCase()] || status
+}
+
+// 获取挂单状态样式类
+const getAlgoStatusBadgeClass = (status) => {
+  if (!status) return 'badge-default'
+  const statusLower = status.toLowerCase()
+  if (statusLower === 'new') return 'badge-info'
+  if (statusLower === 'triggered') return 'badge-warning'
+  if (statusLower === 'executed') return 'badge-success'
+  if (statusLower === 'cancelled') return 'badge-secondary'
+  if (statusLower === 'failed') return 'badge-danger'
+  return 'badge-default'
+}
+
 // 监听标签切换，动态重新加载数据
 watch(activeTab, async (newTab, oldTab) => {
   // 只在选中模型时加载数据
@@ -1356,6 +1479,9 @@ watch(activeTab, async (newTab, oldTab) => {
     } else if (newTab === 'trades') {
       console.log(`[App] Loading trades data...`)
       await loadTrades()
+    } else if (newTab === 'algo-orders') {
+      console.log(`[App] Loading algo orders data...`)
+      await loadAlgoOrders()
     } else if (newTab === 'conversations') {
       // 根据模型的trade_type决定加载对话还是策略决策
       const currentModelData = currentModel.value

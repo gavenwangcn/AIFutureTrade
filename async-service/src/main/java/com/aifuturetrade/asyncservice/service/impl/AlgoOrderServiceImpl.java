@@ -60,6 +60,9 @@ public class AlgoOrderServiceImpl implements AlgoOrderService {
     @Autowired
     private AccountValueHistoryMapper accountValueHistoryMapper;
     
+    @Autowired
+    private com.aifuturetrade.asyncservice.dao.mapper.StrategyDecisionMapper strategyDecisionMapper;
+    
     @Value("${async.algo-order.interval-seconds:2}")
     private int intervalSeconds;
     
@@ -221,8 +224,9 @@ public class AlgoOrderServiceImpl implements AlgoOrderService {
         }
         
         // 执行交易并构建相关记录
+        String tradeId = null;
         try {
-            String tradeId = executeTradeAndBuildRecords(order, model, currentPrice);
+            tradeId = executeTradeAndBuildRecords(order, model, currentPrice);
             result.setExecutedCount(result.getExecutedCount() + 1);
             
             // 更新订单状态为"executed"并关联trade_id
@@ -234,9 +238,29 @@ public class AlgoOrderServiceImpl implements AlgoOrderService {
                 log.warn("[AlgoOrderService] ⚠️ 交易执行完成，但更新订单状态失败: orderId={}, tradeId={}", 
                         orderId, tradeId);
             }
+            
+            // 更新strategy_decisions表状态为EXECUTED（如果有strategy_decision_id）
+            String strategyDecisionId = order.getStrategyDecisionId();
+            if (strategyDecisionId != null && !strategyDecisionId.isEmpty()) {
+                try {
+                    strategyDecisionMapper.updateStrategyDecisionStatus(
+                            strategyDecisionId,
+                            "EXECUTED",
+                            tradeId,
+                            null  // error_reason = null，表示成功
+                    );
+                    log.info("[AlgoOrderService] ✅ 已更新strategy_decisions表状态为EXECUTED: decisionId={}, tradeId={}", 
+                            strategyDecisionId, tradeId);
+                } catch (Exception updateErr) {
+                    log.error("[AlgoOrderService] ⚠️ 更新strategy_decisions表状态失败: decisionId={}, tradeId={}, error={}", 
+                            strategyDecisionId, tradeId, updateErr.getMessage(), updateErr);
+                    // 不抛出异常，避免影响主流程，但记录详细错误信息以便排查
+                }
+            }
         } catch (Exception e) {
             log.error("[AlgoOrderService] ❌ 交易执行失败: orderId={}, error={}", orderId, e.getMessage(), e);
             result.setFailedCount(result.getFailedCount() + 1);
+            
             // 更新订单状态为"failed"
             try {
                 algoOrderMapper.updateAlgoStatus(orderId, "failed");
@@ -244,6 +268,29 @@ public class AlgoOrderServiceImpl implements AlgoOrderService {
             } catch (Exception updateEx) {
                 log.error("[AlgoOrderService] 更新订单状态为failed失败: orderId={}, error={}", 
                         orderId, updateEx.getMessage());
+            }
+            
+            // 更新strategy_decisions表状态为REJECTED（如果有strategy_decision_id）
+            String strategyDecisionId = order.getStrategyDecisionId();
+            if (strategyDecisionId != null && !strategyDecisionId.isEmpty()) {
+                try {
+                    String errorReason = e.getMessage() != null ? e.getMessage() : "交易执行失败";
+                    // 注意：如果trade记录已经插入（tradeId不为null），则写入trade_id和error_reason
+                    // 如果trade记录未插入（tradeId为null），则只写入error_reason
+                    // 这样保证trade和strategy_decisions记录可以追溯查询
+                    strategyDecisionMapper.updateStrategyDecisionStatus(
+                            strategyDecisionId,
+                            "REJECTED",
+                            tradeId,  // 如果trade记录已插入，写入trade_id；否则为null
+                            errorReason
+                    );
+                    log.info("[AlgoOrderService] ✅ 已更新strategy_decisions表状态为REJECTED: decisionId={}, tradeId={}, errorReason={}", 
+                            strategyDecisionId, tradeId, errorReason);
+                } catch (Exception updateErr) {
+                    log.error("[AlgoOrderService] ⚠️ 更新strategy_decisions表状态失败: decisionId={}, error={}", 
+                            strategyDecisionId, updateErr.getMessage(), updateErr);
+                    // 不抛出异常，避免影响主流程
+                }
             }
         }
     }
@@ -496,7 +543,7 @@ public class AlgoOrderServiceImpl implements AlgoOrderService {
         log.info("[AlgoOrderService] ✅ 已插入account_value_historys表记录: historyId={}, tradeId={}", 
                 history.getId(), tradeId);
         
-        // 返回tradeId用于更新algo_order表
+        // 返回tradeId用于更新algo_order表和strategy_decisions表
         return tradeId;
     }
     

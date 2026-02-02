@@ -55,4 +55,13 @@ public interface AlgoOrderMapper extends BaseMapper<AlgoOrderDO> {
             "</foreach>" +
             "</script>")
     int batchUpdateAlgoStatusToCancelled(@Param("ids") List<String> ids);
+
+    /**
+     * 根据模型ID统计条件订单总数
+     * 
+     * @param modelId 模型ID
+     * @return 条件订单总数
+     */
+    @Select("SELECT COUNT(*) FROM algo_order WHERE model_id = #{modelId}")
+    Long countAlgoOrdersByModelId(@Param("modelId") String modelId);
 }

@@ -5,7 +5,7 @@
 
 import { ref, computed, nextTick, onUnmounted } from 'vue'
 import { createSocketConnection } from '../utils/websocket.js'
-import { modelApi, marketApi, settingsApi, binanceFuturesOrderApi } from '../services/api.js'
+import { modelApi, marketApi, settingsApi, binanceFuturesOrderApi, algoOrderApi } from '../services/api.js'
 import * as echarts from 'echarts'
 
 export function useTradingApp() {
@@ -42,6 +42,7 @@ export function useTradingApp() {
   const isRefreshingPositions = ref(false)          // 持仓模块刷新状态
   const isRefreshingTrades = ref(false)             // 交易记录模块刷新状态
   const isRefreshingConversations = ref(false)      // AI对话模块刷新状态
+  const isRefreshingAlgoOrders = ref(false)        // 挂单模块刷新状态
   
   // 投资组合状态
   const portfolio = ref({
@@ -76,6 +77,19 @@ export function useTradingApp() {
   const strategyDecisionsPageSize = ref(10)  // 每页记录数
   const strategyDecisionsTotal = ref(0)  // 总记录数
   const strategyDecisionsTotalPages = ref(0)  // 总页数
+  
+  // 挂单相关状态
+  const algoOrders = ref([])  // 挂单列表
+  const algoOrdersPage = ref(1)  // 当前页码
+  const algoOrdersPageSize = ref(10)  // 每页记录数
+  const algoOrdersTotal = ref(0)  // 总记录数
+  const algoOrdersTotalPages = ref(0)  // 总页数
+  const loading = ref({
+    algoOrders: false
+  })
+  const errors = ref({
+    algoOrders: null
+  })
   
   /**
    * 策略决策分页展示（兼容后端未返回 total/totalPages 的情况）
@@ -1788,6 +1802,113 @@ let portfolioRefreshInterval = null // 投资组合数据自动刷新定时器�
   }
 
   /**
+   * 加载挂单记录（分页）
+   * @param {number} page - 页码，从1开始，默认为当前页
+   * @param {number} pageSize - 每页记录数，默认为10
+   */
+  const loadAlgoOrders = async (page = null, pageSize = null) => {
+    if (!currentModelId.value) return
+    
+    // 使用传入的参数或当前状态
+    const targetPage = page !== null ? page : algoOrdersPage.value
+    const targetPageSize = pageSize !== null ? pageSize : algoOrdersPageSize.value
+    
+    loading.value.algoOrders = true
+    errors.value.algoOrders = null
+    isRefreshingAlgoOrders.value = true
+    try {
+      console.log('[TradingApp] 开始加载挂单记录（分页）, modelId:', currentModelId.value, 'page:', targetPage, 'pageSize:', targetPageSize)
+      const data = await algoOrderApi.getByModelId(currentModelId.value, targetPage, targetPageSize)
+      console.log('[TradingApp] 收到挂单API响应:', data)
+      
+      // 后端返回分页格式：{ data: [], pageNum: 1, pageSize: 10, total: 100, totalPages: 10 }
+      let algoOrdersList = []
+      if (data && typeof data === 'object') {
+        if (Array.isArray(data)) {
+          // 兼容旧格式：直接返回数组
+          algoOrdersList = data
+        } else if (data.data && Array.isArray(data.data)) {
+          // 新格式：分页数据
+          algoOrdersList = data.data
+          algoOrdersPage.value = data.pageNum || targetPage
+          algoOrdersPageSize.value = data.pageSize || targetPageSize
+          algoOrdersTotal.value = data.total || 0
+          algoOrdersTotalPages.value = data.totalPages || 0
+          console.log('[TradingApp] 分页信息: page=', algoOrdersPage.value, 'pageSize=', algoOrdersPageSize.value, 'total=', algoOrdersTotal.value, 'totalPages=', algoOrdersTotalPages.value)
+        }
+      }
+      
+      console.log('[TradingApp] 挂单数据数量:', algoOrdersList.length)
+      console.log('[TradingApp] 挂单原始数据:', JSON.stringify(algoOrdersList, null, 2))
+      
+      // 映射数据格式以匹配前端显示
+      algoOrders.value = algoOrdersList.map((order, index) => {
+        console.log(`[TradingApp] 挂单[${index + 1}] 原始数据:`, {
+          id: order.id,
+          symbol: order.symbol,
+          side: order.side,
+          positionSide: order.positionSide,
+          quantity: order.quantity,
+          type: order.type,
+          algoStatus: order.algoStatus,
+          price: order.price,
+          created_at: order.created_at
+        })
+        
+        const mapped = {
+          id: order.id || `${order.created_at}_${order.symbol || ''}`,
+          symbol: order.symbol || '',
+          side: order.side || '',
+          positionSide: order.positionSide || '',
+          quantity: order.quantity || 0,
+          type: order.type || '',
+          algoStatus: order.algoStatus || '',
+          price: order.price || 0,
+          created_at: order.created_at || '',
+          // 保留原始数据
+          ...order
+        }
+        
+        console.log(`[TradingApp] 挂单[${index + 1}] 映射后数据:`, {
+          id: mapped.id,
+          symbol: mapped.symbol,
+          side: mapped.side,
+          positionSide: mapped.positionSide,
+          quantity: mapped.quantity,
+          type: mapped.type,
+          algoStatus: mapped.algoStatus,
+          price: mapped.price,
+          created_at: mapped.created_at
+        })
+        
+        return mapped
+      })
+      
+      console.log('[TradingApp] 映射完成，最终挂单数据数量:', algoOrders.value.length)
+    } catch (error) {
+      console.error('[TradingApp] Error loading algo orders:', error)
+      errors.value.algoOrders = error.message
+      algoOrders.value = []
+      algoOrdersTotal.value = 0
+      algoOrdersTotalPages.value = 0
+    } finally {
+      loading.value.algoOrders = false
+      isRefreshingAlgoOrders.value = false
+    }
+  }
+  
+  /**
+   * 切换到挂单指定页码
+   */
+  const goToAlgoOrdersPage = async (page) => {
+    if (page < 1 || (algoOrdersTotalPages.value > 0 && page > algoOrdersTotalPages.value)) {
+      return
+    }
+    algoOrdersPage.value = page
+    await loadAlgoOrders(page, algoOrdersPageSize.value)
+  }
+
+  /**
    * 根据模型trade_type加载对话或策略决策
    */
   const loadConversationsOrDecisions = async () => {
@@ -2256,6 +2377,7 @@ let portfolioRefreshInterval = null // 投资组合数据自动刷新定时器�
         isRefreshingPositions.value = true
         isRefreshingTrades.value = true
         isRefreshingConversations.value = true
+        isRefreshingAlgoOrders.value = true
         
         try {
           await Promise.all([
@@ -2291,6 +2413,14 @@ let portfolioRefreshInterval = null // 投资组合数据自动刷新定时器�
               } finally {
                 isRefreshingConversations.value = false
               }
+            })(),
+            (async () => {
+              // 挂单模块
+              try {
+                await loadAlgoOrders()
+              } finally {
+                isRefreshingAlgoOrders.value = false
+              }
             })()
           ])
         } catch (error) {
@@ -2299,6 +2429,7 @@ let portfolioRefreshInterval = null // 投资组合数据自动刷新定时器�
           isRefreshingPositions.value = false
           isRefreshingTrades.value = false
           isRefreshingConversations.value = false
+          isRefreshingAlgoOrders.value = false
           throw error
         }
       }
@@ -2336,6 +2467,7 @@ let portfolioRefreshInterval = null // 投资组合数据自动刷新定时器�
       loadPositions(), // 刷新持仓数据
       loadTrades(1, tradesPageSize.value), // 从第一页开始加载交易记录
       loadConversationsOrDecisions(), // 根据trade_type加载对话或策略决策数据
+      loadAlgoOrders(1, algoOrdersPageSize.value), // 从第一页开始加载挂单记录
       loadModelPortfolioSymbols(), // 立即加载一次模型持仓合约数据
       loadAccountValueHistory() // 只在选择模型时加载一次账户价值历史（使用默认时间范围）
     ])
@@ -3249,6 +3381,7 @@ let portfolioRefreshInterval = null // 投资组合数据自动刷新定时器�
     isRefreshingPositions,
     isRefreshingTrades,
     isRefreshingConversations,
+    isRefreshingAlgoOrders,
     portfolio,
     accountValueHistory,
     // 时间选择相关
@@ -3278,6 +3411,12 @@ let portfolioRefreshInterval = null // 投资组合数据自动刷新定时器�
     strategyDecisionsHasPrev,
     strategyDecisionsHasNext,
     isRefreshingStrategyDecisions,
+    // 挂单相关状态
+    algoOrders,
+    algoOrdersPage,
+    algoOrdersPageSize,
+    algoOrdersTotal,
+    algoOrdersTotalPages,
     settings,
     modelPortfolioSymbols,
     lastPortfolioSymbolsRefreshTime,
@@ -3385,6 +3524,8 @@ let portfolioRefreshInterval = null // 投资组合数据自动刷新定时器�
     loadStrategyDecisions,
     loadConversationsOrDecisions,
     goToStrategyDecisionsPage,
+    loadAlgoOrders,
+    goToAlgoOrdersPage,
     loadModelPortfolioSymbols,
     loadSettings,
     
