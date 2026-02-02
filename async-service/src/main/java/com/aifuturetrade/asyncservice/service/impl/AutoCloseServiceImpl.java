@@ -44,6 +44,9 @@ public class AutoCloseServiceImpl implements AutoCloseService {
     @Autowired
     private ModelMapper modelMapper;
     
+    @Autowired
+    private com.aifuturetrade.asyncservice.dao.mapper.AlgoOrderMapper algoOrderMapper;
+    
     @Value("${async.auto-close.interval-seconds:3}")
     private int intervalSeconds;
     
@@ -327,6 +330,13 @@ public class AutoCloseServiceImpl implements AutoCloseService {
      */
     private boolean executeClosePosition(ModelDO model, String symbol, String positionSide, Double positionAmt, String modelTradeMode) {
         try {
+            // 先取消已存在的条件单
+            String formattedSymbol = symbol.toUpperCase();
+            if (!formattedSymbol.endsWith(quoteAsset)) {
+                formattedSymbol = formattedSymbol + quoteAsset;
+            }
+            cancelExistingAlgoOrders(model, formattedSymbol, modelTradeMode);
+            
             BinanceFuturesBase client = getOrCreateClient(model);
             if (client == null) {
                 log.error("[AutoClose] 无法创建 Binance 客户端");
@@ -424,6 +434,94 @@ public class AutoCloseServiceImpl implements AutoCloseService {
         } catch (Exception e) {
             log.error("[AutoClose] ❌ 执行平仓操作失败: {}", e.getMessage(), e);
             return false;
+        }
+    }
+    
+    /**
+     * 取消已存在的条件单（状态为new的订单）
+     * 
+     * @param model 模型信息
+     * @param symbol 交易对符号（已格式化）
+     * @param modelTradeMode 模型交易模式（'real'或'test'）
+     */
+    private void cancelExistingAlgoOrders(ModelDO model, String symbol, String modelTradeMode) {
+        try {
+            // 查询数据库中状态为new的条件单
+            List<com.aifuturetrade.asyncservice.entity.AlgoOrderDO> existingOrders = 
+                    algoOrderMapper.selectNewAlgoOrdersByModelAndSymbol(model.getId(), symbol);
+            
+            if (existingOrders == null || existingOrders.isEmpty()) {
+                log.debug("[AutoClose] 未找到需要取消的条件单 | model={} symbol={}", model.getId(), symbol);
+                return;
+            }
+            
+            log.info("[AutoClose] 找到 {} 个待取消的条件单 | model={} symbol={}", 
+                    existingOrders.size(), model.getId(), symbol);
+            
+            boolean useRealMode = "real".equalsIgnoreCase(modelTradeMode);
+            
+            if (useRealMode && model.getApiKey() != null && model.getApiSecret() != null) {
+                // real模式：先查询SDK，只有在SDK中查询到条件单时才执行取消操作
+                try {
+                    BinanceFuturesBase client = getOrCreateClient(model);
+                    if (client == null) {
+                        log.warn("[AutoClose] 无法创建Binance客户端，跳过取消条件单操作");
+                        return;
+                    }
+                    
+                    // 查询SDK中的条件单
+                    com.binance.connector.client.common.ApiResponse<
+                        com.binance.connector.client.derivatives_trading_usds_futures.rest.model.QueryAllAlgoOrdersResponse> response = 
+                        client.getRestApi().queryAllAlgoOrders(symbol, null, null, null, 0L, 100L, 5000L);
+                    
+                    // 检查SDK中是否有条件单
+                    com.binance.connector.client.derivatives_trading_usds_futures.rest.model.QueryAllAlgoOrdersResponse responseData = 
+                            response != null ? response.getData() : null;
+                    boolean hasSdkOrders = responseData != null && !responseData.isEmpty();
+                    
+                    if (hasSdkOrders) {
+                        // SDK中有条件单，执行取消操作
+                        com.binance.connector.client.common.ApiResponse<
+                            com.binance.connector.client.derivatives_trading_usds_futures.rest.model.CancelAllAlgoOpenOrdersResponse> cancelResponse = 
+                            client.getRestApi().cancelAllAlgoOpenOrders(symbol, 5000L);
+                        
+                        if (cancelResponse != null && cancelResponse.getData() != null) {
+                            log.info("[AutoClose] SDK取消条件单成功 | model={} symbol={} response={}", 
+                                    model.getId(), symbol, cancelResponse.getData());
+                        } else {
+                            log.info("[AutoClose] SDK取消条件单成功（无返回数据）| model={} symbol={}", 
+                                    model.getId(), symbol);
+                        }
+                        
+                        // SDK取消成功后，更新数据库状态
+                        for (com.aifuturetrade.asyncservice.entity.AlgoOrderDO order : existingOrders) {
+                            algoOrderMapper.updateAlgoStatusToCancelled(order.getId());
+                        }
+                        log.info("[AutoClose] 已更新数据库条件单状态为cancelled | model={} symbol={} count={}", 
+                                model.getId(), symbol, existingOrders.size());
+                    } else {
+                        // SDK中未找到条件单，不执行取消操作
+                        log.info("[AutoClose] SDK中未找到条件单，不执行取消操作 | model={} symbol={}", 
+                                model.getId(), symbol);
+                        // 不更新数据库状态，直接继续后续流程
+                    }
+                } catch (Exception sdkErr) {
+                    log.error("[AutoClose] real模式查询/取消条件单失败 | model={} symbol={} error={}", 
+                            model.getId(), symbol, sdkErr.getMessage(), sdkErr);
+                    // real模式失败时不更新数据库，避免数据不一致
+                }
+            } else {
+                // virtual模式：只有在数据库中查询到条件单时才更新状态
+                for (com.aifuturetrade.asyncservice.entity.AlgoOrderDO order : existingOrders) {
+                    algoOrderMapper.updateAlgoStatusToCancelled(order.getId());
+                }
+                log.info("[AutoClose] virtual模式已更新条件单状态为cancelled | model={} symbol={} count={}", 
+                        model.getId(), symbol, existingOrders.size());
+            }
+        } catch (Exception e) {
+            log.error("[AutoClose] 取消条件单失败 | model={} symbol={} error={}", 
+                    model.getId(), symbol, e.getMessage(), e);
+            // 不抛出异常，避免影响主流程
         }
     }
     

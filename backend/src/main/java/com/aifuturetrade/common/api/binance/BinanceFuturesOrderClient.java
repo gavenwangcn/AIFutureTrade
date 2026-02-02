@@ -613,5 +613,108 @@ public class BinanceFuturesOrderClient extends BinanceFuturesBase {
             throw exc;
         }
     }
+    
+    /**
+     * 查询所有条件单
+     * 
+     * 参考 API: GET /fapi/v1/algo/orders
+     * 参考示例: QueryAllAlgoOrdersExample.java
+     * 
+     * @param symbol 交易对符号（必填）
+     * @param algoId 算法订单ID（可选）
+     * @param startTime 开始时间（可选，时间戳）
+     * @param endTime 结束时间（可选，时间戳）
+     * @param page 页码（可选，默认0）
+     * @param limit 每页数量（可选，默认100，最大1000）
+     * @param recvWindow 接收窗口（可选，默认5000）
+     * @return 条件单列表
+     */
+    public List<Map<String, Object>> queryAllAlgoOrders(String symbol, Long algoId, 
+                                                       Long startTime, Long endTime,
+                                                       Long page, Long limit, Long recvWindow) {
+        try {
+            String formattedSymbol = formatSymbol(symbol);
+            log.info("[Binance Futures] 查询所有条件单，交易对: {}", formattedSymbol);
+            
+            // 调用REST API接口
+            com.binance.connector.client.common.ApiResponse<
+                com.binance.connector.client.derivatives_trading_usds_futures.rest.model.QueryAllAlgoOrdersResponse> response = 
+                restApi.queryAllAlgoOrders(formattedSymbol, algoId, startTime, endTime, page, limit, recvWindow);
+            
+            // 处理响应
+            com.binance.connector.client.derivatives_trading_usds_futures.rest.model.QueryAllAlgoOrdersResponse responseData = response.getData();
+            if (responseData == null || responseData.isEmpty()) {
+                log.info("[Binance Futures] 查询条件单无返回数据");
+                return new ArrayList<>();
+            }
+            
+            // QueryAllAlgoOrdersResponse是ArrayList<QueryAllAlgoOrdersResponseInner>
+            // 转换为Map列表
+            List<Map<String, Object>> result = new ArrayList<>();
+            for (com.binance.connector.client.derivatives_trading_usds_futures.rest.model.QueryAllAlgoOrdersResponseInner order : responseData) {
+                Map<String, Object> orderMap = new HashMap<>();
+                orderMap.put("algoId", order.getAlgoId());
+                orderMap.put("clientAlgoId", order.getClientAlgoId());
+                orderMap.put("algoType", order.getAlgoType());
+                orderMap.put("orderType", order.getOrderType());
+                orderMap.put("symbol", order.getSymbol());
+                orderMap.put("side", order.getSide());
+                orderMap.put("positionSide", order.getPositionSide());
+                orderMap.put("quantity", order.getQuantity());
+                orderMap.put("algoStatus", order.getAlgoStatus());
+                orderMap.put("triggerPrice", order.getTriggerPrice());
+                orderMap.put("price", order.getPrice());
+                result.add(orderMap);
+            }
+            
+            log.info("[Binance Futures] 查询所有条件单成功，找到 {} 个条件单", result.size());
+            
+            return result;
+        } catch (Exception exc) {
+            log.error("[Binance Futures] 查询所有条件单失败: {}", exc.getMessage(), exc);
+            throw new RuntimeException("查询条件单失败: " + exc.getMessage(), exc);
+        }
+    }
+    
+    /**
+     * 取消所有条件单
+     * 
+     * 参考 API: DELETE /fapi/v1/algo/allOpenOrders
+     * 参考示例: CancelAllAlgoOpenOrdersExample.java
+     * 
+     * @param symbol 交易对符号（必填）
+     * @param recvWindow 接收窗口（可选，默认5000）
+     * @return 取消结果
+     */
+    public Map<String, Object> cancelAllAlgoOpenOrders(String symbol, Long recvWindow) {
+        try {
+            String formattedSymbol = formatSymbol(symbol);
+            log.info("[Binance Futures] 取消所有条件单，交易对: {}", formattedSymbol);
+            
+            // 调用REST API接口
+            com.binance.connector.client.common.ApiResponse<
+                com.binance.connector.client.derivatives_trading_usds_futures.rest.model.CancelAllAlgoOpenOrdersResponse> response = 
+                restApi.cancelAllAlgoOpenOrders(formattedSymbol, recvWindow);
+            
+            // 处理响应
+            com.binance.connector.client.derivatives_trading_usds_futures.rest.model.CancelAllAlgoOpenOrdersResponse responseData = response.getData();
+            if (responseData == null) {
+                log.warn("[Binance Futures] 取消条件单无返回数据");
+                return new HashMap<>();
+            }
+            
+            log.info("[Binance Futures] 取消所有条件单成功: {}", responseData);
+            
+            // 转换为Map
+            Map<String, Object> result = new HashMap<>();
+            result.put("success", true);
+            result.put("data", responseData);
+            
+            return result;
+        } catch (Exception exc) {
+            log.error("[Binance Futures] 取消所有条件单失败: {}", exc.getMessage(), exc);
+            throw new RuntimeException("取消条件单失败: " + exc.getMessage(), exc);
+        }
+    }
 }
 

@@ -3763,12 +3763,27 @@ class TradingEngine:
         # 根据is_virtual判断使用real还是test模式
         trade_mode = self._get_trade_mode()
         
+        # 【先取消已存在的条件单】
+        binance_client = self._create_binance_order_client()
+        conversation_id = self._get_conversation_id()
+        cancel_success = self._cancel_existing_algo_orders(
+            symbol=symbol,
+            model_uuid=model_uuid,
+            trade_mode=trade_mode,
+            binance_client=binance_client if trade_mode == 'real' else None,
+            conversation_id=conversation_id,
+            trade_id=trade_id
+        )
+        
+        if not cancel_success:
+            logger.warning(f"TRADE: ⚠️ 取消旧条件单失败，但继续执行卖出操作 | model={self.model_id} symbol={symbol}")
+        
         # 调用SDK执行交易
         sdk_response = None
         sdk_call_skipped = False
         sdk_skip_reason = None
         sdk_error = None
-        binance_client = self._create_binance_order_client()
+        
         if binance_client:
             try:
                 # 首先设置杠杆（使用 _resolve_leverage 解析，优先使用 decision 中的 leverage，否则使用模型配置的 leverage）
@@ -3789,8 +3804,6 @@ class TradingEngine:
                 logger.info(f"@API@ [Model {self.model_id}] [market_trade] === 准备调用接口 ===" 
                           f" | symbol={symbol} | side={sdk_side} | position_side={position_side} | "
                           f"quantity={position_amt} | price={current_price} | leverage={leverage} | trade_mode={trade_mode}")
-                
-                conversation_id = self._get_conversation_id()
                 
                 sdk_response = binance_client.market_trade(
                     symbol=symbol,
@@ -4003,7 +4016,7 @@ class TradingEngine:
                 - message: 执行消息
         
         Note:
-            - 使用STOP_MARKET订单类型，以当前价格作为触发价格（立即触发）
+            - 使用MARKET订单类型（市场价卖出）
             - 计算毛盈亏和净盈亏（扣除手续费）
             - 平仓后更新数据库持仓记录
         """
@@ -4017,6 +4030,9 @@ class TradingEngine:
         # position_amt 转换为整数（与strategy_decisions表和portfolios表保持一致）
         position_amt = int(abs(position.get('position_amt', 0)))
         position_side = position.get('position_side', 'LONG')
+
+        if position_amt <= 0:
+            return {'symbol': symbol, 'error': '持仓数量为0，无法平仓'}
 
         # 使用工具函数计算盈亏
         gross_pnl, trade_fee, net_pnl = calculate_pnl(
@@ -4035,32 +4051,54 @@ class TradingEngine:
         # 根据is_virtual判断使用real还是test模式
         trade_mode = self._get_trade_mode()
         
-        # 【调用SDK执行交易】使用close_position_trade
-        # 注意：close_position_trade只支持STOP_MARKET或TAKE_PROFIT_MARKET，不支持MARKET
-        # 对于立即平仓，使用当前价格作为stop_price的STOP_MARKET订单
+        # 【先取消已存在的条件单】
+        binance_client = self._create_binance_order_client()
+        conversation_id = self._get_conversation_id()
+        cancel_success = self._cancel_existing_algo_orders(
+            symbol=symbol,
+            model_uuid=model_uuid,
+            trade_mode=trade_mode,
+            binance_client=binance_client if trade_mode == 'real' else None,
+            conversation_id=conversation_id,
+            trade_id=trade_id
+        )
+        
+        if not cancel_success:
+            logger.warning(f"TRADE: ⚠️ 取消旧条件单失败，但继续执行平仓操作 | model={self.model_id} symbol={symbol}")
+        
+        # 【调用SDK执行交易】使用market_trade（市场价卖出）
         sdk_response = None
         sdk_call_skipped = False
         sdk_skip_reason = None
         sdk_error = None
-        # 【每次创建新的Binance订单客户端】确保使用最新的model对应的api_key和api_secret
-        binance_client = self._create_binance_order_client()
+        
         if binance_client:
             try:
-                # 【调用前日志】记录调用参数
-                logger.info(f"@API@ [Model {self.model_id}] [close_position_trade] === 准备调用接口 ==="
-                          f" | symbol={symbol} | side={side_for_trade} | order_type=STOP_MARKET | "
-                          f"stop_price={current_price} | position_side={position_side} | "
-                          f"position_amt={position_amt} | entry_price={entry_price} | trade_mode={trade_mode}")
+                # 首先设置杠杆（使用 _resolve_leverage 解析，优先使用 decision 中的 leverage，否则使用模型配置的 leverage）
+                leverage = self._resolve_leverage(decision)
                 
-                conversation_id = self._get_conversation_id()
+                logger.info(f"@API@ [Model {self.model_id}] [change_initial_leverage] === 准备设置杠杆 ===" 
+                          f" | symbol={symbol} | leverage={leverage}")
                 
-                sdk_response = binance_client.close_position_trade(
+                binance_client.change_initial_leverage(
+                    symbol=symbol,
+                    leverage=leverage
+                )
+                
+                logger.info(f"@API@ [Model {self.model_id}] [change_initial_leverage] === 杠杆设置成功 ===" 
+                          f" | symbol={symbol} | leverage={leverage}")
+                
+                # 然后执行交易
+                logger.info(f"@API@ [Model {self.model_id}] [market_trade] === 准备调用接口 ===" 
+                          f" | symbol={symbol} | side={side_for_trade} | position_side={position_side} | "
+                          f"quantity={position_amt} | price={current_price} | leverage={leverage} | trade_mode={trade_mode}")
+                
+                sdk_response = binance_client.market_trade(
                     symbol=symbol,
                     side=side_for_trade,
-                    order_type='STOP_MARKET',
-                    stop_price=current_price,  # 使用当前价格作为触发价格，实现立即平仓
+                    order_type='MARKET',
                     position_side=position_side,
-                    quantity=position_amt,  # 传递持仓数量
+                    quantity=position_amt,
                     model_id=model_uuid,
                     conversation_id=conversation_id,
                     trade_id=trade_id,
@@ -4068,40 +4106,16 @@ class TradingEngine:
                     trade_mode=trade_mode  # 传递trade_mode参数
                 )
                 
-                # 【调用后日志】记录接口返回内容
-                logger.info(f"@API@ [Model {self.model_id}] [close_position_trade] === 接口调用成功 ==="
+                logger.info(f"@API@ [Model {self.model_id}] [market_trade] === 接口调用成功 ==="
                           f" | symbol={symbol} | response={sdk_response}")
             except Exception as sdk_err:
                 sdk_error = str(sdk_err)
-                logger.error(f"@API@ [Model {self.model_id}] [close_position_trade] === 接口调用失败 ==="
+                logger.error(f"@API@ [Model {self.model_id}] [market_trade] === 接口调用失败 ==="
                            f" | symbol={symbol} | error={sdk_err}", exc_info=True)
                 # SDK调用失败不影响数据库记录，继续执行
         else:
-            sdk_call_skipped, sdk_skip_reason = self._handle_sdk_client_error(symbol, 'close_position_trade')
+            sdk_call_skipped, sdk_skip_reason = self._handle_sdk_client_error(symbol, 'market_trade')
 
-        # Close position in database
-        try:
-            self._close_position(self.model_id, symbol=symbol, position_side=position_side)
-        except Exception as db_err:
-            logger.error(f"TRADE: Close position failed model={self.model_id} future={symbol}: {db_err}")
-            raise
-        
-        # 获取持仓的initial_margin（用于计算盈亏百分比）
-        # 从position中获取initial_margin，如果不存在则从portfolios表查询
-        initial_margin = position.get('initial_margin', 0.0)
-        if initial_margin == 0.0:
-            # 如果position中没有，尝试从portfolios表查询
-            try:
-                portfolio_row = self.portfolios_db.query(
-                    f"SELECT initial_margin FROM {self.portfolios_db.portfolios_table} "
-                    f"WHERE model_id = %s AND symbol = %s AND position_side = %s",
-                    (self.portfolios_db._get_model_uuid(self.model_id), symbol.upper(), position_side)
-                )
-                if portfolio_row and len(portfolio_row) > 0 and portfolio_row[0][0] is not None:
-                    initial_margin = float(portfolio_row[0][0])
-            except Exception as e:
-                logger.warning(f"[TradingEngine] Failed to get initial_margin from portfolios table: {e}")
-        
         # 解析SDK返回数据（如果是real模式且调用成功）
         parsed_response = None
         if trade_mode == 'real' and sdk_response:
@@ -4118,6 +4132,44 @@ class TradingEngine:
                 'origType': None,
                 'error': sdk_error
             }
+        
+        # 平仓：只有在real模式且SDK返回成功时才更新数据库持仓记录（将持仓数量设为0）
+        # 对于test模式：始终更新（因为测试模式不会真实成交）
+        if trade_mode == 'real' and parsed_response and not parsed_response.get('error'):
+            # real模式且SDK返回成功，才关闭持仓
+            try:
+                self._close_position(self.model_id, symbol=symbol, position_side=position_side)
+                logger.info(f"TRADE: Closed position (real mode, SDK success) - Model {self.model_id} {symbol} position_side={position_side}")
+            except Exception as db_err:
+                logger.error(f"TRADE: Close position failed (real mode, SDK success) model={self.model_id} future={symbol}: {db_err}")
+                raise
+        elif trade_mode == 'test' or (trade_mode == 'real' and (not parsed_response or parsed_response.get('error'))):
+            # test模式或real模式但SDK调用失败，也关闭持仓（test模式始终更新，real模式失败时也更新以保持一致性）
+            try:
+                self._close_position(self.model_id, symbol=symbol, position_side=position_side)
+                if trade_mode == 'test':
+                    logger.info(f"TRADE: Closed position (test mode) - Model {self.model_id} {symbol} position_side={position_side}")
+                else:
+                    logger.warn(f"TRADE: Closed position (real mode, SDK failed) - Model {self.model_id} {symbol} position_side={position_side}")
+            except Exception as db_err:
+                logger.error(f"TRADE: Close position failed (CLOSE) model={self.model_id} future={symbol}: {db_err}")
+                raise
+        
+        # 获取持仓的initial_margin（用于计算盈亏百分比）
+        # 从position中获取initial_margin，如果不存在则从portfolios表查询
+        initial_margin = position.get('initial_margin', 0.0)
+        if initial_margin == 0.0:
+            # 如果position中没有，尝试从portfolios表查询
+            try:
+                portfolio_row = self.portfolios_db.query(
+                    f"SELECT initial_margin FROM {self.portfolios_db.portfolios_table} "
+                    f"WHERE model_id = %s AND symbol = %s AND position_side = %s",
+                    (self.portfolios_db._get_model_uuid(self.model_id), symbol.upper(), position_side)
+                )
+                if portfolio_row and len(portfolio_row) > 0 and portfolio_row[0][0] is not None:
+                    initial_margin = float(portfolio_row[0][0])
+            except Exception as e:
+                logger.warning(f"[TradingEngine] Failed to get initial_margin from portfolios table: {e}")
         
         # 【确定trades表的字段值】
         # side字段：交易方向（buy/sell），从signal中提取
@@ -4256,7 +4308,7 @@ class TradingEngine:
             logger.info(f"TRADE: 找到 {len(existing_orders)} 个待取消的条件单 | model={self.model_id} symbol={symbol}")
             
             if trade_mode == 'real' and binance_client:
-                # real模式：先查询SDK，再取消SDK，成功后才更新数据库
+                # real模式：先查询SDK，只有在SDK中查询到条件单时才执行取消操作
                 try:
                     # 查询SDK中的条件单
                     sdk_orders = binance_client.query_all_algo_orders(
@@ -4276,44 +4328,41 @@ class TradingEngine:
                                 if algo_id:
                                     sdk_algo_ids.add(int(algo_id))
                     
-                    # 取消SDK中的条件单
-                    cancel_success = False
-                    if sdk_algo_ids:
-                        try:
-                            cancel_response = binance_client.cancel_all_algo_open_orders(
-                                symbol=symbol,
-                                model_id=model_uuid,
-                                conversation_id=conversation_id,
-                                trade_id=trade_id,
-                                db=self.binance_trade_logs_db
-                            )
-                            cancel_success = True
-                            logger.info(f"TRADE: SDK取消条件单成功 | model={self.model_id} symbol={symbol}")
-                        except Exception as cancel_err:
-                            logger.error(f"TRADE: SDK取消条件单失败 | model={self.model_id} symbol={symbol} error={cancel_err}")
-                            return False
-                    else:
-                        # SDK中没有找到条件单，但数据库中有，可能是已过期或已取消
-                        logger.warning(f"TRADE: SDK中未找到条件单，但数据库中有记录 | model={self.model_id} symbol={symbol}")
-                        cancel_success = True  # 允许继续，直接更新数据库
+                    # 只有在SDK中查询到条件单时才执行取消操作
+                    if not sdk_algo_ids:
+                        # SDK中没有找到条件单，不执行取消操作
+                        logger.info(f"TRADE: SDK中未找到条件单，不执行取消操作 | model={self.model_id} symbol={symbol}")
+                        return True  # 返回True表示没有需要取消的条件单
+                    
+                    # SDK中有条件单，执行取消操作
+                    try:
+                        cancel_response = binance_client.cancel_all_algo_open_orders(
+                            symbol=symbol,
+                            model_id=model_uuid,
+                            conversation_id=conversation_id,
+                            trade_id=trade_id,
+                            db=self.binance_trade_logs_db
+                        )
+                        logger.info(f"TRADE: SDK取消条件单成功 | model={self.model_id} symbol={symbol}")
+                    except Exception as cancel_err:
+                        logger.error(f"TRADE: SDK取消条件单失败 | model={self.model_id} symbol={symbol} error={cancel_err}")
+                        return False
                     
                     # SDK取消成功后，更新数据库
-                    if cancel_success:
-                        for order_row in existing_orders:
-                            order_id = order_row[0]
-                            self.db.command(
-                                f"UPDATE {self.db.algo_order_table} SET algoStatus = 'cancelled', updated_at = NOW() WHERE id = %s",
-                                (order_id,)
-                            )
-                        logger.info(f"TRADE: 已更新数据库条件单状态为cancelled | model={self.model_id} symbol={symbol} count={len(existing_orders)}")
-                        return True
-                    else:
-                        return False
+                    for order_row in existing_orders:
+                        order_id = order_row[0]
+                        self.db.command(
+                            f"UPDATE {self.db.algo_order_table} SET algoStatus = 'cancelled', updated_at = NOW() WHERE id = %s",
+                            (order_id,)
+                        )
+                    logger.info(f"TRADE: 已更新数据库条件单状态为cancelled | model={self.model_id} symbol={symbol} count={len(existing_orders)}")
+                    return True
                 except Exception as sdk_err:
                     logger.error(f"TRADE: real模式查询/取消条件单失败 | model={self.model_id} symbol={symbol} error={sdk_err}")
                     return False
             else:
-                # virtual模式：直接在数据库更新状态
+                # virtual模式：只有在数据库中查询到条件单时才更新状态
+                # existing_orders已经在上面查询过了，如果有记录就更新
                 for order_row in existing_orders:
                     order_id = order_row[0]
                     self.db.command(

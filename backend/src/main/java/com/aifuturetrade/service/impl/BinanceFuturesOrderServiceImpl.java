@@ -2,10 +2,12 @@ package com.aifuturetrade.service.impl;
 
 import com.aifuturetrade.common.api.binance.BinanceConfig;
 import com.aifuturetrade.common.api.binance.BinanceFuturesOrderClient;
+import com.aifuturetrade.dao.entity.AlgoOrderDO;
 import com.aifuturetrade.dao.entity.BinanceTradeLogDO;
 import com.aifuturetrade.dao.entity.ModelDO;
 import com.aifuturetrade.dao.entity.PortfolioDO;
 import com.aifuturetrade.dao.entity.TradeDO;
+import com.aifuturetrade.dao.mapper.AlgoOrderMapper;
 import com.aifuturetrade.dao.mapper.BinanceTradeLogMapper;
 import com.aifuturetrade.dao.mapper.ModelMapper;
 import com.aifuturetrade.dao.mapper.PortfolioMapper;
@@ -44,6 +46,9 @@ public class BinanceFuturesOrderServiceImpl implements BinanceFuturesOrderServic
     private BinanceTradeLogMapper binanceTradeLogMapper;
 
     @Autowired
+    private AlgoOrderMapper algoOrderMapper;
+
+    @Autowired
     private BinanceConfig binanceConfig;
 
     @Value("${app.sell-position-trade-mode:test}")
@@ -57,6 +62,75 @@ public class BinanceFuturesOrderServiceImpl implements BinanceFuturesOrderServic
         log.info("[BinanceFuturesOrderService] 开始一键卖出持仓合约，modelId: {}, symbol: {}", modelId, symbol);
         
         try {
+            // 0. 查询模型信息以判断是否为虚拟模式
+            ModelDO model = modelMapper.selectById(modelId);
+            if (model == null) {
+                throw new RuntimeException("未找到模型记录，modelId: " + modelId);
+            }
+            Boolean isVirtual = model.getIsVirtual();
+            boolean useTestMode = (isVirtual != null && isVirtual);
+            
+            // 0.1. 取消已存在的条件单（状态为new）
+            String formattedSymbol = symbol.toUpperCase();
+            if (!formattedSymbol.endsWith(binanceConfig.getQuoteAsset())) {
+                formattedSymbol = formattedSymbol + binanceConfig.getQuoteAsset();
+            }
+            
+            List<AlgoOrderDO> existingOrders = algoOrderMapper.selectNewAlgoOrdersByModelAndSymbol(modelId, formattedSymbol);
+            if (existingOrders != null && !existingOrders.isEmpty()) {
+                log.info("[BinanceFuturesOrderService] 找到 {} 个待取消的条件单，开始取消", existingOrders.size());
+                
+                if (!useTestMode && model.getApiKey() != null && model.getApiSecret() != null) {
+                    // real模式：调用SDK查询和取消
+                    try {
+                        BinanceFuturesOrderClient algoClient = new BinanceFuturesOrderClient(
+                                model.getApiKey(),
+                                model.getApiSecret(),
+                                binanceConfig.getQuoteAsset(),
+                                binanceConfig.getBaseUrl(),
+                                binanceConfig.getTestnet(),
+                                binanceConfig.getConnectTimeout(),
+                                binanceConfig.getReadTimeout()
+                        );
+                        
+                        // 查询SDK中的条件单
+                        List<Map<String, Object>> sdkOrders = algoClient.queryAllAlgoOrders(
+                                formattedSymbol, null, null, null, 0L, 100L, 5000L);
+                        
+                        // 检查SDK中是否有条件单
+                        boolean hasSdkOrders = sdkOrders != null && !sdkOrders.isEmpty();
+                        
+                        if (hasSdkOrders) {
+                            // SDK中有条件单，执行取消操作
+                            Map<String, Object> cancelResult = algoClient.cancelAllAlgoOpenOrders(formattedSymbol, 5000L);
+                            log.info("[BinanceFuturesOrderService] SDK取消条件单成功: {}", cancelResult);
+                            
+                            // SDK取消成功后，更新数据库状态
+                            for (AlgoOrderDO order : existingOrders) {
+                                algoOrderMapper.updateAlgoStatusToCancelled(order.getId());
+                            }
+                            log.info("[BinanceFuturesOrderService] 已更新数据库条件单状态为cancelled，数量: {}", existingOrders.size());
+                        } else {
+                            // SDK中未找到条件单，不执行取消操作
+                            log.info("[BinanceFuturesOrderService] SDK中未找到条件单，不执行取消操作");
+                            // 不更新数据库状态，直接继续后续流程
+                        }
+                    } catch (Exception sdkErr) {
+                        log.error("[BinanceFuturesOrderService] real模式查询/取消条件单失败: {}", sdkErr.getMessage(), sdkErr);
+                        // real模式失败时不更新数据库，避免数据不一致
+                        throw new RuntimeException("取消条件单失败: " + sdkErr.getMessage(), sdkErr);
+                    }
+                } else {
+                    // virtual模式：直接在数据库更新状态
+                    for (AlgoOrderDO order : existingOrders) {
+                        algoOrderMapper.updateAlgoStatusToCancelled(order.getId());
+                    }
+                    log.info("[BinanceFuturesOrderService] virtual模式已更新条件单状态为cancelled，数量: {}", existingOrders.size());
+                }
+            } else {
+                log.debug("[BinanceFuturesOrderService] 未找到需要取消的条件单");
+            }
+            
             // 1. 查询持仓记录
             PortfolioDO portfolio = portfolioMapper.selectByModelIdAndSymbol(modelId, symbol, null);
             if (portfolio == null) {
@@ -66,32 +140,41 @@ public class BinanceFuturesOrderServiceImpl implements BinanceFuturesOrderServic
             log.info("[BinanceFuturesOrderService] 找到持仓记录: positionSide={}, positionAmt={}", 
                     portfolio.getPositionSide(), portfolio.getPositionAmt());
 
-            // 2. 查询模型信息以获取api_key和api_secret
-            ModelDO model = modelMapper.selectById(modelId);
-            if (model == null) {
-                throw new RuntimeException("未找到模型记录，modelId: " + modelId);
-            }
-            if (model.getApiKey() == null || model.getApiSecret() == null) {
+            // 2. 验证模型API密钥信息（real模式需要）
+            if (!useTestMode && (model.getApiKey() == null || model.getApiSecret() == null)) {
                 throw new RuntimeException("模型缺少API密钥信息，modelId: " + modelId);
             }
 
-            log.info("[BinanceFuturesOrderService] 获取模型API密钥信息成功");
+            log.info("[BinanceFuturesOrderService] 模型信息验证成功，is_virtual: {}", isVirtual);
 
             // 3. 获取实时价格（使用BinanceFuturesOrderClient的getOrderBookTicker方法）
-            String formattedSymbol = symbol.toUpperCase();
-            if (!formattedSymbol.endsWith(binanceConfig.getQuoteAsset())) {
-                formattedSymbol = formattedSymbol + binanceConfig.getQuoteAsset();
+            // formattedSymbol已在前面定义，直接使用
+            BinanceFuturesOrderClient priceClient = null;
+            if (!useTestMode && model.getApiKey() != null && model.getApiSecret() != null) {
+                // real模式：使用模型的API密钥
+                priceClient = new BinanceFuturesOrderClient(
+                        model.getApiKey(),
+                        model.getApiSecret(),
+                        binanceConfig.getQuoteAsset(),
+                        binanceConfig.getBaseUrl(),
+                        binanceConfig.getTestnet(),
+                        binanceConfig.getConnectTimeout(),
+                        binanceConfig.getReadTimeout()
+                );
+            } else if (binanceConfig.getApiKey() != null && binanceConfig.getSecretKey() != null) {
+                // virtual模式或模型缺少API密钥：使用默认配置的API密钥
+                priceClient = new BinanceFuturesOrderClient(
+                        binanceConfig.getApiKey(),
+                        binanceConfig.getSecretKey(),
+                        binanceConfig.getQuoteAsset(),
+                        binanceConfig.getBaseUrl(),
+                        binanceConfig.getTestnet(),
+                        binanceConfig.getConnectTimeout(),
+                        binanceConfig.getReadTimeout()
+                );
+            } else {
+                throw new RuntimeException("无法创建价格客户端：缺少API密钥配置");
             }
-            
-            BinanceFuturesOrderClient priceClient = new BinanceFuturesOrderClient(
-                    model.getApiKey(),
-                    model.getApiSecret(),
-                    binanceConfig.getQuoteAsset(),
-                    binanceConfig.getBaseUrl(),
-                    binanceConfig.getTestnet(),
-                    binanceConfig.getConnectTimeout(),
-                    binanceConfig.getReadTimeout()
-            );
             
             List<Map<String, Object>> tickerData = priceClient.getOrderBookTicker(formattedSymbol);
             if (tickerData == null || tickerData.isEmpty()) {
@@ -142,20 +225,34 @@ public class BinanceFuturesOrderServiceImpl implements BinanceFuturesOrderServic
                     entryPrice, currentPrice, positionAmt, positionSide, grossPnl, fee, netPnl);
 
             // 6. 调用SDK执行卖出（在删除portfolios记录之前）
-            BinanceFuturesOrderClient orderClient = new BinanceFuturesOrderClient(
-                    model.getApiKey(),
-                    model.getApiSecret(),
-                    binanceConfig.getQuoteAsset(),
-                    binanceConfig.getBaseUrl(),
-                    binanceConfig.getTestnet(),
-                    binanceConfig.getConnectTimeout(),
-                    binanceConfig.getReadTimeout()
-            );
+            BinanceFuturesOrderClient orderClient = null;
+            if (!useTestMode && model.getApiKey() != null && model.getApiSecret() != null) {
+                // real模式：使用模型的API密钥
+                orderClient = new BinanceFuturesOrderClient(
+                        model.getApiKey(),
+                        model.getApiSecret(),
+                        binanceConfig.getQuoteAsset(),
+                        binanceConfig.getBaseUrl(),
+                        binanceConfig.getTestnet(),
+                        binanceConfig.getConnectTimeout(),
+                        binanceConfig.getReadTimeout()
+                );
+            } else if (binanceConfig.getApiKey() != null && binanceConfig.getSecretKey() != null) {
+                // virtual模式或模型缺少API密钥：使用默认配置的API密钥
+                orderClient = new BinanceFuturesOrderClient(
+                        binanceConfig.getApiKey(),
+                        binanceConfig.getSecretKey(),
+                        binanceConfig.getQuoteAsset(),
+                        binanceConfig.getBaseUrl(),
+                        binanceConfig.getTestnet(),
+                        binanceConfig.getConnectTimeout(),
+                        binanceConfig.getReadTimeout()
+                );
+            } else {
+                throw new RuntimeException("无法创建订单客户端：缺少API密钥配置");
+            }
 
-            // 根据is_virtual判断使用real还是test模式
-            // 如果is_virtual不为true（即非虚拟），使用real模式
-            Boolean isVirtual = model.getIsVirtual();
-            boolean useTestMode = (isVirtual != null && isVirtual);
+            // 使用之前获取的isVirtual和useTestMode
             String modelTradeMode = useTestMode ? "test" : "real";
             
             Map<String, Object> orderParams = new HashMap<>();
