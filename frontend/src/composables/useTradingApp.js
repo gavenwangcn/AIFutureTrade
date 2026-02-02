@@ -84,12 +84,6 @@ export function useTradingApp() {
   const algoOrdersPageSize = ref(10)  // 每页记录数
   const algoOrdersTotal = ref(0)  // 总记录数
   const algoOrdersTotalPages = ref(0)  // 总页数
-  const loading = ref({
-    algoOrders: false
-  })
-  const errors = ref({
-    algoOrders: null
-  })
   
   /**
    * 策略决策分页展示（兼容后端未返回 total/totalPages 的情况）
@@ -195,6 +189,7 @@ const lastPortfolioSymbolsRefreshTime = ref(null) // 持仓合约列表最后刷
   
   // 加载状态
   const loading = ref({
+    algoOrders: false,
     models: false,
     marketPrices: false,
     leaderboard: false,
@@ -208,7 +203,7 @@ const lastPortfolioSymbolsRefreshTime = ref(null) // 持仓合约列表最后刷
   })
   
   // 错误状态
-  const errors = ref({})
+  const errors = ref({ algoOrders: null })
   
   // WebSocket连接
   const socket = ref(null)
