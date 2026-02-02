@@ -515,7 +515,7 @@ class DatabaseInitializer:
             `model_id` VARCHAR(36) DEFAULT NULL COMMENT '关联的模型ID',
             `strategy_decision_id` VARCHAR(36) DEFAULT NULL COMMENT '关联的策略决策ID',
             `trade_id` VARCHAR(36) DEFAULT NULL COMMENT '关联的交易记录ID（异步执行后更新）',
-            `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP,
+            `created_at` DATETIME NOT NULL COMMENT '创建时间（UTC+8，由代码显式设置）',
             `updated_at` DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
             UNIQUE KEY `uk_client_algo_id` (`clientAlgoId`),
             INDEX `idx_algo_id` (`algoId`),
