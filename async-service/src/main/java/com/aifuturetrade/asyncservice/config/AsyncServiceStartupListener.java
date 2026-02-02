@@ -87,6 +87,7 @@ public class AsyncServiceStartupListener implements ApplicationListener<Applicat
                 log.info("[AsyncServiceStartupListener]   - price_refresh: ⏰ 定时任务已启用（通过@Scheduled自动运行）");
                 log.info("[AsyncServiceStartupListener]   - market_symbol_offline: ⏰ 定时任务已启用（通过@Scheduled自动运行）");
                 log.info("[AsyncServiceStartupListener]   - auto_close: ⏰ 定时任务已启用（通过@Scheduled自动运行）");
+                log.info("[AsyncServiceStartupListener]   - algo_order: ⏰ 定时任务已启用（通过@Scheduled自动运行，每2秒检查条件订单）");
                 log.info("=".repeat(80));
             } catch (IllegalArgumentException e) {
                 log.error("[AsyncServiceStartupListener] ❌ 无效的任务名称: {}", autoStartTask);

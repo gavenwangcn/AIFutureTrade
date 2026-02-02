@@ -36,7 +36,8 @@ from .database_init import (
     CONVERSATIONS_TABLE, ACCOUNT_VALUES_TABLE, ACCOUNT_VALUE_HISTORYS_TABLE,
     SETTINGS_TABLE, MODEL_PROMPTS_TABLE, MODEL_FUTURES_TABLE, FUTURES_TABLE,
     ACCOUNT_ASSET_TABLE, ASSET_TABLE, BINANCE_TRADE_LOGS_TABLE,
-    STRATEGYS_TABLE, MODEL_STRATEGY_TABLE, STRATEGY_DECISIONS_TABLE
+    STRATEGYS_TABLE, MODEL_STRATEGY_TABLE, STRATEGY_DECISIONS_TABLE,
+    ALGO_ORDER_TABLE
 )
 import pymysql
 from pymysql import cursors
@@ -188,6 +189,7 @@ class Database:
         self.strategys_table = STRATEGYS_TABLE
         self.model_strategy_table = MODEL_STRATEGY_TABLE
         self.strategy_decisions_table = STRATEGY_DECISIONS_TABLE
+        self.algo_order_table = ALGO_ORDER_TABLE
     
     def close(self) -> None:
         """
@@ -439,6 +441,7 @@ class Database:
             'strategy_table': self.strategys_table,
             'model_strategy_table': self.model_strategy_table,
             'strategy_decisions_table': self.strategy_decisions_table,
+            'algo_order_table': self.algo_order_table,
         }
         init_database_tables(self.command, table_names)
         

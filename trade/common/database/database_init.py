@@ -39,6 +39,7 @@ STRATEGYS_TABLE = "strategys"
 MODEL_STRATEGY_TABLE = "model_strategy"
 STRATEGY_DECISIONS_TABLE = "strategy_decisions"
 MARKET_TICKER_TABLE = "24_market_tickers"
+ALGO_ORDER_TABLE = "algo_order"
 
 
 class DatabaseInitializer:
@@ -494,6 +495,41 @@ class DatabaseInitializer:
         self.command(ddl)
         logger.debug(f"[DatabaseInit] Ensured table {table_name} exists")
     
+    def ensure_algo_order_table(self, table_name: str = "algo_order"):
+        """Create algo_order table if not exists"""
+        ddl = f"""
+        CREATE TABLE IF NOT EXISTS `{table_name}` (
+            `id` VARCHAR(36) PRIMARY KEY,
+            `algoId` BIGINT DEFAULT NULL COMMENT '币安接口返回的算法订单ID',
+            `clientAlgoId` VARCHAR(100) NOT NULL COMMENT '系统生成的UUID，用于标识条件订单',
+            `type` VARCHAR(10) NOT NULL COMMENT '交易类型：real-真实交易，virtual-虚拟交易',
+            `algoType` VARCHAR(50) DEFAULT 'CONDITIONAL' COMMENT '算法订单类型',
+            `orderType` VARCHAR(50) NOT NULL COMMENT '订单类型：STOP、STOP_MARKET、TAKE_PROFIT、TAKE_PROFIT_MARKET、TRAILING_STOP_MARKET',
+            `symbol` VARCHAR(50) NOT NULL COMMENT '交易对符号',
+            `side` VARCHAR(10) NOT NULL COMMENT '交易方向：buy-买入，sell-卖出',
+            `positionSide` VARCHAR(10) NOT NULL COMMENT '持仓方向：LONG-做多，SHORT-做空',
+            `quantity` DOUBLE DEFAULT 0.0 COMMENT '订单数量',
+            `algoStatus` VARCHAR(20) DEFAULT 'new' COMMENT '订单状态：new-新建，triggered-已触发，executed-已执行，cancelled-已取消',
+            `triggerPrice` DOUBLE DEFAULT NULL COMMENT '触发价格',
+            `price` DOUBLE DEFAULT NULL COMMENT '订单价格（限价单使用）',
+            `model_id` VARCHAR(36) DEFAULT NULL COMMENT '关联的模型ID',
+            `strategy_decision_id` VARCHAR(36) DEFAULT NULL COMMENT '关联的策略决策ID',
+            `trade_id` VARCHAR(36) DEFAULT NULL COMMENT '关联的交易记录ID（异步执行后更新）',
+            `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP,
+            `updated_at` DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            UNIQUE KEY `uk_client_algo_id` (`clientAlgoId`),
+            INDEX `idx_algo_id` (`algoId`),
+            INDEX `idx_model_id` (`model_id`),
+            INDEX `idx_symbol` (`symbol`),
+            INDEX `idx_algo_status` (`algoStatus`),
+            INDEX `idx_order_type` (`orderType`),
+            INDEX `idx_trade_id` (`trade_id`),
+            INDEX `idx_created_at` (`created_at`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+        """
+        self.command(ddl)
+        logger.debug(f"[DatabaseInit] Ensured table {table_name} exists")
+    
     # ============ Market Data Table Initialization Methods ============
     
     def ensure_market_ticker_table(self, table_name: str = "24_market_tickers"):
@@ -600,6 +636,9 @@ def init_database_tables(command_func: Callable[[str], Any], table_names: dict):
     
     # Strategy decisions table (strategy execution decisions)
     initializer.ensure_strategy_decisions_table(table_names.get('strategy_decisions_table', 'strategy_decisions'))
+    
+    # Algo order table (conditional orders)
+    initializer.ensure_algo_order_table(table_names.get('algo_order_table', 'algo_order'))
     
     logger.info("[DatabaseInit] MySQL business tables initialized")
 

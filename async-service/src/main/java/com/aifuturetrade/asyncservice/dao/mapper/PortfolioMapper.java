@@ -58,5 +58,23 @@ public interface PortfolioMapper extends BaseMapper<PortfolioDO> {
     int deletePosition(@Param("modelId") String modelId, 
                       @Param("symbol") String symbol, 
                       @Param("positionSide") String positionSide);
+
+    /**
+     * 查询指定模型的持仓记录
+     */
+    @Select("SELECT * FROM portfolios WHERE model_id = #{modelId} AND symbol = #{symbol} AND position_side = #{positionSide}")
+    PortfolioDO selectPosition(@Param("modelId") String modelId, 
+                               @Param("symbol") String symbol, 
+                               @Param("positionSide") String positionSide);
+
+    /**
+     * 更新持仓数量
+     */
+    @org.apache.ibatis.annotations.Update("UPDATE portfolios SET position_amt = #{positionAmt}, updated_at = NOW() " +
+            "WHERE model_id = #{modelId} AND symbol = #{symbol} AND position_side = #{positionSide}")
+    int updatePositionAmt(@Param("modelId") String modelId,
+                          @Param("symbol") String symbol,
+                          @Param("positionSide") String positionSide,
+                          @Param("positionAmt") Double positionAmt);
 }
 

@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.aifuturetrade.asyncservice.dao.mapper.AlgoOrderMapper">
+
+    <!-- 查询所有状态为"new"的条件订单 -->
+    <select id="selectNewAlgoOrders" resultType="com.aifuturetrade.asyncservice.entity.AlgoOrderDO">
+        SELECT 
+            id, algoId, clientAlgoId, type, algoType, orderType,
+            symbol, side, positionSide, quantity, algoStatus,
+            triggerPrice, price, model_id, strategy_decision_id, trade_id,
+            created_at, updated_at
+        FROM algo_order
+        WHERE algoStatus = 'new'
+        ORDER BY created_at ASC
+    </select>
+
+</mapper>

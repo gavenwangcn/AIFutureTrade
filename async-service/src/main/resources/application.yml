@@ -165,3 +165,13 @@ async:
   account-values-daily:
     # Cron表达式（每天0点执行，格式：秒 分 时 日 月 周）由于是香港服务器 时区差8小时
     cron: "0 0 0 * * ?"
+  
+  # 条件订单服务配置
+  algo-order:
+    # 执行周期（秒），默认2秒
+    interval-seconds: ${ASYNC_ALGO_ORDER_INTERVAL_SECONDS:2}
+
+# 交易配置
+trade:
+  # 交易费率（单边费率，如0.001表示0.1%）
+  fee-rate: ${TRADE_FEE_RATE:0.001}
