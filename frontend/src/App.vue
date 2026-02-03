@@ -682,8 +682,8 @@
                     <tr>
                       <th>时间</th>
                       <th>币种</th>
-                      <th>方向</th>
-                      <th>持仓方向</th>
+                      <th>交易类型</th>
+                      <th>操作</th>
                       <th>数量</th>
                       <th>订单类型</th>
                       <th>价格</th>
@@ -702,7 +702,7 @@
                       </td>
                       <td>
                         <span :class="['badge', getSignalBadgeClass((order.positionSide || '').toLowerCase())]">
-                          {{ order.positionSide || '' }}
+                          {{ formatPositionSide(order.positionSide) }}
                         </span>
                       </td>
                       <td>{{ (order.quantity || 0).toFixed(4) }}</td>
@@ -719,7 +719,7 @@
                           :title="order.error_reason"
                           style="color: var(--danger); font-size: 13px; cursor: help; display: inline-block; max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;"
                         >
-                          {{ order.error_reason }}
+                          {{ order.error_reason.length > 50 ? order.error_reason.substring(0, 50) + '...' : order.error_reason }}
                         </span>
                         <span v-else style="color: var(--text-secondary);">--</span>
                       </td>
@@ -1404,6 +1404,7 @@ const {
   getSignalBadgeClass,
   formatTradeSide,
   formatTradeSideClass,
+  formatPositionSide,
   modelPortfolioSymbols,
   lastPortfolioSymbolsRefreshTime,
   loadSettings,
@@ -1455,6 +1456,15 @@ const formatAlgoStatus = (status) => {
     'failed': '失败'
   }
   return statusMap[status.toLowerCase()] || status
+}
+
+// 格式化持仓方向（LONG -> 做多，SHORT -> 做空）
+const formatPositionSide = (positionSide) => {
+  if (!positionSide) return '--'
+  const sideUpper = positionSide.toUpperCase()
+  if (sideUpper === 'LONG') return '做多'
+  if (sideUpper === 'SHORT') return '做空'
+  return positionSide
 }
 
 // 获取挂单状态样式类

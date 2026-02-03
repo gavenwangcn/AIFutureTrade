@@ -118,6 +118,9 @@ public class ModelServiceImpl implements ModelService {
     private AccountValuesDailyMapper accountValuesDailyMapper;
 
     @Autowired
+    private AlgoOrderMapper algoOrderMapper;
+
+    @Autowired
     private BinanceConfig binanceConfig;
 
     @Value("${app.trades-query-limit:10}")
@@ -485,6 +488,15 @@ public class ModelServiceImpl implements ModelService {
         } catch (Exception e) {
             log.error("[ModelService] Failed to delete strategy_decisions for model {}: {}", id, e.getMessage(), e);
             throw new RuntimeException("Failed to delete strategy_decisions for model: " + id, e);
+        }
+        
+        // 10. 删除条件订单记录
+        try {
+            int count = algoOrderMapper.deleteByModelId(id);
+            log.info("[ModelService] Deleted {} algo_order records for model: {}", count, id);
+        } catch (Exception e) {
+            log.error("[ModelService] Failed to delete algo_order for model {}: {}", id, e.getMessage(), e);
+            throw new RuntimeException("Failed to delete algo_order for model: " + id, e);
         }
         
         // 最后删除model记录本身

@@ -2,6 +2,7 @@ package com.aifuturetrade.dao.mapper;
 
 import com.aifuturetrade.dao.entity.AlgoOrderDO;
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
+import org.apache.ibatis.annotations.Delete;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Select;
@@ -64,4 +65,13 @@ public interface AlgoOrderMapper extends BaseMapper<AlgoOrderDO> {
      */
     @Select("SELECT COUNT(*) FROM algo_order WHERE model_id = #{modelId}")
     Long countAlgoOrdersByModelId(@Param("modelId") String modelId);
+
+    /**
+     * 根据模型ID删除条件订单
+     * 
+     * @param modelId 模型ID
+     * @return 删除的记录数
+     */
+    @Delete("DELETE FROM algo_order WHERE model_id = #{modelId}")
+    int deleteByModelId(@Param("modelId") String modelId);
 }
