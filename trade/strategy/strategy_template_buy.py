@@ -11,14 +11,16 @@ Strategy Code Template - 买入策略代码模板基类
 4. 使用 self.log.info() 输出关键执行日志
 
 时间相关库使用（供生成代码参考）：
-- 必须使用：from datetime import datetime, timedelta
-- 然后使用：datetime.now()、datetime.strptime(s, '%Y-%m-%d')、timedelta(days=1)
+- 必须使用：from datetime import datetime, timedelta, timezone
+- 获取当前时间必须使用UTC+8时区（北京时区）：datetime.now(timezone(timedelta(hours=8)))
+- 然后使用：datetime.now(timezone(timedelta(hours=8)))、datetime.strptime(s, '%Y-%m-%d')、timedelta(days=1)
 - 禁止使用：import datetime 后调用 datetime.now() 或 datetime.strptime()（会报错 AttributeError）
+- 禁止使用：datetime.now() 不带时区参数（必须使用UTC+8时区）
 """
 from abc import ABC, abstractmethod
 from typing import Dict, List
 import logging
-from datetime import datetime, timedelta  # 时间处理：推荐在生成代码中也写 from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone  # 时间处理：必须导入timezone，获取当前时间必须使用UTC+8时区
 
 
 class StrategyBaseBuy(ABC):
