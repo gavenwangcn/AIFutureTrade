@@ -34,8 +34,8 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * 1. 定时检查algo_order表中状态为"new"的条件订单
  * 2. 查询对应symbol的市场价格
  * 3. 根据positionSide判断是否触发成交条件：
- *    - LONG: 市场价格 <= triggerPrice 就成交
- *    - SHORT: 市场价格 >= triggerPrice 就成交
+ *    - LONG: 挂单价格 <= 市场价格 就成交（triggerPrice <= currentPrice），成交价为市场价
+ *    - SHORT: 挂单价格 >= 市场价格 就成交（triggerPrice >= currentPrice），成交价为市场价
  * 4. 如果触发，执行交易并更新相关表（trades、account_value_historys、account_values等）
  */
 @Slf4j
@@ -193,13 +193,15 @@ public class AlgoOrderServiceImpl implements AlgoOrderService {
         }
         
         // 判断是否触发成交条件
+        // LONG型：挂单价格要低于等于市场价才能成交（triggerPrice <= currentPrice），成交价为市场价
+        // SHORT型：挂单价格要高于等于市场价才能成交（triggerPrice >= currentPrice），成交价为市场价
         boolean shouldTrigger = false;
         if ("LONG".equalsIgnoreCase(positionSide)) {
-            // LONG持仓：市场价格 <= triggerPrice 就成交
-            shouldTrigger = currentPrice <= triggerPrice;
+            // LONG持仓：挂单价格 <= 市场价格 就成交，成交价为市场价
+            shouldTrigger = triggerPrice <= currentPrice;
         } else if ("SHORT".equalsIgnoreCase(positionSide)) {
-            // SHORT持仓：市场价格 >= triggerPrice 就成交
-            shouldTrigger = currentPrice >= triggerPrice;
+            // SHORT持仓：挂单价格 >= 市场价格 就成交，成交价为市场价
+            shouldTrigger = triggerPrice >= currentPrice;
         }
         
         if (!shouldTrigger) {
