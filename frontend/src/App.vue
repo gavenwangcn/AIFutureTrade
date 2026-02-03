@@ -1404,7 +1404,6 @@ const {
   getSignalBadgeClass,
   formatTradeSide,
   formatTradeSideClass,
-  formatPositionSide,
   modelPortfolioSymbols,
   lastPortfolioSymbolsRefreshTime,
   loadSettings,
