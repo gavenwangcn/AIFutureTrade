@@ -686,8 +686,9 @@
                       <th>持仓方向</th>
                       <th>数量</th>
                       <th>订单类型</th>
-                      <th>状态</th>
                       <th>价格</th>
+                      <th>状态</th>
+                      <th>失败原因</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -706,15 +707,25 @@
                       </td>
                       <td>{{ (order.quantity || 0).toFixed(4) }}</td>
                       <td>{{ order.type || '' }}</td>
+                      <td>${{ formatPrice6(order.price) }}</td>
                       <td>
                         <span :class="['badge', getAlgoStatusBadgeClass(order.algoStatus)]">
                           {{ formatAlgoStatus(order.algoStatus) }}
                         </span>
                       </td>
-                      <td>${{ formatPrice6(order.price) }}</td>
+                      <td>
+                        <span
+                          v-if="order.error_reason"
+                          :title="order.error_reason"
+                          style="color: var(--danger); font-size: 13px; cursor: help; display: inline-block; max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;"
+                        >
+                          {{ order.error_reason }}
+                        </span>
+                        <span v-else style="color: var(--text-secondary);">--</span>
+                      </td>
                     </tr>
                     <tr v-if="algoOrders.length === 0">
-                      <td colspan="8" class="empty-state">暂无挂单记录</td>
+                      <td colspan="9" class="empty-state">暂无挂单记录</td>
                     </tr>
                   </tbody>
                 </table>
