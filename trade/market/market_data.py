@@ -1147,6 +1147,10 @@ class MarketDataFetcher:
                         low_price = float(item.get('low', 0))
                         close_price = float(item.get('close', 0))
                         volume_value = float(item.get('volume', 0))
+                        # 保留 open_time_dt_str 和 close_time_dt_str 字段（如果存在）
+                        open_time_dt_str = item.get('open_time_dt_str')
+                        close_time_dt_str = item.get('close_time_dt_str')
+                        close_time_ms = item.get('close_time')
                     elif isinstance(item, (list, tuple)) and len(item) > 5:
                         open_time_ms = int(item[0])
                         open_price = float(item[1])
@@ -1154,25 +1158,53 @@ class MarketDataFetcher:
                         low_price = float(item[3])
                         close_price = float(item[4])
                         volume_value = float(item[5])
+                        close_time_ms = int(item[6]) if len(item) > 6 else None
+                        # 列表格式没有 dt_str 字段，需要转换
+                        open_time_dt_str = None
+                        close_time_dt_str = None
                     else:
                         continue
                     
+                    # 如果字典格式中没有 dt_str 字段，或者列表格式，需要转换时间戳
+                    if open_time_dt_str is None and open_time_ms:
+                        # 将毫秒时间戳转换为 datetime 字符串（UTC+8时区）
+                        utc8 = timezone(timedelta(hours=8))
+                        dt = datetime.fromtimestamp(open_time_ms / 1000.0, tz=utc8)
+                        open_time_dt_str = dt.strftime('%Y-%m-%d %H:%M:%S')
+                    
+                    if close_time_dt_str is None and close_time_ms:
+                        # 将毫秒时间戳转换为 datetime 字符串（UTC+8时区）
+                        utc8 = timezone(timedelta(hours=8))
+                        dt = datetime.fromtimestamp(close_time_ms / 1000.0, tz=utc8)
+                        close_time_dt_str = dt.strftime('%Y-%m-%d %H:%M:%S')
+                    
                     # 将毫秒时间戳转换为 datetime 字符串（精确到秒后两位小数）
-                    # 格式：YYYY-MM-DD HH:MM:SS.XX
+                    # 格式：YYYY-MM-DD HH:MM:SS.XX（保留time字段用于兼容）
                     dt = datetime.fromtimestamp(open_time_ms / 1000.0, tz=timezone.utc)
                     # 获取毫秒部分（前两位作为小数秒）
                     milliseconds = open_time_ms % 1000
                     time_str = dt.strftime('%Y-%m-%d %H:%M:%S') + f'.{milliseconds // 10:02d}'
                     
-                    # 构建K线数据
-                    kline_data_list.append({
+                    # 构建K线数据（保留所有字段，包括 open_time_dt_str 和 close_time_dt_str）
+                    kline_data = {
                         'time': time_str,
                         'open': open_price,
                         'high': high_price,
                         'low': low_price,
                         'close': close_price,
                         'volume': volume_value
-                    })
+                    }
+                    # 添加时间字段（如果存在）
+                    if open_time_ms:
+                        kline_data['open_time'] = open_time_ms
+                    if open_time_dt_str:
+                        kline_data['open_time_dt_str'] = open_time_dt_str
+                    if close_time_ms:
+                        kline_data['close_time'] = close_time_ms
+                    if close_time_dt_str:
+                        kline_data['close_time_dt_str'] = close_time_dt_str
+                    
+                    kline_data_list.append(kline_data)
                 except (ValueError, TypeError, KeyError, IndexError):
                     continue
             
