@@ -44,16 +44,9 @@ class StrategyBaseSell(ABC):
         # 创建日志记录器，使用类名作为logger名称
         logger_name = f"{self.__class__.__module__}.{self.__class__.__name__}"
         self.log = logging.getLogger(logger_name)
-        # 如果logger没有处理器，添加一个控制台处理器
-        if not self.log.handlers:
-            handler = logging.StreamHandler()
-            formatter = logging.Formatter(
-                '%(asctime)s [%(levelname)s] %(name)s - %(message)s',
-                datefmt='%Y-%m-%d %H:%M:%S'
-            )
-            handler.setFormatter(formatter)
-            self.log.addHandler(handler)
-            self.log.setLevel(logging.INFO)
+        # 使用父级logger（root logger），确保使用UTC+8时区
+        # propagate默认为True，日志会传播到父级logger
+        self.log.setLevel(logging.INFO)
     
     @abstractmethod
     def execute_sell_decision(
