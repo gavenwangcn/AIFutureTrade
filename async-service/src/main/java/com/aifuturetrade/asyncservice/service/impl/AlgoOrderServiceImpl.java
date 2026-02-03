@@ -260,13 +260,16 @@ public class AlgoOrderServiceImpl implements AlgoOrderService {
         } catch (Exception e) {
             log.error("[AlgoOrderService] ❌ 交易执行失败: orderId={}, error={}", orderId, e.getMessage(), e);
             result.setFailedCount(result.getFailedCount() + 1);
-            
-            // 更新订单状态为"failed"
+
+            // 提取详细错误信息
+            String errorReason = extractErrorReason(e);
+
+            // 更新订单状态为"failed"并记录错误原因
             try {
-                algoOrderMapper.updateAlgoStatus(orderId, "failed");
-                log.info("[AlgoOrderService] 订单状态已更新为failed: orderId={}", orderId);
+                algoOrderMapper.updateAlgoStatusWithError(orderId, "failed", errorReason);
+                log.info("[AlgoOrderService] 订单状态已更新为failed: orderId={}, errorReason={}", orderId, errorReason);
             } catch (Exception updateEx) {
-                log.error("[AlgoOrderService] 更新订单状态为failed失败: orderId={}, error={}", 
+                log.error("[AlgoOrderService] 更新订单状态为failed失败: orderId={}, error={}",
                         orderId, updateEx.getMessage());
             }
             
@@ -274,20 +277,20 @@ public class AlgoOrderServiceImpl implements AlgoOrderService {
             String strategyDecisionId = order.getStrategyDecisionId();
             if (strategyDecisionId != null && !strategyDecisionId.isEmpty()) {
                 try {
-                    String errorReason = e.getMessage() != null ? e.getMessage() : "交易执行失败";
                     // 注意：如果trade记录已经插入（tradeId不为null），则写入trade_id和error_reason
                     // 如果trade记录未插入（tradeId为null），则只写入error_reason
                     // 这样保证trade和strategy_decisions记录可以追溯查询
+                    // 使用已提取的详细错误信息（包含错误分类）
                     strategyDecisionMapper.updateStrategyDecisionStatus(
                             strategyDecisionId,
                             "REJECTED",
                             tradeId,  // 如果trade记录已插入，写入trade_id；否则为null
-                            errorReason
+                            errorReason  // 使用上面提取的详细错误信息
                     );
-                    log.info("[AlgoOrderService] ✅ 已更新strategy_decisions表状态为REJECTED: decisionId={}, tradeId={}, errorReason={}", 
+                    log.info("[AlgoOrderService] ✅ 已更新strategy_decisions表状态为REJECTED: decisionId={}, tradeId={}, errorReason={}",
                             strategyDecisionId, tradeId, errorReason);
                 } catch (Exception updateErr) {
-                    log.error("[AlgoOrderService] ⚠️ 更新strategy_decisions表状态失败: decisionId={}, error={}", 
+                    log.error("[AlgoOrderService] ⚠️ 更新strategy_decisions表状态失败: decisionId={}, error={}",
                             strategyDecisionId, updateErr.getMessage(), updateErr);
                     // 不抛出异常，避免影响主流程
                 }
@@ -580,5 +583,71 @@ public class AlgoOrderServiceImpl implements AlgoOrderService {
                     modelId, e.getMessage());
             return null;
         }
+    }
+
+    /**
+     * 提取详细错误原因
+     */
+    private String extractErrorReason(Exception e) {
+        if (e == null) {
+            return "未知错误";
+        }
+
+        String errorMessage = e.getMessage();
+        if (errorMessage == null || errorMessage.isEmpty()) {
+            errorMessage = e.getClass().getSimpleName();
+        }
+
+        // 分类错误类型
+        String errorType = "未知错误";
+
+        // 持仓相关错误
+        if (errorMessage.contains("持仓不存在")) {
+            errorType = "持仓不存在";
+        }
+        // Binance客户端错误
+        else if (errorMessage.contains("无法创建 Binance 客户端")) {
+            errorType = "Binance客户端创建失败";
+        }
+        // 交易接口错误
+        else if (errorMessage.contains("交易接口返回为空")) {
+            errorType = "交易接口返回为空";
+        }
+        // Binance API错误
+        else if (errorMessage.contains("Insufficient balance") || errorMessage.contains("余额不足")) {
+            errorType = "账户余额不足";
+        } else if (errorMessage.contains("Invalid quantity") || errorMessage.contains("数量") || errorMessage.contains("precision")) {
+            errorType = "订单数量或精度错误";
+        } else if (errorMessage.contains("Invalid price") || errorMessage.contains("价格")) {
+            errorType = "订单价格错误";
+        } else if (errorMessage.contains("MIN_NOTIONAL") || errorMessage.contains("最小订单")) {
+            errorType = "订单金额低于最小限制";
+        } else if (errorMessage.contains("Rate limit") || errorMessage.contains("限流") || errorMessage.contains("Too many requests")) {
+            errorType = "API请求频率限制";
+        } else if (errorMessage.contains("API key") || errorMessage.contains("权限") || errorMessage.contains("Permission")) {
+            errorType = "API Key权限不足";
+        } else if (errorMessage.contains("timeout") || errorMessage.contains("超时") || errorMessage.contains("timed out")) {
+            errorType = "网络超时";
+        } else if (errorMessage.contains("connection") || errorMessage.contains("连接") || errorMessage.contains("网络")) {
+            errorType = "网络连接失败";
+        } else if (errorMessage.contains("Symbol") || errorMessage.contains("交易对")) {
+            errorType = "交易对不存在或已下架";
+        } else if (errorMessage.contains("Position") || errorMessage.contains("持仓模式")) {
+            errorType = "持仓模式错误";
+        }
+        // 数据库错误
+        else if (errorMessage.contains("Duplicate") || errorMessage.contains("重复")) {
+            errorType = "数据库主键冲突";
+        } else if (errorMessage.contains("database") || errorMessage.contains("数据库") || errorMessage.contains("SQL")) {
+            errorType = "数据库操作失败";
+        }
+
+        // 限制错误信息长度（最多500字符）
+        String fullError = errorType + ": " + errorMessage;
+        if (fullError.length() > 500) {
+            fullError = fullError.substring(0, 497) + "...";
+        }
+
+        return fullError;
     }
 }

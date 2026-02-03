@@ -509,9 +509,10 @@ class DatabaseInitializer:
             `side` VARCHAR(10) NOT NULL COMMENT '交易方向：buy-买入，sell-卖出',
             `positionSide` VARCHAR(10) NOT NULL COMMENT '持仓方向：LONG-做多，SHORT-做空',
             `quantity` DOUBLE DEFAULT 0.0 COMMENT '订单数量',
-            `algoStatus` VARCHAR(20) DEFAULT 'new' COMMENT '订单状态：new-新建，triggered-已触发，executed-已执行，cancelled-已取消',
+            `algoStatus` VARCHAR(20) DEFAULT 'new' COMMENT '订单状态：new-新建，triggered-已触发，executed-已执行，cancelled-已取消，failed-失败',
             `triggerPrice` DOUBLE DEFAULT NULL COMMENT '触发价格',
             `price` DOUBLE DEFAULT NULL COMMENT '订单价格（限价单使用）',
+            `error_reason` TEXT DEFAULT NULL COMMENT '失败原因（当algoStatus=failed时记录详细错误信息）',
             `model_id` VARCHAR(36) DEFAULT NULL COMMENT '关联的模型ID',
             `strategy_decision_id` VARCHAR(36) DEFAULT NULL COMMENT '关联的策略决策ID',
             `trade_id` VARCHAR(36) DEFAULT NULL COMMENT '关联的交易记录ID（异步执行后更新）',
@@ -529,7 +530,7 @@ class DatabaseInitializer:
         """
         self.command(ddl)
         logger.debug(f"[DatabaseInit] Ensured table {table_name} exists")
-    
+
     # ============ Market Data Table Initialization Methods ============
     
     def ensure_market_ticker_table(self, table_name: str = "24_market_tickers"):

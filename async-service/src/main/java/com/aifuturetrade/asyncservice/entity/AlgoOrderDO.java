@@ -53,6 +53,9 @@ public class AlgoOrderDO implements Serializable {
 
     private Double price;
 
+    @TableField("error_reason")
+    private String errorReason;
+
     @TableField("model_id")
     private String modelId;
 

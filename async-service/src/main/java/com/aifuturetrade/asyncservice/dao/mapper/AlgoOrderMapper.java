@@ -33,8 +33,19 @@ public interface AlgoOrderMapper extends BaseMapper<AlgoOrderDO> {
     int updateAlgoStatus(@Param("id") String id, @Param("algoStatus") String algoStatus);
 
     /**
+     * 更新条件订单状态和错误原因
+     *
+     * @param id 订单ID
+     * @param algoStatus 新状态
+     * @param errorReason 错误原因
+     * @return 更新的记录数
+     */
+    @Update("UPDATE algo_order SET algoStatus = #{algoStatus}, error_reason = #{errorReason}, updated_at = NOW() WHERE id = #{id}")
+    int updateAlgoStatusWithError(@Param("id") String id, @Param("algoStatus") String algoStatus, @Param("errorReason") String errorReason);
+
+    /**
      * 更新条件订单的trade_id和状态
-     * 
+     *
      * @param id 订单ID
      * @param tradeId 交易记录ID
      * @param algoStatus 新状态
