@@ -1838,9 +1838,16 @@ class BinanceFuturesOrderClient(_BinanceFuturesBase):
         }
         
         if quantity is not None:
-            # 调整数量精度，确保符合 Binance 要求，然后转换为整数
+            # 先根据价格调整精度（如果提供了价格）
+            # 注意：quantity在传入SDK之前已经在strategy_trader中根据价格调整过精度
+            # 这里再根据Binance的stepSize要求进行最终调整
             adjusted_quantity = self._adjust_quantity_precision(quantity, formatted_symbol)
-            order_params["quantity"] = int(adjusted_quantity)  # 确保quantity是整数
+            # 保留精度，不强制转换为整数（因为quantity可能已经是小数）
+            # 如果精度为0（整数），转换为整数类型
+            if adjusted_quantity == int(adjusted_quantity):
+                order_params["quantity"] = int(adjusted_quantity)
+            else:
+                order_params["quantity"] = adjusted_quantity
         
         if close_position:
             order_params["close_position"] = True
@@ -1880,8 +1887,14 @@ class BinanceFuturesOrderClient(_BinanceFuturesBase):
         algo_params = {}
         
         if quantity is not None:
-            # 确保quantity是整数
-            algo_params["quantity"] = int(float(quantity))
+            # quantity在传入之前已经在strategy_trader中根据价格调整过精度
+            # 这里保留精度，不强制转换为整数
+            quantity_float = float(quantity)
+            # 如果精度为0（整数），转换为整数类型
+            if quantity_float == int(quantity_float):
+                algo_params["quantity"] = int(quantity_float)
+            else:
+                algo_params["quantity"] = quantity_float
         
         if stop_price is not None:
             algo_params["trigger_price"] = stop_price

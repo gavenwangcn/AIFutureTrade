@@ -50,30 +50,76 @@ class StrategyTrader(Trader):
         self.strategys_db = StrategysDatabase(pool=db._pool if db and hasattr(db, '_pool') else None)
         self.models_db = ModelsDatabase(pool=db._pool if db and hasattr(db, '_pool') else None)
     
-    def _normalize_quantity_to_int(self, decisions: Dict) -> Dict:
+    def _normalize_quantity_by_price(self, decisions: Dict, market_state: Dict) -> Dict:
         """
-        规范化decisions中的quantity为整数
+        根据symbol价格动态调整decisions中的quantity精度
         
         Args:
             decisions: 决策字典，key为交易对符号，value为决策详情
+            market_state: 市场状态字典，包含各symbol的价格信息
             
         Returns:
-            规范化后的决策字典，所有quantity字段都转换为整数
+            规范化后的决策字典，quantity字段根据价格调整精度
         """
+        from trade.trading.trading_utils import adjust_quantity_precision_by_price
+        
         normalized_decisions = {}
         for symbol, decision in decisions.items():
             normalized_decision = decision.copy()
-            # 如果decision中有quantity字段，转换为整数
+            # 如果decision中有quantity字段，根据价格调整精度
             if 'quantity' in normalized_decision and normalized_decision['quantity'] is not None:
                 try:
-                    quantity = normalized_decision['quantity']
-                    # 转换为浮点数后再转换为整数（向下取整）
-                    normalized_decision['quantity'] = int(float(quantity))
-                    logger.debug(f"[StrategyTrader] 规范化 {symbol} 的quantity: {quantity} -> {normalized_decision['quantity']}")
+                    quantity = float(normalized_decision['quantity'])
+                    if quantity <= 0:
+                        normalized_decision['quantity'] = 0.0
+                        continue
+                    
+                    # 从market_state中获取symbol的价格
+                    price = None
+                    symbol_upper = symbol.upper()
+                    
+                    # 尝试从market_state中获取价格
+                    if isinstance(market_state, dict):
+                        # 先直接按大写找
+                        market_info = market_state.get(symbol_upper)
+                        if market_info is None:
+                            # 再遍历找 key 大小写不同的情况
+                            for k, v in market_state.items():
+                                try:
+                                    if str(k).upper() == symbol_upper:
+                                        market_info = v
+                                        break
+                                except Exception:
+                                    continue
+                        
+                        if isinstance(market_info, dict):
+                            price = market_info.get('price')
+                    
+                    # 如果获取到价格，使用价格调整精度；否则默认取整数
+                    if price is not None:
+                        try:
+                            price_float = float(price)
+                            if price_float > 0:
+                                adjusted_quantity = adjust_quantity_precision_by_price(quantity, price_float)
+                                normalized_decision['quantity'] = adjusted_quantity
+                                logger.debug(f"[StrategyTrader] 根据价格调整 {symbol} 的quantity: {quantity} -> {adjusted_quantity} (价格: {price_float})")
+                            else:
+                                # 价格无效，默认取整数
+                                normalized_decision['quantity'] = float(int(quantity))
+                                logger.debug(f"[StrategyTrader] 价格无效，{symbol} 的quantity取整数: {quantity} -> {normalized_decision['quantity']}")
+                        except (ValueError, TypeError) as e:
+                            # 价格转换失败，默认取整数
+                            normalized_decision['quantity'] = float(int(quantity))
+                            logger.debug(f"[StrategyTrader] 价格转换失败，{symbol} 的quantity取整数: {quantity} -> {normalized_decision['quantity']}")
+                    else:
+                        # 没有价格信息，默认取整数
+                        normalized_decision['quantity'] = float(int(quantity))
+                        logger.debug(f"[StrategyTrader] 无价格信息，{symbol} 的quantity取整数: {quantity} -> {normalized_decision['quantity']}")
+                        
                 except (ValueError, TypeError) as e:
-                    logger.warning(f"[StrategyTrader] 无法转换 {symbol} 的quantity为整数: {normalized_decision.get('quantity')}, 错误: {e}")
-                    # 如果转换失败，设置为0或保持原值（根据业务需求）
-                    normalized_decision['quantity'] = 0
+                    logger.warning(f"[StrategyTrader] 无法转换 {symbol} 的quantity: {normalized_decision.get('quantity')}, 错误: {e}")
+                    # 如果转换失败，设置为0
+                    normalized_decision['quantity'] = 0.0
             normalized_decisions[symbol] = normalized_decision
         return normalized_decisions
     
@@ -339,8 +385,8 @@ class StrategyTrader(Trader):
                 if not isinstance(decisions, dict) or not decisions:
                     continue
 
-                # 规范化quantity为整数
-                normalized_decisions = self._normalize_quantity_to_int(decisions)
+                # 根据价格动态调整quantity精度
+                normalized_decisions = self._normalize_quantity_by_price(decisions, filtered_market_state)
 
                 # 将策略返回的 decisions 按 symbol 归一化为 upper key，方便与 remaining_candidates 对齐
                 decisions_by_symbol: Dict[str, Dict] = {}

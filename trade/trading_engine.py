@@ -42,6 +42,7 @@ from trade.trading.trading_utils import (
     validate_position_for_trade,
     calculate_trade_requirements,
     calculate_pnl,
+    adjust_quantity_precision_by_price,
     extract_prices_from_market_state
 )
 from trade.trading.market_data_manager import MarketDataManager
@@ -3405,10 +3406,12 @@ class TradingEngine:
             return {'symbol': symbol, 'error': '请求的合约数量无效'}
         
         # position_amt = 买入 symbol 合约的数量（合约数量）
-        # 与strategy_decisions表的quantity保持一致：使用int向下取整（与策略执行记录保持一致）
-        # 注意：strategy_decisions表中quantity被转换为整数（int(float(quantity))），
-        # 所以这里也使用相同的处理方式，确保portfolios表的position_amt与strategy_decisions表的quantity一致
-        position_amt = int(float(requested_quantity))
+        # 根据symbol价格动态调整quantity精度（与策略执行记录保持一致）
+        # 注意：strategy_decisions表中quantity已根据价格调整精度，这里也使用相同的处理方式
+        position_amt = adjust_quantity_precision_by_price(requested_quantity, price)
+        # 如果精度为0（整数），转换为整数类型
+        if position_amt == int(position_amt):
+            position_amt = int(position_amt)
         
         if position_amt <= 0:
             return {'symbol': symbol, 'error': '请求的合约数量无效（向下取整后为0）'}
@@ -3550,25 +3553,34 @@ class TradingEngine:
             else:
                 position_side_from_sdk = position_side
             
-            # 将executedQty转换为整数（与strategy_decisions表保持一致）
-            executed_qty_int = int(float(executed_qty)) if executed_qty else 0
+            # 根据价格调整executedQty精度（与strategy_decisions表保持一致）
+            from trade.trading.trading_utils import adjust_quantity_precision_by_price
+            if executed_qty and avg_price_from_sdk:
+                executed_qty_adjusted = adjust_quantity_precision_by_price(float(executed_qty), float(avg_price_from_sdk))
+                # 如果精度为0（整数），转换为整数类型
+                executed_qty_int = int(executed_qty_adjusted) if executed_qty_adjusted == int(executed_qty_adjusted) else executed_qty_adjusted
+            else:
+                executed_qty_int = int(float(executed_qty)) if executed_qty else 0
             
             if executed_qty_int > 0 and avg_price_from_sdk > 0:
                 try:
                     # 重新计算initial_margin（基于实际成交的executedQty和avgPrice）
+                    # executed_qty_int可能是整数或浮点数（根据精度调整）
                     actual_required_capital = (executed_qty_int * avg_price_from_sdk) / leverage
                     actual_trade_amount, actual_buy_fee, _, actual_initial_margin = calculate_trade_requirements(
                         executed_qty_int, avg_price_from_sdk, leverage, self.trade_fee_rate, actual_required_capital
                     )
                     
+                    # executed_qty_int可能是整数或浮点数（根据精度调整）
+                    position_amt_for_update = executed_qty_int
                     self._update_position(
-                        self.model_id, symbol=symbol, position_amt=executed_qty_int, 
+                        self.model_id, symbol=symbol, position_amt=position_amt_for_update, 
                         avg_price=avg_price_from_sdk, 
                         leverage=leverage, position_side=position_side_from_sdk,
                         initial_margin=actual_initial_margin
                     )
                     logger.info(f"TRADE: Updated portfolios (real mode, SDK success) - Model {self.model_id} {symbol} "
-                              f"position_amt={executed_qty_int} avg_price={avg_price_from_sdk} position_side={position_side_from_sdk}")
+                              f"position_amt={position_amt_for_update} avg_price={avg_price_from_sdk} position_side={position_side_from_sdk}")
                 except Exception as db_err:
                     logger.error(f"TRADE: Update position failed (real mode, SDK success) model={self.model_id} future={symbol}: {db_err}")
                     raise
@@ -3600,7 +3612,22 @@ class TradingEngine:
         if parsed_response:
             trade_signal_final = parsed_response.get('side', trade_signal)
             trade_position_side_final = parsed_response.get('positionSide', position_side.lower())
-            trade_quantity = parsed_response.get('executedQty', 0.0) if trade_mode == 'real' else quantity
+            # real模式：使用SDK返回的executedQty，并根据价格调整精度
+            # test模式：使用quantity（已经根据价格调整过精度）
+            if trade_mode == 'real':
+                executed_qty = parsed_response.get('executedQty', 0.0)
+                avg_price = parsed_response.get('avgPrice', price)
+                # 如果SDK返回了成交数量和价格，根据价格调整精度
+                if executed_qty and avg_price:
+                    from trade.trading.trading_utils import adjust_quantity_precision_by_price
+                    trade_quantity = adjust_quantity_precision_by_price(float(executed_qty), float(avg_price))
+                    # 如果精度为0（整数），转换为整数类型
+                    if trade_quantity == int(trade_quantity):
+                        trade_quantity = int(trade_quantity)
+                else:
+                    trade_quantity = executed_qty
+            else:
+                trade_quantity = quantity  # test模式，quantity已经根据价格调整过精度
             trade_price = parsed_response.get('avgPrice', 0.0) if trade_mode == 'real' else price
             order_id = parsed_response.get('orderId')
             order_type = parsed_response.get('type')
@@ -3873,7 +3900,22 @@ class TradingEngine:
         if parsed_response:
             trade_signal_final = parsed_response.get('side', trade_signal)
             trade_position_side_final = parsed_response.get('positionSide', position_side.lower())
-            trade_quantity = parsed_response.get('executedQty', 0.0) if trade_mode == 'real' else position_amt
+            # real模式：使用SDK返回的executedQty，并根据价格调整精度
+            # test模式：使用position_amt（已经根据价格调整过精度）
+            if trade_mode == 'real':
+                executed_qty = parsed_response.get('executedQty', 0.0)
+                avg_price = parsed_response.get('avgPrice', current_price)
+                # 如果SDK返回了成交数量和价格，根据价格调整精度
+                if executed_qty and avg_price:
+                    from trade.trading.trading_utils import adjust_quantity_precision_by_price
+                    trade_quantity = adjust_quantity_precision_by_price(float(executed_qty), float(avg_price))
+                    # 如果精度为0（整数），转换为整数类型
+                    if trade_quantity == int(trade_quantity):
+                        trade_quantity = int(trade_quantity)
+                else:
+                    trade_quantity = executed_qty
+            else:
+                trade_quantity = position_amt  # test模式，position_amt已经根据价格调整过精度
             trade_price = parsed_response.get('avgPrice', 0.0) if trade_mode == 'real' else current_price
             order_id = parsed_response.get('orderId')
             order_type = parsed_response.get('type')
@@ -4412,8 +4454,11 @@ class TradingEngine:
         strategy_quantity = decision.get('quantity', 0)
         if not strategy_quantity:
             return {'symbol': symbol, 'error': 'Strategy quantity not provided'}
-        # 与strategy_decisions表的quantity保持一致：使用int向下取整
-        strategy_quantity = int(float(strategy_quantity))
+        # 根据symbol价格动态调整quantity精度（与策略执行记录保持一致）
+        strategy_quantity = adjust_quantity_precision_by_price(float(strategy_quantity), current_price)
+        # 如果精度为0（整数），转换为整数类型
+        if strategy_quantity == int(strategy_quantity):
+            strategy_quantity = int(strategy_quantity)
         
         if strategy_quantity <= 0:
             return {'symbol': symbol, 'error': 'Strategy quantity must be greater than 0'}
@@ -4653,8 +4698,11 @@ class TradingEngine:
         strategy_quantity = decision.get('quantity', 0)
         if not strategy_quantity:
             return {'symbol': symbol, 'error': 'Strategy quantity not provided'}
-        # 与strategy_decisions表的quantity保持一致：使用int向下取整
-        strategy_quantity = int(float(strategy_quantity))
+        # 根据symbol价格动态调整quantity精度（与策略执行记录保持一致）
+        strategy_quantity = adjust_quantity_precision_by_price(float(strategy_quantity), current_price)
+        # 如果精度为0（整数），转换为整数类型
+        if strategy_quantity == int(strategy_quantity):
+            strategy_quantity = int(strategy_quantity)
         
         if strategy_quantity <= 0:
             return {'symbol': symbol, 'error': 'Strategy quantity must be greater than 0'}

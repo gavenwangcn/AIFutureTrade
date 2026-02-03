@@ -523,7 +523,15 @@ klines_1w = timeframes.get('1w', {}).get('klines', [])  # 1周K线
      - 平仓100%：`quantity = position_amt`
      - 平仓50%：`quantity = position_amt * 0.5`
      - 平仓部分：`quantity = position_amt * 平仓比例`
-  5. 杠杆：通常与持仓时的杠杆一致，从 `position.get('leverage', 5)` 获取
+  5. **根据symbol价格动态调整quantity精度**（重要！）：
+     - 价格 < 1：取整数 `quantity = round(quantity, 0)` 或 `quantity = int(quantity)`
+     - 1 <= 价格 < 10：小数点后1位 `quantity = round(quantity, 1)`
+     - 10 <= 价格 < 100：小数点后2位 `quantity = round(quantity, 2)`
+     - 100 <= 价格 < 1000：小数点后3位 `quantity = round(quantity, 3)`
+     - 1000 <= 价格 < 10000：小数点后4位 `quantity = round(quantity, 4)`
+     - 10000 <= 价格 < 100000：小数点后5位 `quantity = round(quantity, 5)`
+     - 价格 >= 100000：小数点后6位（最多）`quantity = round(quantity, 6)`
+  6. 杠杆：通常与持仓时的杠杆一致，从 `position.get('leverage', 5)` 获取
 - **系统会自动计算平仓时的 USDT 数量**：`quantity * 当前价格`
 
 **示例：**
@@ -532,10 +540,26 @@ position_amt = abs(position.get('position_amt', 0))  # 持仓合约数量
 close_quantity = position_amt  # 平仓100%
 # 或平仓50%：close_quantity = position_amt * 0.5
 
+# 根据symbol价格动态调整quantity精度
+if current_price < 1:
+    close_quantity = round(close_quantity, 0)  # 取整数
+elif current_price < 10:
+    close_quantity = round(close_quantity, 1)  # 小数点后1位
+elif current_price < 100:
+    close_quantity = round(close_quantity, 2)  # 小数点后2位
+elif current_price < 1000:
+    close_quantity = round(close_quantity, 3)  # 小数点后3位
+elif current_price < 10000:
+    close_quantity = round(close_quantity, 4)  # 小数点后4位
+elif current_price < 100000:
+    close_quantity = round(close_quantity, 5)  # 小数点后5位
+else:
+    close_quantity = round(close_quantity, 6)  # 小数点后6位（最多）
+
 # ⚠️ 重要：所有字段都必须提供，不能为空或None
 decisions[symbol] = {
     "signal": "close_position",  # 或 "stop_loss" 或 "take_profit"
-    "quantity": close_quantity,  # 必须：合约数量
+    "quantity": close_quantity,  # 必须：合约数量（已根据价格调整精度）
     "price": current_price,  # ⚠️ 必须：当前价格（不能为空、不能为None）
     "stop_price": current_price,  # ⚠️ 必须：触发价格（不能为空、不能为None）
     "leverage": position.get('leverage', 5),  # ⚠️ 必须：杠杆倍数（不能为空、不能为None）
@@ -543,9 +567,10 @@ decisions[symbol] = {
 }
 
 # 止损示例（多单）
+# 注意：close_quantity需要先根据价格调整精度（见上面的示例代码）
 decisions[symbol] = {
     "signal": "stop_loss",
-    "quantity": close_quantity,
+    "quantity": close_quantity,  # 已根据价格调整精度
     "price": current_price,  # ⚠️ 必须：当前价格
     "stop_price": current_price * 0.98,  # ⚠️ 必须：止损触发价（多单设置为略低于当前价）
     "leverage": position.get('leverage', 5),  # ⚠️ 必须：杠杆倍数
@@ -553,9 +578,10 @@ decisions[symbol] = {
 }
 
 # 止盈示例（多单）
+# 注意：close_quantity需要先根据价格调整精度（见上面的示例代码）
 decisions[symbol] = {
     "signal": "take_profit",
-    "quantity": close_quantity,
+    "quantity": close_quantity,  # 已根据价格调整精度
     "price": current_price,  # ⚠️ 必须：当前价格
     "stop_price": current_price * 1.05,  # ⚠️ 必须：止盈触发价（多单设置为略高于当前价）
     "leverage": position.get('leverage', 5),  # ⚠️ 必须：杠杆倍数

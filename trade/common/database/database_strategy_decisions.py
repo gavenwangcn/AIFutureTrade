@@ -192,9 +192,17 @@ class StrategyDecisionsDatabase:
         try:
             decision_id = self._generate_id()
             
-            # Ensure quantity is integer (if provided)
+            # quantity已经在strategy_trader中根据价格调整过精度，这里直接使用
+            # 如果quantity是浮点数且为整数，转换为整数类型
             if quantity is not None:
-                quantity = int(float(quantity))
+                try:
+                    quantity_float = float(quantity)
+                    if quantity_float == int(quantity_float):
+                        quantity = int(quantity_float)
+                    else:
+                        quantity = quantity_float
+                except (ValueError, TypeError):
+                    quantity = 0
             
             # Use UTC+8 timezone (Beijing time), convert to naive datetime for storage
             beijing_tz = timezone(timedelta(hours=8))
@@ -239,9 +247,17 @@ class StrategyDecisionsDatabase:
                 signal = decision.get('signal', '')
                 symbol = decision.get('symbol')  # Get symbol field
                 quantity = decision.get('quantity')
-                # Ensure quantity is integer (if provided)
+                # quantity已经在strategy_trader中根据价格调整过精度，这里直接使用
+                # 如果quantity是浮点数且为整数，转换为整数类型
                 if quantity is not None:
-                    quantity = int(float(quantity))
+                    try:
+                        quantity_float = float(quantity)
+                        if quantity_float == int(quantity_float):
+                            quantity = int(quantity_float)
+                        else:
+                            quantity = quantity_float
+                    except (ValueError, TypeError):
+                        quantity = 0
                 leverage = decision.get('leverage')
                 price = decision.get('price')
                 stop_price = decision.get('stop_price')
@@ -298,7 +314,19 @@ class StrategyDecisionsDatabase:
                 symbol = str(symbol).upper()
             quantity = decision.get('quantity')
             if quantity is not None:
-                quantity = int(float(quantity))
+                try:
+                    quantity_float = float(quantity)
+                    if quantity_float > 0:
+                        # quantity已经在strategy_trader中根据价格调整过精度，这里直接使用
+                        # 如果精度为0（整数），转换为整数类型
+                        if quantity_float == int(quantity_float):
+                            quantity = int(quantity_float)
+                        else:
+                            quantity = quantity_float
+                    else:
+                        quantity = 0
+                except (ValueError, TypeError):
+                    quantity = 0
             leverage = decision.get('leverage')
             price = decision.get('price')
             stop_price = decision.get('stop_price') if decision.get('stop_price') is not None else decision.get('stopPrice')

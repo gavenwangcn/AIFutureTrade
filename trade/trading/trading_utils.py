@@ -5,8 +5,62 @@
 """
 from typing import Dict, Optional, Tuple
 import logging
+import math
 
 logger = logging.getLogger(__name__)
+
+
+def adjust_quantity_precision_by_price(quantity: float, price: float) -> float:
+    """
+    根据symbol价格动态调整quantity的精度
+    
+    规则：
+    - 价格 < 1：取整数
+    - 1 <= 价格 < 10：小数点后1位
+    - 10 <= 价格 < 100：小数点后2位
+    - 100 <= 价格 < 1000：小数点后3位
+    - 1000 <= 价格 < 10000：小数点后4位
+    - 10000 <= 价格 < 100000：小数点后5位
+    - 价格 >= 100000：小数点后6位（最多）
+    
+    Args:
+        quantity: 原始数量
+        price: symbol的当前价格
+        
+    Returns:
+        调整精度后的数量
+    """
+    if quantity <= 0:
+        return 0.0
+    
+    if price <= 0:
+        # 如果价格无效，默认取整数
+        return float(int(quantity))
+    
+    # 根据价格范围确定精度
+    if price < 1:
+        precision = 0  # 取整数
+    elif price < 10:
+        precision = 1  # 小数点后1位
+    elif price < 100:
+        precision = 2  # 小数点后2位
+    elif price < 1000:
+        precision = 3  # 小数点后3位
+    elif price < 10000:
+        precision = 4  # 小数点后4位
+    elif price < 100000:
+        precision = 5  # 小数点后5位
+    else:
+        precision = 6  # 小数点后6位（最多）
+    
+    # 四舍五入到指定精度
+    adjusted_quantity = round(quantity, precision)
+    
+    # 如果精度为0（整数），确保返回整数
+    if precision == 0:
+        adjusted_quantity = float(int(adjusted_quantity))
+    
+    return adjusted_quantity
 
 
 def parse_signal_to_position_side(signal: str) -> Tuple[str, str]:
