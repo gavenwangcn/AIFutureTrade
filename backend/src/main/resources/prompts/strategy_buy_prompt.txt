@@ -571,14 +571,111 @@ decisions[symbol] = {
 - 必须正确导入 StrategyBaseBuy：`from trade.strategy.strategy_template_buy import StrategyBaseBuy`
 - **必须确保方法始终返回字典**：不能返回 None，不能有未定义的返回值
 - **必须使用 try-except 处理异常**：确保即使发生异常也能返回空字典而不是抛出异常
-- **必须使用日志输出关键执行信息**：
+- **必须使用日志输出关键执行信息（极其重要，必须严格遵守）**：
   - **使用 `self.log.info()` 输出关键执行日志（info级别）**
-  - 在方法开始时输出候选交易对数量
-  - 在处理每个交易对时输出交易对符号、当前价格、技术指标值等
-  - **⚠️ 重要：在进行关键判断逻辑时（如开仓条件判断），必须输出详细的判断信息，包括判断条件、相关变量值、判断阈值、判断结果等**
-  - 在生成决策时输出决策类型、数量、杠杆等详细信息
-  - 在方法结束时输出决策总数
-  - 在异常时使用 `self.log.warning()` 或 `self.log.error()` 输出异常信息
+  - **日志记录的基本原则：**
+    - 在方法开始时输出候选交易对数量
+    - 在处理每个交易对时输出交易对符号、当前价格、技术指标值等
+    - 在方法结束时输出决策总数
+    - 在异常时使用 `self.log.warning()` 或 `self.log.error()` 输出异常信息
+
+  - **⚠️⚠️⚠️ 详细日志记录要求（非常重要，必须严格遵守）：**
+
+    **1. 关键判断逻辑必须有详细日志：**
+    - 在进行任何条件判断前，必须输出判断所需的所有变量值
+    - 在判断后，必须输出判断结果（True/False）和原因
+    - 示例：
+      ```python
+      # ❌ 错误示例（缺少日志）
+      if current_price > 1.02 * ma99_value:
+          # 开仓逻辑
+
+      # ✅ 正确示例（有详细日志）
+      threshold = 1.02 * ma99_value
+      self.log.info(f"{symbol} 开多单条件判断: 当前价格={current_price:.4f}, MA(99)={ma99_value:.4f}, 阈值(1.02*MA99)={threshold:.4f}, 比值={current_price/ma99_value:.4f}")
+      if current_price > threshold:
+          self.log.info(f"{symbol} 满足开多单条件: 价格({current_price:.4f}) > 阈值({threshold:.4f})")
+          # 开仓逻辑
+      else:
+          self.log.info(f"{symbol} 不满足开多单条件: 价格({current_price:.4f}) <= 阈值({threshold:.4f})")
+      ```
+
+    **2. 变量生成逻辑必须有详细日志：**
+    - 在计算或生成任何策略变量时，必须输出计算过程和结果
+    - 特别是涉及策略规则的变量（如开仓数量、杠杆倍数等）
+    - 示例：
+      ```python
+      # ❌ 错误示例（缺少日志）
+      capital_usdt = available_cash * 0.5
+      quantity = (capital_usdt * leverage) / current_price
+
+      # ✅ 正确示例（有详细日志）
+      capital_ratio = 0.5  # 使用50%资金
+      capital_usdt = available_cash * capital_ratio
+      self.log.info(f"{symbol} 计算开仓资金: 可用资金={available_cash:.2f} USDT, 使用比例={capital_ratio}, 开仓资金={capital_usdt:.2f} USDT")
+
+      leverage = 5
+      quantity = (capital_usdt * leverage) / current_price
+      quantity = round(quantity, 2)
+      self.log.info(f"{symbol} 计算合约数量: 开仓资金={capital_usdt:.2f} USDT, 杠杆={leverage}x, 当前价格={current_price:.4f}, 合约数量={quantity}")
+      ```
+
+    **3. 数据查找和匹配必须有详细日志：**
+    - 在查找特定数据时（如查找特定K线、匹配条件等），必须输出查找过程
+    - 示例：
+      ```python
+      # 查找符合条件的K线
+      self.log.info(f"{symbol} 开始查找符合条件的K线，总K线数={len(klines_1h)}")
+      found_count = 0
+      for idx, kline in enumerate(klines_1h):
+          close = kline.get('close', 0)
+          if close > threshold:
+              found_count += 1
+              self.log.info(f"{symbol} 找到符合条件的K线: index={idx}, close={close:.4f}, threshold={threshold:.4f}")
+
+      if found_count > 0:
+          self.log.info(f"{symbol} 共找到 {found_count} 根符合条件的K线")
+      else:
+          self.log.warning(f"{symbol} 未找到符合条件的K线")
+      ```
+
+    **4. 技术指标计算必须有详细日志：**
+    - 在计算技术指标后，必须输出指标名称和计算结果
+    - 示例：
+      ```python
+      ma99 = talib.SMA(close_array, timeperiod=99)
+      ma99_value = float(ma99[-1])
+      self.log.info(f"{symbol} 技术指标计算完成: MA(99)={ma99_value:.4f}, 当前价格={current_price:.4f}, 价格/MA(99)={current_price/ma99_value:.4f}")
+      ```
+
+    **5. 决策生成必须有详细日志：**
+    - 在生成决策时，必须输出所有决策字段的值
+    - 示例：
+      ```python
+      decisions[symbol] = {
+          "signal": "buy_to_long",
+          "quantity": quantity,
+          "leverage": leverage,
+          "justification": "满足开多单条件"
+      }
+      self.log.info(f"{symbol} 决策已生成: signal={decisions[symbol]['signal']}, quantity={decisions[symbol]['quantity']}, leverage={decisions[symbol]['leverage']}, justification={decisions[symbol]['justification']}")
+      ```
+
+    **6. 循环和遍历必须有进度日志：**
+    - 在遍历候选交易对时，输出当前处理的进度
+    - 示例：
+      ```python
+      self.log.info(f"开始处理候选交易对，总数: {len(candidates)}")
+      for idx, candidate in enumerate(candidates):
+          symbol = candidate.get('symbol', '').upper()
+          self.log.info(f"[{idx+1}/{len(candidates)}] 开始处理候选: {symbol}")
+          # 处理逻辑
+      ```
+
+  - **日志级别使用规范：**
+    - `self.log.info()`：正常的执行流程、关键变量值、判断结果、决策生成
+    - `self.log.warning()`：数据缺失、数据无效、跳过处理等非致命问题
+    - `self.log.error()`：异常捕获、计算失败等错误情况
 
 ### 6. 策略实现要求
 

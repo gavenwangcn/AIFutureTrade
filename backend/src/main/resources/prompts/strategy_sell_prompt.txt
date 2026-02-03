@@ -296,14 +296,14 @@ class GeneratedSellStrategy(StrategyBaseSell):
             try:
                 # ⚠️ 重要：必须使用 self.log.info() 输出关键执行日志
                 self.log.info(f"处理持仓 {symbol}，持仓方向: {position_side}，持仓数量: {position_amt}，当前价格: {current_price}，MA(99): {ma99_value}")
-                
+
                 # ⚠️ 重要：在进行指标值判断时，必须输出判断条件和结果，便于排查问题
                 # 根据 strategy_context 中的卖出策略规则编写代码
                 # 示例：判断平仓条件
                 # 计算判断条件值（如：current_price < 0.98 * ma99_value）
                 # condition_value = current_price / ma99_value
                 # self.log.info(f"{symbol} 多单平仓条件判断: 价格/MA(99)={condition_value:.4f}, 阈值=0.98, 结果={condition_value < 0.98}")
-                # 
+                #
                 # if position_side == 'LONG' and 满足多单平仓条件:
                 #     # ⚠️ 重要：quantity 是合约数量（平仓数量），不是 USDT 数量
                 #     # 从持仓中获取合约数量
@@ -312,30 +312,34 @@ class GeneratedSellStrategy(StrategyBaseSell):
                 #     close_quantity = position_amt  # 平仓全部持仓
                 #     # 平仓50%的示例：close_quantity = position_amt * 0.5
                 #     self.log.info(f"{symbol} 多单满足平仓条件（价格={current_price:.4f} < 0.98*MA(99)={0.98*ma99_value:.4f}），准备平仓 {close_quantity} 个合约")
+                #
+                #     # ⚠️⚠️⚠️ 重要：所有字段都必须提供，不能为空或None
                 #     decisions[symbol] = {
                 #         "signal": "close_position",  # 平仓信号（或 "stop_loss" 止损 或 "take_profit" 止盈）
-                #         "quantity": close_quantity,  # 合约数量（平仓数量），不是 USDT 数量
-                #         "price": current_price,  # 当前价格
-                #         "stop_price": current_price,  # ⚠️ 对于 stop_loss/take_profit 必填！触发价格（通常设置为当前价格或目标价格）
-                #         "leverage": position.get('leverage', 5),  # 使用持仓时的杠杆
-                #         "justification": "理由"  # 决策理由
+                #         "quantity": close_quantity,  # ⚠️ 必须：合约数量（平仓数量），不是 USDT 数量
+                #         "price": current_price,  # ⚠️ 必须：当前价格（不能为空、不能为None）
+                #         "stop_price": current_price,  # ⚠️ 必须：触发价格（不能为空、不能为None）
+                #         "leverage": position.get('leverage', 5),  # ⚠️ 必须：使用持仓时的杠杆（不能为空、不能为None）
+                #         "justification": "理由"  # ⚠️ 必须：决策理由
                 #     }
-                #     self.log.info(f"{symbol} 平仓决策已添加: signal={decisions[symbol]['signal']}, quantity={decisions[symbol]['quantity']} 个合约")
+                #     self.log.info(f"{symbol} 平仓决策已添加: signal={decisions[symbol]['signal']}, quantity={decisions[symbol]['quantity']} 个合约, price={decisions[symbol]['price']:.4f}, stop_price={decisions[symbol]['stop_price']:.4f}")
                 # elif position_side == 'SHORT' and 满足空单平仓条件:
                 #     # ⚠️ 重要：quantity 是合约数量（平仓数量），不是 USDT 数量
                 #     position_amt = abs(position.get('position_amt', 0))  # 持仓合约数量
                 #     close_quantity = position_amt  # 平仓全部持仓
                 #     # 平仓50%的示例：close_quantity = position_amt * 0.5
                 #     self.log.info(f"{symbol} 空单满足平仓条件（价格={current_price:.4f} > 1.02*MA(99)={1.02*ma99_value:.4f}），准备平仓 {close_quantity} 个合约")
+                #
+                #     # ⚠️⚠️⚠️ 重要：所有字段都必须提供，不能为空或None
                 #     decisions[symbol] = {
                 #         "signal": "close_position",  # 平仓信号（或 "stop_loss" 止损 或 "take_profit" 止盈）
-                #         "quantity": close_quantity,  # 合约数量（平仓数量），不是 USDT 数量
-                #         "price": current_price,  # 当前价格
-                #         "stop_price": current_price,  # ⚠️ 对于 stop_loss/take_profit 必填！触发价格（通常设置为当前价格或目标价格）
-                #         "leverage": position.get('leverage', 5),  # 使用持仓时的杠杆
-                #         "justification": "理由"  # 决策理由
+                #         "quantity": close_quantity,  # ⚠️ 必须：合约数量（平仓数量），不是 USDT 数量
+                #         "price": current_price,  # ⚠️ 必须：当前价格（不能为空、不能为None）
+                #         "stop_price": current_price,  # ⚠️ 必须：触发价格（不能为空、不能为None）
+                #         "leverage": position.get('leverage', 5),  # ⚠️ 必须：使用持仓时的杠杆（不能为空、不能为None）
+                #         "justification": "理由"  # ⚠️ 必须：决策理由
                 #     }
-                #     self.log.info(f"{symbol} 平仓决策已添加: signal={decisions[symbol]['signal']}, quantity={decisions[symbol]['quantity']} 个合约")
+                #     self.log.info(f"{symbol} 平仓决策已添加: signal={decisions[symbol]['signal']}, quantity={decisions[symbol]['quantity']} 个合约, price={decisions[symbol]['price']:.4f}, stop_price={decisions[symbol]['stop_price']:.4f}")
                 # else:
                 #     self.log.info(f"{symbol} 不满足任何平仓条件，跳过")
             except Exception as e:
@@ -466,24 +470,48 @@ klines_1w = timeframes.get('1w', {}).get('klines', [])  # 1周K线
     "SYMBOL": {
         "signal": "close_position" | "stop_loss" | "take_profit",  # 必须
         "quantity": 100,  # 必须：合约数量（平仓数量），不是USDT数量
-        "price": 0.0345,  # 可选：期望价格（仅用于记录，实际交易使用市场价）
-        "stop_price": 0.0325,  # ⚠️ 对于 stop_loss 和 take_profit 信号：必填！对于 close_position 信号：可选
-        "leverage": 5,  # 必须：杠杆倍数（通常与持仓的杠杆一致）
+        "price": 0.0345,  # ⚠️ 必须：当前价格或期望价格（不能为空、不能为None）
+        "stop_price": 0.0325,  # ⚠️ 对于 stop_loss 和 take_profit 信号：必须！对于 close_position 信号：必须！（不能为空、不能为None）
+        "leverage": 5,  # ⚠️ 必须：杠杆倍数（通常与持仓的杠杆一致，不能为空、不能为None）
         "justification": "理由说明"  # 必须：理由
     }
 }
 ```
 
-**⚠️ 关于 stop_price 字段的重要说明：**
-- **对于 `stop_loss`（止损）和 `take_profit`（止盈）信号：`stop_price` 字段是必填的**
-- **对于 `close_position`（平仓）信号：`stop_price` 字段是可选的**
+**⚠️⚠️⚠️ 关键必填字段说明（非常重要，必须严格遵守）：**
+
+**1. price 字段（必填，不能为空）：**
+- **所有信号类型（close_position、stop_loss、take_profit）都必须提供 price 字段**
+- **price 不能为 None，不能为 0，必须是有效的正数**
+- **price 通常设置为当前市场价格：`current_price`**
+- **作用**：用于记录决策时的价格、计算盈亏、审计追踪
+- **示例**：`"price": current_price`（从 market_state 获取的当前价格）
+
+**2. stop_price 字段（必填，不能为空）：**
+- **所有信号类型（close_position、stop_loss、take_profit）都必须提供 stop_price 字段**
+- **stop_price 不能为 None，不能为 0，必须是有效的正数**
 - **stop_price 的作用：**
   - **虚拟交易模式**：使用 `stop_price` 作为触发价格进行盈亏计算和模拟交易
   - **真实交易模式**：虽然实际交易使用市场价（market order）执行，但 `stop_price` 仍需提供用于记录触发条件和审计追踪
-- **stop_price 的设置建议：**
-  - **止损（stop_loss）**：通常设置为当前价格或略低于当前价格（多单）/ 略高于当前价格（空单）
-  - **止盈（take_profit）**：通常设置为当前价格或目标价格
-  - **示例**：如果当前价格为 0.0345，止损价可以设置为 0.0325（约 -5.8%），止盈价可以设置为 0.0365（约 +5.8%）
+- **stop_price 的设置规则：**
+  - **close_position（普通平仓）**：设置为当前价格 `stop_price = current_price`
+  - **stop_loss（止损）**：
+    - 多单（LONG）：设置为当前价格或略低于当前价格，如 `stop_price = current_price * 0.98`（-2%）
+    - 空单（SHORT）：设置为当前价格或略高于当前价格，如 `stop_price = current_price * 1.02`（+2%）
+  - **take_profit（止盈）**：
+    - 多单（LONG）：设置为当前价格或目标价格，如 `stop_price = current_price * 1.05`（+5%）
+    - 空单（SHORT）：设置为当前价格或目标价格，如 `stop_price = current_price * 0.95`（-5%）
+- **示例**：
+  - 普通平仓：`"stop_price": current_price`
+  - 止损（多单）：`"stop_price": current_price * 0.98`
+  - 止盈（多单）：`"stop_price": current_price * 1.05`
+
+**3. leverage 字段（必填，不能为空）：**
+- **所有信号类型都必须提供 leverage 字段**
+- **leverage 不能为 None，不能为 0，必须是有效的正整数（通常是 1-125）**
+- **leverage 通常从持仓信息中获取：`position.get('leverage', 5)`**
+- **如果持仓信息中没有 leverage，使用默认值 5**
+- **示例**：`"leverage": position.get('leverage', 5)`
 
 **⚠️ 重要：关于 quantity 字段和杠杆的说明：**
 - **quantity 是合约数量（平仓数量），不是 USDT 数量**
@@ -503,11 +531,37 @@ klines_1w = timeframes.get('1w', {}).get('klines', [])  # 1周K线
 position_amt = abs(position.get('position_amt', 0))  # 持仓合约数量
 close_quantity = position_amt  # 平仓100%
 # 或平仓50%：close_quantity = position_amt * 0.5
+
+# ⚠️ 重要：所有字段都必须提供，不能为空或None
 decisions[symbol] = {
-    "signal": "close_position",
+    "signal": "close_position",  # 或 "stop_loss" 或 "take_profit"
+    "quantity": close_quantity,  # 必须：合约数量
+    "price": current_price,  # ⚠️ 必须：当前价格（不能为空、不能为None）
+    "stop_price": current_price,  # ⚠️ 必须：触发价格（不能为空、不能为None）
+    "leverage": position.get('leverage', 5),  # ⚠️ 必须：杠杆倍数（不能为空、不能为None）
+    "justification": "满足平仓条件"  # 必须：决策理由
+}
+
+# 止损示例（多单）
+decisions[symbol] = {
+    "signal": "stop_loss",
     "quantity": close_quantity,
-    "leverage": position.get('leverage', 5),
-    "justification": "满足平仓条件"
+    "price": current_price,  # ⚠️ 必须：当前价格
+    "stop_price": current_price * 0.98,  # ⚠️ 必须：止损触发价（多单设置为略低于当前价）
+    "leverage": position.get('leverage', 5),  # ⚠️ 必须：杠杆倍数
+    "justification": "触发止损条件"
+}
+
+# 止盈示例（多单）
+decisions[symbol] = {
+    "signal": "take_profit",
+    "quantity": close_quantity,
+    "price": current_price,  # ⚠️ 必须：当前价格
+    "stop_price": current_price * 1.05,  # ⚠️ 必须：止盈触发价（多单设置为略高于当前价）
+    "leverage": position.get('leverage', 5),  # ⚠️ 必须：杠杆倍数
+    "justification": "触发止盈条件"
+}
+```
 }
 ```
 
@@ -568,14 +622,121 @@ decisions[symbol] = {
 - 必须正确导入 StrategyBaseSell：`from trade.strategy.strategy_template_sell import StrategyBaseSell`
 - **必须确保方法始终返回字典**：不能返回 None，不能有未定义的返回值
 - **必须使用 try-except 处理异常**：确保即使发生异常也能返回空字典而不是抛出异常
-- **必须使用日志输出关键执行信息**：
+- **必须使用日志输出关键执行信息（极其重要，必须严格遵守）**：
   - **使用 `self.log.info()` 输出关键执行日志（info级别）**
-  - 在方法开始时输出持仓数量
-  - 在处理每个持仓时输出交易对符号、持仓方向、持仓数量、当前价格、技术指标值等
-  - **⚠️ 重要：在进行关键判断逻辑时（如平仓条件判断），必须输出详细的判断信息，包括判断条件、相关变量值、判断阈值、判断结果等**
-  - 在生成决策时输出决策类型、数量、触发价格等详细信息
-  - 在方法结束时输出决策总数
-  - 在异常时使用 `self.log.warning()` 或 `self.log.error()` 输出异常信息
+  - **日志记录的基本原则：**
+    - 在方法开始时输出持仓数量
+    - 在处理每个持仓时输出交易对符号、持仓方向、持仓数量、当前价格、技术指标值等
+    - 在方法结束时输出决策总数
+    - 在异常时使用 `self.log.warning()` 或 `self.log.error()` 输出异常信息
+
+  - **⚠️⚠️⚠️ 详细日志记录要求（非常重要，必须严格遵守）：**
+
+    **1. 关键判断逻辑必须有详细日志：**
+    - 在进行任何条件判断前，必须输出判断所需的所有变量值
+    - 在判断后，必须输出判断结果（True/False）和原因
+    - 示例：
+      ```python
+      # ❌ 错误示例（缺少日志）
+      if current_price < 0.98 * ma99_value:
+          # 平仓逻辑
+
+      # ✅ 正确示例（有详细日志）
+      threshold = 0.98 * ma99_value
+      self.log.info(f"{symbol} 多单平仓条件判断: 当前价格={current_price:.4f}, MA(99)={ma99_value:.4f}, 阈值(0.98*MA99)={threshold:.4f}, 比值={current_price/ma99_value:.4f}")
+      if current_price < threshold:
+          self.log.info(f"{symbol} 满足多单平仓条件: 价格({current_price:.4f}) < 阈值({threshold:.4f})")
+          # 平仓逻辑
+      else:
+          self.log.info(f"{symbol} 不满足多单平仓条件: 价格({current_price:.4f}) >= 阈值({threshold:.4f})")
+      ```
+
+    **2. 变量生成逻辑必须有详细日志：**
+    - 在计算或生成任何策略变量时，必须输出计算过程和结果
+    - 特别是涉及策略规则的变量（如止损价、止盈价、平仓数量等）
+    - 示例：
+      ```python
+      # ❌ 错误示例（缺少日志）
+      close_quantity = position_amt * 0.5
+
+      # ✅ 正确示例（有详细日志）
+      close_ratio = 0.5  # 平仓50%
+      close_quantity = position_amt * close_ratio
+      self.log.info(f"{symbol} 计算平仓数量: 持仓数量={position_amt}, 平仓比例={close_ratio}, 平仓数量={close_quantity}")
+      ```
+
+    **3. 数据查找和匹配必须有详细日志：**
+    - 在查找特定数据时（如查找开仓时间对应的K线），必须输出查找过程
+    - 示例：
+      ```python
+      # 查找开仓时间对应的K线
+      open_time = position.get('open_time')
+      if open_time:
+          self.log.info(f"{symbol} 开始查找开仓时间对应的K线: open_time={open_time}")
+          try:
+              open_dt = datetime.strptime(open_time, '%Y-%m-%d %H:%M:%S')
+              self.log.info(f"{symbol} 开仓时间解析成功: {open_dt}")
+
+              found = False
+              for idx, kline in enumerate(klines_15m):
+                  kline_open_str = kline.get('open_time_dt_str')
+                  kline_close_str = kline.get('close_time_dt_str')
+                  if kline_open_str and kline_close_str:
+                      kline_open_dt = datetime.strptime(kline_open_str, '%Y-%m-%d %H:%M:%S')
+                      kline_close_dt = datetime.strptime(kline_close_str, '%Y-%m-%d %H:%M:%S')
+                      if kline_open_dt <= open_dt <= kline_close_dt:
+                          open_kline = kline
+                          found = True
+                          self.log.info(f"{symbol} 找到开仓时间对应的K线: index={idx}, open_time={kline_open_str}, close_time={kline_close_str}, high={kline.get('high')}, low={kline.get('low')}")
+                          break
+
+              if not found:
+                  self.log.warning(f"{symbol} 未找到开仓时间对应的K线: open_time={open_time}, 总K线数={len(klines_15m)}")
+          except Exception as e:
+              self.log.error(f"{symbol} 解析开仓时间或查找K线失败: {e}")
+      else:
+          self.log.warning(f"{symbol} 持仓信息中没有开仓时间")
+      ```
+
+    **4. 技术指标计算必须有详细日志：**
+    - 在计算技术指标后，必须输出指标名称和计算结果
+    - 示例：
+      ```python
+      ma99 = talib.SMA(close_array, timeperiod=99)
+      ma99_value = float(ma99[-1])
+      self.log.info(f"{symbol} 技术指标计算完成: MA(99)={ma99_value:.4f}, 当前价格={current_price:.4f}, 价格/MA(99)={current_price/ma99_value:.4f}")
+      ```
+
+    **5. 决策生成必须有详细日志：**
+    - 在生成决策时，必须输出所有决策字段的值
+    - 示例：
+      ```python
+      decisions[symbol] = {
+          "signal": "stop_loss",
+          "quantity": close_quantity,
+          "price": current_price,
+          "stop_price": stop_price,
+          "leverage": leverage,
+          "justification": "触发止损条件"
+      }
+      self.log.info(f"{symbol} 决策已生成: signal={decisions[symbol]['signal']}, quantity={decisions[symbol]['quantity']}, price={decisions[symbol]['price']:.4f}, stop_price={decisions[symbol]['stop_price']:.4f}, leverage={decisions[symbol]['leverage']}, justification={decisions[symbol]['justification']}")
+      ```
+
+    **6. 循环和遍历必须有进度日志：**
+    - 在遍历持仓或候选时，输出当前处理的进度
+    - 示例：
+      ```python
+      self.log.info(f"开始处理持仓，总数: {len(positions)}")
+      for idx, position in enumerate(positions):
+          symbol = position.get('symbol', '').upper()
+          self.log.info(f"[{idx+1}/{len(positions)}] 开始处理持仓: {symbol}")
+          # 处理逻辑
+      ```
+
+  - **日志级别使用规范：**
+    - `self.log.info()`：正常的执行流程、关键变量值、判断结果、决策生成
+    - `self.log.warning()`：数据缺失、数据无效、跳过处理等非致命问题
+    - `self.log.error()`：异常捕获、计算失败等错误情况
 
 ### 6. 策略实现要求
 
@@ -685,3 +846,23 @@ class GeneratedSellStrategy(StrategyBaseSell):
    - **✅ 必须使用：`isinstance(positions, list)`** - 正确的类型检查方式
 6. 代码必须完整、可执行，不需要额外的实例化代码（系统会自动实例化）
 7. **直接输出Python代码，不要任何包装格式**
+8. **⚠️⚠️⚠️ 决策字段完整性要求（极其重要，必须严格遵守）：**
+   - **每个决策必须包含以下所有字段，且字段值不能为空、不能为None：**
+     - `signal`：信号类型（"close_position"、"stop_loss"、"take_profit"）
+     - `quantity`：合约数量（必须 > 0）
+     - `price`：当前价格（必须 > 0，通常设置为 current_price）
+     - `stop_price`：触发价格（必须 > 0，根据信号类型设置）
+     - `leverage`：杠杆倍数（必须 > 0，通常从持仓获取）
+     - `justification`：决策理由（不能为空字符串）
+   - **如果任何字段缺失或为None，将导致交易执行失败**
+   - **示例（所有字段都必须有值）：**
+     ```python
+     decisions[symbol] = {
+         "signal": "stop_loss",
+         "quantity": position_amt,  # 必须有值
+         "price": current_price,  # 必须有值，不能为None
+         "stop_price": current_price * 0.98,  # 必须有值，不能为None
+         "leverage": position.get('leverage', 5),  # 必须有值，不能为None
+         "justification": "触发止损条件"  # 必须有值
+     }
+     ```

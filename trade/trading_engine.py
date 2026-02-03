@@ -4449,12 +4449,10 @@ class TradingEngine:
         order_type = decision.get('order_type', 'STOP_MARKET').upper()
         if order_type not in ['STOP', 'STOP_MARKET']:
             order_type = 'STOP_MARKET'
-        
-        # 确定价格（STOP订单需要price，STOP_MARKET不需要）
-        price_value = None
-        if order_type == 'STOP':
-            # STOP订单需要price，使用当前价格
-            price_value = current_price
+
+        # 确定价格（algo_order表的price字段统一使用stop_price的值）
+        # 注意：这里的price_value用于插入algo_order表，不影响SDK调用
+        price_value = stop_price  # 使用stop_price作为price字段的值
         
         # 确定交易方向（buy/sell）
         side_value = side_for_trade.lower()  # 'buy' or 'sell'
@@ -4692,12 +4690,10 @@ class TradingEngine:
         order_type = decision.get('order_type', 'TAKE_PROFIT_MARKET').upper()
         if order_type not in ['TAKE_PROFIT', 'TAKE_PROFIT_MARKET']:
             order_type = 'TAKE_PROFIT_MARKET'
-        
-        # 确定价格（TAKE_PROFIT订单需要price，TAKE_PROFIT_MARKET不需要）
-        price_value = None
-        if order_type == 'TAKE_PROFIT':
-            # TAKE_PROFIT订单需要price，使用当前价格
-            price_value = current_price
+
+        # 确定价格（algo_order表的price字段统一使用stop_price的值）
+        # 注意：这里的price_value用于插入algo_order表，不影响SDK调用
+        price_value = stop_price  # 使用stop_price作为price字段的值
         
         # 确定交易方向（buy/sell）
         side_value = side_for_trade.lower()  # 'buy' or 'sell'

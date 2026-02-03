@@ -70,7 +70,7 @@ class BatchDecisionProcessor:
             for symbol, decision in decisions.items():
                 if symbol not in all_decisions:
                     all_decisions[symbol] = decision
-                    logger.debug(f"[Model {self.model_id}] [批次组处理] 批次 {batch_num} 决策: {symbol} -> {decision.get('signal')}")
+                    logger.debug(f"[Model {self.model_id}] [批次组处理] 批次 {batch_num} 决策: {symbol} -> {decision.get('signal', 'N/A')}")
             
             # 合并market_state
             all_market_states.update(batch_market_state)
@@ -139,12 +139,22 @@ class BatchDecisionProcessor:
         
         # 记录每个执行结果
         for idx, result in enumerate(batch_results):
+            # 安全获取字段值，避免None导致格式化错误
+            symbol = result.get('symbol', 'N/A')
+            signal = result.get('signal', 'N/A')
+            position_amt = result.get('position_amt', 0)
+            price = result.get('price')
+            error = result.get('error', '无')
+
+            # 格式化价格字段，处理None值
+            price_str = f"${price:.4f}" if price is not None else "N/A"
+
             logger.debug(f"[Model {self.model_id}] [批次组处理] [步骤2.2.{idx+1}] 执行结果: "
-                        f"合约={result.get('symbol', 'N/A')}, "
-                        f"信号={result.get('signal')}, "
-                        f"数量={result.get('position_amt', 0)}, "
-                        f"价格=${result.get('price', 0):.4f}, "
-                        f"错误={result.get('error', '无')}")
+                        f"合约={symbol}, "
+                        f"信号={signal}, "
+                        f"数量={position_amt}, "
+                        f"价格={price_str}, "
+                        f"错误={error}")
         
         # 添加到执行结果列表
         logger.debug(f"[Model {self.model_id}] [批次组处理] [步骤2.3] 添加执行结果到列表（当前总数: {len(executions)}）...")
