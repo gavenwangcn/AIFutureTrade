@@ -27,6 +27,7 @@ public class TradeDO implements Serializable {
 
     private String future;
 
+    @TableField("`signal`")
     private String signal;
 
     private Double quantity;
