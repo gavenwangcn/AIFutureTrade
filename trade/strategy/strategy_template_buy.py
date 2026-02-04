@@ -56,13 +56,14 @@ class StrategyBaseBuy(ABC):
         candidates: List[Dict],
         portfolio: Dict,
         account_info: Dict,
-        market_state: Dict
+        market_state: Dict,
+        conditional_orders: Dict = None
     ) -> Dict[str, Dict]:
         """
         执行买入决策（抽象方法）
-        
+
         子类必须实现此方法，根据候选交易对列表生成买入/开仓决策。
-        
+
         Args:
             candidates: 候选交易对列表，每个元素包含：
                 - symbol: 交易对符号（如 'BTC'）
@@ -85,7 +86,24 @@ class StrategyBaseBuy(ABC):
                 - indicators: 技术指标数据
                     - timeframes: 多时间周期的技术指标
                     格式：{"1h": {"klines": [...]}, "4h": {...}, ...}
-        
+            conditional_orders: 条件单信息字典（可选），按symbol分组的条件单列表
+                格式：{
+                    "BTCUSDT": [
+                        {
+                            "algoId": "123456",  # 订单ID
+                            "orderType": "STOP_MARKET",  # 订单类型
+                            "symbol": "BTCUSDT",  # 合约符号
+                            "side": "sell",  # 操作
+                            "positionSide": "LONG",  # 交易方向
+                            "quantity": 0.001,  # 挂单数量
+                            "algoStatus": "NEW",  # 状态
+                            "triggerPrice": 50000.0  # 触发价格
+                        },
+                        ...
+                    ],
+                    ...
+                }
+
         Returns:
             Dict[str, Dict]: 决策字典，格式为：
                 {
@@ -97,7 +115,7 @@ class StrategyBaseBuy(ABC):
                     }
                 }
                 如果没有决策，返回空字典 {}
-        
+
         Note:
             - 从 market_state 中获取技术指标数据：market_state[symbol]['indicators']['timeframes']
             - 从 market_state 中获取当前价格：market_state[symbol]['price']

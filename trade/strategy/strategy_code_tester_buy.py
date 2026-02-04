@@ -359,9 +359,9 @@ class StrategyCodeTesterBuy:
             for method_name in required_methods:
                 if method_name in method_names:
                     method = next(m for m in methods if m.name == method_name)
-                    # execute_buy_decision 应该有 5 个参数（self + 4个：candidates, portfolio, account_info, market_state）
+                    # execute_buy_decision 应该有 6 个参数（self + 5个：candidates, portfolio, account_info, market_state, conditional_orders）
                     if method_name == 'execute_buy_decision':
-                        expected_args = 5
+                        expected_args = 6
                         actual_args = len(method.args.args)
                         if actual_args != expected_args:
                             warnings.append(f"{method_name} 方法参数数量不正确，期望 {expected_args} 个（包括self），实际 {actual_args} 个")
@@ -437,7 +437,33 @@ class StrategyCodeTesterBuy:
         mock_portfolio = test_data['portfolio']
         mock_account_info = test_data['account_info']
         mock_market_state = test_data['market_state']
-        
+
+        # 创建模拟条件单数据
+        mock_conditional_orders = {
+            'BTCUSDT': [
+                {
+                    'algoId': '123456789',
+                    'orderType': 'STOP_MARKET',
+                    'symbol': 'BTCUSDT',
+                    'side': 'sell',
+                    'positionSide': 'LONG',
+                    'quantity': 0.05,
+                    'algoStatus': 'NEW',
+                    'triggerPrice': 48000.0
+                },
+                {
+                    'algoId': '987654321',
+                    'orderType': 'TAKE_PROFIT_MARKET',
+                    'symbol': 'BTCUSDT',
+                    'side': 'sell',
+                    'positionSide': 'LONG',
+                    'quantity': 0.05,
+                    'algoStatus': 'NEW',
+                    'triggerPrice': 52000.0
+                }
+            ]
+        }
+
         # 测试买入决策执行
         try:
             logger.debug(f"[StrategyCodeTesterBuy] 测试买入决策执行...")
@@ -448,7 +474,8 @@ class StrategyCodeTesterBuy:
                 portfolio=mock_portfolio,
                 account_info=mock_account_info,
                 market_state=mock_market_state,
-                decision_type='buy'
+                decision_type='buy',
+                conditional_orders=mock_conditional_orders
             )
             
             if buy_result is None:

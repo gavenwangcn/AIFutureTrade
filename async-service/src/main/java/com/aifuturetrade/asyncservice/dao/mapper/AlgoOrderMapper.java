@@ -66,7 +66,7 @@ public interface AlgoOrderMapper extends BaseMapper<AlgoOrderDO> {
             "triggerPrice, price, model_id, strategy_decision_id, trade_id, " +
             "created_at, updated_at " +
             "FROM algo_order " +
-            "WHERE model_id = #{modelId} AND symbol = #{symbol} AND algoStatus = 'new' " +
+            "WHERE model_id = #{modelId} AND symbol = #{symbol} AND algoStatus = 'NEW' " +
             "ORDER BY created_at ASC")
     List<AlgoOrderDO> selectNewAlgoOrdersByModelAndSymbol(@Param("modelId") String modelId, @Param("symbol") String symbol);
 
@@ -76,6 +76,6 @@ public interface AlgoOrderMapper extends BaseMapper<AlgoOrderDO> {
      * @param id 订单ID
      * @return 更新的记录数
      */
-    @Update("UPDATE algo_order SET algoStatus = 'cancelled', updated_at = NOW() WHERE id = #{id}")
+    @Update("UPDATE algo_order SET algoStatus = 'CANCELLED', updated_at = NOW() WHERE id = #{id}")
     int updateAlgoStatusToCancelled(@Param("id") String id);
 }

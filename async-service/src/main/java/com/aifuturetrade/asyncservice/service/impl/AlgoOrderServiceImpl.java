@@ -251,13 +251,13 @@ public class AlgoOrderServiceImpl implements AlgoOrderService {
                     orderId, dbAlgoId, sdkStatus);
             
             // 如果状态不为"new"，说明条件单已在币安侧执行，需要构建trades记录
-            if (!"new".equalsIgnoreCase(sdkStatus)) {
+            if (!"NEW".equalsIgnoreCase(sdkStatus)) {
                 try {
                     String dbStatus = mapSdkStatusToDbStatus(sdkStatus);
 
                     // 检查是否为已成交状态且尚未创建trades记录
-                    boolean isExecutedStatus = "executed".equalsIgnoreCase(dbStatus) ||
-                                              "triggered".equalsIgnoreCase(dbStatus);
+                    boolean isExecutedStatus = "EXECUTED".equalsIgnoreCase(dbStatus) ||
+                                              "TRIGGERED".equalsIgnoreCase(dbStatus);
 
                     if (isExecutedStatus && order.getTradeId() == null) {
                         log.info("[AlgoOrderService] [real模式] 检测到已成交订单，开始构建trades记录: orderId={}, sdkStatus={}",
@@ -320,7 +320,7 @@ public class AlgoOrderServiceImpl implements AlgoOrderService {
                                 String errorReason = extractErrorReason(e);
 
                                 // 更新订单状态为"failed"并记录错误原因
-                                algoOrderMapper.updateAlgoStatusWithError(orderId, "failed", errorReason);
+                                algoOrderMapper.updateAlgoStatusWithError(orderId, "FAILED", errorReason);
 
                                 // 更新strategy_decisions表状态为REJECTED
                                 String strategyDecisionId = order.getStrategyDecisionId();
@@ -414,7 +414,7 @@ public class AlgoOrderServiceImpl implements AlgoOrderService {
         
         // 更新订单状态为"triggered"
         try {
-            algoOrderMapper.updateAlgoStatus(orderId, "triggered");
+            algoOrderMapper.updateAlgoStatus(orderId, "TRIGGERED");
             log.info("[AlgoOrderService] [virtual模式] 订单状态已更新为triggered: orderId={}", orderId);
         } catch (Exception e) {
             log.error("[AlgoOrderService] [virtual模式] 更新订单状态失败: orderId={}, error={}", orderId, e.getMessage());
@@ -429,7 +429,7 @@ public class AlgoOrderServiceImpl implements AlgoOrderService {
             result.setExecutedCount(result.getExecutedCount() + 1);
             
             // 更新订单状态为"executed"并关联trade_id
-            int updateCount = algoOrderMapper.updateTradeIdAndStatus(orderId, tradeId, "executed");
+            int updateCount = algoOrderMapper.updateTradeIdAndStatus(orderId, tradeId, "EXECUTED");
             if (updateCount > 0) {
                 log.info("[AlgoOrderService] [virtual模式] ✅ 交易执行完成，订单状态已更新为executed: orderId={}, tradeId={}, symbol={}", 
                         orderId, tradeId, symbol);
@@ -496,18 +496,18 @@ public class AlgoOrderServiceImpl implements AlgoOrderService {
      */
     private String mapSdkStatusToDbStatus(String sdkStatus) {
         if (sdkStatus == null) {
-            return "new";
+            return "NEW";
         }
         String statusLower = sdkStatus.toLowerCase();
-        // SDK状态映射：triggered -> triggered, executed -> executed, cancelled -> cancelled, rejected -> failed
+        // SDK状态映射：triggered -> TRIGGERED, executed -> EXECUTED, cancelled -> CANCELLED, rejected -> FAILED
         if (statusLower.contains("triggered") || statusLower.contains("executed")) {
-            return statusLower.contains("executed") ? "executed" : "triggered";
+            return statusLower.contains("executed") ? "EXECUTED" : "TRIGGERED";
         } else if (statusLower.contains("cancelled") || statusLower.contains("canceled")) {
-            return "cancelled";
+            return "CANCELLED";
         } else if (statusLower.contains("rejected") || statusLower.contains("failed")) {
-            return "failed";
+            return "FAILED";
         }
-        return "new";  // 默认返回new
+        return "NEW";  // 默认返回NEW
     }
     
     /**

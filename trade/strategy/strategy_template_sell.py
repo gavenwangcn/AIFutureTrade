@@ -55,13 +55,14 @@ class StrategyBaseSell(ABC):
         self,
         portfolio: Dict,
         market_state: Dict,
-        account_info: Dict
+        account_info: Dict,
+        conditional_orders: Dict = None
     ) -> Dict[str, Dict]:
         """
         执行卖出决策（抽象方法）
-        
+
         子类必须实现此方法，根据当前持仓生成卖出/平仓决策。
-        
+
         Args:
             portfolio: 当前持仓组合信息，包含：
                 - positions: 持仓列表，每个元素包含：
@@ -69,6 +70,7 @@ class StrategyBaseSell(ABC):
                     - position_amt: 持仓数量
                     - position_side: 持仓方向（LONG/SHORT）
                     - avg_price: 开仓均价
+                    - open_time: 开仓时间（格式：'YYYY-MM-DD HH:MM:SS'）
                     - unrealized_profit: 未实现盈亏
                 - total_value: 账户总值
                 - cash: 可用现金
@@ -79,14 +81,31 @@ class StrategyBaseSell(ABC):
                     格式：{"1h": {"klines": [...]}, "4h": {...}, ...}
             account_info: 账户信息，包含：
                 - total_return: 累计收益率
-        
+            conditional_orders: 条件单信息字典（可选），按symbol分组的条件单列表
+                格式：{
+                    "BTCUSDT": [
+                        {
+                            "algoId": "123456",  # 订单ID
+                            "orderType": "STOP_MARKET",  # 订单类型
+                            "symbol": "BTCUSDT",  # 合约符号
+                            "side": "sell",  # 操作
+                            "positionSide": "LONG",  # 交易方向
+                            "quantity": 0.001,  # 挂单数量
+                            "algoStatus": "NEW",  # 状态
+                            "triggerPrice": 50000.0  # 触发价格
+                        },
+                        ...
+                    ],
+                    ...
+                }
+
         Returns:
             Dict[str, Dict]: 决策字典，格式为：
                 {
                     "SYMBOL": {
                         "signal": "close_position" | "stop_loss" | "take_profit",
                         "quantity": 100,
-                        "price": 0.0345,      # 期望价格（可选）
+                        "price": 0.0345,      # 期望价格（必填）
                         "stop_price": 0.0325, # 止损/止盈触发价格（必填）
                         "leverage": 10,
                         "justification": "理由说明"

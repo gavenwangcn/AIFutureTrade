@@ -10,7 +10,7 @@
             triggerPrice, price, model_id, strategy_decision_id, trade_id,
             created_at, updated_at
         FROM algo_order
-        WHERE algoStatus = 'new'
+        WHERE algoStatus = 'NEW'
         ORDER BY created_at ASC
     </select>
 

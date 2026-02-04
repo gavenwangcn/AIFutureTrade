@@ -129,21 +129,23 @@ class StrategyTrader(Trader):
         portfolio: Dict,
         account_info: Dict,
         market_state: Dict,
-        model_id: Optional[int] = None
+        model_id: Optional[int] = None,
+        conditional_orders: Optional[Dict[str, List[Dict]]] = None
     ) -> Dict:
         """
         生成买入/开仓决策
-        
+
         通过执行模型关联的买入类型策略代码生成决策。
         按优先级顺序执行策略，直到找到有效的决策信号。
-        
+
         Args:
             candidates: 候选交易对列表
             portfolio: 持仓组合信息
             account_info: 账户信息
             market_state: 市场状态字典，key为交易对符号，value包含价格、技术指标等
             model_id: 模型ID（可选，优先使用实例变量中的model_id）
-        
+            conditional_orders: 条件单信息字典（可选），按symbol分组的条件单列表
+
         Returns:
             Dict: 包含以下字段的字典：
                 - decisions: 决策字典，key为交易对符号，value为决策详情
@@ -153,17 +155,21 @@ class StrategyTrader(Trader):
                 - skipped: 是否跳过（当candidates为空或没有策略时为True）
         """
         logger.info(f"[StrategyTrader] [Model {self.model_id}] 开始生成买入决策, 候选交易对数量: {len(candidates)}")
-        
+
         if not candidates:
             return {'decisions': {}, 'prompt': None, 'raw_response': None, 'cot_trace': None, 'skipped': True}
-        
+
         # 使用实例变量中的model_id，如果提供了参数则使用参数
         effective_model_id = model_id if model_id is not None else self.model_id
-        
+
+        # 如果没有提供conditional_orders，设置为空字典
+        if conditional_orders is None:
+            conditional_orders = {}
+
         # 获取模型关联的买入类型策略（按优先级排序）
         model_mapping = self.models_db._get_model_id_mapping()
         strategies = self.strategys_db.get_model_strategies_by_int_id(effective_model_id, 'buy', model_mapping)
-        
+
         if not strategies:
             logger.info(f"[StrategyTrader] [Model {effective_model_id}] 未找到买入类型策略，返回hold决策")
             return {
@@ -173,7 +179,7 @@ class StrategyTrader(Trader):
                 'cot_trace': '无策略',
                 'skipped': True
             }
-        
+
         logger.info(f"[StrategyTrader] [Model {effective_model_id}] 找到 {len(strategies)} 个买入类型策略，开始按优先级执行")
 
         # 语义要求：
@@ -374,7 +380,8 @@ class StrategyTrader(Trader):
                     portfolio=working_portfolio,
                     account_info=working_account_info,
                     market_state=filtered_market_state,
-                    decision_type='buy'
+                    decision_type='buy',
+                    conditional_orders=conditional_orders
                 )
 
                 if not decision_result or not isinstance(decision_result, dict):
@@ -486,20 +493,22 @@ class StrategyTrader(Trader):
         portfolio: Dict,
         market_state: Dict,
         account_info: Dict,
-        model_id: Optional[int] = None
+        model_id: Optional[int] = None,
+        conditional_orders: Optional[Dict[str, List[Dict]]] = None
     ) -> Dict:
         """
         生成卖出/平仓决策
-        
+
         通过执行模型关联的卖出类型策略代码生成决策。
         按优先级顺序执行策略，直到找到有效的决策信号。
-        
+
         Args:
             portfolio: 当前持仓组合信息
             market_state: 市场状态字典，key为交易对符号，value包含价格、技术指标等
             account_info: 账户信息
             model_id: 模型ID（可选，优先使用实例变量中的model_id）
-        
+            conditional_orders: 条件单信息字典（可选），按symbol分组的条件单列表
+
         Returns:
             Dict: 包含以下字段的字典：
                 - decisions: 决策字典，key为交易对符号，value为决策详情
@@ -509,17 +518,21 @@ class StrategyTrader(Trader):
                 - skipped: 是否跳过（当portfolio中没有持仓或没有策略时为True）
         """
         logger.info(f"[StrategyTrader] [Model {self.model_id}] 开始生成卖出决策, 持仓数量: {len(portfolio.get('positions') or [])}")
-        
+
         if not portfolio.get('positions'):
             return {'decisions': {}, 'prompt': None, 'raw_response': None, 'cot_trace': None, 'skipped': True}
-        
+
         # 使用实例变量中的model_id，如果提供了参数则使用参数
         effective_model_id = model_id if model_id is not None else self.model_id
-        
+
+        # 如果没有提供conditional_orders，设置为空字典
+        if conditional_orders is None:
+            conditional_orders = {}
+
         # 获取模型关联的卖出类型策略（按优先级排序）
         model_mapping = self.models_db._get_model_id_mapping()
         strategies = self.strategys_db.get_model_strategies_by_int_id(effective_model_id, 'sell', model_mapping)
-        
+
         if not strategies:
             logger.info(f"[StrategyTrader] [Model {effective_model_id}] 未找到卖出类型策略，返回hold决策")
             return {
@@ -529,7 +542,7 @@ class StrategyTrader(Trader):
                 'cot_trace': '无策略',
                 'skipped': True
             }
-        
+
         logger.info(f"[StrategyTrader] [Model {effective_model_id}] 找到 {len(strategies)} 个卖出类型策略，开始按优先级执行")
 
         # 语义要求（卖出）：
@@ -635,7 +648,8 @@ class StrategyTrader(Trader):
                     portfolio=working_portfolio,
                     account_info=account_info,
                     market_state=filtered_market_state,
-                    decision_type='sell'
+                    decision_type='sell',
+                    conditional_orders=conditional_orders
                 )
 
                 if not decision_result or not isinstance(decision_result, dict):

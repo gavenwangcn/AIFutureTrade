@@ -197,14 +197,15 @@ class StrategyCodeExecutor:
         portfolio: Optional[Dict] = None,
         account_info: Optional[Dict] = None,
         market_state: Optional[Dict] = None,
-        decision_type: str = 'buy'
+        decision_type: str = 'buy',
+        conditional_orders: Optional[Dict[str, List[Dict]]] = None
     ) -> Optional[Dict]:
         """
         执行策略代码
-        
+
         在安全的执行环境中执行策略代码。策略代码必须是一个继承自 StrategyBase 的类。
         系统会实例化策略类并调用相应的方法。
-        
+
         Args:
             strategy_code: 策略代码字符串（必须是一个继承 StrategyBase 的类定义）
             strategy_name: 策略名称（用于日志）
@@ -213,7 +214,8 @@ class StrategyCodeExecutor:
             account_info: 账户信息
             market_state: 市场状态字典，key为交易对符号，value包含价格、技术指标等
             decision_type: 决策类型，'buy' 或 'sell'
-        
+            conditional_orders: 条件单信息字典（可选），按symbol分组的条件单列表
+
         Returns:
             Optional[Dict]: 策略代码返回的决策结果，格式为：
                 {
@@ -225,7 +227,7 @@ class StrategyCodeExecutor:
                     }
                 }
                 如果执行失败或返回None，则返回None
-        
+
         Note:
             - 策略代码接口统一使用 market_state，不再使用 market_snapshot 和 constraints
             - market_state 格式：{"SYMBOL": {"price": float, "indicators": {"timeframes": {...}}}, ...}
@@ -233,7 +235,7 @@ class StrategyCodeExecutor:
         try:
             # 构建执行上下文
             execution_context = self._create_execution_globals()
-            
+
             # 根据决策类型导入对应的策略基类
             if decision_type == 'buy':
                 from trade.strategy.strategy_template_buy import StrategyBaseBuy
@@ -248,11 +250,11 @@ class StrategyCodeExecutor:
             else:
                 # 未知的决策类型，抛出错误
                 raise ValueError(f"不支持的决策类型: {decision_type}，仅支持 'buy' 或 'sell'")
-            
+
             execution_context['StrategyBase'] = StrategyBase
             execution_context['ABC'] = ABC
             execution_context['abstractmethod'] = abstractmethod
-            
+
             # 添加 typing 模块（用于类型注解）
             try:
                 from typing import Dict, List, Optional
@@ -261,11 +263,11 @@ class StrategyCodeExecutor:
                 execution_context['Optional'] = Optional
             except ImportError:
                 pass
-            
+
             # 生成唯一的模块名
             self.module_counter += 1
             module_name = f"strategy_module_{self.module_counter}_{strategy_name.replace(' ', '_')}"
-            
+
             # 创建模块，并以模块 __dict__ 作为 exec 的全局命名空间，使方法内对 datetime 等名的查找使用模块命名空间
             module = types.ModuleType(module_name)
             module.__dict__.update(execution_context)
@@ -274,27 +276,27 @@ class StrategyCodeExecutor:
             # 执行后注入 datetime/timedelta 为类（非模块），确保方法内 datetime.now()/datetime.strptime() 可用
             module.__dict__['datetime'] = datetime.datetime
             module.__dict__['timedelta'] = datetime.timedelta
-            
+
             # 存储模块引用
             self.modules[module_name] = module
-            
+
             # 查找策略类（查找第一个继承自对应基类的类）
             strategy_class = None
             for name in dir(module):
                 obj = getattr(module, name)
-                if (isinstance(obj, type) and 
-                    issubclass(obj, StrategyBase) and 
+                if (isinstance(obj, type) and
+                    issubclass(obj, StrategyBase) and
                     obj != StrategyBase):
                     strategy_class = obj
                     logger.debug(f"[StrategyCodeExecutor] 找到策略类: {name} (继承自 {base_class_name})")
                     break
-            
+
             if strategy_class is None:
                 raise ValueError(f"策略代码中未找到继承自 {base_class_name} 的类")
-            
+
             # 实例化策略类
             strategy_instance = strategy_class()
-            
+
             # 根据决策类型调用相应方法
             if decision_type == 'buy':
                 # 调用买入决策方法（统一使用 market_state）
@@ -302,14 +304,16 @@ class StrategyCodeExecutor:
                     candidates=candidates or [],
                     portfolio=portfolio or {},
                     account_info=account_info or {},
-                    market_state=market_state or {}
+                    market_state=market_state or {},
+                    conditional_orders=conditional_orders or {}
                 )
             elif decision_type == 'sell':
                 # 调用卖出决策方法
                 decisions = strategy_instance.execute_sell_decision(
                     portfolio=portfolio or {},
                     market_state=market_state or {},
-                    account_info=account_info or {}
+                    account_info=account_info or {},
+                    conditional_orders=conditional_orders or {}
                 )
             else:
                 raise ValueError(f"未知的决策类型: {decision_type}")

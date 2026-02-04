@@ -35,6 +35,7 @@ from trade.common.database.database_account_asset import AccountAssetDatabase
 from trade.common.database.database_trades import TradesDatabase
 from trade.common.database.database_binance_trade_logs import BinanceTradeLogsDatabase
 from trade.common.database.database_strategy_decisions import StrategyDecisionsDatabase
+from trade.common.database.database_algo_order import AlgoOrderDatabase
 from trade.trading.trading_utils import (
     parse_signal_to_position_side,
     get_side_for_trade,
@@ -83,7 +84,7 @@ class TradingEngine:
         self.market_fetcher = market_fetcher
         self.trader = trader
         self.trade_fee_rate = trade_fee_rate
-        # 初始化 ModelPromptsDatabase、ModelsDatabase、PortfoliosDatabase、ConversationsDatabase、AccountValuesDatabase、FuturesDatabase、AccountAssetDatabase 和 BinanceTradeLogsDatabase 实例
+        # 初始化 ModelPromptsDatabase、ModelsDatabase、PortfoliosDatabase、ConversationsDatabase、AccountValuesDatabase、FuturesDatabase、AccountAssetDatabase、BinanceTradeLogsDatabase、AlgoOrderDatabase 实例
         self.model_prompts_db = ModelPromptsDatabase(pool=db._pool if hasattr(db, '_pool') else None)
         self.models_db = ModelsDatabase(pool=db._pool if hasattr(db, '_pool') else None)
         self.portfolios_db = PortfoliosDatabase(pool=db._pool if hasattr(db, '_pool') else None)
@@ -95,6 +96,7 @@ class TradingEngine:
         self.trades_db = TradesDatabase(pool=db._pool if hasattr(db, '_pool') else None)
         self.binance_trade_logs_db = BinanceTradeLogsDatabase(pool=db._pool if hasattr(db, '_pool') else None)
         self.strategy_decisions_db = StrategyDecisionsDatabase(pool=db._pool if hasattr(db, '_pool') else None)
+        self.algo_order_db = AlgoOrderDatabase(pool=db._pool if hasattr(db, '_pool') else None)
         # 从数据库获取 max_positions（最大持仓数量），如果获取失败则使用默认值3
         try:
             model = self.models_db.get_model(model_id)
@@ -1700,9 +1702,161 @@ class TradingEngine:
             'cross_un_pnl': cross_un_pnl
         }
 
+    # ============ 条件单查询方法 ============
+
+    def _get_conditional_orders(self, model_id: int, symbols: List[str] = None) -> Dict[str, List[Dict]]:
+        """
+        获取当前模型的已挂条件单信息
+
+        Args:
+            model_id: 模型ID
+            symbols: 可选的symbol列表，如果提供则只查询这些symbol的条件单
+
+        Returns:
+            Dict[str, List[Dict]]: 按symbol分组的条件单列表
+                格式: {
+                    "BTCUSDT": [
+                        {
+                            "algoId": "123456",
+                            "orderType": "STOP_MARKET",
+                            "symbol": "BTCUSDT",
+                            "side": "sell",
+                            "positionSide": "LONG",
+                            "quantity": 0.001,
+                            "algoStatus": "NEW",
+                            "triggerPrice": 50000.0
+                        },
+                        ...
+                    ],
+                    ...
+                }
+        """
+        try:
+            model = self.models_db.get_model(model_id)
+            if not model:
+                logger.warning(f"[TradingEngine] Model {model_id} not found, cannot get conditional orders")
+                return {}
+
+            is_virtual = model.get('is_virtual', False)
+            model_uuid = model.get('id')  # UUID string
+            conditional_orders_by_symbol = {}
+
+            if is_virtual:
+                # 虚拟模式：从数据库查询
+                logger.debug(f"[Model {model_id}] 虚拟模式：从数据库查询条件单")
+
+                # 查询所有NEW状态的条件单
+                all_orders = self.algo_order_db.query_algo_orders(
+                    model_id=model_uuid,
+                    status='new'
+                )
+
+                # 按symbol分组，并过滤指定的symbols
+                for order in all_orders:
+                    symbol = order.get('symbol', '').upper()
+                    if not symbol:
+                        continue
+
+                    # 如果指定了symbols，只保留这些symbol的条件单
+                    if symbols and symbol not in [s.upper() for s in symbols]:
+                        continue
+
+                    if symbol not in conditional_orders_by_symbol:
+                        conditional_orders_by_symbol[symbol] = []
+
+                    conditional_orders_by_symbol[symbol].append({
+                        'algoId': order.get('algoId'),
+                        'orderType': order.get('orderType'),
+                        'symbol': symbol,
+                        'side': order.get('side'),
+                        'positionSide': order.get('positionSide'),
+                        'quantity': order.get('quantity', 0),
+                        'algoStatus': order.get('algoStatus'),
+                        'triggerPrice': order.get('triggerPrice')
+                    })
+
+                logger.info(f"[Model {model_id}] 虚拟模式：查询到 {len(all_orders)} 个条件单，涉及 {len(conditional_orders_by_symbol)} 个symbol")
+
+            else:
+                # 真实模式：通过SDK查询
+                logger.debug(f"[Model {model_id}] 真实模式：通过SDK查询条件单")
+
+                # 获取API凭证
+                api_key = model.get('api_key')
+                api_secret = model.get('api_secret')
+                account_alias = model.get('account_alias')
+
+                if not api_key or not api_secret:
+                    logger.warning(f"[Model {model_id}] API凭证缺失，无法查询条件单")
+                    return {}
+
+                # 创建Binance客户端
+                try:
+                    order_client = BinanceFuturesOrderClient(
+                        api_key=api_key,
+                        api_secret=api_secret,
+                        account_alias=account_alias
+                    )
+
+                    # 如果没有指定symbols，从持仓中获取
+                    if not symbols:
+                        portfolio = self._get_portfolio(model_id)
+                        positions = portfolio.get('positions', [])
+                        symbols = [pos.get('symbol') for pos in positions if pos.get('symbol')]
+
+                    # 查询每个symbol的条件单
+                    for symbol in symbols:
+                        try:
+                            orders = order_client.query_all_algo_orders(
+                                symbol=symbol,
+                                model_id=model_uuid,
+                                db=self.binance_trade_logs_db
+                            )
+
+                            # 过滤状态为NEW的条件单
+                            new_orders = [
+                                order for order in orders
+                                if order.get('algoStatus') == 'NEW'
+                            ]
+
+                            if new_orders:
+                                symbol_upper = symbol.upper()
+                                conditional_orders_by_symbol[symbol_upper] = [
+                                    {
+                                        'algoId': order.get('algoId'),
+                                        'orderType': order.get('orderType'),
+                                        'symbol': symbol_upper,
+                                        'side': order.get('side'),
+                                        'positionSide': order.get('positionSide'),
+                                        'quantity': order.get('quantity', 0),
+                                        'algoStatus': order.get('algoStatus'),
+                                        'triggerPrice': order.get('triggerPrice')
+                                    }
+                                    for order in new_orders
+                                ]
+
+                        except Exception as e:
+                            logger.warning(f"[Model {model_id}] 查询symbol {symbol} 的条件单失败: {e}")
+                            continue
+
+                    total_orders = sum(len(orders) for orders in conditional_orders_by_symbol.values())
+                    logger.info(f"[Model {model_id}] 真实模式：查询到 {total_orders} 个条件单，涉及 {len(conditional_orders_by_symbol)} 个symbol")
+
+                except Exception as e:
+                    logger.error(f"[Model {model_id}] 创建Binance客户端或查询条件单失败: {e}")
+                    return {}
+
+            return conditional_orders_by_symbol
+
+        except Exception as e:
+            logger.error(f"[TradingEngine] Failed to get conditional orders for model {model_id}: {e}")
+            import traceback
+            logger.error(f"[TradingEngine] Error traceback:\n{traceback.format_exc()}")
+            return {}
+
     # ============ 投资组合管理辅助方法 ============
     # 封装对 PortfoliosDatabase 的调用
-    
+
     def _get_portfolio(self, model_id: int, current_prices: Dict = None) -> Dict:
         """
         获取投资组合信息（委托给 PortfoliosDatabase）
@@ -2165,17 +2319,28 @@ class TradingEngine:
                     'error': f'所有symbol数据验证失败: {len(invalid_symbols)}个symbol无效'
                 }
             
+            # ========== 步骤0.5: 获取条件单信息 ==========
+            logger.debug(f"[Model {self.model_id}] [批次 {batch_num}/{total_batches}] "
+                        f"[步骤0.5] 获取当前模型的条件单信息...")
+            # 获取当前模型所有持仓的条件单信息
+            portfolio_symbols = [pos.get('symbol') for pos in portfolio.get('positions', []) if pos.get('symbol')]
+            conditional_orders = self._get_conditional_orders(self.model_id, portfolio_symbols)
+            total_orders = sum(len(orders) for orders in conditional_orders.values())
+            logger.debug(f"[Model {self.model_id}] [批次 {batch_num}/{total_batches}] "
+                        f"[步骤0.5] 获取到 {total_orders} 个条件单，涉及 {len(conditional_orders)} 个symbol")
+
             # ========== 步骤1: 调用Trader获取买入决策 ==========
             logger.debug(f"[Model {self.model_id}] [批次 {batch_num}/{total_batches}] "
                         f"[步骤1] 调用AI模型获取买入决策... (有效symbol数: {len(valid_candidates)})")
-            
+
             ai_call_start = datetime.now(timezone(timedelta(hours=8)))
             buy_payload = self.trader.make_buy_decision(
                 valid_candidates,  # 只传递有效的candidates
                 portfolio,
                 account_info,
                 market_state,  # 统一使用market_state，其中已包含source信息
-                model_id=self.model_id
+                model_id=self.model_id,
+                conditional_orders=conditional_orders
             )
             
             # 策略交易模式：把命中的策略名写入每个symbol的decision里（后续统一落库时使用）
@@ -2747,17 +2912,27 @@ class TradingEngine:
                         f"[步骤1] 创建临时portfolio，仅包含当前批次持仓... (有效symbol数: {len(valid_positions)})")
             batch_portfolio = portfolio.copy()
             batch_portfolio['positions'] = valid_positions  # 只使用有效的positions
-            
+
+            # ========== 步骤1.5: 获取条件单信息 ==========
+            logger.debug(f"[Model {self.model_id}] [卖出批次 {batch_num}/{total_batches}] "
+                        f"[步骤1.5] 获取当前批次的条件单信息...")
+            batch_symbols = [pos.get('symbol') for pos in valid_positions if pos.get('symbol')]
+            conditional_orders = self._get_conditional_orders(self.model_id, batch_symbols)
+            total_orders = sum(len(orders) for orders in conditional_orders.values())
+            logger.debug(f"[Model {self.model_id}] [卖出批次 {batch_num}/{total_batches}] "
+                        f"[步骤1.5] 获取到 {total_orders} 个条件单，涉及 {len(conditional_orders)} 个symbol")
+
             # ========== 步骤2: 调用模型获取卖出决策 ==========
             logger.debug(f"[Model {self.model_id}] [卖出批次 {batch_num}/{total_batches}] "
                         f"[步骤2] 调用AI模型进行卖出决策... (有效symbol数: {len(valid_positions)})")
-            
+
             ai_call_start = datetime.now(timezone(timedelta(hours=8)))
             sell_payload = self.trader.make_sell_decision(
                 batch_portfolio,
                 market_state,
                 account_info,
-                model_id=self.model_id
+                model_id=self.model_id,
+                conditional_orders=conditional_orders
             )
             
             # 策略交易模式：把命中的策略名写入每个symbol的decision里（后续统一落库时使用）
@@ -4325,11 +4500,7 @@ class TradingEngine:
         """
         try:
             # 查询数据库中状态为new的条件单
-            existing_orders = self.db.query(
-                f"SELECT id, algoId, orderType FROM {self.db.algo_order_table} "
-                f"WHERE model_id = %s AND symbol = %s AND algoStatus = 'new'",
-                (model_uuid, symbol.upper())
-            )
+            existing_orders = self.algo_order_db.get_new_algo_orders_by_symbol(model_uuid, symbol)
             
             if not existing_orders:
                 logger.debug(f"TRADE: 未找到需要取消的条件单 | model={self.model_id} symbol={symbol}")
@@ -4380,12 +4551,9 @@ class TradingEngine:
                     
                     # SDK取消成功后，更新数据库
                     for order_row in existing_orders:
-                        order_id = order_row[0]
-                        self.db.command(
-                            f"UPDATE {self.db.algo_order_table} SET algoStatus = 'cancelled', updated_at = NOW() WHERE id = %s",
-                            (order_id,)
-                        )
-                    logger.info(f"TRADE: 已更新数据库条件单状态为cancelled | model={self.model_id} symbol={symbol} count={len(existing_orders)}")
+                        order_id = order_row.get('id')
+                        self.algo_order_db.update_algo_order_status(order_id, 'CANCELLED')
+                    logger.info(f"TRADE: 已更新数据库条件单状态为CANCELLED | model={self.model_id} symbol={symbol} count={len(existing_orders)}")
                     return True
                 except Exception as sdk_err:
                     logger.error(f"TRADE: real模式查询/取消条件单失败 | model={self.model_id} symbol={symbol} error={sdk_err}")
@@ -4394,12 +4562,9 @@ class TradingEngine:
                 # virtual模式：只有在数据库中查询到条件单时才更新状态
                 # existing_orders已经在上面查询过了，如果有记录就更新
                 for order_row in existing_orders:
-                    order_id = order_row[0]
-                    self.db.command(
-                        f"UPDATE {self.db.algo_order_table} SET algoStatus = 'cancelled', updated_at = NOW() WHERE id = %s",
-                        (order_id,)
-                    )
-                logger.info(f"TRADE: virtual模式已更新条件单状态为cancelled | model={self.model_id} symbol={symbol} count={len(existing_orders)}")
+                    order_id = order_row.get('id')
+                    self.algo_order_db.update_algo_order_status(order_id, 'CANCELLED')
+                logger.info(f"TRADE: virtual模式已更新条件单状态为CANCELLED | model={self.model_id} symbol={symbol} count={len(existing_orders)}")
                 return True
         except Exception as e:
             logger.error(f"TRADE: 取消条件单失败 | model={self.model_id} symbol={symbol} error={e}", exc_info=True)
@@ -4585,36 +4750,27 @@ class TradingEngine:
         
         try:
             algo_order_id = str(uuid.uuid4())
-            columns = [
-                "id", "algoId", "clientAlgoId", "type", "algoType", "orderType", 
-                "symbol", "side", "positionSide", "quantity", "algoStatus", 
-                "triggerPrice", "price", "model_id", "strategy_decision_id", "trade_id", "created_at"
-            ]
-            values = [
-                algo_order_id,
-                algo_id,  # 币安返回的algoId，real模式可能为NULL
-                client_algo_id,  # 系统生成的UUID
-                type_value,  # 'real' or 'virtual'
-                'CONDITIONAL',  # algoType
-                order_type,  # 'STOP' or 'STOP_MARKET'
-                symbol.upper(),
-                side_value,  # 'buy' or 'sell'
-                position_side.upper(),  # 'LONG' or 'SHORT'
-                strategy_quantity,
-                'new',  # algoStatus
-                stop_price,  # triggerPrice
-                price_value,  # price（STOP订单需要，STOP_MARKET为NULL）
-                model_uuid,
-                strategy_decision_id,
-                None,  # trade_id（初始为NULL，异步执行后更新）
-                datetime.now(timezone(timedelta(hours=8))).replace(tzinfo=None)
-            ]
-            
-            self.db.insert_rows(
-                self.db.algo_order_table,
-                [values],
-                columns
-            )
+            algo_order_data = {
+                'id': algo_order_id,
+                'algoId': algo_id,  # 币安返回的algoId，real模式可能为NULL
+                'clientAlgoId': client_algo_id,  # 系统生成的UUID
+                'type': type_value,  # 'real' or 'virtual'
+                'algoType': 'CONDITIONAL',  # algoType
+                'orderType': order_type,  # 'STOP' or 'STOP_MARKET'
+                'symbol': symbol.upper(),
+                'side': side_value,  # 'buy' or 'sell'
+                'positionSide': position_side.upper(),  # 'LONG' or 'SHORT'
+                'quantity': strategy_quantity,
+                'algoStatus': 'NEW',  # algoStatus
+                'triggerPrice': stop_price,  # triggerPrice
+                'price': price_value,  # price（STOP订单需要，STOP_MARKET为NULL）
+                'model_id': model_uuid,
+                'strategy_decision_id': strategy_decision_id,
+                'trade_id': None,  # trade_id（初始为NULL，异步执行后更新）
+                'created_at': datetime.now(timezone(timedelta(hours=8))).replace(tzinfo=None)
+            }
+
+            self.algo_order_db.insert_algo_order(algo_order_data)
             
             if trade_mode == 'real':
                 logger.info(f"TRADE: ALGO_ORDER CREATED (real) - Model {self.model_id} STOP_LOSS {symbol} | "
@@ -4829,36 +4985,27 @@ class TradingEngine:
         
         try:
             algo_order_id = str(uuid.uuid4())
-            columns = [
-                "id", "algoId", "clientAlgoId", "type", "algoType", "orderType", 
-                "symbol", "side", "positionSide", "quantity", "algoStatus", 
-                "triggerPrice", "price", "model_id", "strategy_decision_id", "trade_id", "created_at"
-            ]
-            values = [
-                algo_order_id,
-                algo_id,  # 币安返回的algoId，real模式可能为NULL
-                client_algo_id,  # 系统生成的UUID
-                type_value,  # 'real' or 'virtual'
-                'CONDITIONAL',  # algoType
-                order_type,  # 'TAKE_PROFIT' or 'TAKE_PROFIT_MARKET'
-                symbol.upper(),
-                side_value,  # 'buy' or 'sell'
-                position_side.upper(),  # 'LONG' or 'SHORT'
-                strategy_quantity,
-                'new',  # algoStatus
-                stop_price,  # triggerPrice
-                price_value,  # price（TAKE_PROFIT订单需要，TAKE_PROFIT_MARKET为NULL）
-                model_uuid,
-                strategy_decision_id,
-                None,  # trade_id（初始为NULL，异步执行后更新）
-                datetime.now(timezone(timedelta(hours=8))).replace(tzinfo=None)
-            ]
-            
-            self.db.insert_rows(
-                self.db.algo_order_table,
-                [values],
-                columns
-            )
+            algo_order_data = {
+                'id': algo_order_id,
+                'algoId': algo_id,  # 币安返回的algoId，real模式可能为NULL
+                'clientAlgoId': client_algo_id,  # 系统生成的UUID
+                'type': type_value,  # 'real' or 'virtual'
+                'algoType': 'CONDITIONAL',  # algoType
+                'orderType': order_type,  # 'TAKE_PROFIT' or 'TAKE_PROFIT_MARKET'
+                'symbol': symbol.upper(),
+                'side': side_value,  # 'buy' or 'sell'
+                'positionSide': position_side.upper(),  # 'LONG' or 'SHORT'
+                'quantity': strategy_quantity,
+                'algoStatus': 'NEW',  # algoStatus
+                'triggerPrice': stop_price,  # triggerPrice
+                'price': price_value,  # price（TAKE_PROFIT订单需要，TAKE_PROFIT_MARKET为NULL）
+                'model_id': model_uuid,
+                'strategy_decision_id': strategy_decision_id,
+                'trade_id': None,  # trade_id（初始为NULL，异步执行后更新）
+                'created_at': datetime.now(timezone(timedelta(hours=8))).replace(tzinfo=None)
+            }
+
+            self.algo_order_db.insert_algo_order(algo_order_data)
             
             if trade_mode == 'real':
                 logger.info(f"TRADE: ALGO_ORDER CREATED (real) - Model {self.model_id} TAKE_PROFIT {symbol} | "

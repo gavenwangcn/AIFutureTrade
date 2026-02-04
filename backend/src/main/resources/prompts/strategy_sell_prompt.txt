@@ -10,8 +10,9 @@
 5. **建议使用 try-except 处理异常，确保异常时返回空字典**
 
 ### 方法签名要求：
-- 必须包含且仅包含 4 个参数：`self`, `portfolio`, `market_state`, `account_info`
+- 必须包含且仅包含 5 个参数：`self`, `portfolio`, `market_state`, `account_info`, `conditional_orders`
 - 参数顺序必须完全一致，不能添加或删除任何参数
+- `conditional_orders` 参数是可选的（默认为空字典），包含当前模型已挂的条件单信息
 
 ## 策略规则（strategy_context）：
 {strategy_context}
@@ -38,7 +39,8 @@ def execute_sell_decision(
     self,
     portfolio: Dict,
     market_state: Dict,
-    account_info: Dict
+    account_info: Dict,
+    conditional_orders: Dict[str, List[Dict]] = None
 ) -> Dict[str, Dict]:
 ```
 
@@ -46,6 +48,66 @@ def execute_sell_decision(
 - `portfolio: Dict` - 持仓组合信息，包含 positions（持仓列表，每个元素含 symbol、**avg_price 开仓价**、**open_time 开仓时间** 等）、cash、positions_value、margin_used、total_value、realized_pnl、unrealized_pnl、initial_capital
 - `market_state: Dict` - 市场状态字典，格式：`{"SYMBOL": {"price": float, "base_volume": float, "quote_volume": float, "indicators": {"timeframes": {"1h": {"klines": [...]}}, ...}, "previous_close_prices": {...}}}`
 - `account_info: Dict` - 账户信息，包含 current_time、total_return、initial_capital、balance、available_balance、cross_wallet_balance、cross_pnl、cross_un_pnl
+- `conditional_orders: Dict[str, List[Dict]]` - 条件单信息字典（可选，默认为None或空字典），按symbol分组的条件单列表
+  **格式示例：**
+  ```python
+  {
+      "BTCUSDT": [
+          {
+              "algoId": "123456",  # 订单ID（真实模式为币安返回的ID，虚拟模式为数据库ID）
+              "orderType": "STOP_MARKET",  # 订单类型：STOP、STOP_MARKET、TAKE_PROFIT、TAKE_PROFIT_MARKET、TRAILING_STOP_MARKET
+              "symbol": "BTCUSDT",  # 合约符号
+              "side": "sell",  # 操作：buy-买入，sell-卖出
+              "positionSide": "LONG",  # 交易方向：LONG-做多，SHORT-做空
+              "quantity": 0.001,  # 挂单数量（合约数量）
+              "algoStatus": "NEW",  # 状态：NEW-新建（未触发）
+              "triggerPrice": 50000.0  # 触发价格
+          },
+          ...
+      ],
+      ...
+  }
+  ```
+  **条件单信息说明：**
+  - 条件单是已经挂在交易所（真实模式）或数据库（虚拟模式）的止损/止盈订单
+  - 只包含状态为 'NEW' 的条件单（未触发的订单）
+  - 只包含当前模型所拥有的symbol对应的条件单
+  - 可以在策略中使用条件单信息来辅助决策，例如：
+    - 检查是否已经设置了止损/止盈订单
+    - 根据已有条件单的触发价格调整新的决策
+    - 避免重复设置相同的止损/止盈订单
+  - **使用示例：**
+    ```python
+    # 初始化conditional_orders（如果为None）
+    if conditional_orders is None:
+        conditional_orders = {}
+
+    # 获取某个symbol的条件单列表
+    symbol_orders = conditional_orders.get(symbol, [])
+
+    # 检查是否已有止损单
+    has_stop_loss = any(
+        order.get('orderType') in ['STOP', 'STOP_MARKET']
+        for order in symbol_orders
+    )
+
+    # 检查是否已有止盈单
+    has_take_profit = any(
+        order.get('orderType') in ['TAKE_PROFIT', 'TAKE_PROFIT_MARKET']
+        for order in symbol_orders
+    )
+
+    # 获取已有止损单的触发价格
+    stop_loss_prices = [
+        order.get('triggerPrice')
+        for order in symbol_orders
+        if order.get('orderType') in ['STOP', 'STOP_MARKET']
+    ]
+
+    # 输出条件单信息日志
+    if symbol_orders:
+        self.log.info(f"{symbol} 已有 {len(symbol_orders)} 个条件单: {symbol_orders}")
+    ```
 
 **关于导入语句和可用库：**
 - **允许使用 `import` 和 `from` 语句导入任何有效的 Python 库**
@@ -103,24 +165,25 @@ def execute_sell_decision(
 **完整示例代码结构（包含详细注释）：**
 ```python
 from trade.strategy.strategy_template_sell import StrategyBaseSell
-from typing import Dict
+from typing import Dict, List
 from datetime import datetime, timedelta, timezone  # 与模板一致，必须导入timezone，获取当前时间必须使用UTC+8时区
 
 class GeneratedSellStrategy(StrategyBaseSell):
     """
     卖出策略类
-    
+
     根据策略规则（strategy_context）生成卖出决策，包括平仓、止损、止盈。
     """
     def execute_sell_decision(
         self,
         portfolio: Dict,
         market_state: Dict,
-        account_info: Dict
+        account_info: Dict,
+        conditional_orders: Dict[str, List[Dict]] = None
     ) -> Dict[str, Dict]:
         """
         执行卖出决策
-        
+
         参数:
             portfolio: 持仓组合信息，包含以下字段：
                 - positions: 持仓列表，每个元素包含 symbol、position_amt、position_side、**avg_price（即开仓价）**、**open_time（即开仓时间**，来自 portfolios 表 created_at，与开仓价对应，格式 'YYYY-MM-DD HH:MM:SS'）、leverage 等信息。策略中请使用 avg_price 表示开仓价、open_time 表示开仓时间
@@ -133,7 +196,8 @@ class GeneratedSellStrategy(StrategyBaseSell):
                 - initial_capital: 初始资金（账户初始本金）
             market_state: 市场状态字典，包含各交易对的价格、成交量、技术指标等数据
             account_info: 账户信息，包含 current_time、total_return、initial_capital、balance、available_balance、cross_wallet_balance、cross_pnl、cross_un_pnl
-        
+            conditional_orders: 条件单信息字典（可选），按symbol分组的条件单列表
+
         返回:
             Dict[str, Dict]: 卖出决策字典，key为交易对符号，value为决策详情
                 格式: {"SYMBOL": {"signal": "close_position", "quantity": 100, "leverage": 5, "justification": "理由"}}
@@ -141,6 +205,10 @@ class GeneratedSellStrategy(StrategyBaseSell):
         """
         # ⚠️ 重要：必须初始化decisions字典，且必须返回字典（不能返回None）
         decisions = {}
+
+        # ⚠️ 重要：初始化conditional_orders（如果为None）
+        if conditional_orders is None:
+            conditional_orders = {}
 
         # 获取当前持仓列表
         # positions 是一个列表，每个元素包含 symbol、position_amt、position_side、avg_price（即开仓价）、open_time（即开仓时间，与开仓价对应，可用于持仓时长等逻辑判断）等信息
@@ -164,10 +232,44 @@ class GeneratedSellStrategy(StrategyBaseSell):
             position_amt = abs(position.get('position_amt', 0))  # 持仓合约数量（可能是正数或负数，使用abs取绝对值）
             position_side = position.get('position_side', 'LONG')  # 持仓方向：'LONG'（多单）或 'SHORT'（空单）
             avg_price = position.get('avg_price', 0)  # 持仓平均价格（开仓价格）
-            
+
             # 持仓数量无效则跳过
             if position_amt <= 0:
                 continue
+
+            # ⚠️ 重要：获取该symbol的条件单信息（可选，用于辅助决策）
+            # 条件单信息可以帮助策略了解已经设置的止损/止盈订单，避免重复设置或根据已有订单调整决策
+            symbol_orders = conditional_orders.get(symbol, [])
+            if symbol_orders:
+                self.log.info(f"{symbol} 已有 {len(symbol_orders)} 个条件单")
+                # 检查是否已有止损单
+                has_stop_loss = any(
+                    order.get('orderType') in ['STOP', 'STOP_MARKET']
+                    for order in symbol_orders
+                )
+                # 检查是否已有止盈单
+                has_take_profit = any(
+                    order.get('orderType') in ['TAKE_PROFIT', 'TAKE_PROFIT_MARKET']
+                    for order in symbol_orders
+                )
+                # 获取已有止损单的触发价格
+                stop_loss_prices = [
+                    order.get('triggerPrice')
+                    for order in symbol_orders
+                    if order.get('orderType') in ['STOP', 'STOP_MARKET'] and order.get('triggerPrice')
+                ]
+                # 获取已有止盈单的触发价格
+                take_profit_prices = [
+                    order.get('triggerPrice')
+                    for order in symbol_orders
+                    if order.get('orderType') in ['TAKE_PROFIT', 'TAKE_PROFIT_MARKET'] and order.get('triggerPrice')
+                ]
+                self.log.info(f"{symbol} 条件单状态: 止损单={has_stop_loss}, 止盈单={has_take_profit}, "
+                            f"止损价={stop_loss_prices}, 止盈价={take_profit_prices}")
+                # 可以根据已有条件单信息调整策略决策
+                # 例如：如果已经有止损单，可以选择不再设置新的止损单，或者调整平仓策略
+            else:
+                self.log.info(f"{symbol} 没有已挂的条件单")
             
             # 从 market_state 中获取该交易对的市场数据
             symbol_market_state = market_state.get(symbol, {})
@@ -888,11 +990,13 @@ class GeneratedSellStrategy(StrategyBaseSell):
        self,
        portfolio: Dict,
        market_state: Dict,
-       account_info: Dict
+       account_info: Dict,
+       conditional_orders: Dict[str, List[Dict]] = None
    ) -> Dict[str, Dict]:
    ```
-   - **必须包含且仅包含这 4 个参数（包括 self）**
-   - **参数顺序必须完全一致：`self`, `portfolio`, `market_state`, `account_info`**
+   - **必须包含且仅包含这 5 个参数（包括 self）**
+   - **参数顺序必须完全一致：`self`, `portfolio`, `market_state`, `account_info`, `conditional_orders`**
+   - **conditional_orders 参数必须有默认值 None**
    - **不能添加任何额外参数**
    - **不能删除任何参数**
 4. **返回值要求（关键）：**

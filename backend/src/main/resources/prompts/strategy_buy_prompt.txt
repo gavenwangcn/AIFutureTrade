@@ -10,8 +10,9 @@
 5. **建议使用 try-except 处理异常，确保异常时返回空字典**
 
 ### 方法签名要求：
-- 必须包含且仅包含 5 个参数：`self`, `candidates`, `portfolio`, `account_info`, `market_state`
+- 必须包含且仅包含 6 个参数：`self`, `candidates`, `portfolio`, `account_info`, `market_state`, `conditional_orders`
 - 参数顺序必须完全一致，不能添加或删除任何参数
+- `conditional_orders` 参数是可选的（默认为空字典），包含当前模型已持仓的币的已挂条件单信息
 
 ## 策略规则（strategy_context）：
 {strategy_context}
@@ -39,7 +40,8 @@ def execute_buy_decision(
     candidates: List[Dict],
     portfolio: Dict,
     account_info: Dict,
-    market_state: Dict
+    market_state: Dict,
+    conditional_orders: Dict[str, List[Dict]] = None
 ) -> Dict[str, Dict]:
 ```
 
@@ -48,6 +50,59 @@ def execute_buy_decision(
 - `portfolio: Dict` - 持仓组合信息，包含 cash（可用资金）、positions（持仓列表，每个元素含 symbol、**avg_price 开仓价**、**open_time 开仓时间** 等）、positions_value、margin_used、total_value、realized_pnl、unrealized_pnl、initial_capital
 - `account_info: Dict` - 账户信息，包含 current_time、total_return、initial_capital、balance、available_balance、cross_wallet_balance、cross_pnl、cross_un_pnl
 - `market_state: Dict` - 市场状态字典，格式：`{"SYMBOL": {"price": float, "base_volume": float, "quote_volume": float, "source": str, "leaderboard_source": str, "indicators": {"timeframes": {"1h": {"klines": [...]}}, ...}, "previous_close_prices": {...}}}`
+- `conditional_orders: Dict[str, List[Dict]]` - 条件单信息字典（可选，默认为None或空字典），按symbol分组的条件单列表
+  **格式示例：**
+  ```python
+  {
+      "BTCUSDT": [
+          {
+              "algoId": "123456",  # 订单ID（真实模式为币安返回的ID，虚拟模式为数据库ID）
+              "orderType": "STOP_MARKET",  # 订单类型：STOP、STOP_MARKET、TAKE_PROFIT、TAKE_PROFIT_MARKET、TRAILING_STOP_MARKET
+              "symbol": "BTCUSDT",  # 合约符号
+              "side": "sell",  # 操作：buy-买入，sell-卖出
+              "positionSide": "LONG",  # 交易方向：LONG-做多，SHORT-做空
+              "quantity": 0.001,  # 挂单数量（合约数量）
+              "algoStatus": "NEW",  # 状态：NEW-新建（未触发）
+              "triggerPrice": 50000.0  # 触发价格
+          },
+          ...
+      ],
+      ...
+  }
+  ```
+  **条件单信息说明：**
+  - 条件单是已经挂在交易所（真实模式）或数据库（虚拟模式）的止损/止盈订单
+  - 只包含状态为 'NEW' 的条件单（未触发的订单）
+  - 只包含当前模型已持仓的symbol对应的条件单
+  - 可以在策略中使用条件单信息来辅助决策，例如：
+    - 检查已持仓的币是否已经设置了止损/止盈订单
+    - 根据已有条件单的触发价格调整新的买入决策
+    - 避免在已有大量条件单的情况下继续加仓
+  - **使用示例：**
+    ```python
+    # 初始化conditional_orders（如果为None）
+    if conditional_orders is None:
+        conditional_orders = {}
+
+    # 获取某个symbol的条件单列表
+    symbol_orders = conditional_orders.get(symbol, [])
+
+    # 检查是否已有止损单
+    has_stop_loss = any(
+        order.get('orderType') in ['STOP', 'STOP_MARKET']
+        for order in symbol_orders
+    )
+
+    # 检查是否已有止盈单
+    has_take_profit = any(
+        order.get('orderType') in ['TAKE_PROFIT', 'TAKE_PROFIT_MARKET']
+        for order in symbol_orders
+    )
+
+    # 输出条件单信息日志
+    if symbol_orders:
+        self.log.info(f"{symbol} 已有 {len(symbol_orders)} 个条件单: {symbol_orders}")
+    ```
 
 **关于导入语句和可用库：**
 - **允许使用 `import` 和 `from` 语句导入任何有效的 Python 库**
@@ -119,17 +174,19 @@ class GeneratedBuyStrategy(StrategyBaseBuy):
         candidates: List[Dict],
         portfolio: Dict,
         account_info: Dict,
-        market_state: Dict
+        market_state: Dict,
+        conditional_orders: Dict[str, List[Dict]] = None
     ) -> Dict[str, Dict]:
         """
         执行买入决策
-        
+
         参数:
             candidates: 候选交易对列表，每个元素包含 symbol、price 等信息
             portfolio: 持仓组合信息，包含 cash（可用资金）、positions（持仓列表）等
             account_info: 账户信息，包含 current_time、total_return、balance 等
             market_state: 市场状态字典，包含各交易对的价格、成交量、技术指标等数据
-        
+            conditional_orders: 条件单信息字典（可选），按symbol分组的条件单列表
+
         返回:
             Dict[str, Dict]: 买入决策字典，key为交易对符号，value为决策详情
                 格式: {"SYMBOL": {"signal": "buy_to_long", "quantity": 5.0, "leverage": 10, "justification": "理由"}}
@@ -138,13 +195,17 @@ class GeneratedBuyStrategy(StrategyBaseBuy):
         # ⚠️ 重要：必须初始化decisions字典，且必须返回字典（不能返回None）
         decisions = {}
 
+        # ⚠️ 重要：初始化conditional_orders（如果为None）
+        if conditional_orders is None:
+            conditional_orders = {}
+
         # ⚠️ 重要：如果需要进行类型检查，使用基础类型（list, dict），不要使用泛型类型注解（List[Dict], Dict[str, Dict]）
         # ✅ 正确：isinstance(candidates, list)
         # ❌ 错误：isinstance(candidates, List[Dict]) - 这会导致运行时错误
 
         # ⚠️ 重要：必须使用 self.log.info() 输出关键执行日志
         self.log.info(f"开始执行买入决策，候选交易对数量: {len(candidates)}")
-        
+
         # 遍历候选交易对，对每个交易对进行策略判断
         for candidate in candidates:
             # 获取交易对符号并转换为大写（统一格式）
@@ -862,11 +923,13 @@ class GeneratedBuyStrategy(StrategyBaseBuy):
        candidates: List[Dict],
        portfolio: Dict,
        account_info: Dict,
-       market_state: Dict
+       market_state: Dict,
+       conditional_orders: Dict[str, List[Dict]] = None
    ) -> Dict[str, Dict]:
    ```
-   - **必须包含且仅包含这 5 个参数（包括 self）**
-   - **参数顺序必须完全一致：`self`, `candidates`, `portfolio`, `account_info`, `market_state`**
+   - **必须包含且仅包含这 6 个参数（包括 self）**
+   - **参数顺序必须完全一致：`self`, `candidates`, `portfolio`, `account_info`, `market_state`, `conditional_orders`**
+   - **conditional_orders 参数必须有默认值 None**
    - **不能添加任何额外参数**
    - **不能删除任何参数**
 4. **返回值要求（关键）：**
