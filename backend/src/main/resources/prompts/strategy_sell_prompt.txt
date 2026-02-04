@@ -617,6 +617,16 @@ klines_1w = timeframes.get('1w', {}).get('klines', [])  # 1周K线
   - 止损（多单）：`"stop_price": current_price * 0.98`
   - 止盈（多单）：`"stop_price": current_price * 1.05`
 
+**注意：stop_price vs price 字段的区别：**
+- **stop_price（触发价格）**：条件单的触发价格，当市场价格达到此价格时触发订单
+  - 存储在 algo_order 表的 triggerPrice 字段
+  - 用于判断条件单是否应该被触发执行
+- **price（限价）**：仅用于限价订单（STOP、TAKE_PROFIT），市价订单不需要此字段
+  - 存储在 algo_order 表的 price 字段
+  - 对于 STOP_MARKET、TAKE_PROFIT_MARKET 等市价订单，此字段为 None
+  - 对于 STOP、TAKE_PROFIT 等限价订单，可以设置此字段指定成交价格
+  - 示例：`"price": current_price * 0.99`（限价止损单，触发后以此价格成交）
+
 **3. leverage 字段（必填，不能为空）：**
 - **所有信号类型都必须提供 leverage 字段**
 - **leverage 不能为 None，不能为 0，必须是有效的正整数（通常是 1-125）**

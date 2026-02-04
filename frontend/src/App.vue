@@ -686,7 +686,7 @@
                       <th>操作</th>
                       <th>数量</th>
                       <th>订单类型</th>
-                      <th>价格</th>
+                      <th>触发价格</th>
                       <th>状态</th>
                       <th>失败原因</th>
                     </tr>
@@ -707,7 +707,7 @@
                       </td>
                       <td>{{ (order.quantity || 0).toFixed(4) }}</td>
                       <td>{{ order.type || '' }}</td>
-                      <td>${{ formatPrice6(order.price) }}</td>
+                      <td>${{ formatPrice6(order.triggerPrice) }}</td>
                       <td>
                         <span :class="['badge', getAlgoStatusBadgeClass(order.algoStatus)]">
                           {{ formatAlgoStatus(order.algoStatus) }}

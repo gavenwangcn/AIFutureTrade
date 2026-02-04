@@ -4648,9 +4648,15 @@ class TradingEngine:
         if order_type not in ['STOP', 'STOP_MARKET']:
             order_type = 'STOP_MARKET'
 
-        # 确定价格（algo_order表的price字段统一使用stop_price的值）
-        # 注意：这里的price_value用于插入algo_order表，不影响SDK调用
-        price_value = stop_price  # 使用stop_price作为price字段的值
+        # 确定价格（algo_order表的price字段）
+        # 对于STOP订单：使用策略返回的price字段（限价）
+        # 对于STOP_MARKET订单：price为None（市价单不需要限价）
+        price_value = None
+        if order_type == 'STOP':
+            # 限价止损单：使用策略返回的price字段
+            price_value = decision.get('price')
+            if price_value:
+                price_value = float(price_value)
         
         # 确定交易方向（buy/sell）
         side_value = side_for_trade.lower()  # 'buy' or 'sell'
@@ -4883,9 +4889,15 @@ class TradingEngine:
         if order_type not in ['TAKE_PROFIT', 'TAKE_PROFIT_MARKET']:
             order_type = 'TAKE_PROFIT_MARKET'
 
-        # 确定价格（algo_order表的price字段统一使用stop_price的值）
-        # 注意：这里的price_value用于插入algo_order表，不影响SDK调用
-        price_value = stop_price  # 使用stop_price作为price字段的值
+        # 确定价格（algo_order表的price字段）
+        # 对于TAKE_PROFIT订单：使用策略返回的price字段（限价）
+        # 对于TAKE_PROFIT_MARKET订单：price为None（市价单不需要限价）
+        price_value = None
+        if order_type == 'TAKE_PROFIT':
+            # 限价止盈单：使用策略返回的price字段
+            price_value = decision.get('price')
+            if price_value:
+                price_value = float(price_value)
         
         # 确定交易方向（buy/sell）
         side_value = side_for_trade.lower()  # 'buy' or 'sell'

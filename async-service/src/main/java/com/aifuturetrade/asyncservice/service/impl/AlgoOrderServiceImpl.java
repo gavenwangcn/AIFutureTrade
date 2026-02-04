@@ -464,8 +464,8 @@ public class AlgoOrderServiceImpl implements AlgoOrderService {
 
             // 更新订单状态为"failed"并记录错误原因
             try {
-                algoOrderMapper.updateAlgoStatusWithError(orderId, "failed", errorReason);
-                log.info("[AlgoOrderService] [virtual模式] 订单状态已更新为failed: orderId={}, errorReason={}", orderId, errorReason);
+                algoOrderMapper.updateAlgoStatusWithError(orderId, "FAILED", errorReason);
+                log.info("[AlgoOrderService] [virtual模式] 订单状态已更新为FAILED: orderId={}, errorReason={}", orderId, errorReason);
             } catch (Exception updateEx) {
                 log.error("[AlgoOrderService] [virtual模式] 更新订单状态为failed失败: orderId={}, error={}",
                         orderId, updateEx.getMessage());
