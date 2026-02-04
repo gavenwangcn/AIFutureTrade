@@ -3649,16 +3649,10 @@ class TradingEngine:
         if trade_mode == 'real' and (not error_msg) and sdk_call_skipped and sdk_skip_reason:
             error_msg = sdk_skip_reason
         
-        # 从signal中提取交易方向（buy/sell）
-        # buy_to_long, buy_to_short -> buy
-        # sell_to_long, sell_to_short, close_position, stop_loss, take_profit -> sell
-        trade_side_direction = 'buy'  # 默认值
-        if trade_signal_final:
-            signal_lower = trade_signal_final.lower()
-            if signal_lower.startswith('buy'):
-                trade_side_direction = 'buy'
-            elif signal_lower.startswith('sell') or signal_lower in ['close_position', 'stop_loss', 'take_profit']:
-                trade_side_direction = 'sell'
+        # 【买入方法中统一使用'buy'】
+        # 根据方法文档：trades表的side字段统一使用'buy'（开多和开空都使用buy）
+        # 不再根据signal判断，始终使用'buy'
+        trade_side_direction = 'buy'
         
         # 确保position_side为大写（LONG/SHORT）
         trade_position_side_final_upper = trade_position_side_final.upper() if trade_position_side_final else position_side
@@ -3937,16 +3931,10 @@ class TradingEngine:
         if trade_mode == 'real' and (not error_msg) and sdk_call_skipped and sdk_skip_reason:
             error_msg = sdk_skip_reason
         
-        # 从signal中提取交易方向（buy/sell）
-        # buy_to_long, buy_to_short -> buy
-        # sell_to_long, sell_to_short, close_position, stop_loss, take_profit -> sell
-        trade_side_direction = 'sell'  # 默认值（卖出）
-        if trade_signal_final:
-            signal_lower = trade_signal_final.lower()
-            if signal_lower.startswith('buy'):
-                trade_side_direction = 'buy'
-            elif signal_lower.startswith('sell') or signal_lower in ['close_position', 'stop_loss', 'take_profit']:
-                trade_side_direction = 'sell'
+        # 【卖出方法中统一使用'sell'】
+        # 根据方法文档：trades表的side字段统一使用'sell'（平多和平空都使用sell）
+        # 不再根据signal判断，始终使用'sell'
+        trade_side_direction = 'sell'
         
         # 确保position_side为大写（LONG/SHORT）
         trade_position_side_final_upper = trade_position_side_final.upper() if trade_position_side_final else position_side
