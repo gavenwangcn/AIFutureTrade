@@ -123,6 +123,38 @@ class StrategyTrader(Trader):
             normalized_decisions[symbol] = normalized_decision
         return normalized_decisions
     
+    def _normalize_quantity_to_int(self, decisions: Dict) -> Dict:
+        """
+        将decisions中的quantity字段转换为整数（用于卖出策略）
+        
+        卖出策略通常需要平仓，quantity应该是整数数量的合约。
+        
+        Args:
+            decisions: 决策字典，key为交易对符号，value为决策详情
+            
+        Returns:
+            规范化后的决策字典，quantity字段转换为整数
+        """
+        normalized_decisions = {}
+        for symbol, decision in decisions.items():
+            normalized_decision = decision.copy()
+            # 如果decision中有quantity字段，转换为整数
+            if 'quantity' in normalized_decision and normalized_decision['quantity'] is not None:
+                try:
+                    quantity = float(normalized_decision['quantity'])
+                    if quantity <= 0:
+                        normalized_decision['quantity'] = 0
+                    else:
+                        # 转换为整数（向下取整，因为不能卖出超过持仓的数量）
+                        normalized_decision['quantity'] = int(quantity)
+                        logger.debug(f"[StrategyTrader] 将 {symbol} 的quantity转换为整数: {quantity} -> {normalized_decision['quantity']}")
+                except (ValueError, TypeError) as e:
+                    logger.warning(f"[StrategyTrader] 无法转换 {symbol} 的quantity: {normalized_decision.get('quantity')}, 错误: {e}")
+                    # 如果转换失败，设置为0
+                    normalized_decision['quantity'] = 0
+            normalized_decisions[symbol] = normalized_decision
+        return normalized_decisions
+    
     def make_buy_decision(
         self,
         candidates: List[Dict],

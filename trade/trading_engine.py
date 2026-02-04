@@ -3719,14 +3719,29 @@ class TradingEngine:
                 logger.info(f"@API@ [Model {self.model_id}] [change_initial_leverage] === 杠杆设置成功 ==="
                           f" | symbol={symbol} | leverage={leverage}")
 
-                # 设置为逐仓模式
-                logger.info(f"@API@ [Model {self.model_id}] [change_margin_isolated] === 准备设置逐仓模式 ==="
-                          f" | symbol={symbol}")
+                # ⚠️ 重要：只有真实交易模式（real）才需要设置逐仓模式，虚拟交易模式（test/virtual）不需要设置
+                if trade_mode == 'real':
+                    # 设置为逐仓模式
+                    logger.info(f"@API@ [Model {self.model_id}] [change_margin_isolated] === 准备设置逐仓模式 ==="
+                              f" | symbol={symbol} | trade_mode={trade_mode}")
 
-                binance_client.change_margin_isolated(symbol=symbol)
-
-                logger.info(f"@API@ [Model {self.model_id}] [change_margin_isolated] === 逐仓模式设置成功 ==="
-                          f" | symbol={symbol}")
+                    try:
+                        binance_client.change_margin_isolated(symbol=symbol)
+                        logger.info(f"@API@ [Model {self.model_id}] [change_margin_isolated] === 逐仓模式设置成功 ==="
+                                  f" | symbol={symbol}")
+                    except Exception as margin_error:
+                        # 如果设置逐仓模式失败，记录错误但继续执行交易（可能是已经设置为逐仓模式）
+                        error_msg = str(margin_error)
+                        if 'No need to change margin type' in error_msg or '-4046' in error_msg:
+                            logger.info(f"@API@ [Model {self.model_id}] [change_margin_isolated] === 逐仓模式已设置，无需重复设置 ==="
+                                      f" | symbol={symbol} | error={error_msg}")
+                        else:
+                            logger.warning(f"@API@ [Model {self.model_id}] [change_margin_isolated] === 逐仓模式设置失败，继续执行交易 ==="
+                                         f" | symbol={symbol} | error={error_msg}")
+                else:
+                    # 虚拟交易模式不需要设置逐仓模式
+                    logger.info(f"@API@ [Model {self.model_id}] [change_margin_isolated] === 跳过设置逐仓模式（虚拟交易模式） ==="
+                              f" | symbol={symbol} | trade_mode={trade_mode}")
 
                 # 然后执行交易
                 # SDK 调用时使用合约数量（position_amt），不是 USDT 数量（quantity）

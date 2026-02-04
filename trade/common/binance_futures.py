@@ -1252,6 +1252,10 @@ class BinanceFuturesOrderClient(_BinanceFuturesBase):
 
             if code == 200:
                 logger.info(f"[Binance Futures] 成功变换为逐仓模式，交易对: {formatted_symbol}，响应: {msg}")
+            elif code == -4046 or (msg and 'No need to change margin type' in msg):
+                # ⚠️ 重要：-4046 错误表示逐仓模式已经设置，无需重复设置，这是正常情况，不应该抛出异常
+                logger.info(f"[Binance Futures] 逐仓模式已设置，无需重复设置，交易对: {formatted_symbol}，code: {code}，msg: {msg}")
+                return data
             else:
                 logger.warning(f"[Binance Futures] 变换逐仓模式返回非200状态码，交易对: {formatted_symbol}，code: {code}，msg: {msg}")
 
@@ -1261,6 +1265,12 @@ class BinanceFuturesOrderClient(_BinanceFuturesBase):
             logger.error(f"[Binance Futures] 变换逐仓模式参数错误: {ve}")
             raise
         except Exception as e:
+            error_msg = str(e)
+            # ⚠️ 重要：对于 -4046 错误（No need to change margin type），这是正常情况，不应该抛出异常
+            if '-4046' in error_msg or 'No need to change margin type' in error_msg:
+                logger.info(f"[Binance Futures] 逐仓模式已设置，无需重复设置，交易对: {formatted_symbol}，错误: {error_msg}")
+                # 返回一个表示成功的响应，避免上层代码认为这是错误
+                return {'code': 200, 'msg': 'No need to change margin type (already isolated)'}
             logger.error(f"[Binance Futures] 变换逐仓模式失败: {e}")
             raise
 
