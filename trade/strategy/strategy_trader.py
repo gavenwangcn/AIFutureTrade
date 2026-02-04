@@ -384,13 +384,32 @@ class StrategyTrader(Trader):
                     conditional_orders=conditional_orders
                 )
 
+                # ⚠️ 重要：记录策略代码执行后的返回结果（info级别日志，便于排查问题）
                 if not decision_result or not isinstance(decision_result, dict):
+                    logger.info(f"[StrategyTrader] [Model {effective_model_id}] [买入策略执行] 策略 {strategy_name} (优先级: {priority}) 返回结果无效或为空，继续下一个策略")
                     logger.debug(f"[StrategyTrader] [Model {effective_model_id}] 策略 {strategy_name} 返回结果无效，继续下一个策略")
                     continue
 
                 decisions = decision_result.get('decisions', {}) or {}
                 if not isinstance(decisions, dict) or not decisions:
+                    logger.info(f"[StrategyTrader] [Model {effective_model_id}] [买入策略执行] 策略 {strategy_name} (优先级: {priority}) 返回的decisions为空或格式不正确，继续下一个策略")
                     continue
+                
+                # ⚠️ 重要：记录策略代码返回的交易信号信息（info级别日志）
+                logger.info(f"[StrategyTrader] [Model {effective_model_id}] [买入策略执行] ✓ 策略 {strategy_name} (优先级: {priority}) 执行成功，返回 {len(decisions)} 个交易信号决策")
+                
+                # 详细记录每个交易信号的信息
+                for symbol, decision in decisions.items():
+                    if isinstance(decision, dict):
+                        signal = decision.get('signal', 'N/A')
+                        quantity = decision.get('quantity', 'N/A')
+                        leverage = decision.get('leverage', 'N/A')
+                        justification = decision.get('justification', 'N/A')
+                        logger.info(
+                            f"[StrategyTrader] [Model {effective_model_id}] [买入策略执行] [交易信号] "
+                            f"策略={strategy_name}, Symbol={symbol}, Signal={signal}, "
+                            f"Quantity={quantity}, Leverage={leverage}, Justification={justification}"
+                        )
 
                 # 根据价格动态调整quantity精度
                 normalized_decisions = self._normalize_quantity_by_price(decisions, filtered_market_state)
@@ -426,7 +445,12 @@ class StrategyTrader(Trader):
 
                     sig = (dec.get('signal') or '').lower()
                     if sig not in valid_signals:
+                        logger.debug(f"[StrategyTrader] [Model {effective_model_id}] 跳过 {sym_upper}: 信号不在有效列表中 (signal={sig}, valid_signals={valid_signals})")
                         continue
+                    
+                    # ⚠️ 重要：buy_to_long 和 buy_to_short 是有效的买入信号，会被接受并继续处理
+                    # 这些信号会被提交给后续策略执行流程，生成策略信息和交易信息
+                    logger.info(f"[StrategyTrader] [Model {effective_model_id}] ✓ 接受有效买入信号: {sym_upper} -> {sig} (quantity={dec.get('quantity')}, leverage={dec.get('leverage')})")
 
                     # 预估资金占用，若超过剩余余额则跳过该symbol（不影响其他symbol）
                     required_capital = _estimate_required_capital(sym_upper, dec, filtered_market_state)
@@ -652,13 +676,32 @@ class StrategyTrader(Trader):
                     conditional_orders=conditional_orders
                 )
 
+                # ⚠️ 重要：记录策略代码执行后的返回结果（info级别日志，便于排查问题）
                 if not decision_result or not isinstance(decision_result, dict):
+                    logger.info(f"[StrategyTrader] [Model {effective_model_id}] [卖出策略执行] 策略 {strategy_name} (优先级: {priority}) 返回结果无效或为空，继续下一个策略")
                     logger.debug(f"[StrategyTrader] [Model {effective_model_id}] 策略 {strategy_name} 返回结果无效，继续下一个策略")
                     continue
 
                 decisions = decision_result.get('decisions', {}) or {}
                 if not isinstance(decisions, dict) or not decisions:
+                    logger.info(f"[StrategyTrader] [Model {effective_model_id}] [卖出策略执行] 策略 {strategy_name} (优先级: {priority}) 返回的decisions为空或格式不正确，继续下一个策略")
                     continue
+                
+                # ⚠️ 重要：记录策略代码返回的交易信号信息（info级别日志）
+                logger.info(f"[StrategyTrader] [Model {effective_model_id}] [卖出策略执行] ✓ 策略 {strategy_name} (优先级: {priority}) 执行成功，返回 {len(decisions)} 个交易信号决策")
+                
+                # 详细记录每个交易信号的信息
+                for symbol, decision in decisions.items():
+                    if isinstance(decision, dict):
+                        signal = decision.get('signal', 'N/A')
+                        quantity = decision.get('quantity', 'N/A')
+                        price = decision.get('price', 'N/A')
+                        reason = decision.get('reason', decision.get('justification', 'N/A'))
+                        logger.info(
+                            f"[StrategyTrader] [Model {effective_model_id}] [卖出策略执行] [交易信号] "
+                            f"策略={strategy_name}, Symbol={symbol}, Signal={signal}, "
+                            f"Quantity={quantity}, Price={price}, Reason={reason}"
+                        )
 
                 normalized_decisions = self._normalize_quantity_to_int(decisions)
 

@@ -75,6 +75,7 @@ def parse_signal_to_position_side(signal: str) -> Tuple[str, str]:
     """
     signal_lower = signal.lower()
     
+    # ⚠️ 重要：buy_to_long 和 buy_to_short 是有效的买入信号
     if signal_lower == 'buy_to_long':
         return 'LONG', 'buy_to_long'
     elif signal_lower == 'buy_to_short':
