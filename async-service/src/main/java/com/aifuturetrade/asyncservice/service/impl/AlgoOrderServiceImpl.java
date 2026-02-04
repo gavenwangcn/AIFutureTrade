@@ -2,23 +2,17 @@ package com.aifuturetrade.asyncservice.service.impl;
 
 import com.aifuturetrade.asyncservice.api.binance.BinanceFuturesBase;
 import com.aifuturetrade.asyncservice.api.binance.BinanceFuturesClient;
+import com.aifuturetrade.asyncservice.api.binance.BinanceFuturesOrderClient;
 import com.aifuturetrade.asyncservice.dao.mapper.*;
 import com.aifuturetrade.asyncservice.entity.*;
 import com.aifuturetrade.asyncservice.service.AlgoOrderProcessResult;
 import com.aifuturetrade.asyncservice.service.AlgoOrderService;
-import com.binance.connector.client.common.ApiResponse;
-import com.binance.connector.client.derivatives_trading_usds_futures.rest.model.NewOrderRequest;
-import com.binance.connector.client.derivatives_trading_usds_futures.rest.model.NewOrderResponse;
-import com.binance.connector.client.derivatives_trading_usds_futures.rest.model.QueryAllAlgoOrdersResponse;
-import com.binance.connector.client.derivatives_trading_usds_futures.rest.model.QueryAllAlgoOrdersResponseInner;
-import com.binance.connector.client.derivatives_trading_usds_futures.rest.model.Side;
-import com.binance.connector.client.derivatives_trading_usds_futures.rest.model.PositionSide;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
-
+import com.aifuturetrade.asyncservice.dao.mapper.StrategyDecisionMapper;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import java.time.LocalDateTime;
@@ -66,7 +60,7 @@ public class AlgoOrderServiceImpl implements AlgoOrderService {
     private AccountValueHistoryMapper accountValueHistoryMapper;
     
     @Autowired
-    private com.aifuturetrade.asyncservice.dao.mapper.StrategyDecisionMapper strategyDecisionMapper;
+    private StrategyDecisionMapper strategyDecisionMapper;
     
     @Value("${async.algo-order.interval-seconds:2}")
     private int intervalSeconds;
@@ -87,6 +81,9 @@ public class AlgoOrderServiceImpl implements AlgoOrderService {
     
     // 缓存每个模型的 Binance 客户端（使用模型自己的 API Key）
     private final Map<String, BinanceFuturesBase> modelClients = new ConcurrentHashMap<>();
+
+    // 缓存每个模型的 Binance 订单客户端（用于订单和交易操作）
+    private final Map<String, BinanceFuturesOrderClient> modelOrderClients = new ConcurrentHashMap<>();
     
     @PostConstruct
     public void init() {
@@ -100,6 +97,7 @@ public class AlgoOrderServiceImpl implements AlgoOrderService {
         stopScheduler();
         // 清理客户端缓存
         modelClients.clear();
+        modelOrderClients.clear();
         log.info("[AlgoOrderService] 👋 条件订单服务已销毁");
     }
     
@@ -217,69 +215,39 @@ public class AlgoOrderServiceImpl implements AlgoOrderService {
         log.debug("[AlgoOrderService] [real模式] 处理条件订单: orderId={}, symbol={}, positionSide={}, triggerPrice={}",
                 orderId, symbol, positionSide, triggerPrice);
         
-        // 获取Binance客户端
-        BinanceFuturesBase client = getOrCreateClient(model);
-        if (client == null) {
-            log.warn("[AlgoOrderService] [real模式] 无法创建Binance客户端，跳过: orderId={}", orderId);
+        // 获取Binance订单客户端
+        BinanceFuturesOrderClient orderClient = getOrCreateOrderClient(model);
+        if (orderClient == null) {
+            log.warn("[AlgoOrderService] [real模式] 无法创建Binance订单客户端，跳过: orderId={}", orderId);
             result.setSkippedCount(result.getSkippedCount() + 1);
             return;
         }
-        
-        // 查询SDK接口的条件单信息
+
+        // 查询SDK接口的条件单信息（使用单个algoId查询）
         try {
-            String formattedSymbol = formatSymbol(symbol);
-            ApiResponse<QueryAllAlgoOrdersResponse> response = 
-                client.getRestApi().queryAllAlgoOrders(formattedSymbol, null, null, null, 0L, 100L, 5000L);
-            
-            if (response == null) {
-                log.warn("[AlgoOrderService] [real模式] SDK查询条件单返回为空: orderId={}, symbol={}", orderId, symbol);
-                result.setSkippedCount(result.getSkippedCount() + 1);
-                return;
-            }
-            
-            // 检查HTTP状态码
-            int httpStatusCode = response.getStatusCode();
-            if (httpStatusCode != 200) {
-                log.warn("[AlgoOrderService] [real模式] SDK查询条件单返回非200状态码: orderId={}, symbol={}, statusCode={}", 
-                        orderId, symbol, httpStatusCode);
-                result.setSkippedCount(result.getSkippedCount() + 1);
-                return;
-            }
-            
-            QueryAllAlgoOrdersResponse responseData = response.getData();
-            
-            if (responseData == null || responseData.isEmpty()) {
-                log.debug("[AlgoOrderService] [real模式] SDK中未找到条件单: orderId={}, symbol={}", orderId, symbol);
-                result.setSkippedCount(result.getSkippedCount() + 1);
-                return;
-            }
-            
-            // 查找对应的条件单（通过algoId匹配）
-            QueryAllAlgoOrdersResponseInner sdkOrder = null;
             Long dbAlgoId = order.getAlgoId();
-            if (dbAlgoId != null) {
-                for (QueryAllAlgoOrdersResponseInner sdkOrderItem : responseData) {
-                    if (sdkOrderItem.getAlgoId() != null && sdkOrderItem.getAlgoId().equals(dbAlgoId)) {
-                        sdkOrder = sdkOrderItem;
-                        break;
-                    }
-                }
-            }
-            
-            if (sdkOrder == null) {
-                log.debug("[AlgoOrderService] [real模式] SDK中未找到匹配的条件单: orderId={}, algoId={}, symbol={}", 
-                        orderId, dbAlgoId, symbol);
+            if (dbAlgoId == null) {
+                log.warn("[AlgoOrderService] [real模式] 订单缺少algoId，跳过: orderId={}", orderId);
                 result.setSkippedCount(result.getSkippedCount() + 1);
                 return;
             }
-            
+
+            // 使用单个algoId查询接口
+            Map<String, Object> sdkOrderMap = orderClient.queryAlgoOrder(dbAlgoId, 5000L);
+
+            if (sdkOrderMap == null) {
+                log.debug("[AlgoOrderService] [real模式] SDK中未找到条件单: orderId={}, algoId={}", orderId, dbAlgoId);
+                result.setSkippedCount(result.getSkippedCount() + 1);
+                return;
+            }
+
             // 获取SDK返回的状态
-            String sdkStatus = sdkOrder.getAlgoStatus();
+            String sdkStatus = (String) sdkOrderMap.get("algoStatus");
             if (sdkStatus == null) {
                 sdkStatus = "";
             }
-            
-            log.debug("[AlgoOrderService] [real模式] SDK条件单状态: orderId={}, algoId={}, sdkStatus={}", 
+
+            log.debug("[AlgoOrderService] [real模式] SDK条件单状态: orderId={}, algoId={}, sdkStatus={}",
                     orderId, dbAlgoId, sdkStatus);
             
             // 如果状态不为"new"，说明条件单已在币安侧执行，需要构建trades记录
@@ -296,9 +264,9 @@ public class AlgoOrderServiceImpl implements AlgoOrderService {
                                 orderId, sdkStatus);
 
                         // 从SDK返回的数据中获取成交信息
-                        String actualPriceStr = sdkOrder.getActualPrice();
-                        String quantityStr = sdkOrder.getQuantity();
-                        String actualOrderIdStr = sdkOrder.getActualOrderId();
+                        String actualPriceStr = (String) sdkOrderMap.get("actualPrice");
+                        String quantityStr = (String) sdkOrderMap.get("quantity");
+                        Object actualOrderIdObj = sdkOrderMap.get("actualOrderId");
 
                         if (actualPriceStr != null && !actualPriceStr.isEmpty()) {
                             try {
@@ -308,8 +276,12 @@ public class AlgoOrderServiceImpl implements AlgoOrderService {
                                     executedQuantity = Double.parseDouble(quantityStr);
                                 }
                                 Long actualOrderId = null;
-                                if (actualOrderIdStr != null && !actualOrderIdStr.isEmpty()) {
-                                    actualOrderId = Long.parseLong(actualOrderIdStr);
+                                if (actualOrderIdObj != null) {
+                                    if (actualOrderIdObj instanceof Long) {
+                                        actualOrderId = (Long) actualOrderIdObj;
+                                    } else if (actualOrderIdObj instanceof String) {
+                                        actualOrderId = Long.parseLong((String) actualOrderIdObj);
+                                    }
                                 }
 
                                 // 构建trades记录（不调用平仓接口）
@@ -635,36 +607,38 @@ public class AlgoOrderServiceImpl implements AlgoOrderService {
         
         if (!useTestMode) {
             // real模式：调用真实交易接口
-            BinanceFuturesBase client = getOrCreateClient(model);
-            if (client == null) {
-                throw new RuntimeException("无法创建 Binance 客户端");
+            BinanceFuturesOrderClient orderClient = getOrCreateOrderClient(model);
+            if (orderClient == null) {
+                throw new RuntimeException("无法创建 Binance 订单客户端");
             }
-            
+
             try {
-                NewOrderRequest orderRequest = new NewOrderRequest();
-                orderRequest.setSymbol(symbol);
-                orderRequest.setSide("sell".equalsIgnoreCase(side) ? Side.SELL : Side.BUY);
-                orderRequest.setType("MARKET");
-                orderRequest.setQuantity(quantity);
-                
-                if ("LONG".equalsIgnoreCase(positionSide)) {
-                    orderRequest.setPositionSide(PositionSide.LONG);
-                } else if ("SHORT".equalsIgnoreCase(positionSide)) {
-                    orderRequest.setPositionSide(PositionSide.SHORT);
-                }
-                
-                ApiResponse<NewOrderResponse> response = client.getRestApi().newOrder(orderRequest);
-                if (response != null && response.getData() != null) {
-                    NewOrderResponse orderResponse = response.getData();
-                    binanceOrderId = orderResponse.getOrderId();
+                // 使用 BinanceFuturesOrderClient 的 marketTrade 方法
+                Map<String, Object> tradeResult = orderClient.marketTrade(symbol, side, quantity, positionSide);
+
+                // 从响应中获取订单信息
+                if (tradeResult != null) {
+                    Object orderIdObj = tradeResult.get("orderId");
+                    if (orderIdObj != null) {
+                        if (orderIdObj instanceof Long) {
+                            binanceOrderId = (Long) orderIdObj;
+                        } else if (orderIdObj instanceof String) {
+                            binanceOrderId = Long.parseLong((String) orderIdObj);
+                        }
+                    }
+
                     // 从响应中获取实际成交价格和数量
-                    if (orderResponse.getAvgPrice() != null) {
-                        executedPrice = Double.parseDouble(orderResponse.getAvgPrice());
+                    String avgPriceStr = (String) tradeResult.get("avgPrice");
+                    if (avgPriceStr != null && !avgPriceStr.isEmpty()) {
+                        executedPrice = Double.parseDouble(avgPriceStr);
                     }
-                    if (orderResponse.getExecutedQty() != null) {
-                        executedQuantity = Double.parseDouble(orderResponse.getExecutedQty());
+
+                    String executedQtyStr = (String) tradeResult.get("executedQty");
+                    if (executedQtyStr != null && !executedQtyStr.isEmpty()) {
+                        executedQuantity = Double.parseDouble(executedQtyStr);
                     }
-                    log.info("[AlgoOrderService] ✅ 交易执行成功: orderId={}, binanceOrderId={}, executedPrice={}, executedQuantity={}", 
+
+                    log.info("[AlgoOrderService] ✅ 交易执行成功: orderId={}, binanceOrderId={}, executedPrice={}, executedQuantity={}",
                             orderId, binanceOrderId, executedPrice, executedQuantity);
                 } else {
                     throw new RuntimeException("交易接口返回为空");
@@ -962,31 +936,66 @@ public class AlgoOrderServiceImpl implements AlgoOrderService {
      */
     private BinanceFuturesBase getOrCreateClient(ModelDO model) {
         String modelId = model.getId();
-        
+
         // 从缓存中获取
         BinanceFuturesBase client = modelClients.get(modelId);
         if (client != null) {
             return client;
         }
-        
+
         // 创建新的客户端
         try {
             String apiKey = model.getApiKey();
             String apiSecret = model.getApiSecret();
-            
+
             if (apiKey == null || apiKey.isEmpty() || apiSecret == null || apiSecret.isEmpty()) {
                 log.warn("[AlgoOrderService] 模型未配置API密钥，使用默认密钥: modelId={}", modelId);
                 apiKey = defaultApiKey;
                 apiSecret = defaultSecretKey;
             }
-            
+
             client = new BinanceFuturesClient(apiKey, apiSecret, quoteAsset, null, false);
             modelClients.put(modelId, client);
-            
+
             log.debug("[AlgoOrderService] 创建 Binance 客户端: modelId={}", modelId);
             return client;
         } catch (Exception e) {
-            log.error("[AlgoOrderService] 创建 Binance 客户端失败: modelId={}, error={}", 
+            log.error("[AlgoOrderService] 创建 Binance 客户端失败: modelId={}, error={}",
+                    modelId, e.getMessage());
+            return null;
+        }
+    }
+
+    /**
+     * 获取或创建 Binance 订单客户端（使用模型自己的 API Key）
+     */
+    private BinanceFuturesOrderClient getOrCreateOrderClient(ModelDO model) {
+        String modelId = model.getId();
+
+        // 从缓存中获取
+        BinanceFuturesOrderClient orderClient = modelOrderClients.get(modelId);
+        if (orderClient != null) {
+            return orderClient;
+        }
+
+        // 创建新的订单客户端
+        try {
+            String apiKey = model.getApiKey();
+            String apiSecret = model.getApiSecret();
+
+            if (apiKey == null || apiKey.isEmpty() || apiSecret == null || apiSecret.isEmpty()) {
+                log.warn("[AlgoOrderService] 模型未配置API密钥，使用默认密钥: modelId={}", modelId);
+                apiKey = defaultApiKey;
+                apiSecret = defaultSecretKey;
+            }
+
+            orderClient = new BinanceFuturesOrderClient(apiKey, apiSecret, quoteAsset, null, false);
+            modelOrderClients.put(modelId, orderClient);
+
+            log.debug("[AlgoOrderService] 创建 Binance 订单客户端: modelId={}", modelId);
+            return orderClient;
+        } catch (Exception e) {
+            log.error("[AlgoOrderService] 创建 Binance 订单客户端失败: modelId={}, error={}",
                     modelId, e.getMessage());
             return null;
         }
