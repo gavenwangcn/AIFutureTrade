@@ -212,8 +212,9 @@ public class AlgoOrderServiceImpl implements AlgoOrderService {
         String symbol = order.getSymbol();
         String positionSide = order.getPositionSide();
         Double triggerPrice = order.getTriggerPrice();
-        
-        log.debug("[AlgoOrderService] [real模式] 处理条件订单: orderId={}, symbol={}, positionSide={}, triggerPrice={}", 
+        Double quantity = order.getQuantity();
+
+        log.debug("[AlgoOrderService] [real模式] 处理条件订单: orderId={}, symbol={}, positionSide={}, triggerPrice={}",
                 orderId, symbol, positionSide, triggerPrice);
         
         // 获取Binance客户端
@@ -281,132 +282,113 @@ public class AlgoOrderServiceImpl implements AlgoOrderService {
             log.debug("[AlgoOrderService] [real模式] SDK条件单状态: orderId={}, algoId={}, sdkStatus={}", 
                     orderId, dbAlgoId, sdkStatus);
             
-            // 如果状态不为"new"，更新数据库状态
+            // 如果状态不为"new"，说明条件单已在币安侧执行，需要构建trades记录
             if (!"new".equalsIgnoreCase(sdkStatus)) {
-                // 更新数据库状态
                 try {
                     String dbStatus = mapSdkStatusToDbStatus(sdkStatus);
-                    algoOrderMapper.updateAlgoStatus(orderId, dbStatus);
-                    log.info("[AlgoOrderService] [real模式] 已更新数据库状态: orderId={}, sdkStatus={}, dbStatus={}", 
-                            orderId, sdkStatus, dbStatus);
-                    result.setSkippedCount(result.getSkippedCount() + 1);
+
+                    // 检查是否为已成交状态且尚未创建trades记录
+                    boolean isExecutedStatus = "executed".equalsIgnoreCase(dbStatus) ||
+                                              "triggered".equalsIgnoreCase(dbStatus);
+
+                    if (isExecutedStatus && order.getTradeId() == null) {
+                        log.info("[AlgoOrderService] [real模式] 检测到已成交订单，开始构建trades记录: orderId={}, sdkStatus={}",
+                                orderId, sdkStatus);
+
+                        // 从SDK返回的数据中获取成交信息
+                        String actualPriceStr = sdkOrder.getActualPrice();
+                        String quantityStr = sdkOrder.getQuantity();
+                        String actualOrderIdStr = sdkOrder.getActualOrderId();
+
+                        if (actualPriceStr != null && !actualPriceStr.isEmpty()) {
+                            try {
+                                Double actualPrice = Double.parseDouble(actualPriceStr);
+                                Double executedQuantity = quantity;
+                                if (quantityStr != null && !quantityStr.isEmpty()) {
+                                    executedQuantity = Double.parseDouble(quantityStr);
+                                }
+                                Long actualOrderId = null;
+                                if (actualOrderIdStr != null && !actualOrderIdStr.isEmpty()) {
+                                    actualOrderId = Long.parseLong(actualOrderIdStr);
+                                }
+
+                                // 构建trades记录（不调用平仓接口）
+                                String tradeId = buildTradeRecordFromSdkData(order, model, actualPrice, executedQuantity, actualOrderId);
+
+                                // 更新algo_order表状态和trade_id
+                                algoOrderMapper.updateTradeIdAndStatus(orderId, tradeId, dbStatus);
+                                log.info("[AlgoOrderService] [real模式] ✅ 已构建trades记录并更新状态: orderId={}, tradeId={}, dbStatus={}",
+                                        orderId, tradeId, dbStatus);
+
+                                // 更新strategy_decisions表状态为EXECUTED
+                                String strategyDecisionId = order.getStrategyDecisionId();
+                                if (strategyDecisionId != null && !strategyDecisionId.isEmpty()) {
+                                    strategyDecisionMapper.updateStrategyDecisionStatus(
+                                            strategyDecisionId,
+                                            "EXECUTED",
+                                            tradeId,
+                                            null
+                                    );
+                                    log.info("[AlgoOrderService] [real模式] ✅ 已更新strategy_decisions表状态为EXECUTED: decisionId={}, tradeId={}",
+                                            strategyDecisionId, tradeId);
+                                }
+
+                                result.setExecutedCount(result.getExecutedCount() + 1);
+                            } catch (NumberFormatException e) {
+                                log.error("[AlgoOrderService] [real模式] 解析SDK返回的价格或数量失败: orderId={}, actualPrice={}, quantity={}, error={}",
+                                        orderId, actualPriceStr, quantityStr, e.getMessage());
+                                // 只更新状态，不构建trades记录
+                                algoOrderMapper.updateAlgoStatus(orderId, dbStatus);
+                                result.setSkippedCount(result.getSkippedCount() + 1);
+                            } catch (Exception e) {
+                                log.error("[AlgoOrderService] [real模式] 构建trades记录失败: orderId={}, error={}",
+                                        orderId, e.getMessage(), e);
+
+                                // 提取详细错误信息
+                                String errorReason = extractErrorReason(e);
+
+                                // 更新订单状态为"failed"并记录错误原因
+                                algoOrderMapper.updateAlgoStatusWithError(orderId, "failed", errorReason);
+
+                                // 更新strategy_decisions表状态为REJECTED
+                                String strategyDecisionId = order.getStrategyDecisionId();
+                                if (strategyDecisionId != null && !strategyDecisionId.isEmpty()) {
+                                    strategyDecisionMapper.updateStrategyDecisionStatus(
+                                            strategyDecisionId,
+                                            "REJECTED",
+                                            null,
+                                            errorReason
+                                    );
+                                }
+
+                                result.setFailedCount(result.getFailedCount() + 1);
+                            }
+                        } else {
+                            // 没有实际成交价格，只更新状态
+                            log.warn("[AlgoOrderService] [real模式] SDK未返回实际成交价格，只更新状态: orderId={}, sdkStatus={}",
+                                    orderId, sdkStatus);
+                            algoOrderMapper.updateAlgoStatus(orderId, dbStatus);
+                            result.setSkippedCount(result.getSkippedCount() + 1);
+                        }
+                    } else {
+                        // 非成交状态或已有trades记录，只更新状态
+                        algoOrderMapper.updateAlgoStatus(orderId, dbStatus);
+                        log.info("[AlgoOrderService] [real模式] 已更新数据库状态: orderId={}, sdkStatus={}, dbStatus={}",
+                                orderId, sdkStatus, dbStatus);
+                        result.setSkippedCount(result.getSkippedCount() + 1);
+                    }
                 } catch (Exception e) {
-                    log.error("[AlgoOrderService] [real模式] 更新数据库状态失败: orderId={}, sdkStatus={}, error={}", 
+                    log.error("[AlgoOrderService] [real模式] 处理已成交订单失败: orderId={}, sdkStatus={}, error={}",
                             orderId, sdkStatus, e.getMessage(), e);
                     result.setFailedCount(result.getFailedCount() + 1);
                 }
                 return;
             }
-            
-            // 状态为"new"，继续处理价格判断逻辑
-            // 获取当前市场价格
-            Double currentPrice = getCurrentPrice(symbol, model);
-            if (currentPrice == null || currentPrice <= 0) {
-                log.warn("[AlgoOrderService] [real模式] 无法获取市场价格，跳过: symbol={}", symbol);
-                result.setSkippedCount(result.getSkippedCount() + 1);
-                return;
-            }
-            
-            // 判断是否触发成交条件
-            // LONG类型：当挂单价格高于市场价格时（triggerPrice > currentPrice），执行市场价格卖出
-            // SHORT类型：当挂单价格低于市场价时（triggerPrice < currentPrice），执行市场价格卖出
-            boolean shouldTrigger = false;
-            if ("LONG".equalsIgnoreCase(positionSide)) {
-                // LONG持仓：挂单价格 > 市场价格 就成交，成交价为市场价
-                shouldTrigger = triggerPrice > currentPrice;
-            } else if ("SHORT".equalsIgnoreCase(positionSide)) {
-                // SHORT持仓：挂单价格 < 市场价格 就成交，成交价为市场价
-                shouldTrigger = triggerPrice < currentPrice;
-            }
-            
-            if (!shouldTrigger) {
-                log.debug("[AlgoOrderService] [real模式] 条件未触发: symbol={}, currentPrice={}, triggerPrice={}, positionSide={}", 
-                        symbol, currentPrice, triggerPrice, positionSide);
-                return;
-            }
-            
-            log.info("[AlgoOrderService] [real模式] ✅ 条件订单触发: orderId={}, symbol={}, currentPrice={}, triggerPrice={}, positionSide={}", 
-                    orderId, symbol, currentPrice, triggerPrice, positionSide);
-            
-            result.setTriggeredCount(result.getTriggeredCount() + 1);
-            
-            // 更新订单状态为"triggered"
-            try {
-                algoOrderMapper.updateAlgoStatus(orderId, "triggered");
-                log.info("[AlgoOrderService] [real模式] 订单状态已更新为triggered: orderId={}", orderId);
-            } catch (Exception e) {
-                log.error("[AlgoOrderService] [real模式] 更新订单状态失败: orderId={}, error={}", orderId, e.getMessage());
-                result.setFailedCount(result.getFailedCount() + 1);
-                return;
-            }
-            
-            // 执行市场价格卖出交易
-            String tradeId = null;
-            try {
-                tradeId = executeMarketSellTrade(order, model, currentPrice, client);
-                result.setExecutedCount(result.getExecutedCount() + 1);
-                
-                // 更新订单状态为"executed"并关联trade_id
-                int updateCount = algoOrderMapper.updateTradeIdAndStatus(orderId, tradeId, "executed");
-                if (updateCount > 0) {
-                    log.info("[AlgoOrderService] [real模式] ✅ 交易执行完成，订单状态已更新为executed: orderId={}, tradeId={}, symbol={}", 
-                            orderId, tradeId, symbol);
-                } else {
-                    log.warn("[AlgoOrderService] [real模式] ⚠️ 交易执行完成，但更新订单状态失败: orderId={}, tradeId={}", 
-                            orderId, tradeId);
-                }
-                
-                // 更新strategy_decisions表状态为EXECUTED（如果有strategy_decision_id）
-                String strategyDecisionId = order.getStrategyDecisionId();
-                if (strategyDecisionId != null && !strategyDecisionId.isEmpty()) {
-                    try {
-                        strategyDecisionMapper.updateStrategyDecisionStatus(
-                                strategyDecisionId,
-                                "EXECUTED",
-                                tradeId,
-                                null  // error_reason = null，表示成功
-                        );
-                        log.info("[AlgoOrderService] [real模式] ✅ 已更新strategy_decisions表状态为EXECUTED: decisionId={}, tradeId={}", 
-                                strategyDecisionId, tradeId);
-                    } catch (Exception updateErr) {
-                        log.error("[AlgoOrderService] [real模式] ⚠️ 更新strategy_decisions表状态失败: decisionId={}, tradeId={}, error={}", 
-                                strategyDecisionId, tradeId, updateErr.getMessage(), updateErr);
-                    }
-                }
-            } catch (Exception e) {
-                log.error("[AlgoOrderService] [real模式] ❌ 交易执行失败: orderId={}, error={}", orderId, e.getMessage(), e);
-                result.setFailedCount(result.getFailedCount() + 1);
 
-                // 提取详细错误信息
-                String errorReason = extractErrorReason(e);
-
-                // 更新订单状态为"failed"并记录错误原因
-                try {
-                    algoOrderMapper.updateAlgoStatusWithError(orderId, "failed", errorReason);
-                    log.info("[AlgoOrderService] [real模式] 订单状态已更新为failed: orderId={}, errorReason={}", orderId, errorReason);
-                } catch (Exception updateEx) {
-                    log.error("[AlgoOrderService] [real模式] 更新订单状态为failed失败: orderId={}, error={}",
-                            orderId, updateEx.getMessage());
-                }
-                
-                // 更新strategy_decisions表状态为REJECTED（如果有strategy_decision_id）
-                String strategyDecisionId = order.getStrategyDecisionId();
-                if (strategyDecisionId != null && !strategyDecisionId.isEmpty()) {
-                    try {
-                        strategyDecisionMapper.updateStrategyDecisionStatus(
-                                strategyDecisionId,
-                                "REJECTED",
-                                tradeId,
-                                errorReason
-                        );
-                        log.info("[AlgoOrderService] [real模式] ✅ 已更新strategy_decisions表状态为REJECTED: decisionId={}, tradeId={}, errorReason={}",
-                                strategyDecisionId, tradeId, errorReason);
-                    } catch (Exception updateErr) {
-                        log.error("[AlgoOrderService] [real模式] ⚠️ 更新strategy_decisions表状态失败: decisionId={}, error={}",
-                                strategyDecisionId, updateErr.getMessage(), updateErr);
-                    }
-                }
-            }
+            // 状态为"new"，条件单尚未触发，跳过处理
+            log.debug("[AlgoOrderService] [real模式] 条件单状态为new，等待币安侧触发: orderId={}, symbol={}, triggerPrice={}",
+                    orderId, symbol, triggerPrice);
+            result.setSkippedCount(result.getSkippedCount() + 1);
             
         } catch (Exception e) {
             log.error("[AlgoOrderService] [real模式] 查询SDK条件单失败: orderId={}, symbol={}, error={}", 
@@ -435,16 +417,16 @@ public class AlgoOrderServiceImpl implements AlgoOrderService {
             return;
         }
         
-        // 判断是否触发成交条件（原有逻辑）
-        // LONG型：挂单价格要低于等于市场价才能成交（triggerPrice <= currentPrice），成交价为市场价
-        // SHORT型：挂单价格要高于等于市场价才能成交（triggerPrice >= currentPrice），成交价为市场价
+        // 判断是否触发成交条件
+        // LONG型：市场价格 <= 触发价格时触发（currentPrice <= triggerPrice），成交价为市场价
+        // SHORT型：市场价格 >= 触发价格时触发（currentPrice >= triggerPrice），成交价为市场价
         boolean shouldTrigger = false;
         if ("LONG".equalsIgnoreCase(positionSide)) {
-            // LONG持仓：挂单价格 <= 市场价格 就成交，成交价为市场价
-            shouldTrigger = triggerPrice <= currentPrice;
+            // LONG持仓：市场价格 <= 触发价格 就触发，成交价为市场价
+            shouldTrigger = currentPrice <= triggerPrice;
         } else if ("SHORT".equalsIgnoreCase(positionSide)) {
-            // SHORT持仓：挂单价格 >= 市场价格 就成交，成交价为市场价
-            shouldTrigger = triggerPrice >= currentPrice;
+            // SHORT持仓：市场价格 >= 触发价格 就触发，成交价为市场价
+            shouldTrigger = currentPrice >= triggerPrice;
         }
         
         if (!shouldTrigger) {
@@ -535,210 +517,6 @@ public class AlgoOrderServiceImpl implements AlgoOrderService {
                 }
             }
         }
-    }
-    
-    /**
-     * 执行市场价格卖出交易（real模式专用）
-     * 
-     * @param order 条件订单
-     * @param model 模型信息
-     * @param currentPrice 当前市场价格
-     * @param client Binance客户端
-     * @return tradeId
-     */
-    private String executeMarketSellTrade(AlgoOrderDO order, ModelDO model, Double currentPrice, BinanceFuturesBase client) {
-        String orderId = order.getId();
-        String modelId = order.getModelId();
-        String symbol = order.getSymbol().toUpperCase();
-        String positionSide = order.getPositionSide();
-        Double quantity = order.getQuantity();
-        String orderType = order.getOrderType();
-        
-        // 查询持仓信息
-        PortfolioDO position = portfolioMapper.selectPosition(modelId, symbol, positionSide);
-        if (position == null) {
-            throw new RuntimeException("持仓不存在: modelId=" + modelId + ", symbol=" + symbol + ", positionSide=" + positionSide);
-        }
-        
-        Double positionAmt = Math.abs(position.getPositionAmt());
-        Double avgPrice = position.getAvgPrice();
-        Double initialMargin = position.getInitialMargin();
-        Integer leverage = position.getLeverage() != null ? position.getLeverage() : model.getLeverage() != null ? model.getLeverage() : 10;
-        
-        // 验证数量
-        if (quantity > positionAmt) {
-            quantity = positionAmt;
-            log.warn("[AlgoOrderService] [real模式] 订单数量超过持仓数量，使用持仓数量: orderId={}, quantity={}, positionAmt={}", 
-                    orderId, order.getQuantity(), positionAmt);
-        }
-        
-        // 执行市场价格卖出交易
-        String formattedSymbol = formatSymbol(symbol);
-        Long binanceOrderId = null;
-        Double executedPrice = currentPrice;  // 使用市场价格作为成交价
-        Double executedQuantity = quantity;
-        
-        try {
-            NewOrderRequest orderRequest = new NewOrderRequest();
-            orderRequest.setSymbol(formattedSymbol);
-            orderRequest.setSide(Side.SELL);  // 统一使用SELL（市场价格卖出）
-            orderRequest.setType("MARKET");
-            orderRequest.setQuantity(quantity);
-            
-            if ("LONG".equalsIgnoreCase(positionSide)) {
-                orderRequest.setPositionSide(PositionSide.LONG);
-            } else if ("SHORT".equalsIgnoreCase(positionSide)) {
-                orderRequest.setPositionSide(PositionSide.SHORT);
-            }
-            
-            ApiResponse<NewOrderResponse> response = client.getRestApi().newOrder(orderRequest);
-            
-            // 检查HTTP状态码是否为200
-            if (response == null) {
-                throw new RuntimeException("交易接口返回为空");
-            }
-            
-            int httpStatusCode = response.getStatusCode();
-            if (httpStatusCode != 200) {
-                throw new RuntimeException("交易接口返回非200状态码: " + httpStatusCode);
-            }
-            
-            if (response.getData() != null) {
-                NewOrderResponse orderResponse = response.getData();
-                binanceOrderId = orderResponse.getOrderId();
-                // 从响应中获取实际成交价格和数量
-                if (orderResponse.getAvgPrice() != null) {
-                    executedPrice = Double.parseDouble(orderResponse.getAvgPrice());
-                }
-                if (orderResponse.getExecutedQty() != null) {
-                    executedQuantity = Double.parseDouble(orderResponse.getExecutedQty());
-                }
-                log.info("[AlgoOrderService] [real模式] ✅ 市场价格卖出交易执行成功: orderId={}, binanceOrderId={}, executedPrice={}, executedQuantity={}", 
-                        orderId, binanceOrderId, executedPrice, executedQuantity);
-            } else {
-                throw new RuntimeException("交易接口返回数据为空");
-            }
-        } catch (Exception e) {
-            log.error("[AlgoOrderService] [real模式] ❌ 市场价格卖出交易执行失败: orderId={}, error={}", orderId, e.getMessage(), e);
-            throw e;
-        }
-        
-        // 计算手续费和盈亏
-        Double tradeAmount = executedQuantity * executedPrice;
-        Double tradeFee = tradeAmount * tradeFeeRate;
-        
-        // 计算盈亏
-        Double grossPnl;
-        if ("LONG".equalsIgnoreCase(positionSide)) {
-            grossPnl = (executedPrice - avgPrice) * executedQuantity;
-        } else {
-            grossPnl = (avgPrice - executedPrice) * executedQuantity;
-        }
-        Double netPnl = grossPnl - tradeFee;
-        
-        // 生成trade_id
-        String tradeId = UUID.randomUUID().toString();
-        LocalDateTime now = LocalDateTime.now(ZoneId.of("Asia/Shanghai"));
-        
-        // 1. 插入trades表记录（价格为市场价格）
-        TradeDO trade = new TradeDO();
-        trade.setId(tradeId);
-        trade.setModelId(modelId);
-        trade.setFuture(symbol);
-        trade.setSignal(orderType.toLowerCase().contains("stop") ? "stop_loss" : "take_profit");
-        trade.setQuantity(executedQuantity);
-        trade.setPrice(executedPrice);  // 使用市场价格
-        trade.setLeverage(leverage);
-        trade.setSide("sell");  // 统一为sell
-        trade.setPositionSide(positionSide);
-        trade.setPnl(netPnl);
-        trade.setFee(tradeFee);
-        trade.setInitialMargin(initialMargin);
-        trade.setStrategyDecisionId(order.getStrategyDecisionId());
-        trade.setOrderId(binanceOrderId);
-        trade.setType(orderType);
-        trade.setTimestamp(now);
-        tradeMapper.insert(trade);
-        log.info("[AlgoOrderService] [real模式] ✅ 已插入trades表记录: tradeId={}, price={}", tradeId, executedPrice);
-        
-        // 2. 更新portfolios表（减少持仓数量）
-        Double newPositionAmt = positionAmt - executedQuantity;
-        if (newPositionAmt <= 0) {
-            // 持仓数量为0，删除持仓记录
-            portfolioMapper.deletePosition(modelId, symbol, positionSide);
-            log.info("[AlgoOrderService] [real模式] ✅ 已删除持仓记录: modelId={}, symbol={}, positionSide={}", 
-                    modelId, symbol, positionSide);
-        } else {
-            // 更新持仓数量
-            portfolioMapper.updatePositionAmt(modelId, symbol, positionSide, newPositionAmt);
-            log.info("[AlgoOrderService] [real模式] ✅ 已更新持仓数量: modelId={}, symbol={}, positionSide={}, newPositionAmt={}", 
-                    modelId, symbol, positionSide, newPositionAmt);
-        }
-        
-        // 3. 查询或创建account_values记录
-        String accountAlias = model.getAccountAlias() != null ? model.getAccountAlias() : "";
-        AccountValueDO accountValue = accountValueMapper.selectLatestByModelAndAlias(modelId, accountAlias);
-        
-        Double balance = model.getInitialCapital() != null ? model.getInitialCapital() : 10000.0;
-        Double availableBalance = balance;
-        Double crossWalletBalance = balance;
-        Double crossPnl = 0.0;
-        Double crossUnPnl = 0.0;
-        
-        if (accountValue != null) {
-            balance = accountValue.getBalance() != null ? accountValue.getBalance() : balance;
-            availableBalance = accountValue.getAvailableBalance() != null ? accountValue.getAvailableBalance() : availableBalance;
-            crossWalletBalance = accountValue.getCrossWalletBalance() != null ? accountValue.getCrossWalletBalance() : crossWalletBalance;
-            crossPnl = accountValue.getCrossPnl() != null ? accountValue.getCrossPnl() : 0.0;
-            crossUnPnl = accountValue.getCrossUnPnl() != null ? accountValue.getCrossUnPnl() : 0.0;
-        }
-        
-        // 更新账户价值
-        crossPnl = crossPnl + netPnl;  // 累加已实现盈亏
-        balance = balance + netPnl;    // 总余额增加净盈亏
-        availableBalance = availableBalance + netPnl;  // 可用余额增加净盈亏（简化：不考虑保证金释放）
-        crossWalletBalance = balance;   // 全仓余额等于总余额
-        
-        // 更新或插入account_values表
-        if (accountValue != null) {
-            // 更新现有记录
-            accountValueMapper.updateAccountValueById(accountValue.getId(), balance, availableBalance, 
-                    crossWalletBalance, crossPnl, crossUnPnl, now);
-        } else {
-            // 插入新记录
-            AccountValueDO newAccountValue = new AccountValueDO();
-            newAccountValue.setId(UUID.randomUUID().toString());
-            newAccountValue.setModelId(modelId);
-            newAccountValue.setAccountAlias(accountAlias);
-            newAccountValue.setBalance(balance);
-            newAccountValue.setAvailableBalance(availableBalance);
-            newAccountValue.setCrossWalletBalance(crossWalletBalance);
-            newAccountValue.setCrossPnl(crossPnl);
-            newAccountValue.setCrossUnPnl(crossUnPnl);
-            newAccountValue.setTimestamp(now);
-            accountValueMapper.insert(newAccountValue);
-        }
-        log.info("[AlgoOrderService] [real模式] ✅ 已更新account_values表: modelId={}, balance={}, crossPnl={}", 
-                modelId, balance, crossPnl);
-        
-        // 4. 插入account_value_historys表记录
-        AccountValueHistoryDO history = new AccountValueHistoryDO();
-        history.setId(UUID.randomUUID().toString());
-        history.setModelId(modelId);
-        history.setAccountAlias(accountAlias);
-        history.setBalance(balance);
-        history.setAvailableBalance(availableBalance);
-        history.setCrossWalletBalance(crossWalletBalance);
-        history.setCrossPnl(crossPnl);
-        history.setCrossUnPnl(crossUnPnl);
-        history.setTradeId(tradeId);
-        history.setTimestamp(now);
-        accountValueHistoryMapper.insert(history);
-        log.info("[AlgoOrderService] [real模式] ✅ 已插入account_value_historys表记录: historyId={}, tradeId={}", 
-                history.getId(), tradeId);
-        
-        // 返回tradeId用于更新algo_order表和strategy_decisions表
-        return tradeId;
     }
     
     /**
@@ -1025,7 +803,160 @@ public class AlgoOrderServiceImpl implements AlgoOrderService {
         // 返回tradeId用于更新algo_order表和strategy_decisions表
         return tradeId;
     }
-    
+
+    /**
+     * 根据SDK返回的数据构建trades记录（real模式专用，不调用平仓接口）
+     *
+     * @param order 条件订单
+     * @param model 模型信息
+     * @param actualPrice SDK返回的实际成交价格
+     * @param executedQuantity SDK返回的实际成交数量
+     * @param actualOrderId SDK返回的实际订单ID
+     * @return tradeId
+     */
+    private String buildTradeRecordFromSdkData(AlgoOrderDO order, ModelDO model, Double actualPrice,
+                                                Double executedQuantity, Long actualOrderId) {
+        String orderId = order.getId();
+        String modelId = order.getModelId();
+        String symbol = order.getSymbol().toUpperCase();
+        String positionSide = order.getPositionSide();
+        String orderType = order.getOrderType();
+
+        // 查询持仓信息
+        PortfolioDO position = portfolioMapper.selectPosition(modelId, symbol, positionSide);
+        if (position == null) {
+            log.warn("[AlgoOrderService] [real模式] 持仓不存在，使用订单信息: modelId={}, symbol={}, positionSide={}",
+                    modelId, symbol, positionSide);
+            // 持仓可能已经被清空，使用订单中的信息
+        }
+
+        Double avgPrice = position != null ? position.getAvgPrice() : order.getTriggerPrice();
+        Double initialMargin = position != null ? position.getInitialMargin() : 0.0;
+        Integer leverage = position != null && position.getLeverage() != null ? position.getLeverage() :
+                          model.getLeverage() != null ? model.getLeverage() : 10;
+
+        // 计算手续费和盈亏
+        Double tradeAmount = executedQuantity * actualPrice;
+        Double tradeFee = tradeAmount * tradeFeeRate;
+
+        // 计算盈亏
+        Double grossPnl;
+        if ("LONG".equalsIgnoreCase(positionSide)) {
+            grossPnl = (actualPrice - avgPrice) * executedQuantity;
+        } else {
+            grossPnl = (avgPrice - actualPrice) * executedQuantity;
+        }
+        Double netPnl = grossPnl - tradeFee;
+
+        // 生成trade_id
+        String tradeId = UUID.randomUUID().toString();
+        LocalDateTime now = LocalDateTime.now(ZoneId.of("Asia/Shanghai"));
+
+        // 1. 插入trades表记录
+        TradeDO trade = new TradeDO();
+        trade.setId(tradeId);
+        trade.setModelId(modelId);
+        trade.setFuture(symbol);
+        trade.setSignal(orderType.toLowerCase().contains("stop") ? "stop_loss" : "take_profit");
+        trade.setQuantity(executedQuantity);
+        trade.setPrice(actualPrice);  // 使用SDK返回的实际成交价格
+        trade.setLeverage(leverage);
+        trade.setSide("sell");  // 条件单通常是平仓，所以是sell
+        trade.setPositionSide(positionSide);
+        trade.setPnl(netPnl);
+        trade.setFee(tradeFee);
+        trade.setInitialMargin(initialMargin);
+        trade.setStrategyDecisionId(order.getStrategyDecisionId());
+        trade.setOrderId(actualOrderId);
+        trade.setType(orderType);
+        trade.setTimestamp(now);
+        tradeMapper.insert(trade);
+        log.info("[AlgoOrderService] [real模式] ✅ 已插入trades表记录: tradeId={}, price={}, quantity={}",
+                tradeId, actualPrice, executedQuantity);
+
+        // 2. 更新portfolios表（减少持仓数量）
+        if (position != null) {
+            Double positionAmt = Math.abs(position.getPositionAmt());
+            Double newPositionAmt = positionAmt - executedQuantity;
+            if (newPositionAmt <= 0) {
+                // 持仓数量为0，删除持仓记录
+                portfolioMapper.deletePosition(modelId, symbol, positionSide);
+                log.info("[AlgoOrderService] [real模式] ✅ 已删除持仓记录: modelId={}, symbol={}, positionSide={}",
+                        modelId, symbol, positionSide);
+            } else {
+                // 更新持仓数量
+                portfolioMapper.updatePositionAmt(modelId, symbol, positionSide, newPositionAmt);
+                log.info("[AlgoOrderService] [real模式] ✅ 已更新持仓数量: modelId={}, symbol={}, positionSide={}, newPositionAmt={}",
+                        modelId, symbol, positionSide, newPositionAmt);
+            }
+        }
+
+        // 3. 查询或创建account_values记录
+        String accountAlias = model.getAccountAlias() != null ? model.getAccountAlias() : "";
+        AccountValueDO accountValue = accountValueMapper.selectLatestByModelAndAlias(modelId, accountAlias);
+
+        Double balance = model.getInitialCapital() != null ? model.getInitialCapital() : 10000.0;
+        Double availableBalance = balance;
+        Double crossWalletBalance = balance;
+        Double crossPnl = 0.0;
+        Double crossUnPnl = 0.0;
+
+        if (accountValue != null) {
+            balance = accountValue.getBalance() != null ? accountValue.getBalance() : balance;
+            availableBalance = accountValue.getAvailableBalance() != null ? accountValue.getAvailableBalance() : availableBalance;
+            crossWalletBalance = accountValue.getCrossWalletBalance() != null ? accountValue.getCrossWalletBalance() : crossWalletBalance;
+            crossPnl = accountValue.getCrossPnl() != null ? accountValue.getCrossPnl() : 0.0;
+            crossUnPnl = accountValue.getCrossUnPnl() != null ? accountValue.getCrossUnPnl() : 0.0;
+        }
+
+        // 更新账户价值
+        crossPnl = crossPnl + netPnl;  // 累加已实现盈亏
+        balance = balance + netPnl;    // 总余额增加净盈亏
+        availableBalance = availableBalance + netPnl;  // 可用余额增加净盈亏
+        crossWalletBalance = balance;   // 全仓余额等于总余额
+
+        // 更新或插入account_values表
+        if (accountValue != null) {
+            // 更新现有记录
+            accountValueMapper.updateAccountValueById(accountValue.getId(), balance, availableBalance,
+                    crossWalletBalance, crossPnl, crossUnPnl, now);
+        } else {
+            // 插入新记录
+            AccountValueDO newAccountValue = new AccountValueDO();
+            newAccountValue.setId(UUID.randomUUID().toString());
+            newAccountValue.setModelId(modelId);
+            newAccountValue.setAccountAlias(accountAlias);
+            newAccountValue.setBalance(balance);
+            newAccountValue.setAvailableBalance(availableBalance);
+            newAccountValue.setCrossWalletBalance(crossWalletBalance);
+            newAccountValue.setCrossPnl(crossPnl);
+            newAccountValue.setCrossUnPnl(crossUnPnl);
+            newAccountValue.setTimestamp(now);
+            accountValueMapper.insert(newAccountValue);
+        }
+        log.info("[AlgoOrderService] [real模式] ✅ 已更新account_values表: modelId={}, balance={}, crossPnl={}",
+                modelId, balance, crossPnl);
+
+        // 4. 插入account_value_historys表记录
+        AccountValueHistoryDO history = new AccountValueHistoryDO();
+        history.setId(UUID.randomUUID().toString());
+        history.setModelId(modelId);
+        history.setAccountAlias(accountAlias);
+        history.setBalance(balance);
+        history.setAvailableBalance(availableBalance);
+        history.setCrossWalletBalance(crossWalletBalance);
+        history.setCrossPnl(crossPnl);
+        history.setCrossUnPnl(crossUnPnl);
+        history.setTradeId(tradeId);
+        history.setTimestamp(now);
+        accountValueHistoryMapper.insert(history);
+        log.info("[AlgoOrderService] [real模式] ✅ 已插入account_value_historys表记录: historyId={}, tradeId={}",
+                history.getId(), tradeId);
+
+        // 返回tradeId用于更新algo_order表和strategy_decisions表
+        return tradeId;
+    }
+
     /**
      * 获取或创建 Binance 客户端（使用模型自己的 API Key）
      */
