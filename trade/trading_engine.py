@@ -38,6 +38,7 @@ from trade.common.database.database_strategy_decisions import StrategyDecisionsD
 from trade.trading.trading_utils import (
     parse_signal_to_position_side,
     get_side_for_trade,
+    get_side_for_sell_cycle,
     calculate_quantity_with_risk,
     validate_position_for_trade,
     calculate_trade_requirements,
@@ -4036,17 +4037,16 @@ class TradingEngine:
     def _execute_close(self, symbol: str, decision: Dict, market_state: Dict, portfolio: Dict) -> Dict:
         """
         执行平仓操作
-        
-        根据持仓的position_side自动确定平仓方向：
-        - LONG持仓：使用SELL方向平仓（平多仓）
-        - SHORT持仓：使用BUY方向平仓（平空仓）
-        
+
+        卖出循环中的平仓逻辑：
+        - 无论LONG还是SHORT持仓，都统一使用SELL方向
+
         Args:
             symbol: 交易对符号
             decision: AI决策详情，包含signal='close_position'
             market_state: 市场状态数据，包含当前价格
             portfolio: 当前持仓组合信息
-        
+
         Returns:
             Dict: 执行结果，包含：
                 - symbol: 交易对符号
@@ -4056,7 +4056,7 @@ class TradingEngine:
                 - pnl: 净盈亏
                 - fee: 手续费
                 - message: 执行消息
-        
+
         Note:
             - 使用MARKET订单类型（市场价卖出）
             - 计算毛盈亏和净盈亏（扣除手续费）
@@ -4081,8 +4081,8 @@ class TradingEngine:
             entry_price, current_price, position_amt, position_side, self.trade_fee_rate
         )
 
-        # 使用工具函数确定交易方向
-        side_for_trade = get_side_for_trade(position_side)
+        # 卖出循环专用：统一使用SELL方向
+        side_for_trade = get_side_for_sell_cycle(position_side)
 
         # 获取交易上下文
         model_uuid, trade_id = self._get_trade_context()
@@ -4422,8 +4422,8 @@ class TradingEngine:
         执行止损操作 - 使用条件单方式
         
         注意：止损不是平仓操作，而是对持有资产的反向操作
-        - LONG持仓：使用SELL方向止损（卖多，持仓方向仍为LONG，但数量减少）
-        - SHORT持仓：使用BUY方向止损（买空，持仓方向仍为SHORT，但数量减少）
+        卖出循环中的止损逻辑：
+        - 无论LONG还是SHORT持仓，都统一使用SELL方向
         
         Args:
             symbol: 交易对符号
@@ -4473,9 +4473,9 @@ class TradingEngine:
         if not stop_price:
             return {'symbol': symbol, 'error': 'Stop price not provided'}
         stop_price = float(stop_price)
-        
-        # 确定交易方向：LONG持仓使用SELL，SHORT持仓使用BUY（反向操作）
-        side_for_trade = get_side_for_trade(position_side)
+
+        # 卖出循环专用：统一使用SELL方向
+        side_for_trade = get_side_for_sell_cycle(position_side)
 
         # 获取交易上下文
         model_uuid, trade_id = self._get_trade_context()
@@ -4666,8 +4666,8 @@ class TradingEngine:
         执行止盈操作 - 使用条件单方式
         
         注意：止盈不是平仓操作，而是对持有资产的反向操作
-        - LONG持仓：使用SELL方向止盈（卖多，持仓方向仍为LONG，但数量减少）
-        - SHORT持仓：使用BUY方向止盈（买空，持仓方向仍为SHORT，但数量减少）
+        卖出循环中的止盈逻辑：
+        - 无论LONG还是SHORT持仓，都统一使用SELL方向
         
         Args:
             symbol: 交易对符号
@@ -4717,9 +4717,9 @@ class TradingEngine:
         if not stop_price:
             return {'symbol': symbol, 'error': 'Take profit price not provided'}
         stop_price = float(stop_price)
-        
-        # 确定交易方向：LONG持仓使用SELL，SHORT持仓使用BUY（反向操作）
-        side_for_trade = get_side_for_trade(position_side)
+
+        # 卖出循环专用：统一使用SELL方向
+        side_for_trade = get_side_for_sell_cycle(position_side)
 
         # 获取交易上下文
         model_uuid, trade_id = self._get_trade_context()

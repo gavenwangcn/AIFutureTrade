@@ -92,10 +92,10 @@ def parse_signal_to_position_side(signal: str) -> Tuple[str, str]:
 def get_side_for_trade(position_side: str) -> str:
     """
     根据持仓方向获取交易方向
-    
+
     Args:
         position_side: 持仓方向（LONG或SHORT）
-    
+
     Returns:
         str: 交易方向（BUY或SELL）
     """
@@ -103,6 +103,21 @@ def get_side_for_trade(position_side: str) -> str:
         return 'SELL'  # 平多仓使用SELL
     else:  # SHORT
         return 'BUY'   # 平空仓使用BUY
+
+
+def get_side_for_sell_cycle(position_side: str) -> str:
+    """
+    卖出循环专用：获取交易方向
+
+    在卖出循环中，无论持仓方向如何，都统一使用SELL方向
+
+    Args:
+        position_side: 持仓方向（LONG或SHORT）
+
+    Returns:
+        str: 交易方向（始终返回SELL）
+    """
+    return 'SELL'  # 卖出循环统一使用SELL
 
 
 def calculate_quantity_with_risk(
