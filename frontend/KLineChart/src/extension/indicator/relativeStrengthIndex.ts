@@ -22,10 +22,10 @@ interface Rsi {
 
 /**
  * RSI（相对强弱指数）
- * 
+ *
  * 使用TradingView的计算逻辑（Wilder's Smoothing方法）
  * 参考：https://www.tradingview.com/support/solutions/43000521824-relative-strength-index-rsi/
- * 
+ *
  * Wilder's Smoothing公式：
  * - AvgGain = (PrevAvgGain * (period - 1) + CurrentGain) / period
  * - AvgLoss = (PrevAvgLoss * (period - 1) + CurrentLoss) / period
@@ -50,14 +50,14 @@ const relativeStrengthIndex: IndicatorTemplate<Rsi, number> = {
     // 为每个周期维护AvgGain和AvgLoss（使用Wilder's Smoothing）
     const avgGains: number[] = []
     const avgLosses: number[] = []
-    
+
     return dataList.map((kLineData, i) => {
       const rsi = {}
       const prevClose = i > 0 ? dataList[i - 1].close : kLineData.close
       const change = kLineData.close - prevClose
       const gain = change > 0 ? change : 0
       const loss = change < 0 ? -change : 0
-      
+
       params.forEach((period, index) => {
         if (i === 0) {
           // 第一根K线：初始化AvgGain和AvgLoss
@@ -67,7 +67,7 @@ const relativeStrengthIndex: IndicatorTemplate<Rsi, number> = {
           // 前period根K线：使用简单平均
           avgGains[index] = (avgGains[index] ?? 0) + gain
           avgLosses[index] = (avgLosses[index] ?? 0) + loss
-          
+
           if (i === period - 1) {
             // 第period根K线：计算初始平均值
             avgGains[index] = avgGains[index] / period
@@ -80,7 +80,7 @@ const relativeStrengthIndex: IndicatorTemplate<Rsi, number> = {
           avgGains[index] = (avgGains[index] * (period - 1) + gain) / period
           avgLosses[index] = (avgLosses[index] * (period - 1) + loss) / period
         }
-        
+
         // 计算RSI（需要至少period根K线）
         if (i >= period - 1) {
           if (avgLosses[index] !== 0) {
@@ -92,7 +92,7 @@ const relativeStrengthIndex: IndicatorTemplate<Rsi, number> = {
           }
         }
       })
-      
+
       return rsi
     })
   }
