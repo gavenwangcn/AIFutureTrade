@@ -74,7 +74,7 @@ public class AlgoOrderServiceImpl implements AlgoOrderService {
         for (AlgoOrderDO algoOrderDO : algoOrderDOList) {
             Map<String, Object> algoOrder = new HashMap<>();
             
-            // 只包含前端需要的字段：symbol, side, positionSide, quantity, type, algoStatus, price, created_at, error_reason
+            // 只包含前端需要的字段：symbol, side, positionSide, quantity, type, algoStatus, price, triggerPrice, created_at, error_reason
             algoOrder.put("id", algoOrderDO.getId());
             algoOrder.put("symbol", algoOrderDO.getSymbol());
             algoOrder.put("side", algoOrderDO.getSide());
@@ -83,6 +83,7 @@ public class AlgoOrderServiceImpl implements AlgoOrderService {
             algoOrder.put("type", algoOrderDO.getOrderType()); // 使用orderType作为type
             algoOrder.put("algoStatus", algoOrderDO.getAlgoStatus());
             algoOrder.put("price", algoOrderDO.getPrice() != null ? algoOrderDO.getPrice() : 0.0);
+            algoOrder.put("triggerPrice", algoOrderDO.getTriggerPrice() != null ? algoOrderDO.getTriggerPrice() : 0.0); // 添加触发价格字段
             algoOrder.put("error_reason", algoOrderDO.getErrorReason()); // 添加失败原因字段
             
             // 格式化时间
