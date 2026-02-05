@@ -73,6 +73,14 @@ async-service/
   - `market_symbol_offline`: 市场Symbol下线服务
   - `all`: 运行所有服务
 
+### 5. AlgoOrderCleanupService - 条件订单清理服务
+- **功能**：定期清理已取消的历史条件订单
+- **特性**：
+  - 删除状态为CANCELLED且创建时间超过配置时长的订单
+  - 定时执行（默认每10分钟）
+  - 数据保留时间可配置（默认1小时）
+  - 避免数据库中积累过多无用数据
+
 ## 自动启动配置
 
 应用启动时会自动启动配置的异步服务，无需手动调用API。
@@ -158,6 +166,10 @@ async:
   market-symbol-offline:
     cron: ${MARKET_SYMBOL_OFFLINE_CRON:*/30 * * * *}  # Cron表达式
     retention-minutes: ${MARKET_SYMBOL_RETENTION_MINUTES:30}  # 数据保留分钟数
+
+  algo-order-cleanup:
+    cron: "0 */10 * * * *"  # Cron表达式（每10分钟执行）
+    retention-hours: ${ASYNC_ALGO_ORDER_CLEANUP_RETENTION_HOURS:1}  # 数据保留时长（小时）
 ```
 
 ## 使用方式

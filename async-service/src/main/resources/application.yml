@@ -61,6 +61,7 @@ logging:
     com.aifuturetrade.asyncservice.service.impl.AutoCloseServiceImpl: warn
     com.aifuturetrade.asyncservice.service.impl.AccountValuesDailyServiceImpl: warn
     com.aifuturetrade.asyncservice.service.impl.AlgoOrderServiceImpl: info
+    com.aifuturetrade.asyncservice.service.impl.AlgoOrderCleanupServiceImpl: info
     com.aifuturetrade.asyncservice.api.binance: warn
     com.aifuturetrade.asyncservice.dao.mapper: info
     # 第三方库日志级别
@@ -171,6 +172,13 @@ async:
   algo-order:
     # 执行周期（秒），默认2秒
     interval-seconds: ${ASYNC_ALGO_ORDER_INTERVAL_SECONDS:2}
+
+  # 条件订单清理服务配置
+  algo-order-cleanup:
+    # Cron表达式（每10分钟执行，格式：秒 分 时 日 月 周）
+    cron: "0 */10 * * * *"
+    # 数据保留时长（小时），默认1小时
+    retention-hours: ${ASYNC_ALGO_ORDER_CLEANUP_RETENTION_HOURS:1}
 
 # 交易配置
 trade:

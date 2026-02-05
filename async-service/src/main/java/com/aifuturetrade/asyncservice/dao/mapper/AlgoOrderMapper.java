@@ -6,6 +6,7 @@ import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Update;
 
+import java.time.LocalDateTime;
 import java.util.List;
 
 /**
@@ -72,10 +73,19 @@ public interface AlgoOrderMapper extends BaseMapper<AlgoOrderDO> {
 
     /**
      * 更新条件订单状态为cancelled
-     * 
+     *
      * @param id 订单ID
      * @return 更新的记录数
      */
     @Update("UPDATE algo_order SET algoStatus = 'CANCELLED', updated_at = NOW() WHERE id = #{id}")
     int updateAlgoStatusToCancelled(@Param("id") String id);
+
+    /**
+     * 删除状态为CANCELLED且创建时间在指定时间之前的条件订单
+     *
+     * @param beforeTime 时间阈值（删除此时间之前创建的记录）
+     * @return 删除的记录数
+     */
+    @org.apache.ibatis.annotations.Delete("DELETE FROM algo_order WHERE algoStatus = 'CANCELLED' AND created_at < #{beforeTime}")
+    int deleteCancelledOrdersBeforeTime(@Param("beforeTime") LocalDateTime beforeTime);
 }
