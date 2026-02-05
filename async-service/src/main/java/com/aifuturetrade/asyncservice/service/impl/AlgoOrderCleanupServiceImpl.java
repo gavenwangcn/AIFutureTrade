@@ -1,6 +1,7 @@
 package com.aifuturetrade.asyncservice.service.impl;
 
 import com.aifuturetrade.asyncservice.dao.mapper.AlgoOrderMapper;
+import com.aifuturetrade.asyncservice.dao.mapper.StrategyDecisionMapper;
 import com.aifuturetrade.asyncservice.service.AlgoOrderCleanupService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -21,6 +22,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 public class AlgoOrderCleanupServiceImpl implements AlgoOrderCleanupService {
 
     private final AlgoOrderMapper algoOrderMapper;
+    private final StrategyDecisionMapper strategyDecisionMapper;
 
     @Value("${async.algo-order-cleanup.retention-hours:1}")
     private int retentionHours;
@@ -33,8 +35,9 @@ public class AlgoOrderCleanupServiceImpl implements AlgoOrderCleanupService {
 
     private final AtomicBoolean schedulerRunning = new AtomicBoolean(false);
 
-    public AlgoOrderCleanupServiceImpl(AlgoOrderMapper algoOrderMapper) {
+    public AlgoOrderCleanupServiceImpl(AlgoOrderMapper algoOrderMapper, StrategyDecisionMapper strategyDecisionMapper) {
         this.algoOrderMapper = algoOrderMapper;
+        this.strategyDecisionMapper = strategyDecisionMapper;
     }
 
     @PreDestroy
@@ -60,18 +63,28 @@ public class AlgoOrderCleanupServiceImpl implements AlgoOrderCleanupService {
             log.info("[AlgoOrderCleanup] [步骤1] 计算时间阈值");
             log.info("[AlgoOrderCleanup] [步骤1] 当前时间(UTC+8): {}", utc8Time);
             log.info("[AlgoOrderCleanup] [步骤1] 删除阈值时间(UTC+8): {}", beforeTime);
-            log.info("[AlgoOrderCleanup] [步骤1] 将删除状态为CANCELLED且创建时间早于 {} 的订单", beforeTime);
+            log.info("[AlgoOrderCleanup] [步骤1] 将删除状态为CANCELLED且创建时间早于 {} 的订单及相关策略决策", beforeTime);
 
-            // 执行删除操作
-            log.info("[AlgoOrderCleanup] [步骤2] 开始执行删除操作...");
-            int deletedCount = algoOrderMapper.deleteCancelledOrdersBeforeTime(beforeTime);
+            // 先删除相关的策略决策数据
+            log.info("[AlgoOrderCleanup] [步骤2] 开始删除相关的策略决策数据...");
+            int deletedStrategyCount = strategyDecisionMapper.deleteByRelatedCancelledOrders(beforeTime);
+            log.info("[AlgoOrderCleanup] [步骤2] ✅ 策略决策删除完成，共删除 {} 条记录", deletedStrategyCount);
 
-            log.info("[AlgoOrderCleanup] [步骤2] ✅ 删除操作完成，共删除 {} 条记录", deletedCount);
+            // 再删除条件订单数据
+            log.info("[AlgoOrderCleanup] [步骤3] 开始删除条件订单数据...");
+            int deletedOrderCount = algoOrderMapper.deleteCancelledOrdersBeforeTime(beforeTime);
+            log.info("[AlgoOrderCleanup] [步骤3] ✅ 条件订单删除完成，共删除 {} 条记录", deletedOrderCount);
+
+            int totalDeleted = deletedStrategyCount + deletedOrderCount;
             log.info("=".repeat(80));
             log.info("[AlgoOrderCleanup] ========== 条件订单清理任务完成 ==========");
+            log.info("[AlgoOrderCleanup] 总计删除: {} 条记录（策略决策: {}, 条件订单: {}）",
+                    totalDeleted, deletedStrategyCount, deletedOrderCount);
             log.info("=".repeat(80));
 
-            return new CleanupResult(deletedCount, true, "清理成功，删除 " + deletedCount + " 条记录");
+            return new CleanupResult(totalDeleted, true,
+                    String.format("清理成功，删除 %d 条记录（策略决策: %d, 条件订单: %d）",
+                            totalDeleted, deletedStrategyCount, deletedOrderCount));
 
         } catch (Exception e) {
             log.error("[AlgoOrderCleanup] ========== 条件订单清理任务执行失败 ==========", e);

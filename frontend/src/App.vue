@@ -504,7 +504,7 @@
             </button>
             <button :class="['tab-btn', { active: activeTab === 'algo-orders' }]" @click="activeTab = 'algo-orders'">
               <i v-if="isRefreshingAlgoOrders" class="bi bi-arrow-repeat spin" style="margin-right: 4px;"></i>
-              市场挂单
+              市场委托单
             </button>
             <button 
               v-if="currentModel && (currentModel.trade_type || currentModel.tradeType) === 'strategy'"
@@ -663,7 +663,7 @@
             </div>
           </div>
 
-          <!-- 市场挂单模块 -->
+          <!-- 市场委托单模块 -->
           <div v-show="activeTab === 'algo-orders'" class="tab-content active">
             <div v-if="loading.algoOrders" class="loading-container">
               <i class="bi bi-arrow-repeat spin" style="font-size: 24px; color: var(--primary-color);"></i>
