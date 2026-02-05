@@ -530,11 +530,11 @@ def get_market_klines():
                 raw_low = kline.get('low', 0)
                 raw_close = kline.get('close', 0)
                 
-                # 转换为浮点数并保留6位小数
-                formatted_open = round(float(raw_open) if raw_open else 0.0, 6)
-                formatted_high = round(float(raw_high) if raw_high else 0.0, 6)
-                formatted_low = round(float(raw_low) if raw_low else 0.0, 6)
-                formatted_close = round(float(raw_close) if raw_close else 0.0, 6)
+                # 转换为浮点数并保留7位小数
+                formatted_open = round(float(raw_open) if raw_open else 0.0, 7)
+                formatted_high = round(float(raw_high) if raw_high else 0.0, 7)
+                formatted_low = round(float(raw_low) if raw_low else 0.0, 7)
+                formatted_close = round(float(raw_close) if raw_close else 0.0, 7)
                 
                 formatted_klines.append({
                     'timestamp': kline.get('open_time', 0),

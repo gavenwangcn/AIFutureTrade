@@ -47,7 +47,15 @@ def execute_sell_decision(
 **参数说明：**
 - `portfolio: Dict` - 持仓组合信息，包含 positions（持仓列表，每个元素含 symbol、**avg_price 开仓价**、**open_time 开仓时间** 等）、cash、positions_value、margin_used、total_value、realized_pnl、unrealized_pnl、initial_capital
 - `market_state: Dict` - 市场状态字典，格式：`{"SYMBOL": {"price": float, "base_volume": float, "quote_volume": float, "indicators": {"timeframes": {"1h": {"klines": [...]}}, ...}, "previous_close_prices": {...}}}`
-- `account_info: Dict` - 账户信息，包含 current_time、total_return、initial_capital、balance、available_balance、cross_wallet_balance、cross_pnl、cross_un_pnl
+- `account_info: Dict` - 账户信息，包含以下字段：
+  - `current_time`: 当前时间
+  - `total_return`: 总收益率（%）
+  - `initial_capital`: 初始资金（USDT）
+  - `balance`: 账户总余额/账户总值（USDT）- 这是账户的真实总价值
+  - `available_balance`: 可用余额（USDT）
+  - `cross_wallet_balance`: 全仓钱包余额（USDT）
+  - `cross_pnl`: 已实现盈亏（USDT）
+  - `cross_un_pnl`: 未实现盈亏（USDT）
 - `conditional_orders: Dict[str, List[Dict]]` - 条件单信息字典（可选，默认为None或空字典），按symbol分组的条件单列表
   **格式示例：**
   ```python
@@ -326,6 +334,7 @@ class GeneratedSellStrategy(StrategyBaseSell):
             
             # 提取收盘价数组（必须验证有效性）
             # 收盘价用于计算MA、EMA等基于价格的指标
+            # ⚠️ 重要：价格数据精度为小数点后7位，在进行价格计算时请保持此精度
             close_prices = []
             for kline in klines_data:
                 close = kline.get('close', 0)
@@ -343,6 +352,7 @@ class GeneratedSellStrategy(StrategyBaseSell):
             
             # 提取 high、low 数组（用于计算 KDJ、ATR 等需要 OHLC 数据的指标）
             # KDJ指标和ATR指标需要最高价、最低价和收盘价三个数组
+            # ⚠️ 重要：价格数据精度为小数点后7位，在进行价格计算时请保持此精度
             high_prices = []
             low_prices = []
             for kline in klines_data:
@@ -366,6 +376,11 @@ class GeneratedSellStrategy(StrategyBaseSell):
             # MA(99)需要至少99根K线，MA(20)需要至少20根K线，MA(5)需要至少5根K线
             # KDJ需要至少9根K线，ATR(21)需要至少21根K线，ATR(14)需要至少14根K线，ATR(7)需要至少7根K线
             # 在计算指标前，需要检查K线数据是否足够：len(close_array) >= 指标周期
+            # ⚠️ 重要：价格精度要求（必须严格遵守）
+            # - 所有从K线获取的价格数据（开盘价、最高价、最低价、收盘价）精度为小数点后7位
+            # - 所有基于价格计算的技术指标（MA、EMA、ATR等）在计算和使用时应保持小数点后7位精度
+            # - 所有涉及价格的计算（如价格差值、价格比较、止损止盈价格等）都应保持小数点后7位精度
+            # - 避免过早四舍五入导致精度丢失，特别是对于价格精度为小数点后6位的交易对
             # talib已经在执行环境中预加载，无需import
             try:
                 # 示例：计算MA(99)（简单移动平均线，99周期）
@@ -486,7 +501,17 @@ class GeneratedSellStrategy(StrategyBaseSell):
    - 从 `market_state[symbol]['indicators']['timeframes']['1h']` 或 `'4h'`、`'30m'`、`'15m'`、`'1m'`、`'5m'`、`'1d'`、`'1w'` 等获取
    - **优先顺序建议**：1h > 4h > 30m > 15m（根据策略需求，也可以使用其他时间周期）
    - **获取方式**：`klines_data = timeframes.get('1h', {}).get('klines', [])` 或 `timeframes.get('4h', {}).get('klines', [])` 等
-2. **数据验证**：
+2. **⚠️ 价格精度要求（必须严格遵守）**：
+   - **所有从K线获取的价格数据（open、high、low、close）精度为小数点后7位**
+   - **所有基于价格计算的技术指标（MA、EMA、ATR等）在计算和使用时应保持小数点后7位精度**
+   - **所有涉及价格的计算都应保持小数点后7位精度**，包括但不限于：
+     - 价格差值计算（如：`high - low`、`close - open`）
+     - 价格比较（如：`current_price > ma99_value`）
+     - 止损止盈价格计算（如：`stop_price = entry_price * 0.98`）
+     - ATR等波动率指标的计算和使用
+   - **避免过早四舍五入导致精度丢失**，特别是对于价格精度为小数点后6位的交易对
+   - **示例**：如果交易对价格为 0.123456，最高价为 0.123457，最低价为 0.123456，则 `high - low = 0.000001`（保留7位小数才能正确计算）
+3. **数据验证**：
    - **检查价格数据是否有效**：必须检查价格数据是否有效（> 0）
    - **检查K线数据是否足够**：根据使用的指标周期检查K线数据是否足够
      - **MA指标**：MA(5)需要至少5根K线，MA(20)需要至少20根K线，MA(99)需要至少99根K线
@@ -497,9 +522,9 @@ class GeneratedSellStrategy(StrategyBaseSell):
      - **MACD指标**：需要至少26根K线（slowperiod=26）
      - **金叉死叉判断**：需要至少 slow_period + 1 根K线（例如MA5/MA20需要至少21根）
    - **检查方式**：在计算指标前检查 `len(close_array) >= 指标周期`，例如：`if len(close_array) < 99: continue`（如果使用MA(99)）
-3. **numpy数组处理**：先收集有效数据到列表，再转换为numpy数组，检查数组长度
-4. **指标计算**：检查返回值是否为空、是否为NaN、是否有效（> 0），计算后必须使用 `self.log.info()` 输出指标名称和计算值
-5. **⚠️ 关键判断逻辑的日志输出（非常重要）**：
+4. **numpy数组处理**：先收集有效数据到列表，再转换为numpy数组，检查数组长度
+5. **指标计算**：检查返回值是否为空、是否为NaN、是否有效（> 0），计算后必须使用 `self.log.info()` 输出指标名称和计算值
+6. **⚠️ 关键判断逻辑的日志输出（非常重要）**：
    - **在进行任何关键判断逻辑时（如平仓条件判断、止损条件判断等），必须使用 `self.log.info()` 输出详细的判断信息**
    - **必须输出**：判断条件、相关变量的值（如价格、指标值、持仓方向等）、判断阈值、计算比值、判断结果（True/False）
    - **如果满足条件**：输出满足条件的具体数值和原因
@@ -513,13 +538,14 @@ class GeneratedSellStrategy(StrategyBaseSell):
 ```python
 {
     "SYMBOL": {
-        "price": float,  # 当前价格
+        "price": float,  # 当前价格（精度：小数点后7位）
         "base_volume": float,  # 24小时成交量（基础资产，如BTC数量）
         "quote_volume": float,  # 24小时成交额（计价资产，如USDT金额）
         "indicators": {
             "timeframes": {
                 # ⚠️ 重要：K线数据共有8类interval（时间周期）
                 # 每根K线含 open_time_dt_str、close_time_dt_str（该根K线时间区间，UTC+8），用于与开仓时间匹配
+                # ⚠️ 重要：所有价格字段（open、high、low、close）精度为小数点后7位
                 "1m": {"klines": [{"open": float, "high": float, "low": float, "close": float, "volume": float, "open_time_dt_str": str, "close_time_dt_str": str}, ...]},  # 1分钟K线
                 "5m": {"klines": [...]},  # 5分钟K线
                 "15m": {"klines": [...]},  # 15分钟K线

@@ -4693,15 +4693,22 @@ class TradingEngine:
         position_side = position.get('position_side', 'LONG')
         
         # 获取策略决策中的quantity
-        strategy_quantity = decision.get('quantity', 0)
-        if not strategy_quantity:
+        original_strategy_quantity = decision.get('quantity', 0)
+        if not original_strategy_quantity:
             return {'symbol': symbol, 'error': 'Strategy quantity not provided'}
+
         # 根据symbol价格动态调整quantity精度（与策略执行记录保持一致）
-        strategy_quantity = adjust_quantity_precision_by_price(float(strategy_quantity), current_price)
-        # 如果精度为0（整数），转换为整数类型
-        if strategy_quantity == int(strategy_quantity):
-            strategy_quantity = int(strategy_quantity)
-        
+        strategy_quantity = adjust_quantity_precision_by_price(float(original_strategy_quantity), current_price)
+
+        # 如果调整后变成0或负数，使用原始值（避免小数被截断为0）
+        if strategy_quantity <= 0:
+            strategy_quantity = float(original_strategy_quantity)
+            logger.warning(f"TRADE: 精度调整后数量变为0，使用原始值 {strategy_quantity} | symbol={symbol}")
+        else:
+            # 如果精度为0（整数），转换为整数类型
+            if strategy_quantity == int(strategy_quantity):
+                strategy_quantity = int(strategy_quantity)
+
         if strategy_quantity <= 0:
             return {'symbol': symbol, 'error': 'Strategy quantity must be greater than 0'}
         
@@ -4934,15 +4941,22 @@ class TradingEngine:
         position_side = position.get('position_side', 'LONG')
         
         # 获取策略决策中的quantity
-        strategy_quantity = decision.get('quantity', 0)
-        if not strategy_quantity:
+        original_strategy_quantity = decision.get('quantity', 0)
+        if not original_strategy_quantity:
             return {'symbol': symbol, 'error': 'Strategy quantity not provided'}
+
         # 根据symbol价格动态调整quantity精度（与策略执行记录保持一致）
-        strategy_quantity = adjust_quantity_precision_by_price(float(strategy_quantity), current_price)
-        # 如果精度为0（整数），转换为整数类型
-        if strategy_quantity == int(strategy_quantity):
-            strategy_quantity = int(strategy_quantity)
-        
+        strategy_quantity = adjust_quantity_precision_by_price(float(original_strategy_quantity), current_price)
+
+        # 如果调整后变成0或负数，使用原始值（避免小数被截断为0）
+        if strategy_quantity <= 0:
+            strategy_quantity = float(original_strategy_quantity)
+            logger.warning(f"TRADE: 精度调整后数量变为0，使用原始值 {strategy_quantity} | symbol={symbol}")
+        else:
+            # 如果精度为0（整数），转换为整数类型
+            if strategy_quantity == int(strategy_quantity):
+                strategy_quantity = int(strategy_quantity)
+
         if strategy_quantity <= 0:
             return {'symbol': symbol, 'error': 'Strategy quantity must be greater than 0'}
         
