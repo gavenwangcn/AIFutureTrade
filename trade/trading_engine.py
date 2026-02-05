@@ -2543,22 +2543,35 @@ class TradingEngine:
             
             signal = (decision.get('signal') or '').lower()
             if not signal or signal == 'hold':
-                # hold 不计入“策略执行记录”
+                # hold 不计入"策略执行记录"
                 skipped_count += 1
                 logger.debug(f"[Model {self.model_id}] [策略决策保存] 跳过 {sym}: signal为空或为hold (signal={signal})")
                 continue
-            
-            # ⚠️ 重要：验证信号是否为有效的买入信号（buy_to_long 或 buy_to_short）
-            # 买入策略只应该返回 buy_to_long 或 buy_to_short，其他信号（如 sell_to_long, close_position 等）不应该出现在买入决策中
-            # 这些有效信号会被保存到策略决策表并提交给后续执行流程，生成策略信息和交易信息
+
+            # ⚠️ 重要：根据策略类型验证信号的有效性
+            # 买入策略只应该返回 buy_to_long 或 buy_to_short
+            # 卖出策略应该返回 close_position, stop_loss, take_profit, sell_to_long, sell_to_short 等
             valid_buy_signals = {'buy_to_long', 'buy_to_short'}
-            if signal not in valid_buy_signals:
-                skipped_count += 1
-                logger.warning(f"[Model {self.model_id}] [策略决策保存] 跳过 {sym}: 无效的买入信号 (signal={signal})，买入策略只支持 buy_to_long 或 buy_to_short")
-                continue
-            
-            # ⚠️ 重要：buy_to_long 和 buy_to_short 是有效的买入信号，会被保存到策略决策表并提交给后续执行流程
-            logger.debug(f"[Model {self.model_id}] [策略决策保存] ✓ 确认有效买入信号: {sym} -> {signal}")
+            valid_sell_signals = {'close_position', 'stop_loss', 'take_profit', 'sell_to_long', 'sell_to_short'}
+
+            if default_strategy_type == 'buy':
+                # 买入循环：只接受买入信号
+                if signal not in valid_buy_signals:
+                    skipped_count += 1
+                    logger.warning(f"[Model {self.model_id}] [策略决策保存] 跳过 {sym}: 无效的买入信号 (signal={signal})，买入策略只支持 buy_to_long 或 buy_to_short")
+                    continue
+                logger.debug(f"[Model {self.model_id}] [策略决策保存] ✓ 确认有效买入信号: {sym} -> {signal}")
+            elif default_strategy_type == 'sell':
+                # 卖出循环：只接受卖出信号（包括止盈、止损）
+                if signal not in valid_sell_signals:
+                    skipped_count += 1
+                    logger.warning(f"[Model {self.model_id}] [策略决策保存] 跳过 {sym}: 无效的卖出信号 (signal={signal})，卖出策略只支持 close_position, stop_loss, take_profit, sell_to_long, sell_to_short")
+                    continue
+                logger.debug(f"[Model {self.model_id}] [策略决策保存] ✓ 确认有效卖出信号: {sym} -> {signal}")
+            else:
+                # 其他类型：接受所有信号
+                logger.debug(f"[Model {self.model_id}] [策略决策保存] ✓ 确认信号: {sym} -> {signal} (strategy_type={default_strategy_type})")
+
             recorded_strategy_symbols.add(sym)
             
             strategy_name = decision.get('_strategy_name') or decision.get('strategy_name') or '未知策略'
@@ -2571,6 +2584,9 @@ class TradingEngine:
                 row['stop_price'] = row.get('stopPrice')
             
             grouped.setdefault((str(strategy_name), str(strategy_type)), []).append(row)
+            processed_count += 1
+
+        logger.info(f"[Model {self.model_id}] [策略决策保存] 处理完成: 已处理={processed_count}, 已跳过={skipped_count}, 总计={len(decisions)}")
 
         all_mapping: Dict[str, str] = {}
         for (strategy_name, strategy_type), rows in grouped.items():
