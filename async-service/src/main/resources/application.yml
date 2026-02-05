@@ -60,7 +60,7 @@ logging:
     com.aifuturetrade.asyncservice.service.impl.AsyncAgentServiceImpl: info
     com.aifuturetrade.asyncservice.service.impl.AutoCloseServiceImpl: warn
     com.aifuturetrade.asyncservice.service.impl.AccountValuesDailyServiceImpl: warn
-    com.aifuturetrade.asyncservice.service.impl.AlgoOrderServiceImpl: info
+    com.aifuturetrade.asyncservice.service.impl.AlgoOrderServiceImpl: warn
     com.aifuturetrade.asyncservice.service.impl.AlgoOrderCleanupServiceImpl: info
     com.aifuturetrade.asyncservice.api.binance: warn
     com.aifuturetrade.asyncservice.dao.mapper: info
