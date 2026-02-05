@@ -175,6 +175,8 @@ async:
 
   # 条件订单清理服务配置
   algo-order-cleanup:
+    # 是否启用清理任务（默认true）
+    enabled: ${ASYNC_ALGO_ORDER_CLEANUP_ENABLED:true}
     # Cron表达式（每10分钟执行，格式：秒 分 时 日 月 周）
     cron: "0 */10 * * * *"
     # 数据保留时长（小时），默认1小时

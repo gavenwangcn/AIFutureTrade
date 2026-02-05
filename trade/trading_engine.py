@@ -4659,6 +4659,88 @@ class TradingEngine:
             logger.error(f"TRADE: 取消条件单失败 | model={self.model_id} symbol={symbol} error={e}", exc_info=True)
             return False
 
+    def _check_duplicate_algo_order(self, symbol: str, model_uuid: str, trigger_price: float,
+                                     trade_mode: str, binance_client=None,
+                                     conversation_id: str = None, trade_id: str = None,
+                                     price_tolerance: float = 0.0001) -> bool:
+        """
+        检查是否存在相同触发价格的条件单
+
+        Args:
+            symbol: 交易对符号
+            model_uuid: 模型UUID
+            trigger_price: 触发价格
+            trade_mode: 交易模式（'real' 或 'virtual'）
+            binance_client: Binance客户端（real模式需要）
+            conversation_id: 对话ID（可选）
+            trade_id: 交易ID（可选）
+            price_tolerance: 价格容差（默认0.01%），用于判断价格是否相同
+
+        Returns:
+            bool: True表示存在相同触发价格的条件单，False表示不存在
+        """
+        try:
+            # 1. 查询数据库中状态为new的条件单
+            existing_orders = self.algo_order_db.get_new_algo_orders_by_symbol(model_uuid, symbol)
+
+            if not existing_orders:
+                logger.debug(f"TRADE: 数据库中未找到条件单 | model={self.model_id} symbol={symbol}")
+                return False
+
+            # 2. 检查数据库中是否有相同触发价格的条件单
+            for order_row in existing_orders:
+                db_trigger_price = order_row.get('triggerPrice') or order_row.get('trigger_price')
+                if db_trigger_price:
+                    db_trigger_price = float(db_trigger_price)
+                    # 计算价格差异百分比
+                    price_diff_pct = abs(db_trigger_price - trigger_price) / trigger_price
+                    if price_diff_pct <= price_tolerance:
+                        logger.info(f"TRADE: 数据库中已存在相同触发价格的条件单 | model={self.model_id} symbol={symbol} | "
+                                   f"触发价格={trigger_price} | 已存在价格={db_trigger_price} | 差异={price_diff_pct*100:.4f}%")
+                        return True
+
+            # 3. real模式：还需要查询SDK中的条件单
+            if trade_mode == 'real' and binance_client:
+                try:
+                    # 查询SDK中的条件单
+                    sdk_orders = binance_client.query_all_algo_orders(
+                        symbol=symbol,
+                        model_id=model_uuid,
+                        conversation_id=conversation_id,
+                        trade_id=trade_id,
+                        db=self.binance_trade_logs_db
+                    )
+
+                    if sdk_orders and isinstance(sdk_orders, list):
+                        for order in sdk_orders:
+                            if isinstance(order, dict):
+                                # 检查订单状态（只检查NEW状态的订单）
+                                algo_status = order.get('algoStatus') or order.get('algo_status')
+                                if algo_status and algo_status.upper() != 'NEW':
+                                    continue
+
+                                # 检查触发价格
+                                sdk_trigger_price = order.get('activatePrice') or order.get('activate_price')
+                                if sdk_trigger_price:
+                                    sdk_trigger_price = float(sdk_trigger_price)
+                                    # 计算价格差异百分比
+                                    price_diff_pct = abs(sdk_trigger_price - trigger_price) / trigger_price
+                                    if price_diff_pct <= price_tolerance:
+                                        algo_id = order.get('algoId') or order.get('algo_id')
+                                        logger.info(f"TRADE: SDK中已存在相同触发价格的条件单 | model={self.model_id} symbol={symbol} | "
+                                                   f"触发价格={trigger_price} | SDK价格={sdk_trigger_price} | 差异={price_diff_pct*100:.4f}% | algoId={algo_id}")
+                                        return True
+                except Exception as sdk_err:
+                    logger.warning(f"TRADE: 查询SDK条件单失败，继续执行 | model={self.model_id} symbol={symbol} error={sdk_err}")
+
+            logger.debug(f"TRADE: 未找到相同触发价格的条件单 | model={self.model_id} symbol={symbol} trigger_price={trigger_price}")
+            return False
+
+        except Exception as e:
+            logger.error(f"TRADE: 检查重复条件单失败 | model={self.model_id} symbol={symbol} error={e}", exc_info=True)
+            # 出错时返回False，允许继续创建条件单
+            return False
+
     def _execute_stop_loss(self, symbol: str, decision: Dict, market_state: Dict, portfolio: Dict) -> Dict:
         """
         执行止损操作 - 使用条件单方式
@@ -4753,13 +4835,34 @@ class TradingEngine:
             price_value = decision.get('price')
             if price_value:
                 price_value = float(price_value)
-        
+
         # 确定交易方向（buy/sell）
         side_value = side_for_trade.lower()  # 'buy' or 'sell'
-        
-        # 【先取消已存在的条件单】
+
+        # 【检查是否存在相同触发价格的条件单】
         binance_client = self._create_binance_order_client()
         conversation_id = self._get_conversation_id()
+
+        has_duplicate = self._check_duplicate_algo_order(
+            symbol=symbol,
+            model_uuid=model_uuid,
+            trigger_price=stop_price,
+            trade_mode=trade_mode,
+            binance_client=binance_client if trade_mode == 'real' else None,
+            conversation_id=conversation_id,
+            trade_id=trade_id
+        )
+
+        if has_duplicate:
+            logger.info(f"TRADE: 跳过创建止损单 - 已存在相同触发价格的条件单 | model={self.model_id} symbol={symbol} stop_price={stop_price}")
+            return {
+                'symbol': symbol,
+                'signal': 'stop_loss',
+                'skipped': True,
+                'message': f'跳过创建止损单 {symbol} - 已存在相同触发价格({stop_price})的条件单'
+            }
+
+        # 【先取消已存在的条件单】
         cancel_success = self._cancel_existing_algo_orders(
             symbol=symbol,
             model_uuid=model_uuid,
@@ -5001,13 +5104,34 @@ class TradingEngine:
             price_value = decision.get('price')
             if price_value:
                 price_value = float(price_value)
-        
+
         # 确定交易方向（buy/sell）
         side_value = side_for_trade.lower()  # 'buy' or 'sell'
-        
-        # 【先取消已存在的条件单】
+
+        # 【检查是否存在相同触发价格的条件单】
         binance_client = self._create_binance_order_client()
         conversation_id = self._get_conversation_id()
+
+        has_duplicate = self._check_duplicate_algo_order(
+            symbol=symbol,
+            model_uuid=model_uuid,
+            trigger_price=stop_price,
+            trade_mode=trade_mode,
+            binance_client=binance_client if trade_mode == 'real' else None,
+            conversation_id=conversation_id,
+            trade_id=trade_id
+        )
+
+        if has_duplicate:
+            logger.info(f"TRADE: 跳过创建止盈单 - 已存在相同触发价格的条件单 | model={self.model_id} symbol={symbol} stop_price={stop_price}")
+            return {
+                'symbol': symbol,
+                'signal': 'take_profit',
+                'skipped': True,
+                'message': f'跳过创建止盈单 {symbol} - 已存在相同触发价格({stop_price})的条件单'
+            }
+
+        # 【先取消已存在的条件单】
         cancel_success = self._cancel_existing_algo_orders(
             symbol=symbol,
             model_uuid=model_uuid,

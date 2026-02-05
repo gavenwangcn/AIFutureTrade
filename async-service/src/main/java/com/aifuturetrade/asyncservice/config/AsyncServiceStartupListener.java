@@ -1,6 +1,7 @@
 package com.aifuturetrade.asyncservice.config;
 
 import com.aifuturetrade.asyncservice.service.AsyncAgentService;
+import com.aifuturetrade.asyncservice.service.AlgoOrderCleanupService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
@@ -24,7 +25,10 @@ public class AsyncServiceStartupListener implements ApplicationListener<Applicat
     
     @Autowired
     private AsyncAgentService asyncAgentService;
-    
+
+    @Autowired
+    private AlgoOrderCleanupService algoOrderCleanupService;
+
     /**
      * 启动时自动启动的任务
      * 可选值：market_tickers, price_refresh, market_symbol_offline, all
@@ -82,12 +86,14 @@ public class AsyncServiceStartupListener implements ApplicationListener<Applicat
                 
                 log.info("[AsyncServiceStartupListener] ✅ 异步服务 '{}' 已启动", autoStartTask);
                 log.info("[AsyncServiceStartupListener] 📊 服务状态：");
-                log.info("[AsyncServiceStartupListener]   - market_tickers: {}", 
+                log.info("[AsyncServiceStartupListener]   - market_tickers: {}",
                         asyncAgentService.isTaskRunning("market_tickers") ? "✅ 运行中" : "❌ 未运行");
                 log.info("[AsyncServiceStartupListener]   - price_refresh: ⏰ 定时任务已启用（通过@Scheduled自动运行）");
                 log.info("[AsyncServiceStartupListener]   - market_symbol_offline: ⏰ 定时任务已启用（通过@Scheduled自动运行）");
                 log.info("[AsyncServiceStartupListener]   - auto_close: ⏰ 定时任务已启用（通过@Scheduled自动运行）");
                 log.info("[AsyncServiceStartupListener]   - algo_order: ⏰ 定时任务已启用（通过@Scheduled自动运行，每2秒检查条件订单）");
+                log.info("[AsyncServiceStartupListener]   - algo_order_cleanup: {}",
+                        algoOrderCleanupService.isSchedulerRunning() ? "✅ 已启用（定时清理已取消订单）" : "❌ 已禁用");
                 log.info("=".repeat(80));
             } catch (IllegalArgumentException e) {
                 log.error("[AsyncServiceStartupListener] ❌ 无效的任务名称: {}", autoStartTask);

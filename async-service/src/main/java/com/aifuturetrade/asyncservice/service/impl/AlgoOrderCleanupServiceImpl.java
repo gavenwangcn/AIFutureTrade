@@ -28,6 +28,9 @@ public class AlgoOrderCleanupServiceImpl implements AlgoOrderCleanupService {
     @Value("${async.algo-order-cleanup.cron:0 */10 * * * *}")
     private String cronExpression;
 
+    @Value("${async.algo-order-cleanup.enabled:true}")
+    private boolean cleanupEnabled;
+
     private final AtomicBoolean schedulerRunning = new AtomicBoolean(false);
 
     public AlgoOrderCleanupServiceImpl(AlgoOrderMapper algoOrderMapper) {
@@ -80,6 +83,11 @@ public class AlgoOrderCleanupServiceImpl implements AlgoOrderCleanupService {
     @Override
     @Scheduled(cron = "${async.algo-order-cleanup.cron:0 */10 * * * *}")
     public void startScheduler() {
+        if (!cleanupEnabled) {
+            log.debug("[AlgoOrderCleanup] 清理任务已禁用，跳过执行");
+            return;
+        }
+
         if (schedulerRunning.get()) {
             log.debug("[AlgoOrderCleanup] 清理任务正在执行中，跳过本次调度");
             return;
@@ -97,5 +105,10 @@ public class AlgoOrderCleanupServiceImpl implements AlgoOrderCleanupService {
     public void stopScheduler() {
         schedulerRunning.set(false);
         log.info("[AlgoOrderCleanup] 清理任务已停止");
+    }
+
+    @Override
+    public boolean isSchedulerRunning() {
+        return cleanupEnabled;
     }
 }

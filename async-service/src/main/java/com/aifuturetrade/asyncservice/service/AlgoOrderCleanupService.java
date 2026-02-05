@@ -26,6 +26,13 @@ public interface AlgoOrderCleanupService {
     void stopScheduler();
 
     /**
+     * 检查调度器是否正在运行
+     *
+     * @return true表示调度器已启用，false表示已停止
+     */
+    boolean isSchedulerRunning();
+
+    /**
      * 清理结果
      */
     class CleanupResult {
