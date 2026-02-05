@@ -35,6 +35,58 @@ from trade.common.database.database_futures import FuturesDatabase
 logger = logging.getLogger(__name__)
 
 
+def _calculate_rsi_tradingview(close_array: np.ndarray, period: int) -> np.ndarray:
+    """
+    使用TradingView的计算逻辑计算RSI（Wilder's Smoothing方法）
+    
+    参考：https://www.tradingview.com/support/solutions/43000521824-relative-strength-index-rsi/
+    
+    Wilder's Smoothing公式：
+    - AvgGain = (PrevAvgGain * (period - 1) + CurrentGain) / period
+    - AvgLoss = (PrevAvgLoss * (period - 1) + CurrentLoss) / period
+    - RS = AvgGain / AvgLoss
+    - RSI = 100 - (100 / (1 + RS))
+    
+    参数:
+        close_array: 收盘价数组（numpy数组）
+        period: RSI周期（如6、9、14等）
+    
+    返回:
+        RSI值数组（numpy数组），与输入数组长度相同，前period-1个值为NaN
+    """
+    if len(close_array) < period:
+        return np.full(len(close_array), np.nan)
+    
+    # 计算价格变化
+    delta = np.diff(close_array, prepend=close_array[0])
+    
+    # 分离涨跌
+    gains = np.where(delta > 0, delta, 0)
+    losses = np.where(delta < 0, -delta, 0)
+    
+    # 使用Wilder's Smoothing计算AvgGain和AvgLoss
+    # 方法：使用EMA模拟Wilder's Smoothing
+    # Wilder's的平滑因子 alpha = 1/period，EMA的平滑因子 alpha = 2/(period+1)
+    # 为了使两者等价，需要调整EMA的周期：令 2/(ema_period + 1) = 1/period => ema_period = 2*period - 1
+    wilders_period = 2 * period - 1
+    
+    # 使用TA-Lib的EMA（模拟Wilder's Smoothing）计算AvgGain和AvgLoss
+    avg_gain = talib.EMA(gains, timeperiod=wilders_period)
+    avg_loss = talib.EMA(losses, timeperiod=wilders_period)
+    
+    # 计算RS和RSI
+    # 避免除零错误
+    rs = np.divide(avg_gain, avg_loss, out=np.zeros_like(avg_gain), where=avg_loss != 0)
+    rsi = 100 - (100 / (1 + rs))
+    
+    # 处理特殊情况：如果AvgLoss为0且AvgGain>0，RSI应该为100
+    rsi = np.where((avg_loss == 0) & (avg_gain > 0), 100.0, rsi)
+    # 如果AvgLoss为0且AvgGain==0，RSI应该为50
+    rsi = np.where((avg_loss == 0) & (avg_gain == 0), 50.0, rsi)
+    
+    return rsi
+
+
 def _ensure_usdt_suffix(symbol: str, quote_asset: str = 'USDT') -> str:
     """
     确保symbol以USDT结尾，如果没有则添加，防止重复添加
@@ -787,12 +839,12 @@ class MarketDataFetcher:
                 else:
                     logger.warning(f'[MACD] 数据不足: 需要至少26个数据点，实际只有{len(closes)}个')
                 
-                # 实时计算RSI指标使用TA-Lib
+                # 实时计算RSI指标使用TradingView的计算逻辑（Wilder's Smoothing方法）
                 rsi = {'rsi6': 50.0, 'rsi9': 50.0}
                 # 计算RSI(6)
                 if len(closes) >= 7:  # RSI(6)需要至少7个数据点
                     try:
-                        rsi6_result = talib.RSI(close_array, timeperiod=6)
+                        rsi6_result = _calculate_rsi_tradingview(close_array, period=6)
                         if rsi6_result is not None and len(rsi6_result) > 0:
                             rsi6_value = rsi6_result[-1]
                             if not np.isnan(rsi6_value) and not np.isinf(rsi6_value):
@@ -803,7 +855,7 @@ class MarketDataFetcher:
                 # 计算RSI(9)
                 if len(closes) >= 10:  # RSI(9)需要至少10个数据点
                     try:
-                        rsi9_result = talib.RSI(close_array, timeperiod=9)
+                        rsi9_result = _calculate_rsi_tradingview(close_array, period=9)
                         if rsi9_result is not None and len(rsi9_result) > 0:
                             rsi9_value = rsi9_result[-1]
                             if not np.isnan(rsi9_value) and not np.isinf(rsi9_value):
@@ -1036,11 +1088,11 @@ class MarketDataFetcher:
                     except Exception as e:
                         logger.warning(f'[Indicators] 无法计算MACD for {timeframe}: {e}')
                 
-                # 计算RSI指标使用TA-Lib
+                # 计算RSI指标使用TradingView的计算逻辑（Wilder's Smoothing方法）
                 rsi = {'rsi6': 50.0, 'rsi9': 50.0}
                 if len(closes) >= 7:
                     try:
-                        rsi6_result = talib.RSI(close_array, timeperiod=6)
+                        rsi6_result = _calculate_rsi_tradingview(close_array, period=6)
                         if rsi6_result is not None and len(rsi6_result) > 0:
                             rsi6_value = rsi6_result[-1]
                             if not np.isnan(rsi6_value) and not np.isinf(rsi6_value):
@@ -1050,7 +1102,7 @@ class MarketDataFetcher:
                 
                 if len(closes) >= 10:
                     try:
-                        rsi9_result = talib.RSI(close_array, timeperiod=9)
+                        rsi9_result = _calculate_rsi_tradingview(close_array, period=9)
                         if rsi9_result is not None and len(rsi9_result) > 0:
                             rsi9_value = rsi9_result[-1]
                             if not np.isnan(rsi9_value) and not np.isinf(rsi9_value):

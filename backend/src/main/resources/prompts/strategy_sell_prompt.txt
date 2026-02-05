@@ -484,9 +484,150 @@ class GeneratedSellStrategy(StrategyBaseSell):
 **支持的指标类型：**
 - **MA（移动平均线）**：`talib.SMA(close_array, timeperiod=5)`，常用周期：5, 20, 60, 99
 - **EMA（指数移动平均线）**：`talib.EMA(close_array, timeperiod=5)`，对价格变化更敏感，适合捕捉短期趋势
-- **KDJ（随机指标）**：`slowk, slowd = talib.STOCH(high_array, low_array, close_array, fastk_period=9, slowk_period=3, slowk_matype=0, slowd_period=3, slowd_matype=0)`，J值：`j_value = 3 * slowk[-1] - 2 * slowd[-1]`，⚠️ 需要 high、low、close 三个数组
-- **RSI（相对强弱指数）**：`talib.RSI(close_array, timeperiod=14)`
-- **ATR（平均真实波幅）**：`talib.ATR(high_array, low_array, close_array, timeperiod=14)`，⚠️ 需要 high、low、close 三个数组，必须从 K 线数据（klines）中提取，支持周期：7, 14, 21，用于设置止损位、判断市场波动强度
+- **KDJ（随机指标）**：**⚠️⚠️⚠️ 必须使用TradingView的计算逻辑，不能直接使用 `talib.STOCH()`**
+  - **TradingView的KDJ计算逻辑**：
+    ```python
+    import talib
+    import numpy as np
+    
+    def calculate_kdj_tradingview(high_array, low_array, close_array, k_period=9, smooth_k=3, smooth_d=3):
+        """
+        计算与TradingView一致的KDJ指标
+        
+        TradingView的KDJ计算逻辑：
+        1. 计算原始%K（RSV）：RSV = 100 * (Close - LowestLow) / (HighestHigh - LowestLow)
+        2. 第一次平滑得到K值：使用SMA平滑RSV（周期为smooth_k）
+        3. 第二次平滑得到D值：使用SMA平滑K值（周期为smooth_d）
+        4. 计算J值：J = 3K - 2D
+        """
+        # 1. 计算原始%K（未平滑的随机值）
+        lowest_low = talib.MIN(low_array, timeperiod=k_period)
+        highest_high = talib.MAX(high_array, timeperiod=k_period)
+        
+        raw_k = np.where(
+            highest_high != lowest_low,
+            100 * (close_array - lowest_low) / (highest_high - lowest_low),
+            50  # 如果最高价=最低价，设为50
+        )
+        
+        # 2. 第一次平滑得到K值（使用SMA）
+        k_line = talib.SMA(raw_k, timeperiod=smooth_k)
+        
+        # 3. 第二次平滑得到D值（对K值进行SMA平滑）
+        d_line = talib.SMA(k_line, timeperiod=smooth_d)
+        
+        # 4. 计算J值
+        j_line = 3 * k_line - 2 * d_line
+        
+        return k_line, d_line, j_line
+    
+    # 使用示例：
+    k, d, j = calculate_kdj_tradingview(high_array, low_array, close_array, k_period=9, smooth_k=3, smooth_d=3)
+    k_value = float(k[-1])  # 获取最后一个值（最新的K值）
+    d_value = float(d[-1])   # 获取最后一个值（最新的D值）
+    j_value = float(j[-1])   # 获取最后一个值（最新的J值）
+    ```
+  - **⚠️ 重要**：必须使用上述方法计算KDJ，确保与TradingView的结果一致
+  - **标准参数**：`k_period=9, smooth_k=3, smooth_d=3`
+  - **⚠️ 需要 high、low、close 三个数组**
+- **RSI（相对强弱指数）**：**⚠️⚠️⚠️ 必须使用TradingView的计算逻辑（Wilder's Smoothing方法），不能直接使用 `talib.RSI()`**
+  - **TradingView的RSI计算逻辑（Wilder's Smoothing方法）**：
+    ```python
+    import talib
+    import numpy as np
+    
+    def calculate_rsi_tradingview(close_array, period):
+        """
+        使用TradingView的计算逻辑计算RSI（Wilder's Smoothing方法）
+        
+        Wilder's Smoothing公式：
+        - AvgGain = (PrevAvgGain * (period - 1) + CurrentGain) / period
+        - AvgLoss = (PrevAvgLoss * (period - 1) + CurrentLoss) / period
+        - RS = AvgGain / AvgLoss
+        - RSI = 100 - (100 / (1 + RS))
+        
+        使用TA-Lib模拟Wilder's Smoothing：
+        - Wilder's的平滑因子 alpha = 1/period
+        - EMA的平滑因子 alpha = 2/(period+1)
+        - 为了使两者等价，需要调整EMA的周期：ema_period = 2*period - 1
+        """
+        # 计算价格变化
+        delta = np.diff(close_array, prepend=close_array[0])
+        
+        # 分离涨跌
+        gains = np.where(delta > 0, delta, 0)
+        losses = np.where(delta < 0, -delta, 0)
+        
+        # 使用Wilder's Smoothing计算AvgGain和AvgLoss
+        # 通过调整EMA周期来模拟Wilder's Smoothing
+        wilders_period = 2 * period - 1  # 对于14周期RSI，即为27
+        
+        # 使用TA-Lib的EMA（模拟Wilder's Smoothing）计算AvgGain和AvgLoss
+        avg_gain = talib.EMA(gains, timeperiod=wilders_period)
+        avg_loss = talib.EMA(losses, timeperiod=wilders_period)
+        
+        # 计算RS和RSI
+        rs = np.divide(avg_gain, avg_loss, out=np.zeros_like(avg_gain), where=avg_loss != 0)
+        rsi = 100 - (100 / (1 + rs))
+        
+        # 处理特殊情况
+        rsi = np.where((avg_loss == 0) & (avg_gain > 0), 100.0, rsi)  # AvgLoss为0且AvgGain>0，RSI=100
+        rsi = np.where((avg_loss == 0) & (avg_gain == 0), 50.0, rsi)   # AvgLoss为0且AvgGain==0，RSI=50
+        
+        return rsi
+    
+    # 使用示例：
+    rsi_result = calculate_rsi_tradingview(close_array, timeperiod=14)
+    rsi_value = float(rsi_result[-1])  # 获取最后一个值（最新的RSI值）
+    ```
+  - **⚠️ 重要**：必须使用上述方法计算RSI，确保与TradingView的结果一致
+  - **常用周期**：RSI(6)、RSI(9)、RSI(14)、RSI(21)
+- **ATR（平均真实波幅）**：**⚠️⚠️⚠️ 必须使用TradingView的计算逻辑（RMA/Wilder's Smoothing方法），不能直接使用 `talib.ATR()`**
+  - **TradingView的ATR计算逻辑（RMA/Wilder's Smoothing方法）**：
+    ```python
+    import talib
+    import numpy as np
+    
+    def calculate_atr_tradingview(high_array, low_array, close_array, period=14):
+        """
+        使用TradingView的计算逻辑计算ATR（RMA/Wilder's Smoothing方法）
+        
+        TradingView的ATR计算逻辑：
+        1. 计算真实波幅（TR）：
+           TR = max(以下三者)：
+             - 当日最高价 - 当日最低价
+             - |当日最高价 - 前日收盘价|
+             - |当日最低价 - 前日收盘价|
+        2. 计算ATR：
+           ATR = RMA(TR, N)  # N为周期，通常14
+           RMA（Wilder's Smoothing）公式：
+           - 第一个值：RMA = SMA(TR, N)
+           - 后续值：RMA = (PrevRMA * (N - 1) + CurrentTR) / N
+        """
+        # 1. 计算TR（真实波幅）
+        tr = np.zeros_like(high_array)
+        tr[0] = high_array[0] - low_array[0]  # 第一根K线的TR
+        
+        for i in range(1, len(high_array)):
+            hl = high_array[i] - low_array[i]
+            hc = abs(high_array[i] - close_array[i-1])
+            lc = abs(low_array[i] - close_array[i-1])
+            tr[i] = max(hl, hc, lc)
+        
+        # 2. 使用RMA（Wilder's Smoothing）计算ATR
+        # RMA在TA-Lib中就是Wilder's Smoothing
+        atr = talib.RMA(tr, timeperiod=period)
+        
+        return atr
+    
+    # 使用示例：
+    atr_result = calculate_atr_tradingview(high_array, low_array, close_array, period=14)
+    atr_value = float(atr_result[-1])  # 获取最后一个值（最新的ATR值）
+    ```
+  - **⚠️ 重要**：必须使用上述方法计算ATR，确保与TradingView的结果一致
+  - **支持周期**：ATR(7)、ATR(14)、ATR(21)
+  - **⚠️ 需要 high、low、close 三个数组，必须从 K 线数据（klines）中提取**
+  - **用途**：用于设置止损位、判断市场波动强度
 - **MACD**：`macd, signal, histogram = talib.MACD(close_array, fastperiod=12, slowperiod=26, signalperiod=9)`
 
 **金叉和死叉判断（卖出策略）：**
@@ -501,6 +642,7 @@ class GeneratedSellStrategy(StrategyBaseSell):
    - 从 `market_state[symbol]['indicators']['timeframes']['1h']` 或 `'4h'`、`'30m'`、`'15m'`、`'1m'`、`'5m'`、`'1d'`、`'1w'` 等获取
    - **优先顺序建议**：1h > 4h > 30m > 15m（根据策略需求，也可以使用其他时间周期）
    - **获取方式**：`klines_data = timeframes.get('1h', {}).get('klines', [])` 或 `timeframes.get('4h', {}).get('klines', [])` 等
+   - **⚠️⚠️⚠️ 重要：如果策略中提到「某某的某类(interval)K线的某个技术指标值」（如「开仓价的15分钟K线对应的ATR14值」），请参考下面的「基于特定时间点的某 interval K 线计算技术指标值」章节，必须严格按照该章节的说明进行计算，不能直接使用最新K线计算指标。**
 2. **⚠️ 价格精度要求（必须严格遵守）**：
    - **所有从K线获取的价格数据（open、high、low、close）精度为小数点后7位**
    - **所有基于价格计算的技术指标（MA、EMA、ATR等）在计算和使用时应保持小数点后7位精度**
@@ -598,6 +740,225 @@ klines_1w = timeframes.get('1w', {}).get('klines', [])  # 1周K线
 - **查找方式**：遍历对应 interval 的 klines 列表，找到满足「open_time 落在该根 K 线的 open_time_dt_str 与 close_time_dt_str 之间」的那一根；该根 K 线上的 **open、high、low、close、volume** 等即为「开仓价在该 interval 下的 K 线信息」。
 - **若无匹配**：若没有任何一根该 interval 的 K 线的时间区间包含开仓时间，则「开仓价某某 interval K 线的 xxx 信息」（如最高价、最低价、开盘价、收盘价等）**为空/None**，策略中需做判空处理。
 - **示例**：`open_time = position.get('open_time')`，在 `klines_15m` 中查找满足 `kline['open_time_dt_str'] <= open_time <= kline['close_time_dt_str']` 的 kline，若找到则 `kline_high_at_open = kline['high']`，否则 `kline_high_at_open = None`。
+
+**⚠️⚠️⚠️ 基于特定时间点的某 interval K 线计算技术指标值（极其重要，必须严格遵守）：**
+- **核心概念**：当策略中提到「某某的某类(interval)K线的某个技术指标值」时（如「开仓价的15分钟K线对应的ATR14值」），计算逻辑是：
+  1. **先找到特定时间点对应的K线**：根据特定时间点（如开仓时间 open_time）查询到该时间点对应的 interval（如15m）的那根K线（即该时间点所在的K线）。
+  2. **以该K线为起点**：将找到的K线作为「最新K线」（起点），而不是使用当前最新的K线。
+  3. **往后获取计算指标所需的K线数量**：从该起点K线开始，往后（向历史方向）获取计算指标所需的K线数量（如ATR14需要14根K线）。
+  4. **计算指标值**：使用获取到的K线数据集计算对应的技术指标值。
+
+- **计算步骤详解（以「开仓价的15分钟K线对应的ATR14值」为例）**：
+  1. **查找开仓时间对应的15m K线**：
+     ```python
+     open_time = position.get('open_time')  # 开仓时间，格式：'YYYY-MM-DD HH:MM:SS'
+     klines_15m = timeframes.get('15m', {}).get('klines', [])  # 获取15分钟K线列表
+     
+     # 解析开仓时间为datetime对象
+     from datetime import datetime
+     open_dt = datetime.strptime(open_time, '%Y-%m-%d %H:%M:%S')
+     
+     # 查找开仓时间对应的K线（开仓时间所在的K线）
+     start_kline_index = None  # 起点K线的索引
+     for idx, kline in enumerate(klines_15m):
+         kline_open_str = kline.get('open_time_dt_str')
+         kline_close_str = kline.get('close_time_dt_str')
+         if kline_open_str and kline_close_str:
+             kline_open_dt = datetime.strptime(kline_open_str, '%Y-%m-%d %H:%M:%S')
+             kline_close_dt = datetime.strptime(kline_close_str, '%Y-%m-%d %H:%M:%S')
+             # 判断开仓时间是否在该K线的时间区间内
+             if kline_open_dt <= open_dt <= kline_close_dt:
+                 start_kline_index = idx  # 找到起点K线的索引
+                 self.log.info(f"{symbol} 找到开仓时间对应的15m K线: index={idx}, open_time={kline_open_str}, close_time={kline_close_str}")
+                 break
+     ```
+  
+  2. **处理找不到对应K线的情况**：
+     ```python
+     if start_kline_index is None:
+         # 如果找不到开仓时间对应的K线，使用最新K线（klines列表的最后一个）
+         # 或者根据策略规则使用指定的K线（如当前K线的后一根）
+         # 策略中如果有明确说明，则按策略规则处理；否则默认使用最新K线
+         start_kline_index = len(klines_15m) - 1  # 使用最新K线（最后一个）
+         self.log.warning(f"{symbol} 未找到开仓时间对应的15m K线，使用最新K线作为起点: index={start_kline_index}")
+         # 如果策略明确说明使用"当前K线的后一根"，则：
+         # start_kline_index = len(klines_15m) - 2  # 使用倒数第二根K线（当前K线的后一根）
+     ```
+  
+  3. **从起点K线往后获取计算指标所需的K线数量**：
+     ```python
+     # ATR14需要14根K线，从起点K线往后（向历史方向）获取14根K线
+     indicator_period = 14  # ATR14的周期
+     
+     # 检查是否有足够的K线数据（起点K线索引 + 1 >= 指标周期）
+     if start_kline_index + 1 < indicator_period:
+         self.log.warning(f"{symbol} K线数据不足，ATR14需要至少{indicator_period}根K线，起点K线index={start_kline_index}，可用K线数={start_kline_index + 1}，跳过")
+         # 无法计算，跳过或返回None
+         atr14_value = None
+     else:
+         # 从起点K线往后获取14根K线（包括起点K线本身）
+         # klines列表是按时间从旧到新排列的，所以往后取就是取索引 [start_kline_index - (indicator_period - 1), start_kline_index]
+         end_index = start_kline_index  # 终点索引（起点K线）
+         start_index = start_kline_index - (indicator_period - 1)  # 起点索引（往前推indicator_period-1根）
+         
+         # 提取这14根K线的数据
+         klines_for_indicator = klines_15m[start_index:end_index + 1]  # 包含终点，所以+1
+         self.log.info(f"{symbol} 从起点K线(index={start_kline_index})往后获取{indicator_period}根K线: index范围=[{start_index}, {end_index}], 共{len(klines_for_indicator)}根")
+     ```
+  
+  4. **提取K线数据并计算指标值**：
+     ```python
+     # 提取high、low、close数组用于计算ATR
+     high_prices = []
+     low_prices = []
+     close_prices = []
+     for kline in klines_for_indicator:
+         high = kline.get('high', 0)
+         low = kline.get('low', 0)
+         close = kline.get('close', 0)
+         if isinstance(high, (int, float)) and high > 0 and isinstance(low, (int, float)) and low > 0 and isinstance(close, (int, float)) and close > 0:
+             high_prices.append(float(high))
+             low_prices.append(float(low))
+             close_prices.append(float(close))
+     
+     # 转换为numpy数组
+     import numpy as np
+     high_array = np.array(high_prices, dtype=float)
+     low_array = np.array(low_prices, dtype=float)
+     close_array = np.array(close_prices, dtype=float)
+     
+     # 计算ATR14（使用TradingView的计算逻辑：RMA/Wilder's Smoothing）
+     import talib
+     # 1. 计算TR（真实波幅）
+     tr = np.zeros_like(high_array)
+     tr[0] = high_array[0] - low_array[0]  # 第一根K线的TR
+     for j in range(1, len(high_array)):
+         hl = high_array[j] - low_array[j]
+         hc = abs(high_array[j] - close_array[j-1])
+         lc = abs(low_array[j] - close_array[j-1])
+         tr[j] = max(hl, hc, lc)
+     
+     # 2. 使用RMA（Wilder's Smoothing）计算ATR
+     atr = talib.RMA(tr, timeperiod=14)
+     
+     # 获取最后一个值（即起点K线对应的ATR14值）
+     if len(atr) > 0 and not np.isnan(atr[-1]):
+         atr14_value = float(atr[-1])
+         self.log.info(f"{symbol} 开仓价的15分钟K线对应的ATR14值={atr14_value:.7f}")
+     else:
+         atr14_value = None
+         self.log.warning(f"{symbol} ATR14计算结果无效")
+     ```
+
+- **通用计算函数示例**：
+  ```python
+  def calculate_indicator_at_timepoint(klines, timepoint_str, interval, indicator_name, indicator_period, indicator_func):
+      """
+      计算特定时间点对应的某interval K线的某个技术指标值
+      
+      参数:
+          klines: K线列表（按时间从旧到新排列）
+          timepoint_str: 特定时间点字符串（如开仓时间），格式：'YYYY-MM-DD HH:MM:SS'
+          interval: K线周期（如'15m'），用于日志输出
+          indicator_name: 指标名称（如'ATR14'），用于日志输出
+          indicator_period: 指标周期（如14），用于确定需要多少根K线
+          indicator_func: 指标计算函数（如talib.ATR），接收high_array, low_array, close_array, timeperiod参数
+      
+      返回:
+          指标值（float）或None（如果无法计算）
+      """
+      from datetime import datetime
+      
+      # 1. 查找时间点对应的K线
+      timepoint_dt = datetime.strptime(timepoint_str, '%Y-%m-%d %H:%M:%S')
+      start_kline_index = None
+      
+      for idx, kline in enumerate(klines):
+          kline_open_str = kline.get('open_time_dt_str')
+          kline_close_str = kline.get('close_time_dt_str')
+          if kline_open_str and kline_close_str:
+              kline_open_dt = datetime.strptime(kline_open_str, '%Y-%m-%d %H:%M:%S')
+              kline_close_dt = datetime.strptime(kline_close_str, '%Y-%m-%d %H:%M:%S')
+              if kline_open_dt <= timepoint_dt <= kline_close_dt:
+                  start_kline_index = idx
+                  break
+      
+      # 2. 如果找不到，使用最新K线（或根据策略规则处理）
+      if start_kline_index is None:
+          start_kline_index = len(klines) - 1
+          self.log.warning(f"未找到时间点{timepoint_str}对应的{interval} K线，使用最新K线作为起点")
+      
+      # 3. 检查K线数据是否足够
+      if start_kline_index + 1 < indicator_period:
+          self.log.warning(f"K线数据不足，{indicator_name}需要至少{indicator_period}根K线，起点K线index={start_kline_index}，可用K线数={start_kline_index + 1}")
+          return None
+      
+      # 4. 从起点K线往后获取计算指标所需的K线数量
+      end_index = start_kline_index
+      start_index = start_kline_index - (indicator_period - 1)
+      klines_for_indicator = klines[start_index:end_index + 1]
+      
+      # 5. 提取数据并计算指标
+      high_prices = []
+      low_prices = []
+      close_prices = []
+      for kline in klines_for_indicator:
+          high = kline.get('high', 0)
+          low = kline.get('low', 0)
+          close = kline.get('close', 0)
+          if isinstance(high, (int, float)) and high > 0 and isinstance(low, (int, float)) and low > 0 and isinstance(close, (int, float)) and close > 0:
+              high_prices.append(float(high))
+              low_prices.append(float(low))
+              close_prices.append(float(close))
+      
+      if len(high_prices) < indicator_period:
+          return None
+      
+      import numpy as np
+      high_array = np.array(high_prices, dtype=float)
+      low_array = np.array(low_prices, dtype=float)
+      close_array = np.array(close_prices, dtype=float)
+      
+      # 6. 计算指标值
+      # 注意：对于ATR指标，需要使用RMA方法，不能直接使用talib.ATR()
+      if indicator_name.startswith('ATR'):
+          # ATR使用RMA（Wilder's Smoothing）方法
+          # 1. 计算TR（真实波幅）
+          tr = np.zeros_like(high_array)
+          tr[0] = high_array[0] - low_array[0]
+          for j in range(1, len(high_array)):
+              hl = high_array[j] - low_array[j]
+              hc = abs(high_array[j] - close_array[j-1])
+              lc = abs(low_array[j] - close_array[j-1])
+              tr[j] = max(hl, hc, lc)
+          # 2. 使用RMA计算ATR
+          indicator_result = talib.RMA(tr, timeperiod=indicator_period)
+      else:
+          # 其他指标使用原函数
+          indicator_result = indicator_func(high_array, low_array, close_array, timeperiod=indicator_period)
+      
+      if len(indicator_result) > 0 and not np.isnan(indicator_result[-1]):
+          indicator_value = float(indicator_result[-1])
+          self.log.info(f"时间点{timepoint_str}对应的{interval} K线的{indicator_name}值={indicator_value:.7f}")
+          return indicator_value
+      else:
+          return None
+  ```
+
+- **重要注意事项**：
+  1. **K线列表的排列顺序**：klines列表是按时间从旧到新排列的（索引0是最旧的，索引-1是最新的），所以「往后」是指向历史方向（索引减小）。
+  2. **起点K线的确定**：起点K线是特定时间点所在的K线，不是当前最新的K线。
+  3. **找不到对应K线的处理**：
+     - **默认处理**：如果找不到特定时间点对应的K线，使用最新K线（klines列表的最后一个）作为起点。
+     - **策略指定处理**：如果策略中明确说明找不到对应K线时使用哪根K线（如「使用当前K线的后一根」），则按策略规则处理。
+  4. **数据量检查**：必须检查从起点K线往后是否有足够的K线数据来计算指标（起点K线索引 + 1 >= 指标周期）。
+  5. **指标值的获取**：计算出的指标数组的最后一个值（`indicator_result[-1]`）就是起点K线对应的指标值。
+  6. **日志输出**：必须输出详细的日志，包括查找过程、起点K线索引、获取的K线范围、计算结果等。
+
+- **其他示例**：
+  - **「开仓价的1小时K线对应的MA20值」**：查找开仓时间对应的1h K线，以该K线为起点，往后获取20根1h K线，计算MA20，取最后一个值。
+  - **「开仓价的30分钟K线对应的RSI14值」**：查找开仓时间对应的30m K线，以该K线为起点，往后获取14根30m K线，计算RSI14，取最后一个值。
+  - **「当前时间的15分钟K线对应的ATR14值」**：查找当前时间对应的15m K线，以该K线为起点，往后获取14根15m K线，计算ATR14，取最后一个值。
 
 ### 4. 决策格式要求
 

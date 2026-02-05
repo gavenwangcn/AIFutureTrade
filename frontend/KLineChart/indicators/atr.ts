@@ -32,18 +32,20 @@ const ATR_COLORS = ['#2DC08E', '#935EBD', '#FF9600']
  * ATR（平均真实波幅）指标
  * 支持 ATR7、ATR14、ATR21
  * 
- * 参考官方API文档：
- * - https://klinecharts.com/api/chart/registerIndicator
- * - https://klinecharts.com/guide/indicator
+ * 使用TradingView的计算逻辑
+ * 参考：https://www.tradingview.com/support/solutions/43000521824-average-true-range-atr/
  * 
- * ATR 的计算分为三步：
+ * TradingView的ATR计算逻辑：
  * 1. 计算真实波幅（TR）：
  *    TR = max(以下三者)：
  *      - 当日最高价 - 当日最低价
  *      - |当日最高价 - 前日收盘价|
  *      - |当日最低价 - 前日收盘价|
  * 2. 计算 ATR：
- *    ATR = SMA(TR, N)  # N为周期，通常14
+ *    ATR = RMA(TR, N)  # N为周期，通常14
+ *    RMA（Wilder's Smoothing）公式：
+ *    - 第一个值：RMA = SMA(TR, N)
+ *    - 后续值：RMA = (PrevRMA * (N - 1) + CurrentTR) / N
  * 
  * 显示方式：
  * - 在独立的副图区域以曲线形式显示
@@ -134,8 +136,10 @@ const atr: IndicatorTemplate<Atr, number> = {
   calc: (dataList, indicator) => {
     const { calcParams: params, figures } = indicator
     
-    // 为每个周期维护TR的累积和
-    const trSums: number[] = []
+    // 为每个周期维护RMA值（使用Wilder's Smoothing）
+    const rmaValues: number[] = []
+    // 为每个周期维护TR值数组（用于计算第一个RMA值）
+    const trArrays: number[][] = []
     
     return dataList.map((kLineData, i) => {
       const atr: Atr = {}
@@ -151,26 +155,30 @@ const atr: IndicatorTemplate<Atr, number> = {
       
       // 为每个周期计算ATR
       params.forEach((period, index) => {
-        // 如果数据足够，先移除最旧的TR值（滑动窗口）
-        if (i >= period) {
-          const oldTrIndex = i - period
-          const oldKLineData = dataList[oldTrIndex]
-          const oldPrevClose = oldTrIndex > 0 ? dataList[oldTrIndex - 1].close : oldKLineData.close
-          const oldTr1 = oldKLineData.high - oldKLineData.low
-          const oldTr2 = Math.abs(oldKLineData.high - oldPrevClose)
-          const oldTr3 = Math.abs(oldKLineData.low - oldPrevClose)
-          const oldTr = Math.max(oldTr1, oldTr2, oldTr3)
-          trSums[index] = (trSums[index] ?? 0) - oldTr
+        // 初始化TR数组
+        if (!trArrays[index]) {
+          trArrays[index] = []
         }
         
-        // 累积当前TR值
-        trSums[index] = (trSums[index] ?? 0) + tr
+        // 添加当前TR值
+        trArrays[index].push(tr)
         
-        // 如果数据足够，计算ATR（SMA of TR）
+        // 如果数据足够，计算ATR（使用RMA/Wilder's Smoothing）
         if (i >= period - 1) {
-          // 计算TR的简单移动平均（SMA）
-          const atrValue = trSums[index] / period
-          atr[figures[index].key] = atrValue
+          if (i === period - 1) {
+            // 第一个值：使用SMA计算初始RMA
+            let sum = 0
+            for (let j = 0; j < period; j++) {
+              sum += trArrays[index][j]
+            }
+            rmaValues[index] = sum / period
+          } else {
+            // 后续值：使用Wilder's Smoothing
+            // RMA = (PrevRMA * (period - 1) + CurrentTR) / period
+            rmaValues[index] = (rmaValues[index] * (period - 1) + tr) / period
+          }
+          
+          atr[figures[index].key] = rmaValues[index]
         }
       })
       

@@ -83,34 +83,53 @@ export function registerRSIIndicator(klinecharts) {
       }),
       calc: (dataList, indicator) => {
         const { calcParams: params, figures } = indicator
-        const sumCloseAs = []
-        const sumCloseBs = []
+        // 使用TradingView的计算逻辑（Wilder's Smoothing方法）
+        // 为每个周期维护AvgGain和AvgLoss（使用Wilder's Smoothing）
+        const avgGains = []
+        const avgLosses = []
+        
         return dataList.map((kLineData, i) => {
           const rsi = {}
-          const prevClose = (dataList[i - 1] ?? kLineData).close
-          const tmp = kLineData.close - prevClose
-          params.forEach((p, index) => {
-            if (tmp > 0) {
-              sumCloseAs[index] = (sumCloseAs[index] || 0) + tmp
-            } else {
-              sumCloseBs[index] = (sumCloseBs[index] || 0) + Math.abs(tmp)
-            }
-            if (i >= p - 1) {
-              if (sumCloseBs[index] !== 0) {
-                rsi[figures[index].key] = 100 - (100.0 / (1 + sumCloseAs[index] / sumCloseBs[index]))
-              } else {
-                rsi[figures[index].key] = 0
+          const prevClose = i > 0 ? dataList[i - 1].close : kLineData.close
+          const change = kLineData.close - prevClose
+          const gain = change > 0 ? change : 0
+          const loss = change < 0 ? -change : 0
+          
+          params.forEach((period, index) => {
+            if (i === 0) {
+              // 第一根K线：初始化AvgGain和AvgLoss
+              avgGains[index] = gain
+              avgLosses[index] = loss
+            } else if (i < period) {
+              // 前period根K线：使用简单平均
+              avgGains[index] = (avgGains[index] || 0) + gain
+              avgLosses[index] = (avgLosses[index] || 0) + loss
+              
+              if (i === period - 1) {
+                // 第period根K线：计算初始平均值
+                avgGains[index] = avgGains[index] / period
+                avgLosses[index] = avgLosses[index] / period
               }
-              const agoData = dataList[i - (p - 1)]
-              const agoPreData = dataList[i - p] ?? agoData
-              const agoTmp = agoData.close - agoPreData.close
-              if (agoTmp > 0) {
-                sumCloseAs[index] -= agoTmp
+            } else {
+              // 第period+1根K线开始：使用Wilder's Smoothing
+              // AvgGain = (PrevAvgGain * (period - 1) + CurrentGain) / period
+              // AvgLoss = (PrevAvgLoss * (period - 1) + CurrentLoss) / period
+              avgGains[index] = (avgGains[index] * (period - 1) + gain) / period
+              avgLosses[index] = (avgLosses[index] * (period - 1) + loss) / period
+            }
+            
+            // 计算RSI（需要至少period根K线）
+            if (i >= period - 1) {
+              if (avgLosses[index] !== 0) {
+                const rs = avgGains[index] / avgLosses[index]
+                rsi[figures[index].key] = 100 - (100 / (1 + rs))
               } else {
-                sumCloseBs[index] -= Math.abs(agoTmp)
+                // 如果AvgLoss为0，RSI为100（所有都是上涨）
+                rsi[figures[index].key] = avgGains[index] > 0 ? 100 : 50
               }
             }
           })
+          
           return rsi
         })
       }
@@ -209,8 +228,10 @@ export function registerATRIndicator(klinecharts) {
       calc: (dataList, indicator) => {
         const { calcParams: params, figures } = indicator
         
-        // 为每个周期维护TR的累积和
-        const trSums = []
+        // 为每个周期维护RMA值（使用Wilder's Smoothing）
+        const rmaValues = []
+        // 为每个周期维护TR值数组（用于计算第一个RMA值）
+        const trArrays = []
         
         return dataList.map((kLineData, i) => {
           const atr = {}
@@ -226,26 +247,30 @@ export function registerATRIndicator(klinecharts) {
           
           // 为每个周期计算ATR
           params.forEach((period, index) => {
-            // 如果数据足够，先移除最旧的TR值（滑动窗口）
-            if (i >= period) {
-              const oldTrIndex = i - period
-              const oldKLineData = dataList[oldTrIndex]
-              const oldPrevClose = oldTrIndex > 0 ? dataList[oldTrIndex - 1].close : oldKLineData.close
-              const oldTr1 = oldKLineData.high - oldKLineData.low
-              const oldTr2 = Math.abs(oldKLineData.high - oldPrevClose)
-              const oldTr3 = Math.abs(oldKLineData.low - oldPrevClose)
-              const oldTr = Math.max(oldTr1, oldTr2, oldTr3)
-              trSums[index] = (trSums[index] || 0) - oldTr
+            // 初始化TR数组
+            if (!trArrays[index]) {
+              trArrays[index] = []
             }
             
-            // 累积当前TR值
-            trSums[index] = (trSums[index] || 0) + tr
+            // 添加当前TR值
+            trArrays[index].push(tr)
             
-            // 如果数据足够，计算ATR（SMA of TR）
+            // 如果数据足够，计算ATR（使用RMA/Wilder's Smoothing）
             if (i >= period - 1) {
-              // 计算TR的简单移动平均（SMA）
-              const atrValue = trSums[index] / period
-              atr[figures[index].key] = atrValue
+              if (i === period - 1) {
+                // 第一个值：使用SMA计算初始RMA
+                let sum = 0
+                for (let j = 0; j < period; j++) {
+                  sum += trArrays[index][j]
+                }
+                rmaValues[index] = sum / period
+              } else {
+                // 后续值：使用Wilder's Smoothing
+                // RMA = (PrevRMA * (period - 1) + CurrentTR) / period
+                rmaValues[index] = (rmaValues[index] * (period - 1) + tr) / period
+              }
+              
+              atr[figures[index].key] = rmaValues[index]
             }
           })
           

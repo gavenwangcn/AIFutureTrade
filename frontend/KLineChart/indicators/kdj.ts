@@ -23,6 +23,16 @@ interface Kdj {
 /**
  * KDJ（随机指标）指标
  * K值、D值、J值
+ * 
+ * 使用TradingView的计算逻辑
+ * 参考：https://www.tradingview.com/support/solutions/43000521824-stochastic-oscillator/
+ * 
+ * TradingView的KDJ计算逻辑：
+ * 1. 计算原始%K（RSV）：RSV = 100 * (Close - LowestLow) / (HighestHigh - LowestLow)
+ * 2. 第一次平滑得到K值：使用SMA平滑RSV（周期为smooth_k）
+ * 3. 第二次平滑得到D值：使用SMA平滑K值（周期为smooth_d）
+ * 4. 计算J值：J = 3K - 2D
+ * 
  * 标准参数：(9, 3, 3)
  * - 第一个参数：RSV计算周期（通常为9）
  * - 第二个参数：K值平滑周期（通常为3）
@@ -44,25 +54,27 @@ const kdj: IndicatorTemplate<Kdj, number> = {
   ],
   calc: (dataList, indicator) => {
     const { calcParams: params } = indicator
-    const rsvPeriod = params[0] // RSV计算周期
-    const kPeriod = params[1]   // K值平滑周期
-    const dPeriod = params[2]   // D值平滑周期
+    const rsvPeriod = params[0] // RSV计算周期（通常为9）
+    const smoothK = params[1]   // K值平滑周期（通常为3）
+    const smoothD = params[2]    // D值平滑周期（通常为3）
     
-    let k = 50  // K值初始值
-    let d = 50  // D值初始值
-    let prevK = 50
-    let prevD = 50
+    // 存储原始%K（RSV）值
+    const rawKValues: number[] = []
+    // 存储K值
+    const kValues: number[] = []
+    // 存储D值
+    const dValues: number[] = []
     
     return dataList.map((kLineData, i) => {
       const kdj: Kdj = {}
       
-      // 计算RSV（未成熟随机值）
+      // 1. 计算原始%K（RSV）
       if (i >= rsvPeriod - 1) {
         // 获取最近N周期内的最高价和最低价
         let highest = kLineData.high
         let lowest = kLineData.low
         
-        for (let j = i - rsvPeriod + 1; j < i; j++) {
+        for (let j = i - rsvPeriod + 1; j <= i; j++) {
           if (dataList[j].high > highest) {
             highest = dataList[j].high
           }
@@ -71,38 +83,41 @@ const kdj: IndicatorTemplate<Kdj, number> = {
           }
         }
         
-        // 计算RSV
+        // 计算RSV（原始%K）
         const rsv = highest !== lowest 
           ? ((kLineData.close - lowest) / (highest - lowest)) * 100 
           : 50
         
-        // 计算K值：平滑移动平均
-        // K = (2/3) * 前一日K值 + (1/3) * 当日RSV
-        if (i === rsvPeriod - 1) {
-          // 第一次计算，使用RSV的简单平均
-          k = rsv
-        } else {
-          k = (2 * prevK + rsv) / 3
+        rawKValues.push(rsv)
+        
+        // 2. 第一次平滑得到K值（使用SMA平滑RSV）
+        if (rawKValues.length >= smoothK) {
+          // 计算SMA：取最近smoothK个RSV值的平均值
+          let sum = 0
+          for (let j = rawKValues.length - smoothK; j < rawKValues.length; j++) {
+            sum += rawKValues[j]
+          }
+          const k = sum / smoothK
+          kValues.push(k)
+          
+          // 3. 第二次平滑得到D值（使用SMA平滑K值）
+          if (kValues.length >= smoothD) {
+            // 计算SMA：取最近smoothD个K值的平均值
+            let dSum = 0
+            for (let j = kValues.length - smoothD; j < kValues.length; j++) {
+              dSum += kValues[j]
+            }
+            const d = dSum / smoothD
+            dValues.push(d)
+            
+            // 4. 计算J值：J = 3K - 2D
+            const j = 3 * k - 2 * d
+            
+            kdj.k = k
+            kdj.d = d
+            kdj.j = j
+          }
         }
-        
-        // 计算D值：K值的平滑移动平均
-        // D = (2/3) * 前一日D值 + (1/3) * 当日K值
-        if (i === rsvPeriod - 1) {
-          d = k
-        } else {
-          d = (2 * prevD + k) / 3
-        }
-        
-        // 计算J值：J = 3K - 2D
-        const j = 3 * k - 2 * d
-        
-        kdj.k = k
-        kdj.d = d
-        kdj.j = j
-        
-        // 更新前一日值
-        prevK = k
-        prevD = d
       }
       
       return kdj
