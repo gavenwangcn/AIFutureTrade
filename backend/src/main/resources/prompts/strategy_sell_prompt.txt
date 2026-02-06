@@ -650,8 +650,9 @@ class GeneratedSellStrategy(StrategyBaseSell):
      - **MA指标**：MA(5)需要至少5根K线，MA(20)需要至少20根K线，MA(99)需要至少99根K线
      - **EMA指标**：EMA(5)需要至少5根K线，EMA(20)需要至少20根K线，EMA(99)需要至少99根K线
      - **KDJ指标**：需要至少9根K线
-     - **RSI指标**：RSI(14)需要至少14根K线
-     - **ATR指标**：ATR(7)需要至少7根K线，ATR(14)需要至少14根K线，ATR(21)需要至少21根K线
+     - **RSI指标（使用Wilder's Smoothing方法）**：RSI(6)需要至少11根K线（wilders_period=2*6-1=11），RSI(14)需要至少27根K线（wilders_period=2*14-1=27），RSI(21)需要至少41根K线（wilders_period=2*21-1=41）
+     - **ATR指标（使用Wilder's Smoothing方法）**：ATR(7)需要至少13根K线（wilders_period=2*7-1=13），ATR(14)需要至少27根K线（wilders_period=2*14-1=27），ATR(21)需要至少41根K线（wilders_period=2*21-1=41）
+     - **⚠️ 重要说明**：由于ATR和RSI使用Wilder's Smoothing方法（通过EMA模拟），实际所需K线数量 = 2 * period - 1。为了获得更稳定的结果，建议使用更多的K线数据（如ATR14建议使用50+根K线）
      - **MACD指标**：需要至少26根K线（slowperiod=26）
      - **金叉死叉判断**：需要至少 slow_period + 1 根K线（例如MA5/MA20需要至少21根）
    - **检查方式**：在计算指标前检查 `len(close_array) >= 指标周期`，例如：`if len(close_array) < 99: continue`（如果使用MA(99)）
@@ -749,11 +750,13 @@ klines_1w = timeframes.get('1w', {}).get('klines', [])  # 1周K线
      ```python
      open_time = position.get('open_time')  # 开仓时间，格式：'YYYY-MM-DD HH:MM:SS'
      klines_15m = timeframes.get('15m', {}).get('klines', [])  # 获取15分钟K线列表
-     
-     # 解析开仓时间为datetime对象
+
+     # ⚠️ 重要：解析时间字符串时，统一使用naive datetime（不带时区信息）进行比较
+     # 因为K线的时间字符串（open_time_dt_str、close_time_dt_str）都是UTC+8时区的时间字符串
+     # 解析后的datetime对象都是naive datetime，所以比较时也应该使用naive datetime
      from datetime import datetime
      open_dt = datetime.strptime(open_time, '%Y-%m-%d %H:%M:%S')
-     
+
      # 查找开仓时间对应的K线（开仓时间所在的K线）
      start_kline_index = None  # 起点K线的索引
      for idx, kline in enumerate(klines_15m):
@@ -783,23 +786,26 @@ klines_1w = timeframes.get('1w', {}).get('klines', [])  # 1周K线
   
   3. **从起点K线往后获取计算指标所需的K线数量**：
      ```python
-     # ATR14需要14根K线，从起点K线往后（向历史方向）获取14根K线
+     # ⚠️ 重要：ATR14使用Wilder's Smoothing方法（EMA模拟），需要的K线数量不是14根，而是27根
+     # 因为 wilders_period = 2 * 14 - 1 = 27
      indicator_period = 14  # ATR14的周期
-     
-     # 检查是否有足够的K线数据（起点K线索引 + 1 >= 指标周期）
-     if start_kline_index + 1 < indicator_period:
-         self.log.warning(f"{symbol} K线数据不足，ATR14需要至少{indicator_period}根K线，起点K线index={start_kline_index}，可用K线数={start_kline_index + 1}，跳过")
+     wilders_period = 2 * indicator_period - 1  # 对于ATR14，即为27
+     required_klines = wilders_period  # 实际需要的K线数量：27根
+
+     # 检查是否有足够的K线数据（起点K线索引 + 1 >= 实际需要的K线数量）
+     if start_kline_index + 1 < required_klines:
+         self.log.warning(f"{symbol} K线数据不足，ATR14需要至少{required_klines}根K线（wilders_period={wilders_period}），起点K线index={start_kline_index}，可用K线数={start_kline_index + 1}，跳过")
          # 无法计算，跳过或返回None
          atr14_value = None
      else:
-         # 从起点K线往后获取14根K线（包括起点K线本身）
-         # klines列表是按时间从旧到新排列的，所以往后取就是取索引 [start_kline_index - (indicator_period - 1), start_kline_index]
+         # 从起点K线往后获取27根K线（包括起点K线本身）
+         # klines列表是按时间从旧到新排列的，所以往后取就是取索引 [start_kline_index - (required_klines - 1), start_kline_index]
          end_index = start_kline_index  # 终点索引（起点K线）
-         start_index = start_kline_index - (indicator_period - 1)  # 起点索引（往前推indicator_period-1根）
-         
-         # 提取这14根K线的数据
+         start_index = start_kline_index - (required_klines - 1)  # 起点索引（往前推required_klines-1根）
+
+         # 提取这27根K线的数据
          klines_for_indicator = klines_15m[start_index:end_index + 1]  # 包含终点，所以+1
-         self.log.info(f"{symbol} 从起点K线(index={start_kline_index})往后获取{indicator_period}根K线: index范围=[{start_index}, {end_index}], 共{len(klines_for_indicator)}根")
+         self.log.info(f"{symbol} 从起点K线(index={start_kline_index})往后获取{required_klines}根K线: index范围=[{start_index}, {end_index}], 共{len(klines_for_indicator)}根")
      ```
   
   4. **提取K线数据并计算指标值**：
@@ -1269,26 +1275,44 @@ decisions[symbol] = {
     **3. 获取当前时间必须使用UTC+8时区（北京时区）：**
     - **⚠️ 严格要求**：所有获取当前时间的操作必须使用 `datetime.now(timezone(timedelta(hours=8)))`
     - **禁止使用**：`datetime.now()` 不带时区参数
+    - **⚠️⚠️⚠️ 时区一致性要求（极其重要）**：
+      - **K线时间字符串**（`open_time_dt_str`、`close_time_dt_str`）都是UTC+8时区的时间字符串
+      - **解析时间字符串时**，使用 `datetime.strptime()` 会创建 **naive datetime**（不带时区信息）
+      - **获取当前时间时**，使用 `datetime.now(timezone(timedelta(hours=8)))` 会创建 **aware datetime**（带时区信息）
+      - **⚠️ 关键问题**：**不能直接比较 naive datetime 和 aware datetime**，否则会抛出错误："can't compare offset-naive and offset-aware datetimes"
+      - **解决方案**：
+        - **方案1（推荐）**：统一使用 **naive datetime** 进行比较
+          - 获取当前时间时，使用 `datetime.now(timezone(timedelta(hours=8))).replace(tzinfo=None)` 去除时区信息
+          - 或者直接使用 `datetime.now()` 获取本地时间（如果系统时区是UTC+8）
+        - **方案2**：统一使用 **aware datetime** 进行比较
+          - 解析时间字符串后，添加时区信息：`datetime.strptime(time_str, '%Y-%m-%d %H:%M:%S').replace(tzinfo=timezone(timedelta(hours=8)))`
     - **示例**：
       ```python
-      # ✅ 正确：获取当前时间（UTC+8时区）
-      current_time_utc8 = datetime.now(timezone(timedelta(hours=8)))
-      self.log.info(f"当前时间（UTC+8）: {current_time_utc8.strftime('%Y-%m-%d %H:%M:%S')}")
-      
-      # ✅ 正确：解析account_info中的时间字符串
-      if 'current_time' in account_info:
-          time_str = account_info['current_time']  # 格式：'YYYY-MM-DD HH:MM:SS'
-          parsed_time = datetime.strptime(time_str, '%Y-%m-%d %H:%M:%S')
-          self.log.info(f"解析账户时间: {parsed_time}")
-      
-      # ❌ 错误：不要使用 datetime.now() 不带时区参数
-      # current_time = datetime.now()  # 这是错误的！
-      
-      # ✅ 正确：计算持仓时长（使用UTC+8时区）
+      # ✅ 正确：获取当前时间（UTC+8时区，aware datetime）
+      current_time_utc8_aware = datetime.now(timezone(timedelta(hours=8)))
+      self.log.info(f"当前时间（UTC+8，aware）: {current_time_utc8_aware.strftime('%Y-%m-%d %H:%M:%S')}")
+
+      # ✅ 正确：获取当前时间（UTC+8时区，naive datetime，用于与K线时间比较）
+      current_time_utc8 = datetime.now(timezone(timedelta(hours=8))).replace(tzinfo=None)
+      self.log.info(f"当前时间（UTC+8，naive）: {current_time_utc8.strftime('%Y-%m-%d %H:%M:%S')}")
+
+      # ✅ 正确：解析K线时间字符串（naive datetime）
+      kline_open_str = kline.get('open_time_dt_str')  # 格式：'YYYY-MM-DD HH:MM:SS'
+      kline_open_dt = datetime.strptime(kline_open_str, '%Y-%m-%d %H:%M:%S')  # naive datetime
+
+      # ✅ 正确：比较时间（统一使用naive datetime）
+      if kline_open_dt <= current_time_utc8 <= kline_close_dt:
+          # 找到当前时间对应的K线
+          pass
+
+      # ❌ 错误：不要使用 datetime.now() 不带时区参数（除非用于与naive datetime比较）
+      # current_time = datetime.now()  # 这可能不是UTC+8时区！
+
+      # ✅ 正确：计算持仓时长（使用naive datetime）
       if 'open_time' in position:
           open_time_str = position.get('open_time')  # 格式：'YYYY-MM-DD HH:MM:SS'
-          open_time = datetime.strptime(open_time_str, '%Y-%m-%d %H:%M:%S')
-          current_time = datetime.now(timezone(timedelta(hours=8)))
+          open_time = datetime.strptime(open_time_str, '%Y-%m-%d %H:%M:%S')  # naive datetime
+          current_time = datetime.now(timezone(timedelta(hours=8))).replace(tzinfo=None)  # naive datetime
           holding_duration = current_time - open_time
           self.log.info(f"{symbol} 持仓时长: {holding_duration.total_seconds() / 3600:.2f} 小时")
       ```

@@ -1298,26 +1298,26 @@ class MarketDataFetcher:
     def get_market_data_5m(self, symbol: str) -> Dict:
         """
         获取5分钟时间周期的市场数据
-        
+
         Args:
             symbol: 交易对符号（如 'BTC'）
-            
+
         Returns:
             市场数据字典，包含symbol、timeframe、klines、indicators和metadata字段
         """
-        return self._get_market_data_by_interval(symbol, '5m', limit=300, return_count=300)
+        return self._get_market_data_by_interval(symbol, '5m', limit=500, return_count=500)
 
     def get_market_data_15m(self, symbol: str) -> Dict:
         """
         获取15分钟时间周期的市场数据
-        
+
         Args:
             symbol: 交易对符号（如 'BTC'）
-            
+
         Returns:
             市场数据字典，包含symbol、timeframe、klines、indicators和metadata字段
         """
-        return self._get_market_data_by_interval(symbol, '15m', limit=300, return_count=300)
+        return self._get_market_data_by_interval(symbol, '15m', limit=500, return_count=500)
 
     def get_market_data_30m(self, symbol: str) -> Dict:
         """
