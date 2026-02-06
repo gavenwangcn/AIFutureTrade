@@ -964,7 +964,10 @@ class MarketDataFetcher:
         为所有K线计算技术指标
 
         此方法接收原始K线数据，为每根K线计算并添加技术指标。
-        由于指标计算需要历史数据，只为后面的K线计算指标（前面的K线作为历史数据）。
+        由于指标计算需要历史数据，不同指标需要不同数量的历史K线：
+        - MA5/EMA5/RSI6/ATR7/MACD: 需要较少历史数据
+        - MA99/EMA99: 需要99根历史数据
+        - 如果K线不足，能计算出多少指标就给多少，计算不出来的指标值为0或默认值
 
         技术指标包括：
         - MA: 简单移动平均线 (5, 20, 60, 99)
@@ -976,16 +979,20 @@ class MarketDataFetcher:
         - VOL: 成交量及均量线 (5, 10, 60)
 
         Args:
-            klines: 原始K线数据列表（至少100根）
+            klines: 原始K线数据列表（可以是任意数量，不足时部分指标为空）
             symbol: 交易对符号
             interval: 时间周期
 
         Returns:
-            包含指标数据的K线列表（只返回有完整指标的K线）
+            包含指标数据的K线列表（返回所有K线，不足历史数据的K线指标部分为空）
         """
-        if not klines or len(klines) < 100:
-            logger.warning(f'[Indicators] Insufficient klines for {symbol} {interval}: {len(klines)} < 100')
+        if not klines or len(klines) == 0:
+            logger.warning(f'[Indicators] No klines data for {symbol} {interval}')
             return []
+        
+        # 如果K线不足100根，记录警告但继续计算（能算多少算多少）
+        if len(klines) < 100:
+            logger.warning(f'[Indicators] Insufficient klines for {symbol} {interval}: {len(klines)} < 100, will calculate partial indicators')
 
         try:
             # 提取OHLCV数据为numpy数组
@@ -1029,64 +1036,69 @@ class MarketDataFetcher:
             mavol10 = talib.SMA(volumes, timeperiod=10)
             mavol60 = talib.SMA(volumes, timeperiod=60)
 
-            # 确定从哪个索引开始返回K线（确保所有指标都有效）
-            # MA99需要99根历史数据，所以从第99根开始（索引99）
-            # 为了安全起见，从第100根开始（索引99）
-            start_index = 99
-
-            # 为每根K线添加指标数据
+            # 为每根K线添加指标数据（返回所有K线，不足历史数据的K线指标部分为空）
             result_klines = []
-            for i in range(start_index, len(klines)):
+            for i in range(len(klines)):
                 kline = klines[i].copy()
 
-                # 构建指标字典
+                # 构建指标字典，根据K线索引判断哪些指标可以计算
+                # 不同指标需要的最小历史数据量：
+                # MA5/EMA5/ATR7/RSI6: 需要5-7根历史数据
+                # MA20/EMA20/RSI9/ATR14: 需要20根历史数据
+                # MA60/EMA60/RSI14/ATR21: 需要60根历史数据
+                # MA99/EMA99: 需要99根历史数据
+                # MACD: 需要26根历史数据
+                # KDJ: 需要9根历史数据
+                
                 indicators = {
                     'ma': {
-                        'ma5': float(ma5[i]) if not np.isnan(ma5[i]) else 0.0,
-                        'ma20': float(ma20[i]) if not np.isnan(ma20[i]) else 0.0,
-                        'ma60': float(ma60[i]) if not np.isnan(ma60[i]) else 0.0,
-                        'ma99': float(ma99[i]) if not np.isnan(ma99[i]) else 0.0
+                        'ma5': float(ma5[i]) if i >= 4 and not np.isnan(ma5[i]) else 0.0,
+                        'ma20': float(ma20[i]) if i >= 19 and not np.isnan(ma20[i]) else 0.0,
+                        'ma60': float(ma60[i]) if i >= 59 and not np.isnan(ma60[i]) else 0.0,
+                        'ma99': float(ma99[i]) if i >= 98 and not np.isnan(ma99[i]) else 0.0
                     },
                     'ema': {
-                        'ema5': float(ema5[i]) if not np.isnan(ema5[i]) else 0.0,
-                        'ema20': float(ema20[i]) if not np.isnan(ema20[i]) else 0.0,
-                        'ema60': float(ema60[i]) if not np.isnan(ema60[i]) else 0.0,
-                        'ema99': float(ema99[i]) if not np.isnan(ema99[i]) else 0.0
+                        'ema5': float(ema5[i]) if i >= 4 and not np.isnan(ema5[i]) else 0.0,
+                        'ema20': float(ema20[i]) if i >= 19 and not np.isnan(ema20[i]) else 0.0,
+                        'ema60': float(ema60[i]) if i >= 59 and not np.isnan(ema60[i]) else 0.0,
+                        'ema99': float(ema99[i]) if i >= 98 and not np.isnan(ema99[i]) else 0.0
                     },
                     'rsi': {
-                        'rsi6': float(rsi6[i]) if not np.isnan(rsi6[i]) else 50.0,
-                        'rsi9': float(rsi9[i]) if not np.isnan(rsi9[i]) else 50.0,
-                        'rsi14': float(rsi14[i]) if not np.isnan(rsi14[i]) else 50.0
+                        'rsi6': float(rsi6[i]) if i >= 6 and not np.isnan(rsi6[i]) else 50.0,
+                        'rsi9': float(rsi9[i]) if i >= 9 and not np.isnan(rsi9[i]) else 50.0,
+                        'rsi14': float(rsi14[i]) if i >= 14 and not np.isnan(rsi14[i]) else 50.0
                     },
                     'macd': {
-                        'dif': float(macd_dif[i]) if not np.isnan(macd_dif[i]) else 0.0,
-                        'dea': float(macd_dea[i]) if not np.isnan(macd_dea[i]) else 0.0,
-                        'bar': float(macd_bar[i]) if not np.isnan(macd_bar[i]) else 0.0
+                        'dif': float(macd_dif[i]) if i >= 25 and not np.isnan(macd_dif[i]) else 0.0,
+                        'dea': float(macd_dea[i]) if i >= 25 and not np.isnan(macd_dea[i]) else 0.0,
+                        'bar': float(macd_bar[i]) if i >= 25 and not np.isnan(macd_bar[i]) else 0.0
                     },
                     'kdj': {
-                        'k': float(kdj_k[i]) if not np.isnan(kdj_k[i]) else 50.0,
-                        'd': float(kdj_d[i]) if not np.isnan(kdj_d[i]) else 50.0,
-                        'j': float(kdj_j[i]) if not np.isnan(kdj_j[i]) else 50.0
+                        'k': float(kdj_k[i]) if i >= 8 and not np.isnan(kdj_k[i]) else 50.0,
+                        'd': float(kdj_d[i]) if i >= 8 and not np.isnan(kdj_d[i]) else 50.0,
+                        'j': float(kdj_j[i]) if i >= 8 and not np.isnan(kdj_j[i]) else 50.0
                     },
                     'atr': {
-                        'atr7': float(atr7[i]) if not np.isnan(atr7[i]) else 0.0,
-                        'atr14': float(atr14[i]) if not np.isnan(atr14[i]) else 0.0,
-                        'atr21': float(atr21[i]) if not np.isnan(atr21[i]) else 0.0
+                        'atr7': float(atr7[i]) if i >= 6 and not np.isnan(atr7[i]) else 0.0,
+                        'atr14': float(atr14[i]) if i >= 13 and not np.isnan(atr14[i]) else 0.0,
+                        'atr21': float(atr21[i]) if i >= 20 and not np.isnan(atr21[i]) else 0.0
                     },
                     'vol': {
                         'vol': float(volumes[i]),
                         'buy_vol': float(klines[i].get('taker_buy_base_volume', 0)),
                         'sell_vol': float(volumes[i] - klines[i].get('taker_buy_base_volume', 0)),
-                        'mavol5': float(mavol5[i]) if not np.isnan(mavol5[i]) else 0.0,
-                        'mavol10': float(mavol10[i]) if not np.isnan(mavol10[i]) else 0.0,
-                        'mavol60': float(mavol60[i]) if not np.isnan(mavol60[i]) else 0.0
+                        'mavol5': float(mavol5[i]) if i >= 4 and not np.isnan(mavol5[i]) else 0.0,
+                        'mavol10': float(mavol10[i]) if i >= 9 and not np.isnan(mavol10[i]) else 0.0,
+                        'mavol60': float(mavol60[i]) if i >= 59 and not np.isnan(mavol60[i]) else 0.0
                     }
                 }
 
                 kline['indicators'] = indicators
                 result_klines.append(kline)
 
-            logger.info(f'[Indicators] Calculated indicators for {symbol} {interval}: {len(result_klines)} klines with full indicators')
+            # 统计有多少K线有完整指标（MA99需要99根历史数据）
+            full_indicators_count = max(0, len(klines) - 98) if len(klines) >= 99 else 0
+            logger.info(f'[Indicators] Calculated indicators for {symbol} {interval}: {len(result_klines)} total klines, {full_indicators_count} klines with full indicators (MA99/EMA99)')
             return result_klines
 
         except Exception as e:
@@ -1140,13 +1152,17 @@ class MarketDataFetcher:
                                    period: int = 14) -> np.ndarray:
         """
         使用TradingView的计算逻辑计算ATR（使用Wilder's Smoothing/RMA）
+        
+        完全按照前端JavaScript代码的实现方式计算，确保结果一致。
 
-        TradingView的ATR计算逻辑（与前端JavaScript实现完全一致）：
-        1. 计算真实波幅（TR）：
-           TR = max(high - low, |high - prevClose|, |low - prevClose|)
-        2. 计算ATR：使用RMA (Wilder's Smoothing)
-           - 第一个值：使用前period个TR的简单平均
-           - 之后：RMA = (PrevRMA * (period - 1) + CurrentTR) / period
+        前端计算逻辑（frontend/KLineChart/indicators/atr.ts）：
+        1. 对于每一根K线（从索引0开始）：
+           - 获取前一根K线的收盘价：prevClose = i > 0 ? dataList[i - 1].close : kLineData.close
+           - 计算真实波幅（TR）：TR = max(high - low, |high - prevClose|, |low - prevClose|)
+           - 将TR添加到数组中
+        2. 当索引 i >= period - 1 时计算ATR：
+           - 如果 i === period - 1：第一个ATR值 = 前period个TR的简单平均（SMA）
+           - 否则：使用Wilder's Smoothing：RMA = (PrevRMA * (period - 1) + CurrentTR) / period
 
         Args:
             high_array: 最高价数组
@@ -1155,24 +1171,48 @@ class MarketDataFetcher:
             period: ATR周期（默认14）
 
         Returns:
-            ATR值数组
+            ATR值数组（与输入数组长度相同，前period-1个值为NaN）
         """
-        if len(close_array) < period + 1:
+        if len(close_array) < period:
             return np.full(len(close_array), np.nan)
 
-        # 1. 计算真实波幅TR（使用TA-Lib内置函数）
-        tr = talib.TRANGE(high_array, low_array, close_array)
-
-        # 2. 初始化结果数组
+        # 初始化结果数组
         atr = np.full(len(close_array), np.nan)
+        
+        # 存储TR值数组（用于计算第一个ATR值）
+        tr_array = []
+        
+        # 存储当前RMA值（用于Wilder's Smoothing）
+        rma_value = None
 
-        # 3. 计算第一个ATR值（使用前period个TR的简单平均）
-        atr[period - 1] = np.mean(tr[:period])
-
-        # 4. 使用Wilder's Smoothing (RMA)计算后续ATR值
-        for i in range(period, len(close_array)):
-            # RMA公式（与前端完全一致）
-            atr[i] = (atr[i - 1] * (period - 1) + tr[i]) / period
+        # 遍历每一根K线，完全按照前端逻辑计算
+        for i in range(len(close_array)):
+            # 获取前一根K线的收盘价（与前端逻辑完全一致）
+            # 第一根K线（i=0）时，prevClose就是它自己的close
+            prev_close = close_array[i - 1] if i > 0 else close_array[i]
+            
+            # 计算真实波幅TR（与前端逻辑完全一致）
+            tr1 = high_array[i] - low_array[i]  # 当日最高价 - 当日最低价
+            tr2 = abs(high_array[i] - prev_close)  # |当日最高价 - 前日收盘价|
+            tr3 = abs(low_array[i] - prev_close)   # |当日最低价 - 前日收盘价|
+            tr = max(tr1, tr2, tr3)  # TR = max(三者)
+            
+            # 将TR添加到数组（与前端逻辑一致）
+            tr_array.append(tr)
+            
+            # 如果数据足够，计算ATR（使用RMA/Wilder's Smoothing）
+            if i >= period - 1:
+                if i == period - 1:
+                    # 第一个值：使用SMA计算初始RMA（与前端逻辑完全一致）
+                    # 使用前period个TR值（索引0到period-1）
+                    tr_sum = sum(tr_array[:period])
+                    rma_value = tr_sum / period
+                    atr[i] = rma_value
+                else:
+                    # 后续值：使用Wilder's Smoothing（与前端逻辑完全一致）
+                    # RMA = (PrevRMA * (period - 1) + CurrentTR) / period
+                    rma_value = (rma_value * (period - 1) + tr) / period
+                    atr[i] = rma_value
 
         return atr
 
@@ -1277,17 +1317,24 @@ class MarketDataFetcher:
                 except (ValueError, TypeError, KeyError, IndexError):
                     continue
 
-            if len(all_klines_parsed) < 100:  # 至少需要100根K线才能计算指标
-                logger.warning(f'[MarketData] Insufficient klines for {symbol} {interval}: {len(all_klines_parsed)} < 100')
-                return {}
+            # 如果K线不足100根，记录警告但继续处理（能算多少算多少）
+            if len(all_klines_parsed) < 100:
+                logger.warning(f'[MarketData] Insufficient klines for {symbol} {interval}: {len(all_klines_parsed)} < 100, will calculate partial indicators')
 
-            # 计算所有K线的技术指标
+            # 计算所有K线的技术指标（即使不足100根也会返回所有K线，部分指标为空）
             klines_with_indicators = self._calculate_indicators_for_klines(all_klines_parsed, symbol, interval)
 
-            # 只返回最后return_count根K线（这些K线都有完整的指标数据）
-            # 如果获取了500根，计算了400根，则返回最后400根
+            # 确保返回return_count数量的K线（如果不足则返回所有可用的K线）
+            # 即使某些指标为空，也要返回指定数量的K线
+            if len(klines_with_indicators) == 0:
+                logger.warning(f'[MarketData] No klines with indicators for {symbol} {interval}')
+                return {}
+            
+            # 返回最后return_count根K线（如果不足则返回所有）
             actual_return_count = min(return_count, len(klines_with_indicators))
             klines = klines_with_indicators[-actual_return_count:] if len(klines_with_indicators) > actual_return_count else klines_with_indicators
+            
+            logger.info(f'[MarketData] Returning {len(klines)} klines for {symbol} {interval} (requested: {return_count}, available: {len(klines_with_indicators)})')
 
             # 构建K线数据列表（已包含指标数据）
             kline_data_list = []
@@ -1408,7 +1455,7 @@ class MarketDataFetcher:
         Returns:
             市场数据字典，包含symbol、timeframe、klines（每根K线含indicators字段）和metadata字段
         """
-        return self._get_market_data_by_interval(symbol, '1h', limit=500, return_count=400)
+        return self._get_market_data_by_interval(symbol, '1h', limit=400, return_count=300)
 
     def get_market_data_4h(self, symbol: str) -> Dict:
         """
@@ -1420,7 +1467,7 @@ class MarketDataFetcher:
         Returns:
             市场数据字典，包含symbol、timeframe、klines（每根K线含indicators字段）和metadata字段
         """
-        return self._get_market_data_by_interval(symbol, '4h', limit=500, return_count=400)
+        return self._get_market_data_by_interval(symbol, '4h', limit=400, return_count=300)
 
     def get_market_data_1d(self, symbol: str) -> Dict:
         """
@@ -1432,7 +1479,7 @@ class MarketDataFetcher:
         Returns:
             市场数据字典，包含symbol、timeframe、klines（每根K线含indicators字段）和metadata字段
         """
-        return self._get_market_data_by_interval(symbol, '1d', limit=500, return_count=400)
+        return self._get_market_data_by_interval(symbol, '1d', limit=200, return_count=100)
 
     def get_market_data_1w(self, symbol: str) -> Dict:
         """
@@ -1444,7 +1491,7 @@ class MarketDataFetcher:
         Returns:
             市场数据字典，包含symbol、timeframe、klines（每根K线含indicators字段）和metadata字段
         """
-        return self._get_market_data_by_interval(symbol, '1w', limit=500, return_count=400)
+        return self._get_market_data_by_interval(symbol, '1w', limit=200, return_count=100)
 
 
     # ============ Leaderboard Methods ===========
