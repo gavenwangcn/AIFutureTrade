@@ -38,52 +38,60 @@ logger = logging.getLogger(__name__)
 def _calculate_rsi_tradingview(close_array: np.ndarray, period: int) -> np.ndarray:
     """
     使用TradingView的计算逻辑计算RSI（Wilder's Smoothing方法）
-    
+
     参考：https://www.tradingview.com/support/solutions/43000521824-relative-strength-index-rsi/
-    
-    Wilder's Smoothing公式：
-    - AvgGain = (PrevAvgGain * (period - 1) + CurrentGain) / period
-    - AvgLoss = (PrevAvgLoss * (period - 1) + CurrentLoss) / period
+
+    Wilder's Smoothing公式（与前端JavaScript实现完全一致）：
+    - 第一个period根K线：使用简单平均
+    - 之后：AvgGain = (PrevAvgGain * (period - 1) + CurrentGain) / period
+    - 之后：AvgLoss = (PrevAvgLoss * (period - 1) + CurrentLoss) / period
     - RS = AvgGain / AvgLoss
     - RSI = 100 - (100 / (1 + RS))
-    
+
     参数:
         close_array: 收盘价数组（numpy数组）
         period: RSI周期（如6、9、14等）
-    
+
     返回:
-        RSI值数组（numpy数组），与输入数组长度相同，前period-1个值为NaN
+        RSI值数组（numpy数组），与输入数组长度相同，前period个值为NaN
     """
-    if len(close_array) < period:
+    if len(close_array) < period + 1:
         return np.full(len(close_array), np.nan)
-    
+
     # 计算价格变化
     delta = np.diff(close_array, prepend=close_array[0])
-    
+
     # 分离涨跌
     gains = np.where(delta > 0, delta, 0)
     losses = np.where(delta < 0, -delta, 0)
-    
-    # 使用Wilder's Smoothing计算AvgGain和AvgLoss
-    # 方法：使用EMA模拟Wilder's Smoothing
-    # Wilder's的平滑因子 alpha = 1/period，EMA的平滑因子 alpha = 2/(period+1)
-    # 为了使两者等价，需要调整EMA的周期：令 2/(ema_period + 1) = 1/period => ema_period = 2*period - 1
-    wilders_period = 2 * period - 1
-    
-    # 使用TA-Lib的EMA（模拟Wilder's Smoothing）计算AvgGain和AvgLoss
-    avg_gain = talib.EMA(gains, timeperiod=wilders_period)
-    avg_loss = talib.EMA(losses, timeperiod=wilders_period)
-    
-    # 计算RS和RSI
-    # 避免除零错误
-    rs = np.divide(avg_gain, avg_loss, out=np.zeros_like(avg_gain), where=avg_loss != 0)
-    rsi = 100 - (100 / (1 + rs))
-    
-    # 处理特殊情况：如果AvgLoss为0且AvgGain>0，RSI应该为100
-    rsi = np.where((avg_loss == 0) & (avg_gain > 0), 100.0, rsi)
-    # 如果AvgLoss为0且AvgGain==0，RSI应该为50
-    rsi = np.where((avg_loss == 0) & (avg_gain == 0), 50.0, rsi)
-    
+
+    # 初始化结果数组
+    rsi = np.full(len(close_array), np.nan)
+
+    # 计算第一个period的简单平均（跳过第一个值，因为是prepend的）
+    avg_gain = np.mean(gains[1:period+1])
+    avg_loss = np.mean(losses[1:period+1])
+
+    # 计算第一个RSI值（索引为period）
+    if avg_loss != 0:
+        rs = avg_gain / avg_loss
+        rsi[period] = 100 - (100 / (1 + rs))
+    else:
+        rsi[period] = 100.0 if avg_gain > 0 else 50.0
+
+    # 使用Wilder's Smoothing计算后续RSI值
+    for i in range(period + 1, len(close_array)):
+        # Wilder's Smoothing公式（与前端完全一致）
+        avg_gain = (avg_gain * (period - 1) + gains[i]) / period
+        avg_loss = (avg_loss * (period - 1) + losses[i]) / period
+
+        # 计算RSI
+        if avg_loss != 0:
+            rs = avg_gain / avg_loss
+            rsi[i] = 100 - (100 / (1 + rs))
+        else:
+            rsi[i] = 100.0 if avg_gain > 0 else 50.0
+
     return rsi
 
 
@@ -1146,19 +1154,244 @@ class MarketDataFetcher:
         return result
 
     # ============ 市场数据获取方法 ============
+
+    def _calculate_indicators_for_klines(self, klines: List[Dict], symbol: str, interval: str) -> List[Dict]:
+        """
+        为所有K线计算技术指标
+
+        此方法接收原始K线数据，为每根K线计算并添加技术指标。
+        由于指标计算需要历史数据，只为后面的K线计算指标（前面的K线作为历史数据）。
+
+        技术指标包括：
+        - MA: 简单移动平均线 (5, 20, 60, 99)
+        - EMA: 指数移动平均线 (5, 20, 60, 99)
+        - RSI: 相对强弱指数 (6, 9, 14) - 使用Wilder's Smoothing方法
+        - MACD: 指数平滑异同移动平均线 (12, 26, 9)
+        - KDJ: 随机指标 (9, 3, 3) - 使用TradingView计算逻辑
+        - ATR: 平均真实波幅 (7, 14, 21) - 使用Wilder's Smoothing方法
+        - VOL: 成交量及均量线 (5, 10, 60)
+
+        Args:
+            klines: 原始K线数据列表（至少100根）
+            symbol: 交易对符号
+            interval: 时间周期
+
+        Returns:
+            包含指标数据的K线列表（只返回有完整指标的K线）
+        """
+        if not klines or len(klines) < 100:
+            logger.warning(f'[Indicators] Insufficient klines for {symbol} {interval}: {len(klines)} < 100')
+            return []
+
+        try:
+            # 提取OHLCV数据为numpy数组
+            opens = np.array([k['open'] for k in klines], dtype=np.float64)
+            highs = np.array([k['high'] for k in klines], dtype=np.float64)
+            lows = np.array([k['low'] for k in klines], dtype=np.float64)
+            closes = np.array([k['close'] for k in klines], dtype=np.float64)
+            volumes = np.array([k['volume'] for k in klines], dtype=np.float64)
+
+            # 计算所有指标（返回与输入长度相同的数组）
+            # MA指标
+            ma5 = talib.SMA(closes, timeperiod=5)
+            ma20 = talib.SMA(closes, timeperiod=20)
+            ma60 = talib.SMA(closes, timeperiod=60)
+            ma99 = talib.SMA(closes, timeperiod=99)
+
+            # EMA指标
+            ema5 = talib.EMA(closes, timeperiod=5)
+            ema20 = talib.EMA(closes, timeperiod=20)
+            ema60 = talib.EMA(closes, timeperiod=60)
+            ema99 = talib.EMA(closes, timeperiod=99)
+
+            # RSI指标（使用Wilder's Smoothing方法）
+            rsi6 = _calculate_rsi_tradingview(closes, period=6)
+            rsi9 = _calculate_rsi_tradingview(closes, period=9)
+            rsi14 = _calculate_rsi_tradingview(closes, period=14)
+
+            # MACD指标
+            macd_dif, macd_dea, macd_bar = talib.MACD(closes, fastperiod=12, slowperiod=26, signalperiod=9)
+
+            # KDJ指标（使用TradingView计算逻辑）
+            kdj_k, kdj_d, kdj_j = self._calculate_kdj_tradingview(highs, lows, closes, k_period=9, smooth_k=3, smooth_d=3)
+
+            # ATR指标（使用Wilder's Smoothing方法）
+            atr7 = self._calculate_atr_tradingview(highs, lows, closes, period=7)
+            atr14 = self._calculate_atr_tradingview(highs, lows, closes, period=14)
+            atr21 = self._calculate_atr_tradingview(highs, lows, closes, period=21)
+
+            # VOL均量线
+            mavol5 = talib.SMA(volumes, timeperiod=5)
+            mavol10 = talib.SMA(volumes, timeperiod=10)
+            mavol60 = talib.SMA(volumes, timeperiod=60)
+
+            # 确定从哪个索引开始返回K线（确保所有指标都有效）
+            # MA99需要99根历史数据，所以从第99根开始（索引99）
+            # 为了安全起见，从第100根开始（索引99）
+            start_index = 99
+
+            # 为每根K线添加指标数据
+            result_klines = []
+            for i in range(start_index, len(klines)):
+                kline = klines[i].copy()
+
+                # 构建指标字典
+                indicators = {
+                    'ma': {
+                        'ma5': float(ma5[i]) if not np.isnan(ma5[i]) else 0.0,
+                        'ma20': float(ma20[i]) if not np.isnan(ma20[i]) else 0.0,
+                        'ma60': float(ma60[i]) if not np.isnan(ma60[i]) else 0.0,
+                        'ma99': float(ma99[i]) if not np.isnan(ma99[i]) else 0.0
+                    },
+                    'ema': {
+                        'ema5': float(ema5[i]) if not np.isnan(ema5[i]) else 0.0,
+                        'ema20': float(ema20[i]) if not np.isnan(ema20[i]) else 0.0,
+                        'ema60': float(ema60[i]) if not np.isnan(ema60[i]) else 0.0,
+                        'ema99': float(ema99[i]) if not np.isnan(ema99[i]) else 0.0
+                    },
+                    'rsi': {
+                        'rsi6': float(rsi6[i]) if not np.isnan(rsi6[i]) else 50.0,
+                        'rsi9': float(rsi9[i]) if not np.isnan(rsi9[i]) else 50.0,
+                        'rsi14': float(rsi14[i]) if not np.isnan(rsi14[i]) else 50.0
+                    },
+                    'macd': {
+                        'dif': float(macd_dif[i]) if not np.isnan(macd_dif[i]) else 0.0,
+                        'dea': float(macd_dea[i]) if not np.isnan(macd_dea[i]) else 0.0,
+                        'bar': float(macd_bar[i]) if not np.isnan(macd_bar[i]) else 0.0
+                    },
+                    'kdj': {
+                        'k': float(kdj_k[i]) if not np.isnan(kdj_k[i]) else 50.0,
+                        'd': float(kdj_d[i]) if not np.isnan(kdj_d[i]) else 50.0,
+                        'j': float(kdj_j[i]) if not np.isnan(kdj_j[i]) else 50.0
+                    },
+                    'atr': {
+                        'atr7': float(atr7[i]) if not np.isnan(atr7[i]) else 0.0,
+                        'atr14': float(atr14[i]) if not np.isnan(atr14[i]) else 0.0,
+                        'atr21': float(atr21[i]) if not np.isnan(atr21[i]) else 0.0
+                    },
+                    'vol': {
+                        'vol': float(volumes[i]),
+                        'buy_vol': float(klines[i].get('taker_buy_base_volume', 0)),
+                        'sell_vol': float(volumes[i] - klines[i].get('taker_buy_base_volume', 0)),
+                        'mavol5': float(mavol5[i]) if not np.isnan(mavol5[i]) else 0.0,
+                        'mavol10': float(mavol10[i]) if not np.isnan(mavol10[i]) else 0.0,
+                        'mavol60': float(mavol60[i]) if not np.isnan(mavol60[i]) else 0.0
+                    }
+                }
+
+                kline['indicators'] = indicators
+                result_klines.append(kline)
+
+            logger.info(f'[Indicators] Calculated indicators for {symbol} {interval}: {len(result_klines)} klines with full indicators')
+            return result_klines
+
+        except Exception as e:
+            logger.error(f'[Indicators] Failed to calculate indicators for {symbol} {interval}: {e}', exc_info=True)
+            return []
+
+    def _calculate_kdj_tradingview(self, high_array: np.ndarray, low_array: np.ndarray, close_array: np.ndarray,
+                                   k_period: int = 9, smooth_k: int = 3, smooth_d: int = 3) -> tuple:
+        """
+        计算与TradingView一致的KDJ指标
+
+        TradingView的KDJ计算逻辑：
+        1. 计算原始%K（RSV）：RSV = 100 * (Close - LowestLow) / (HighestHigh - LowestLow)
+        2. 第一次平滑得到K值：使用SMA平滑RSV（周期为smooth_k）
+        3. 第二次平滑得到D值：使用SMA平滑K值（周期为smooth_d）
+        4. 计算J值：J = 3K - 2D
+
+        Args:
+            high_array: 最高价数组
+            low_array: 最低价数组
+            close_array: 收盘价数组
+            k_period: K线周期（默认9）
+            smooth_k: K值平滑周期（默认3）
+            smooth_d: D值平滑周期（默认3）
+
+        Returns:
+            (k_line, d_line, j_line): K值、D值、J值数组
+        """
+        # 1. 计算原始%K（未平滑的随机值）
+        lowest_low = talib.MIN(low_array, timeperiod=k_period)
+        highest_high = talib.MAX(high_array, timeperiod=k_period)
+
+        raw_k = np.where(
+            highest_high != lowest_low,
+            100 * (close_array - lowest_low) / (highest_high - lowest_low),
+            50  # 如果最高价=最低价，设为50
+        )
+
+        # 2. 第一次平滑得到K值（使用SMA）
+        k_line = talib.SMA(raw_k, timeperiod=smooth_k)
+
+        # 3. 第二次平滑得到D值（对K值进行SMA平滑）
+        d_line = talib.SMA(k_line, timeperiod=smooth_d)
+
+        # 4. 计算J值
+        j_line = 3 * k_line - 2 * d_line
+
+        return k_line, d_line, j_line
+
+    def _calculate_atr_tradingview(self, high_array: np.ndarray, low_array: np.ndarray, close_array: np.ndarray,
+                                   period: int = 14) -> np.ndarray:
+        """
+        使用TradingView的计算逻辑计算ATR（使用Wilder's Smoothing/RMA）
+
+        TradingView的ATR计算逻辑（与前端JavaScript实现完全一致）：
+        1. 计算真实波幅（TR）：
+           TR = max(high - low, |high - prevClose|, |low - prevClose|)
+        2. 计算ATR：使用RMA (Wilder's Smoothing)
+           - 第一个值：使用前period个TR的简单平均
+           - 之后：RMA = (PrevRMA * (period - 1) + CurrentTR) / period
+
+        Args:
+            high_array: 最高价数组
+            low_array: 最低价数组
+            close_array: 收盘价数组
+            period: ATR周期（默认14）
+
+        Returns:
+            ATR值数组
+        """
+        if len(close_array) < period + 1:
+            return np.full(len(close_array), np.nan)
+
+        # 1. 计算真实波幅TR（使用TA-Lib内置函数）
+        tr = talib.TRANGE(high_array, low_array, close_array)
+
+        # 2. 初始化结果数组
+        atr = np.full(len(close_array), np.nan)
+
+        # 3. 计算第一个ATR值（使用前period个TR的简单平均）
+        atr[period - 1] = np.mean(tr[:period])
+
+        # 4. 使用Wilder's Smoothing (RMA)计算后续ATR值
+        for i in range(period, len(close_array)):
+            # RMA公式（与前端完全一致）
+            atr[i] = (atr[i - 1] * (period - 1) + tr[i]) / period
+
+        return atr
+
+    # ============ 市场数据获取方法 ============
     
     def _get_market_data_by_interval(self, symbol: str, interval: str, limit: int, return_count: int) -> Dict:
         """
-        通用方法：获取指定交易对和时间周期的K线数据（不计算指标）
-        
+        通用方法：获取指定交易对和时间周期的K线数据（预计算所有技术指标）
+
+        改造说明：
+        - 获取500根K线，计算最后400根K线的技术指标（因为最大指标周期需要99根历史数据）
+        - 每根K线包含完整的技术指标数据（MA, EMA, RSI, MACD, KDJ, ATR, VOL）
+        - 使用TA-Lib库计算，保持与TradingView计算逻辑一致
+        - 策略代码可直接从K线数据中读取指标，无需再自行计算
+
         Args:
             symbol: 交易对符号（如 'BTC' 或 'BTCUSDT'）
             interval: 时间周期（如 '1m', '5m', '1h', '4h', '1d', '1w'）
-            limit: 获取的K线数量
-            return_count: 返回的K线数量（最新的return_count根K线）
-            
+            limit: 获取的K线数量（建议500，用于计算指标）
+            return_count: 返回的K线数量（建议400，确保所有K线都有完整指标）
+
         Returns:
-            市场数据字典，只包含symbol、timeframe、klines和metadata字段（不包含indicators）
+            市场数据字典，包含symbol、timeframe、klines（每根K线含indicators字段）和metadata字段
         """
         if not self._futures_client:
             logger.warning(f'[MarketData] Futures client unavailable for {symbol}')
@@ -1167,30 +1400,27 @@ class MarketDataFetcher:
         # 确保symbol以USDT结尾，防止重复添加
         quote_asset = getattr(self, '_futures_quote_asset', 'USDT')
         formatted_symbol = _ensure_usdt_suffix(symbol, quote_asset)
-        
+
         # 格式化交易对符号（format_symbol方法也有防重复逻辑，双重保险）
         symbol_key = self._futures_client.format_symbol(formatted_symbol)
-        
+
         try:
-            # 获取K线数据
+            # 获取K线数据（获取足够多的数据用于指标计算）
+            # 为了计算400根K线的指标，需要获取500根（最大指标周期MA99需要99根历史数据）
+            fetch_limit = max(limit, 500)  # 至少获取500根
             all_klines = self._futures_client.get_klines(
-                symbol_key, 
-                interval, 
-                limit=limit
+                symbol_key,
+                interval,
+                limit=fetch_limit
             )
-            
+
             if not all_klines or len(all_klines) == 0:
                 logger.debug(f'[MarketData] No klines data for {symbol} {interval}')
                 return {}
-            
-            # 只返回最新的return_count根K线
-            klines = all_klines[-return_count:] if len(all_klines) > return_count else all_klines
-            
-            # 构建K线数据列表
-            kline_data_list = []
-            
-            for item in klines:
-                # 兼容字典和列表格式
+
+            # 先提取所有K线的OHLCV数据用于计算指标
+            all_klines_parsed = []
+            for item in all_klines:
                 try:
                     if isinstance(item, dict):
                         open_time_ms = int(item.get('open_time', 0))
@@ -1199,10 +1429,10 @@ class MarketDataFetcher:
                         low_price = float(item.get('low', 0))
                         close_price = float(item.get('close', 0))
                         volume_value = float(item.get('volume', 0))
-                        # 保留 open_time_dt_str 和 close_time_dt_str 字段（如果存在）
                         open_time_dt_str = item.get('open_time_dt_str')
                         close_time_dt_str = item.get('close_time_dt_str')
                         close_time_ms = item.get('close_time')
+                        taker_buy_base_volume = float(item.get('taker_buy_base_volume', 0))
                     elif isinstance(item, (list, tuple)) and len(item) > 5:
                         open_time_ms = int(item[0])
                         open_price = float(item[1])
@@ -1211,53 +1441,86 @@ class MarketDataFetcher:
                         close_price = float(item[4])
                         volume_value = float(item[5])
                         close_time_ms = int(item[6]) if len(item) > 6 else None
-                        # 列表格式没有 dt_str 字段，需要转换
+                        taker_buy_base_volume = float(item[9]) if len(item) > 9 else 0
                         open_time_dt_str = None
                         close_time_dt_str = None
                     else:
                         continue
-                    
-                    # 如果字典格式中没有 dt_str 字段，或者列表格式，需要转换时间戳
+
+                    # 转换时间戳为字符串（如果需要）
                     if open_time_dt_str is None and open_time_ms:
-                        # 将毫秒时间戳转换为 datetime 字符串（UTC+8时区）
                         utc8 = timezone(timedelta(hours=8))
                         dt = datetime.fromtimestamp(open_time_ms / 1000.0, tz=utc8)
                         open_time_dt_str = dt.strftime('%Y-%m-%d %H:%M:%S')
-                    
+
                     if close_time_dt_str is None and close_time_ms:
-                        # 将毫秒时间戳转换为 datetime 字符串（UTC+8时区）
                         utc8 = timezone(timedelta(hours=8))
                         dt = datetime.fromtimestamp(close_time_ms / 1000.0, tz=utc8)
                         close_time_dt_str = dt.strftime('%Y-%m-%d %H:%M:%S')
-                    
-                    # 将毫秒时间戳转换为 datetime 字符串（精确到秒后两位小数）
-                    # 格式：YYYY-MM-DD HH:MM:SS.XX（保留time字段用于兼容）
-                    dt = datetime.fromtimestamp(open_time_ms / 1000.0, tz=timezone.utc)
-                    # 获取毫秒部分（前两位作为小数秒）
-                    milliseconds = open_time_ms % 1000
-                    time_str = dt.strftime('%Y-%m-%d %H:%M:%S') + f'.{milliseconds // 10:02d}'
-                    
-                    # 构建K线数据（保留所有字段，包括 open_time_dt_str 和 close_time_dt_str）
-                    kline_data = {
-                        'time': time_str,
+
+                    all_klines_parsed.append({
+                        'open_time': open_time_ms,
+                        'open_time_dt_str': open_time_dt_str,
+                        'close_time': close_time_ms,
+                        'close_time_dt_str': close_time_dt_str,
                         'open': open_price,
                         'high': high_price,
                         'low': low_price,
                         'close': close_price,
-                        'volume': volume_value
+                        'volume': volume_value,
+                        'taker_buy_base_volume': taker_buy_base_volume
+                    })
+                except (ValueError, TypeError, KeyError, IndexError):
+                    continue
+
+            if len(all_klines_parsed) < 100:  # 至少需要100根K线才能计算指标
+                logger.warning(f'[MarketData] Insufficient klines for {symbol} {interval}: {len(all_klines_parsed)} < 100')
+                return {}
+
+            # 计算所有K线的技术指标
+            klines_with_indicators = self._calculate_indicators_for_klines(all_klines_parsed, symbol, interval)
+
+            # 只返回最后return_count根K线（这些K线都有完整的指标数据）
+            # 如果获取了500根，计算了400根，则返回最后400根
+            actual_return_count = min(return_count, len(klines_with_indicators))
+            klines = klines_with_indicators[-actual_return_count:] if len(klines_with_indicators) > actual_return_count else klines_with_indicators
+
+            # 构建K线数据列表（已包含指标数据）
+            kline_data_list = []
+
+            for kline in klines:
+                try:
+                    open_time_ms = kline['open_time']
+                    open_time_dt_str = kline['open_time_dt_str']
+                    close_time_ms = kline.get('close_time')
+                    close_time_dt_str = kline.get('close_time_dt_str')
+
+                    # 将毫秒时间戳转换为 datetime 字符串（精确到秒后两位小数）
+                    dt = datetime.fromtimestamp(open_time_ms / 1000.0, tz=timezone.utc)
+                    milliseconds = open_time_ms % 1000
+                    time_str = dt.strftime('%Y-%m-%d %H:%M:%S') + f'.{milliseconds // 10:02d}'
+
+                    # 构建K线数据（包含所有字段和指标）
+                    kline_data = {
+                        'time': time_str,
+                        'open': kline['open'],
+                        'high': kline['high'],
+                        'low': kline['low'],
+                        'close': kline['close'],
+                        'volume': kline['volume'],
+                        'open_time': open_time_ms,
+                        'open_time_dt_str': open_time_dt_str,
+                        'indicators': kline.get('indicators', {})  # 包含所有预计算的指标
                     }
-                    # 添加时间字段（如果存在）
-                    if open_time_ms:
-                        kline_data['open_time'] = open_time_ms
-                    if open_time_dt_str:
-                        kline_data['open_time_dt_str'] = open_time_dt_str
+
                     if close_time_ms:
                         kline_data['close_time'] = close_time_ms
                     if close_time_dt_str:
                         kline_data['close_time_dt_str'] = close_time_dt_str
-                    
+
                     kline_data_list.append(kline_data)
-                except (ValueError, TypeError, KeyError, IndexError):
+                except (ValueError, TypeError, KeyError, IndexError) as e:
+                    logger.warning(f'[MarketData] Failed to parse kline: {e}')
                     continue
             
             if not kline_data_list or len(kline_data_list) < 1:
@@ -1285,99 +1548,99 @@ class MarketDataFetcher:
 
     def get_market_data_1m(self, symbol: str) -> Dict:
         """
-        获取1分钟时间周期的市场数据
-        
+        获取1分钟时间周期的市场数据（包含预计算的技术指标）
+
         Args:
             symbol: 交易对符号（如 'BTC'）
-            
+
         Returns:
-            市场数据字典，包含symbol、timeframe、klines、indicators和metadata字段
+            市场数据字典，包含symbol、timeframe、klines（每根K线含indicators字段）和metadata字段
         """
-        return self._get_market_data_by_interval(symbol, '1m', limit=300, return_count=300)
+        return self._get_market_data_by_interval(symbol, '1m', limit=500, return_count=400)
 
     def get_market_data_5m(self, symbol: str) -> Dict:
         """
-        获取5分钟时间周期的市场数据
+        获取5分钟时间周期的市场数据（包含预计算的技术指标）
 
         Args:
             symbol: 交易对符号（如 'BTC'）
 
         Returns:
-            市场数据字典，包含symbol、timeframe、klines、indicators和metadata字段
+            市场数据字典，包含symbol、timeframe、klines（每根K线含indicators字段）和metadata字段
         """
-        return self._get_market_data_by_interval(symbol, '5m', limit=500, return_count=500)
+        return self._get_market_data_by_interval(symbol, '5m', limit=500, return_count=400)
 
     def get_market_data_15m(self, symbol: str) -> Dict:
         """
-        获取15分钟时间周期的市场数据
+        获取15分钟时间周期的市场数据（包含预计算的技术指标）
 
         Args:
             symbol: 交易对符号（如 'BTC'）
 
         Returns:
-            市场数据字典，包含symbol、timeframe、klines、indicators和metadata字段
+            市场数据字典，包含symbol、timeframe、klines（每根K线含indicators字段）和metadata字段
         """
-        return self._get_market_data_by_interval(symbol, '15m', limit=500, return_count=500)
+        return self._get_market_data_by_interval(symbol, '15m', limit=500, return_count=400)
 
     def get_market_data_30m(self, symbol: str) -> Dict:
         """
-        获取30分钟时间周期的市场数据
-        
+        获取30分钟时间周期的市场数据（包含预计算的技术指标）
+
         Args:
             symbol: 交易对符号（如 'BTC'）
-            
+
         Returns:
-            市场数据字典，包含symbol、timeframe、klines、indicators和metadata字段
+            市场数据字典，包含symbol、timeframe、klines（每根K线含indicators字段）和metadata字段
         """
-        return self._get_market_data_by_interval(symbol, '30m', limit=300, return_count=300)
+        return self._get_market_data_by_interval(symbol, '30m', limit=500, return_count=400)
 
     def get_market_data_1h(self, symbol: str) -> Dict:
         """
-        获取1小时时间周期的市场数据
-        
+        获取1小时时间周期的市场数据（包含预计算的技术指标）
+
         Args:
             symbol: 交易对符号（如 'BTC'）
-            
+
         Returns:
-            市场数据字典，包含symbol、timeframe、klines、indicators和metadata字段
+            市场数据字典，包含symbol、timeframe、klines（每根K线含indicators字段）和metadata字段
         """
-        return self._get_market_data_by_interval(symbol, '1h', limit=300, return_count=300)
+        return self._get_market_data_by_interval(symbol, '1h', limit=500, return_count=400)
 
     def get_market_data_4h(self, symbol: str) -> Dict:
         """
-        获取4小时时间周期的市场数据
-        
+        获取4小时时间周期的市场数据（包含预计算的技术指标）
+
         Args:
             symbol: 交易对符号（如 'BTC'）
-            
+
         Returns:
-            市场数据字典，包含symbol、timeframe、klines、indicators和metadata字段
+            市场数据字典，包含symbol、timeframe、klines（每根K线含indicators字段）和metadata字段
         """
-        return self._get_market_data_by_interval(symbol, '4h', limit=300, return_count=300)
+        return self._get_market_data_by_interval(symbol, '4h', limit=500, return_count=400)
 
     def get_market_data_1d(self, symbol: str) -> Dict:
         """
-        获取1天时间周期的市场数据
-        
+        获取1天时间周期的市场数据（包含预计算的技术指标）
+
         Args:
             symbol: 交易对符号（如 'BTC'）
-            
+
         Returns:
-            市场数据字典，包含symbol、timeframe、klines、indicators和metadata字段
+            市场数据字典，包含symbol、timeframe、klines（每根K线含indicators字段）和metadata字段
         """
-        return self._get_market_data_by_interval(symbol, '1d', limit=99, return_count=99)
+        return self._get_market_data_by_interval(symbol, '1d', limit=500, return_count=400)
 
     def get_market_data_1w(self, symbol: str) -> Dict:
         """
-        获取1周时间周期的市场数据
-        
+        获取1周时间周期的市场数据（包含预计算的技术指标）
+
         Args:
             symbol: 交易对符号（如 'BTC'）
-            
+
         Returns:
-            市场数据字典，包含symbol、timeframe、klines、indicators和metadata字段
+            市场数据字典，包含symbol、timeframe、klines（每根K线含indicators字段）和metadata字段
         """
-        return self._get_market_data_by_interval(symbol, '1w', limit=99, return_count=99)
+        return self._get_market_data_by_interval(symbol, '1w', limit=500, return_count=400)
 
 
     # ============ Leaderboard Methods ===========
