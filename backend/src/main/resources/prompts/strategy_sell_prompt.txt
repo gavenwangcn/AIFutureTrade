@@ -9,6 +9,9 @@
 4. **必须确保所有代码路径都返回 decisions**
 5. **建议使用 try-except 处理异常，确保异常时返回空字典**
 
+### ⚠️⚠️⚠️ 日志要求（极其重要，必须严格遵守）：
+**生成的策略代码必须包含详细的info级别日志，用于排查策略执行逻辑。每个逻辑判断分支（if/elif/else）、每个策略规则匹配、每个决策生成步骤都必须有日志输出。日志必须包含：判断条件、变量值、判断结果、执行路径。详细要求见下文"详细日志记录要求"章节。**
+
 ### 方法签名要求：
 - 必须包含且仅包含 5 个参数：`self`, `portfolio`, `market_state`, `account_info`, `conditional_orders`
 - 参数顺序必须完全一致，不能添加或删除任何参数
@@ -1109,14 +1112,249 @@ decisions[symbol] = {
   - **✅ 正确：`isinstance(positions, list)`** - 使用基础类型
   - **✅ 正确：`isinstance(decisions, dict)`** - 使用基础类型
   - **✅ 正确：`isinstance(price, (int, float))`** - 检查数值类型
-- **⚠️ 必须添加详细的中文注释说明（非常重要，便于阅读和理解代码逻辑）**：
-  - **类注释**：在类定义上方添加文档字符串，说明类的功能和用途
-  - **方法注释**：在方法定义上方添加文档字符串，说明方法的功能、参数、返回值
-  - **关键逻辑注释**：在重要的业务逻辑处添加注释，说明为什么这样做（如：为什么选择这个时间周期、为什么使用这个阈值）
-  - **计算步骤注释**：在复杂的计算步骤处添加注释，说明每一步的计算目的（如：计算合约数量的公式、杠杆的作用、计算平仓数量的逻辑）
-  - **条件判断注释**：在重要的条件判断处添加注释，说明判断条件的业务含义（如：开多单条件、开空单条件、多单平仓条件、空单平仓条件）
-  - **变量含义注释**：对于重要的变量，添加行内注释说明其含义和单位（如：quantity是合约数量，不是USDT数量）
-  - **代码块注释**：在代码块开始处添加注释，说明该代码块的功能（如：提取K线数据、计算技术指标、策略判断等）
+- **⚠️⚠️⚠️ 必须添加详细的中文注释说明（极其重要，强制要求，便于阅读和理解代码逻辑）**：
+
+  **注释的核心目的：提高代码可读性，让其他开发者或用户能够快速理解策略逻辑、判断条件、计算过程。**
+
+  **强制要求：生成的策略代码必须包含丰富的中文注释，每个重要的代码段、每个判断逻辑、每个计算步骤都必须有注释说明。**
+
+  **注释类型和要求：**
+
+  - **1. 类注释（必须）**：
+    - 在类定义上方添加文档字符串（docstring）
+    - 说明类的功能、用途、策略类型
+    - 示例：
+      ```python
+      class GeneratedSellStrategy(StrategyBaseSell):
+          """
+          卖出策略类 - 基于MA(99)和持仓时长的止盈止损策略
+
+          策略说明：
+          - 多单：当价格跌破MA(99)或持仓亏损超过5%时平仓
+          - 空单：当价格突破MA(99)或持仓亏损超过5%时平仓
+          - 持仓超过24小时且盈利超过10%时止盈
+
+          风险提示：
+          - 适用于趋势反转或止损止盈场景
+          - 需要配合合理的开仓策略使用
+          """
+      ```
+
+  - **2. 方法注释（必须）**：
+    - 在方法定义上方添加文档字符串
+    - 详细说明方法的功能、参数含义、返回值格式
+    - 示例：
+      ```python
+      def execute_sell_decision(self, portfolio, market_state, account_info, conditional_orders=None):
+          """
+          执行卖出决策 - 根据策略规则生成平仓决策
+
+          参数说明：
+              portfolio (Dict): 持仓组合信息，包含positions（持仓列表）、cash（可用资金）等
+              market_state (Dict): 市场状态字典，包含各交易对的价格、成交量、技术指标等
+              account_info (Dict): 账户信息，包含balance（账户总值）、total_return（总收益率）等
+              conditional_orders (Dict[str, List[Dict]], optional): 条件单信息，默认为None
+
+          返回值：
+              Dict[str, Dict]: 卖出决策字典，格式为 {symbol: {signal, quantity, price, stop_price, leverage, justification}}
+                              如果没有决策则返回空字典 {}
+
+          决策逻辑：
+              1. 遍历所有持仓
+              2. 获取K线数据并计算技术指标（MA、KDJ等）
+              3. 根据持仓方向（多单/空单）判断是否满足平仓条件
+              4. 计算平仓数量
+              5. 生成决策并返回
+          """
+      ```
+
+  - **3. 代码块注释（必须）**：
+    - 在每个主要代码块开始处添加注释
+    - 说明该代码块的功能和目的
+    - 使用 `# ========== 功能说明 ==========` 格式标记重要代码块
+    - 示例：
+      ```python
+      # ========== 第一步：初始化和参数验证 ==========
+      decisions = {}  # 初始化决策字典
+      if conditional_orders is None:
+          conditional_orders = {}
+
+      # ========== 第二步：获取持仓列表 ==========
+      positions = portfolio.get('positions', []) or []
+
+      # ========== 第三步：遍历持仓 ==========
+      for position in positions:
+          # 获取持仓基本信息
+          symbol = position.get('symbol', '').upper()
+          position_side = position.get('position_side', 'LONG')
+
+          # ========== 第四步：获取市场数据和技术指标 ==========
+          # 从market_state中提取该交易对的数据
+          symbol_market_state = market_state.get(symbol, {})
+
+          # ========== 第五步：计算技术指标 ==========
+          # 使用TA-Lib计算MA(99)指标
+          ma99 = talib.SMA(close_array, timeperiod=99)
+
+          # ========== 第六步：策略判断和决策生成 ==========
+          # 根据持仓方向判断平仓条件
+          if position_side == 'LONG':
+              # 多单平仓逻辑
+              if current_price < 0.98 * ma99_value:
+                  # 生成平仓决策
+                  decisions[symbol] = {...}
+      ```
+
+  - **4. 关键逻辑注释（必须）**：
+    - 在重要的业务逻辑处添加注释
+    - 说明为什么这样做、背后的策略思想
+    - 示例：
+      ```python
+      # 策略逻辑：多单价格跌破MA(99)的0.98倍（-2%）才平仓，避免过早止损
+      # 原因：MA(99)是长期趋势线，跌破后需要有一定的幅度才能确认趋势反转
+      threshold = 0.98 * ma99_value
+
+      # 计算持仓盈亏比例，用于判断是否需要止损或止盈
+      # 公式：盈亏比例 = (当前价格 - 开仓价格) / 开仓价格 × 100%
+      # 正值表示盈利，负值表示亏损
+      pnl_pct = ((current_price - avg_price) / avg_price) * 100 if avg_price > 0 else 0
+
+      # 止损阈值设置为-5%，即亏损超过5%时强制平仓
+      # 原因：控制单笔交易的最大亏损，避免亏损扩大
+      stop_loss_threshold = -5.0
+      ```
+
+  - **5. 计算步骤注释（必须）**：
+    - 在复杂的计算步骤处添加注释
+    - 说明计算公式、计算目的、单位说明
+    - 示例：
+      ```python
+      # 计算平仓合约数量
+      # 说明：从持仓信息中获取合约数量，使用绝对值确保为正数
+      position_amt = abs(position.get('position_amt', 0))  # 持仓合约数量
+
+      # 平仓100%持仓
+      # 说明：将所有持仓全部平仓，quantity就是持仓数量
+      close_quantity = position_amt
+
+      # 平仓50%持仓的示例
+      # close_ratio = 0.5  # 平仓比例
+      # close_quantity = position_amt * close_ratio  # 平仓数量 = 持仓数量 × 平仓比例
+
+      # 根据交易对价格动态调整quantity精度
+      # 原因：不同价格区间的交易对对数量精度要求不同
+      if current_price < 1:
+          close_quantity = round(close_quantity, 0)  # 价格<1，取整数
+      elif current_price < 10:
+          close_quantity = round(close_quantity, 1)  # 价格1-10，保留1位小数
+      # ... 其他价格区间
+      ```
+
+  - **6. 条件判断注释（必须）**：
+    - 在每个if/elif/else判断处添加注释
+    - 说明判断条件的业务含义、阈值选择原因
+    - 示例：
+      ```python
+      # 判断条件1：检查持仓方向
+      # 说明：多单和空单的平仓条件不同，需要分别处理
+      if position_side == 'LONG':
+          # 多单平仓逻辑
+          # 判断条件2：检查价格是否跌破MA(99)
+          # 说明：多单价格跌破MA(99)表示上涨趋势结束，应该平仓
+          # 阈值0.98表示需要跌破2%才确认，避免假跌破
+          if current_price < 0.98 * ma99_value:
+              # 满足多单平仓条件
+              self.log.info(f"{symbol} 多单满足平仓条件：价格跌破MA(99)")
+              # 生成平仓决策...
+          else:
+              # 价格未跌破MA(99)，继续持有
+              self.log.info(f"{symbol} 多单价格未跌破MA(99)，继续持有")
+      elif position_side == 'SHORT':
+          # 空单平仓逻辑
+          # 判断条件2：检查价格是否突破MA(99)
+          # 说明：空单价格突破MA(99)表示下跌趋势结束，应该平仓
+          # 阈值1.02表示需要突破2%才确认，避免假突破
+          if current_price > 1.02 * ma99_value:
+              # 满足空单平仓条件
+              self.log.info(f"{symbol} 空单满足平仓条件：价格突破MA(99)")
+              # 生成平仓决策...
+          else:
+              # 价格未突破MA(99)，继续持有
+              self.log.info(f"{symbol} 空单价格未突破MA(99)，继续持有")
+      else:
+          # 未知的持仓方向，记录警告
+          self.log.warning(f"{symbol} 未知的持仓方向: {position_side}")
+      ```
+
+  - **7. 变量含义注释（必须）**：
+    - 对于重要的变量，添加行内注释
+    - 说明变量的含义、单位、取值范围
+    - 示例：
+      ```python
+      position_amt = abs(position.get('position_amt', 0))  # 持仓合约数量（绝对值）
+      position_side = position.get('position_side', 'LONG')  # 持仓方向：LONG-多单，SHORT-空单
+      avg_price = position.get('avg_price', 0)  # 开仓均价，单位：USDT
+      open_time = position.get('open_time')  # 开仓时间，格式：'YYYY-MM-DD HH:MM:SS'
+      leverage = position.get('leverage', 5)  # 杠杆倍数，取值范围：1-125
+
+      current_price = symbol_market_state.get('price', 0)  # 当前市场价格，单位：USDT
+      close_quantity = position_amt  # 平仓数量（合约数量，不是USDT数量）
+      stop_price = current_price * 0.98  # 止损触发价格，单位：USDT
+      ```
+
+  - **8. 技术指标注释（必须）**：
+    - 在计算技术指标时添加注释
+    - 说明指标的含义、计算方法、使用目的
+    - 示例：
+      ```python
+      # 计算MA(99)指标 - 99周期简单移动平均线
+      # 用途：判断长期趋势，价格在MA(99)上方表示上涨趋势，下方表示下跌趋势
+      # 参数：timeperiod=99 表示使用最近99根K线计算平均值
+      # 注意：需要至少99根K线数据才能计算
+      ma99 = talib.SMA(close_array, timeperiod=99)
+      ma99_value = float(ma99[-1])  # 获取最新的MA(99)值
+
+      # 计算ATR(14)指标 - 14周期平均真实波幅
+      # 用途：衡量市场波动性，ATR值越大表示波动越大
+      # 使用场景：用于设置动态止损位，止损距离 = ATR × 倍数
+      # 参数：period=14 表示使用最近14根K线计算
+      atr14 = calculate_atr_tradingview(high_array, low_array, close_array, period=14)
+      atr14_value = float(atr14[-1])  # 获取最新的ATR(14)值
+      ```
+
+  - **9. 异常处理注释（必须）**：
+    - 在try-except块添加注释
+    - 说明可能出现的异常、处理方式
+    - 示例：
+      ```python
+      try:
+          # 尝试计算技术指标
+          # 可能的异常：数据不足、数据格式错误、计算溢出等
+          ma99 = talib.SMA(close_array, timeperiod=99)
+          ma99_value = float(ma99[-1])
+      except Exception as e:
+          # 捕获所有异常，记录错误日志，跳过该持仓
+          # 原因：单个持仓的异常不应影响其他持仓的处理
+          self.log.error(f"{symbol} MA(99)计算失败: {e}，跳过该持仓")
+          continue  # 继续处理下一个持仓
+      ```
+
+  **⚠️ 注释的强制性要求：**
+  - 每个类必须有类注释（docstring）
+  - 每个方法必须有方法注释（docstring）
+  - 每个主要代码块必须有功能说明注释
+  - 每个if/elif/else判断必须有条件说明注释
+  - 每个重要变量必须有含义说明注释
+  - 每个技术指标计算必须有指标说明注释
+  - 每个复杂计算必须有公式和目的说明注释
+
+  **⚠️ 注释的质量要求：**
+  - 注释必须使用中文
+  - 注释必须清晰、准确、易懂
+  - 注释必须说明"为什么"而不仅仅是"是什么"
+  - 注释必须与代码保持一致
+  - 避免无意义的注释（如：`x = 1  # 设置x为1`）
+  - 注释应该解释业务逻辑、策略思想、计算原理
 - **注释示例格式（买入策略）**：
   ```python
   class GeneratedBuyStrategy(StrategyBaseBuy):
@@ -1206,6 +1444,10 @@ decisions[symbol] = {
 
   - **⚠️⚠️⚠️ 详细日志记录要求（非常重要，必须严格遵守）：**
 
+    **⚠️ 日志的核心目的：便于排查策略在哪个判断中执行了或者没有执行，确保策略逻辑的每个分支都有清晰的日志记录。**
+
+    **⚠️ 强制要求：生成的策略代码中，每个逻辑判断（if/elif/else）、每个策略规则匹配、每个决策生成步骤都必须有详细的info级别日志输出。**
+
     **1. 关键判断逻辑必须有详细日志：**
     - 在进行任何条件判断前，必须输出判断所需的所有变量值
     - 在判断后，必须输出判断结果（True/False）和原因
@@ -1223,6 +1465,85 @@ decisions[symbol] = {
           # 平仓逻辑
       else:
           self.log.info(f"{symbol} 不满足多单平仓条件: 价格({current_price:.4f}) >= 阈值({threshold:.4f})")
+      ```
+    - **⚠️ 多层嵌套判断的日志要求**：
+      - 对于多层if/elif/else嵌套判断，每一层都必须有日志输出
+      - 必须清楚地标识当前处于哪一层判断、哪个分支
+      - 示例：
+      ```python
+      # ✅ 正确示例（多层判断都有日志）
+      self.log.info(f"{symbol} 开始策略判断流程")
+
+      # 第一层判断：检查持仓方向
+      position_side = position.get('position_side', 'LONG')
+      self.log.info(f"{symbol} [判断1] 持仓方向检查: position_side={position_side}")
+      if position_side == 'LONG':
+          self.log.info(f"{symbol} [判断1-满足] 持仓为多单，继续判断平仓条件")
+
+          # 第二层判断：检查持仓时长
+          open_time = position.get('open_time')
+          if open_time:
+              open_dt = datetime.strptime(open_time, '%Y-%m-%d %H:%M:%S')
+              current_dt = datetime.now(timezone(timedelta(hours=8))).replace(tzinfo=None)
+              holding_hours = (current_dt - open_dt).total_seconds() / 3600
+              self.log.info(f"{symbol} [判断2] 持仓时长检查: 开仓时间={open_time}, 持仓时长={holding_hours:.2f}小时")
+
+              if holding_hours > 24:
+                  self.log.info(f"{symbol} [判断2-满足] 持仓超过24小时，继续判断技术指标")
+
+                  # 第三层判断：检查技术指标
+                  self.log.info(f"{symbol} [判断3] 技术指标检查: 价格={current_price:.4f}, MA(99)={ma99_value:.4f}")
+                  if current_price < 0.98 * ma99_value:
+                      self.log.info(f"{symbol} [判断3-满足] 价格跌破MA(99)，生成平仓决策")
+                      # 生成决策
+                  else:
+                      self.log.info(f"{symbol} [判断3-不满足] 价格未跌破MA(99)，继续持有")
+              else:
+                  self.log.info(f"{symbol} [判断2-不满足] 持仓未超过24小时，继续持有")
+          else:
+              self.log.warning(f"{symbol} [判断2-异常] 持仓信息中没有开仓时间")
+      elif position_side == 'SHORT':
+          self.log.info(f"{symbol} [判断1-满足] 持仓为空单，检查空单平仓条件")
+          # 空单平仓逻辑
+      else:
+          self.log.warning(f"{symbol} [判断1-异常] 未知的持仓方向: {position_side}")
+
+      self.log.info(f"{symbol} 策略判断流程结束")
+      ```
+    - **⚠️ 策略规则匹配的日志要求**：
+      - 当策略包含多个规则时，必须输出每个规则的匹配结果
+      - 必须明确标识是"规则1"、"规则2"等
+      - 必须输出最终的规则匹配结果（满足哪些规则、不满足哪些规则）
+      - 示例：
+      ```python
+      # ✅ 正确示例（多规则匹配都有日志）
+      self.log.info(f"{symbol} 开始多规则匹配检查（多单平仓）")
+
+      # 规则1：价格跌破MA(99)
+      rule1_threshold = 0.98 * ma99_value
+      rule1_satisfied = current_price < rule1_threshold
+      self.log.info(f"{symbol} [规则1] 价格跌破MA(99)检查: 价格={current_price:.4f}, 阈值={rule1_threshold:.4f}, 结果={rule1_satisfied}")
+
+      # 规则2：持仓亏损超过5%
+      avg_price = position.get('avg_price', 0)
+      pnl_pct = ((current_price - avg_price) / avg_price) * 100 if avg_price > 0 else 0
+      rule2_threshold = -5.0
+      rule2_satisfied = pnl_pct < rule2_threshold
+      self.log.info(f"{symbol} [规则2] 亏损检查: 开仓价={avg_price:.4f}, 当前价={current_price:.4f}, 盈亏比例={pnl_pct:.2f}%, 阈值={rule2_threshold}%, 结果={rule2_satisfied}")
+
+      # 规则3：KDJ死叉
+      rule3_satisfied = k_value < d_value and k_prev >= d_prev
+      self.log.info(f"{symbol} [规则3] KDJ死叉检查: K={k_value:.2f}, D={d_value:.2f}, K_prev={k_prev:.2f}, D_prev={d_prev:.2f}, 结果={rule3_satisfied}")
+
+      # 综合判断（任一规则满足即平仓）
+      any_rule_satisfied = rule1_satisfied or rule2_satisfied or rule3_satisfied
+      self.log.info(f"{symbol} 规则匹配结果: 规则1={rule1_satisfied}, 规则2={rule2_satisfied}, 规则3={rule3_satisfied}, 任一满足={any_rule_satisfied}")
+
+      if any_rule_satisfied:
+          self.log.info(f"{symbol} 存在满足的规则，生成平仓决策")
+          # 生成决策
+      else:
+          self.log.info(f"{symbol} 所有规则都不满足，继续持有")
       ```
 
     **2. 变量生成逻辑必须有详细日志：**
@@ -1402,6 +1723,8 @@ decisions[symbol] = {
 
     **6. 循环和遍历必须有进度日志：**
     - 在遍历候选交易对（买入策略）或持仓（卖出策略）时，输出当前处理的进度
+    - **⚠️ 每个持仓的处理必须有明确的开始和结束日志**
+    - **⚠️ 必须输出每个持仓的最终处理结果（生成决策/跳过/异常）**
     - **示例（买入策略：遍历候选交易对）**：
       ```python
       self.log.info(f"开始处理候选交易对，总数: {len(candidates)}")
@@ -1415,8 +1738,25 @@ decisions[symbol] = {
       self.log.info(f"开始处理持仓，总数: {len(positions)}")
       for idx, position in enumerate(positions):
           symbol = position.get('symbol', '').upper()
-          self.log.info(f"[{idx+1}/{len(positions)}] 开始处理持仓: {symbol}")
-          # 处理逻辑
+          position_side = position.get('position_side', 'LONG')
+          position_amt = abs(position.get('position_amt', 0))
+          self.log.info(f"[{idx+1}/{len(positions)}] ========== 开始处理持仓: {symbol} (方向:{position_side}, 数量:{position_amt}) ==========")
+
+          try:
+              # 处理逻辑
+              # ... 各种判断和计算 ...
+
+              # 最终结果日志
+              if symbol in decisions:
+                  self.log.info(f"[{idx+1}/{len(positions)}] {symbol} 处理完成: 已生成决策 - {decisions[symbol]['signal']}")
+              else:
+                  self.log.info(f"[{idx+1}/{len(positions)}] {symbol} 处理完成: 未生成决策（不满足条件）")
+          except Exception as e:
+              self.log.error(f"[{idx+1}/{len(positions)}] {symbol} 处理异常: {e}")
+
+          self.log.info(f"[{idx+1}/{len(positions)}] ========== 结束处理持仓: {symbol} ==========")
+
+      self.log.info(f"所有持仓处理完成，共处理{len(positions)}个，生成决策{len(decisions)}个")
       ```
 
   - **日志级别使用规范：**

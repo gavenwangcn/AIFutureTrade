@@ -9,6 +9,9 @@
 4. **必须确保所有代码路径都返回 decisions**
 5. **建议使用 try-except 处理异常，确保异常时返回空字典**
 
+### ⚠️⚠️⚠️ 日志要求（极其重要，必须严格遵守）：
+**生成的策略代码必须包含详细的info级别日志，用于排查策略执行逻辑。每个逻辑判断分支（if/elif/else）、每个策略规则匹配、每个决策生成步骤都必须有日志输出。日志必须包含：判断条件、变量值、判断结果、执行路径。详细要求见下文"详细日志记录要求"章节。**
+
 ### 方法签名要求：
 - 必须包含且仅包含 6 个参数：`self`, `candidates`, `portfolio`, `account_info`, `market_state`, `conditional_orders`
 - 参数顺序必须完全一致，不能添加或删除任何参数
@@ -1026,14 +1029,236 @@ decisions[symbol] = {
   - **✅ 正确：`isinstance(candidates, list)`** - 使用基础类型
   - **✅ 正确：`isinstance(decisions, dict)`** - 使用基础类型
   - **✅ 正确：`isinstance(price, (int, float))`** - 检查数值类型
-- **⚠️ 必须添加详细的中文注释说明（非常重要，便于阅读和理解代码逻辑）**：
-  - **类注释**：在类定义上方添加文档字符串，说明类的功能和用途
-  - **方法注释**：在方法定义上方添加文档字符串，说明方法的功能、参数、返回值
-  - **关键逻辑注释**：在重要的业务逻辑处添加注释，说明为什么这样做（如：为什么选择这个时间周期、为什么使用这个阈值）
-  - **计算步骤注释**：在复杂的计算步骤处添加注释，说明每一步的计算目的（如：计算合约数量的公式、杠杆的作用、计算平仓数量的逻辑）
-  - **条件判断注释**：在重要的条件判断处添加注释，说明判断条件的业务含义（如：开多单条件、开空单条件、多单平仓条件、空单平仓条件）
-  - **变量含义注释**：对于重要的变量，添加行内注释说明其含义和单位（如：quantity是合约数量，不是USDT数量）
-  - **代码块注释**：在代码块开始处添加注释，说明该代码块的功能（如：提取K线数据、计算技术指标、策略判断等）
+- **⚠️⚠️⚠️ 必须添加详细的中文注释说明（极其重要，强制要求，便于阅读和理解代码逻辑）**：
+
+  **注释的核心目的：提高代码可读性，让其他开发者或用户能够快速理解策略逻辑、判断条件、计算过程。**
+
+  **强制要求：生成的策略代码必须包含丰富的中文注释，每个重要的代码段、每个判断逻辑、每个计算步骤都必须有注释说明。**
+
+  **注释类型和要求：**
+
+  - **1. 类注释（必须）**：
+    - 在类定义上方添加文档字符串（docstring）
+    - 说明类的功能、用途、策略类型
+    - 示例：
+      ```python
+      class GeneratedBuyStrategy(StrategyBaseBuy):
+          """
+          买入策略类 - 基于MA(99)和成交量的趋势跟踪策略
+
+          策略说明：
+          - 当价格突破MA(99)且成交量放大时开多单
+          - 当价格跌破MA(99)且成交量放大时开空单
+          - 使用5倍杠杆，每次使用50%可用资金
+
+          风险提示：
+          - 适用于趋势明显的市场环境
+          - 震荡市场可能产生频繁交易
+          """
+      ```
+
+  - **2. 方法注释（必须）**：
+    - 在方法定义上方添加文档字符串
+    - 详细说明方法的功能、参数含义、返回值格式
+    - 示例：
+      ```python
+      def execute_buy_decision(self, candidates, portfolio, account_info, market_state, conditional_orders=None):
+          """
+          执行买入决策 - 根据策略规则生成开仓决策
+
+          参数说明：
+              candidates (List[Dict]): 候选交易对列表，每个元素包含symbol、price等信息
+              portfolio (Dict): 持仓组合信息，包含cash（可用资金）、positions（持仓列表）等
+              account_info (Dict): 账户信息，包含balance（账户总值）、total_return（总收益率）等
+              market_state (Dict): 市场状态字典，包含各交易对的价格、成交量、技术指标等
+              conditional_orders (Dict[str, List[Dict]], optional): 条件单信息，默认为None
+
+          返回值：
+              Dict[str, Dict]: 买入决策字典，格式为 {symbol: {signal, quantity, leverage, justification}}
+                              如果没有决策则返回空字典 {}
+
+          决策逻辑：
+              1. 遍历所有候选交易对
+              2. 获取K线数据并计算技术指标（MA、KDJ等）
+              3. 根据策略规则判断是否满足开仓条件
+              4. 计算开仓数量和杠杆倍数
+              5. 生成决策并返回
+          """
+      ```
+
+  - **3. 代码块注释（必须）**：
+    - 在每个主要代码块开始处添加注释
+    - 说明该代码块的功能和目的
+    - 使用 `# ========== 功能说明 ==========` 格式标记重要代码块
+    - 示例：
+      ```python
+      # ========== 第一步：初始化和参数验证 ==========
+      decisions = {}  # 初始化决策字典
+      if conditional_orders is None:
+          conditional_orders = {}
+
+      # ========== 第二步：遍历候选交易对 ==========
+      for candidate in candidates:
+          # 获取交易对基本信息
+          symbol = candidate.get('symbol', '').upper()
+
+          # ========== 第三步：获取市场数据和技术指标 ==========
+          # 从market_state中提取该交易对的数据
+          symbol_state = market_state.get(symbol, {})
+
+          # ========== 第四步：计算技术指标 ==========
+          # 使用TA-Lib计算MA(99)指标
+          ma99 = talib.SMA(close_array, timeperiod=99)
+
+          # ========== 第五步：策略判断和决策生成 ==========
+          # 判断是否满足开多单条件
+          if current_price > 1.02 * ma99_value:
+              # 生成开多单决策
+              decisions[symbol] = {...}
+      ```
+
+  - **4. 关键逻辑注释（必须）**：
+    - 在重要的业务逻辑处添加注释
+    - 说明为什么这样做、背后的策略思想
+    - 示例：
+      ```python
+      # 策略逻辑：价格突破MA(99)的1.02倍（2%）才开仓，避免假突破
+      # 原因：MA(99)是长期趋势线，突破后需要有一定的强度才能确认趋势
+      threshold = 1.02 * ma99_value
+
+      # 使用50%可用资金开仓，保留50%用于加仓或应对风险
+      # 原因：避免一次性投入过多资金，保持资金灵活性
+      capital_ratio = 0.5
+      capital_usdt = available_cash * capital_ratio
+
+      # 使用5倍杠杆，在收益和风险之间取得平衡
+      # 原因：5倍杠杆可以放大收益，同时风险相对可控
+      leverage = 5
+      ```
+
+  - **5. 计算步骤注释（必须）**：
+    - 在复杂的计算步骤处添加注释
+    - 说明计算公式、计算目的、单位说明
+    - 示例：
+      ```python
+      # 计算开仓合约数量
+      # 公式：quantity = (本金 × 杠杆) / 交易对价格
+      # 说明：本金是USDT数量，杠杆放大购买力，除以价格得到合约数量
+      # 例如：本金50 USDT，杠杆5倍，价格100，则 quantity = (50 * 5) / 100 = 2.5 个合约
+      quantity = (capital_usdt * leverage) / current_price
+
+      # 根据交易对价格动态调整quantity精度
+      # 原因：不同价格区间的交易对对数量精度要求不同
+      # 价格越低，数量精度要求越低（可以是整数）
+      # 价格越高，数量精度要求越高（需要更多小数位）
+      if current_price < 1:
+          quantity = round(quantity, 0)  # 价格<1，取整数
+      elif current_price < 10:
+          quantity = round(quantity, 1)  # 价格1-10，保留1位小数
+      # ... 其他价格区间
+      ```
+
+  - **6. 条件判断注释（必须）**：
+    - 在每个if/elif/else判断处添加注释
+    - 说明判断条件的业务含义、阈值选择原因
+    - 示例：
+      ```python
+      # 判断条件1：检查数据源是否为涨跌榜
+      # 说明：只对涨跌榜中的交易对进行策略判断，过滤掉普通交易对
+      if source == 'leaderboard':
+          # 判断条件2：检查是否为涨幅榜
+          # 说明：涨幅榜表示价格上涨的交易对，适合做多
+          if leaderboard_source == 'gainers':
+              # 判断条件3：检查价格是否突破MA(99)
+              # 说明：价格突破MA(99)表示上涨趋势确立，可以开多单
+              # 阈值1.02表示需要突破2%才确认，避免假突破
+              if current_price > 1.02 * ma99_value:
+                  # 满足所有条件，生成开多单决策
+                  self.log.info(f"{symbol} 满足开多单条件：涨幅榜 + 价格突破MA(99)")
+                  # 生成决策...
+              else:
+                  # 价格未突破MA(99)，不满足开仓条件
+                  self.log.info(f"{symbol} 价格未突破MA(99)，跳过")
+          else:
+              # 非涨幅榜（可能是跌幅榜），不适合做多
+              self.log.info(f"{symbol} 非涨幅榜，跳过")
+      else:
+          # 非涨跌榜数据源，不处理
+          self.log.info(f"{symbol} 非涨跌榜数据源，跳过")
+      ```
+
+  - **7. 变量含义注释（必须）**：
+    - 对于重要的变量，添加行内注释
+    - 说明变量的含义、单位、取值范围
+    - 示例：
+      ```python
+      available_cash = portfolio.get('cash', 0)  # 可用资金，单位：USDT
+      capital_ratio = 0.5  # 使用资金比例，取值范围：0-1
+      capital_usdt = available_cash * capital_ratio  # 本次开仓使用的资金，单位：USDT
+      leverage = 5  # 杠杆倍数，取值范围：1-125
+      quantity = (capital_usdt * leverage) / current_price  # 合约数量（不是USDT数量）
+
+      position_amt = abs(position.get('position_amt', 0))  # 持仓合约数量（绝对值）
+      position_side = position.get('position_side', 'LONG')  # 持仓方向：LONG-多单，SHORT-空单
+      avg_price = position.get('avg_price', 0)  # 开仓均价，单位：USDT
+      open_time = position.get('open_time')  # 开仓时间，格式：'YYYY-MM-DD HH:MM:SS'
+      ```
+
+  - **8. 技术指标注释（必须）**：
+    - 在计算技术指标时添加注释
+    - 说明指标的含义、计算方法、使用目的
+    - 示例：
+      ```python
+      # 计算MA(99)指标 - 99周期简单移动平均线
+      # 用途：判断长期趋势，价格在MA(99)上方表示上涨趋势，下方表示下跌趋势
+      # 参数：timeperiod=99 表示使用最近99根K线计算平均值
+      # 注意：需要至少99根K线数据才能计算
+      ma99 = talib.SMA(close_array, timeperiod=99)
+      ma99_value = float(ma99[-1])  # 获取最新的MA(99)值
+
+      # 计算KDJ指标 - 随机指标，用于判断超买超卖
+      # K值：快速线，反应灵敏
+      # D值：慢速线，相对平滑
+      # J值：超前指标，J = 3K - 2D
+      # 用途：K上穿D为金叉（买入信号），K下穿D为死叉（卖出信号）
+      k, d, j = calculate_kdj_tradingview(high_array, low_array, close_array)
+      k_value = float(k[-1])  # 当前K值
+      d_value = float(d[-1])  # 当前D值
+      ```
+
+  - **9. 异常处理注释（必须）**：
+    - 在try-except块添加注释
+    - 说明可能出现的异常、处理方式
+    - 示例：
+      ```python
+      try:
+          # 尝试计算技术指标
+          # 可能的异常：数据不足、数据格式错误、计算溢出等
+          ma99 = talib.SMA(close_array, timeperiod=99)
+          ma99_value = float(ma99[-1])
+      except Exception as e:
+          # 捕获所有异常，记录错误日志，跳过该交易对
+          # 原因：单个交易对的异常不应影响其他交易对的处理
+          self.log.error(f"{symbol} MA(99)计算失败: {e}，跳过该交易对")
+          continue  # 继续处理下一个交易对
+      ```
+
+  **⚠️ 注释的强制性要求：**
+  - 每个类必须有类注释（docstring）
+  - 每个方法必须有方法注释（docstring）
+  - 每个主要代码块必须有功能说明注释
+  - 每个if/elif/else判断必须有条件说明注释
+  - 每个重要变量必须有含义说明注释
+  - 每个技术指标计算必须有指标说明注释
+  - 每个复杂计算必须有公式和目的说明注释
+
+  **⚠️ 注释的质量要求：**
+  - 注释必须使用中文
+  - 注释必须清晰、准确、易懂
+  - 注释必须说明"为什么"而不仅仅是"是什么"
+  - 注释必须与代码保持一致
+  - 避免无意义的注释（如：`x = 1  # 设置x为1`）
+  - 注释应该解释业务逻辑、策略思想、计算原理
 - **注释示例格式（买入策略）**：
   ```python
   class GeneratedBuyStrategy(StrategyBaseBuy):
@@ -1123,6 +1348,10 @@ decisions[symbol] = {
 
   - **⚠️⚠️⚠️ 详细日志记录要求（非常重要，必须严格遵守）：**
 
+    **⚠️ 日志的核心目的：便于排查策略在哪个判断中执行了或者没有执行，确保策略逻辑的每个分支都有清晰的日志记录。**
+
+    **⚠️ 强制要求：生成的策略代码中，每个逻辑判断（if/elif/else）、每个策略规则匹配、每个决策生成步骤都必须有详细的info级别日志输出。**
+
     **1. 关键判断逻辑必须有详细日志：**
     - 在进行任何条件判断前，必须输出判断所需的所有变量值
     - 在判断后，必须输出判断结果（True/False）和原因
@@ -1140,6 +1369,73 @@ decisions[symbol] = {
           # 开仓逻辑
       else:
           self.log.info(f"{symbol} 不满足开多单条件: 价格({current_price:.4f}) <= 阈值({threshold:.4f})")
+      ```
+    - **⚠️ 多层嵌套判断的日志要求**：
+      - 对于多层if/elif/else嵌套判断，每一层都必须有日志输出
+      - 必须清楚地标识当前处于哪一层判断、哪个分支
+      - 示例：
+      ```python
+      # ✅ 正确示例（多层判断都有日志）
+      self.log.info(f"{symbol} 开始策略判断流程")
+
+      # 第一层判断：检查数据源
+      source = symbol_state.get('source', '')
+      self.log.info(f"{symbol} [判断1] 数据源检查: source={source}")
+      if source == 'leaderboard':
+          self.log.info(f"{symbol} [判断1-满足] 数据源为涨跌榜，继续判断")
+
+          # 第二层判断：检查涨跌榜类型
+          leaderboard_source = symbol_state.get('leaderboard_source', '')
+          self.log.info(f"{symbol} [判断2] 涨跌榜类型检查: leaderboard_source={leaderboard_source}")
+          if leaderboard_source == 'gainers':
+              self.log.info(f"{symbol} [判断2-满足] 涨幅榜交易对，继续判断")
+
+              # 第三层判断：检查技术指标
+              self.log.info(f"{symbol} [判断3] 技术指标检查: 价格={current_price:.4f}, MA(99)={ma99_value:.4f}")
+              if current_price > 1.02 * ma99_value:
+                  self.log.info(f"{symbol} [判断3-满足] 价格突破MA(99)，生成开多单决策")
+                  # 生成决策
+              else:
+                  self.log.info(f"{symbol} [判断3-不满足] 价格未突破MA(99)，跳过")
+          else:
+              self.log.info(f"{symbol} [判断2-不满足] 非涨幅榜交易对，跳过")
+      else:
+          self.log.info(f"{symbol} [判断1-不满足] 数据源非涨跌榜，跳过")
+
+      self.log.info(f"{symbol} 策略判断流程结束")
+      ```
+    - **⚠️ 策略规则匹配的日志要求**：
+      - 当策略包含多个规则时，必须输出每个规则的匹配结果
+      - 必须明确标识是"规则1"、"规则2"等
+      - 必须输出最终的规则匹配结果（满足哪些规则、不满足哪些规则）
+      - 示例：
+      ```python
+      # ✅ 正确示例（多规则匹配都有日志）
+      self.log.info(f"{symbol} 开始多规则匹配检查")
+
+      # 规则1：价格突破MA(99)
+      rule1_threshold = 1.02 * ma99_value
+      rule1_satisfied = current_price > rule1_threshold
+      self.log.info(f"{symbol} [规则1] 价格突破MA(99)检查: 价格={current_price:.4f}, 阈值={rule1_threshold:.4f}, 结果={rule1_satisfied}")
+
+      # 规则2：成交量大于阈值
+      rule2_threshold = 1000000
+      rule2_satisfied = quote_volume > rule2_threshold
+      self.log.info(f"{symbol} [规则2] 成交量检查: 成交量={quote_volume:.2f}, 阈值={rule2_threshold}, 结果={rule2_satisfied}")
+
+      # 规则3：KDJ金叉
+      rule3_satisfied = k_value > d_value and k_prev <= d_prev
+      self.log.info(f"{symbol} [规则3] KDJ金叉检查: K={k_value:.2f}, D={d_value:.2f}, K_prev={k_prev:.2f}, D_prev={d_prev:.2f}, 结果={rule3_satisfied}")
+
+      # 综合判断
+      all_rules_satisfied = rule1_satisfied and rule2_satisfied and rule3_satisfied
+      self.log.info(f"{symbol} 规则匹配结果: 规则1={rule1_satisfied}, 规则2={rule2_satisfied}, 规则3={rule3_satisfied}, 全部满足={all_rules_satisfied}")
+
+      if all_rules_satisfied:
+          self.log.info(f"{symbol} 所有规则都满足，生成开仓决策")
+          # 生成决策
+      else:
+          self.log.info(f"{symbol} 存在不满足的规则，跳过")
       ```
 
     **2. 变量生成逻辑必须有详细日志：**
@@ -1323,13 +1619,30 @@ decisions[symbol] = {
 
     **6. 循环和遍历必须有进度日志：**
     - 在遍历候选交易对（买入策略）或持仓（卖出策略）时，输出当前处理的进度
+    - **⚠️ 每个交易对的处理必须有明确的开始和结束日志**
+    - **⚠️ 必须输出每个交易对的最终处理结果（生成决策/跳过/异常）**
     - **示例（买入策略：遍历候选交易对）**：
       ```python
       self.log.info(f"开始处理候选交易对，总数: {len(candidates)}")
       for idx, candidate in enumerate(candidates):
           symbol = candidate.get('symbol', '').upper()
-          self.log.info(f"[{idx+1}/{len(candidates)}] 开始处理候选: {symbol}")
-          # 处理逻辑
+          self.log.info(f"[{idx+1}/{len(candidates)}] ========== 开始处理候选: {symbol} ==========")
+
+          try:
+              # 处理逻辑
+              # ... 各种判断和计算 ...
+
+              # 最终结果日志
+              if symbol in decisions:
+                  self.log.info(f"[{idx+1}/{len(candidates)}] {symbol} 处理完成: 已生成决策 - {decisions[symbol]['signal']}")
+              else:
+                  self.log.info(f"[{idx+1}/{len(candidates)}] {symbol} 处理完成: 未生成决策（不满足条件）")
+          except Exception as e:
+              self.log.error(f"[{idx+1}/{len(candidates)}] {symbol} 处理异常: {e}")
+
+          self.log.info(f"[{idx+1}/{len(candidates)}] ========== 结束处理候选: {symbol} ==========")
+
+      self.log.info(f"所有候选交易对处理完成，共处理{len(candidates)}个，生成决策{len(decisions)}个")
       ```
     - **示例（卖出策略：遍历持仓）**：
       ```python
