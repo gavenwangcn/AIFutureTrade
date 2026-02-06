@@ -1012,6 +1012,7 @@ class MarketDataFetcher:
             # EMA指标
             ema5 = talib.EMA(closes, timeperiod=5)
             ema20 = talib.EMA(closes, timeperiod=20)
+            ema30 = talib.EMA(closes, timeperiod=30)
             ema60 = talib.EMA(closes, timeperiod=60)
             ema99 = talib.EMA(closes, timeperiod=99)
 
