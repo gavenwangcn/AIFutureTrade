@@ -579,39 +579,38 @@ class GeneratedSellStrategy(StrategyBaseSell):
     ```python
     import talib
     import numpy as np
-    
+
     def calculate_atr_tradingview(high_array, low_array, close_array, period=14):
         """
-        使用TradingView的计算逻辑计算ATR（RMA/Wilder's Smoothing方法）
-        
+        使用TradingView的计算逻辑计算ATR（使用Wilder's Smoothing/RMA）
+
         TradingView的ATR计算逻辑：
-        1. 计算真实波幅（TR）：
+        1. 计算真实波幅（TR）：使用TA-Lib内置的TRANGE函数
            TR = max(以下三者)：
              - 当日最高价 - 当日最低价
              - |当日最高价 - 前日收盘价|
              - |当日最低价 - 前日收盘价|
-        2. 计算ATR：
-           ATR = RMA(TR, N)  # N为周期，通常14
-           RMA（Wilder's Smoothing）公式：
-           - 第一个值：RMA = SMA(TR, N)
-           - 后续值：RMA = (PrevRMA * (N - 1) + CurrentTR) / N
+        2. 计算ATR：使用EMA模拟Wilder's Smoothing
+           Wilder's平滑因子 = 1/period
+           EMA的平滑因子 = 2/(ema_period+1)
+           令两者相等：1/period = 2/(ema_period+1)
+           解得：ema_period = 2*period - 1
         """
-        # 1. 计算TR（真实波幅）
-        tr = np.zeros_like(high_array)
-        tr[0] = high_array[0] - low_array[0]  # 第一根K线的TR
-        
-        for i in range(1, len(high_array)):
-            hl = high_array[i] - low_array[i]
-            hc = abs(high_array[i] - close_array[i-1])
-            lc = abs(low_array[i] - close_array[i-1])
-            tr[i] = max(hl, hc, lc)
-        
-        # 2. 使用RMA（Wilder's Smoothing）计算ATR
-        # RMA在TA-Lib中就是Wilder's Smoothing
-        atr = talib.RMA(tr, timeperiod=period)
-        
+        # 1. 计算真实波幅TR（使用TA-Lib内置函数）
+        tr = talib.TRANGE(high_array, low_array, close_array)
+
+        # 2. 使用EMA模拟Wilder's Smoothing
+        # Wilder's平滑因子 = 1/period
+        # EMA的平滑因子 = 2/(ema_period+1)
+        # 令两者相等：1/period = 2/(ema_period+1)
+        # 解得：ema_period = 2*period - 1
+        wilders_period = 2 * period - 1
+
+        # 3. 使用EMA计算ATR
+        atr = talib.EMA(tr, timeperiod=wilders_period)
+
         return atr
-    
+
     # 使用示例：
     atr_result = calculate_atr_tradingview(high_array, low_array, close_array, period=14)
     atr_value = float(atr_result[-1])  # 获取最后一个值（最新的ATR值）
@@ -824,19 +823,18 @@ klines_1w = timeframes.get('1w', {}).get('klines', [])  # 1周K线
      low_array = np.array(low_prices, dtype=float)
      close_array = np.array(close_prices, dtype=float)
      
-     # 计算ATR14（使用TradingView的计算逻辑：RMA/Wilder's Smoothing）
+     # 计算ATR14（使用TradingView的计算逻辑：使用EMA模拟Wilder's Smoothing）
      import talib
-     # 1. 计算TR（真实波幅）
-     tr = np.zeros_like(high_array)
-     tr[0] = high_array[0] - low_array[0]  # 第一根K线的TR
-     for j in range(1, len(high_array)):
-         hl = high_array[j] - low_array[j]
-         hc = abs(high_array[j] - close_array[j-1])
-         lc = abs(low_array[j] - close_array[j-1])
-         tr[j] = max(hl, hc, lc)
-     
-     # 2. 使用RMA（Wilder's Smoothing）计算ATR
-     atr = talib.RMA(tr, timeperiod=14)
+     # 1. 计算TR（真实波幅）- 使用TA-Lib内置函数
+     tr = talib.TRANGE(high_array, low_array, close_array)
+
+     # 2. 使用EMA模拟Wilder's Smoothing计算ATR
+     # Wilder's平滑因子 = 1/period
+     # EMA的平滑因子 = 2/(ema_period+1)
+     # 令两者相等：1/period = 2/(ema_period+1)
+     # 解得：ema_period = 2*period - 1
+     wilders_period = 2 * 14 - 1  # 对于ATR14，即为27
+     atr = talib.EMA(tr, timeperiod=wilders_period)
      
      # 获取最后一个值（即起点K线对应的ATR14值）
      if len(atr) > 0 and not np.isnan(atr[-1]):
@@ -917,19 +915,18 @@ klines_1w = timeframes.get('1w', {}).get('klines', [])  # 1周K线
       close_array = np.array(close_prices, dtype=float)
       
       # 6. 计算指标值
-      # 注意：对于ATR指标，需要使用RMA方法，不能直接使用talib.ATR()
+      # 注意：对于ATR指标，需要使用EMA模拟Wilder's Smoothing方法
       if indicator_name.startswith('ATR'):
-          # ATR使用RMA（Wilder's Smoothing）方法
-          # 1. 计算TR（真实波幅）
-          tr = np.zeros_like(high_array)
-          tr[0] = high_array[0] - low_array[0]
-          for j in range(1, len(high_array)):
-              hl = high_array[j] - low_array[j]
-              hc = abs(high_array[j] - close_array[j-1])
-              lc = abs(low_array[j] - close_array[j-1])
-              tr[j] = max(hl, hc, lc)
-          # 2. 使用RMA计算ATR
-          indicator_result = talib.RMA(tr, timeperiod=indicator_period)
+          # ATR使用EMA模拟Wilder's Smoothing方法
+          # 1. 计算TR（真实波幅）- 使用TA-Lib内置函数
+          tr = talib.TRANGE(high_array, low_array, close_array)
+          # 2. 使用EMA模拟Wilder's Smoothing计算ATR
+          # Wilder's平滑因子 = 1/period
+          # EMA的平滑因子 = 2/(ema_period+1)
+          # 令两者相等：1/period = 2/(ema_period+1)
+          # 解得：ema_period = 2*period - 1
+          wilders_period = 2 * indicator_period - 1
+          indicator_result = talib.EMA(tr, timeperiod=wilders_period)
       else:
           # 其他指标使用原函数
           indicator_result = indicator_func(high_array, low_array, close_array, timeperiod=indicator_period)
