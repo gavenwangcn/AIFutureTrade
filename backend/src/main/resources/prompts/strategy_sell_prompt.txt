@@ -12,6 +12,24 @@
 ### ⚠️⚠️⚠️ 日志要求（极其重要，必须严格遵守）：
 **生成的策略代码必须包含详细的info级别日志，用于排查策略执行逻辑。每个逻辑判断分支（if/elif/else）、每个策略规则匹配、每个决策生成步骤都必须有日志输出。日志必须包含：判断条件、变量值、判断结果、执行路径。详细要求见下文"详细日志记录要求"章节。**
 
+### ⚠️⚠️⚠️ 指标空值处理要求（极其重要，必须严格遵守）：
+**技术指标值可能为 `None`（空值），必须在使用前检查，确保代码健壮性：**
+- **某些时间周期（如4h、1d、1w）的K线数据可能不足**，导致部分技术指标无法计算，值为 `None`
+- **必须在使用任何指标值前检查是否为 `None`**，避免使用无效指标进行交易决策
+- **检查方式**：使用 `if indicator_value is not None:` 或 `if indicator_value is None:` 明确检查
+- **禁止使用**：`if indicator_value:` 或 `if indicator_value > 0:` 来判断，因为 `None` 和 `0.0` 在布尔上下文中都是 `False`
+- **当指标为 `None` 时**：应该跳过该指标的使用，记录警告日志，并使用其他逻辑或跳过该持仓
+- **示例**：
+  ```python
+  atr14 = latest_kline.get('indicators', {}).get('atr', {}).get('atr14')
+  if atr14 is None:
+      self.log.warning(f"{symbol} ATR14值为None，可能K线数据不足，跳过该指标的使用")
+      continue  # 或使用其他逻辑
+  # 确保atr14不为None后再使用
+  if atr14 > threshold:
+      # 使用atr14进行判断
+  ```
+
 ### 方法签名要求：
 - 必须包含且仅包含 5 个参数：`self`, `portfolio`, `market_state`, `account_info`, `conditional_orders`
 - 参数顺序必须完全一致，不能添加或删除任何参数
@@ -337,57 +355,80 @@ class GeneratedSellStrategy(StrategyBaseSell):
                 continue
 
             # 从指标数据中读取各类指标
+            # ⚠️⚠️⚠️ 重要：指标值可能为None（空值），必须在使用前检查
+            # MA指标（简单移动平均线，可能为None）
             ma_data = indicators_data.get('ma', {})
-            ma5 = ma_data.get('ma5', 0)
-            ma20 = ma_data.get('ma20', 0)
-            ma60 = ma_data.get('ma60', 0)
-            ma99 = ma_data.get('ma99', 0)
+            ma5 = ma_data.get('ma5')  # 可能为None
+            ma20 = ma_data.get('ma20')  # 可能为None
+            ma60 = ma_data.get('ma60')  # 可能为None
+            ma99 = ma_data.get('ma99')  # 可能为None
 
+            # EMA指标（指数移动平均线，可能为None）
             ema_data = indicators_data.get('ema', {})
-            ema5 = ema_data.get('ema5', 0)
-            ema20 = ema_data.get('ema20', 0)
-            ema60 = ema_data.get('ema60', 0)
-            ema99 = ema_data.get('ema99', 0)
+            ema5 = ema_data.get('ema5')  # 可能为None
+            ema20 = ema_data.get('ema20')  # 可能为None
+            ema60 = ema_data.get('ema60')  # 可能为None
+            ema99 = ema_data.get('ema99')  # 可能为None
 
+            # RSI指标（相对强弱指数，可能为None）
             rsi_data = indicators_data.get('rsi', {})
-            rsi6 = rsi_data.get('rsi6', 50)
-            rsi9 = rsi_data.get('rsi9', 50)
-            rsi14 = rsi_data.get('rsi14', 50)
+            rsi6 = rsi_data.get('rsi6')  # 可能为None
+            rsi9 = rsi_data.get('rsi9')  # 可能为None
+            rsi14 = rsi_data.get('rsi14')  # 可能为None
 
+            # MACD指标（可能为None）
             macd_data = indicators_data.get('macd', {})
-            macd_dif = macd_data.get('dif', 0)
-            macd_dea = macd_data.get('dea', 0)
-            macd_bar = macd_data.get('bar', 0)
+            macd_dif = macd_data.get('dif')  # 可能为None
+            macd_dea = macd_data.get('dea')  # 可能为None
+            macd_bar = macd_data.get('bar')  # 可能为None
 
+            # KDJ指标（可能为None）
             kdj_data = indicators_data.get('kdj', {})
-            kdj_k = kdj_data.get('k', 50)
-            kdj_d = kdj_data.get('d', 50)
-            kdj_j = kdj_data.get('j', 50)
+            kdj_k = kdj_data.get('k')  # 可能为None
+            kdj_d = kdj_data.get('d')  # 可能为None
+            kdj_j = kdj_data.get('j')  # 可能为None
 
+            # ATR指标（平均真实波幅，可能为None）
             atr_data = indicators_data.get('atr', {})
-            atr7 = atr_data.get('atr7', 0)
-            atr14 = atr_data.get('atr14', 0)
-            atr21 = atr_data.get('atr21', 0)
+            atr7 = atr_data.get('atr7')  # 可能为None
+            atr14 = atr_data.get('atr14')  # 可能为None
+            atr21 = atr_data.get('atr21')  # 可能为None
 
+            # VOL指标（成交量及均量线，vol/buy_vol/sell_vol通常不为None，但均量线可能为None）
             vol_data = indicators_data.get('vol', {})
-            vol = vol_data.get('vol', 0)
-            buy_vol = vol_data.get('buy_vol', 0)
-            sell_vol = vol_data.get('sell_vol', 0)
-            mavol5 = vol_data.get('mavol5', 0)
-            mavol10 = vol_data.get('mavol10', 0)
-            mavol60 = vol_data.get('mavol60', 0)
+            vol = vol_data.get('vol', 0)  # 成交量通常不为None
+            buy_vol = vol_data.get('buy_vol', 0)  # 通常不为None
+            sell_vol = vol_data.get('sell_vol', 0)  # 通常不为None
+            mavol5 = vol_data.get('mavol5')  # 可能为None
+            mavol10 = vol_data.get('mavol10')  # 可能为None
+            mavol60 = vol_data.get('mavol60')  # 可能为None
+
+            # ⚠️⚠️⚠️ 重要：在使用指标值前必须检查是否为None
+            # 示例：如果策略需要使用MA99，必须先检查
+            if ma99 is None:
+                self.log.warning(f"{symbol} MA99值为None，可能K线数据不足，跳过该持仓")
+                continue  # 跳过该持仓，或使用其他逻辑
 
             # ⚠️ 重要：输出读取到的指标值（用于调试和日志记录）
+            # ⚠️⚠️⚠️ 注意：如果指标值为None，格式化字符串时需要处理
             # 打印所有关键指标，特别是策略中明确使用的指标
             self.log.info(
                 f"{symbol} 技术指标读取完成: "
-                f"MA5={ma5:.7f}, MA20={ma20:.7f}, MA60={ma60:.7f}, MA99={ma99:.7f}, "
-                f"EMA5={ema5:.7f}, EMA20={ema20:.7f}, EMA60={ema60:.7f}, EMA99={ema99:.7f}, "
-                f"RSI6={rsi6:.2f}, RSI9={rsi9:.2f}, RSI14={rsi14:.2f}, "
-                f"MACD_DIF={macd_dif:.7f}, MACD_DEA={macd_dea:.7f}, MACD_BAR={macd_bar:.7f}, "
-                f"KDJ_K={kdj_k:.2f}, KDJ_D={kdj_d:.2f}, KDJ_J={kdj_j:.2f}, "
-                f"ATR7={atr7:.7f}, ATR14={atr14:.7f}, ATR21={atr21:.7f}, "
-                f"VOL={vol:.2f}, MAVOL5={mavol5:.2f}, MAVOL10={mavol10:.2f}"
+                f"MA5={ma5 if ma5 is not None else 'None'}, MA20={ma20 if ma20 is not None else 'None'}, "
+                f"MA60={ma60 if ma60 is not None else 'None'}, MA99={ma99 if ma99 is not None else 'None'}, "
+                f"EMA5={ema5 if ema5 is not None else 'None'}, EMA20={ema20 if ema20 is not None else 'None'}, "
+                f"EMA60={ema60 if ema60 is not None else 'None'}, EMA99={ema99 if ema99 is not None else 'None'}, "
+                f"RSI6={rsi6 if rsi6 is not None else 'None'}, RSI9={rsi9 if rsi9 is not None else 'None'}, "
+                f"RSI14={rsi14 if rsi14 is not None else 'None'}, "
+                f"MACD_DIF={macd_dif if macd_dif is not None else 'None'}, "
+                f"MACD_DEA={macd_dea if macd_dea is not None else 'None'}, "
+                f"MACD_BAR={macd_bar if macd_bar is not None else 'None'}, "
+                f"KDJ_K={kdj_k if kdj_k is not None else 'None'}, KDJ_D={kdj_d if kdj_d is not None else 'None'}, "
+                f"KDJ_J={kdj_j if kdj_j is not None else 'None'}, "
+                f"ATR7={atr7 if atr7 is not None else 'None'}, ATR14={atr14 if atr14 is not None else 'None'}, "
+                f"ATR21={atr21 if atr21 is not None else 'None'}, "
+                f"VOL={vol:.2f}, MAVOL5={mavol5 if mavol5 is not None else 'None'}, "
+                f"MAVOL10={mavol10 if mavol10 is not None else 'None'}"
             )
             # - 所有从K线获取的价格数据（开盘价、最高价、最低价、收盘价）精度为小数点后7位
             # - 所有基于价格计算的技术指标（MA、EMA、ATR等）在计算和使用时应保持小数点后7位精度
@@ -401,8 +442,13 @@ class GeneratedSellStrategy(StrategyBaseSell):
                 # 获取最新K线
                 latest_kline = klines_data[-1]
 
-                # 读取MA(99)值
-                ma99_value = latest_kline['indicators']['ma']['ma99']
+                # 读取MA(99)值（可能为None）
+                ma99_value = latest_kline.get('indicators', {}).get('ma', {}).get('ma99')
+
+                # ⚠️⚠️⚠️ 重要：必须检查指标值是否为None
+                if ma99_value is None:
+                    self.log.warning(f"{symbol} MA(99) 值为None，可能K线数据不足，跳过")
+                    continue
 
                 # 检查值是否有效（必须大于0）
                 if ma99_value <= 0:
@@ -680,23 +726,26 @@ klines_1w = timeframes.get('1w', {}).get('klines', [])  # 1周K线
 
 **⚠️⚠️⚠️ 重要：关于技术指标可能为空的情况（必须做好代码健壮性管理）：**
 - **某些时间周期（如4h、1d、1w）的K线数据可能不足**，导致部分技术指标无法计算
-- **当K线数据不足时，系统会返回所有可用的K线，但部分指标值为0或默认值**：
-  - **MA/EMA指标**：如果K线不足，对应周期的指标值为0.0（如：只有16根1d K线时，MA99/EMA99为0.0）
-  - **RSI指标**：如果K线不足，对应周期的指标值为默认值50.0
-  - **KDJ指标**：如果K线不足，K/D/J值都为默认值50.0
-  - **MACD指标**：如果K线不足26根，DIF/DEA/BAR都为0.0
-  - **ATR指标**：如果K线不足，对应周期的指标值为0.0
-  - **VOL均量线**：如果K线不足，对应周期的均量线值为0.0
+- **当K线数据不足时，系统会返回所有可用的K线，但部分指标值为 `None`（空值）**：
+  - **MA/EMA指标**：如果K线不足，对应周期的指标值为 `None`（如：只有16根1d K线时，MA99/EMA99为 `None`）
+  - **RSI指标**：如果K线不足，对应周期的指标值为 `None`
+  - **KDJ指标**：如果K线不足，K/D/J值都为 `None`
+  - **MACD指标**：如果K线不足26根，DIF/DEA/BAR都为 `None`
+  - **ATR指标**：如果K线不足，对应周期的指标值为 `None`
+  - **VOL均量线**：如果K线不足，对应周期的均量线值为 `None`
 - **不同指标需要的最小K线数量**：
-  - MA5/EMA5/ATR7/RSI6/MACD: 需要5-26根历史数据
+  - MA5/EMA5/ATR7/RSI6: 需要5-7根历史数据
   - MA20/EMA20/ATR14/RSI9: 需要20根历史数据
   - MA60/EMA60/ATR21/RSI14: 需要60根历史数据
   - MA99/EMA99: 需要99根历史数据
+  - MACD: 需要26根历史数据
+  - KDJ: 需要9根历史数据
 - **代码健壮性要求**：
-  - **必须在使用指标值前检查是否为0或默认值**，避免使用无效指标进行交易决策
-  - **示例**：`atr14 = latest_kline['indicators']['atr']['atr14']`，如果 `atr14 == 0.0`，说明数据不足，应该跳过或使用其他逻辑
-  - **建议**：在使用指标前添加检查，如 `if atr14 > 0:` 或 `if ema99 > 0:`，确保指标有效
-  - **日志记录**：当检测到指标为空时，应该记录警告日志，如 `self.log.warning(f"{symbol} ATR14值为0，可能K线数据不足，跳过该指标的使用")`
+  - **必须在使用指标值前检查是否为 `None`**，避免使用无效指标进行交易决策
+  - **示例**：`atr14 = latest_kline['indicators']['atr']['atr14']`，如果 `atr14 is None`，说明数据不足，应该跳过或使用其他逻辑
+  - **建议**：在使用指标前添加检查，如 `if atr14 is not None:` 或 `if ema99 is not None:`，确保指标有效
+  - **日志记录**：当检测到指标为空时，应该记录警告日志，如 `self.log.warning(f"{symbol} ATR14值为None，可能K线数据不足，跳过该指标的使用")`
+  - **注意**：不要使用 `if atr14:` 或 `if atr14 > 0:` 来判断，因为 `None` 在布尔上下文中为 `False`，但 `0.0` 也是 `False`，应该明确使用 `is None` 或 `is not None` 检查
 ```
 
 **⚠️ 开仓价对应某 interval 的 K 线信息（理解与处理逻辑）：**

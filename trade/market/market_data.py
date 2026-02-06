@@ -1052,44 +1052,44 @@ class MarketDataFetcher:
                 
                 indicators = {
                     'ma': {
-                        'ma5': float(ma5[i]) if i >= 4 and not np.isnan(ma5[i]) else 0.0,
-                        'ma20': float(ma20[i]) if i >= 19 and not np.isnan(ma20[i]) else 0.0,
-                        'ma60': float(ma60[i]) if i >= 59 and not np.isnan(ma60[i]) else 0.0,
-                        'ma99': float(ma99[i]) if i >= 98 and not np.isnan(ma99[i]) else 0.0
+                        'ma5': float(ma5[i]) if i >= 4 and not np.isnan(ma5[i]) else None,
+                        'ma20': float(ma20[i]) if i >= 19 and not np.isnan(ma20[i]) else None,
+                        'ma60': float(ma60[i]) if i >= 59 and not np.isnan(ma60[i]) else None,
+                        'ma99': float(ma99[i]) if i >= 98 and not np.isnan(ma99[i]) else None
                     },
                     'ema': {
-                        'ema5': float(ema5[i]) if i >= 4 and not np.isnan(ema5[i]) else 0.0,
-                        'ema20': float(ema20[i]) if i >= 19 and not np.isnan(ema20[i]) else 0.0,
-                        'ema60': float(ema60[i]) if i >= 59 and not np.isnan(ema60[i]) else 0.0,
-                        'ema99': float(ema99[i]) if i >= 98 and not np.isnan(ema99[i]) else 0.0
+                        'ema5': float(ema5[i]) if i >= 4 and not np.isnan(ema5[i]) else None,
+                        'ema20': float(ema20[i]) if i >= 19 and not np.isnan(ema20[i]) else None,
+                        'ema60': float(ema60[i]) if i >= 59 and not np.isnan(ema60[i]) else None,
+                        'ema99': float(ema99[i]) if i >= 98 and not np.isnan(ema99[i]) else None
                     },
                     'rsi': {
-                        'rsi6': float(rsi6[i]) if i >= 6 and not np.isnan(rsi6[i]) else 50.0,
-                        'rsi9': float(rsi9[i]) if i >= 9 and not np.isnan(rsi9[i]) else 50.0,
-                        'rsi14': float(rsi14[i]) if i >= 14 and not np.isnan(rsi14[i]) else 50.0
+                        'rsi6': float(rsi6[i]) if i >= 6 and not np.isnan(rsi6[i]) else None,
+                        'rsi9': float(rsi9[i]) if i >= 9 and not np.isnan(rsi9[i]) else None,
+                        'rsi14': float(rsi14[i]) if i >= 14 and not np.isnan(rsi14[i]) else None
                     },
                     'macd': {
-                        'dif': float(macd_dif[i]) if i >= 25 and not np.isnan(macd_dif[i]) else 0.0,
-                        'dea': float(macd_dea[i]) if i >= 25 and not np.isnan(macd_dea[i]) else 0.0,
-                        'bar': float(macd_bar[i]) if i >= 25 and not np.isnan(macd_bar[i]) else 0.0
+                        'dif': float(macd_dif[i]) if i >= 25 and not np.isnan(macd_dif[i]) else None,
+                        'dea': float(macd_dea[i]) if i >= 25 and not np.isnan(macd_dea[i]) else None,
+                        'bar': float(macd_bar[i]) if i >= 25 and not np.isnan(macd_bar[i]) else None
                     },
                     'kdj': {
-                        'k': float(kdj_k[i]) if i >= 8 and not np.isnan(kdj_k[i]) else 50.0,
-                        'd': float(kdj_d[i]) if i >= 8 and not np.isnan(kdj_d[i]) else 50.0,
-                        'j': float(kdj_j[i]) if i >= 8 and not np.isnan(kdj_j[i]) else 50.0
+                        'k': float(kdj_k[i]) if i >= 8 and not np.isnan(kdj_k[i]) else None,
+                        'd': float(kdj_d[i]) if i >= 8 and not np.isnan(kdj_d[i]) else None,
+                        'j': float(kdj_j[i]) if i >= 8 and not np.isnan(kdj_j[i]) else None
                     },
                     'atr': {
-                        'atr7': float(atr7[i]) if i >= 6 and not np.isnan(atr7[i]) else 0.0,
-                        'atr14': float(atr14[i]) if i >= 13 and not np.isnan(atr14[i]) else 0.0,
-                        'atr21': float(atr21[i]) if i >= 20 and not np.isnan(atr21[i]) else 0.0
+                        'atr7': float(atr7[i]) if i >= 6 and not np.isnan(atr7[i]) else None,
+                        'atr14': float(atr14[i]) if i >= 13 and not np.isnan(atr14[i]) else None,
+                        'atr21': float(atr21[i]) if i >= 20 and not np.isnan(atr21[i]) else None
                     },
                     'vol': {
                         'vol': float(volumes[i]),
                         'buy_vol': float(klines[i].get('taker_buy_base_volume', 0)),
                         'sell_vol': float(volumes[i] - klines[i].get('taker_buy_base_volume', 0)),
-                        'mavol5': float(mavol5[i]) if i >= 4 and not np.isnan(mavol5[i]) else 0.0,
-                        'mavol10': float(mavol10[i]) if i >= 9 and not np.isnan(mavol10[i]) else 0.0,
-                        'mavol60': float(mavol60[i]) if i >= 59 and not np.isnan(mavol60[i]) else 0.0
+                        'mavol5': float(mavol5[i]) if i >= 4 and not np.isnan(mavol5[i]) else None,
+                        'mavol10': float(mavol10[i]) if i >= 9 and not np.isnan(mavol10[i]) else None,
+                        'mavol60': float(mavol60[i]) if i >= 59 and not np.isnan(mavol60[i]) else None
                     }
                 }
 
