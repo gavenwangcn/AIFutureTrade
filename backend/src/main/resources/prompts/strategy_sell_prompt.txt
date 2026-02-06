@@ -533,7 +533,7 @@ class GeneratedSellStrategy(StrategyBaseSell):
 
 **支持的指标类型：**
 - **MA（移动平均线）**：ma5, ma20, ma60, ma99
-- **EMA（指数移动平均线）**：ema5, ema20, ema60, ema99
+- **EMA（指数移动平均线）**：ema5, ema20, ema30, ema60, ema99
 - **RSI（相对强弱指数）**：rsi6, rsi9, rsi14（使用Wilder's Smoothing方法，与TradingView一致）
 - **MACD**：dif, dea, bar
 - **KDJ（随机指标）**：k, d, j（使用TradingView计算逻辑）

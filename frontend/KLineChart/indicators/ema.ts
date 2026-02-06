@@ -19,11 +19,12 @@ interface Ema {
   ema2?: number
   ema3?: number
   ema4?: number
+  ema5?: number
 }
 
 /**
  * EMA（指数移动平均线）指标
- * 支持 EMA5、EMA20、EMA60、EMA99
+ * 支持 EMA5、EMA20、EMA30、EMA60、EMA99
  * EMA计算公式：EMA(t) = Close(t) * α + EMA(t-1) * (1 - α)
  * 其中 α = 2 / (N + 1)
  */
@@ -31,14 +32,15 @@ const ema: IndicatorTemplate<Ema, number> = {
   name: 'EMA',
   shortName: 'EMA',
   series: 'price',
-  calcParams: [5, 20, 60, 99],
+  calcParams: [5, 20, 30, 60, 99],
   precision: 6,
   shouldOhlc: true,
   figures: [
     { key: 'ema1', title: 'EMA5: ', type: 'line' },
     { key: 'ema2', title: 'EMA20: ', type: 'line' },
-    { key: 'ema3', title: 'EMA60: ', type: 'line' },
-    { key: 'ema4', title: 'EMA99: ', type: 'line' }
+    { key: 'ema3', title: 'EMA30: ', type: 'line' },
+    { key: 'ema4', title: 'EMA60: ', type: 'line' },
+    { key: 'ema5', title: 'EMA99: ', type: 'line' }
   ],
   regenerateFigures: (params) => params.map((p, i) => ({ key: `ema${i + 1}`, title: `EMA${p}: `, type: 'line' })),
   calc: (dataList, indicator) => {

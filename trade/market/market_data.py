@@ -971,7 +971,7 @@ class MarketDataFetcher:
 
         技术指标包括：
         - MA: 简单移动平均线 (5, 20, 60, 99)
-        - EMA: 指数移动平均线 (5, 20, 60, 99)
+        - EMA: 指数移动平均线 (5, 20, 30, 60, 99)
         - RSI: 相对强弱指数 (6, 9, 14) - 使用Wilder's Smoothing方法
         - MACD: 指数平滑异同移动平均线 (12, 26, 9)
         - KDJ: 随机指标 (9, 3, 3) - 使用TradingView计算逻辑
@@ -1060,6 +1060,7 @@ class MarketDataFetcher:
                     'ema': {
                         'ema5': float(ema5[i]) if i >= 4 and not np.isnan(ema5[i]) else None,
                         'ema20': float(ema20[i]) if i >= 19 and not np.isnan(ema20[i]) else None,
+                        'ema30': float(ema30[i]) if i >= 29 and not np.isnan(ema30[i]) else None,
                         'ema60': float(ema60[i]) if i >= 59 and not np.isnan(ema60[i]) else None,
                         'ema99': float(ema99[i]) if i >= 98 and not np.isnan(ema99[i]) else None
                     },
