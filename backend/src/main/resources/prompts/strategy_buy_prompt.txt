@@ -334,7 +334,17 @@ class GeneratedBuyStrategy(StrategyBaseBuy):
             mavol60 = vol_data.get('mavol60', 0)
 
             # ⚠️ 重要：输出读取到的指标值（用于调试和日志记录）
-            self.log.info(f"{symbol} 技术指标读取完成: MA99={ma99:.7f}, RSI14={rsi14:.2f}, ATR14={atr14:.7f}, MACD_DIF={macd_dif:.7f}")
+            # 打印所有关键指标，特别是策略中明确使用的指标
+            self.log.info(
+                f"{symbol} 技术指标读取完成: "
+                f"MA5={ma5:.7f}, MA20={ma20:.7f}, MA60={ma60:.7f}, MA99={ma99:.7f}, "
+                f"EMA5={ema5:.7f}, EMA20={ema20:.7f}, EMA60={ema60:.7f}, EMA99={ema99:.7f}, "
+                f"RSI6={rsi6:.2f}, RSI9={rsi9:.2f}, RSI14={rsi14:.2f}, "
+                f"MACD_DIF={macd_dif:.7f}, MACD_DEA={macd_dea:.7f}, MACD_BAR={macd_bar:.7f}, "
+                f"KDJ_K={kdj_k:.2f}, KDJ_D={kdj_d:.2f}, KDJ_J={kdj_j:.2f}, "
+                f"ATR7={atr7:.7f}, ATR14={atr14:.7f}, ATR21={atr21:.7f}, "
+                f"VOL={vol:.2f}, MAVOL5={mavol5:.2f}, MAVOL10={mavol10:.2f}"
+            )
             
             # ========== 策略判断和决策生成部分 ==========
             # 建议使用 try-except 处理异常，确保异常时继续处理下一个candidate

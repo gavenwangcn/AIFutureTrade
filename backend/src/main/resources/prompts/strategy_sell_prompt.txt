@@ -377,8 +377,18 @@ class GeneratedSellStrategy(StrategyBaseSell):
             mavol10 = vol_data.get('mavol10', 0)
             mavol60 = vol_data.get('mavol60', 0)
 
-            # 输出读取到的指标值
-            self.log.info(f"{symbol} 技术指标读取完成: MA99={ma99:.7f}, RSI14={rsi14:.2f}, ATR14={atr14:.7f}, MACD_DIF={macd_dif:.7f}")
+            # ⚠️ 重要：输出读取到的指标值（用于调试和日志记录）
+            # 打印所有关键指标，特别是策略中明确使用的指标
+            self.log.info(
+                f"{symbol} 技术指标读取完成: "
+                f"MA5={ma5:.7f}, MA20={ma20:.7f}, MA60={ma60:.7f}, MA99={ma99:.7f}, "
+                f"EMA5={ema5:.7f}, EMA20={ema20:.7f}, EMA60={ema60:.7f}, EMA99={ema99:.7f}, "
+                f"RSI6={rsi6:.2f}, RSI9={rsi9:.2f}, RSI14={rsi14:.2f}, "
+                f"MACD_DIF={macd_dif:.7f}, MACD_DEA={macd_dea:.7f}, MACD_BAR={macd_bar:.7f}, "
+                f"KDJ_K={kdj_k:.2f}, KDJ_D={kdj_d:.2f}, KDJ_J={kdj_j:.2f}, "
+                f"ATR7={atr7:.7f}, ATR14={atr14:.7f}, ATR21={atr21:.7f}, "
+                f"VOL={vol:.2f}, MAVOL5={mavol5:.2f}, MAVOL10={mavol10:.2f}"
+            )
             # - 所有从K线获取的价格数据（开盘价、最高价、最低价、收盘价）精度为小数点后7位
             # - 所有基于价格计算的技术指标（MA、EMA、ATR等）在计算和使用时应保持小数点后7位精度
             # - 所有涉及价格的计算（如价格差值、价格比较、止损止盈价格等）都应保持小数点后7位精度
