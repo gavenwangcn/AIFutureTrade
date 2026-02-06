@@ -992,7 +992,7 @@ class MarketDataFetcher:
         
         # 如果K线不足100根，记录警告但继续计算（能算多少算多少）
         if len(klines) < 100:
-            logger.warning(f'[Indicators] Insufficient klines for {symbol} {interval}: {len(klines)} < 100, will calculate partial indicators')
+            logger.debug(f'[Indicators] Insufficient klines for {symbol} {interval}: {len(klines)} < 100, will calculate partial indicators')
 
         try:
             # 提取OHLCV数据为numpy数组
@@ -1098,7 +1098,7 @@ class MarketDataFetcher:
 
             # 统计有多少K线有完整指标（MA99需要99根历史数据）
             full_indicators_count = max(0, len(klines) - 98) if len(klines) >= 99 else 0
-            logger.info(f'[Indicators] Calculated indicators for {symbol} {interval}: {len(result_klines)} total klines, {full_indicators_count} klines with full indicators (MA99/EMA99)')
+            logger.debug(f'[Indicators] Calculated indicators for {symbol} {interval}: {len(result_klines)} total klines, {full_indicators_count} klines with full indicators (MA99/EMA99)')
             return result_klines
 
         except Exception as e:
@@ -1319,7 +1319,7 @@ class MarketDataFetcher:
 
             # 如果K线不足100根，记录警告但继续处理（能算多少算多少）
             if len(all_klines_parsed) < 100:
-                logger.warning(f'[MarketData] Insufficient klines for {symbol} {interval}: {len(all_klines_parsed)} < 100, will calculate partial indicators')
+                logger.debug(f'[MarketData] Insufficient klines for {symbol} {interval}: {len(all_klines_parsed)} < 100, will calculate partial indicators')
 
             # 计算所有K线的技术指标（即使不足100根也会返回所有K线，部分指标为空）
             klines_with_indicators = self._calculate_indicators_for_klines(all_klines_parsed, symbol, interval)
@@ -1334,7 +1334,7 @@ class MarketDataFetcher:
             actual_return_count = min(return_count, len(klines_with_indicators))
             klines = klines_with_indicators[-actual_return_count:] if len(klines_with_indicators) > actual_return_count else klines_with_indicators
             
-            logger.info(f'[MarketData] Returning {len(klines)} klines for {symbol} {interval} (requested: {return_count}, available: {len(klines_with_indicators)})')
+            logger.debug(f'[MarketData] Returning {len(klines)} klines for {symbol} {interval} (requested: {return_count}, available: {len(klines_with_indicators)})')
 
             # 构建K线数据列表（已包含指标数据）
             kline_data_list = []
