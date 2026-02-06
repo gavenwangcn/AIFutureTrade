@@ -539,6 +539,7 @@
                     <th>开仓价</th>
                     <th>当前价</th>
                     <th>杠杆</th>
+                    <th>开仓保证金</th>
                     <th>盈亏</th>
                     <th>盈亏百分比</th>
                   </tr>
@@ -553,6 +554,7 @@
                     <td>${{ formatPrice6(position.openPrice || position.avg_price || position.avgPrice || 0) }}</td>
                     <td>${{ formatPrice6(position.currentPrice || position.current_price || position.currentPrice || 0) }}</td>
                     <td>{{ position.leverage }}x</td>
+                    <td>${{ formatCurrency5(position.initialMargin || position.initial_margin || 0) }}</td>
                     <td :class="getPnlClass(position.pnl || 0, true)">
                       <strong>{{ formatPnl(position.pnl || 0, true) }}</strong>
                     </td>
@@ -561,7 +563,7 @@
                     </td>
                   </tr>
                   <tr v-if="positions.length === 0">
-                    <td colspan="8" class="empty-state">暂无持仓</td>
+                    <td colspan="9" class="empty-state">暂无持仓</td>
                   </tr>
                 </tbody>
               </table>
