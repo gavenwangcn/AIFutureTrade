@@ -3358,7 +3358,38 @@ class TradingEngine:
             return [], {}
         
         logger.info(f"[Model {self.model_id}] 过滤后剩余 {len(filtered_candidates)} 个候选symbol")
-        
+
+        # 步骤2.4: 根据 same_symbol_interval 过滤（同币种在间隔内禁止多次买入）
+        try:
+            model = self.models_db.get_model(self.model_id)
+            same_symbol_interval = model.get('same_symbol_interval') if model else None
+            if same_symbol_interval is not None and int(same_symbol_interval) > 0:
+                interval_min = int(same_symbol_interval)
+                model_mapping = self.models_db._get_model_id_mapping()
+                model_uuid = model_mapping.get(self.model_id)
+                if model_uuid:
+                    interval_filtered = []
+                    for candidate in filtered_candidates:
+                        sym = (candidate.get('symbol') or candidate.get('contract_symbol') or '').upper()
+                        if not sym:
+                            continue
+                        if not sym.endswith('USDT'):
+                            sym = f"{sym}USDT"
+                        if self.trades_db.has_recent_buy_trade(model_uuid, sym, interval_min):
+                            logger.debug(f"[Model {self.model_id}] 过滤 {sym}: same_symbol_interval={interval_min}分钟内已有买入记录")
+                            continue
+                        interval_filtered.append(candidate)
+                    filtered_count = len(filtered_candidates) - len(interval_filtered)
+                    if filtered_count > 0:
+                        logger.info(f"[Model {self.model_id}] same_symbol_interval 过滤: 移除 {filtered_count} 个symbol（间隔内已有买入）")
+                    filtered_candidates = interval_filtered
+
+                if not filtered_candidates:
+                    logger.info(f"[Model {self.model_id}] same_symbol_interval 过滤后无可用候选symbol")
+                    return [], {}
+        except Exception as e:
+            logger.warning(f"[Model {self.model_id}] same_symbol_interval 过滤失败: {e}，继续使用未过滤的候选symbol")
+
         # 步骤2.5: 根据模型的quote_volume配置过滤成交额（在最开始进行过滤，避免调用SDK的K线接口）
         try:
             model = self.models_db.get_model(self.model_id)

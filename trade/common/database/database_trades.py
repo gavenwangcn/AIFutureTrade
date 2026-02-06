@@ -257,6 +257,34 @@ class TradesDatabase:
             logger.error(f"[Trades] Failed to add trade: {e}")
             raise
     
+    def has_recent_buy_trade(self, model_id: str, symbol: str, interval_minutes: int) -> bool:
+        """
+        检查该模型在指定symbol上是否在interval_minutes分钟内有买入记录
+
+        Args:
+            model_id: 模型ID（UUID格式）
+            symbol: 交易对符号（如 BTCUSDT）
+            interval_minutes: 间隔分钟数
+
+        Returns:
+            bool: True表示在间隔内有买入记录，应过滤掉；False表示无买入记录，可继续
+        """
+        try:
+            beijing_tz = timezone(timedelta(hours=8))
+            now = datetime.now(beijing_tz)
+            cutoff = now - timedelta(minutes=interval_minutes)
+
+            rows = self.query(f"""
+                SELECT 1 FROM {self.trades_table}
+                WHERE model_id = %s AND future = %s AND side = 'buy' AND timestamp >= %s
+                LIMIT 1
+            """, (model_id, symbol.upper(), cutoff))
+
+            return bool(rows)
+        except Exception as e:
+            logger.warning(f"[Trades] has_recent_buy_trade failed: {e}")
+            return False  # 查询失败时不过滤，保守处理
+
     def get_today_sell_trades(self, model_id: str) -> List[Dict[str, Any]]:
         """
         获取当天的卖出交易记录（当天指从早上8点到第二天早上8点）

@@ -198,6 +198,14 @@ public class ModelDTO implements Serializable {
     private String forbidBuyEnd;
 
     /**
+     * 同币种最小买入间隔（分钟），在此时长内禁止同一symbol再次买入，NULL表示不过滤
+     * 支持两种命名方式：same_symbol_interval（snake_case）和 sameSymbolInterval（camelCase）
+     */
+    @JsonProperty("same_symbol_interval")
+    @JsonAlias({"sameSymbolInterval"})
+    private Integer sameSymbolInterval;
+
+    /**
      * 创建时间
      */
     private LocalDateTime createdAt;

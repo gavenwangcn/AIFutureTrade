@@ -196,6 +196,14 @@ public interface ModelService {
     Map<String, Object> updateModelForbidBuyTime(String modelId, String forbidBuyStart, String forbidBuyEnd);
 
     /**
+     * 更新模型的同币种最小买入间隔（分钟）
+     * @param modelId 模型ID（UUID格式）
+     * @param sameSymbolInterval 同币种最小买入间隔（分钟），null表示不过滤
+     * @return 更新结果
+     */
+    Map<String, Object> updateModelSameSymbolInterval(String modelId, Integer sameSymbolInterval);
+
+    /**
      * 更新模型的API提供方和模型名称
      * @param modelId 模型ID（UUID格式）
      * @param providerId 新的API提供方ID（UUID格式）

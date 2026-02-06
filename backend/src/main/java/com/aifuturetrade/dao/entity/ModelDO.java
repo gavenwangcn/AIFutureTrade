@@ -184,6 +184,12 @@ public class ModelDO implements Serializable {
     private String forbidBuyEnd;
 
     /**
+     * 同币种最小买入间隔（分钟），在此时长内禁止同一symbol再次买入，NULL表示不过滤
+     */
+    @TableField("same_symbol_interval")
+    private Integer sameSymbolInterval;
+
+    /**
      * 创建时间
      */
     @TableField("created_at")

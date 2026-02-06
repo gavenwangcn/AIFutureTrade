@@ -1163,6 +1163,18 @@
               <TimePicker v-model="tempModelSettings.forbid_buy_end" />
             </div>
             <div class="form-group">
+              <label for="settingsSameSymbolIntervalInput" title="同一合约在指定分钟数内禁止再次买入。留空或0表示不过滤。">相同合约禁止买入间隔（分钟）</label>
+              <input
+                type="number"
+                id="settingsSameSymbolIntervalInput"
+                class="form-input"
+                min="0"
+                placeholder="留空不过滤"
+                v-model.number="tempModelSettings.same_symbol_interval"
+              >
+              <small class="form-help">同一symbol在此时长内已有买入记录则不再买入</small>
+            </div>
+            <div class="form-group">
               <label style="font-weight: 600; margin-bottom: 12px; display: block;">买入批次配置</label>
               <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px;">
                 <div>

@@ -163,6 +163,7 @@ const lastPortfolioSymbolsRefreshTime = ref(null) // 持仓合约列表最后刷
     losses_num: null,
     forbid_buy_start: null,
     forbid_buy_end: null,
+    same_symbol_interval: null,
     buy_batch_size: 1,
     buy_batch_execution_interval: 60,
     buy_batch_execution_group_size: 1,
@@ -2666,7 +2667,10 @@ let portfolioRefreshInterval = null // 投资组合数据自动刷新定时器�
       // 禁止买入时间段（兼容两种命名方式）
       const forbidBuyStartValue = model.forbid_buy_start ?? model.forbidBuyStart ?? null
       const forbidBuyEndValue = model.forbid_buy_end ?? model.forbidBuyEnd ?? null
-      
+
+      // 相同合约禁止买入间隔（兼容两种命名方式）
+      const sameSymbolIntervalValue = model.same_symbol_interval ?? model.sameSymbolInterval ?? null
+
       // 解析批次配置字段（兼容两种命名方式）
       const buyBatchSizeValue = model.buy_batch_size ?? model.buyBatchSize ?? 1
       const buyBatchExecutionIntervalValue = model.buy_batch_execution_interval ?? model.buyBatchExecutionInterval ?? 60
@@ -2691,6 +2695,7 @@ let portfolioRefreshInterval = null // 投资组合数据自动刷新定时器�
         losses_num: lossesNumValue,
         forbid_buy_start: forbidBuyStartValue,
         forbid_buy_end: forbidBuyEndValue,
+        same_symbol_interval: sameSymbolIntervalValue,
         // 使用解析后的批次配置值
         buy_batch_size: buyBatchSizeValue,
         buy_batch_execution_interval: buyBatchExecutionIntervalValue,
@@ -2755,6 +2760,7 @@ let portfolioRefreshInterval = null // 投资组合数据自动刷新定时器�
           losses_num: lossesNumValue,
           forbid_buy_start: localModel.forbid_buy_start ?? localModel.forbidBuyStart ?? null,
           forbid_buy_end: localModel.forbid_buy_end ?? localModel.forbidBuyEnd ?? null,
+          same_symbol_interval: localModel.same_symbol_interval ?? localModel.sameSymbolInterval ?? null,
           // 使用解析后的批次配置值
           buy_batch_size: buyBatchSizeValue,
           buy_batch_execution_interval: buyBatchExecutionIntervalValue,
@@ -2867,6 +2873,7 @@ let portfolioRefreshInterval = null // 投资组合数据自动刷新定时器�
       const lossesNumValue = tempModelSettings.value.losses_num
       const forbidBuyStartValue = tempModelSettings.value.forbid_buy_start
       const forbidBuyEndValue = tempModelSettings.value.forbid_buy_end
+      const sameSymbolIntervalValue = tempModelSettings.value.same_symbol_interval
 
       // 禁止买入时间段必须成对设置
       if ((forbidBuyStartValue && !forbidBuyEndValue) || (!forbidBuyStartValue && forbidBuyEndValue)) {
@@ -2882,7 +2889,8 @@ let portfolioRefreshInterval = null // 投资组合数据自动刷新定时器�
         modelApi.setBaseVolume(pendingModelSettingsId.value, baseVolumeValue || null),
         modelApi.setDailyReturn(pendingModelSettingsId.value, dailyReturnValue || null),
         modelApi.setLossesNum(pendingModelSettingsId.value, lossesNumValue || null),
-        modelApi.setForbidBuyTime(pendingModelSettingsId.value, forbidBuyStartValue || null, forbidBuyEndValue || null)
+        modelApi.setForbidBuyTime(pendingModelSettingsId.value, forbidBuyStartValue || null, forbidBuyEndValue || null),
+        modelApi.setSameSymbolInterval(pendingModelSettingsId.value, sameSymbolIntervalValue && sameSymbolIntervalValue > 0 ? sameSymbolIntervalValue : null)
       )
       
       // 更新批次配置

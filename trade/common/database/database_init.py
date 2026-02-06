@@ -108,6 +108,7 @@ class DatabaseInitializer:
             `losses_num` INT UNSIGNED DEFAULT NULL COMMENT '连续亏损次数阈值，达到此值后暂停买入交易，NULL表示不限制',
             `forbid_buy_start` VARCHAR(8) DEFAULT NULL COMMENT '禁止买入开始时间（HH:mm:ss，UTC+8），NULL表示不限制',
             `forbid_buy_end` VARCHAR(8) DEFAULT NULL COMMENT '禁止买入结束时间（HH:mm:ss，UTC+8），NULL表示不限制',
+            `same_symbol_interval` INT UNSIGNED DEFAULT NULL COMMENT '同币种最小买入间隔（分钟），在此时长内禁止同一symbol再次买入，NULL表示不过滤',
             `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP,
             INDEX `idx_provider_id` (`provider_id`),
             INDEX `idx_account_alias` (`account_alias`),
@@ -117,8 +118,21 @@ class DatabaseInitializer:
         """
         self.command(ddl)
         logger.debug(f"[DatabaseInit] Ensured table {table_name} exists")
-        
-  
+
+        # 迁移：为已存在的表添加 same_symbol_interval 列（若不存在）
+        try:
+            self.command(f"""
+                ALTER TABLE `{table_name}` ADD COLUMN
+                `same_symbol_interval` INT UNSIGNED DEFAULT NULL COMMENT '同币种最小买入间隔（分钟），NULL表示不过滤'
+            """)
+            logger.debug(f"[DatabaseInit] 已添加 same_symbol_interval 列到 {table_name}")
+        except Exception as e:
+            if 'Duplicate column name' in str(e) or '1060' in str(e):
+                logger.debug(f"[DatabaseInit] same_symbol_interval 列已存在，跳过")
+            else:
+                logger.warning(f"[DatabaseInit] 添加 same_symbol_interval 列失败: {e}")
+
+
     def ensure_portfolios_table(self, table_name: str = "portfolios"):
         """Create portfolios table if not exists"""
         ddl = f"""

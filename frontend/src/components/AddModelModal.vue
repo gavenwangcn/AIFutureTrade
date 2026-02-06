@@ -61,6 +61,11 @@
         <label>禁止买入结束</label>
         <TimePicker v-model="formData.forbidBuyEnd" />
       </div>
+      <div class="form-group">
+        <label title="同一合约在指定分钟数内禁止再次买入。留空或0表示不过滤。">相同合约禁止买入间隔（分钟）</label>
+        <input v-model.number="formData.sameSymbolInterval" type="number" class="form-input" min="0" placeholder="留空不过滤" />
+        <small class="form-help">同一symbol在此时长内已有买入记录则不再买入，留空表示不过滤</small>
+      </div>
     </div>
     <div v-if="timeRangeError" class="form-help" style="color: #dc3545; margin-top: 8px;">
       {{ timeRangeError }}
@@ -198,6 +203,7 @@ const formData = ref({
   lossesNum: null,  // 连续亏损次数阈值，默认不限制
   forbidBuyStart: null, // 禁止买入开始时间 HH:mm:ss（UTC+8）
   forbidBuyEnd: null, // 禁止买入结束时间 HH:mm:ss（UTC+8）
+  sameSymbolInterval: null, // 相同合约禁止买入间隔（分钟），null表示不过滤
   accountAlias: '',
   isVirtual: true,  // 默认值为 true（虚拟账户）
   symbolSource: 'leaderboard',  // 默认使用涨跌榜
@@ -300,6 +306,7 @@ const handleSubmit = async () => {
       lossesNum: formData.value.lossesNum || null,
       forbidBuyStart: formData.value.forbidBuyStart || null,
       forbidBuyEnd: formData.value.forbidBuyEnd || null,
+      sameSymbolInterval: formData.value.sameSymbolInterval && formData.value.sameSymbolInterval > 0 ? formData.value.sameSymbolInterval : null,
       accountAlias: formData.value.accountAlias,
       isVirtual: formData.value.isVirtual,
       symbolSource: formData.value.symbolSource,
@@ -336,6 +343,7 @@ const clearForm = () => {
     lossesNum: null,  // 重置为默认值
     forbidBuyStart: null,
     forbidBuyEnd: null,
+    sameSymbolInterval: null,
     accountAlias: '',
     isVirtual: true,  // 重置为默认值 true（虚拟账户）
     symbolSource: 'leaderboard',  // 重置为默认值

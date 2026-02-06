@@ -142,6 +142,12 @@ export const modelApi = {
     apiPost(`/api/models/${modelId}/forbid_buy_time`, { forbid_buy_start: forbidBuyStart, forbid_buy_end: forbidBuyEnd }),
 
   /**
+   * 设置模型同币种最小买入间隔（分钟，null或0表示不过滤）
+   */
+  setSameSymbolInterval: (modelId, sameSymbolInterval) =>
+    apiPost(`/api/models/${modelId}/same_symbol_interval`, { same_symbol_interval: sameSymbolInterval }),
+
+  /**
    * 更新模型的API提供方和模型名称
    */
   updateProvider: (modelId, providerId, modelName) => apiPut(`/api/models/${modelId}/provider`, { provider_id: providerId, model_name: modelName }),

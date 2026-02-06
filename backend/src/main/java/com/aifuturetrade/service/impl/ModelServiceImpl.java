@@ -1864,6 +1864,45 @@ public class ModelServiceImpl implements ModelService {
         }
     }
 
+    @Override
+    public Map<String, Object> updateModelSameSymbolInterval(String modelId, Integer sameSymbolInterval) {
+        log.debug("[ModelService] 更新模型同币种最小买入间隔, modelId={}, sameSymbolInterval={}", modelId, sameSymbolInterval);
+        Map<String, Object> response = new HashMap<>();
+        try {
+            ModelDO model = modelMapper.selectModelById(modelId);
+            if (model == null) {
+                response.put("success", false);
+                response.put("error", "Model not found");
+                return response;
+            }
+
+            // sameSymbolInterval 为 null 或 <= 0 表示不过滤
+            Integer value = (sameSymbolInterval != null && sameSymbolInterval > 0) ? sameSymbolInterval : null;
+
+            UpdateWrapper<ModelDO> updateWrapper = new UpdateWrapper<>();
+            updateWrapper.eq("id", modelId);
+            updateWrapper.set("same_symbol_interval", value);
+
+            int result = modelMapper.update(null, updateWrapper);
+            if (result > 0) {
+                response.put("success", true);
+                response.put("message", "Same symbol interval updated successfully");
+                response.put("same_symbol_interval", value);
+                log.info("[ModelService] 更新模型同币种最小买入间隔成功, modelId={}, same_symbol_interval={}", modelId, value);
+            } else {
+                response.put("success", false);
+                response.put("error", "Failed to update same symbol interval");
+                log.warn("[ModelService] 更新模型同币种最小买入间隔失败, modelId={}", modelId);
+            }
+            return response;
+        } catch (Exception e) {
+            log.error("[ModelService] 更新模型同币种最小买入间隔失败: {}", e.getMessage(), e);
+            response.put("success", false);
+            response.put("error", e.getMessage());
+            return response;
+        }
+    }
+
     /**
      * 规范化时间字符串为 HH:mm:ss，支持 24:00:00；空字符串返回 null。
      * - 支持输入：HH、HH:mm、HH:mm:ss

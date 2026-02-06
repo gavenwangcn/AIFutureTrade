@@ -437,6 +437,39 @@ public class ModelController {
     }
 
     /**
+     * 更新模型的同币种最小买入间隔（分钟）
+     * @param modelId 模型ID
+     * @param requestBody 请求体，包含 same_symbol_interval（分钟，null或0表示不过滤）
+     * @return 更新操作结果
+     */
+    @PostMapping("/{modelId}/same_symbol_interval")
+    @Operation(summary = "更新模型的同币种最小买入间隔（分钟）")
+    public ResponseEntity<Map<String, Object>> updateModelSameSymbolInterval(
+            @PathVariable(value = "modelId") String modelId,
+            @RequestBody Map<String, Object> requestBody) {
+        Object sameSymbolIntervalObj = requestBody.get("same_symbol_interval");
+        Integer sameSymbolInterval = null;
+        if (sameSymbolIntervalObj != null) {
+            if (sameSymbolIntervalObj instanceof Number) {
+                int v = ((Number) sameSymbolIntervalObj).intValue();
+                sameSymbolInterval = v > 0 ? v : null;
+            } else if (sameSymbolIntervalObj instanceof String) {
+                String str = (String) sameSymbolIntervalObj;
+                if (!str.trim().isEmpty()) {
+                    try {
+                        int v = Integer.parseInt(str.trim());
+                        sameSymbolInterval = v > 0 ? v : null;
+                    } catch (NumberFormatException e) {
+                        // ignore
+                    }
+                }
+            }
+        }
+        Map<String, Object> result = modelService.updateModelSameSymbolInterval(modelId, sameSymbolInterval);
+        return new ResponseEntity<>(result, HttpStatus.OK);
+    }
+
+    /**
      * 更新模型的API提供方和模型名称
      * @param modelId 模型ID
      * @param requestBody 请求体，包含provider_id和model_name

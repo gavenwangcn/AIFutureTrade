@@ -257,27 +257,27 @@ class ModelsDatabase:
             
             # Query model and associated provider
             rows = self.query(f"""
-                SELECT m.id, m.name, m.provider_id, m.model_name, m.initial_capital, 
-                       m.leverage, m.auto_buy_enabled, m.auto_sell_enabled, m.max_positions, 
+                SELECT m.id, m.name, m.provider_id, m.model_name, m.initial_capital,
+                       m.leverage, m.auto_buy_enabled, m.auto_sell_enabled, m.max_positions,
                        m.buy_batch_size, m.buy_batch_execution_interval, m.buy_batch_execution_group_size,
                        m.sell_batch_size, m.sell_batch_execution_interval, m.sell_batch_execution_group_size,
                        m.account_alias, m.is_virtual, m.symbol_source, m.trade_type, m.base_volume, m.daily_return, m.losses_num,
-                       m.forbid_buy_start, m.forbid_buy_end, m.created_at,
+                       m.forbid_buy_start, m.forbid_buy_end, m.same_symbol_interval, m.created_at,
                        m.api_key, m.api_secret, p.api_url, p.provider_type
                 FROM {self.models_table} m
                 LEFT JOIN {self.providers_table} p ON m.provider_id = p.id
                 WHERE m.id = '{model_uuid}'
             """)
-            
+
             if not rows:
                 return None
-            
-            columns = ["id", "name", "provider_id", "model_name", "initial_capital", 
+
+            columns = ["id", "name", "provider_id", "model_name", "initial_capital",
                       "leverage", "auto_buy_enabled", "auto_sell_enabled", "max_positions",
                       "buy_batch_size", "buy_batch_execution_interval", "buy_batch_execution_group_size",
                       "sell_batch_size", "sell_batch_execution_interval", "sell_batch_execution_group_size",
                       "account_alias", "is_virtual", "symbol_source", "trade_type", "base_volume", "daily_return", "losses_num",
-                      "forbid_buy_start", "forbid_buy_end", "created_at",
+                      "forbid_buy_start", "forbid_buy_end", "same_symbol_interval", "created_at",
                       "api_key", "api_secret", "api_url", "provider_type"]
             result = self._row_to_dict(rows[0], columns)
             # Convert ID to maintain compatibility
