@@ -167,23 +167,24 @@ class AITrader(Trader):
                 state_info = market_state[symbol]
                 timeframes_data = state_info.get('indicators', {}).get('timeframes', {})
                 
-                # 如果timeframes_data只包含klines，需要计算指标
-                # 检查第一个时间框架是否有指标数据
+                # 检查K线数据是否已包含预计算的指标
+                # 如果K线已经包含indicators字段，则无需再次计算
+                # 注意：_get_market_data_by_interval方法已经为每根K线预计算了完整的技术指标
                 has_indicators = False
                 if timeframes_data:
+                    # 检查第一个时间框架的第一根K线是否有indicators字段
                     first_timeframe = next(iter(timeframes_data.values()), {})
                     if isinstance(first_timeframe, dict):
-                        # 检查是否有ma、macd等指标字段
-                        has_indicators = any(key in first_timeframe for key in ['ma', 'macd', 'rsi', 'vol'])
-                
-                # 如果没有指标且有market_fetcher，计算指标
-                if not has_indicators and timeframes_data and self.market_fetcher:
-                    try:
-                        # 使用market_fetcher计算指标
-                        timeframes_data = self.market_fetcher.calculate_indicators_for_timeframes(timeframes_data)
-                        logger.debug(f"[{self.provider_type}] [买入决策] 为 {symbol} 计算了技术指标")
-                    except Exception as e:
-                        logger.warning(f"[{self.provider_type}] [买入决策] 计算指标失败: {e}")
+                        klines = first_timeframe.get('klines', [])
+                        if klines and len(klines) > 0:
+                            first_kline = klines[0]
+                            if isinstance(first_kline, dict) and 'indicators' in first_kline:
+                                has_indicators = True
+                                logger.debug(f"[{self.provider_type}] [买入决策] {symbol} K线已包含预计算的技术指标")
+
+                # 如果K线没有预计算的指标，记录警告（理论上不应该发生）
+                if not has_indicators and timeframes_data:
+                    logger.warning(f"[{self.provider_type}] [买入决策] {symbol} K线数据缺少预计算的技术指标，可能影响决策质量")
                 
                 snapshot_entry = {
                     'symbol': symbol,
@@ -505,23 +506,25 @@ class AITrader(Trader):
             )
             prompt += "\n\n当前持仓的市场历史指标数据：\n"
             
-            # 添加市场历史指标数据（如果只有klines，需要计算指标）
+            # 添加市场历史指标数据
+            # 注意：K线数据已经在_get_market_data_by_interval方法中预计算了完整的技术指标
             timeframes = market_info.get('indicators', {}).get('timeframes', {})
             if timeframes:
-                # 检查是否有指标数据
+                # 检查K线数据是否已包含预计算的指标
                 has_indicators = False
                 first_timeframe = next(iter(timeframes.values()), {})
                 if isinstance(first_timeframe, dict):
-                    has_indicators = any(key in first_timeframe for key in ['ma', 'macd', 'rsi', 'vol'])
-                
-                # 如果没有指标且有market_fetcher，计算指标
-                if not has_indicators and self.market_fetcher:
-                    try:
-                        timeframes = self.market_fetcher.calculate_indicators_for_timeframes(timeframes)
-                        logger.debug(f"[{self.provider_type}] [卖出决策] 为 {symbol} 计算了技术指标")
-                    except Exception as e:
-                        logger.warning(f"[{self.provider_type}] [卖出决策] 计算指标失败: {e}")
-                
+                    klines = first_timeframe.get('klines', [])
+                    if klines and len(klines) > 0:
+                        first_kline = klines[0]
+                        if isinstance(first_kline, dict) and 'indicators' in first_kline:
+                            has_indicators = True
+                            logger.debug(f"[{self.provider_type}] [卖出决策] {symbol} K线已包含预计算的技术指标")
+
+                # 如果K线没有预计算的指标，记录警告（理论上不应该发生）
+                if not has_indicators:
+                    logger.warning(f"[{self.provider_type}] [卖出决策] {symbol} K线数据缺少预计算的技术指标，可能影响决策质量")
+
                 prompt += f"   {symbol}市场历史指标数据: {json.dumps(timeframes, indent=2, ensure_ascii=False, default=str)}\n"
             else:
                 prompt += f"   {symbol}市场历史指标数据: 无\n"
