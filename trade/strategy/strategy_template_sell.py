@@ -18,7 +18,7 @@ Strategy Code Template - 卖出策略代码模板基类
 - 禁止使用：datetime.now() 不带时区参数（必须使用UTC+8时区）
 """
 from abc import ABC, abstractmethod
-from typing import Dict
+from typing import Dict, List
 import logging
 from datetime import datetime, timedelta, timezone  # 时间处理：必须导入timezone，获取当前时间必须使用UTC+8时区
 
@@ -57,7 +57,7 @@ class StrategyBaseSell(ABC):
         market_state: Dict,
         account_info: Dict,
         conditional_orders: Dict = None
-    ) -> Dict[str, Dict]:
+    ) -> Dict[str, List[Dict]]:
         """
         执行卖出决策（抽象方法）
 
@@ -100,17 +100,9 @@ class StrategyBaseSell(ABC):
                 }
 
         Returns:
-            Dict[str, Dict]: 决策字典，格式为：
-                {
-                    "SYMBOL": {
-                        "signal": "close_position" | "stop_loss" | "take_profit",
-                        "quantity": 100,
-                        "price": 0.0345,      # 期望价格（必填）
-                        "stop_price": 0.0325, # 止损/止盈触发价格（必填）
-                        "leverage": 10,
-                        "justification": "理由说明"
-                    }
-                }
+            Dict[str, List[Dict]]: 决策字典。key 为 SYMBOL，value 为该 symbol 的决策列表（必须为列表，即使只有一条）。
+                格式示例：{"SYMBOL": [{"signal": "close_position", "quantity": 100, ...}, {"signal": "stop_loss", ...}]}
+                每条决策需包含：signal（close_position|stop_loss|take_profit）、quantity、price、stop_price、leverage、justification 等。
                 如果没有决策，返回空字典 {}
         """
         pass

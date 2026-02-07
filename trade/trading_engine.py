@@ -1962,7 +1962,8 @@ class TradingEngine:
         cot_trace = payload.get('cot_trace') or ''
         tokens = payload.get('tokens', 0)  # 获取tokens数量，默认为0
         if not isinstance(raw_response, str):
-            raw_response = json.dumps(payload.get('decisions', {}), ensure_ascii=False)
+            # decisions 格式为 Dict[symbol, List[decision]]，序列化时兼容 datetime 等非标准类型
+            raw_response = json.dumps(payload.get('decisions', {}), ensure_ascii=False, default=str)
         # 获取模型ID映射
         model_mapping = self.models_db._get_model_id_mapping()
         conversation_id = self.conversations_db.add_conversation(
@@ -2131,7 +2132,9 @@ class TradingEngine:
                 
                 if not payload.get('skipped') and payload.get('decisions'):
                     has_buy_decision = True
-                    logger.info(f"[Model {self.model_id}] [分批买入] 批次 {batch_num}/{len(batches)} 决策完成: 决策数={len(payload.get('decisions') or {})}")
+                    _dec = payload.get('decisions') or {}
+                    _cnt = sum(len(v) if isinstance(v, list) else 0 for v in _dec.values())
+                    logger.info(f"[Model {self.model_id}] [分批买入] 批次 {batch_num}/{len(batches)} 决策完成: symbol数={len(_dec)}, 决策条数={_cnt}")
                 else:
                     logger.debug(f"[Model {self.model_id}] [分批买入] 批次 {batch_num}/{len(batches)} 跳过或无决策")
                     
@@ -2347,19 +2350,18 @@ class TradingEngine:
             try:
                 strategy_name = buy_payload.get('cot_trace')
                 decisions = buy_payload.get('decisions') or {}
-                logger.debug(f"[Model {self.model_id}] [批次 {batch_num}/{total_batches}] [策略名称注入] cot_trace={strategy_name}, decisions数量={len(decisions)}")
+                _dec_cnt = sum(len(v) if isinstance(v, list) else 0 for v in (decisions or {}).values())
+                logger.debug(f"[Model {self.model_id}] [批次 {batch_num}/{total_batches}] [策略名称注入] cot_trace={strategy_name}, symbol数={len(decisions)}, 决策条数={_dec_cnt}")
                 if strategy_name and isinstance(decisions, dict):
-                    for sym, dec in decisions.items():
-                        if isinstance(dec, dict):
-                            # 如果决策中已经有_strategy_name，优先使用（来自strategy_trader）
-                            # 否则使用cot_trace（可能是多个策略名称的逗号分隔字符串）
-                            existing_strategy_name = dec.get('_strategy_name')
-                            if not existing_strategy_name:
-                                dec['_strategy_name'] = strategy_name
-                                logger.debug(f"[Model {self.model_id}] [批次 {batch_num}/{total_batches}] [策略名称注入] {sym}: 使用cot_trace={strategy_name}")
-                            else:
-                                logger.debug(f"[Model {self.model_id}] [批次 {batch_num}/{total_batches}] [策略名称注入] {sym}: 已存在_strategy_name={existing_strategy_name}")
-                            dec.setdefault('_strategy_type', 'buy')
+                    for sym, val in decisions.items():
+                        list_dec = val if isinstance(val, list) else []
+                        for dec in list_dec:
+                            if isinstance(dec, dict):
+                                existing_strategy_name = dec.get('_strategy_name')
+                                if not existing_strategy_name:
+                                    dec['_strategy_name'] = strategy_name
+                                    logger.debug(f"[Model {self.model_id}] [批次 {batch_num}/{total_batches}] [策略名称注入] {sym}: 使用cot_trace={strategy_name}")
+                                dec.setdefault('_strategy_type', 'buy')
             except Exception as e:
                 logger.warning(f"[Model {self.model_id}] [批次 {batch_num}/{total_batches}] [策略名称注入] 注入策略名称失败: {e}")
             ai_call_duration = (datetime.now(timezone(timedelta(hours=8))) - ai_call_start).total_seconds()
@@ -2367,9 +2369,10 @@ class TradingEngine:
             is_skipped = buy_payload.get('skipped', False)
             has_prompt = bool(buy_payload.get('prompt'))
             decisions = buy_payload.get('decisions') or {}
+            _dec_cnt = sum(len(v) if isinstance(v, list) else 0 for v in (decisions or {}).values())
             logger.debug(f"[Model {self.model_id}] [批次 {batch_num}/{total_batches}] "
                         f"[步骤1] AI调用完成: 耗时={ai_call_duration:.2f}秒, "
-                        f"跳过={is_skipped}, 有提示词={has_prompt}, 决策数={len(decisions)}")
+                        f"跳过={is_skipped}, 有提示词={has_prompt}, symbol数={len(decisions)}, 决策条数={_dec_cnt}")
             
             batch_end_time = datetime.now(timezone(timedelta(hours=8)))
             batch_duration = (batch_end_time - batch_start_time).total_seconds()
@@ -2422,12 +2425,13 @@ class TradingEngine:
                 logger.debug(f"[Model {self.model_id}] [批次组处理] 无有效决策，跳过执行")
                 return
             
-            # 策略执行记录：保证同一轮循环、同一symbol最多记录1条
-            logger.info(f"[Model {self.model_id}] [批次组处理] [策略决策保存] 准备保存策略决策到数据库: 决策数={len(all_decisions)}")
+            total_decision_count = sum(len(v) if isinstance(v, list) else 0 for v in (all_decisions or {}).values())
+            logger.info(f"[Model {self.model_id}] [批次组处理] [策略决策保存] 准备保存策略决策到数据库: symbol数={len(all_decisions)}, 决策条数={total_decision_count}")
             if all_decisions:
-                # 打印决策详情用于调试
-                for sym, dec in list(all_decisions.items())[:3]:  # 只打印前3个
-                    logger.info(f"[Model {self.model_id}] [批次组处理] [策略决策保存] 决策示例 {sym}: signal={dec.get('signal')}, _strategy_name={dec.get('_strategy_name')}, _strategy_type={dec.get('_strategy_type')}")
+                for sym, list_dec in list(all_decisions.items())[:3]:
+                    dec_list = list_dec if isinstance(list_dec, list) else []
+                    signals = [d.get('signal') for d in dec_list if isinstance(d, dict)]
+                    logger.info(f"[Model {self.model_id}] [批次组处理] [策略决策保存] 决策示例 {sym}: 条数={len(dec_list)}, signals={signals}")
             
             mapping = self._record_strategy_decisions_once(
                 decisions=all_decisions,
@@ -2436,8 +2440,9 @@ class TradingEngine:
                 cycle_id=cycle_id
             )
             
-            logger.info(f"[Model {self.model_id}] [批次组处理] [策略决策保存] 策略决策保存完成: 保存数量={len(mapping)}, 映射={list(mapping.keys())[:5] if mapping else []}")
-            logger.debug(f"[Model {self.model_id}] [批次组处理] 合并完成: 决策数={len(all_decisions)}, 对话数={len(all_payloads)}")
+            saved_count = sum(len(ids) for ids in (mapping or {}).values())
+            logger.info(f"[Model {self.model_id}] [批次组处理] [策略决策保存] 策略决策保存完成: 保存条数={saved_count}, symbol数={len(mapping or {})}")
+            logger.debug(f"[Model {self.model_id}] [批次组处理] 合并完成: symbol数={len(all_decisions)}, 决策条数={total_decision_count}, 对话数={len(all_payloads)}")
             
             # ========== 步骤1: 记录所有批次的AI对话到数据库 ==========
             self.batch_decision_processor.record_conversations(all_payloads, conversation_type='buy')
@@ -2447,7 +2452,7 @@ class TradingEngine:
                 all_decisions, all_market_states, current_prices, executions
             )
             
-            logger.info(f"[Model {self.model_id}] [批次组处理] 执行完成, 决策数: {len(all_decisions)}, 执行结果: {len(batch_results)}")
+            logger.info(f"[Model {self.model_id}] [批次组处理] 执行完成, 决策条数: {total_decision_count}, 执行结果: {len(batch_results)}")
             
             # ========== 步骤3: 更新portfolio和constraints ==========
             self.batch_decision_processor.update_portfolio_and_account_info(
@@ -2469,19 +2474,18 @@ class TradingEngine:
         default_strategy_type: str,
         recorded_strategy_symbols: Optional[set] = None,
         cycle_id: Optional[str] = None
-    ) -> Dict[str, str]:
+    ) -> Dict[str, List[str]]:
         """
-        记录策略执行记录（strategy_decisions），并保证：
-        - 同一轮循环中，同一symbol最多记录1条
+        记录策略执行记录（strategy_decisions）。同一 symbol 可有多条决策（如卖出/止损/止盈），均会落库。
         - 仅在模型 trade_type == 'strategy' 时记录
         
         注意：
+        - decisions 格式为 Dict[symbol, List[decision]] 或 Dict[symbol, decision]（单条视为单元素列表）
         - 策略名来自 decision['_strategy_name']（由 _process_*_batch_decision_only 注入）
         - strategy_type 来自 decision['_strategy_type']，否则使用 default_strategy_type
-        - 会把写入后的 decision_id 回填到 decisions[symbol]['_strategy_decision_id']，用于后续 trades 关联与状态流转
+        - 会把写入后的 decision_id 按顺序回填到 decisions[symbol][i]['_strategy_decision_id']，用于后续 trades 关联与状态流转
         """
         logger.info(f"[Model {self.model_id}] [策略决策保存] ========== 开始记录策略决策 ==========")
-        logger.info(f"[Model {self.model_id}] [策略决策保存] 输入参数: decisions数量={len(decisions) if decisions else 0}, cycle_id={cycle_id}")
         
         try:
             model = self.models_db.get_model(self.model_id)
@@ -2497,10 +2501,14 @@ class TradingEngine:
         if not decisions or not isinstance(decisions, dict):
             logger.warning(f"[Model {self.model_id}] [策略决策保存] decisions为空或格式不正确，跳过保存")
             return {}
-        
-        if recorded_strategy_symbols is None:
-            recorded_strategy_symbols = set()
-        
+
+        # 统一为 Dict[symbol, List[decision]]：计算 symbol 数与决策条数（用于日志）
+        _total_decisions = sum(
+            len(v) if isinstance(v, list) else 0
+            for v in decisions.values()
+        )
+        logger.info(f"[Model {self.model_id}] [策略决策保存] 输入参数: symbol数={len(decisions)}, 决策条数={_total_decisions}, cycle_id={cycle_id}")
+
         # 获取 model_id 映射（int -> uuid）
         model_mapping = self.models_db._get_model_id_mapping()
         model_uuid = model_mapping.get(self.model_id)
@@ -2518,77 +2526,51 @@ class TradingEngine:
                 symbol_key_by_upper[str(k).upper()] = k
             except Exception:
                 continue
-        
-        # 按 (strategy_name, strategy_type) 分组批量写入
+
+        # 按 (strategy_name, strategy_type) 分组批量写入；同一 symbol 可有多条决策
         grouped: Dict[tuple[str, str], List[Dict]] = {}
-        
-        logger.info(f"[Model {self.model_id}] [策略决策保存] 开始处理 {len(decisions)} 个决策")
+        logger.info(f"[Model {self.model_id}] [策略决策保存] 开始处理 {len(decisions)} 个 symbol、共 {_total_decisions} 条决策")
         processed_count = 0
         skipped_count = 0
-        
-        for symbol, decision in decisions.items():
+
+        for symbol, val in decisions.items():
             sym = (symbol or '').upper()
             if not sym:
                 skipped_count += 1
-                logger.debug(f"[Model {self.model_id}] [策略决策保存] 跳过: symbol为空")
                 continue
-            if sym in recorded_strategy_symbols:
-                skipped_count += 1
-                logger.debug(f"[Model {self.model_id}] [策略决策保存] 跳过 {sym}: 已在recorded_strategy_symbols中")
-                continue
-            if not isinstance(decision, dict):
-                skipped_count += 1
-                logger.debug(f"[Model {self.model_id}] [策略决策保存] 跳过 {sym}: decision不是字典")
-                continue
-            
-            signal = (decision.get('signal') or '').lower()
-            if not signal or signal == 'hold':
-                # hold 不计入"策略执行记录"
-                skipped_count += 1
-                logger.debug(f"[Model {self.model_id}] [策略决策保存] 跳过 {sym}: signal为空或为hold (signal={signal})")
-                continue
-
-            # ⚠️ 重要：根据策略类型验证信号的有效性
-            # 买入策略只应该返回 buy_to_long 或 buy_to_short
-            # 卖出策略应该返回 close_position, stop_loss, take_profit, sell_to_long, sell_to_short 等
-            valid_buy_signals = {'buy_to_long', 'buy_to_short'}
-            valid_sell_signals = {'close_position', 'stop_loss', 'take_profit', 'sell_to_long', 'sell_to_short'}
-
-            if default_strategy_type == 'buy':
-                # 买入循环：只接受买入信号
-                if signal not in valid_buy_signals:
+            list_dec = val if isinstance(val, list) else []
+            for decision in list_dec:
+                if not isinstance(decision, dict):
                     skipped_count += 1
-                    logger.warning(f"[Model {self.model_id}] [策略决策保存] 跳过 {sym}: 无效的买入信号 (signal={signal})，买入策略只支持 buy_to_long 或 buy_to_short")
                     continue
-                logger.debug(f"[Model {self.model_id}] [策略决策保存] ✓ 确认有效买入信号: {sym} -> {signal}")
-            elif default_strategy_type == 'sell':
-                # 卖出循环：只接受卖出信号（包括止盈、止损）
-                if signal not in valid_sell_signals:
+                signal = (decision.get('signal') or '').lower()
+                if not signal or signal == 'hold':
                     skipped_count += 1
-                    logger.warning(f"[Model {self.model_id}] [策略决策保存] 跳过 {sym}: 无效的卖出信号 (signal={signal})，卖出策略只支持 close_position, stop_loss, take_profit, sell_to_long, sell_to_short")
                     continue
-                logger.debug(f"[Model {self.model_id}] [策略决策保存] ✓ 确认有效卖出信号: {sym} -> {signal}")
-            else:
-                # 其他类型：接受所有信号
-                logger.debug(f"[Model {self.model_id}] [策略决策保存] ✓ 确认信号: {sym} -> {signal} (strategy_type={default_strategy_type})")
 
-            recorded_strategy_symbols.add(sym)
-            
-            strategy_name = decision.get('_strategy_name') or decision.get('strategy_name') or '未知策略'
-            strategy_type = decision.get('_strategy_type') or default_strategy_type
-            
-            row = dict(decision)
-            row['symbol'] = sym
-            # 兼容 stopPrice -> stop_price
-            if 'stopPrice' in row and 'stop_price' not in row:
-                row['stop_price'] = row.get('stopPrice')
-            
-            grouped.setdefault((str(strategy_name), str(strategy_type)), []).append(row)
-            processed_count += 1
+                valid_buy_signals = {'buy_to_long', 'buy_to_short'}
+                valid_sell_signals = {'close_position', 'stop_loss', 'take_profit', 'sell_to_long', 'sell_to_short'}
+                if default_strategy_type == 'buy':
+                    if signal not in valid_buy_signals:
+                        skipped_count += 1
+                        continue
+                elif default_strategy_type == 'sell':
+                    if signal not in valid_sell_signals:
+                        skipped_count += 1
+                        continue
 
-        logger.info(f"[Model {self.model_id}] [策略决策保存] 处理完成: 已处理={processed_count}, 已跳过={skipped_count}, 总计={len(decisions)}")
+                strategy_name = decision.get('_strategy_name') or decision.get('strategy_name') or '未知策略'
+                strategy_type = decision.get('_strategy_type') or default_strategy_type
+                row = dict(decision)
+                row['symbol'] = sym
+                if 'stopPrice' in row and 'stop_price' not in row:
+                    row['stop_price'] = row.get('stopPrice')
+                grouped.setdefault((str(strategy_name), str(strategy_type)), []).append(row)
+                processed_count += 1
 
-        all_mapping: Dict[str, str] = {}
+        logger.info(f"[Model {self.model_id}] [策略决策保存] 处理完成: 已处理={processed_count}, 已跳过={skipped_count}, 总条数={_total_decisions}")
+
+        all_mapping: Dict[str, List[str]] = {}
         for (strategy_name, strategy_type), rows in grouped.items():
             if not rows:
                 continue
@@ -2602,8 +2584,9 @@ class TradingEngine:
                     decisions=rows
                 )
                 if mapping:
-                    all_mapping.update(mapping)
-                    logger.info(f"[Model {self.model_id}] [策略决策保存] 成功保存 {len(mapping)} 条记录: symbols={list(mapping.keys())[:5]}")
+                    for sym_key, ids in mapping.items():
+                        all_mapping.setdefault(sym_key, []).extend(ids)
+                    logger.info(f"[Model {self.model_id}] [策略决策保存] 成功保存: strategy_name={strategy_name}, rows={len(rows)}")
                 else:
                     logger.warning(f"[Model {self.model_id}] [策略决策保存] 保存返回空映射: strategy_name={strategy_name}, rows={len(rows)}")
             except Exception as e:
@@ -2613,17 +2596,19 @@ class TradingEngine:
                     exc_info=True
                 )
 
-        # 回填 decision_id（用于后续 trades 关联）
+        # 回填 decision_id 到 decisions[symbol][i]['_strategy_decision_id']（顺序与落库一致）
         if all_mapping:
-            logger.info(f"[Model {self.model_id}] [策略决策保存] 回填decision_id到决策中: 数量={len(all_mapping)}")
-            for sym_upper, decision_id in all_mapping.items():
+            logger.info(f"[Model {self.model_id}] [策略决策保存] 回填decision_id到决策中: symbols={len(all_mapping)}")
+            for sym_upper, ids in all_mapping.items():
                 key = symbol_key_by_upper.get(sym_upper)
                 if not key:
                     continue
                 try:
-                    dec = decisions.get(key)
-                    if isinstance(dec, dict):
-                        dec['_strategy_decision_id'] = decision_id
+                    list_dec = decisions.get(key)
+                    list_dec = list_dec if isinstance(list_dec, list) else []
+                    for i, dec in enumerate(list_dec):
+                        if i < len(ids) and isinstance(dec, dict):
+                            dec['_strategy_decision_id'] = ids[i]
                 except Exception:
                     continue
         else:
@@ -2756,20 +2741,22 @@ class TradingEngine:
                 })
                 
                 if not payload.get('skipped') and payload.get('decisions'):
-                    # 检查是否有实际的卖出决策（排除 hold 操作）
                     decisions = payload.get('decisions') or {}
                     has_actual_decision = False
-                    for symbol, decision in decisions.items():
-                        signal = decision.get('signal', '').lower()
-                        if signal in ['close_position', 'stop_loss', 'take_profit']:
-                            has_actual_decision = True
-                            has_sell_decision = True
+                    total_dec_count = sum(len(v) if isinstance(v, list) else 0 for v in (decisions or {}).values())
+                    for symbol, val in decisions.items():
+                        list_dec = val if isinstance(val, list) else []
+                        for dec in list_dec:
+                            if isinstance(dec, dict) and (dec.get('signal') or '').lower() in ['close_position', 'stop_loss', 'take_profit']:
+                                has_actual_decision = True
+                                has_sell_decision = True
+                                break
+                        if has_actual_decision:
                             break
-                    
                     if has_actual_decision:
-                        logger.info(f"[Model {self.model_id}] [分批卖出] 批次 {batch_num}/{len(batches)} 卖出决策完成: 决策数={len(decisions)}, 有实际执行={has_actual_decision}")
+                        logger.info(f"[Model {self.model_id}] [分批卖出] 批次 {batch_num}/{len(batches)} 卖出决策完成: symbol数={len(decisions)}, 决策条数={total_dec_count}, 有实际执行={has_actual_decision}")
                     else:
-                        logger.debug(f"[Model {self.model_id}] [分批卖出] 批次 {batch_num}/{len(batches)} 卖出决策完成: 决策数={len(decisions)}, 但无实际执行（仅有hold）")
+                        logger.debug(f"[Model {self.model_id}] [分批卖出] 批次 {batch_num}/{len(batches)} 卖出决策完成: symbol数={len(decisions)}, 决策条数={total_dec_count}, 但无实际执行（仅有hold）")
                 else:
                     logger.debug(f"[Model {self.model_id}] [分批卖出] 批次 {batch_num}/{len(batches)} 跳过或无决策")
                     
@@ -2868,25 +2855,25 @@ class TradingEngine:
             logger.debug(f"[Model {self.model_id}] [卖出批次组处理] 无有效卖出决策，跳过执行")
             return
 
-        # 策略执行记录：保证同一轮循环、同一symbol最多记录1条
+        sell_decision_count = sum(len(v) if isinstance(v, list) else 0 for v in all_decisions.values())
         self._record_strategy_decisions_once(
             decisions=all_decisions,
             default_strategy_type='sell',
             recorded_strategy_symbols=recorded_strategy_symbols,
             cycle_id=cycle_id
         )
-        
-        logger.debug(f"[Model {self.model_id}] [卖出批次组处理] 合并完成: 卖出决策数={len(all_decisions)}, 对话数={len(all_payloads)}")
-        
+
+        logger.debug(f"[Model {self.model_id}] [卖出批次组处理] 合并完成: symbol数={len(all_decisions)}, 卖出决策条数={sell_decision_count}, 对话数={len(all_payloads)}")
+
         # ========== 步骤1: 记录所有批次的AI对话到数据库 ==========
         self.batch_decision_processor.record_conversations(all_payloads, conversation_type='sell')
-        
+
         # ========== 步骤2: 顺序执行所有卖出决策 ==========
         batch_results = self.batch_decision_processor.execute_decisions(
             all_decisions, all_market_states, current_prices, executions
         )
-        
-        logger.info(f"[Model {self.model_id}] [卖出批次组处理] 执行完成, 卖出决策数: {len(all_decisions)}, 执行结果: {len(batch_results)}")
+
+        logger.info(f"[Model {self.model_id}] [卖出批次组处理] 执行完成, 卖出决策条数: {sell_decision_count}, 执行结果: {len(batch_results)}")
         
         # ========== 步骤3: 更新portfolio和account_info ==========
         self.batch_decision_processor.update_portfolio_and_account_info(
@@ -3010,10 +2997,12 @@ class TradingEngine:
                 strategy_name = sell_payload.get('cot_trace')
                 decisions = sell_payload.get('decisions') or {}
                 if strategy_name and isinstance(decisions, dict):
-                    for sym, dec in decisions.items():
-                        if isinstance(dec, dict):
-                            dec.setdefault('_strategy_name', strategy_name)
-                            dec.setdefault('_strategy_type', 'sell')
+                    for sym, val in decisions.items():
+                        list_dec = val if isinstance(val, list) else []
+                        for dec in list_dec:
+                            if isinstance(dec, dict):
+                                dec.setdefault('_strategy_name', strategy_name)
+                                dec.setdefault('_strategy_type', 'sell')
             except Exception:
                 pass
             ai_call_duration = (datetime.now(timezone(timedelta(hours=8))) - ai_call_start).total_seconds()
@@ -3021,9 +3010,10 @@ class TradingEngine:
             is_skipped = sell_payload.get('skipped', False)
             has_prompt = bool(sell_payload.get('prompt'))
             decisions = sell_payload.get('decisions') or {}
+            _dec_cnt = sum(len(v) if isinstance(v, list) else 0 for v in (decisions or {}).values())
             logger.debug(f"[Model {self.model_id}] [卖出批次 {batch_num}/{total_batches}] "
                         f"[步骤2] 调用完成: 耗时={ai_call_duration:.2f}秒, "
-                        f"跳过={is_skipped}, 有提示词={has_prompt}, 决策数={len(decisions)}")
+                        f"跳过={is_skipped}, 有提示词={has_prompt}, symbol数={len(decisions)}, 决策条数={_dec_cnt}")
             
             batch_end_time = datetime.now(timezone(timedelta(hours=8)))
             batch_duration = (batch_end_time - batch_start_time).total_seconds()
@@ -3554,78 +3544,74 @@ class TradingEngine:
         with self.trading_lock:
             logger.debug(f"[Model {self.model_id}] [交易执行] 获取到交易锁，=====开始执行SDK交易决策=====")
             
-            for symbol, decision in decisions.items():
-                signal = (decision.get('signal', '') if isinstance(decision, dict) else '').lower()
-                decision_id = None
-                if isinstance(decision, dict):
-                    decision_id = decision.get('_strategy_decision_id') or decision.get('strategy_decision_id')
+            # decisions 格式为 Dict[symbol, List[decision]] 或 Dict[symbol, decision]，同一 symbol 可有多条决策
+            for symbol, val in decisions.items():
+                list_dec = val if isinstance(val, list) else []
+                for decision in list_dec:
+                    signal = (decision.get('signal', '') if isinstance(decision, dict) else '').lower()
+                    decision_id = None
+                    if isinstance(decision, dict):
+                        decision_id = decision.get('_strategy_decision_id') or decision.get('strategy_decision_id')
 
-                result = None
-                try:
-                    # ⚠️ 重要：buy_to_long 和 buy_to_short 是有效的买入信号，会调用 _execute_buy 执行开仓操作
-                    if signal == 'buy_to_long' or signal == 'buy_to_short':
-                        logger.info(f"[Model {self.model_id}] [交易执行] ✓ 识别到有效买入信号: {signal}，准备执行开仓操作并生成交易信息")
-                        result = self._execute_buy(symbol, decision, market_state, portfolio)
-                    elif signal == 'sell_to_long' or signal == 'sell_to_short':
-                        result = self._execute_sell(symbol, decision, market_state, portfolio)
-                    elif signal == 'close_position':
-                        if symbol not in positions_map:
-                            result = {'symbol': symbol, 'error': 'No position to close'}
+                    result = None
+                    try:
+                        if signal == 'buy_to_long' or signal == 'buy_to_short':
+                            logger.info(f"[Model {self.model_id}] [交易执行] ✓ 识别到有效买入信号: {signal}，准备执行开仓操作并生成交易信息")
+                            result = self._execute_buy(symbol, decision, market_state, portfolio)
+                        elif signal == 'sell_to_long' or signal == 'sell_to_short':
+                            result = self._execute_sell(symbol, decision, market_state, portfolio)
+                        elif signal == 'close_position':
+                            if symbol not in positions_map:
+                                result = {'symbol': symbol, 'error': 'No position to close'}
+                            else:
+                                result = self._execute_close(symbol, decision, market_state, portfolio)
+                        elif signal == 'stop_loss':
+                            if symbol not in positions_map:
+                                result = {'symbol': symbol, 'error': 'No position for stop loss'}
+                            else:
+                                result = self._execute_stop_loss(symbol, decision, market_state, portfolio)
+                        elif signal == 'take_profit':
+                            if symbol not in positions_map:
+                                result = {'symbol': symbol, 'error': 'No position for take profit'}
+                            else:
+                                result = self._execute_take_profit(symbol, decision, market_state, portfolio)
+                        elif signal == 'hold':
+                            result = {'symbol': symbol, 'signal': 'hold', 'message': '保持观望'}
                         else:
-                            result = self._execute_close(symbol, decision, market_state, portfolio)
-                    elif signal == 'stop_loss':
-                        if symbol not in positions_map:
-                            result = {'symbol': symbol, 'error': 'No position for stop loss'}
-                        else:
-                            result = self._execute_stop_loss(symbol, decision, market_state, portfolio)
-                    elif signal == 'take_profit':
-                        if symbol not in positions_map:
-                            result = {'symbol': symbol, 'error': 'No position for take profit'}
-                        else:
-                            result = self._execute_take_profit(symbol, decision, market_state, portfolio)
-                    elif signal == 'hold':
-                        result = {'symbol': symbol, 'signal': 'hold', 'message': '保持观望'}
-                    else:
-                        result = {'symbol': symbol, 'error': f'Unknown signal: {signal}'}
-                except Exception as e:
-                    # 记录异常，但继续执行其他交易决策
-                    logger.error(f"[Model {self.model_id}] [交易执行] 执行交易决策失败 (symbol={symbol}): {e}")
-                    import traceback
-                    logger.debug(f"[Model {self.model_id}] [交易执行] 异常堆栈:\n{traceback.format_exc()}")
-                    result = {'symbol': symbol, 'error': str(e)}
-                finally:
-                    # 策略交易模式：把 TRIGGERED 的 decision 更新为 EXECUTED/REJECTED，并写入 trade_id/error_reason
-                    if decision_id:
-                        try:
-                            trade_id = None
-                            err = None
-                            if isinstance(result, dict):
-                                trade_id = result.get('trade_id') or result.get('tradeId')
-                                err = result.get('error')
-                            # 重要：error 优先级高于 trade_id
-                            # - SDK 调用失败等场景可能仍会生成 trade_id 并落库 trades（用于审计/排查）
-                            # - 但策略执行应视为失败：status=REJECTED，并写入 error_reason（同时保留 trade_id 以便追踪）
-                            if err:
-                                self.strategy_decisions_db.update_strategy_decision_status(
-                                    decision_id=decision_id,
-                                    status="REJECTED",
-                                    trade_id=trade_id,
-                                    error_reason=str(err)
+                            result = {'symbol': symbol, 'error': f'Unknown signal: {signal}'}
+                    except Exception as e:
+                        logger.error(f"[Model {self.model_id}] [交易执行] 执行交易决策失败 (symbol={symbol}, signal={signal}): {e}")
+                        import traceback
+                        logger.debug(f"[Model {self.model_id}] [交易执行] 异常堆栈:\n{traceback.format_exc()}")
+                        result = {'symbol': symbol, 'error': str(e)}
+                    finally:
+                        if decision_id:
+                            try:
+                                trade_id = None
+                                err = None
+                                if isinstance(result, dict):
+                                    trade_id = result.get('trade_id') or result.get('tradeId')
+                                    err = result.get('error')
+                                if err:
+                                    self.strategy_decisions_db.update_strategy_decision_status(
+                                        decision_id=decision_id,
+                                        status="REJECTED",
+                                        trade_id=trade_id,
+                                        error_reason=str(err)
+                                    )
+                                elif trade_id:
+                                    self.strategy_decisions_db.update_strategy_decision_status(
+                                        decision_id=decision_id,
+                                        status="EXECUTED",
+                                        trade_id=trade_id,
+                                        error_reason=None
+                                    )
+                            except Exception as update_err:
+                                logger.warning(
+                                    f"[Model {self.model_id}] 更新策略执行记录状态失败: symbol={symbol}, "
+                                    f"decision_id={decision_id}, err={update_err}"
                                 )
-                            elif trade_id:
-                                self.strategy_decisions_db.update_strategy_decision_status(
-                                    decision_id=decision_id,
-                                    status="EXECUTED",
-                                    trade_id=trade_id,
-                                    error_reason=None
-                                )
-                        except Exception as update_err:
-                            logger.warning(
-                                f"[Model {self.model_id}] 更新策略执行记录状态失败: symbol={symbol}, "
-                                f"decision_id={decision_id}, err={update_err}"
-                            )
-
-                results.append(result)
+                    results.append(result)
             
             logger.debug(f"[Model {self.model_id}] [交易执行] 交易决策执行完成，释放交易锁")
 

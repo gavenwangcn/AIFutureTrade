@@ -283,9 +283,9 @@ class StrategyDecisionsDatabase:
         strategy_name: str,
         strategy_type: str,
         decisions: List[Dict]
-    ) -> Dict[str, str]:
+    ) -> Dict[str, List[str]]:
         """
-        在“策略生成阶段”批量写入策略执行记录（status=TRIGGERED），并返回 symbol -> decision_id 的映射。
+        在“策略生成阶段”批量写入策略执行记录（status=TRIGGERED），并返回 symbol -> [decision_id, ...] 的映射（同一 symbol 可多条）。
         
         Args:
             model_id: Model ID (UUID string)
@@ -295,7 +295,7 @@ class StrategyDecisionsDatabase:
             decisions: Decision list，每个decision至少包含 signal/symbol，可包含 quantity/leverage/price/stop_price/justification
         
         Returns:
-            Dict[str, str]: {symbol: decision_id}
+            Dict[str, List[str]]: {symbol: [decision_id, ...]}，顺序与 decisions 一致
         """
         if not decisions:
             return {}
@@ -304,7 +304,7 @@ class StrategyDecisionsDatabase:
         current_time = datetime.now(beijing_tz).replace(tzinfo=None)
         
         rows = []
-        mapping: Dict[str, str] = {}
+        mapping: Dict[str, List[str]] = {}
         
         for decision in decisions:
             decision_id = self._generate_id()
@@ -352,7 +352,7 @@ class StrategyDecisionsDatabase:
                 current_time  # updated_at
             ])
             if symbol:
-                mapping[symbol] = decision_id
+                mapping.setdefault(symbol, []).append(decision_id)
         
         if rows:
             self.insert_rows(

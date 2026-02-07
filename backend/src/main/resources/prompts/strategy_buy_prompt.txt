@@ -4,7 +4,7 @@
 
 ### 返回值要求（最重要）：
 1. **必须初始化 `decisions = {}` 在方法开始处**
-2. **必须返回字典类型 `Dict[str, Dict]`，不能返回 None**
+2. **必须返回 `Dict[str, List[Dict]]`，不能返回 None**。key 为 SYMBOL，value **必须**为该 symbol 的决策**列表**。**仅支持列表格式，禁止单条 dict 返回（如 `{"SYMBOL": {...}}` 会无法通过测试）**。示例：`{"BTCUSDT": [{"signal": "buy_to_long", "quantity": 100, "leverage": 10, ...}]}`
 3. **即使没有决策也要返回空字典 `{}`**
 4. **必须确保所有代码路径都返回 decisions**
 5. **建议使用 try-except 处理异常，确保异常时返回空字典**
@@ -29,6 +29,12 @@
   if atr14 > threshold:
       # 使用atr14进行判断
   ```
+
+### ⚠️ 与模版输入输出格式一致（必须遵守，否则无法通过策略代码测试器）：
+- **模版**：`StrategyBaseBuy`（`strategy_template_buy.py`）定义的 `execute_buy_decision(self, candidates, portfolio, account_info, market_state, conditional_orders=None)`。
+- **方法签名**：必须与模版完全一致（参数名、顺序、可选参数默认值）。
+- **返回值类型**：仅支持 `Dict[str, List[Dict]]`，每个 symbol 对应一个**列表**，列表中每项为一条决策 dict。**禁止**返回 `Dict[str, Dict]`（单条 dict 会无法通过策略代码测试器）。
+- 生成的代码会由策略代码测试器（strategy_code_tester_buy）校验，格式不匹配将导致测试失败。
 
 ### 方法签名要求：
 - 必须包含且仅包含 6 个参数：`self`, `candidates`, `portfolio`, `account_info`, `market_state`, `conditional_orders`
@@ -64,7 +70,7 @@ def execute_buy_decision(
     account_info: Dict,
     market_state: Dict,
     conditional_orders: Dict[str, List[Dict]] = None
-) -> Dict[str, Dict]:
+) -> Dict[str, List[Dict]]:
 ```
 
 **参数说明：**
@@ -197,7 +203,7 @@ class GeneratedBuyStrategy(StrategyBaseBuy):
         account_info: Dict,
         market_state: Dict,
         conditional_orders: Dict[str, List[Dict]] = None
-    ) -> Dict[str, Dict]:
+    ) -> Dict[str, List[Dict]]:
         """
         执行买入决策
 
@@ -209,8 +215,8 @@ class GeneratedBuyStrategy(StrategyBaseBuy):
             conditional_orders: 条件单信息字典（可选），按symbol分组的条件单列表
 
         返回:
-            Dict[str, Dict]: 买入决策字典，key为交易对符号，value为决策详情
-                格式: {"SYMBOL": {"signal": "buy_to_long", "quantity": 5.0, "leverage": 10, "justification": "理由"}}
+            Dict[str, List[Dict]]: 买入决策字典，key为交易对符号，value为该 symbol 的决策列表（必须为列表）
+                格式: {"SYMBOL": [{"signal": "buy_to_long", "quantity": 5.0, "leverage": 10, "justification": "理由"}]}
                 如果没有决策，返回空字典 {}
         """
         # ⚠️ 重要：必须初始化decisions字典，且必须返回字典（不能返回None）
@@ -434,7 +440,7 @@ class GeneratedBuyStrategy(StrategyBaseBuy):
         # ⚠️ 重要：必须返回decisions字典，不能返回None，即使没有决策也要返回空字典{}
         # 必须确保所有代码路径都返回decisions，不能有任何路径返回None
         self.log.info(f"买入决策执行完成，共生成 {len(decisions)} 个决策")
-        return decisions  # 返回决策字典，格式: {"SYMBOL": {"signal": "...", "quantity": ..., "leverage": ..., "justification": "..."}}
+        return decisions  # 返回决策字典，格式: {"SYMBOL": [{"signal": "...", "quantity": ..., "leverage": ..., "justification": "..."}]}
 ```
 
 ### 2. 技术指标已预先计算，直接从K线数据中读取
@@ -739,16 +745,13 @@ else:
 
 ### 4. 决策格式要求和返回值规范
 
-**买入决策返回值格式：**
+**买入决策返回值格式（仅支持 `Dict[str, List[Dict]]`）：** 每个 symbol 的 value 必须是**列表**，列表中每项为一条决策。禁止单条 dict 返回（如 `decisions[symbol] = {...}` 错误，必须 `decisions[symbol] = [{...}]`）。
 ```python
-{
-    "SYMBOL": {
-        "signal": "buy_to_long" | "buy_to_short",  # 必须
-        "quantity": 5.0,  # 必须：合约数量，计算公式：quantity = (USDT数量 * leverage) / symbol价格
-        "leverage": 5,  # 必须：杠杆倍数
-        "justification": "理由说明"  # 必须：理由
-    }
-}
+# 格式：{"SYMBOL": [决策1, 决策2, ...]}
+{"BTCUSDT": [
+    {"signal": "buy_to_long", "quantity": 5.0, "leverage": 5, "justification": "理由说明"}
+]}
+# 每条决策必须包含：signal（buy_to_long|buy_to_short）、quantity、leverage、justification
 ```
 
 **⚠️ 关于必填字段的重要说明：**
@@ -798,12 +801,9 @@ elif current_price < 100000:
 else:
     quantity = round(quantity, 6)  # 小数点后6位（最多）
 
-decisions[symbol] = {
-    "signal": "buy_to_long",
-    "quantity": quantity,
-    "leverage": leverage,
-    "justification": "理由"
-}
+decisions[symbol] = [
+    {"signal": "buy_to_long", "quantity": quantity, "leverage": leverage, "justification": "理由"}
+]
 ```
 
 ### 5. 代码质量要求
@@ -861,7 +861,7 @@ decisions[symbol] = {
               conditional_orders (Dict[str, List[Dict]], optional): 条件单信息，默认为None
 
           返回值：
-              Dict[str, Dict]: 买入决策字典，格式为 {symbol: {signal, quantity, leverage, justification}}
+              Dict[str, List[Dict]]: 买入决策字典（每个 symbol 的 value 为决策列表），格式为 {symbol: {signal, quantity, leverage, justification}}
                               如果没有决策则返回空字典 {}
 
           决策逻辑：
@@ -1061,7 +1061,7 @@ decisions[symbol] = {
               account_info: 账户信息
               market_state: 市场状态字典
           返回:
-              Dict[str, Dict]: 买入决策字典
+              Dict[str, List[Dict]]: 买入决策字典（每个 symbol 的 value 为决策列表）
           """
           # 初始化决策字典，用于存储所有买入决策
           decisions = {}
@@ -1491,7 +1491,7 @@ class GeneratedBuyStrategy(StrategyBaseBuy):
        account_info: Dict,
        market_state: Dict,
        conditional_orders: Dict[str, List[Dict]] = None
-   ) -> Dict[str, Dict]:
+   ) -> Dict[str, List[Dict]]:
    ```
    - **必须包含且仅包含这 6 个参数（包括 self）**
    - **参数顺序必须完全一致：`self`, `candidates`, `portfolio`, `account_info`, `market_state`, `conditional_orders`**
@@ -1500,7 +1500,7 @@ class GeneratedBuyStrategy(StrategyBaseBuy):
    - **不能删除任何参数**
 4. **返回值要求（关键）：**
    - **必须在方法开始处初始化：`decisions = {}`**
-   - **必须返回字典类型：`Dict[str, Dict]`**
+   - **必须返回 `Dict[str, List[Dict]]`**：每个 symbol 的 value 必须为**列表**，禁止单条 dict（必须写 `decisions[symbol] = [decision_dict]`，不能写 `decisions[symbol] = decision_dict`）
    - **不能返回 None**：即使没有决策也要返回空字典 `{}`
    - **必须确保所有代码路径都返回 decisions**：不能有任何路径返回 None 或未定义
    - **建议使用 try-except 包装主要逻辑**：确保异常时返回空字典而不是抛出异常

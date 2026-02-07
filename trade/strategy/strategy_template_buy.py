@@ -58,7 +58,7 @@ class StrategyBaseBuy(ABC):
         account_info: Dict,
         market_state: Dict,
         conditional_orders: Dict = None
-    ) -> Dict[str, Dict]:
+    ) -> Dict[str, List[Dict]]:
         """
         执行买入决策（抽象方法）
 
@@ -105,15 +105,9 @@ class StrategyBaseBuy(ABC):
                 }
 
         Returns:
-            Dict[str, Dict]: 决策字典，格式为：
-                {
-                    "SYMBOL": {
-                        "signal": "buy_to_long" | "buy_to_short",
-                        "quantity": 100,
-                        "leverage": 10,
-                        "justification": "理由说明"
-                    }
-                }
+            Dict[str, List[Dict]]: 决策字典。key 为 SYMBOL，value 为该 symbol 的决策列表（必须为列表，即使只有一条）。
+                格式示例：{"SYMBOL": [{"signal": "buy_to_long", "quantity": 100, "leverage": 10, ...}]}
+                每条决策需包含：signal（buy_to_long|buy_to_short）、quantity、leverage、justification 等。
                 如果没有决策，返回空字典 {}
 
         Note:

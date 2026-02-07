@@ -38,6 +38,7 @@ class StrategyCodeTesterBuy:
     - 方法实现：是否实现了必要的方法（execute_buy_decision）
     - 方法签名：方法参数数量是否正确
     - 执行能力：使用模拟数据测试代码是否能正常执行
+    - 返回值格式：仅支持 Dict[str, List[Dict]]，每个 symbol 的 value 必须为决策列表（不兼容单条 dict）
     
     使用示例：
         # 在添加买入策略时验证 AI 生成的代码
@@ -485,7 +486,28 @@ class StrategyCodeTesterBuy:
             elif 'decisions' not in buy_result:
                 errors.append("买入决策返回结果缺少 'decisions' 字段")
             else:
-                logger.debug(f"[StrategyCodeTesterBuy] ✓ 买入决策执行成功，返回决策数: {len(buy_result.get('decisions', {}))}")
+                decisions = buy_result.get('decisions', {})
+                if not isinstance(decisions, dict):
+                    errors.append(f"decisions 类型错误，期望 dict，实际 {type(decisions)}")
+                else:
+                    # 格式校验：仅支持 Dict[str, List[Dict]]，不兼容单条 dict 返回；每个 symbol 的 value 必须为列表
+                    for sym, val in decisions.items():
+                        if not isinstance(val, list):
+                            errors.append(
+                                f"返回值格式错误：decisions 的 value 必须为 List[Dict]（不兼容单条 dict）。"
+                                f"当前 {sym!r} 的 value 类型为 {type(val).__name__}。"
+                                f"正确示例: {{\"BTCUSDT\": [{{\"signal\": \"buy_to_long\", \"quantity\": 100, ...}}]}}"
+                            )
+                            break
+                        for i, item in enumerate(val):
+                            if not isinstance(item, dict):
+                                errors.append(
+                                    f"返回值格式错误：decisions[{sym!r}] 的第 {i+1} 项应为 dict，实际为 {type(item).__name__}"
+                                )
+                                break
+                    if not errors:
+                        total_count = sum(len(v) for v in decisions.values())
+                        logger.debug(f"[StrategyCodeTesterBuy] ✓ 买入决策执行成功，格式 Dict[symbol, List[decision]] 正确，共 {len(decisions)} 个 symbol、{total_count} 条决策")
         except Exception as e:
             errors.append(f"买入决策执行异常: {str(e)}")
             import traceback

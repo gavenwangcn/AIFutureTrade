@@ -4,7 +4,7 @@
 
 ### 返回值要求（最重要）：
 1. **必须初始化 `decisions = {}` 在方法开始处**
-2. **必须返回字典类型 `Dict[str, Dict]`，不能返回 None**
+2. **必须返回 `Dict[str, List[Dict]]`，不能返回 None**。key 为 SYMBOL，value **必须**为该 symbol 的决策**列表**。**仅支持列表格式，禁止单条 dict 返回（如 `{"SYMBOL": {...}}` 会无法通过测试）**。示例：`{"BTCUSDT": [{"signal": "close_position", "quantity": 100, ...}]}` 或同一 symbol 多条：`{"BTCUSDT": [{"signal": "close_position", ...}, {"signal": "stop_loss", ...}]}`
 3. **即使没有决策也要返回空字典 `{}`**
 4. **必须确保所有代码路径都返回 decisions**
 5. **建议使用 try-except 处理异常，确保异常时返回空字典**
@@ -29,6 +29,12 @@
   if atr14 > threshold:
       # 使用atr14进行判断
   ```
+
+### ⚠️ 与模版输入输出格式一致（必须遵守，否则无法通过策略代码测试器）：
+- **模版**：`StrategyBaseSell`（`strategy_template_sell.py`）定义的 `execute_sell_decision(self, portfolio, market_state, account_info, conditional_orders=None)`。
+- **方法签名**：必须与模版完全一致（参数名、顺序、可选参数默认值）。
+- **返回值类型**：仅支持 `Dict[str, List[Dict]]`，每个 symbol 对应一个**列表**，列表中每项为一条决策 dict。**禁止**返回 `Dict[str, Dict]`（单条 dict 会无法通过策略代码测试器）。
+- 生成的代码会由策略代码测试器（strategy_code_tester_sell）校验，格式不匹配将导致测试失败。
 
 ### 方法签名要求：
 - 必须包含且仅包含 5 个参数：`self`, `portfolio`, `market_state`, `account_info`, `conditional_orders`
@@ -63,7 +69,7 @@ def execute_sell_decision(
     market_state: Dict,
     account_info: Dict,
     conditional_orders: Dict[str, List[Dict]] = None
-) -> Dict[str, Dict]:
+) -> Dict[str, List[Dict]]:
 ```
 
 **参数说明：**
@@ -201,7 +207,7 @@ class GeneratedSellStrategy(StrategyBaseSell):
         market_state: Dict,
         account_info: Dict,
         conditional_orders: Dict[str, List[Dict]] = None
-    ) -> Dict[str, Dict]:
+    ) -> Dict[str, List[Dict]]:
         """
         执行卖出决策
 
@@ -220,8 +226,8 @@ class GeneratedSellStrategy(StrategyBaseSell):
             conditional_orders: 条件单信息字典（可选），按symbol分组的条件单列表
 
         返回:
-            Dict[str, Dict]: 卖出决策字典，key为交易对符号，value为决策详情
-                格式: {"SYMBOL": {"signal": "close_position", "quantity": 100, "leverage": 5, "justification": "理由"}}
+            Dict[str, List[Dict]]: 卖出决策字典，key为交易对符号，value为该 symbol 的决策列表（必须为列表）
+                格式: {"SYMBOL": [{"signal": "close_position", "quantity": 100, "leverage": 5, "justification": "理由"}]}
                 如果没有决策，返回空字典 {}
         """
         # ⚠️ 重要：必须初始化decisions字典，且必须返回字典（不能返回None）
@@ -838,18 +844,20 @@ else:
 
 ### 4. 决策格式要求
 
-**卖出决策返回值格式：**
+**卖出决策返回值格式（仅支持 `Dict[str, List[Dict]]`）：** 每个 symbol 的 value 必须是**列表**，列表中每项为一条决策；同一 symbol 可有多条（如 卖出+止损+止盈）。禁止单条 dict 返回（必须 `decisions[symbol] = [{...}]`，不能 `decisions[symbol] = {...}`）。
 ```python
-{
-    "SYMBOL": {
-        "signal": "close_position" | "stop_loss" | "take_profit",  # 必须
-        "quantity": 100,  # 必须：合约数量（平仓数量），不是USDT数量
-        "price": 0.0345,  # ⚠️ 必须：当前价格或期望价格（不能为空、不能为None）
-        "stop_price": 0.0325,  # ⚠️ 对于 stop_loss 和 take_profit 信号：必须！对于 close_position 信号：必须！（不能为空、不能为None）
-        "leverage": 5,  # ⚠️ 必须：杠杆倍数（通常与持仓的杠杆一致，不能为空、不能为None）
-        "justification": "理由说明"  # 必须：理由
-    }
-}
+# 格式：{"SYMBOL": [决策1, 决策2, ...]}，仅支持列表格式，禁止单条 dict
+{"BTCUSDT": [
+    {"signal": "close_position", "quantity": 100, "price": 0.0345, "stop_price": 0.0325, "leverage": 5, "justification": "..."},
+    {"signal": "stop_loss", "quantity": 100, "price": 0.0345, "stop_price": 0.0325, "leverage": 5, "justification": "..."}
+]}
+# 每条决策必须包含：
+#   signal: "close_position" | "stop_loss" | "take_profit"
+#   quantity: 合约数量（平仓数量）
+#   price: 当前价格或期望价格（不能为空、不能为None）
+#   stop_price: 触发价格（不能为空、不能为None）
+#   leverage: 杠杆倍数（不能为空、不能为None）
+#   justification: 理由说明
 ```
 
 **⚠️⚠️⚠️ 关键必填字段说明（非常重要，必须严格遵守）：**
@@ -1029,7 +1037,7 @@ decisions[symbol] = {
               conditional_orders (Dict[str, List[Dict]], optional): 条件单信息，默认为None
 
           返回值：
-              Dict[str, Dict]: 卖出决策字典，格式为 {symbol: {signal, quantity, price, stop_price, leverage, justification}}
+              Dict[str, List[Dict]]: 卖出决策字典，格式为 {symbol: [决策1, 决策2, ...]}，每项包含 signal, quantity, price, stop_price, leverage, justification
                               如果没有决策则返回空字典 {}
 
           决策逻辑：
@@ -1279,7 +1287,7 @@ decisions[symbol] = {
               market_state: 市场状态字典
               account_info: 账户信息
           返回:
-              Dict[str, Dict]: 卖出决策字典
+              Dict[str, List[Dict]]: 卖出决策字典（每个 symbol 的 value 为决策列表）
           """
           # 初始化决策字典，用于存储所有卖出决策
           decisions = {}
@@ -1682,7 +1690,7 @@ class GeneratedSellStrategy(StrategyBaseSell):
        market_state: Dict,
        account_info: Dict,
        conditional_orders: Dict[str, List[Dict]] = None
-   ) -> Dict[str, Dict]:
+   ) -> Dict[str, List[Dict]]:
    ```
    - **必须包含且仅包含这 5 个参数（包括 self）**
    - **参数顺序必须完全一致：`self`, `portfolio`, `market_state`, `account_info`, `conditional_orders`**
@@ -1691,7 +1699,7 @@ class GeneratedSellStrategy(StrategyBaseSell):
    - **不能删除任何参数**
 4. **返回值要求（关键）：**
    - **必须在方法开始处初始化：`decisions = {}`**
-   - **必须返回字典类型：`Dict[str, Dict]`**
+   - **必须返回 `Dict[str, List[Dict]]`**：每个 symbol 的 value 必须为**列表**，禁止单条 dict（必须写 `decisions[symbol] = [decision_dict]`，不能写 `decisions[symbol] = decision_dict`）
    - **不能返回 None**：即使没有决策也要返回空字典 `{}`
    - **必须确保所有代码路径都返回 decisions**：不能有任何路径返回 None 或未定义
    - **建议使用 try-except 包装主要逻辑**：确保异常时返回空字典而不是抛出异常
@@ -1711,14 +1719,14 @@ class GeneratedSellStrategy(StrategyBaseSell):
      - `leverage`：杠杆倍数（必须 > 0，通常从持仓获取）
      - `justification`：决策理由（不能为空字符串）
    - **如果任何字段缺失或为None，将导致交易执行失败**
-   - **示例（所有字段都必须有值）：**
+   - **示例（所有字段都必须有值，且 value 必须为列表）：**
      ```python
-     decisions[symbol] = {
+     decisions[symbol] = [{
          "signal": "stop_loss",
          "quantity": position_amt,  # 必须有值
          "price": current_price,  # 必须有值，不能为None
          "stop_price": current_price * 0.98,  # 必须有值，不能为None
          "leverage": position.get('leverage', 5),  # 必须有值，不能为None
          "justification": "触发止损条件"  # 必须有值
-     }
+     }]
      ```

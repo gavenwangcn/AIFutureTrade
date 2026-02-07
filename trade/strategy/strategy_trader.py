@@ -50,109 +50,103 @@ class StrategyTrader(Trader):
         self.strategys_db = StrategysDatabase(pool=db._pool if db and hasattr(db, '_pool') else None)
         self.models_db = ModelsDatabase(pool=db._pool if db and hasattr(db, '_pool') else None)
     
-    def _normalize_quantity_by_price(self, decisions: Dict, market_state: Dict) -> Dict:
+    def _decisions_to_list_per_symbol(self, decisions: Dict) -> Dict[str, List[Dict]]:
         """
-        根据symbol价格动态调整decisions中的quantity精度
-        
-        Args:
-            decisions: 决策字典，key为交易对符号，value为决策详情
-            market_state: 市场状态字典，包含各symbol的价格信息
-            
-        Returns:
-            规范化后的决策字典，quantity字段根据价格调整精度
+        策略只返回 Dict[symbol, List[decision]]，value 必须为列表。
+        非列表的 value 视为空列表并过滤掉非 dict 元素。
+        """
+        result: Dict[str, List[Dict]] = {}
+        for symbol, val in (decisions or {}).items():
+            if not symbol:
+                continue
+            if isinstance(val, list):
+                result[symbol] = [d for d in val if isinstance(d, dict)]
+            else:
+                result[symbol] = []
+        return result
+
+    def _normalize_quantity_by_price(self, decisions: Dict, market_state: Dict) -> Dict[str, List[Dict]]:
+        """
+        根据 symbol 价格动态调整 decisions 中的 quantity 精度。
+        decisions 格式为 Dict[symbol, List[decision]]，返回同格式。
         """
         from trade.trading.trading_utils import adjust_quantity_precision_by_price
-        
-        normalized_decisions = {}
-        for symbol, decision in decisions.items():
-            normalized_decision = decision.copy()
-            # 如果decision中有quantity字段，根据价格调整精度
-            if 'quantity' in normalized_decision and normalized_decision['quantity'] is not None:
-                try:
-                    quantity = float(normalized_decision['quantity'])
-                    if quantity <= 0:
-                        normalized_decision['quantity'] = 0.0
-                        continue
-                    
-                    # 从market_state中获取symbol的价格
-                    price = None
-                    symbol_upper = symbol.upper()
-                    
-                    # 尝试从market_state中获取价格
-                    if isinstance(market_state, dict):
-                        # 先直接按大写找
-                        market_info = market_state.get(symbol_upper)
-                        if market_info is None:
-                            # 再遍历找 key 大小写不同的情况
-                            for k, v in market_state.items():
+
+        list_per_symbol = self._decisions_to_list_per_symbol(decisions)
+        normalized_decisions: Dict[str, List[Dict]] = {}
+        for symbol, decision_list in list_per_symbol.items():
+            normalized_list = []
+            for decision in decision_list:
+                normalized_decision = decision.copy()
+                # 如果decision中有quantity字段，根据价格调整精度
+                if 'quantity' in normalized_decision and normalized_decision['quantity'] is not None:
+                    try:
+                        quantity = float(normalized_decision['quantity'])
+                        if quantity <= 0:
+                            normalized_decision['quantity'] = 0.0
+                        else:
+                            # 从market_state中获取symbol的价格
+                            price = None
+                            symbol_upper = str(symbol).upper()
+                            if isinstance(market_state, dict):
+                                market_info = market_state.get(symbol_upper)
+                                if market_info is None:
+                                    for k, v in market_state.items():
+                                        try:
+                                            if str(k).upper() == symbol_upper:
+                                                market_info = v
+                                                break
+                                        except Exception:
+                                            continue
+                                if isinstance(market_info, dict):
+                                    price = market_info.get('price')
+                            if price is not None:
                                 try:
-                                    if str(k).upper() == symbol_upper:
-                                        market_info = v
-                                        break
-                                except Exception:
-                                    continue
-                        
-                        if isinstance(market_info, dict):
-                            price = market_info.get('price')
-                    
-                    # 如果获取到价格，使用价格调整精度；否则默认取整数
-                    if price is not None:
-                        try:
-                            price_float = float(price)
-                            if price_float > 0:
-                                adjusted_quantity = adjust_quantity_precision_by_price(quantity, price_float)
-                                normalized_decision['quantity'] = adjusted_quantity
-                                logger.debug(f"[StrategyTrader] 根据价格调整 {symbol} 的quantity: {quantity} -> {adjusted_quantity} (价格: {price_float})")
+                                    price_float = float(price)
+                                    if price_float > 0:
+                                        adjusted_quantity = adjust_quantity_precision_by_price(quantity, price_float)
+                                        normalized_decision['quantity'] = adjusted_quantity
+                                        logger.debug(f"[StrategyTrader] 根据价格调整 {symbol} 的quantity: {quantity} -> {adjusted_quantity} (价格: {price_float})")
+                                    else:
+                                        normalized_decision['quantity'] = float(int(quantity))
+                                        logger.debug(f"[StrategyTrader] 价格无效，{symbol} 的quantity取整数: {quantity} -> {normalized_decision['quantity']}")
+                                except (ValueError, TypeError):
+                                    normalized_decision['quantity'] = float(int(quantity))
+                                    logger.debug(f"[StrategyTrader] 价格转换失败，{symbol} 的quantity取整数: {quantity} -> {normalized_decision['quantity']}")
                             else:
-                                # 价格无效，默认取整数
                                 normalized_decision['quantity'] = float(int(quantity))
-                                logger.debug(f"[StrategyTrader] 价格无效，{symbol} 的quantity取整数: {quantity} -> {normalized_decision['quantity']}")
-                        except (ValueError, TypeError) as e:
-                            # 价格转换失败，默认取整数
-                            normalized_decision['quantity'] = float(int(quantity))
-                            logger.debug(f"[StrategyTrader] 价格转换失败，{symbol} 的quantity取整数: {quantity} -> {normalized_decision['quantity']}")
-                    else:
-                        # 没有价格信息，默认取整数
-                        normalized_decision['quantity'] = float(int(quantity))
-                        logger.debug(f"[StrategyTrader] 无价格信息，{symbol} 的quantity取整数: {quantity} -> {normalized_decision['quantity']}")
-                        
-                except (ValueError, TypeError) as e:
-                    logger.warning(f"[StrategyTrader] 无法转换 {symbol} 的quantity: {normalized_decision.get('quantity')}, 错误: {e}")
-                    # 如果转换失败，设置为0
-                    normalized_decision['quantity'] = 0.0
-            normalized_decisions[symbol] = normalized_decision
+                                logger.debug(f"[StrategyTrader] 无价格信息，{symbol} 的quantity取整数: {quantity} -> {normalized_decision['quantity']}")
+                    except (ValueError, TypeError) as e:
+                        logger.warning(f"[StrategyTrader] 无法转换 {symbol} 的quantity: {normalized_decision.get('quantity')}, 错误: {e}")
+                        normalized_decision['quantity'] = 0.0
+                normalized_list.append(normalized_decision)
+            normalized_decisions[symbol] = normalized_list
         return normalized_decisions
     
-    def _normalize_quantity_to_int(self, decisions: Dict) -> Dict:
+    def _normalize_quantity_to_int(self, decisions: Dict) -> Dict[str, List[Dict]]:
         """
-        将decisions中的quantity字段转换为整数（用于卖出策略）
-        
-        卖出策略通常需要平仓，quantity应该是整数数量的合约。
-        
-        Args:
-            decisions: 决策字典，key为交易对符号，value为决策详情
-            
-        Returns:
-            规范化后的决策字典，quantity字段转换为整数
+        将decisions中的quantity字段转换为整数（用于卖出策略）。
+        decisions 可为 Dict[symbol, decision] 或 Dict[symbol, List[decision]]，返回 Dict[symbol, List[decision]]。
         """
-        normalized_decisions = {}
-        for symbol, decision in decisions.items():
-            normalized_decision = decision.copy()
-            # 如果decision中有quantity字段，转换为整数
-            if 'quantity' in normalized_decision and normalized_decision['quantity'] is not None:
-                try:
-                    quantity = float(normalized_decision['quantity'])
-                    if quantity <= 0:
+        list_per_symbol = self._decisions_to_list_per_symbol(decisions)
+        normalized_decisions: Dict[str, List[Dict]] = {}
+        for symbol, decision_list in list_per_symbol.items():
+            normalized_list = []
+            for decision in decision_list:
+                normalized_decision = decision.copy()
+                if 'quantity' in normalized_decision and normalized_decision['quantity'] is not None:
+                    try:
+                        quantity = float(normalized_decision['quantity'])
+                        if quantity <= 0:
+                            normalized_decision['quantity'] = 0
+                        else:
+                            normalized_decision['quantity'] = int(quantity)
+                            logger.debug(f"[StrategyTrader] 将 {symbol} 的quantity转换为整数: {quantity} -> {normalized_decision['quantity']}")
+                    except (ValueError, TypeError) as e:
+                        logger.warning(f"[StrategyTrader] 无法转换 {symbol} 的quantity: {normalized_decision.get('quantity')}, 错误: {e}")
                         normalized_decision['quantity'] = 0
-                    else:
-                        # 转换为整数（向下取整，因为不能卖出超过持仓的数量）
-                        normalized_decision['quantity'] = int(quantity)
-                        logger.debug(f"[StrategyTrader] 将 {symbol} 的quantity转换为整数: {quantity} -> {normalized_decision['quantity']}")
-                except (ValueError, TypeError) as e:
-                    logger.warning(f"[StrategyTrader] 无法转换 {symbol} 的quantity: {normalized_decision.get('quantity')}, 错误: {e}")
-                    # 如果转换失败，设置为0
-                    normalized_decision['quantity'] = 0
-            normalized_decisions[symbol] = normalized_decision
+                normalized_list.append(normalized_decision)
+            normalized_decisions[symbol] = normalized_list
         return normalized_decisions
     
     def make_buy_decision(
@@ -362,7 +356,7 @@ class StrategyTrader(Trader):
 
             return (qty * price_f) / lev
 
-        final_decisions: Dict[str, Dict] = {}
+        final_decisions: Dict[str, List[Dict]] = {}
         used_strategy_names: List[str] = []
 
         valid_signals = {'buy_to_long', 'buy_to_short'}
@@ -427,40 +421,36 @@ class StrategyTrader(Trader):
                     logger.info(f"[StrategyTrader] [Model {effective_model_id}] [买入策略执行] 策略 {strategy_name} (优先级: {priority}) 返回的decisions为空或格式不正确，继续下一个策略")
                     continue
                 
-                # ⚠️ 重要：记录策略代码返回的交易信号信息（info级别日志）
-                logger.info(f"[StrategyTrader] [Model {effective_model_id}] [买入策略执行] ✓ 策略 {strategy_name} (优先级: {priority}) 执行成功，返回 {len(decisions)} 个交易信号决策")
-                
-                # 详细记录每个交易信号的信息
-                for symbol, decision in decisions.items():
-                    if isinstance(decision, dict):
-                        signal = decision.get('signal', 'N/A')
-                        quantity = decision.get('quantity', 'N/A')
-                        leverage = decision.get('leverage', 'N/A')
-                        justification = decision.get('justification', 'N/A')
-                        logger.info(
-                            f"[StrategyTrader] [Model {effective_model_id}] [买入策略执行] [交易信号] "
-                            f"策略={strategy_name}, Symbol={symbol}, Signal={signal}, "
-                            f"Quantity={quantity}, Leverage={leverage}, Justification={justification}"
-                        )
+                # 归一化为 symbol -> List[decision]（同一 symbol 可多条信号）
+                list_per_symbol = self._decisions_to_list_per_symbol(decisions)
+                total_decision_count = sum(len(lst) for lst in list_per_symbol.values())
+                logger.info(f"[StrategyTrader] [Model {effective_model_id}] [买入策略执行] ✓ 策略 {strategy_name} (优先级: {priority}) 执行成功，返回 {len(list_per_symbol)} 个 symbol、共 {total_decision_count} 个交易信号决策")
 
-                # 根据价格动态调整quantity精度
+                for symbol, dec_list in list_per_symbol.items():
+                    for dec in dec_list:
+                        if isinstance(dec, dict):
+                            logger.info(
+                                f"[StrategyTrader] [Model {effective_model_id}] [买入策略执行] [交易信号] "
+                                f"策略={strategy_name}, Symbol={symbol}, Signal={dec.get('signal', 'N/A')}, "
+                                f"Quantity={dec.get('quantity', 'N/A')}, Leverage={dec.get('leverage', 'N/A')}, Justification={dec.get('justification', 'N/A')}"
+                            )
+
+                # 根据价格动态调整quantity精度（返回 Dict[symbol, List[decision]]）
                 normalized_decisions = self._normalize_quantity_by_price(decisions, filtered_market_state)
 
-                # 将策略返回的 decisions 按 symbol 归一化为 upper key，方便与 remaining_candidates 对齐
-                decisions_by_symbol: Dict[str, Dict] = {}
-                for sym, dec in normalized_decisions.items():
-                    if not isinstance(dec, dict):
-                        continue
+                # 按 symbol 归一化为 upper key，value 为 List[decision]
+                decisions_by_symbol: Dict[str, List[Dict]] = {}
+                for sym, dec_list in normalized_decisions.items():
                     sym_upper = str(sym).upper()
                     if not sym_upper:
                         continue
-                    decisions_by_symbol[sym_upper] = dec
+                    decisions_by_symbol[sym_upper] = dec_list
 
                 selected_symbols_this_strategy: List[str] = []
                 spent_this_strategy = 0.0
                 available_before = _get_available_balance()
 
-                # 按 remaining_candidates 顺序挑选（更符合“候选集顺序”语义）
+                # 按 remaining_candidates 顺序挑选（同一 symbol 可有多条决策，合并资金预估）
                 for c in remaining_candidates:
                     try:
                         sym_upper = str(c.get('symbol') or c.get('contract_symbol') or '').upper()
@@ -471,34 +461,38 @@ class StrategyTrader(Trader):
                     if sym_upper in final_decisions:
                         continue
 
-                    dec = decisions_by_symbol.get(sym_upper)
-                    if not isinstance(dec, dict):
+                    dec_list = decisions_by_symbol.get(sym_upper) or []
+                    if not dec_list:
                         continue
 
-                    sig = (dec.get('signal') or '').lower()
-                    if sig not in valid_signals:
-                        logger.debug(f"[StrategyTrader] [Model {effective_model_id}] 跳过 {sym_upper}: 信号不在有效列表中 (signal={sig}, valid_signals={valid_signals})")
+                    # 只保留有效买入信号的决策，并汇总所需资金
+                    valid_dec_list = []
+                    total_required_capital = 0.0
+                    for dec in dec_list:
+                        if not isinstance(dec, dict):
+                            continue
+                        sig = (dec.get('signal') or '').lower()
+                        if sig not in valid_signals:
+                            continue
+                        valid_dec_list.append(dec)
+                        cap = _estimate_required_capital(sym_upper, dec, filtered_market_state)
+                        if cap > 0:
+                            total_required_capital += cap
+                    if not valid_dec_list:
                         continue
-                    
-                    # ⚠️ 重要：buy_to_long 和 buy_to_short 是有效的买入信号，会被接受并继续处理
-                    # 这些信号会被提交给后续策略执行流程，生成策略信息和交易信息
-                    logger.info(f"[StrategyTrader] [Model {effective_model_id}] ✓ 接受有效买入信号: {sym_upper} -> {sig} (quantity={dec.get('quantity')}, leverage={dec.get('leverage')})")
-
-                    # 预估资金占用，若超过剩余余额则跳过该symbol（不影响其他symbol）
-                    required_capital = _estimate_required_capital(sym_upper, dec, filtered_market_state)
-                    if required_capital <= 0:
+                    if total_required_capital <= 0:
+                        continue
+                    if available_before - spent_this_strategy < total_required_capital:
                         continue
 
-                    if available_before - spent_this_strategy < required_capital:
-                        continue
+                    for dec in valid_dec_list:
+                        logger.info(f"[StrategyTrader] [Model {effective_model_id}] ✓ 接受有效买入信号: {sym_upper} -> {(dec.get('signal') or '').lower()} (quantity={dec.get('quantity')}, leverage={dec.get('leverage')})")
+                        dec.setdefault('_strategy_name', strategy_name)
+                        dec.setdefault('_strategy_type', 'buy')
 
-                    # 回填策略追踪信息（供后续策略记录/落库使用）
-                    dec.setdefault('_strategy_name', strategy_name)
-                    dec.setdefault('_strategy_type', 'buy')
-
-                    final_decisions[sym_upper] = dec
+                    final_decisions[sym_upper] = valid_dec_list
                     selected_symbols_this_strategy.append(sym_upper)
-                    spent_this_strategy += required_capital
+                    spent_this_strategy += total_required_capital
 
                 # 若本策略命中，则扣除 candidates/market_state，并预扣余额（供后续策略使用）
                 if selected_symbols_this_strategy:
@@ -530,7 +524,7 @@ class StrategyTrader(Trader):
                     'decisions': final_decisions,
                     'remaining_candidate_count': len(remaining_candidates),
                     'remaining_available_balance': _get_available_balance()
-                }, ensure_ascii=False),
+                }, ensure_ascii=False, default=str),
                 'cot_trace': trace,
                 'skipped': False
             }
@@ -636,7 +630,7 @@ class StrategyTrader(Trader):
         # portfolio 工作副本（仅用于策略间扣除）
         base_portfolio: Dict = dict(portfolio) if isinstance(portfolio, dict) else {}
 
-        final_decisions: Dict[str, Dict] = {}
+        final_decisions: Dict[str, List[Dict]] = {}
         used_strategy_names: List[str] = []
         valid_signals = {'sell_to_long', 'sell_to_short', 'close_position', 'stop_loss', 'take_profit'}
 
@@ -719,37 +713,33 @@ class StrategyTrader(Trader):
                     logger.info(f"[StrategyTrader] [Model {effective_model_id}] [卖出策略执行] 策略 {strategy_name} (优先级: {priority}) 返回的decisions为空或格式不正确，继续下一个策略")
                     continue
                 
-                # ⚠️ 重要：记录策略代码返回的交易信号信息（info级别日志）
-                logger.info(f"[StrategyTrader] [Model {effective_model_id}] [卖出策略执行] ✓ 策略 {strategy_name} (优先级: {priority}) 执行成功，返回 {len(decisions)} 个交易信号决策")
-                
-                # 详细记录每个交易信号的信息
-                for symbol, decision in decisions.items():
-                    if isinstance(decision, dict):
-                        signal = decision.get('signal', 'N/A')
-                        quantity = decision.get('quantity', 'N/A')
-                        price = decision.get('price', 'N/A')
-                        reason = decision.get('reason', decision.get('justification', 'N/A'))
-                        logger.info(
-                            f"[StrategyTrader] [Model {effective_model_id}] [卖出策略执行] [交易信号] "
-                            f"策略={strategy_name}, Symbol={symbol}, Signal={signal}, "
-                            f"Quantity={quantity}, Price={price}, Reason={reason}"
-                        )
+                # 归一化为 symbol -> List[decision]（同一 symbol 可多条信号：卖出/止损/止盈等）
+                list_per_symbol = self._decisions_to_list_per_symbol(decisions)
+                total_decision_count = sum(len(lst) for lst in list_per_symbol.values())
+                logger.info(f"[StrategyTrader] [Model {effective_model_id}] [卖出策略执行] ✓ 策略 {strategy_name} (优先级: {priority}) 执行成功，返回 {len(list_per_symbol)} 个 symbol、共 {total_decision_count} 个交易信号决策")
+
+                for symbol, dec_list in list_per_symbol.items():
+                    for dec in dec_list:
+                        if isinstance(dec, dict):
+                            logger.info(
+                                f"[StrategyTrader] [Model {effective_model_id}] [卖出策略执行] [交易信号] "
+                                f"策略={strategy_name}, Symbol={symbol}, Signal={dec.get('signal', 'N/A')}, "
+                                f"Quantity={dec.get('quantity', 'N/A')}, Price={dec.get('price', 'N/A')}, Reason={dec.get('reason', dec.get('justification', 'N/A'))}"
+                            )
 
                 normalized_decisions = self._normalize_quantity_to_int(decisions)
 
-                # 将策略返回的 decisions 按 symbol 归一化为 upper key，方便与 remaining_positions 对齐
-                decisions_by_symbol: Dict[str, Dict] = {}
-                for sym, dec in normalized_decisions.items():
-                    if not isinstance(dec, dict):
-                        continue
+                # 按 symbol 归一化为 upper key，value 为 List[decision]
+                decisions_by_symbol: Dict[str, List[Dict]] = {}
+                for sym, dec_list in normalized_decisions.items():
                     sym_upper = str(sym).upper()
                     if not sym_upper:
                         continue
-                    decisions_by_symbol[sym_upper] = dec
+                    decisions_by_symbol[sym_upper] = dec_list
 
                 selected_symbols_this_strategy: List[str] = []
 
-                # 按 remaining_positions 顺序挑选（更符合“持仓顺序”语义）
+                # 按 remaining_positions 顺序挑选（同一 symbol 可有多条决策：close_position/stop_loss/take_profit 等）
                 for p in remaining_positions:
                     try:
                         sym_upper = str(p.get('symbol') or '').upper()
@@ -760,18 +750,24 @@ class StrategyTrader(Trader):
                     if sym_upper in final_decisions:
                         continue
 
-                    dec = decisions_by_symbol.get(sym_upper)
-                    if not isinstance(dec, dict):
+                    dec_list = decisions_by_symbol.get(sym_upper) or []
+                    if not dec_list:
                         continue
 
-                    sig = (dec.get('signal') or '').lower()
-                    if sig not in valid_signals:
+                    valid_dec_list = []
+                    for dec in dec_list:
+                        if not isinstance(dec, dict):
+                            continue
+                        sig = (dec.get('signal') or '').lower()
+                        if sig not in valid_signals:
+                            continue
+                        dec.setdefault('_strategy_name', strategy_name)
+                        dec.setdefault('_strategy_type', 'sell')
+                        valid_dec_list.append(dec)
+                    if not valid_dec_list:
                         continue
 
-                    dec.setdefault('_strategy_name', strategy_name)
-                    dec.setdefault('_strategy_type', 'sell')
-
-                    final_decisions[sym_upper] = dec
+                    final_decisions[sym_upper] = valid_dec_list
                     selected_symbols_this_strategy.append(sym_upper)
 
                 # 若本策略命中，则扣除 portfolio.positions & market_state（通过 remaining_symbol_set 实现）
@@ -800,7 +796,7 @@ class StrategyTrader(Trader):
                     'strategies': used_strategy_names,
                     'decisions': final_decisions,
                     'remaining_position_count': len(remaining_positions)
-                }, ensure_ascii=False),
+                }, ensure_ascii=False, default=str),
                 'cot_trace': trace,
                 'skipped': False
             }

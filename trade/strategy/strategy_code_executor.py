@@ -325,8 +325,9 @@ class StrategyCodeExecutor:
             if not isinstance(decisions, dict):
                 raise ValueError(f"策略方法返回结果格式不正确，期望 dict，实际 {type(decisions)}")
             
-            # ⚠️ 重要：记录策略代码执行后返回的交易信号信息（info级别日志，便于排查问题）
-            logger.info(f"[StrategyCodeExecutor] [策略代码执行] 策略 {strategy_name} (类型: {decision_type}) 执行完成，返回决策数: {len(decisions)}")
+            # 策略只返回 Dict[symbol, List[decision]]，总条数 = sum(len(v) for v in decisions.values())
+            _total_count = sum(len(v) if isinstance(v, list) else 0 for v in (decisions or {}).values())
+            logger.info(f"[StrategyCodeExecutor] [策略代码执行] 策略 {strategy_name} (类型: {decision_type}) 执行完成，返回 {len(decisions)} 个 symbol、共 {_total_count} 条决策")
             
             # 记录决策内容日志（完整JSON格式，便于调试）
             if decisions:
@@ -347,59 +348,50 @@ class StrategyCodeExecutor:
                 'strategy_class': strategy_class.__name__,
                 'decision_type': decision_type,
                 'success': True,
-                'decisions_count': len(decisions)
+                'decisions_count': _total_count
             })
             
-            # ⚠️ 重要：详细记录每个交易信号的信息（info级别日志）
+            # ⚠️ 重要：详细记录每个交易信号的信息（支持同一 symbol 多条决策）
             if decisions:
-                logger.info(f"[StrategyCodeExecutor] [策略代码执行] [交易信号详情] 策略 {strategy_name} 返回了 {len(decisions)} 个交易信号:")
-                for idx, (symbol, decision) in enumerate(decisions.items(), 1):
-                    if not isinstance(decision, dict):
-                        logger.warning(f"[StrategyCodeExecutor] [策略代码执行] [交易信号详情] 决策 {idx}: {symbol} - 决策格式不正确（不是字典）")
-                        continue
-                    
-                    decision_info = []
-                    decision_info.append(f"  [交易信号 {idx}] Symbol: {symbol}")
-                    
-                    # 提取决策的关键字段
-                    signal = decision.get('signal', 'N/A')
-                    decision_info.append(f"    Signal: {signal}")
-                    
-                    if 'quantity' in decision:
-                        decision_info.append(f"    Quantity: {decision['quantity']}")
-                    
-                    if 'leverage' in decision:
-                        decision_info.append(f"    Leverage: {decision['leverage']}")
-                    
-                    if 'price' in decision:
-                        decision_info.append(f"    Price: {decision['price']}")
-                    
-                    if 'position_side' in decision:
-                        decision_info.append(f"    PositionSide: {decision['position_side']}")
-                    
-                    if 'justification' in decision:
-                        justification = decision['justification']
-                        # 如果 justification 太长，截断
-                        if len(str(justification)) > 150:
-                            justification = str(justification)[:150] + "..."
-                        decision_info.append(f"    Justification: {justification}")
-                    elif 'reason' in decision:
-                        reason = decision['reason']
-                        # 如果 reason 太长，截断
-                        if len(str(reason)) > 150:
-                            reason = str(reason)[:150] + "..."
-                        decision_info.append(f"    Reason: {reason}")
-                    
-                    # 打印其他字段（排除已打印的字段）
-                    printed_fields = {'signal', 'quantity', 'leverage', 'price', 'position_side', 'reason', 'justification'}
-                    other_fields = {k: v for k, v in decision.items() if k not in printed_fields}
-                    if other_fields:
-                        other_fields_str = json.dumps(other_fields, ensure_ascii=False, default=str)
-                        if len(other_fields_str) > 200:
-                            other_fields_str = other_fields_str[:200] + "..."
-                        decision_info.append(f"    其他字段: {other_fields_str}")
-                    
-                    logger.info("\n".join(decision_info))
+                logger.info(f"[StrategyCodeExecutor] [策略代码执行] [交易信号详情] 策略 {strategy_name} 返回了 {_total_count} 个交易信号:")
+                idx = 0
+                for symbol, val in decisions.items():
+                    dec_list = val if isinstance(val, list) else []
+                    for decision in dec_list:
+                        idx += 1
+                        if not isinstance(decision, dict):
+                            logger.warning(f"[StrategyCodeExecutor] [策略代码执行] [交易信号详情] 决策 {idx}: {symbol} - 决策格式不正确（不是字典）")
+                            continue
+                        decision_info = []
+                        decision_info.append(f"  [交易信号 {idx}] Symbol: {symbol}")
+                        signal = decision.get('signal', 'N/A')
+                        decision_info.append(f"    Signal: {signal}")
+                        if 'quantity' in decision:
+                            decision_info.append(f"    Quantity: {decision['quantity']}")
+                        if 'leverage' in decision:
+                            decision_info.append(f"    Leverage: {decision['leverage']}")
+                        if 'price' in decision:
+                            decision_info.append(f"    Price: {decision['price']}")
+                        if 'position_side' in decision:
+                            decision_info.append(f"    PositionSide: {decision['position_side']}")
+                        if 'justification' in decision:
+                            justification = decision['justification']
+                            if len(str(justification)) > 150:
+                                justification = str(justification)[:150] + "..."
+                            decision_info.append(f"    Justification: {justification}")
+                        elif 'reason' in decision:
+                            reason = decision['reason']
+                            if len(str(reason)) > 150:
+                                reason = str(reason)[:150] + "..."
+                            decision_info.append(f"    Reason: {reason}")
+                        printed_fields = {'signal', 'quantity', 'leverage', 'price', 'position_side', 'reason', 'justification'}
+                        other_fields = {k: v for k, v in decision.items() if k not in printed_fields}
+                        if other_fields:
+                            other_fields_str = json.dumps(other_fields, ensure_ascii=False, default=str)
+                            if len(other_fields_str) > 200:
+                                other_fields_str = other_fields_str[:200] + "..."
+                            decision_info.append(f"    其他字段: {other_fields_str}")
+                        logger.info("\n".join(decision_info))
             else:
                 logger.info(f"[StrategyCodeExecutor] [策略代码执行] 策略 {strategy_name} 无决策返回（decisions为空字典）")
             

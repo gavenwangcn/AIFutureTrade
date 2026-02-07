@@ -54,7 +54,7 @@ class BatchDecisionProcessor:
             group_decisions: 批次组决策列表
         
         Returns:
-            Dict: 包含合并后的决策、对话和市场状态的字典
+            Dict: 包含合并后的决策、对话和市场状态。其中 'decisions' 为 Dict[symbol, List[decision]]
         """
         all_decisions = {}
         all_payloads = []
@@ -66,11 +66,17 @@ class BatchDecisionProcessor:
             batch_market_state = batch_data.get('batch_market_state', {})
             batch_num = batch_data.get('batch_num', 0)
             
-            # 合并决策
-            for symbol, decision in decisions.items():
+            # 合并决策：格式为 Dict[symbol, List[decision]]，按 symbol 合并为 List
+            for symbol, val in decisions.items():
+                list_dec = val if isinstance(val, list) else []
+                if not list_dec:
+                    continue
                 if symbol not in all_decisions:
-                    all_decisions[symbol] = decision
-                    logger.debug(f"[Model {self.model_id}] [批次组处理] 批次 {batch_num} 决策: {symbol} -> {decision.get('signal', 'N/A')}")
+                    all_decisions[symbol] = []
+                all_decisions[symbol].extend(list_dec)
+                for d in list_dec:
+                    if isinstance(d, dict):
+                        logger.debug(f"[Model {self.model_id}] [批次组处理] 批次 {batch_num} 决策: {symbol} -> {d.get('signal', 'N/A')}")
             
             # 合并market_state
             all_market_states.update(batch_market_state)
@@ -112,7 +118,7 @@ class BatchDecisionProcessor:
         执行决策
         
         Args:
-            decisions: 决策字典
+            decisions: 决策字典，格式为 Dict[symbol, List[decision]]（每个 symbol 对应决策列表）
             market_states: 市场状态字典
             current_prices: 当前价格字典
             executions: 执行结果列表（会被更新）
