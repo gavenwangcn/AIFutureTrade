@@ -15,7 +15,7 @@ import Tip from '../@components/Tip.vue'
 | VOL | [5, 10, 20] | CR | [26, 10, 20, 40, 60] | SAR | [2, 2,  20] |
 | MACD | [12, 26, 9] | PSY | [12, 6] | AO | [5, 34] |
 | BOLL | [20, 2] | DMA | [10, 50, 10] | ROC | [12, 6] |
-| KDJ | [9, 3, 3] | TRIX | [12, 20] | PVT | 无 |
+| KDJ | [60, 20, 5] | TRIX | [12, 20] | PVT | 无 |
 | RSI | [6, 12, 24] | OBV | [30] | AVP | 无 |
 
 <Tip title="提示" tip="一些指标可以使用 <code>chart.createIndicator('MA', true, { id:'candle_pane' })</code> 叠加在蜡烛图上，而有些则不能。与蜡烛图兼容的指标有：BBI、BOLL、EMA、MA、SAR、SMA。另外也可以使用自定义指标的自定义绘制，将指标绘制在蜡烛图上，使其能够和蜡烛图兼容。"/>
