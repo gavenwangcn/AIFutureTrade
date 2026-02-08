@@ -335,11 +335,25 @@ class StrategyCodeExecutor:
                 )
             elif decision_type == 'sell':
                 # 调用卖出决策方法
+                co = conditional_orders or {}
+                total_co = sum(len(v) for v in (co.values() if isinstance(co, dict) else []))
+                logger.info(
+                    f"[StrategyCodeExecutor] [策略代码执行] 策略 {strategy_name} 传入条件单: "
+                    f"共 {total_co} 个，涉及 {len(co)} 个symbol，keys={list(co.keys())}"
+                )
+                if co:
+                    for sym, orders in (co.items() if isinstance(co, dict) else []):
+                        for i, o in enumerate(orders or []):
+                            logger.info(
+                                f"[StrategyCodeExecutor] 条件单[{sym}][{i}]: "
+                                f"orderType={o.get('orderType')}, positionSide={o.get('positionSide')}, "
+                                f"triggerPrice={o.get('triggerPrice')}, quantity={o.get('quantity')}"
+                            )
                 decisions = strategy_instance.execute_sell_decision(
                     portfolio=portfolio or {},
                     market_state=market_state or {},
                     account_info=account_info or {},
-                    conditional_orders=conditional_orders or {}
+                    conditional_orders=co
                 )
             else:
                 raise ValueError(f"未知的决策类型: {decision_type}")

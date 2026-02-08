@@ -121,6 +121,13 @@ def execute_buy_decision(
     - 检查已持仓的币是否已经设置了止损/止盈订单
     - 根据已有条件单的触发价格调整新的买入决策
     - 避免在已有大量条件单的情况下继续加仓
+
+  **⚠️⚠️⚠️ 查询 symbol 已有条件单触发价（正确写法，必须遵守）：**
+  - **第一步**：将 symbol 转为大写，`symbol = candidate.get('symbol', '').upper()`（conditional_orders 的 key 均为大写）
+  - **第二步**：获取该 symbol 的条件单列表，`symbol_orders = conditional_orders.get(symbol, [])`（必须用 .get(symbol, [])，不能直接索引）
+  - **第三步**：遍历 symbol_orders，按 orderType 和 positionSide 过滤；读取触发价用 `order.get('triggerPrice')`（字段名固定为 triggerPrice，camelCase）
+  - **错误写法**：❌ 使用 `conditional_orders[symbol]`（key 不存在会报错）；❌ 使用 `order.get('trigger_price')`（字段名为 triggerPrice）
+
   - **使用示例：**
     ```python
     # 初始化conditional_orders（如果为None）
@@ -141,6 +148,9 @@ def execute_buy_decision(
         order.get('orderType') in ['TAKE_PROFIT', 'TAKE_PROFIT_MARKET']
         for order in symbol_orders
     )
+
+    # 获取已有止损/止盈单的触发价格（字段名为 triggerPrice，camelCase）
+    stop_loss_prices = [order.get('triggerPrice') for order in symbol_orders if order.get('orderType') in ['STOP', 'STOP_MARKET'] and order.get('triggerPrice')]
 
     # 输出条件单信息日志
     if symbol_orders:

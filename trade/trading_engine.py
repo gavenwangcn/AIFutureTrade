@@ -1745,10 +1745,10 @@ class TradingEngine:
                 # 虚拟模式：从数据库查询
                 logger.debug(f"[Model {model_id}] 虚拟模式：从数据库查询条件单")
 
-                # 查询所有NEW状态的条件单
+                # 查询所有NEW状态的条件单（status与数据库algoStatus字段值一致，大小写需匹配）
                 all_orders = self.algo_order_db.query_algo_orders(
                     model_id=model_uuid,
-                    status='new'
+                    status='NEW'
                 )
 
                 # 按symbol分组，并过滤指定的symbols
@@ -1769,10 +1769,10 @@ class TradingEngine:
                         'orderType': order.get('orderType'),
                         'symbol': symbol,
                         'side': order.get('side'),
-                        'positionSide': order.get('positionSide'),
+                        'positionSide': (order.get('positionSide') or '').upper() or order.get('positionSide'),
                         'quantity': order.get('quantity', 0),
                         'algoStatus': order.get('algoStatus'),
-                        'triggerPrice': order.get('triggerPrice')
+                        'triggerPrice': order.get('triggerPrice') or order.get('trigger_price')
                     })
 
                 logger.info(f"[Model {model_id}] 虚拟模式：查询到 {len(all_orders)} 个条件单，涉及 {len(conditional_orders_by_symbol)} 个symbol")
@@ -1827,10 +1827,10 @@ class TradingEngine:
                                         'orderType': order.get('orderType'),
                                         'symbol': symbol_upper,
                                         'side': order.get('side'),
-                                        'positionSide': order.get('positionSide'),
+                                        'positionSide': (order.get('positionSide') or '').upper() or order.get('positionSide'),
                                         'quantity': order.get('quantity', 0),
                                         'algoStatus': order.get('algoStatus'),
-                                        'triggerPrice': order.get('triggerPrice')
+                                        'triggerPrice': order.get('triggerPrice') or order.get('trigger_price')
                                     }
                                     for order in new_orders
                                 ]
@@ -2976,8 +2976,16 @@ class TradingEngine:
             batch_symbols = [pos.get('symbol') for pos in valid_positions if pos.get('symbol')]
             conditional_orders = self._get_conditional_orders(self.model_id, batch_symbols)
             total_orders = sum(len(orders) for orders in conditional_orders.values())
-            logger.debug(f"[Model {self.model_id}] [卖出批次 {batch_num}/{total_batches}] "
-                        f"[步骤1.5] 获取到 {total_orders} 个条件单，涉及 {len(conditional_orders)} 个symbol")
+            logger.info(
+                f"[Model {self.model_id}] [卖出批次 {batch_num}/{total_batches}] [步骤1.5] 条件单查询结果: "
+                f"请求symbols={batch_symbols}, 获取到 {total_orders} 个条件单，涉及 {len(conditional_orders)} 个symbol，keys={list(conditional_orders.keys())}"
+            )
+            for sym, orders in conditional_orders.items():
+                for i, o in enumerate(orders or []):
+                    logger.info(
+                        f"[Model {self.model_id}] 条件单明细[{sym}][{i}]: orderType={o.get('orderType')}, "
+                        f"positionSide={o.get('positionSide')}, triggerPrice={o.get('triggerPrice')}"
+                    )
 
             # ========== 步骤2: 调用模型获取卖出决策 ==========
             logger.debug(f"[Model {self.model_id}] [卖出批次 {batch_num}/{total_batches}] "

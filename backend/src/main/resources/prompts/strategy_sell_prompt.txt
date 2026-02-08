@@ -119,6 +119,29 @@ def execute_sell_decision(
     - 检查是否已经设置了止损/止盈订单
     - 根据已有条件单的触发价格调整新的决策
     - 避免重复设置相同的止损/止盈订单
+
+  **⚠️⚠️⚠️ 查询 symbol 已有条件单触发价（正确写法，必须遵守）：**
+  - **第一步**：将 symbol 转为大写，`symbol = position.get('symbol', '').upper()`（conditional_orders 的 key 均为大写，如 "ARCUSDT"、"BTCUSDT"）
+  - **第二步**：获取该 symbol 的条件单列表，`symbol_orders = conditional_orders.get(symbol, [])`（必须用 .get(symbol, [])，不能直接索引）
+  - **第三步**：遍历 symbol_orders，按 orderType 和 positionSide 过滤：
+    - **止损单**：`order.get('orderType') in ['STOP', 'STOP_MARKET']` 且 `order.get('positionSide') == 'LONG'`（多单）或 `'SHORT'`（空单）
+    - **止盈单**：`order.get('orderType') in ['TAKE_PROFIT', 'TAKE_PROFIT_MARKET']`
+  - **第四步**：读取触发价，`trigger_price = order.get('triggerPrice')`（字段名固定为 triggerPrice，camelCase）
+  - **示例（多单止损单最高触发价）**：
+    ```python
+    symbol = position.get('symbol', '').upper()
+    symbol_orders = conditional_orders.get(symbol, [])
+    existing_stop_loss_price = None
+    for order in symbol_orders:
+        if order.get('orderType') in ['STOP', 'STOP_MARKET'] and order.get('positionSide') == 'LONG':
+            tp = order.get('triggerPrice')
+            if tp is not None:
+                if existing_stop_loss_price is None or tp > existing_stop_loss_price:
+                    existing_stop_loss_price = tp
+    self.log.info(f"{symbol} 多单现有止损单最高触发价: {existing_stop_loss_price}")
+    ```
+  - **错误写法**：❌ 使用 `conditional_orders[symbol]`（key 不存在会报错）；❌ 使用 `order.get('trigger_price')`（字段名为 triggerPrice）；❌ 忘记过滤 positionSide（多空单需分开处理）
+
   - **使用示例：**
     ```python
     # 初始化conditional_orders（如果为None）
@@ -140,11 +163,11 @@ def execute_sell_decision(
         for order in symbol_orders
     )
 
-    # 获取已有止损单的触发价格
+    # 获取已有止损单的触发价格（按 positionSide 过滤，多单用 LONG，空单用 SHORT；字段名为 triggerPrice）
     stop_loss_prices = [
         order.get('triggerPrice')
         for order in symbol_orders
-        if order.get('orderType') in ['STOP', 'STOP_MARKET']
+        if order.get('orderType') in ['STOP', 'STOP_MARKET'] and order.get('triggerPrice') is not None
     ]
 
     # 输出条件单信息日志

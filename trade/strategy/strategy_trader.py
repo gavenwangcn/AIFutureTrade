@@ -691,6 +691,30 @@ class StrategyTrader(Trader):
                 except Exception:
                     pass
 
+                # 打印传递给策略代码的条件单信息（便于排查条件单未正确传递的问题）
+                try:
+                    co = conditional_orders or {}
+                    total_co = sum(len(v) for v in (co.values() if isinstance(co, dict) else []))
+                    symbols_to_log = [str(p.get('symbol') or '').upper() for p in remaining_positions if p.get('symbol')]
+                    symbols_to_log = list(dict.fromkeys(symbols_to_log))
+                    logger.info(
+                        f"[StrategyTrader] [Model {effective_model_id}] 提交到策略代码(sell/{strategy_name}) 条件单信息: "
+                        f"共 {total_co} 个条件单，涉及 {len(co)} 个symbol，keys={list(co.keys())}"
+                    )
+                    for sym_u in symbols_to_log:
+                        orders = co.get(sym_u, []) if isinstance(co, dict) else []
+                        if orders:
+                            for i, o in enumerate(orders):
+                                logger.info(
+                                    f"[StrategyTrader] [Model {effective_model_id}] 条件单[{sym_u}][{i}]: "
+                                    f"orderType={o.get('orderType')}, positionSide={o.get('positionSide')}, "
+                                    f"triggerPrice={o.get('triggerPrice')}, quantity={o.get('quantity')}, algoId={o.get('algoId')}"
+                                )
+                        else:
+                            logger.info(f"[StrategyTrader] [Model {effective_model_id}] 条件单[{sym_u}]: 无（空列表）")
+                except Exception as e:
+                    logger.debug(f"[StrategyTrader] 打印条件单信息异常: {e}")
+
                 decision_result = self.code_executor.execute_strategy_code(
                     strategy_code=strategy_code,
                     strategy_name=strategy_name,
