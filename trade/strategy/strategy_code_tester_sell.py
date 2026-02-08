@@ -178,6 +178,7 @@ class StrategyCodeTesterSell:
             logger.info(f"[StrategyCodeTesterSell] ✓ 卖出策略代码测试通过: {strategy_name}")
         else:
             logger.warning(f"[StrategyCodeTesterSell] ✗ 卖出策略代码测试失败: {strategy_name}, 错误数: {len(errors)}")
+            logger.error(f"[StrategyCodeTesterSell] 测试失败，提交到测试模块的AI生成策略代码:\n--- 策略代码开始 ---\n{strategy_code}\n--- 策略代码结束 ---")
         
         return result
     
