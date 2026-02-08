@@ -4215,7 +4215,7 @@ class TradingEngine:
                     self._update_position(
                         self.model_id, symbol=symbol, position_amt=remaining_amt, avg_price=entry_price,
                         leverage=leverage, position_side=position_side, initial_margin=original_initial_margin,
-                        unrealized_profit=0.0, model_mapping=model_mapping
+                        unrealized_profit=0.0
                     )
                     logger.info(f"TRADE: Partial close (real mode, SDK success) - Model {self.model_id} {symbol} position_side={position_side} closed={strategy_quantity} remaining={remaining_amt} margin_unchanged")
             except Exception as db_err:
@@ -4232,7 +4232,7 @@ class TradingEngine:
                     self._update_position(
                         self.model_id, symbol=symbol, position_amt=remaining_amt, avg_price=entry_price,
                         leverage=leverage, position_side=position_side, initial_margin=original_initial_margin,
-                        unrealized_profit=0.0, model_mapping=model_mapping
+                        unrealized_profit=0.0
                     )
                     logger.info(f"TRADE: Partial close (test/fail mode) - Model {self.model_id} {symbol} position_side={position_side} closed={strategy_quantity} remaining={remaining_amt} margin_unchanged")
             except Exception as db_err:
@@ -4562,7 +4562,7 @@ class TradingEngine:
                     self._update_position(
                         self.model_id, symbol=symbol, position_amt=remaining_amt, avg_price=entry_price,
                         leverage=leverage, position_side=position_side, initial_margin=original_initial_margin,
-                        unrealized_profit=0.0, model_mapping=model_mapping
+                        unrealized_profit=0.0
                     )
                     logger.info(f"TRADE: Partial close (real mode, SDK success) - Model {self.model_id} {symbol} position_side={position_side} closed={strategy_quantity} remaining={remaining_amt} margin_unchanged")
             except Exception as db_err:
@@ -4579,7 +4579,7 @@ class TradingEngine:
                     self._update_position(
                         self.model_id, symbol=symbol, position_amt=remaining_amt, avg_price=entry_price,
                         leverage=leverage, position_side=position_side, initial_margin=original_initial_margin,
-                        unrealized_profit=0.0, model_mapping=model_mapping
+                        unrealized_profit=0.0
                     )
                     logger.info(f"TRADE: Partial close (test/fail mode) - Model {self.model_id} {symbol} position_side={position_side} closed={strategy_quantity} remaining={remaining_amt} margin_unchanged")
             except Exception as db_err:
