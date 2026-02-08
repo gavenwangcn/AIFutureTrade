@@ -1,0 +1,18 @@
+# Maven 构建产物，构建时在容器内生成
+target/
+
+# Git 元数据
+.git/
+.gitignore
+
+# 文档和脚本，构建不需要
+README.md
+scripts/
+
+# IDE 配置
+.idea/
+*.iml
+.vscode/
+.project
+.classpath
+.settings/

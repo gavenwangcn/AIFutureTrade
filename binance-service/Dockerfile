@@ -1,6 +1,8 @@
+# syntax=docker/dockerfile:1
 # ============ Binance Service Dockerfile ============
 # Binance Service微服务
 # 所有配置从application.yml读取，可通过环境变量覆盖
+# 构建时需启用 BuildKit：DOCKER_BUILDKIT=1 docker compose build binance-service
 
 # 多阶段构建：第一阶段构建JAR文件
 FROM maven:3.9.6-eclipse-temurin-17 AS builder
@@ -8,25 +10,28 @@ FROM maven:3.9.6-eclipse-temurin-17 AS builder
 WORKDIR /app
 
 # Maven 依赖缓存优化策略：
-# 1. 先只复制 pom.xml，利用 Docker 层缓存机制
-# 2. 下载所有依赖到本地缓存（不编译代码）
-# 3. 然后复制源代码并编译
+# 1. 先只复制 pom.xml，依赖变更时此层失效，会重新下载依赖
+# 2. 使用 BuildKit 缓存挂载持久化 .m2/repository，跨构建复用依赖
+# 3. 仅代码变更时，依赖层命中缓存，无需重新拉取
+# 4. 构建阶段不使用 -U，避免强制更新依赖
 
-# 第一步：只复制 pom.xml
+# 第一步：只复制 pom.xml（依赖变更时此层失效）
 COPY pom.xml .
 
-# 第二步：下载依赖到本地缓存（利用 Docker 层缓存）
-RUN mvn dependency:go-offline -B -DskipTests || \
+# 第二步：下载依赖到缓存（使用 BuildKit 缓存挂载，依赖在多次构建间复用）
+RUN --mount=type=cache,target=/root/.m2/repository \
+    mvn dependency:go-offline -B -DskipTests || \
     (echo "Warning: dependency:go-offline failed, trying dependency:resolve" && \
      mvn dependency:resolve -B -DskipTests)
 
-# 第三步：复制源代码
+# 第三步：复制源代码（代码变更时仅此层及后续层失效）
 COPY src ./src
 
-# 第四步：构建应用
-RUN mvn clean package -DskipTests -B -U || \
+# 第四步：构建应用（不使用 -U，使用已缓存的依赖；仅编译不重复拉取）
+RUN --mount=type=cache,target=/root/.m2/repository \
+    mvn clean package -DskipTests -B || \
     (echo "Build failed, showing error details..." && \
-     mvn clean package -DskipTests -U && \
+     mvn clean package -DskipTests && \
      exit 1)
 
 # 验证 JAR 文件是否存在且包含主清单属性

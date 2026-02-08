@@ -12,6 +12,9 @@
 # 请使用: ./docker-compose-up.sh --build --no-cache
 # 或单独强制重建: docker compose build --no-cache binance-service && docker compose up -d
 
+# 启用 BuildKit（binance-service 等使用缓存挂载加速构建）
+export DOCKER_BUILDKIT=1
+
 # 确定使用的命令（docker compose 或 docker-compose）
 if docker compose version &> /dev/null 2>&1; then
     DOCKER_COMPOSE_CMD="docker compose"
