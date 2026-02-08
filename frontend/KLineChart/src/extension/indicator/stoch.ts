@@ -47,8 +47,8 @@ const stoch: IndicatorTemplate<Kdj, number> = {
   calc: (dataList, indicator) => {
     const params = indicator.calcParams
     const rsvPeriod = params[0] // RSV计算周期（60）
-    const smoothK = params[1]   // K值平滑周期（20）
-    const smoothD = params[2]  // D值平滑周期（5）
+    const smoothK = params[1] // K值平滑周期（20）
+    const smoothD = params[2] // D值平滑周期（5）
 
     const result: Kdj[] = []
     // 存储原始%K（RSV）值
