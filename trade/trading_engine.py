@@ -4072,9 +4072,28 @@ class TradingEngine:
         if position_amt <= 0:
             return {'symbol': symbol, 'error': '持仓数量为0，无法平仓'}
         
-        # 使用工具函数计算盈亏
+        # 【使用策略指定的数量】若未提供则默认全仓
+        original_strategy_quantity = decision.get('quantity')
+        if original_strategy_quantity is None or (isinstance(original_strategy_quantity, (int, float)) and original_strategy_quantity <= 0):
+            strategy_quantity = position_amt
+            logger.info(f"TRADE: 策略未指定quantity，使用全仓数量 {strategy_quantity} | symbol={symbol}")
+        else:
+            strategy_quantity = adjust_quantity_precision_by_price(float(original_strategy_quantity), current_price)
+            if strategy_quantity <= 0:
+                strategy_quantity = float(original_strategy_quantity)
+                logger.warning(f"TRADE: 精度调整后数量变为0，使用原始值 {strategy_quantity} | symbol={symbol}")
+            else:
+                if strategy_quantity == int(strategy_quantity):
+                    strategy_quantity = int(strategy_quantity)
+            if strategy_quantity > position_amt:
+                logger.warning(f"TRADE: 策略数量({strategy_quantity})超过持仓数量({position_amt})，使用持仓数量 | symbol={symbol}")
+                strategy_quantity = position_amt
+            if strategy_quantity <= 0:
+                return {'symbol': symbol, 'error': 'Strategy quantity must be greater than 0'}
+        
+        # 使用工具函数计算盈亏（基于实际平仓数量 strategy_quantity）
         gross_pnl, trade_fee, net_pnl = calculate_pnl(
-            entry_price, current_price, position_amt, position_side, self.trade_fee_rate
+            entry_price, current_price, strategy_quantity, position_side, self.trade_fee_rate
         )
         
         # 【确定SDK调用的side参数】统一使用SELL（平多和平空都使用SELL）
@@ -4126,17 +4145,17 @@ class TradingEngine:
                 logger.info(f"@API@ [Model {self.model_id}] [change_initial_leverage] === 杠杆设置成功 ===" 
                           f" | symbol={symbol} | leverage={leverage}")
                 
-                # 然后执行交易
+                # 然后执行交易（使用策略指定的数量 strategy_quantity）
                 logger.info(f"@API@ [Model {self.model_id}] [market_trade] === 准备调用接口 ===" 
                           f" | symbol={symbol} | side={sdk_side} | position_side={position_side} | "
-                          f"quantity={position_amt} | price={current_price} | leverage={leverage} | trade_mode={trade_mode}")
+                          f"quantity={strategy_quantity} | price={current_price} | leverage={leverage} | trade_mode={trade_mode}")
                 
                 sdk_response = binance_client.market_trade(
                     symbol=symbol,
                     side=sdk_side,
                     order_type='MARKET',
                     position_side=position_side,
-                    quantity=position_amt,
+                    quantity=strategy_quantity,
                     model_id=model_uuid,
                     conversation_id=conversation_id,
                     trade_id=trade_id,
@@ -4170,26 +4189,54 @@ class TradingEngine:
                 'error': sdk_error
             }
         
-        # 平仓：只有在real模式且SDK返回成功时才更新数据库持仓记录（将持仓数量设为0）
-        # 对于test模式：始终更新（因为测试模式不会真实成交）
-        if trade_mode == 'real' and parsed_response and not parsed_response.get('error'):
-            # real模式且SDK返回成功，才关闭持仓
+        # 更新数据库持仓记录：全平仓则删除，部分平仓则减少持仓数量（保证金不变）
+        model_mapping = self.models_db._get_model_id_mapping() if self.models_db else None
+        # 部分平仓时获取原始 initial_margin，保证金保持不变
+        original_initial_margin = position.get('initial_margin', 0.0)
+        if original_initial_margin == 0.0:
             try:
-                self._close_position(self.model_id, symbol=symbol, position_side=position_side)
-                logger.info(f"TRADE: Closed position (real mode, SDK success) - Model {self.model_id} {symbol} position_side={position_side}")
+                portfolio_row = self.portfolios_db.query(
+                    f"SELECT initial_margin FROM {self.portfolios_db.portfolios_table} "
+                    f"WHERE model_id = %s AND symbol = %s AND position_side = %s",
+                    (self.portfolios_db._get_model_uuid(self.model_id), symbol.upper(), position_side)
+                )
+                if portfolio_row and len(portfolio_row) > 0 and portfolio_row[0][0] is not None:
+                    original_initial_margin = float(portfolio_row[0][0])
+            except Exception:
+                pass
+        if trade_mode == 'real' and parsed_response and not parsed_response.get('error'):
+            try:
+                if strategy_quantity >= position_amt:
+                    self._close_position(self.model_id, symbol=symbol, position_side=position_side)
+                    logger.info(f"TRADE: Closed position (real mode, SDK success) - Model {self.model_id} {symbol} position_side={position_side} quantity={strategy_quantity}")
+                else:
+                    remaining_amt = position_amt - strategy_quantity
+                    leverage = self._resolve_leverage(decision)
+                    self._update_position(
+                        self.model_id, symbol=symbol, position_amt=remaining_amt, avg_price=entry_price,
+                        leverage=leverage, position_side=position_side, initial_margin=original_initial_margin,
+                        unrealized_profit=0.0, model_mapping=model_mapping
+                    )
+                    logger.info(f"TRADE: Partial close (real mode, SDK success) - Model {self.model_id} {symbol} position_side={position_side} closed={strategy_quantity} remaining={remaining_amt} margin_unchanged")
             except Exception as db_err:
-                logger.error(f"TRADE: Close position failed (real mode, SDK success) model={self.model_id} future={symbol}: {db_err}")
+                logger.error(f"TRADE: Update position failed (real mode, SDK success) model={self.model_id} future={symbol}: {db_err}")
                 raise
         elif trade_mode == 'test' or (trade_mode == 'real' and (not parsed_response or parsed_response.get('error'))):
-            # test模式或real模式但SDK调用失败，也关闭持仓（test模式始终更新，real模式失败时也更新以保持一致性）
             try:
-                self._close_position(self.model_id, symbol=symbol, position_side=position_side)
-                if trade_mode == 'test':
-                    logger.info(f"TRADE: Closed position (test mode) - Model {self.model_id} {symbol} position_side={position_side}")
+                if strategy_quantity >= position_amt:
+                    self._close_position(self.model_id, symbol=symbol, position_side=position_side)
+                    logger.info(f"TRADE: Closed position (test/fail mode) - Model {self.model_id} {symbol} position_side={position_side} quantity={strategy_quantity}")
                 else:
-                    logger.warn(f"TRADE: Closed position (real mode, SDK failed) - Model {self.model_id} {symbol} position_side={position_side}")
+                    remaining_amt = position_amt - strategy_quantity
+                    leverage = self._resolve_leverage(decision)
+                    self._update_position(
+                        self.model_id, symbol=symbol, position_amt=remaining_amt, avg_price=entry_price,
+                        leverage=leverage, position_side=position_side, initial_margin=original_initial_margin,
+                        unrealized_profit=0.0, model_mapping=model_mapping
+                    )
+                    logger.info(f"TRADE: Partial close (test/fail mode) - Model {self.model_id} {symbol} position_side={position_side} closed={strategy_quantity} remaining={remaining_amt} margin_unchanged")
             except Exception as db_err:
-                logger.error(f"TRADE: Close position failed ({trade_signal.upper()}) model={self.model_id} future={symbol}: {db_err}")
+                logger.error(f"TRADE: Update position failed ({trade_signal.upper()}) model={self.model_id} future={symbol}: {db_err}")
                 raise
         
         # 【确定trades表的字段】
@@ -4200,7 +4247,7 @@ class TradingEngine:
             trade_signal_final = parsed_response.get('side', trade_signal)
             trade_position_side_final = parsed_response.get('positionSide', position_side.lower())
             # real模式：使用SDK返回的executedQty，并根据价格调整精度
-            # test模式：使用position_amt（已经根据价格调整过精度）
+            # test模式：使用strategy_quantity（策略指定的数量）
             if trade_mode == 'real':
                 executed_qty = parsed_response.get('executedQty', 0.0)
                 avg_price = parsed_response.get('avgPrice', current_price)
@@ -4213,7 +4260,7 @@ class TradingEngine:
                 else:
                     trade_quantity = executed_qty
             else:
-                trade_quantity = position_amt  # test模式，position_amt已经根据价格调整过精度
+                trade_quantity = strategy_quantity  # test模式，使用策略指定的数量
             trade_price = parsed_response.get('avgPrice', 0.0) if trade_mode == 'real' else current_price
             order_id = parsed_response.get('orderId')
             order_type = parsed_response.get('type')
@@ -4223,7 +4270,7 @@ class TradingEngine:
             # test模式或未解析，使用策略返回的值
             trade_signal_final = trade_signal
             trade_position_side_final = position_side.lower()
-            trade_quantity = position_amt
+            trade_quantity = strategy_quantity
             trade_price = current_price
             order_id = None
             order_type = None
@@ -4257,6 +4304,9 @@ class TradingEngine:
                     initial_margin = float(portfolio_row[0][0])
             except Exception as e:
                 logger.warning(f"[TradingEngine] Failed to get initial_margin from portfolios table: {e}")
+        # 部分平仓时，trades表记录的initial_margin按平仓比例计算
+        if position_amt > 0 and strategy_quantity < position_amt:
+            initial_margin = initial_margin * (strategy_quantity / position_amt)
         
         # 记录交易（使用 _resolve_leverage 解析，优先使用 decision 中的 leverage，否则使用模型配置的 leverage）
         logger.info(f"TRADE: PENDING - Model {self.model_id} {trade_signal_final.upper()} {symbol} position_side={trade_position_side_final_upper} side={trade_side_direction} position_amt={trade_quantity} price={trade_price} fee={trade_fee} net_pnl={net_pnl} initial_margin={initial_margin}")
@@ -4316,7 +4366,7 @@ class TradingEngine:
             'trade_id': trade_id,
             'strategy_decision_id': strategy_decision_id,
             'signal': trade_signal,  # 返回实际的signal（sell_to_long或sell_to_short）
-            'position_amt': position_amt,
+            'position_amt': strategy_quantity,
             'position_side': position_side,  # 返回position_side信息
             'price': current_price,
             'pnl': net_pnl,
@@ -4367,9 +4417,28 @@ class TradingEngine:
         if position_amt <= 0:
             return {'symbol': symbol, 'error': '持仓数量为0，无法平仓'}
 
-        # 使用工具函数计算盈亏
+        # 【使用策略指定的数量】若未提供则默认全仓
+        original_strategy_quantity = decision.get('quantity')
+        if original_strategy_quantity is None or (isinstance(original_strategy_quantity, (int, float)) and original_strategy_quantity <= 0):
+            strategy_quantity = position_amt
+            logger.info(f"TRADE: 策略未指定quantity，使用全仓数量 {strategy_quantity} | symbol={symbol}")
+        else:
+            strategy_quantity = adjust_quantity_precision_by_price(float(original_strategy_quantity), current_price)
+            if strategy_quantity <= 0:
+                strategy_quantity = float(original_strategy_quantity)
+                logger.warning(f"TRADE: 精度调整后数量变为0，使用原始值 {strategy_quantity} | symbol={symbol}")
+            else:
+                if strategy_quantity == int(strategy_quantity):
+                    strategy_quantity = int(strategy_quantity)
+            if strategy_quantity > position_amt:
+                logger.warning(f"TRADE: 策略数量({strategy_quantity})超过持仓数量({position_amt})，使用持仓数量 | symbol={symbol}")
+                strategy_quantity = position_amt
+            if strategy_quantity <= 0:
+                return {'symbol': symbol, 'error': 'Strategy quantity must be greater than 0'}
+
+        # 使用工具函数计算盈亏（基于实际平仓数量 strategy_quantity）
         gross_pnl, trade_fee, net_pnl = calculate_pnl(
-            entry_price, current_price, position_amt, position_side, self.trade_fee_rate
+            entry_price, current_price, strategy_quantity, position_side, self.trade_fee_rate
         )
 
         # 卖出循环专用：统一使用SELL方向
@@ -4421,17 +4490,17 @@ class TradingEngine:
                 logger.info(f"@API@ [Model {self.model_id}] [change_initial_leverage] === 杠杆设置成功 ===" 
                           f" | symbol={symbol} | leverage={leverage}")
                 
-                # 然后执行交易
+                # 然后执行交易（使用策略指定的数量 strategy_quantity）
                 logger.info(f"@API@ [Model {self.model_id}] [market_trade] === 准备调用接口 ===" 
                           f" | symbol={symbol} | side={side_for_trade} | position_side={position_side} | "
-                          f"quantity={position_amt} | price={current_price} | leverage={leverage} | trade_mode={trade_mode}")
+                          f"quantity={strategy_quantity} | price={current_price} | leverage={leverage} | trade_mode={trade_mode}")
                 
                 sdk_response = binance_client.market_trade(
                     symbol=symbol,
                     side=side_for_trade,
                     order_type='MARKET',
                     position_side=position_side,
-                    quantity=position_amt,
+                    quantity=strategy_quantity,
                     model_id=model_uuid,
                     conversation_id=conversation_id,
                     trade_id=trade_id,
@@ -4466,26 +4535,55 @@ class TradingEngine:
                 'error': sdk_error
             }
         
-        # 平仓：只有在real模式且SDK返回成功时才更新数据库持仓记录（将持仓数量设为0）
-        # 对于test模式：始终更新（因为测试模式不会真实成交）
-        if trade_mode == 'real' and parsed_response and not parsed_response.get('error'):
-            # real模式且SDK返回成功，才关闭持仓
+        # 更新数据库持仓记录：全平仓则删除，部分平仓则减少持仓数量（保证金不变）
+        # 只有在real模式且SDK返回成功时才更新；对于test模式：始终更新
+        model_mapping = self.models_db._get_model_id_mapping() if self.models_db else None
+        # 部分平仓时获取原始 initial_margin，保证金保持不变
+        original_initial_margin = position.get('initial_margin', 0.0)
+        if original_initial_margin == 0.0:
             try:
-                self._close_position(self.model_id, symbol=symbol, position_side=position_side)
-                logger.info(f"TRADE: Closed position (real mode, SDK success) - Model {self.model_id} {symbol} position_side={position_side}")
+                portfolio_row = self.portfolios_db.query(
+                    f"SELECT initial_margin FROM {self.portfolios_db.portfolios_table} "
+                    f"WHERE model_id = %s AND symbol = %s AND position_side = %s",
+                    (self.portfolios_db._get_model_uuid(self.model_id), symbol.upper(), position_side)
+                )
+                if portfolio_row and len(portfolio_row) > 0 and portfolio_row[0][0] is not None:
+                    original_initial_margin = float(portfolio_row[0][0])
+            except Exception:
+                pass
+        if trade_mode == 'real' and parsed_response and not parsed_response.get('error'):
+            try:
+                if strategy_quantity >= position_amt:
+                    self._close_position(self.model_id, symbol=symbol, position_side=position_side)
+                    logger.info(f"TRADE: Closed position (real mode, SDK success) - Model {self.model_id} {symbol} position_side={position_side} quantity={strategy_quantity}")
+                else:
+                    remaining_amt = position_amt - strategy_quantity
+                    leverage = self._resolve_leverage(decision)
+                    self._update_position(
+                        self.model_id, symbol=symbol, position_amt=remaining_amt, avg_price=entry_price,
+                        leverage=leverage, position_side=position_side, initial_margin=original_initial_margin,
+                        unrealized_profit=0.0, model_mapping=model_mapping
+                    )
+                    logger.info(f"TRADE: Partial close (real mode, SDK success) - Model {self.model_id} {symbol} position_side={position_side} closed={strategy_quantity} remaining={remaining_amt} margin_unchanged")
             except Exception as db_err:
-                logger.error(f"TRADE: Close position failed (real mode, SDK success) model={self.model_id} future={symbol}: {db_err}")
+                logger.error(f"TRADE: Update position failed (real mode, SDK success) model={self.model_id} future={symbol}: {db_err}")
                 raise
         elif trade_mode == 'test' or (trade_mode == 'real' and (not parsed_response or parsed_response.get('error'))):
-            # test模式或real模式但SDK调用失败，也关闭持仓（test模式始终更新，real模式失败时也更新以保持一致性）
             try:
-                self._close_position(self.model_id, symbol=symbol, position_side=position_side)
-                if trade_mode == 'test':
-                    logger.info(f"TRADE: Closed position (test mode) - Model {self.model_id} {symbol} position_side={position_side}")
+                if strategy_quantity >= position_amt:
+                    self._close_position(self.model_id, symbol=symbol, position_side=position_side)
+                    logger.info(f"TRADE: Closed position (test/fail mode) - Model {self.model_id} {symbol} position_side={position_side} quantity={strategy_quantity}")
                 else:
-                    logger.warn(f"TRADE: Closed position (real mode, SDK failed) - Model {self.model_id} {symbol} position_side={position_side}")
+                    remaining_amt = position_amt - strategy_quantity
+                    leverage = self._resolve_leverage(decision)
+                    self._update_position(
+                        self.model_id, symbol=symbol, position_amt=remaining_amt, avg_price=entry_price,
+                        leverage=leverage, position_side=position_side, initial_margin=original_initial_margin,
+                        unrealized_profit=0.0, model_mapping=model_mapping
+                    )
+                    logger.info(f"TRADE: Partial close (test/fail mode) - Model {self.model_id} {symbol} position_side={position_side} closed={strategy_quantity} remaining={remaining_amt} margin_unchanged")
             except Exception as db_err:
-                logger.error(f"TRADE: Close position failed (CLOSE) model={self.model_id} future={symbol}: {db_err}")
+                logger.error(f"TRADE: Update position failed (CLOSE) model={self.model_id} future={symbol}: {db_err}")
                 raise
         
         # 获取持仓的initial_margin（用于计算盈亏百分比）
@@ -4503,6 +4601,9 @@ class TradingEngine:
                     initial_margin = float(portfolio_row[0][0])
             except Exception as e:
                 logger.warning(f"[TradingEngine] Failed to get initial_margin from portfolios table: {e}")
+        # 部分平仓时，trades表记录的initial_margin按平仓比例计算
+        if position_amt > 0 and strategy_quantity < position_amt:
+            initial_margin = initial_margin * (strategy_quantity / position_amt)
         
         # 【确定trades表的字段值】
         # side字段：交易方向（buy/sell），从signal中提取
@@ -4511,7 +4612,7 @@ class TradingEngine:
         if parsed_response:
             trade_signal_final = parsed_response.get('side', 'close_position')
             trade_position_side_final = parsed_response.get('positionSide', position_side.lower())
-            trade_quantity = parsed_response.get('executedQty', 0.0) if trade_mode == 'real' else position_amt
+            trade_quantity = parsed_response.get('executedQty', 0.0) if trade_mode == 'real' else strategy_quantity
             trade_price = parsed_response.get('avgPrice', 0.0) if trade_mode == 'real' else current_price
             order_id = parsed_response.get('orderId')
             order_type = parsed_response.get('type')
@@ -4521,7 +4622,7 @@ class TradingEngine:
             # test模式或未解析，使用策略返回的值
             trade_signal_final = 'close_position'
             trade_position_side_final = position_side.lower()
-            trade_quantity = position_amt
+            trade_quantity = strategy_quantity
             trade_price = current_price
             order_id = None
             order_type = None
@@ -4602,7 +4703,7 @@ class TradingEngine:
             'trade_id': trade_id,
             'strategy_decision_id': strategy_decision_id,
             'signal': 'close_position',
-            'position_amt': position_amt,
+            'position_amt': strategy_quantity,
             'price': current_price,
             'pnl': net_pnl,
             'fee': trade_fee,
