@@ -63,6 +63,55 @@ def adjust_quantity_precision_by_price(quantity: float, price: float) -> float:
     return adjusted_quantity
 
 
+def adjust_quantity_precision_by_price_ceil(quantity: float, price: float) -> float:
+    """
+    根据symbol价格动态调整quantity的精度，使用向后取整（向上取整）。
+    例如：20.5 -> 21，0.5 -> 1
+    
+    规则：
+    - 价格 < 1：取整数（ceil）
+    - 1 <= 价格 < 10：小数点后1位（ceil到1位）
+    - 其他精度同上，使用ceil向上取整
+    
+    Args:
+        quantity: 原始数量
+        price: symbol的当前价格
+        
+    Returns:
+        调整精度后的数量（向后取整）
+    """
+    if quantity <= 0:
+        return 0.0
+    
+    if price <= 0:
+        return float(math.ceil(quantity))
+    
+    # 根据价格范围确定精度
+    if price < 1:
+        precision = 0
+    elif price < 10:
+        precision = 1
+    elif price < 100:
+        precision = 2
+    elif price < 1000:
+        precision = 3
+    elif price < 10000:
+        precision = 4
+    elif price < 100000:
+        precision = 5
+    else:
+        precision = 6
+    
+    # 向后取整（向上取整）到指定精度
+    multiplier = 10 ** precision
+    adjusted_quantity = math.ceil(quantity * multiplier) / multiplier
+    
+    if precision == 0:
+        adjusted_quantity = float(int(adjusted_quantity))
+    
+    return adjusted_quantity
+
+
 def parse_signal_to_position_side(signal: str) -> Tuple[str, str]:
     """
     解析signal到position_side和trade_signal

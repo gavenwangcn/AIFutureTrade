@@ -267,14 +267,44 @@ public class AlgoOrderServiceImpl implements AlgoOrderService {
                         String actualPriceStr = (String) sdkOrderMap.get("actualPrice");
                         String quantityStr = (String) sdkOrderMap.get("quantity");
                         Object actualOrderIdObj = sdkOrderMap.get("actualOrderId");
+                        
+                        // 解析实际成交数量
+                        Double executedQuantity = quantity;
+                        if (quantityStr != null && !quantityStr.isEmpty()) {
+                            try {
+                                executedQuantity = Double.parseDouble(quantityStr);
+                            } catch (NumberFormatException ignored) { }
+                        }
+                        
+                        // 在构建trades记录前，校验本地持仓数量是否足够
+                        PortfolioDO position = portfolioMapper.selectPosition(order.getModelId(), symbol.toUpperCase(), positionSide);
+                        if (position == null) {
+                            String errorReason = "持仓不存在，无法同步成交记录: modelId=" + order.getModelId() + ", symbol=" + symbol + ", positionSide=" + positionSide;
+                            log.warn("[AlgoOrderService] [real模式] ❌ {}", errorReason);
+                            algoOrderMapper.updateAlgoStatusWithError(orderId, "FAILED", errorReason);
+                            String strategyDecisionId = order.getStrategyDecisionId();
+                            if (strategyDecisionId != null && !strategyDecisionId.isEmpty()) {
+                                strategyDecisionMapper.updateStrategyDecisionStatus(strategyDecisionId, "REJECTED", null, errorReason);
+                            }
+                            result.setFailedCount(result.getFailedCount() + 1);
+                            return;
+                        }
+                        Double positionAmt = Math.abs(position.getPositionAmt());
+                        if (positionAmt < executedQuantity) {
+                            String errorReason = String.format("持仓数量不足，无法同步成交记录: 成交数量=%.8f，当前持仓=%.8f", executedQuantity, positionAmt);
+                            log.warn("[AlgoOrderService] [real模式] ❌ {}", errorReason);
+                            algoOrderMapper.updateAlgoStatusWithError(orderId, "FAILED", errorReason);
+                            String strategyDecisionId = order.getStrategyDecisionId();
+                            if (strategyDecisionId != null && !strategyDecisionId.isEmpty()) {
+                                strategyDecisionMapper.updateStrategyDecisionStatus(strategyDecisionId, "REJECTED", null, errorReason);
+                            }
+                            result.setFailedCount(result.getFailedCount() + 1);
+                            return;
+                        }
 
                         if (actualPriceStr != null && !actualPriceStr.isEmpty()) {
                             try {
                                 Double actualPrice = Double.parseDouble(actualPriceStr);
-                                Double executedQuantity = quantity;
-                                if (quantityStr != null && !quantityStr.isEmpty()) {
-                                    executedQuantity = Double.parseDouble(quantityStr);
-                                }
                                 Long actualOrderId = null;
                                 if (actualOrderIdObj != null) {
                                     if (actualOrderIdObj instanceof Long) {
@@ -410,6 +440,25 @@ public class AlgoOrderServiceImpl implements AlgoOrderService {
         log.info("[AlgoOrderService] [virtual模式] ✅ 条件订单触发: orderId={}, symbol={}, currentPrice={}, triggerPrice={}, positionSide={}", 
                 orderId, symbol, currentPrice, triggerPrice, positionSide);
         
+        // 在价格触发后、执行前，校验持仓数量是否足够
+        Double orderQuantity = order.getQuantity();
+        if (orderQuantity != null && orderQuantity > 0) {
+            PortfolioDO position = portfolioMapper.selectPosition(order.getModelId(), symbol.toUpperCase(), positionSide);
+            if (position == null) {
+                String errorReason = "持仓不存在，无法执行条件单: modelId=" + order.getModelId() + ", symbol=" + symbol + ", positionSide=" + positionSide;
+                log.warn("[AlgoOrderService] [virtual模式] ❌ {}", errorReason);
+                handleInsufficientPositionError(order, result, errorReason);
+                return;
+            }
+            Double positionAmt = Math.abs(position.getPositionAmt());
+            if (positionAmt < orderQuantity) {
+                String errorReason = String.format("持仓数量不足，无法执行条件单: 条件单要求数量=%.8f，当前持仓=%.8f", orderQuantity, positionAmt);
+                log.warn("[AlgoOrderService] [virtual模式] ❌ {}", errorReason);
+                handleInsufficientPositionError(order, result, errorReason);
+                return;
+            }
+        }
+        
         result.setTriggeredCount(result.getTriggeredCount() + 1);
         
         // 更新订单状态为"triggered"
@@ -488,6 +537,28 @@ public class AlgoOrderServiceImpl implements AlgoOrderService {
                             strategyDecisionId, updateErr.getMessage(), updateErr);
                 }
             }
+        }
+    }
+    
+    /**
+     * 处理持仓不足错误：更新订单状态为FAILED，strategy_decisions为REJECTED
+     */
+    private void handleInsufficientPositionError(AlgoOrderDO order, AlgoOrderProcessResult result, String errorReason) {
+        try {
+            algoOrderMapper.updateAlgoStatusWithError(order.getId(), "FAILED", errorReason);
+            String strategyDecisionId = order.getStrategyDecisionId();
+            if (strategyDecisionId != null && !strategyDecisionId.isEmpty()) {
+                strategyDecisionMapper.updateStrategyDecisionStatus(
+                        strategyDecisionId,
+                        "REJECTED",
+                        null,
+                        errorReason
+                );
+            }
+            result.setFailedCount(result.getFailedCount() + 1);
+        } catch (Exception e) {
+            log.error("[AlgoOrderService] 更新持仓不足错误状态失败: orderId={}, error={}", order.getId(), e.getMessage());
+            result.setFailedCount(result.getFailedCount() + 1);
         }
     }
     
@@ -1020,6 +1091,8 @@ public class AlgoOrderServiceImpl implements AlgoOrderService {
         // 持仓相关错误
         if (errorMessage.contains("持仓不存在")) {
             errorType = "持仓不存在";
+        } else if (errorMessage.contains("持仓数量不足")) {
+            errorType = "持仓数量不足";
         }
         // Binance客户端错误
         else if (errorMessage.contains("无法创建 Binance 客户端")) {

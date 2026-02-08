@@ -946,15 +946,16 @@ else:
      - 平仓50%：`quantity = position_amt * 0.5`
      - 平仓部分：`quantity = position_amt * 平仓比例`
   5. **根据symbol价格动态调整quantity精度**（重要！）：
-     - 价格 < 1：取整数 `quantity = round(quantity, 0)` 或 `quantity = int(quantity)`
-     - 1 <= 价格 < 10：小数点后1位 `quantity = round(quantity, 1)`
-     - 10 <= 价格 < 100：小数点后2位 `quantity = round(quantity, 2)`
-     - 100 <= 价格 < 1000：小数点后3位 `quantity = round(quantity, 3)`
-     - 1000 <= 价格 < 10000：小数点后4位 `quantity = round(quantity, 4)`
-     - 10000 <= 价格 < 100000：小数点后5位 `quantity = round(quantity, 5)`
-     - 价格 >= 100000：小数点后6位（最多）`quantity = round(quantity, 6)`
+     - **quantity使用向后取整**（向上取整）：例如 20.5 取 21，0.5 取 1。使用 `import math` 后 `quantity = math.ceil(quantity)` 或按精度：`quantity = math.ceil(quantity * 10**精度) / 10**精度`
+     - 价格 < 1：取整数（向后取整）`quantity = math.ceil(quantity)`
+     - 1 <= 价格 < 10：小数点后1位（向后取整）`quantity = math.ceil(quantity * 10) / 10`
+     - 10 <= 价格 < 100：小数点后2位 `quantity = math.ceil(quantity * 100) / 100`
+     - 100 <= 价格 < 1000：小数点后3位 `quantity = math.ceil(quantity * 1000) / 1000`
+     - 1000 <= 价格 < 10000：小数点后4位 `quantity = math.ceil(quantity * 10000) / 10000`
+     - 10000 <= 价格 < 100000：小数点后5位 `quantity = math.ceil(quantity * 100000) / 100000`
+     - 价格 >= 100000：小数点后6位（最多）`quantity = math.ceil(quantity * 1000000) / 1000000`
   6. 杠杆：通常与持仓时的杠杆一致，从 `position.get('leverage', 5)` 获取
-- **系统会自动计算平仓时的 USDT 数量**：`quantity * 当前价格`
+- **系统会自动**：若策略返回的 quantity 大于当前持仓数量，则使用持仓数量；计算平仓时的 USDT 数量：`quantity * 当前价格`
 
 **示例：**
 ```python
@@ -962,21 +963,24 @@ position_amt = abs(position.get('position_amt', 0))  # 持仓合约数量
 close_quantity = position_amt  # 平仓100%
 # 或平仓50%：close_quantity = position_amt * 0.5
 
-# 根据symbol价格动态调整quantity精度
+# 根据symbol价格动态调整quantity精度（向后取整：20.5取21；若quantity>持仓数量，系统会自动使用持仓数量）
+import math
 if current_price < 1:
-    close_quantity = round(close_quantity, 0)  # 取整数
+    close_quantity = math.ceil(close_quantity)  # 取整数，向后取整
 elif current_price < 10:
-    close_quantity = round(close_quantity, 1)  # 小数点后1位
+    close_quantity = math.ceil(close_quantity * 10) / 10  # 小数点后1位
 elif current_price < 100:
-    close_quantity = round(close_quantity, 2)  # 小数点后2位
+    close_quantity = math.ceil(close_quantity * 100) / 100  # 小数点后2位
 elif current_price < 1000:
-    close_quantity = round(close_quantity, 3)  # 小数点后3位
+    close_quantity = math.ceil(close_quantity * 1000) / 1000  # 小数点后3位
 elif current_price < 10000:
-    close_quantity = round(close_quantity, 4)  # 小数点后4位
+    close_quantity = math.ceil(close_quantity * 10000) / 10000  # 小数点后4位
 elif current_price < 100000:
-    close_quantity = round(close_quantity, 5)  # 小数点后5位
+    close_quantity = math.ceil(close_quantity * 100000) / 100000  # 小数点后5位
 else:
-    close_quantity = round(close_quantity, 6)  # 小数点后6位（最多）
+    close_quantity = math.ceil(close_quantity * 1000000) / 1000000  # 小数点后6位（最多）
+# 若计算出的close_quantity超过持仓数量，系统会自动使用持仓数量
+close_quantity = min(close_quantity, position_amt)
 
 # ⚠️ 重要：所有字段都必须提供，不能为空或None
 decisions[symbol] = {
@@ -1196,19 +1200,19 @@ decisions[symbol] = {
       
       # 根据symbol价格动态调整quantity精度
       if current_price < 1:
-          quantity = round(quantity, 0)  # 取整数
+          quantity = math.ceil(quantity)  # 取整数，向后取整
       elif current_price < 10:
-          quantity = round(quantity, 1)  # 小数点后1位
+          quantity = math.ceil(quantity * 10) / 10  # 小数点后1位
       elif current_price < 100:
-          quantity = round(quantity, 2)  # 小数点后2位
+          quantity = math.ceil(quantity * 100) / 100  # 小数点后2位
       elif current_price < 1000:
-          quantity = round(quantity, 3)  # 小数点后3位
+          quantity = math.ceil(quantity * 1000) / 1000  # 小数点后3位
       elif current_price < 10000:
-          quantity = round(quantity, 4)  # 小数点后4位
+          quantity = math.ceil(quantity * 10000) / 10000  # 小数点后4位
       elif current_price < 100000:
-          quantity = round(quantity, 5)  # 小数点后5位
+          quantity = math.ceil(quantity * 100000) / 100000  # 小数点后5位
       else:
-          quantity = round(quantity, 6)  # 小数点后6位（最多）
+          quantity = math.ceil(quantity * 1000000) / 1000000  # 小数点后6位（最多）
       
       self.log.info(f"{symbol} 计算合约数量: 开仓资金={capital_usdt:.2f} USDT, 杠杆={leverage}x, 当前价格={current_price:.4f}, 合约数量={quantity}")
       ```
@@ -1217,9 +1221,12 @@ decisions[symbol] = {
       # ❌ 错误示例（缺少日志）
       close_quantity = position_amt * 0.5
 
-      # ✅ 正确示例（有详细日志）
+      # ✅ 正确示例（有详细日志，向后取整；若超过持仓则用持仓数量）
+      import math
       close_ratio = 0.5  # 平仓50%
       close_quantity = position_amt * close_ratio
+      close_quantity = math.ceil(close_quantity) if close_quantity > 0 else 0
+      close_quantity = min(close_quantity, position_amt)
       self.log.info(f"{symbol} 计算平仓数量: 持仓数量={position_amt}, 平仓比例={close_ratio}, 平仓数量={close_quantity}")
       ```
 

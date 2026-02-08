@@ -17,6 +17,7 @@ from datetime import datetime, timezone, timedelta
 from typing import Dict, List, Optional, Any
 import json
 import logging
+import math
 import threading
 import time
 import uuid
@@ -45,6 +46,7 @@ from trade.trading.trading_utils import (
     calculate_trade_requirements,
     calculate_pnl,
     adjust_quantity_precision_by_price,
+    adjust_quantity_precision_by_price_ceil,
     extract_prices_from_market_state
 )
 from trade.trading.market_data_manager import MarketDataManager
@@ -3739,15 +3741,14 @@ class TradingEngine:
             return {'symbol': symbol, 'error': '请求的合约数量无效'}
         
         # position_amt = 买入 symbol 合约的数量（合约数量）
-        # 根据symbol价格动态调整quantity精度（与策略执行记录保持一致）
-        # 注意：strategy_decisions表中quantity已根据价格调整精度，这里也使用相同的处理方式
-        position_amt = adjust_quantity_precision_by_price(requested_quantity, price)
+        # 使用向后取整（20.5->21）调整quantity精度
+        position_amt = adjust_quantity_precision_by_price_ceil(requested_quantity, price)
         # 如果精度为0（整数），转换为整数类型
         if position_amt == int(position_amt):
             position_amt = int(position_amt)
         
         if position_amt <= 0:
-            return {'symbol': symbol, 'error': '请求的合约数量无效（向下取整后为0）'}
+            return {'symbol': symbol, 'error': '请求的合约数量无效（取整后为0）'}
         
         # 根据合约数量反推需要的本金USDT数量
         # 公式：capital_usdt = (quantity * price) / leverage
@@ -4114,18 +4115,16 @@ class TradingEngine:
             return {'symbol': symbol, 'error': '持仓数量为0，无法平仓'}
         
         # 【使用策略指定的数量】若未提供则默认全仓
+        # 使用向后取整（20.5->21）；若策略返回的quantity>持仓数量，则使用持仓数量
         original_strategy_quantity = decision.get('quantity')
         if original_strategy_quantity is None or (isinstance(original_strategy_quantity, (int, float)) and original_strategy_quantity <= 0):
             strategy_quantity = position_amt
             logger.info(f"TRADE: 策略未指定quantity，使用全仓数量 {strategy_quantity} | symbol={symbol}")
         else:
-            strategy_quantity = adjust_quantity_precision_by_price(float(original_strategy_quantity), current_price)
+            strategy_quantity = adjust_quantity_precision_by_price_ceil(float(original_strategy_quantity), current_price)
             if strategy_quantity <= 0:
-                strategy_quantity = float(original_strategy_quantity)
-                logger.warning(f"TRADE: 精度调整后数量变为0，使用原始值 {strategy_quantity} | symbol={symbol}")
-            else:
-                if strategy_quantity == int(strategy_quantity):
-                    strategy_quantity = int(strategy_quantity)
+                strategy_quantity = float(math.ceil(float(original_strategy_quantity)))
+                logger.warning(f"TRADE: 精度调整后数量变为0，使用向后取整原始值 {strategy_quantity} | symbol={symbol}")
             if strategy_quantity > position_amt:
                 logger.warning(f"TRADE: 策略数量({strategy_quantity})超过持仓数量({position_amt})，使用持仓数量 | symbol={symbol}")
                 strategy_quantity = position_amt
@@ -4133,7 +4132,7 @@ class TradingEngine:
                 return {'symbol': symbol, 'error': 'Strategy quantity must be greater than 0'}
 
         # 【最终校验】防止超出持有数量（SDK调用和交易记录前再次校验）
-        strategy_quantity = min(int(strategy_quantity), int(position_amt))
+        strategy_quantity = min(int(math.ceil(strategy_quantity)), int(position_amt))
         if strategy_quantity <= 0:
             return {'symbol': symbol, 'error': '持仓数量不足，无法执行平仓/卖出'}
         
@@ -4463,19 +4462,16 @@ class TradingEngine:
         if position_amt <= 0:
             return {'symbol': symbol, 'error': '持仓数量为0，无法平仓'}
 
-        # 【使用策略指定的数量】若未提供则默认全仓
+        # 【使用策略指定的数量】向后取整（20.5->21）；若quantity>持仓数量，使用持仓数量
         original_strategy_quantity = decision.get('quantity')
         if original_strategy_quantity is None or (isinstance(original_strategy_quantity, (int, float)) and original_strategy_quantity <= 0):
             strategy_quantity = position_amt
             logger.info(f"TRADE: 策略未指定quantity，使用全仓数量 {strategy_quantity} | symbol={symbol}")
         else:
-            strategy_quantity = adjust_quantity_precision_by_price(float(original_strategy_quantity), current_price)
+            strategy_quantity = adjust_quantity_precision_by_price_ceil(float(original_strategy_quantity), current_price)
             if strategy_quantity <= 0:
-                strategy_quantity = float(original_strategy_quantity)
-                logger.warning(f"TRADE: 精度调整后数量变为0，使用原始值 {strategy_quantity} | symbol={symbol}")
-            else:
-                if strategy_quantity == int(strategy_quantity):
-                    strategy_quantity = int(strategy_quantity)
+                strategy_quantity = float(math.ceil(float(original_strategy_quantity)))
+                logger.warning(f"TRADE: 精度调整后数量变为0，使用向后取整原始值 {strategy_quantity} | symbol={symbol}")
             if strategy_quantity > position_amt:
                 logger.warning(f"TRADE: 策略数量({strategy_quantity})超过持仓数量({position_amt})，使用持仓数量 | symbol={symbol}")
                 strategy_quantity = position_amt
@@ -4483,7 +4479,7 @@ class TradingEngine:
                 return {'symbol': symbol, 'error': 'Strategy quantity must be greater than 0'}
 
         # 【最终校验】防止超出持有数量（SDK调用和交易记录前再次校验）
-        strategy_quantity = min(int(strategy_quantity), int(position_amt))
+        strategy_quantity = min(int(math.ceil(strategy_quantity)), int(position_amt))
         if strategy_quantity <= 0:
             return {'symbol': symbol, 'error': '持仓数量不足，无法执行平仓'}
 
@@ -4970,17 +4966,12 @@ class TradingEngine:
         if not original_strategy_quantity:
             return {'symbol': symbol, 'error': 'Strategy quantity not provided'}
 
-        # 根据symbol价格动态调整quantity精度（与策略执行记录保持一致）
-        strategy_quantity = adjust_quantity_precision_by_price(float(original_strategy_quantity), current_price)
+        # 使用向后取整（20.5->21）；若quantity>持仓数量，使用持仓数量
+        strategy_quantity = adjust_quantity_precision_by_price_ceil(float(original_strategy_quantity), current_price)
 
-        # 如果调整后变成0或负数，使用原始值（避免小数被截断为0）
         if strategy_quantity <= 0:
-            strategy_quantity = float(original_strategy_quantity)
-            logger.warning(f"TRADE: 精度调整后数量变为0，使用原始值 {strategy_quantity} | symbol={symbol}")
-        else:
-            # 如果精度为0（整数），转换为整数类型
-            if strategy_quantity == int(strategy_quantity):
-                strategy_quantity = int(strategy_quantity)
+            strategy_quantity = float(math.ceil(float(original_strategy_quantity)))
+            logger.warning(f"TRADE: 精度调整后数量变为0，使用向后取整原始值 {strategy_quantity} | symbol={symbol}")
 
         if strategy_quantity <= 0:
             return {'symbol': symbol, 'error': 'Strategy quantity must be greater than 0'}
@@ -4991,7 +4982,7 @@ class TradingEngine:
             strategy_quantity = position_amt
 
         # 【最终校验】防止超出持有数量（创建条件单和交易记录前再次校验）
-        strategy_quantity = min(int(strategy_quantity), int(position_amt))
+        strategy_quantity = min(int(math.ceil(strategy_quantity)), int(position_amt))
         if strategy_quantity <= 0:
             return {'symbol': symbol, 'error': '持仓数量不足，无法创建止损单'}
         
@@ -5244,17 +5235,12 @@ class TradingEngine:
         if not original_strategy_quantity:
             return {'symbol': symbol, 'error': 'Strategy quantity not provided'}
 
-        # 根据symbol价格动态调整quantity精度（与策略执行记录保持一致）
-        strategy_quantity = adjust_quantity_precision_by_price(float(original_strategy_quantity), current_price)
+        # 使用向后取整（20.5->21）；若quantity>持仓数量，使用持仓数量
+        strategy_quantity = adjust_quantity_precision_by_price_ceil(float(original_strategy_quantity), current_price)
 
-        # 如果调整后变成0或负数，使用原始值（避免小数被截断为0）
         if strategy_quantity <= 0:
-            strategy_quantity = float(original_strategy_quantity)
-            logger.warning(f"TRADE: 精度调整后数量变为0，使用原始值 {strategy_quantity} | symbol={symbol}")
-        else:
-            # 如果精度为0（整数），转换为整数类型
-            if strategy_quantity == int(strategy_quantity):
-                strategy_quantity = int(strategy_quantity)
+            strategy_quantity = float(math.ceil(float(original_strategy_quantity)))
+            logger.warning(f"TRADE: 精度调整后数量变为0，使用向后取整原始值 {strategy_quantity} | symbol={symbol}")
 
         if strategy_quantity <= 0:
             return {'symbol': symbol, 'error': 'Strategy quantity must be greater than 0'}
@@ -5265,7 +5251,7 @@ class TradingEngine:
             strategy_quantity = position_amt
 
         # 【最终校验】防止超出持有数量（创建条件单和交易记录前再次校验）
-        strategy_quantity = min(int(strategy_quantity), int(position_amt))
+        strategy_quantity = min(int(math.ceil(strategy_quantity)), int(position_amt))
         if strategy_quantity <= 0:
             return {'symbol': symbol, 'error': '持仓数量不足，无法创建止盈单'}
         

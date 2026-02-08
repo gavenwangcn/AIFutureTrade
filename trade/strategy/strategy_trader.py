@@ -13,6 +13,7 @@ Strategy Trader - 基于策略代码的交易决策生成器
 """
 import json
 import logging
+import math
 from typing import Dict, List, Optional
 from trade.trader import Trader
 from trade.strategy.strategy_code_executor import StrategyCodeExecutor
@@ -70,7 +71,7 @@ class StrategyTrader(Trader):
         根据 symbol 价格动态调整 decisions 中的 quantity 精度。
         decisions 格式为 Dict[symbol, List[decision]]，返回同格式。
         """
-        from trade.trading.trading_utils import adjust_quantity_precision_by_price
+        from trade.trading.trading_utils import adjust_quantity_precision_by_price_ceil
 
         list_per_symbol = self._decisions_to_list_per_symbol(decisions)
         normalized_decisions: Dict[str, List[Dict]] = {}
@@ -104,18 +105,18 @@ class StrategyTrader(Trader):
                                 try:
                                     price_float = float(price)
                                     if price_float > 0:
-                                        adjusted_quantity = adjust_quantity_precision_by_price(quantity, price_float)
+                                        adjusted_quantity = adjust_quantity_precision_by_price_ceil(quantity, price_float)
                                         normalized_decision['quantity'] = adjusted_quantity
-                                        logger.debug(f"[StrategyTrader] 根据价格调整 {symbol} 的quantity: {quantity} -> {adjusted_quantity} (价格: {price_float})")
+                                        logger.debug(f"[StrategyTrader] 根据价格向后取整 {symbol} 的quantity: {quantity} -> {adjusted_quantity} (价格: {price_float})")
                                     else:
-                                        normalized_decision['quantity'] = float(int(quantity))
-                                        logger.debug(f"[StrategyTrader] 价格无效，{symbol} 的quantity取整数: {quantity} -> {normalized_decision['quantity']}")
+                                        normalized_decision['quantity'] = float(math.ceil(quantity))
+                                        logger.debug(f"[StrategyTrader] 价格无效，{symbol} 的quantity向后取整: {quantity} -> {normalized_decision['quantity']}")
                                 except (ValueError, TypeError):
-                                    normalized_decision['quantity'] = float(int(quantity))
-                                    logger.debug(f"[StrategyTrader] 价格转换失败，{symbol} 的quantity取整数: {quantity} -> {normalized_decision['quantity']}")
+                                    normalized_decision['quantity'] = float(math.ceil(quantity))
+                                    logger.debug(f"[StrategyTrader] 价格转换失败，{symbol} 的quantity向后取整: {quantity} -> {normalized_decision['quantity']}")
                             else:
-                                normalized_decision['quantity'] = float(int(quantity))
-                                logger.debug(f"[StrategyTrader] 无价格信息，{symbol} 的quantity取整数: {quantity} -> {normalized_decision['quantity']}")
+                                normalized_decision['quantity'] = float(math.ceil(quantity))
+                                logger.debug(f"[StrategyTrader] 无价格信息，{symbol} 的quantity向后取整: {quantity} -> {normalized_decision['quantity']}")
                     except (ValueError, TypeError) as e:
                         logger.warning(f"[StrategyTrader] 无法转换 {symbol} 的quantity: {normalized_decision.get('quantity')}, 错误: {e}")
                         normalized_decision['quantity'] = 0.0
@@ -126,6 +127,7 @@ class StrategyTrader(Trader):
     def _normalize_quantity_to_int(self, decisions: Dict) -> Dict[str, List[Dict]]:
         """
         将decisions中的quantity字段转换为整数（用于卖出策略）。
+        使用向后取整（向上取整），例如 20.5 -> 21。
         decisions 可为 Dict[symbol, decision] 或 Dict[symbol, List[decision]]，返回 Dict[symbol, List[decision]]。
         """
         list_per_symbol = self._decisions_to_list_per_symbol(decisions)
@@ -140,8 +142,8 @@ class StrategyTrader(Trader):
                         if quantity <= 0:
                             normalized_decision['quantity'] = 0
                         else:
-                            normalized_decision['quantity'] = int(quantity)
-                            logger.debug(f"[StrategyTrader] 将 {symbol} 的quantity转换为整数: {quantity} -> {normalized_decision['quantity']}")
+                            normalized_decision['quantity'] = int(math.ceil(quantity))
+                            logger.debug(f"[StrategyTrader] 将 {symbol} 的quantity向后取整: {quantity} -> {normalized_decision['quantity']}")
                     except (ValueError, TypeError) as e:
                         logger.warning(f"[StrategyTrader] 无法转换 {symbol} 的quantity: {normalized_decision.get('quantity')}, 错误: {e}")
                         normalized_decision['quantity'] = 0
