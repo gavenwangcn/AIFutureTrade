@@ -21,7 +21,7 @@ import logging
 from typing import Dict, List, Optional, Tuple
 import traceback
 from trade.strategy.strategy_template_sell import StrategyBaseSell
-from trade.strategy.strategy_code_executor import StrategyCodeExecutor
+from trade.strategy.strategy_code_executor import StrategyCodeExecutor, strip_markdown_code_block
 
 logger = logging.getLogger(__name__)
 
@@ -91,6 +91,9 @@ class StrategyCodeTesterSell:
         errors = []
         warnings = []
         test_results = {}
+        
+        # 剥离可能的 Markdown 代码块（AI 可能输出 ```python ... ```），确保语法/类/继承等检查使用纯代码
+        strategy_code = strip_markdown_code_block(strategy_code)
         
         logger.info(f"[StrategyCodeTesterSell] 开始测试卖出策略代码: {strategy_name}")
         

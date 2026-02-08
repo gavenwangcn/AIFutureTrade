@@ -11,6 +11,7 @@ Strategy Code Executor - 策略代码执行器
 4. 上下文管理：提供candidates、portfolio、account_info等上下文数据
 """
 import importlib.util
+import re
 import sys
 import types
 import logging
@@ -21,6 +22,28 @@ import json
 import datetime
 
 logger = logging.getLogger(__name__)
+
+
+def strip_markdown_code_block(code: str) -> str:
+    """
+    从策略代码中剥离 Markdown 代码块标记。
+    AI 生成的代码有时会包含 ```python ... ``` 包装，直接 exec 会导致 SyntaxError。
+    
+    Args:
+        code: 原始策略代码字符串（可能包含 Markdown 代码块）
+    
+    Returns:
+        剥离 Markdown 标记后的纯 Python 代码
+    """
+    if not code or not isinstance(code, str):
+        return code
+    stripped = code.strip()
+    # 移除开头的 ```python 或 ``` (不区分大小写)
+    stripped = re.sub(r'^```(?:[pP]ython)?\s*\n?', '', stripped)
+    # 移除结尾的 ```
+    stripped = re.sub(r'\n?```\s*$', '', stripped)
+    return stripped.strip()
+
 
 # 尝试导入TA-Lib和numpy、pandas
 try:
@@ -233,6 +256,9 @@ class StrategyCodeExecutor:
             - market_state 格式：{"SYMBOL": {"price": float, "indicators": {"timeframes": {...}}}, ...}
         """
         try:
+            # 剥离可能的 Markdown 代码块包装（AI 可能输出 ```python ... ```）
+            strategy_code = strip_markdown_code_block(strategy_code)
+            
             # 构建执行上下文
             execution_context = self._create_execution_globals()
 

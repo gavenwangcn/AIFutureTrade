@@ -2,6 +2,13 @@
 
 ## ⚠️ 关键要求（必须严格遵守）：
 
+### ⚠️⚠️⚠️ 输出格式要求（最高优先级，违反将导致语法错误）：
+**你必须只输出纯 Python 代码，第一行必须是 `from` 或 `import` 语句，绝对不能包含：**
+- ❌ **严禁使用 Markdown 代码块**：不要用 ```python 或 ``` 包裹代码（会导致 Python 执行时报 SyntaxError: invalid syntax）
+- ❌ 不要使用 JSON 格式包装（如 `{"code": "..."}`）
+- ❌ 不要添加任何解释文字、注释说明或"生成的代码如下："等前缀
+- ✅ **正确做法**：直接输出 `from trade.strategy.strategy_template_sell import StrategyBaseSell` 作为第一行，紧接着是 `from typing import ...`、类定义等，直到最后一行 `return decisions`
+
 ### 返回值要求（最重要）：
 1. **必须初始化 `decisions = {}` 在方法开始处**
 2. **必须返回 `Dict[str, List[Dict]]`，不能返回 None**。key 为 SYMBOL，value **必须**为该 symbol 的决策**列表**。**仅支持列表格式，禁止单条 dict 返回（如 `{"SYMBOL": {...}}` 会无法通过测试）**。示例：`{"BTCUSDT": [{"signal": "close_position", "quantity": 100, ...}]}` 或同一 symbol 多条：`{"BTCUSDT": [{"signal": "close_position", ...}, {"signal": "stop_loss", ...}]}`
@@ -189,7 +196,7 @@ def execute_sell_decision(
   - 数值检查：`isinstance(x, (int, float))`
   - 布尔检查：`isinstance(x, bool)`
 
-**完整示例代码结构（包含详细注释）：**
+**完整示例代码结构（注释简洁）：**
 ```python
 from trade.strategy.strategy_template_sell import StrategyBaseSell
 from typing import Dict, List
@@ -993,318 +1000,43 @@ decisions[symbol] = {
   - **✅ 正确：`isinstance(positions, list)`** - 使用基础类型
   - **✅ 正确：`isinstance(decisions, dict)`** - 使用基础类型
   - **✅ 正确：`isinstance(price, (int, float))`** - 检查数值类型
-- **⚠️⚠️⚠️ 必须添加详细的中文注释说明（极其重要，强制要求，便于阅读和理解代码逻辑）**：
+- **注释要求（简洁优先）**：
 
-  **注释的核心目的：提高代码可读性，让其他开发者或用户能够快速理解策略逻辑、判断条件、计算过程。**
+  **⚠️ 重要：注释需简洁，避免冗长。过多过细的注释可能触发不必要的格式化输出，影响代码解析。**
 
-  **强制要求：生成的策略代码必须包含丰富的中文注释，每个重要的代码段、每个判断逻辑、每个计算步骤都必须有注释说明。**
+  **核心原则：**
+  - 只保留必要的注释，代码逻辑应自解释
+  - 注释使用单行 `#`，避免大段文档块
+  - 禁止使用 Markdown 格式、分隔线（如 `# ====`）、多行说明块
 
-  **注释类型和要求：**
+  **必须有的注释（各1处即可，简短）：**
+  - 类 docstring：1-2 行说明策略用途
+  - 方法 docstring：1 行说明功能
+  - 关键策略逻辑：仅对非显而易见的阈值、公式做 1 行说明
 
-  - **1. 类注释（必须）**：
-    - 在类定义上方添加文档字符串（docstring）
-    - 说明类的功能、用途、策略类型
-    - 示例：
-      ```python
-      class GeneratedSellStrategy(StrategyBaseSell):
-          """
-          卖出策略类 - 基于MA(99)和持仓时长的止盈止损策略
-
-          策略说明：
-          - 多单：当价格跌破MA(99)或持仓亏损超过5%时平仓
-          - 空单：当价格突破MA(99)或持仓亏损超过5%时平仓
-          - 持仓超过24小时且盈利超过10%时止盈
-
-          风险提示：
-          - 适用于趋势反转或止损止盈场景
-          - 需要配合合理的开仓策略使用
-          """
-      ```
-
-  - **2. 方法注释（必须）**：
-    - 在方法定义上方添加文档字符串
-    - 详细说明方法的功能、参数含义、返回值格式
-    - 示例：
-      ```python
-      def execute_sell_decision(self, portfolio, market_state, account_info, conditional_orders=None):
-          """
-          执行卖出决策 - 根据策略规则生成平仓决策
-
-          参数说明：
-              portfolio (Dict): 持仓组合信息，包含positions（持仓列表）、cash（可用资金）等
-              market_state (Dict): 市场状态字典，包含各交易对的价格、成交量、技术指标等
-              account_info (Dict): 账户信息，包含balance（账户总值）、total_return（总收益率）等
-              conditional_orders (Dict[str, List[Dict]], optional): 条件单信息，默认为None
-
-          返回值：
-              Dict[str, List[Dict]]: 卖出决策字典，格式为 {symbol: [决策1, 决策2, ...]}，每项包含 signal, quantity, price, stop_price, leverage, justification
-                              如果没有决策则返回空字典 {}
-
-          决策逻辑：
-              1. 遍历所有持仓
-              2. 获取K线数据并计算技术指标（MA、KDJ等）
-              3. 根据持仓方向（多单/空单）判断是否满足平仓条件
-              4. 计算平仓数量
-              5. 生成决策并返回
-          """
-      ```
-
-  - **3. 代码块注释（必须）**：
-    - 在每个主要代码块开始处添加注释
-    - 说明该代码块的功能和目的
-    - 使用 `# ========== 功能说明 ==========` 格式标记重要代码块
-    - 示例：
-      ```python
-      # ========== 第一步：初始化和参数验证 ==========
-      decisions = {}  # 初始化决策字典
-      if conditional_orders is None:
-          conditional_orders = {}
-
-      # ========== 第二步：获取持仓列表 ==========
-      positions = portfolio.get('positions', []) or []
-
-      # ========== 第三步：遍历持仓 ==========
-      for position in positions:
-          # 获取持仓基本信息
-          symbol = position.get('symbol', '').upper()
-          position_side = position.get('position_side', 'LONG')
-
-          # ========== 第四步：获取市场数据和技术指标 ==========
-          # 从market_state中提取该交易对的数据
-          symbol_market_state = market_state.get(symbol, {})
-
-          # ========== 第五步：读取技术指标 ==========
-          # 从K线数据中读取MA(99)指标
-          ma99_value = latest_kline['indicators']['ma']['ma99']
-
-          # ========== 第六步：策略判断和决策生成 ==========
-          # 根据持仓方向判断平仓条件
-          if position_side == 'LONG':
-              # 多单平仓逻辑
-              if current_price < 0.98 * ma99_value:
-                  # 生成平仓决策
-                  decisions[symbol] = {...}
-      ```
-
-  - **4. 关键逻辑注释（必须）**：
-    - 在重要的业务逻辑处添加注释
-    - 说明为什么这样做、背后的策略思想
-    - 示例：
-      ```python
-      # 策略逻辑：多单价格跌破MA(99)的0.98倍（-2%）才平仓，避免过早止损
-      # 原因：MA(99)是长期趋势线，跌破后需要有一定的幅度才能确认趋势反转
-      threshold = 0.98 * ma99_value
-
-      # 计算持仓盈亏比例，用于判断是否需要止损或止盈
-      # 公式：盈亏比例 = (当前价格 - 开仓价格) / 开仓价格 × 100%
-      # 正值表示盈利，负值表示亏损
-      pnl_pct = ((current_price - avg_price) / avg_price) * 100 if avg_price > 0 else 0
-
-      # 止损阈值设置为-5%，即亏损超过5%时强制平仓
-      # 原因：控制单笔交易的最大亏损，避免亏损扩大
-      stop_loss_threshold = -5.0
-      ```
-
-  - **5. 计算步骤注释（必须）**：
-    - 在复杂的计算步骤处添加注释
-    - 说明计算公式、计算目的、单位说明
-    - 示例：
-      ```python
-      # 计算平仓合约数量
-      # 说明：从持仓信息中获取合约数量，使用绝对值确保为正数
-      position_amt = abs(position.get('position_amt', 0))  # 持仓合约数量
-
-      # 平仓100%持仓
-      # 说明：将所有持仓全部平仓，quantity就是持仓数量
-      close_quantity = position_amt
-
-      # 平仓50%持仓的示例
-      # close_ratio = 0.5  # 平仓比例
-      # close_quantity = position_amt * close_ratio  # 平仓数量 = 持仓数量 × 平仓比例
-
-      # 根据交易对价格动态调整quantity精度
-      # 原因：不同价格区间的交易对对数量精度要求不同
-      if current_price < 1:
-          close_quantity = round(close_quantity, 0)  # 价格<1，取整数
-      elif current_price < 10:
-          close_quantity = round(close_quantity, 1)  # 价格1-10，保留1位小数
-      # ... 其他价格区间
-      ```
-
-  - **6. 条件判断注释（必须）**：
-    - 在每个if/elif/else判断处添加注释
-    - 说明判断条件的业务含义、阈值选择原因
-    - 示例：
-      ```python
-      # 判断条件1：检查持仓方向
-      # 说明：多单和空单的平仓条件不同，需要分别处理
-      if position_side == 'LONG':
-          # 多单平仓逻辑
-          # 判断条件2：检查价格是否跌破MA(99)
-          # 说明：多单价格跌破MA(99)表示上涨趋势结束，应该平仓
-          # 阈值0.98表示需要跌破2%才确认，避免假跌破
-          if current_price < 0.98 * ma99_value:
-              # 满足多单平仓条件
-              self.log.info(f"{symbol} 多单满足平仓条件：价格跌破MA(99)")
-              # 生成平仓决策...
-          else:
-              # 价格未跌破MA(99)，继续持有
-              self.log.info(f"{symbol} 多单价格未跌破MA(99)，继续持有")
-      elif position_side == 'SHORT':
-          # 空单平仓逻辑
-          # 判断条件2：检查价格是否突破MA(99)
-          # 说明：空单价格突破MA(99)表示下跌趋势结束，应该平仓
-          # 阈值1.02表示需要突破2%才确认，避免假突破
-          if current_price > 1.02 * ma99_value:
-              # 满足空单平仓条件
-              self.log.info(f"{symbol} 空单满足平仓条件：价格突破MA(99)")
-              # 生成平仓决策...
-          else:
-              # 价格未突破MA(99)，继续持有
-              self.log.info(f"{symbol} 空单价格未突破MA(99)，继续持有")
-      else:
-          # 未知的持仓方向，记录警告
-          self.log.warning(f"{symbol} 未知的持仓方向: {position_side}")
-      ```
-
-  - **7. 变量含义注释（必须）**：
-    - 对于重要的变量，添加行内注释
-    - 说明变量的含义、单位、取值范围
-    - 示例：
-      ```python
-      position_amt = abs(position.get('position_amt', 0))  # 持仓合约数量（绝对值）
-      position_side = position.get('position_side', 'LONG')  # 持仓方向：LONG-多单，SHORT-空单
-      avg_price = position.get('avg_price', 0)  # 开仓均价，单位：USDT
-      open_time = position.get('open_time')  # 开仓时间，格式：'YYYY-MM-DD HH:MM:SS'
-      leverage = position.get('leverage', 5)  # 杠杆倍数，取值范围：1-125
-
-      current_price = symbol_market_state.get('price', 0)  # 当前市场价格，单位：USDT
-      close_quantity = position_amt  # 平仓数量（合约数量，不是USDT数量）
-      stop_price = current_price * 0.98  # 止损触发价格，单位：USDT
-      ```
-
-  - **8. 技术指标注释（必须）**：
-    - 在读取技术指标时添加注释
-    - 说明指标的含义、使用目的
-    - 示例：
-      ```python
-      # 读取MA(99)指标 - 99周期简单移动平均线
-      # 用途：判断长期趋势，价格在MA(99)上方表示上涨趋势，下方表示下跌趋势
-      ma99_value = latest_kline['indicators']['ma']['ma99']
-
-      # 读取ATR(14)指标 - 14周期平均真实波幅
-      # 用途：衡量市场波动性，ATR值越大表示波动越大
-      # 使用场景：用于设置动态止损位，止损距离 = ATR × 倍数
-      atr14_value = latest_kline['indicators']['atr']['atr14']
-      ```
-
-  - **9. 异常处理注释（必须）**：
-    - 在try-except块添加注释
-    - 说明可能出现的异常、处理方式
-    - 示例：
-      ```python
-      try:
-          # 尝试读取技术指标
-          # 可能的异常：数据不存在、数据格式错误等
-          ma99_value = latest_kline['indicators']['ma']['ma99']
-      except Exception as e:
-          # 捕获所有异常，记录错误日志，跳过该持仓
-          # 原因：单个持仓的异常不应影响其他持仓的处理
-          self.log.error(f"{symbol} MA(99)读取失败: {e}，跳过该持仓")
-          continue  # 继续处理下一个持仓
-      ```
-
-  **⚠️ 注释的强制性要求：**
-  - 每个类必须有类注释（docstring）
-  - 每个方法必须有方法注释（docstring）
-  - 每个主要代码块必须有功能说明注释
-  - 每个if/elif/else判断必须有条件说明注释
-  - 每个重要变量必须有含义说明注释
-  - 每个技术指标读取必须有指标说明注释
-  - 每个复杂计算必须有公式和目的说明注释
-
-  **⚠️ 注释的质量要求：**
-  - 注释必须使用中文
-  - 注释必须清晰、准确、易懂
-  - 注释必须说明"为什么"而不仅仅是"是什么"
-  - 注释必须与代码保持一致
-  - 避免无意义的注释（如：`x = 1  # 设置x为1`）
-  - 注释应该解释业务逻辑、策略思想、计算原理
-- **注释示例格式（买入策略）**：
-  ```python
-  class GeneratedBuyStrategy(StrategyBaseBuy):
-      """
-      买入策略类
-      
-      根据策略规则（strategy_context）生成买入决策，包括开多单和开空单。
-      """
-      def execute_buy_decision(self, ...):
-          """
-          执行买入决策
-          
-          参数:
-              candidates: 候选交易对列表
-              portfolio: 持仓组合信息
-              account_info: 账户信息
-              market_state: 市场状态字典
-          返回:
-              Dict[str, Dict]: 买入决策字典
-          """
-          # 初始化决策字典，用于存储所有买入决策
-          decisions = {}
-          
-          # 遍历候选交易对，对每个交易对进行策略判断
-          for candidate in candidates:
-              # 获取交易对符号并转换为大写
-              symbol = candidate.get('symbol', '').upper()
-              
-              # 获取当前价格（优先从candidate获取，否则从market_state获取）
-              current_price = candidate.get('price', 0) or market_state.get(symbol, {}).get('price', 0)
-
-              # 计算合约数量：quantity = (本金 × 杠杆) / symbol价格
-              # 例如：本金=50 USDT，杠杆=10，价格=100，则 quantity = (50 * 10) / 100 = 5 个合约
-              quantity = (capital_usdt * leverage) / current_price
-              
-              # 判断开多单条件：当前价格 > 1.02 * MA(99)值
-              if current_price > 1.02 * ma99_value:
-                  # 满足开多条件，生成买入决策
-                  decisions[symbol] = {...}
-  ```
-- **注释示例格式（卖出策略）**：
+  **示例（简洁风格）：**
   ```python
   class GeneratedSellStrategy(StrategyBaseSell):
-      """
-      卖出策略类
-      
-      根据策略规则（strategy_context）生成卖出决策，包括平仓、止损、止盈。
-      """
-      def execute_sell_decision(self, ...):
-          """
-          执行卖出决策
-          
-          参数:
-              portfolio: 持仓组合信息
-              market_state: 市场状态字典
-              account_info: 账户信息
-          返回:
-              Dict[str, List[Dict]]: 卖出决策字典（每个 symbol 的 value 为决策列表）
-          """
-          # 初始化决策字典，用于存储所有卖出决策
+      """卖出策略：根据MA(99)判断多空单平仓条件。"""
+      def execute_sell_decision(self, portfolio, market_state, account_info, conditional_orders=None):
+          """执行卖出决策，返回 {symbol: [决策列表]}。"""
           decisions = {}
-          
-          # 遍历持仓，对每个持仓进行策略判断
+          if conditional_orders is None:
+              conditional_orders = {}
+          positions = portfolio.get('positions', []) or []
           for position in positions:
-              # 获取持仓信息
-              position_amt = abs(position.get('position_amt', 0))  # 持仓合约数量（绝对值）
-              position_side = position.get('position_side', 'LONG')  # 持仓方向：'LONG'（多单）或 'SHORT'（空单）
-              
-              # 判断多单平仓条件：当前价格 < 0.98 * MA(99)值
+              symbol = position.get('symbol', '').upper()
+              # 多单：价格跌破MA99的0.98倍平仓
               if position_side == 'LONG' and current_price < 0.98 * ma99_value:
-                  # 平仓100%持仓
-                  # quantity 是合约数量（平仓数量），不是 USDT 数量
-                  close_quantity = position_amt  # 平仓全部持仓
-                  decisions[symbol] = {...}
+                  decisions[symbol] = [...]
+          return decisions
   ```
+
+  **禁止的注释风格：**
+  - ❌ 每个 if/elif/else 都加注释
+  - ❌ 每个变量都加行内说明
+  - ❌ 使用 `# ========== xxx ==========` 等分隔符
+  - ❌ 长篇"参数说明""返回值格式"文档块
 - 必须遵循 Python 代码规范
 - 必须正确导入 StrategyBaseSell：`from trade.strategy.strategy_template_sell import StrategyBaseSell`
 - **必须确保方法始终返回字典**：不能返回 None，不能有未定义的返回值
@@ -1657,15 +1389,14 @@ decisions[symbol] = {
 
 ## 请根据提供的 strategy_context 生成完整的卖出策略代码：
 
-## ⚠️ 重要：输出格式要求
+## ⚠️⚠️⚠️ 最终输出格式（再次强调，违反会导致 SyntaxError）：
 
-**你必须只输出纯Python代码，不要包含以下内容：**
-- ❌ 不要使用JSON格式包装（如 `{"code": "..."}`）
-- ❌ 不要使用Markdown代码块（如 ```python ... ```）
-- ❌ 不要添加任何解释文字或注释说明
-- ❌ 不要添加"生成的代码如下："等前缀
+**你必须只输出纯 Python 代码，第一行必须以 `from` 或 `import` 开头。严禁包含：**
+- ❌ **严禁 Markdown 代码块**：绝对不要用 ```python 或 ``` 包裹输出（会导致 invalid syntax）
+- ❌ 不要使用 JSON 格式包装（如 `{"code": "..."}`）
+- ❌ 不要添加任何解释、说明或前缀文字
 
-**正确的输出格式：**
+**正确的输出格式（直接输出，无任何包装）：**
 ```
 from trade.strategy.strategy_template_sell import StrategyBaseSell
 from typing import Dict
