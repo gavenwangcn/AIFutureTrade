@@ -1738,7 +1738,21 @@ class TradingEngine:
                 return {}
 
             is_virtual = model.get('is_virtual', False)
-            model_uuid = model.get('id')  # UUID string
+            # algo_order 表的 model_id 存的是 UUID 字符串；get_model 返回的 id 已被兼容层替换为整数，必须通过 mapping 获取 UUID
+            mapping = self.models_db._get_model_id_mapping()
+            model_uuid = None
+            if isinstance(model_id, int):
+                model_uuid = mapping.get(model_id)
+            elif isinstance(model_id, str) and ('-' in model_id or (len(model_id) == 32 and all(c in '0123456789abcdefABCDEF' for c in model_id))):
+                model_uuid = model_id
+            else:
+                try:
+                    model_uuid = mapping.get(int(model_id))
+                except (ValueError, TypeError):
+                    pass
+            if not model_uuid:
+                logger.warning(f"[TradingEngine] Model {model_id} 无法解析为 UUID，无法查询条件单")
+                return {}
             conditional_orders_by_symbol = {}
 
             if is_virtual:
