@@ -49,14 +49,16 @@ class DatabaseInitializer:
     Encapsulates all table creation logic, can be used by Database and MarketTickersDatabase classes.
     """
     
-    def __init__(self, command_func: Callable[[str], Any]):
+    def __init__(self, command_func: Callable[[str], Any], query_func: Callable[[str, tuple], Any] = None):
         """
         Initialize database initializer
         
         Args:
             command_func: Function to execute SQL commands, accepts SQL string as parameter
+            query_func: Optional function to execute SELECT (sql, params) and return rows, for migration checks
         """
         self.command = command_func
+        self.query_func = query_func
     
     # ============ Business Table Initialization Methods ============
     
@@ -120,17 +122,36 @@ class DatabaseInitializer:
         logger.debug(f"[DatabaseInit] Ensured table {table_name} exists")
 
         # 迁移：为已存在的表添加 same_symbol_interval 列（若不存在）
-        try:
-            self.command(f"""
-                ALTER TABLE `{table_name}` ADD COLUMN
-                `same_symbol_interval` INT UNSIGNED DEFAULT NULL COMMENT '同币种最小买入间隔（分钟），NULL表示不过滤'
-            """)
-            logger.debug(f"[DatabaseInit] 已添加 same_symbol_interval 列到 {table_name}")
-        except Exception as e:
-            if 'Duplicate column name' in str(e) or '1060' in str(e):
-                logger.debug(f"[DatabaseInit] same_symbol_interval 列已存在，跳过")
-            else:
-                logger.warning(f"[DatabaseInit] 添加 same_symbol_interval 列失败: {e}")
+        # 先检查列是否存在，避免 ALTER 触发 Duplicate column 错误（该错误会被 retry 误判为网络错误）
+        need_add = True
+        if self.query_func:
+            try:
+                rows = self.query_func(
+                    "SELECT COUNT(*) as cnt FROM information_schema.COLUMNS "
+                    "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = %s AND COLUMN_NAME = 'same_symbol_interval'",
+                    (table_name,)
+                )
+                cnt = 0
+                if rows and len(rows) > 0:
+                    r0 = rows[0]
+                    cnt = int(r0[0]) if isinstance(r0, (list, tuple)) and len(r0) > 0 else int(r0.get('cnt', 0) if isinstance(r0, dict) else 0)
+                if cnt > 0:
+                    need_add = False
+                    logger.debug(f"[DatabaseInit] same_symbol_interval 列已存在，跳过")
+            except Exception as e:
+                logger.debug(f"[DatabaseInit] 检查列存在性失败: {e}，将尝试 ADD COLUMN")
+        if need_add:
+            try:
+                self.command(f"""
+                    ALTER TABLE `{table_name}` ADD COLUMN
+                    `same_symbol_interval` INT UNSIGNED DEFAULT NULL COMMENT '同币种最小买入间隔（分钟），NULL表示不过滤'
+                """)
+                logger.debug(f"[DatabaseInit] 已添加 same_symbol_interval 列到 {table_name}")
+            except Exception as e:
+                if 'Duplicate column name' in str(e) or '1060' in str(e):
+                    logger.debug(f"[DatabaseInit] same_symbol_interval 列已存在，跳过")
+                else:
+                    logger.warning(f"[DatabaseInit] 添加 same_symbol_interval 列失败: {e}")
 
 
     def ensure_portfolios_table(self, table_name: str = "portfolios"):
@@ -583,17 +604,18 @@ class DatabaseInitializer:
     # ensure_market_klines_table and ensure_market_data_agent_table methods have been deleted, related tables are no longer used
 
 
-def init_database_tables(command_func: Callable[[str], Any], table_names: dict):
+def init_database_tables(command_func: Callable[[str], Any], table_names: dict, query_func: Callable[[str, tuple], Any] = None):
     """
     Initialize all business database tables
     
     Args:
         command_func: Function to execute SQL commands
         table_names: Table name dictionary, contains table names for all business tables
+        query_func: Optional function to execute SELECT and return results, for column-existence checks in migrations
     """
     logger.info("[DatabaseInit] Initializing MySQL business tables...")
     
-    initializer = DatabaseInitializer(command_func)
+    initializer = DatabaseInitializer(command_func, query_func=query_func)
     
     # Providers table (API provider)
     initializer.ensure_providers_table(table_names.get('providers_table', 'providers'))

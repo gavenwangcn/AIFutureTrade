@@ -443,7 +443,7 @@ class Database:
             'strategy_decisions_table': self.strategy_decisions_table,
             'algo_order_table': self.algo_order_table,
         }
-        init_database_tables(self.command, table_names)
+        init_database_tables(self.command, table_names, query_func=self.query)
         
         # Insert default settings if no settings exist
         self._init_default_settings()
