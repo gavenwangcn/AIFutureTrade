@@ -13,6 +13,9 @@ const RSI_COLORS = ['#FF9600', '#935EBD']
 // ATR曲线颜色配置
 const ATR_COLORS = ['#2DC08E', '#935EBD', '#FF9600']
 
+// KDJ曲线颜色配置
+const KDJ_COLORS = ['#E6AC00', '#935EBD', '#2DC08E']
+
 /**
  * 注册RSI指标到KLineChart
  * 自定义RSI：支持RSI6、RSI9（与默认的RSI6、RSI12、RSI24不同）
@@ -290,10 +293,90 @@ export function registerATRIndicator(klinecharts) {
 }
 
 /**
+ * 注册KDJ指标到KLineChart（与后端一致：参数60,20,5，TradingView计算逻辑）
+ * 运行时覆盖默认KDJ，确保页面显示(60,20,5)而非(9,3,3)
+ * @param {object} klinecharts - KLineChart库对象（window.klinecharts）
+ * @returns {boolean} 是否成功注册
+ */
+export function registerKDJIndicator(klinecharts) {
+  if (!klinecharts || typeof klinecharts.registerIndicator !== 'function') {
+    console.error('[KDJ] klinecharts.registerIndicator is not available')
+    return false
+  }
+
+  try {
+    const kdjIndicator = {
+      name: 'KDJ',
+      shortName: 'KDJ',
+      calcParams: [60, 20, 5],
+      figures: [
+        { key: 'k', title: 'K: ', type: 'line', styles: ({ indicator }) => ({ color: indicator?.styles?.lines?.[0]?.color || KDJ_COLORS[0], size: 1.5 }) },
+        { key: 'd', title: 'D: ', type: 'line', styles: ({ indicator }) => ({ color: indicator?.styles?.lines?.[1]?.color || KDJ_COLORS[1], size: 1.5 }) },
+        { key: 'j', title: 'J: ', type: 'line', styles: ({ indicator }) => ({ color: indicator?.styles?.lines?.[2]?.color || KDJ_COLORS[2], size: 1.5 }) }
+      ],
+      regenerateFigures: () => [
+        { key: 'k', title: 'K: ', type: 'line' },
+        { key: 'd', title: 'D: ', type: 'line' },
+        { key: 'j', title: 'J: ', type: 'line' }
+      ],
+      calc: (dataList, indicator) => {
+        const params = indicator.calcParams
+        const rsvPeriod = params[0]
+        const smoothK = params[1]
+        const smoothD = params[2]
+        const rawKValues = []
+        const kValues = []
+        const dValues = []
+
+        return dataList.map((kLineData, i) => {
+          const kdj = {}
+          if (i >= rsvPeriod - 1) {
+            let highest = kLineData.high
+            let lowest = kLineData.low
+            for (let j = i - rsvPeriod + 1; j <= i; j++) {
+              if (dataList[j].high > highest) highest = dataList[j].high
+              if (dataList[j].low < lowest) lowest = dataList[j].low
+            }
+            const rsv = highest !== lowest ? ((kLineData.close - lowest) / (highest - lowest)) * 100 : 50
+            rawKValues.push(rsv)
+
+            if (rawKValues.length >= smoothK) {
+              let sum = 0
+              for (let j = rawKValues.length - smoothK; j < rawKValues.length; j++) sum += rawKValues[j]
+              const k = sum / smoothK
+              kValues.push(k)
+
+              if (kValues.length >= smoothD) {
+                let dSum = 0
+                for (let j = kValues.length - smoothD; j < kValues.length; j++) dSum += kValues[j]
+                const d = dSum / smoothD
+                dValues.push(d)
+                kdj.k = k
+                kdj.d = d
+                kdj.j = 3 * k - 2 * d
+              }
+            }
+          }
+          return kdj
+        })
+      }
+    }
+
+    klinecharts.registerIndicator(kdjIndicator)
+    console.log('[KDJ] KDJ indicator registered (60,20,5) at runtime')
+    return true
+  } catch (error) {
+    console.error('[KDJ] Failed to register KDJ indicator:', error)
+    return false
+  }
+}
+
+/**
  * 注册所有自定义指标
  * @param {object} klinecharts - KLineChart库对象（window.klinecharts）
  */
 export function registerAllCustomIndicators(klinecharts) {
   registerRSIIndicator(klinecharts)
   registerATRIndicator(klinecharts)
+  registerKDJIndicator(klinecharts)
 }

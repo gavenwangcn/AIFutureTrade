@@ -45,17 +45,16 @@
 <script setup>
 import { ref, watch, nextTick, onUnmounted } from 'vue'
 import { createDataLoader } from '../utils/customDatafeed.js'
-import { registerRSIIndicator, registerATRIndicator } from '../utils/registerCustomIndicators.js'
+import { registerRSIIndicator, registerATRIndicator, registerKDJIndicator } from '../utils/registerCustomIndicators.js'
 
 // 获取 KLineChart 库（UMD 方式）
 const getKLineCharts = () => {
   if (typeof window !== 'undefined' && window.klinecharts) {
     const klinecharts = window.klinecharts
-    // 在首次获取时注册自定义指标（如果尚未注册）
-    // 优先使用构建时包含的方式，如果未包含则使用运行时注册作为备用
-    // 注意：RSI需要覆盖默认的RSI指标，确保使用自定义版本（RSI6、RSI9）
+    // 在首次获取时注册自定义指标（覆盖默认参数，与后端一致）
     registerRSIIndicator(klinecharts)
     registerATRIndicator(klinecharts)
+    registerKDJIndicator(klinecharts)
     return klinecharts
   }
   throw new Error(
