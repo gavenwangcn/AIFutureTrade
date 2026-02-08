@@ -45,16 +45,18 @@
 <script setup>
 import { ref, watch, nextTick, onUnmounted } from 'vue'
 import { createDataLoader } from '../utils/customDatafeed.js'
-import { registerRSIIndicator, registerATRIndicator, registerKDJIndicator } from '../utils/registerCustomIndicators.js'
+import { registerRSIIndicator, registerATRIndicator, registerKDJIndicator, registerVOLIndicator, registerMACDIndicator } from '../utils/registerCustomIndicators.js'
 
 // 获取 KLineChart 库（UMD 方式）
 const getKLineCharts = () => {
   if (typeof window !== 'undefined' && window.klinecharts) {
     const klinecharts = window.klinecharts
-    // 在首次获取时注册自定义指标（覆盖默认参数，与后端一致）
+    // 在首次获取时注册自定义指标（覆盖默认参数，与 indicators/*.ts 一致）
     registerRSIIndicator(klinecharts)
     registerATRIndicator(klinecharts)
     registerKDJIndicator(klinecharts)
+    registerVOLIndicator(klinecharts)
+    registerMACDIndicator(klinecharts)
     return klinecharts
   }
   throw new Error(
@@ -251,9 +253,31 @@ const initChart = async () => {
 
     // 创建默认指标（根据当前选中的指标类型）
     chartInstance.value.createIndicator(currentIndicator.value, false, { id: 'candle_pane' })
-    chartInstance.value.createIndicator('VOL', false)
-    chartInstance.value.createIndicator('MACD', false)
-    chartInstance.value.createIndicator('KDJ', false)
+
+    // 创建VOL指标（使用自定义版本：vol.ts，MA5、MA10，红涨绿跌）
+    if (registerVOLIndicator(klinecharts)) {
+      const volIndicatorId = chartInstance.value.createIndicator('VOL', false)
+      console.log('[KLineChart] VOL indicator registered and created with id:', volIndicatorId)
+    } else {
+      console.error('[KLineChart] Failed to register VOL indicator')
+    }
+
+    // 创建MACD指标（使用自定义版本：macd.ts，12,26,9，红涨绿跌）
+    if (registerMACDIndicator(klinecharts)) {
+      const macdIndicatorId = chartInstance.value.createIndicator('MACD', false)
+      console.log('[KLineChart] MACD indicator registered and created with id:', macdIndicatorId)
+    } else {
+      console.error('[KLineChart] Failed to register MACD indicator')
+    }
+
+    // 创建KDJ指标（使用自定义版本：60,20,5）
+    // 直接使用运行时注册方式，确保使用自定义版本
+    if (registerKDJIndicator(klinecharts)) {
+      const kdjIndicatorId = chartInstance.value.createIndicator('KDJ', false)
+      console.log('[KLineChart] KDJ indicator registered and created with id:', kdjIndicatorId)
+    } else {
+      console.error('[KLineChart] Failed to register KDJ indicator')
+    }
 
     // 创建RSI指标（使用自定义版本：RSI6、RSI9）
     // 直接使用运行时注册方式，确保覆盖默认的RSI（RSI6、RSI12、RSI24），使用自定义版本

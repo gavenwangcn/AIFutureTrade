@@ -16,6 +16,14 @@ const ATR_COLORS = ['#2DC08E', '#935EBD', '#FF9600']
 // KDJ曲线颜色配置
 const KDJ_COLORS = ['#E6AC00', '#935EBD', '#2DC08E']
 
+// VOL 红涨绿跌
+const VOL_UP = 'rgba(249,40,85,0.7)'
+const VOL_DOWN = 'rgba(45,192,142,0.7)'
+
+// MACD 红涨绿跌
+const MACD_UP = 'rgba(249,40,85,0.7)'
+const MACD_DOWN = 'rgba(45,192,142,0.7)'
+
 /**
  * 注册RSI指标到KLineChart
  * 自定义RSI：支持RSI6、RSI9（与默认的RSI6、RSI12、RSI24不同）
@@ -372,6 +380,160 @@ export function registerKDJIndicator(klinecharts) {
 }
 
 /**
+ * 注册VOL指标到KLineChart（与 indicators/vol.ts 一致：MA5、MA10，红涨绿跌）
+ * @param {object} klinecharts - KLineChart库对象（window.klinecharts）
+ * @returns {boolean} 是否成功注册
+ */
+export function registerVOLIndicator(klinecharts) {
+  if (!klinecharts || typeof klinecharts.registerIndicator !== 'function') {
+    console.error('[VOL] klinecharts.registerIndicator is not available')
+    return false
+  }
+
+  try {
+    const volIndicator = {
+      name: 'VOL',
+      shortName: 'VOL',
+      series: 'volume',
+      calcParams: [5, 10],
+      shouldFormatBigNumber: true,
+      precision: 0,
+      minValue: 0,
+      figures: [
+        { key: 'ma1', title: 'MA5: ', type: 'line' },
+        { key: 'ma2', title: 'MA10: ', type: 'line' },
+        {
+          key: 'volume',
+          title: 'VOLUME: ',
+          type: 'bar',
+          baseValue: 0,
+          styles: ({ data }) => {
+            const c = data?.current
+            if (!c) return { color: VOL_DOWN }
+            return { color: c.close > c.open ? VOL_UP : VOL_DOWN }
+          }
+        }
+      ],
+      regenerateFigures: (params) => {
+        const figs = params.map((p, i) => ({ key: `ma${i + 1}`, title: `MA${p}: `, type: 'line' }))
+        figs.push({ key: 'volume', title: 'VOLUME: ', type: 'bar', baseValue: 0, styles: ({ data }) => ({ color: data?.current?.close > data?.current?.open ? VOL_UP : VOL_DOWN }) })
+        return figs
+      },
+      calc: (dataList, indicator) => {
+        const params = indicator.calcParams
+        const figures = indicator.figures
+        const volSums = []
+        return dataList.map((kLineData, i) => {
+          const volume = kLineData.volume ?? 0
+          const vol = { volume, open: kLineData.open, close: kLineData.close }
+          params.forEach((p, index) => {
+            volSums[index] = (volSums[index] ?? 0) + volume
+            if (i >= p - 1) {
+              vol[figures[index].key] = volSums[index] / p
+              volSums[index] -= (dataList[i - (p - 1)].volume ?? 0)
+            }
+          })
+          return vol
+        })
+      }
+    }
+    klinecharts.registerIndicator(volIndicator)
+    console.log('[VOL] VOL indicator registered at runtime')
+    return true
+  } catch (error) {
+    console.error('[VOL] Failed to register VOL indicator:', error)
+    return false
+  }
+}
+
+/**
+ * 注册MACD指标到KLineChart（与 indicators/macd.ts 一致：12,26,9，红涨绿跌）
+ * @param {object} klinecharts - KLineChart库对象（window.klinecharts）
+ * @returns {boolean} 是否成功注册
+ */
+export function registerMACDIndicator(klinecharts) {
+  if (!klinecharts || typeof klinecharts.registerIndicator !== 'function') {
+    console.error('[MACD] klinecharts.registerIndicator is not available')
+    return false
+  }
+
+  try {
+    const macdIndicator = {
+      name: 'MACD',
+      shortName: 'MACD',
+      calcParams: [12, 26, 9],
+      figures: [
+        { key: 'dif', title: 'DIF: ', type: 'line' },
+        { key: 'dea', title: 'DEA: ', type: 'line' },
+        {
+          key: 'macd',
+          title: 'MACD: ',
+          type: 'bar',
+          baseValue: 0,
+          styles: ({ data }) => {
+            const prevMacd = data?.prev?.macd ?? Number.MIN_SAFE_INTEGER
+            const currentMacd = data?.current?.macd ?? Number.MIN_SAFE_INTEGER
+            const color = currentMacd > 0 ? MACD_UP : (currentMacd < 0 ? MACD_DOWN : '#888')
+            const style = prevMacd < currentMacd ? 'stroke' : 'fill'
+            return { style, color, borderColor: color }
+          }
+        }
+      ],
+      calc: (dataList, indicator) => {
+        const params = indicator.calcParams
+        let closeSum = 0
+        let emaShort = 0
+        let emaLong = 0
+        let dif = 0
+        let difSum = 0
+        let dea = 0
+        const maxPeriod = Math.max(params[0], params[1])
+        return dataList.map((kLineData, i) => {
+          const macd = {}
+          const close = kLineData.close
+          closeSum += close
+          if (i >= params[0] - 1) {
+            if (i > params[0] - 1) {
+              emaShort = (2 * close + (params[0] - 1) * emaShort) / (params[0] + 1)
+            } else {
+              emaShort = closeSum / params[0]
+            }
+          }
+          if (i >= params[1] - 1) {
+            if (i > params[1] - 1) {
+              emaLong = (2 * close + (params[1] - 1) * emaLong) / (params[1] + 1)
+            } else {
+              emaLong = closeSum / params[1]
+            }
+          }
+          if (i >= maxPeriod - 1) {
+            dif = emaShort - emaLong
+            macd.dif = dif
+            difSum += dif
+            if (i >= maxPeriod + params[2] - 2) {
+              if (i > maxPeriod + params[2] - 2) {
+                dea = (dif * 2 + dea * (params[2] - 1)) / (params[2] + 1)
+              } else {
+                dea = difSum / params[2]
+              }
+              macd.macd = (dif - dea) * 2
+              macd.dea = dea
+            }
+          }
+          return macd
+        })
+      }
+    }
+    klinecharts.registerIndicator(macdIndicator)
+    console.log('[MACD] MACD indicator registered at runtime')
+    return true
+  } catch (error) {
+    console.error('[MACD] Failed to register MACD indicator:', error)
+    return false
+  }
+}
+
+/**
  * 注册所有自定义指标
  * @param {object} klinecharts - KLineChart库对象（window.klinecharts）
  */
@@ -379,4 +541,6 @@ export function registerAllCustomIndicators(klinecharts) {
   registerRSIIndicator(klinecharts)
   registerATRIndicator(klinecharts)
   registerKDJIndicator(klinecharts)
+  registerVOLIndicator(klinecharts)
+  registerMACDIndicator(klinecharts)
 }
