@@ -253,7 +253,6 @@ const initChart = async () => {
     chartInstance.value.createIndicator(currentIndicator.value, false, { id: 'candle_pane' })
     chartInstance.value.createIndicator('VOL', false)
     chartInstance.value.createIndicator('MACD', false)
-    chartInstance.value.createIndicator('KDJ', false)
     
     // 创建RSI指标（使用自定义版本：RSI6、RSI9）
     // 直接使用运行时注册方式，确保覆盖默认的RSI（RSI6、RSI12、RSI24），使用自定义版本
