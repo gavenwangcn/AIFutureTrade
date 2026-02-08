@@ -3562,12 +3562,38 @@ class TradingEngine:
 
         positions_map = {pos['symbol']: pos for pos in portfolio.get('positions', [])}
 
-            # 获取全局交易锁，确保买入和卖出服务线程不会同时执行交易操作
+        # 【去重】同一合约(symbol)同类型信号(close_position/sell/stop_loss/take_profit/buy)在一轮中只执行一个
+        # 信号类型归一化：sell_to_long/sell_to_short -> 'sell', buy_to_long/buy_to_short -> 'buy'
+        def _normalize_signal_type(sig: str) -> str:
+            s = (sig or '').lower()
+            if s in ('sell_to_long', 'sell_to_short'):
+                return 'sell'
+            if s in ('buy_to_long', 'buy_to_short'):
+                return 'buy'
+            return s if s else 'unknown'
+
+        seen_symbol_signal = set()
+        deduped_decisions = {}
+        for symbol, val in decisions.items():
+            list_dec = val if isinstance(val, list) else []
+            if not list_dec and isinstance(val, dict):
+                list_dec = [val]
+            for decision in list_dec:
+                sig = (decision.get('signal', '') if isinstance(decision, dict) else '').lower()
+                key = (symbol, _normalize_signal_type(sig))
+                if key in seen_symbol_signal:
+                    logger.info(f"[Model {self.model_id}] [交易执行] 跳过重复: {symbol} {sig}（同合约同类型本轮已执行）")
+                    continue
+                seen_symbol_signal.add(key)
+                if symbol not in deduped_decisions:
+                    deduped_decisions[symbol] = []
+                deduped_decisions[symbol].append(decision)
+
+        # 获取全局交易锁，确保买入和卖出服务线程不会同时执行交易操作
         with self.trading_lock:
             logger.debug(f"[Model {self.model_id}] [交易执行] 获取到交易锁，=====开始执行SDK交易决策=====")
             
-            # decisions 格式为 Dict[symbol, List[decision]] 或 Dict[symbol, decision]，同一 symbol 可有多条决策
-            for symbol, val in decisions.items():
+            for symbol, val in deduped_decisions.items():
                 list_dec = val if isinstance(val, list) else []
                 for decision in list_dec:
                     signal = (decision.get('signal', '') if isinstance(decision, dict) else '').lower()
@@ -3634,6 +3660,21 @@ class TradingEngine:
                                     f"decision_id={decision_id}, err={update_err}"
                                 )
                     results.append(result)
+
+                    # 【持仓扣减】卖出/平仓成功后立即扣减内存中的持仓，防止同symbol后续决策超出持有数量
+                    if result and not result.get('error') and signal in ('sell_to_long', 'sell_to_short', 'close_position'):
+                        exec_qty = result.get('position_amt') or result.get('quantity') or 0
+                        if exec_qty > 0:
+                            pos = positions_map.get(symbol)
+                            if pos:
+                                old_amt = float(pos.get('position_amt', 0) or 0)
+                                new_amt = max(0, old_amt - float(exec_qty))
+                                pos['position_amt'] = int(new_amt) if new_amt == int(new_amt) else new_amt
+                                if new_amt <= 0:
+                                    positions = portfolio.get('positions', []) or []
+                                    portfolio['positions'] = [p for p in positions if p is not pos]
+                                    positions_map.pop(symbol, None)
+                                logger.debug(f"[Model {self.model_id}] [交易执行] 扣减持仓: {symbol} {old_amt} -> {new_amt}")
             
             logger.debug(f"[Model {self.model_id}] [交易执行] 交易决策执行完成，释放交易锁")
 
@@ -4090,6 +4131,11 @@ class TradingEngine:
                 strategy_quantity = position_amt
             if strategy_quantity <= 0:
                 return {'symbol': symbol, 'error': 'Strategy quantity must be greater than 0'}
+
+        # 【最终校验】防止超出持有数量（SDK调用和交易记录前再次校验）
+        strategy_quantity = min(int(strategy_quantity), int(position_amt))
+        if strategy_quantity <= 0:
+            return {'symbol': symbol, 'error': '持仓数量不足，无法执行平仓/卖出'}
         
         # 使用工具函数计算盈亏（基于实际平仓数量 strategy_quantity）
         gross_pnl, trade_fee, net_pnl = calculate_pnl(
@@ -4435,6 +4481,11 @@ class TradingEngine:
                 strategy_quantity = position_amt
             if strategy_quantity <= 0:
                 return {'symbol': symbol, 'error': 'Strategy quantity must be greater than 0'}
+
+        # 【最终校验】防止超出持有数量（SDK调用和交易记录前再次校验）
+        strategy_quantity = min(int(strategy_quantity), int(position_amt))
+        if strategy_quantity <= 0:
+            return {'symbol': symbol, 'error': '持仓数量不足，无法执行平仓'}
 
         # 使用工具函数计算盈亏（基于实际平仓数量 strategy_quantity）
         gross_pnl, trade_fee, net_pnl = calculate_pnl(
@@ -4938,6 +4989,11 @@ class TradingEngine:
         if strategy_quantity > position_amt:
             logger.warning(f"TRADE: 策略数量({strategy_quantity})超过持仓数量({position_amt})，使用持仓数量 | symbol={symbol}")
             strategy_quantity = position_amt
+
+        # 【最终校验】防止超出持有数量（创建条件单和交易记录前再次校验）
+        strategy_quantity = min(int(strategy_quantity), int(position_amt))
+        if strategy_quantity <= 0:
+            return {'symbol': symbol, 'error': '持仓数量不足，无法创建止损单'}
         
         # 获取止损价格
         stop_price = decision.get('stop_price')
@@ -5207,6 +5263,11 @@ class TradingEngine:
         if strategy_quantity > position_amt:
             logger.warning(f"TRADE: 策略数量({strategy_quantity})超过持仓数量({position_amt})，使用持仓数量 | symbol={symbol}")
             strategy_quantity = position_amt
+
+        # 【最终校验】防止超出持有数量（创建条件单和交易记录前再次校验）
+        strategy_quantity = min(int(strategy_quantity), int(position_amt))
+        if strategy_quantity <= 0:
+            return {'symbol': symbol, 'error': '持仓数量不足，无法创建止盈单'}
         
         # 获取止盈价格
         stop_price = decision.get('stop_price')
