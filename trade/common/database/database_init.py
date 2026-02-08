@@ -121,39 +121,6 @@ class DatabaseInitializer:
         self.command(ddl)
         logger.debug(f"[DatabaseInit] Ensured table {table_name} exists")
 
-        # 迁移：为已存在的表添加 same_symbol_interval 列（若不存在）
-        # 先检查列是否存在，避免 ALTER 触发 Duplicate column 错误（该错误会被 retry 误判为网络错误）
-        need_add = True
-        if self.query_func:
-            try:
-                rows = self.query_func(
-                    "SELECT COUNT(*) as cnt FROM information_schema.COLUMNS "
-                    "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = %s AND COLUMN_NAME = 'same_symbol_interval'",
-                    (table_name,)
-                )
-                cnt = 0
-                if rows and len(rows) > 0:
-                    r0 = rows[0]
-                    cnt = int(r0[0]) if isinstance(r0, (list, tuple)) and len(r0) > 0 else int(r0.get('cnt', 0) if isinstance(r0, dict) else 0)
-                if cnt > 0:
-                    need_add = False
-                    logger.debug(f"[DatabaseInit] same_symbol_interval 列已存在，跳过")
-            except Exception as e:
-                logger.debug(f"[DatabaseInit] 检查列存在性失败: {e}，将尝试 ADD COLUMN")
-        if need_add:
-            try:
-                self.command(f"""
-                    ALTER TABLE `{table_name}` ADD COLUMN
-                    `same_symbol_interval` INT UNSIGNED DEFAULT NULL COMMENT '同币种最小买入间隔（分钟），NULL表示不过滤'
-                """)
-                logger.debug(f"[DatabaseInit] 已添加 same_symbol_interval 列到 {table_name}")
-            except Exception as e:
-                if 'Duplicate column name' in str(e) or '1060' in str(e):
-                    logger.debug(f"[DatabaseInit] same_symbol_interval 列已存在，跳过")
-                else:
-                    logger.warning(f"[DatabaseInit] 添加 same_symbol_interval 列失败: {e}")
-
-
     def ensure_portfolios_table(self, table_name: str = "portfolios"):
         """Create portfolios table if not exists"""
         ddl = f"""
