@@ -44,10 +44,11 @@ public class AlgoOrderServiceImpl implements AlgoOrderService {
             log.debug("[AlgoOrderService] 条件订单总数: {}", total);
             
             // 使用MyBatis-Plus的Page进行分页查询
+            // 排序：新建类型(new)的委托单排在最前面，其余按创建时间倒序
             Page<AlgoOrderDO> page = new Page<>(pageNum, pageSize);
             QueryWrapper<AlgoOrderDO> queryWrapper = new QueryWrapper<>();
             queryWrapper.eq("model_id", modelId);
-            queryWrapper.orderByDesc("created_at");
+            queryWrapper.last("ORDER BY (CASE WHEN LOWER(algoStatus) = 'new' THEN 0 ELSE 1 END) ASC, created_at DESC");
             Page<AlgoOrderDO> algoOrderDOPage = algoOrderMapper.selectPage(page, queryWrapper);
             
             List<AlgoOrderDO> algoOrderDOList = algoOrderDOPage.getRecords();
