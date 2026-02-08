@@ -974,7 +974,7 @@ class MarketDataFetcher:
         - EMA: 指数移动平均线 (5, 20, 30, 60, 99)
         - RSI: 相对强弱指数 (6, 9, 14) - 使用Wilder's Smoothing方法
         - MACD: 指数平滑异同移动平均线 (12, 26, 9)
-        - KDJ: 随机指标 (9, 3, 3) - 使用TradingView计算逻辑
+        - KDJ: 随机指标 (60, 20, 5) - 使用TradingView计算逻辑
         - ATR: 平均真实波幅 (7, 14, 21) - 使用Wilder's Smoothing方法
         - VOL: 成交量及均量线 (5, 10, 60)
 
@@ -1024,8 +1024,8 @@ class MarketDataFetcher:
             # MACD指标
             macd_dif, macd_dea, macd_bar = talib.MACD(closes, fastperiod=12, slowperiod=26, signalperiod=9)
 
-            # KDJ指标（使用TradingView计算逻辑）
-            kdj_k, kdj_d, kdj_j = self._calculate_kdj_tradingview(highs, lows, closes, k_period=9, smooth_k=3, smooth_d=3)
+            # KDJ指标（使用TradingView计算逻辑，参数60,20,5）
+            kdj_k, kdj_d, kdj_j = self._calculate_kdj_tradingview(highs, lows, closes, k_period=60, smooth_k=20, smooth_d=5)
 
             # ATR指标（使用Wilder's Smoothing方法）
             atr7 = self._calculate_atr_tradingview(highs, lows, closes, period=7)
@@ -1049,7 +1049,7 @@ class MarketDataFetcher:
                 # MA60/EMA60/RSI14/ATR21: 需要60根历史数据
                 # MA99/EMA99: 需要99根历史数据
                 # MACD: 需要26根历史数据
-                # KDJ: 需要9根历史数据
+                # KDJ(60,20,5): 需要84根历史数据
                 
                 indicators = {
                     'ma': {
@@ -1076,9 +1076,9 @@ class MarketDataFetcher:
                         'bar': float(macd_bar[i]) if i >= 25 and not np.isnan(macd_bar[i]) else None
                     },
                     'kdj': {
-                        'k': float(kdj_k[i]) if i >= 8 and not np.isnan(kdj_k[i]) else None,
-                        'd': float(kdj_d[i]) if i >= 8 and not np.isnan(kdj_d[i]) else None,
-                        'j': float(kdj_j[i]) if i >= 8 and not np.isnan(kdj_j[i]) else None
+                        'k': float(kdj_k[i]) if i >= 82 and not np.isnan(kdj_k[i]) else None,
+                        'd': float(kdj_d[i]) if i >= 82 and not np.isnan(kdj_d[i]) else None,
+                        'j': float(kdj_j[i]) if i >= 82 and not np.isnan(kdj_j[i]) else None
                     },
                     'atr': {
                         'atr7': float(atr7[i]) if i >= 6 and not np.isnan(atr7[i]) else None,
@@ -1108,7 +1108,7 @@ class MarketDataFetcher:
             return []
 
     def _calculate_kdj_tradingview(self, high_array: np.ndarray, low_array: np.ndarray, close_array: np.ndarray,
-                                   k_period: int = 9, smooth_k: int = 3, smooth_d: int = 3) -> tuple:
+                                   k_period: int = 60, smooth_k: int = 20, smooth_d: int = 5) -> tuple:
         """
         计算与TradingView一致的KDJ指标
 
@@ -1122,9 +1122,9 @@ class MarketDataFetcher:
             high_array: 最高价数组
             low_array: 最低价数组
             close_array: 收盘价数组
-            k_period: K线周期（默认9）
-            smooth_k: K值平滑周期（默认3）
-            smooth_d: D值平滑周期（默认3）
+            k_period: K线周期（默认60）
+            smooth_k: K值平滑周期（默认20）
+            smooth_d: D值平滑周期（默认5）
 
         Returns:
             (k_line, d_line, j_line): K值、D值、J值数组

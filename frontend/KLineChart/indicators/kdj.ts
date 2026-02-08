@@ -33,15 +33,15 @@ interface Kdj {
  * 3. 第二次平滑得到D值：使用SMA平滑K值（周期为smooth_d）
  * 4. 计算J值：J = 3K - 2D
  * 
- * 标准参数：(9, 3, 3)
- * - 第一个参数：RSV计算周期（通常为9）
- * - 第二个参数：K值平滑周期（通常为3）
- * - 第三个参数：D值平滑周期（通常为3）
+ * 标准参数：(60, 20, 5)
+ * - 第一个参数：RSV计算周期（60）
+ * - 第二个参数：K值平滑周期（20）
+ * - 第三个参数：D值平滑周期（5）
  */
 const kdj: IndicatorTemplate<Kdj, number> = {
   name: 'KDJ',
   shortName: 'KDJ',
-  calcParams: [9, 3, 3],
+  calcParams: [60, 20, 5],
   figures: [
     { key: 'k', title: 'K: ', type: 'line' },
     { key: 'd', title: 'D: ', type: 'line' },
@@ -54,9 +54,9 @@ const kdj: IndicatorTemplate<Kdj, number> = {
   ],
   calc: (dataList, indicator) => {
     const { calcParams: params } = indicator
-    const rsvPeriod = params[0] // RSV计算周期（通常为9）
-    const smoothK = params[1]   // K值平滑周期（通常为3）
-    const smoothD = params[2]    // D值平滑周期（通常为3）
+    const rsvPeriod = params[0] // RSV计算周期（60）
+    const smoothK = params[1]   // K值平滑周期（20）
+    const smoothD = params[2]   // D值平滑周期（5）
     
     // 存储原始%K（RSV）值
     const rawKValues: number[] = []
