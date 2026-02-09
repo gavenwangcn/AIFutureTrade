@@ -261,16 +261,37 @@ class PortfoliosDatabase:
             
             # Use INSERT ... ON DUPLICATE KEY UPDATE to implement atomic UPSERT operation
             # When unique key (model_id, symbol, position_side) conflicts, update existing record
+            # position_init: 仅在首次买入时记录（INSERT时设置为position_amt），后续买入/卖出时保持不变（UPDATE时不更新）
             def _execute_upsert(conn):
                 cursor = conn.cursor()
                 try:
+                    # Check if record exists
+                    check_sql = f"""
+                    SELECT `position_init` FROM `{self.portfolios_table}`
+                    WHERE `model_id` = %s AND `symbol` = %s AND `position_side` = %s
+                    """
+                    cursor.execute(check_sql, (model_uuid, normalized_symbol, position_side_upper))
+                    existing_row = cursor.fetchone()
+                    
+                    # Determine position_init value: 只有首次买入（新记录）时才设置
+                    if existing_row is None:
+                        # New record (首次买入): set position_init to position_amt
+                        position_init_value = position_amt
+                        logger.debug(f"[Portfolios] 首次买入，设置 position_init={position_init_value}")
+                    else:
+                        # Existing record (后续买入/卖出): position_init 保持不变，使用 NULL（UPDATE时不会更新该字段）
+                        position_init_value = None
+                        existing_position_init = existing_row[0] if existing_row else None
+                        logger.debug(f"[Portfolios] 后续交易，position_init 保持不变={existing_position_init}")
+                    
                     sql = f"""
                     INSERT INTO `{self.portfolios_table}` 
-                    (`id`, `model_id`, `symbol`, `position_amt`, `avg_price`, `leverage`, 
+                    (`id`, `model_id`, `symbol`, `position_amt`, `position_init`, `avg_price`, `leverage`, 
                      `position_side`, `initial_margin`, `unrealized_profit`, `created_at`, `updated_at`)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     ON DUPLICATE KEY UPDATE
                         `position_amt` = VALUES(`position_amt`),
+                        `position_init` = `position_init`,
                         `avg_price` = VALUES(`avg_price`),
                         `leverage` = VALUES(`leverage`),
                         `initial_margin` = VALUES(`initial_margin`),
@@ -278,15 +299,16 @@ class PortfoliosDatabase:
                         `updated_at` = VALUES(`updated_at`)
                     """
                     cursor.execute(sql, (
-                        position_id, model_uuid, normalized_symbol, position_amt, avg_price,
+                        position_id, model_uuid, normalized_symbol, position_amt, position_init_value, avg_price,
                         leverage, position_side_upper, initial_margin, unrealized_profit,
                         current_time_utc8, current_time_utc8
                     ))
                     # Check if insert or update
                     if cursor.rowcount == 1:
-                        logger.debug(f"[Portfolios] Position inserted: model_id={model_uuid}, symbol={normalized_symbol}, position_side={position_side_upper}, id={position_id}")
+                        logger.debug(f"[Portfolios] Position inserted: model_id={model_uuid}, symbol={normalized_symbol}, position_side={position_side_upper}, id={position_id}, position_init={position_init_value} (首次买入)")
                     elif cursor.rowcount == 2:
-                        logger.debug(f"[Portfolios] Position updated: model_id={model_uuid}, symbol={normalized_symbol}, position_side={position_side_upper}")
+                        existing_position_init = existing_row[0] if existing_row else None
+                        logger.debug(f"[Portfolios] Position updated: model_id={model_uuid}, symbol={normalized_symbol}, position_side={position_side_upper}, position_amt={position_amt}, position_init={existing_position_init} (保持不变)")
                 finally:
                     cursor.close()
             
@@ -341,7 +363,7 @@ class PortfoliosDatabase:
                 SELECT * FROM {self.portfolios_table}
                 WHERE model_id = '{model_uuid}' AND position_amt != 0
             """)
-            columns = ["id", "model_id", "symbol", "position_amt", "avg_price", "leverage",
+            columns = ["id", "model_id", "symbol", "position_amt", "position_init", "avg_price", "leverage",
                       "position_side", "initial_margin", "unrealized_profit", "created_at", "updated_at"]
             positions = self._rows_to_dicts(rows, columns)
             # 为策略传递开仓时间：open_time 取自 portfolios.created_at，与 avg_price 对应

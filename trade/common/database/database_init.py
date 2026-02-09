@@ -129,6 +129,7 @@ class DatabaseInitializer:
             `model_id` VARCHAR(36) NOT NULL,
             `symbol` VARCHAR(50) NOT NULL,
             `position_amt` DOUBLE DEFAULT 0.0,
+            `position_init` DOUBLE DEFAULT NULL COMMENT '首次买入的初始仓数量（记录第一次开仓时的position_amt）',
             `avg_price` DOUBLE DEFAULT 0.0,
             `leverage` TINYINT UNSIGNED DEFAULT 1,
             `position_side` VARCHAR(10) DEFAULT 'LONG',
@@ -148,6 +149,25 @@ class DatabaseInitializer:
         self.command(ddl)
         logger.debug(f"[DatabaseInit] Ensured table {table_name} exists")
     
+    def migrate_portfolios_add_position_init(self, table_name: str = "portfolios"):
+        """Add position_init column to portfolios table if it doesn't exist"""
+        # Try to add column directly - MySQL will throw an error if it already exists, which we'll catch
+        alter_sql = f"""
+        ALTER TABLE `{table_name}` 
+        ADD COLUMN `position_init` DOUBLE DEFAULT NULL COMMENT '首次买入的初始仓数量（记录第一次开仓时的position_amt）'
+        """
+        try:
+            self.command(alter_sql)
+            logger.info(f"[DatabaseInit] Successfully added position_init column to {table_name}")
+        except Exception as e:
+            # If column already exists, MySQL will throw an error, which is fine - we'll ignore it
+            error_msg = str(e).lower()
+            if 'duplicate column' in error_msg or 'already exists' in error_msg or 'duplicate column name' in error_msg:
+                logger.debug(f"[DatabaseInit] Column position_init already exists in {table_name}, skipping migration")
+            else:
+                # For other errors, log warning but don't raise (to allow system to continue)
+                logger.warning(f"[DatabaseInit] Failed to add position_init column to {table_name}: {e}, continuing anyway")
+    
     def ensure_trades_table(self, table_name: str = "trades"):
         """Create trades table if not exists"""
         ddl = f"""
@@ -164,6 +184,7 @@ class DatabaseInitializer:
             `pnl` DOUBLE DEFAULT 0,
             `fee` DOUBLE DEFAULT 0,
             `initial_margin` DOUBLE DEFAULT 0.0,
+            `portfolios_id` VARCHAR(36) DEFAULT NULL COMMENT '关联的持仓ID（portfolios.id），记录交易时对应的持仓记录',
             `strategy_decision_id` VARCHAR(36) DEFAULT NULL COMMENT '关联的策略决策ID（strategy_decisions.id）',
             `orderId` BIGINT DEFAULT NULL COMMENT '系统订单号',
             `type` VARCHAR(50) DEFAULT NULL COMMENT '订单类型',
@@ -177,11 +198,45 @@ class DatabaseInitializer:
             INDEX `idx_position_side` (`position_side`),
             INDEX `idx_timestamp` (`timestamp`),
             INDEX `idx_orderId` (`orderId`),
-            INDEX `idx_strategy_decision_id` (`strategy_decision_id`)
+            INDEX `idx_strategy_decision_id` (`strategy_decision_id`),
+            INDEX `idx_portfolios_id` (`portfolios_id`)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
         """
         self.command(ddl)
         logger.debug(f"[DatabaseInit] Ensured table {table_name} exists")
+    
+    def migrate_trades_add_portfolios_id(self, table_name: str = "trades"):
+        """Add portfolios_id column and index to trades table if they don't exist"""
+        # First, try to add the column
+        alter_column_sql = f"""
+        ALTER TABLE `{table_name}` 
+        ADD COLUMN `portfolios_id` VARCHAR(36) DEFAULT NULL COMMENT '关联的持仓ID（portfolios.id），记录交易时对应的持仓记录'
+        """
+        try:
+            self.command(alter_column_sql)
+            logger.info(f"[DatabaseInit] Successfully added portfolios_id column to {table_name}")
+        except Exception as e:
+            error_msg = str(e).lower()
+            if 'duplicate column' in error_msg or 'already exists' in error_msg or 'duplicate column name' in error_msg:
+                logger.debug(f"[DatabaseInit] Column portfolios_id already exists in {table_name}, skipping column addition")
+            else:
+                logger.warning(f"[DatabaseInit] Failed to add portfolios_id column to {table_name}: {e}, continuing anyway")
+                return  # If column addition failed for other reasons, don't try to add index
+        
+        # Then, try to add the index (only if column was added or already exists)
+        alter_index_sql = f"""
+        ALTER TABLE `{table_name}` 
+        ADD INDEX `idx_portfolios_id` (`portfolios_id`)
+        """
+        try:
+            self.command(alter_index_sql)
+            logger.info(f"[DatabaseInit] Successfully added idx_portfolios_id index to {table_name}")
+        except Exception as e:
+            error_msg = str(e).lower()
+            if 'duplicate key name' in error_msg or 'already exists' in error_msg:
+                logger.debug(f"[DatabaseInit] Index idx_portfolios_id already exists in {table_name}, skipping index addition")
+            else:
+                logger.warning(f"[DatabaseInit] Failed to add idx_portfolios_id index to {table_name}: {e}, continuing anyway")
        
     def ensure_conversations_table(self, table_name: str = "conversations"):
         """Create conversations table if not exists"""
@@ -591,10 +646,16 @@ def init_database_tables(command_func: Callable[[str], Any], table_names: dict, 
     initializer.ensure_models_table(table_names.get('models_table', 'models'))
     
     # Portfolios table
-    initializer.ensure_portfolios_table(table_names.get('portfolios_table', 'portfolios'))
+    portfolios_table_name = table_names.get('portfolios_table', 'portfolios')
+    initializer.ensure_portfolios_table(portfolios_table_name)
+    # Migrate: add position_init column if it doesn't exist (always try, will skip if already exists)
+    initializer.migrate_portfolios_add_position_init(portfolios_table_name)
     
     # Trades table
-    initializer.ensure_trades_table(table_names.get('trades_table', 'trades'))
+    trades_table_name = table_names.get('trades_table', 'trades')
+    initializer.ensure_trades_table(trades_table_name)
+    # Migrate: add portfolios_id column if it doesn't exist (always try, will skip if already exists)
+    initializer.migrate_trades_add_portfolios_id(trades_table_name)
     
     # Conversations table
     initializer.ensure_conversations_table(table_names.get('conversations_table', 'conversations'))
@@ -666,7 +727,7 @@ def init_market_tables(command_func: Callable[[str], Any], table_config: dict):
     logger.info("[DatabaseInit] MySQL market tables initialized")
 
 
-def init_all_database_tables(command_func: Callable[[str, tuple], Any]):
+def init_all_database_tables(command_func: Callable[[str, tuple], Any], query_func: Callable[[str, tuple], Any] = None):
     """
     Initialize all database tables (business tables + market data tables)
     
@@ -674,6 +735,7 @@ def init_all_database_tables(command_func: Callable[[str, tuple], Any]):
     
     Args:
         command_func: Function to execute SQL commands, accepts SQL string and parameter tuple
+        query_func: Optional function to execute SELECT queries, for migration checks
     """
     logger.info("[DatabaseInit] Initializing all database tables...")
     
@@ -698,8 +760,8 @@ def init_all_database_tables(command_func: Callable[[str, tuple], Any]):
         'model_strategy_table': MODEL_STRATEGY_TABLE,
     }
     
-    # Initialize business tables
-    init_database_tables(command_func, table_names)
+    # Initialize business tables (migration will be handled inside, query_func is optional)
+    init_database_tables(command_func, table_names, query_func=query_func)
     
     # Initialize market data tables
     table_config = {

@@ -412,6 +412,8 @@ public class BinanceFuturesOrderServiceImpl implements BinanceFuturesOrderServic
             // 设置原始保证金（从portfolio中获取，用于计算盈亏百分比）
             Double initialMargin = portfolio.getInitialMargin();
             trade.setInitialMargin(initialMargin != null ? initialMargin : 0.0);
+            // 设置 portfolios_id（关联的持仓ID）
+            trade.setPortfoliosId(portfolio.getId());
             // 设置新字段（如果real模式有值）
             if (orderId != null) {
                 trade.setOrderId(orderId);

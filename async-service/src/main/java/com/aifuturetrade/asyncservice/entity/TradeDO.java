@@ -61,5 +61,8 @@ public class TradeDO implements Serializable {
 
     private String error;
 
+    @TableField("portfolios_id")
+    private String portfoliosId;
+
     private LocalDateTime timestamp;
 }

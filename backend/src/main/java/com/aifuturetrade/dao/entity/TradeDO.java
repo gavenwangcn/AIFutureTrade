@@ -137,4 +137,10 @@ public class TradeDO implements Serializable {
     @TableField("leverage")
     private Integer leverage;
 
+    /**
+     * 关联的持仓ID（portfolios.id），记录交易时对应的持仓记录
+     */
+    @TableField("portfolios_id")
+    private String portfoliosId;
+
 }

@@ -171,7 +171,7 @@ class TradesDatabase:
               price: float, leverage: int = 1, side: str = 'buy', position_side: str = 'LONG', pnl: float = 0, fee: float = 0,
               model_id_mapping: Dict[int, str] = None, orderId: Optional[int] = None,
               type: Optional[str] = None, origType: Optional[str] = None, error: Optional[str] = None,
-              strategy_decision_id: Optional[str] = None):
+              strategy_decision_id: Optional[str] = None, portfolios_id: Optional[str] = None):
         """
         Add trade record with fee
         
@@ -226,8 +226,8 @@ class TradesDatabase:
             position_side_upper = position_side.upper() if position_side else 'LONG'
             
             # Build columns and values lists, including new optional fields
-            columns = ["id", "model_id", "future", "signal", "quantity", "price", "leverage", "side", "position_side", "pnl", "fee", "timestamp"]
-            values = [trade_id, model_uuid, future.upper(), signal, quantity, price, leverage, side, position_side_upper, pnl, fee, current_time]
+            columns = ["id", "model_id", "future", "signal", "quantity", "price", "leverage", "side", "position_side", "pnl", "fee", "portfolios_id", "timestamp"]
+            values = [trade_id, model_uuid, future.upper(), signal, quantity, price, leverage, side, position_side_upper, pnl, fee, portfolios_id, current_time]
 
             # Link to strategy decision if provided
             if strategy_decision_id is not None:

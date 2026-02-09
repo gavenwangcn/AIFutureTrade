@@ -3990,7 +3990,7 @@ class TradingEngine:
             order_type = None
             orig_type = None
             error_msg = None
-
+        
         # real 模式下 SDK 调用被跳过（如无法创建客户端）时，也应记录/回填错误信息
         if trade_mode == 'real' and (not error_msg) and sdk_call_skipped and sdk_skip_reason:
             error_msg = sdk_skip_reason
@@ -4003,15 +4003,31 @@ class TradingEngine:
         # 确保position_side为大写（LONG/SHORT）
         trade_position_side_final_upper = trade_position_side_final.upper() if trade_position_side_final else position_side
         
+        # 获取 portfolios_id：查询 portfolios 表获取对应持仓记录的 id
+        portfolios_id = None
+        try:
+            portfolio_rows = self.portfolios_db.query(
+                f"SELECT id FROM {self.portfolios_db.portfolios_table} "
+                f"WHERE model_id = %s AND symbol = %s AND position_side = %s",
+                (model_uuid, symbol.upper(), trade_position_side_final_upper)
+            )
+            if portfolio_rows and len(portfolio_rows) > 0:
+                portfolios_id = portfolio_rows[0][0]
+                logger.debug(f"[TradingEngine] Found portfolios_id={portfolios_id} for model={self.model_id} symbol={symbol} position_side={trade_position_side_final_upper}")
+            else:
+                logger.warning(f"[TradingEngine] No portfolios_id found for model={self.model_id} symbol={symbol} position_side={trade_position_side_final_upper}")
+        except Exception as e:
+            logger.warning(f"[TradingEngine] Failed to get portfolios_id: {e}")
+        
         # 记录交易
         # quantity = 合约数量（用于 trades 表，与strategy_decisions表保持一致）
         # position_amt = 合约数量（用于 portfolios 表）
         # initial_margin = 开仓时使用的原始保证金（用于计算盈亏百分比）
-        logger.info(f"TRADE: PENDING - Model {self.model_id} {trade_signal_final.upper()} {symbol} position_side={trade_position_side_final_upper} side={trade_side_direction} quantity={trade_quantity} (合约数量), position_amt={position_amt} (合约数量), price={trade_price} fee={trade_fee} initial_margin={initial_margin}")
+        logger.info(f"TRADE: PENDING - Model {self.model_id} {trade_signal_final.upper()} {symbol} position_side={trade_position_side_final_upper} side={trade_side_direction} quantity={trade_quantity} (合约数量), position_amt={position_amt} (合约数量), price={trade_price} fee={trade_fee} initial_margin={initial_margin} portfolios_id={portfolios_id}")
         try:
             # 构建插入数据的列和值
-            columns = ["id", "model_id", "future", "signal", "quantity", "price", "leverage", "side", "position_side", "pnl", "fee", "initial_margin", "timestamp"]
-            values = [trade_id, model_uuid, symbol.upper(), trade_signal_final, trade_quantity, trade_price, leverage, trade_side_direction, trade_position_side_final_upper, 0, trade_fee, initial_margin, datetime.now(timezone(timedelta(hours=8))).replace(tzinfo=None)]
+            columns = ["id", "model_id", "future", "signal", "quantity", "price", "leverage", "side", "position_side", "pnl", "fee", "initial_margin", "portfolios_id", "timestamp"]
+            values = [trade_id, model_uuid, symbol.upper(), trade_signal_final, trade_quantity, trade_price, leverage, trade_side_direction, trade_position_side_final_upper, 0, trade_fee, initial_margin, portfolios_id, datetime.now(timezone(timedelta(hours=8))).replace(tzinfo=None)]
 
             # 关联策略执行记录（strategy_decisions.id）
             if strategy_decision_id:
@@ -4353,15 +4369,20 @@ class TradingEngine:
         if position_amt > 0 and strategy_quantity < position_amt:
             initial_margin = initial_margin * (strategy_quantity / position_amt)
         
+        # 获取 portfolios_id：从 position 对象中获取 id
+        portfolios_id = position.get('id') if position else None
+        if not portfolios_id:
+            logger.warning(f"[TradingEngine] No portfolios_id found in position for model={self.model_id} symbol={symbol} position_side={position_side}")
+        
         # 记录交易（使用 _resolve_leverage 解析，优先使用 decision 中的 leverage，否则使用模型配置的 leverage）
-        logger.info(f"TRADE: PENDING - Model {self.model_id} {trade_signal_final.upper()} {symbol} position_side={trade_position_side_final_upper} side={trade_side_direction} position_amt={trade_quantity} price={trade_price} fee={trade_fee} net_pnl={net_pnl} initial_margin={initial_margin}")
+        logger.info(f"TRADE: PENDING - Model {self.model_id} {trade_signal_final.upper()} {symbol} position_side={trade_position_side_final_upper} side={trade_side_direction} position_amt={trade_quantity} price={trade_price} fee={trade_fee} net_pnl={net_pnl} initial_margin={initial_margin} portfolios_id={portfolios_id}")
         try:
             # 使用 _resolve_leverage 解析杠杆（优先使用 decision 中的 leverage，否则使用模型配置的 leverage）
             leverage = self._resolve_leverage(decision)
             
             # 构建插入数据的列和值
-            columns = ["id", "model_id", "future", "signal", "quantity", "price", "leverage", "side", "position_side", "pnl", "fee", "initial_margin", "timestamp"]
-            values = [trade_id, model_uuid, symbol.upper(), trade_signal_final, trade_quantity, trade_price, leverage, trade_side_direction, trade_position_side_final_upper, net_pnl, trade_fee, initial_margin, datetime.now(timezone(timedelta(hours=8))).replace(tzinfo=None)]
+            columns = ["id", "model_id", "future", "signal", "quantity", "price", "leverage", "side", "position_side", "pnl", "fee", "initial_margin", "portfolios_id", "timestamp"]
+            values = [trade_id, model_uuid, symbol.upper(), trade_signal_final, trade_quantity, trade_price, leverage, trade_side_direction, trade_position_side_final_upper, net_pnl, trade_fee, initial_margin, portfolios_id, datetime.now(timezone(timedelta(hours=8))).replace(tzinfo=None)]
 
             # 关联策略执行记录（strategy_decisions.id）
             if strategy_decision_id:
@@ -4652,6 +4673,11 @@ class TradingEngine:
         if position_amt > 0 and strategy_quantity < position_amt:
             initial_margin = initial_margin * (strategy_quantity / position_amt)
         
+        # 获取 portfolios_id：从 position 对象中获取 id
+        portfolios_id = position.get('id') if position else None
+        if not portfolios_id:
+            logger.warning(f"[TradingEngine] No portfolios_id found in position for model={self.model_id} symbol={symbol} position_side={position_side}")
+        
         # 【确定trades表的字段值】
         # side字段：交易方向（buy/sell），从signal中提取
         # position_side字段：持仓方向（LONG/SHORT）
@@ -4694,14 +4720,14 @@ class TradingEngine:
         trade_position_side_final_upper = trade_position_side_final.upper() if trade_position_side_final else position_side
         
         # 记录交易（使用 _resolve_leverage 解析，优先使用 decision 中的 leverage，否则使用模型配置的 leverage）
-        logger.info(f"TRADE: PENDING - Model {self.model_id} CLOSE {symbol} position_side={trade_position_side_final_upper} side={trade_side_direction} position_amt={trade_quantity} price={trade_price} fee={trade_fee} net_pnl={net_pnl} initial_margin={initial_margin}")
+        logger.info(f"TRADE: PENDING - Model {self.model_id} CLOSE {symbol} position_side={trade_position_side_final_upper} side={trade_side_direction} position_amt={trade_quantity} price={trade_price} fee={trade_fee} net_pnl={net_pnl} initial_margin={initial_margin} portfolios_id={portfolios_id}")
         try:
             # 使用 _resolve_leverage 解析杠杆（优先使用 decision 中的 leverage，否则使用模型配置的 leverage）
             leverage = self._resolve_leverage(decision)
             
             # 构建插入数据的列和值
-            columns = ["id", "model_id", "future", "signal", "quantity", "price", "leverage", "side", "position_side", "pnl", "fee", "initial_margin", "timestamp"]
-            values = [trade_id, model_uuid, symbol.upper(), trade_signal_final, trade_quantity, trade_price, leverage, trade_side_direction, trade_position_side_final_upper, net_pnl, trade_fee, initial_margin, datetime.now(timezone(timedelta(hours=8))).replace(tzinfo=None)]
+            columns = ["id", "model_id", "future", "signal", "quantity", "price", "leverage", "side", "position_side", "pnl", "fee", "initial_margin", "portfolios_id", "timestamp"]
+            values = [trade_id, model_uuid, symbol.upper(), trade_signal_final, trade_quantity, trade_price, leverage, trade_side_direction, trade_position_side_final_upper, net_pnl, trade_fee, initial_margin, portfolios_id, datetime.now(timezone(timedelta(hours=8))).replace(tzinfo=None)]
 
             # 关联策略执行记录（strategy_decisions.id）
             if strategy_decision_id:

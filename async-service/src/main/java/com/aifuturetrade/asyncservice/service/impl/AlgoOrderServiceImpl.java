@@ -754,6 +754,7 @@ public class AlgoOrderServiceImpl implements AlgoOrderService {
         trade.setPnl(netPnl);
         trade.setFee(tradeFee);
         trade.setInitialMargin(initialMargin);
+        trade.setPortfoliosId(position.getId());  // 设置 portfolios_id（关联的持仓ID）
         trade.setStrategyDecisionId(order.getStrategyDecisionId());
         trade.setOrderId(binanceOrderId);
         trade.setType(orderType);
@@ -911,6 +912,10 @@ public class AlgoOrderServiceImpl implements AlgoOrderService {
         trade.setPnl(netPnl);
         trade.setFee(tradeFee);
         trade.setInitialMargin(initialMargin);
+        // 设置 portfolios_id（关联的持仓ID）
+        if (position != null) {
+            trade.setPortfoliosId(position.getId());
+        }
         trade.setStrategyDecisionId(order.getStrategyDecisionId());
         trade.setOrderId(actualOrderId);
         trade.setType(orderType);
