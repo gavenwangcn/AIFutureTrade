@@ -185,7 +185,7 @@ class DatabaseInitializer:
         """
         self.command(ddl)
         logger.debug(f"[DatabaseInit] Ensured table {table_name} exists")
-       
+    
     def ensure_conversations_table(self, table_name: str = "conversations"):
         """Create conversations table if not exists"""
         ddl = f"""
@@ -596,14 +596,10 @@ def init_database_tables(command_func: Callable[[str], Any], table_names: dict, 
     # Portfolios table
     portfolios_table_name = table_names.get('portfolios_table', 'portfolios')
     initializer.ensure_portfolios_table(portfolios_table_name)
-    # Migrate: add position_init column if it doesn't exist (always try, will skip if already exists)
-    initializer.migrate_portfolios_add_position_init(portfolios_table_name)
     
     # Trades table
     trades_table_name = table_names.get('trades_table', 'trades')
     initializer.ensure_trades_table(trades_table_name)
-    # Migrate: add portfolios_id column if it doesn't exist (always try, will skip if already exists)
-    initializer.migrate_trades_add_portfolios_id(trades_table_name)
     
     # Conversations table
     initializer.ensure_conversations_table(table_names.get('conversations_table', 'conversations'))
