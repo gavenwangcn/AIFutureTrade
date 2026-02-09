@@ -359,12 +359,14 @@ class PortfoliosDatabase:
                 }
             
             # Get positions（含 created_at 用于派生 open_time 开仓时间，与开仓价 avg_price 对应）
-            rows = self.query(f"""
-                SELECT * FROM {self.portfolios_table}
-                WHERE model_id = '{model_uuid}' AND position_amt != 0
-            """)
+            # 显式指定列名，确保顺序与 columns 列表一致，避免字段映射错误
             columns = ["id", "model_id", "symbol", "position_amt", "position_init", "avg_price", "leverage",
                       "position_side", "initial_margin", "unrealized_profit", "created_at", "updated_at"]
+            columns_str = ", ".join([f"`{col}`" for col in columns])
+            rows = self.query(f"""
+                SELECT {columns_str} FROM {self.portfolios_table}
+                WHERE model_id = '{model_uuid}' AND position_amt != 0
+            """)
             positions = self._rows_to_dicts(rows, columns)
             # 为策略传递开仓时间：open_time 取自 portfolios.created_at，与 avg_price 对应
             for pos in positions:
@@ -436,6 +438,27 @@ class PortfoliosDatabase:
                         logger.debug(f"[Portfolios] Using calculated margin for {p.get('symbol')}: {calculated_margin} (initial_margin is None)")
             
             # Calculate unrealized P&L (prefer unrealized_profit field, if not available calculate)
+            # Helper function to safely convert unrealized_profit to float
+            def safe_get_unrealized_profit(pos_dict):
+                """Safely get unrealized_profit as float, handling type errors"""
+                val = pos_dict.get('unrealized_profit')
+                if val is None:
+                    return None
+                # If already a number type, return it
+                if isinstance(val, (int, float)):
+                    return float(val)
+                # If it's a datetime or other non-numeric type, log warning and return None
+                # This handles cases where field mapping might be incorrect
+                logger.warning(
+                    f"[Portfolios] unrealized_profit has unexpected type {type(val).__name__} "
+                    f"for symbol {pos_dict.get('symbol')}, value: {val}. Will calculate instead."
+                )
+                # Try to convert, but if it fails, return None
+                try:
+                    return float(val)
+                except (ValueError, TypeError):
+                    return None
+            
             unrealized_pnl = 0
             if current_prices:
                 for pos in positions:
@@ -447,8 +470,9 @@ class PortfoliosDatabase:
                         pos['current_price'] = current_price
                         
                         # Prefer unrealized_profit field from database
-                        if pos.get('unrealized_profit') is not None and pos['unrealized_profit'] != 0:
-                            pos_pnl = pos['unrealized_profit']
+                        db_unrealized_profit = safe_get_unrealized_profit(pos)
+                        if db_unrealized_profit is not None and db_unrealized_profit != 0:
+                            pos_pnl = db_unrealized_profit
                         else:
                             # If not available, calculate
                             if pos['position_side'] == 'LONG':
@@ -461,14 +485,16 @@ class PortfoliosDatabase:
                     else:
                         pos['current_price'] = None
                         # Use unrealized_profit field from database
-                        pos['pnl'] = pos.get('unrealized_profit', 0)
-                        unrealized_pnl += pos.get('unrealized_profit', 0)
+                        db_unrealized_profit = safe_get_unrealized_profit(pos)
+                        pos['pnl'] = db_unrealized_profit if db_unrealized_profit is not None else 0.0
+                        unrealized_pnl += pos['pnl']
             else:
                 for pos in positions:
                     pos['current_price'] = None
                     # Use unrealized_profit field from database
-                    pos['pnl'] = pos.get('unrealized_profit', 0)
-                    unrealized_pnl += pos.get('unrealized_profit', 0)
+                    db_unrealized_profit = safe_get_unrealized_profit(pos)
+                    pos['pnl'] = db_unrealized_profit if db_unrealized_profit is not None else 0.0
+                    unrealized_pnl += pos['pnl']
             
             cash = initial_capital + realized_pnl - margin_used
             positions_value = sum([abs(p['position_amt']) * p['avg_price'] for p in positions])

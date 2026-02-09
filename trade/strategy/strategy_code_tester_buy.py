@@ -178,7 +178,24 @@ class StrategyCodeTesterBuy:
             logger.info(f"[StrategyCodeTesterBuy] ✓ 买入策略代码测试通过: {strategy_name}")
         else:
             logger.warning(f"[StrategyCodeTesterBuy] ✗ 买入策略代码测试失败: {strategy_name}, 错误数: {len(errors)}")
-            logger.error(f"[StrategyCodeTesterBuy] 测试失败，提交到测试模块的AI生成策略代码:\n--- 策略代码开始 ---\n{strategy_code}\n--- 策略代码结束 ---")
+            # 打印完整的策略代码（API接口返回的完整代码）
+            code_length = len(strategy_code)
+            code_lines = strategy_code.count('\n') + 1
+            logger.error(f"[StrategyCodeTesterBuy] 测试失败，提交到测试模块的AI生成策略代码（完整代码，未截取）:")
+            logger.error(f"[StrategyCodeTesterBuy] 代码统计: 总长度={code_length} 字符, 总行数={code_lines} 行")
+            logger.error(f"[StrategyCodeTesterBuy] --- 策略代码开始（完整代码） ---")
+            # 分段打印，确保即使日志系统有长度限制也能看到完整代码
+            # 每段最多50000字符，避免单条日志过长
+            chunk_size = 50000
+            if code_length <= chunk_size:
+                # 代码不长，直接打印
+                logger.error(strategy_code)
+            else:
+                # 代码很长，分段打印
+                chunks = [strategy_code[i:i+chunk_size] for i in range(0, code_length, chunk_size)]
+                for idx, chunk in enumerate(chunks, 1):
+                    logger.error(f"[StrategyCodeTesterBuy] [代码片段 {idx}/{len(chunks)}] (字符 {idx*chunk_size-chunk_size+1}-{min(idx*chunk_size, code_length)}):\n{chunk}")
+            logger.error(f"[StrategyCodeTesterBuy] --- 策略代码结束（完整代码） ---")
         
         return result
     
