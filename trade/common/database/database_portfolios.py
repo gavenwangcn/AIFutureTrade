@@ -263,13 +263,14 @@ class PortfoliosDatabase:
             # When unique key (model_id, symbol, position_side) conflicts, update existing record
             # position_init: 仅在首次买入时记录（INSERT时设置为position_amt），后续买入/卖出时保持不变（UPDATE时不更新）
             def _execute_upsert(conn):
-                cursor = conn.cursor()
+                cursor = None
                 try:
                     # Check if record exists
                     check_sql = f"""
                     SELECT `position_init` FROM `{self.portfolios_table}`
                     WHERE `model_id` = %s AND `symbol` = %s AND `position_side` = %s
                     """
+                    cursor = conn.cursor()
                     cursor.execute(check_sql, (model_uuid, normalized_symbol, position_side_upper))
                     existing_row = cursor.fetchone()
                     
@@ -304,17 +305,42 @@ class PortfoliosDatabase:
                         current_time_utc8, current_time_utc8
                     ))
                     # Check if insert or update
+                    # Note: INSERT ... ON DUPLICATE KEY UPDATE returns:
+                    # - rowcount = 1: New row inserted
+                    # - rowcount = 2: Existing row updated
+                    # - rowcount = 0: No rows affected (should not happen normally)
                     if cursor.rowcount == 1:
                         logger.debug(f"[Portfolios] Position inserted: model_id={model_uuid}, symbol={normalized_symbol}, position_side={position_side_upper}, id={position_id}, position_init={position_init_value} (首次买入)")
                     elif cursor.rowcount == 2:
                         existing_position_init = existing_row[0] if existing_row else None
                         logger.debug(f"[Portfolios] Position updated: model_id={model_uuid}, symbol={normalized_symbol}, position_side={position_side_upper}, position_amt={position_amt}, position_init={existing_position_init} (保持不变)")
+                    elif cursor.rowcount == 0:
+                        # This should not happen normally, but log a warning instead of raising an exception
+                        logger.warning(f"[Portfolios] UPSERT returned rowcount=0 (no rows affected): model_id={model_uuid}, symbol={normalized_symbol}, position_side={position_side_upper}, position_amt={position_amt}. This may indicate a database constraint issue.")
+                    else:
+                        # Unexpected rowcount value
+                        logger.warning(f"[Portfolios] UPSERT returned unexpected rowcount={cursor.rowcount}: model_id={model_uuid}, symbol={normalized_symbol}, position_side={position_side_upper}, position_amt={position_amt}")
+                except Exception as inner_e:
+                    # Log detailed error information before re-raising
+                    logger.error(
+                        f"[Portfolios] Error in _execute_upsert: "
+                        f"model_id={model_id}, model_uuid={model_uuid}, symbol={symbol}, "
+                        f"normalized_symbol={normalized_symbol}, position_side={position_side}, "
+                        f"position_side_upper={position_side_upper}, position_amt={position_amt}, "
+                        f"error_type={type(inner_e).__name__}, error={inner_e}, "
+                        f"error_args={inner_e.args if hasattr(inner_e, 'args') else 'N/A'}"
+                    )
+                    raise
                 finally:
-                    cursor.close()
+                    if cursor:
+                        try:
+                            cursor.close()
+                        except Exception as close_err:
+                            logger.debug(f"[Portfolios] Error closing cursor: {close_err}")
             
             self._with_connection(_execute_upsert)
         except Exception as e:
-            logger.error(f"[Portfolios] Failed to update position: {e}")
+            logger.error(f"[Portfolios] Failed to update position: model_id={model_id}, symbol={symbol}, position_side={position_side}, position_amt={position_amt}, error_type={type(e).__name__}, error={e}")
             raise
     
     def get_portfolio(self, model_id: int, current_prices: Dict = None,
@@ -560,7 +586,7 @@ class PortfoliosDatabase:
                 logger.debug(f"[Portfolios] Executing SQL: {delete_futures_sql}")
                 self.command(delete_futures_sql)
         except Exception as e:
-            logger.error(f"[Portfolios] Failed to close position: {e}")
+            logger.error(f"[Portfolios] Failed to close position: model_id={model_id}, symbol={symbol}, position_side={position_side}, error_type={type(e).__name__}, error={e}")
             raise
     
     def get_model_held_symbols(self, model_id: int, model_id_mapping: Dict[int, str] = None) -> List[str]:
