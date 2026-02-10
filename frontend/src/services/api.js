@@ -428,9 +428,9 @@ export const aiProviderApi = {
   fetchModels: (providerId) => apiPost('/api/ai/models', { providerId }),
 
   /**
-   * 生成策略代码（超时时间6分钟，因为后端AI生成需要较长时间）
+   * 生成策略代码（超时时间15分钟，因为后端AI生成需要较长时间）
    */
-  generateStrategyCode: (data) => apiPost('/api/ai/generate-strategy-code', data, {}, 360000)
+  generateStrategyCode: (data) => apiPost('/api/ai/generate-strategy-code', data, {}, 900000)
 }
 
 /**

@@ -87,7 +87,7 @@ public class AiProviderController {
             String strategyCode = aiProviderService.generateStrategyCode(
                     providerId, modelName, strategyContext, strategyType);
 
-            log.info("[生成策略代码] 生成的策略代码: {}", strategyCode);
+            log.debug("[生成策略代码] 生成的策略代码: {}", strategyCode);
 
             // 自动测试生成的策略代码
             String strategyName = request.get("strategyName");

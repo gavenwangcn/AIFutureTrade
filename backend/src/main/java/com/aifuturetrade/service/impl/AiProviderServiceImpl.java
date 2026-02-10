@@ -142,14 +142,15 @@ public class AiProviderServiceImpl implements AiProviderService {
             String baseUrl = normalizeApiUrl(apiUrl);
             String url = baseUrl + "/chat/completions";
 
-            // 获取配置参数
+            // 获取配置参数（从数据库settings表读取）
             Map<String, Object> config = getStrategyConfig();
             Double temperature = getConfigDouble(config, "strategy_temperature", 0.0);
+            Double topP = getConfigDouble(config, "strategy_top_p", 0.9);
             Integer maxTokens = getConfigInteger(config, "strategy_max_tokens", 8192);
             // 确保max_tokens至少为1，使用数据库配置的值，不做上限限制
             maxTokens = Math.max(1, maxTokens);
-            log.info("[OpenAI API] 使用配置参数: max_tokens={} (从数据库读取)", maxTokens);
-            Double topP = getConfigDouble(config, "strategy_top_p", 0.9);
+            log.info("[OpenAI API] 使用配置参数（从数据库settings表读取）: temperature={}, top_p={}, max_tokens={}", 
+                    temperature, topP, maxTokens);
             
             // 构建请求体，参考Python版本的实现
             Map<String, Object> requestBody = new HashMap<>();
@@ -184,7 +185,7 @@ public class AiProviderServiceImpl implements AiProviderService {
             int requestBodySize = requestBodyJson.length();
             
             // 记录请求详细信息
-            log.info("[OpenAI API] 开始调用API: url={}, model={}, temperature={}, max_tokens={}, top_p={}, timeout=5分钟", 
+            log.info("[OpenAI API] 开始调用API: url={}, model={}, temperature={}, max_tokens={}, top_p={}, timeout=15分钟", 
                     url, modelName, temperature, maxTokens, topP);
             log.info("[OpenAI API] 输入Token估算: system_tokens={}, prompt_tokens={}, total_input_tokens={}, request_body_size={} bytes", 
                     systemTokenCount, promptTokenCount, totalInputTokenCount, requestBodySize);
@@ -195,7 +196,7 @@ public class AiProviderServiceImpl implements AiProviderService {
                     .header("Authorization", "Bearer " + apiKey)
                     .header("Content-Type", "application/json")
                     .POST(HttpRequest.BodyPublishers.ofString(requestBodyJson))
-                    .timeout(Duration.ofMinutes(5))  // 超时时间设置为5分钟
+                    .timeout(Duration.ofMinutes(10))  // 超时时间设置为15分钟
                     .build();
             
             // 发送请求
@@ -285,14 +286,15 @@ public class AiProviderServiceImpl implements AiProviderService {
             String baseUrl = normalizeApiUrl(apiUrl);
             String url = baseUrl + "/messages";
 
-            // 获取配置参数
+            // 获取配置参数（从数据库settings表读取）
             Map<String, Object> config = getStrategyConfig();
+            Double temperature = getConfigDouble(config, "strategy_temperature", 0.0);
+            Double topP = getConfigDouble(config, "strategy_top_p", 0.9);
             Integer maxTokens = getConfigInteger(config, "strategy_max_tokens", 8192);
             // 确保max_tokens至少为1，使用数据库配置的值，不做上限限制
             maxTokens = Math.max(1, maxTokens);
-            log.info("[Anthropic API] 使用配置参数: max_tokens={} (从数据库读取)", maxTokens);
-            Double temperature = getConfigDouble(config, "strategy_temperature", 0.0);
-            Double topP = getConfigDouble(config, "strategy_top_p", 0.9);
+            log.info("[Anthropic API] 使用配置参数（从数据库settings表读取）: temperature={}, top_p={}, max_tokens={}", 
+                    temperature, topP, maxTokens);
             
             String systemContent = "You are a professional cryptocurrency trading strategy code generator. Output ONLY the Python code, without any JSON wrapper, markdown code blocks, or explanations. The output must be pure Python code that can be directly executed.";
             
@@ -323,7 +325,7 @@ public class AiProviderServiceImpl implements AiProviderService {
             int requestBodySize = requestBodyJson.length();
             
             // 记录请求详细信息
-            log.info("[Anthropic API] 开始调用API: url={}, model={}, temperature={}, max_tokens={}, top_p={}, timeout=5分钟", 
+            log.info("[Anthropic API] 开始调用API: url={}, model={}, temperature={}, max_tokens={}, top_p={}, timeout=15分钟", 
                     url, modelName, temperature, maxTokens, topP);
             log.info("[Anthropic API] 输入Token估算: system_tokens={}, prompt_tokens={}, total_input_tokens={}, request_body_size={} bytes", 
                     systemTokenCount, promptTokenCount, totalInputTokenCount, requestBodySize);
@@ -335,7 +337,7 @@ public class AiProviderServiceImpl implements AiProviderService {
                     .header("anthropic-version", "2023-06-01")
                     .header("Content-Type", "application/json")
                     .POST(HttpRequest.BodyPublishers.ofString(requestBodyJson))
-                    .timeout(Duration.ofMinutes(5))  // 超时时间设置为5分钟
+                    .timeout(Duration.ofMinutes(15))  // 超时时间设置为15分钟
                     .build();
             
             // 发送请求
@@ -433,15 +435,16 @@ public class AiProviderServiceImpl implements AiProviderService {
             contents.add(content);
             requestBody.put("contents", contents);
 
-            // 获取配置参数
+            // 获取配置参数（从数据库settings表读取）
             Map<String, Object> config = getStrategyConfig();
             Double temperature = getConfigDouble(config, "strategy_temperature", 0.0);
+            Double topP = getConfigDouble(config, "strategy_top_p", 0.9);
+            Integer topK = getConfigInteger(config, "strategy_top_k", 50);
             Integer maxTokens = getConfigInteger(config, "strategy_max_tokens", 8192);
             // 确保max_tokens至少为1，使用数据库配置的值，不做上限限制
             maxTokens = Math.max(1, maxTokens);
-            log.info("[Gemini API] 使用配置参数: max_tokens={} (从数据库读取)", maxTokens);
-            Double topP = getConfigDouble(config, "strategy_top_p", 0.9);
-            Integer topK = getConfigInteger(config, "strategy_top_k", 50);
+            log.info("[Gemini API] 使用配置参数（从数据库settings表读取）: temperature={}, top_p={}, top_k={}, max_tokens={}", 
+                    temperature, topP, topK, maxTokens);
             
             Map<String, Object> generationConfig = new HashMap<>();
             generationConfig.put("temperature", temperature);
@@ -464,7 +467,7 @@ public class AiProviderServiceImpl implements AiProviderService {
             int requestBodySize = requestBodyJson.length();
             
             // 记录请求详细信息
-            log.info("[Gemini API] 开始调用API: url={}, model={}, temperature={}, max_output_tokens={}, top_p={}, top_k={}, timeout=5分钟", 
+            log.info("[Gemini API] 开始调用API: url={}, model={}, temperature={}, max_output_tokens={}, top_p={}, top_k={}, timeout=15分钟", 
                     url, modelName, temperature, maxTokens, topP, topK);
             log.info("[Gemini API] 输入Token估算: system_tokens={}, prompt_tokens={}, total_input_tokens={}, request_body_size={} bytes", 
                     systemTokenCount, promptTokenCount, totalInputTokenCount, requestBodySize);
@@ -477,7 +480,7 @@ public class AiProviderServiceImpl implements AiProviderService {
                     .uri(URI.create(urlWithKey))
                     .header("Content-Type", "application/json")
                     .POST(HttpRequest.BodyPublishers.ofString(requestBodyJson))
-                    .timeout(Duration.ofMinutes(5))  // 超时时间设置为5分钟
+                    .timeout(Duration.ofMinutes(15))  // 超时时间设置为15分钟
                     .build();
             
             // 发送请求
@@ -816,14 +819,17 @@ public class AiProviderServiceImpl implements AiProviderService {
     }
 
     /**
-     * 获取策略配置参数
+     * 获取策略配置参数（从数据库settings表读取）
+     * 包括：strategy_temperature, strategy_top_p, strategy_top_k, strategy_max_tokens
+     * 如果数据库读取失败，则返回默认值
      * @return 配置参数Map
      */
     private Map<String, Object> getStrategyConfig() {
         try {
+            // 从数据库settings表获取配置
             return settingsService.getSettings();
         } catch (Exception e) {
-            log.warn("Failed to get settings, using default values: {}", e.getMessage());
+            log.warn("Failed to get settings from database, using default values: {}", e.getMessage());
             // 返回默认值
             Map<String, Object> defaultConfig = new HashMap<>();
             defaultConfig.put("strategy_temperature", 0.0);
