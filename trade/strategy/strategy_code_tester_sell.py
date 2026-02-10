@@ -439,36 +439,197 @@ class StrategyCodeTesterSell:
         errors = []
         warnings = []
         
-        # 创建模拟数据
+        # 创建模拟数据（完全参考portfolios表结构）
         mock_portfolio = {
             'positions': [
                 {
                     'symbol': 'BTCUSDT',
-                    'position_amt': 0.1,
-                    'position_side': 'LONG',
-                    'avg_price': 49000.0,
-                    'leverage': 5,
-                    'unrealized_profit': 100.0
+                    'position_amt': 0.1,  # 当前持仓数量
+                    'position_side': 'LONG',  # 持仓方向
+                    'avg_price': 49000.0,  # 开仓价格
+                    'leverage': 5,  # 杠杆倍数
+                    'unrealized_profit': 100.0,  # 未实现盈亏
+                    'open_time': '2026-02-10 14:00:00',  # 开仓时间（来自portfolios.created_at）
+                    'position_init': 0.1  # 首次买入的初始仓数量（记录第一次开仓时的position_amt）
                 }
             ],
             'cash': 10000.0,
-            'total_value': 15000.0
+            'total_value': 15000.0,
+            'positions_value': 4900.0,  # 持仓总价值
+            'margin_used': 980.0,  # 已用保证金
+            'realized_pnl': 0.0,  # 已实现盈亏
+            'unrealized_pnl': 100.0,  # 未实现盈亏
+            'initial_capital': 10000.0  # 初始资金
         }
 
         mock_account_info = {
-            'balance': 15000.0,
-            'available_balance': 10000.0,
-            'total_return': 50.0
+            'current_time': '2026-02-10 14:11:00',  # 当前时间
+            'balance': 15000.0,  # 账户总余额
+            'available_balance': 10000.0,  # 可用余额
+            'total_return': 50.0,  # 总收益率（%）
+            'initial_capital': 10000.0,  # 初始资金
+            'cross_wallet_balance': 15000.0,  # 全仓钱包余额
+            'cross_pnl': 0.0,  # 已实现盈亏
+            'cross_un_pnl': 100.0  # 未实现盈亏
         }
+
+        # 生成带有完整字段和技术指标的K线数据
+        def create_kline_with_indicators(open_price, high_price, low_price, close_price, volume,
+                                         open_time_str, close_time_str):
+            """创建包含技术指标的K线数据"""
+            return {
+                'open': open_price,
+                'high': high_price,
+                'low': low_price,
+                'close': close_price,
+                'volume': volume,
+                'open_time_dt_str': open_time_str,  # K线开始时间（UTC+8）
+                'close_time_dt_str': close_time_str,  # K线结束时间（UTC+8）
+                'indicators': {
+                    'ma': {
+                        'ma5': close_price * 0.99,
+                        'ma20': close_price * 0.98,
+                        'ma60': close_price * 0.97,
+                        'ma99': close_price * 0.96
+                    },
+                    'ema': {
+                        'ema5': close_price * 0.99,
+                        'ema20': close_price * 0.98,
+                        'ema30': close_price * 0.975,
+                        'ema60': close_price * 0.97,
+                        'ema99': close_price * 0.96
+                    },
+                    'rsi': {
+                        'rsi6': 55.0,
+                        'rsi9': 58.0,
+                        'rsi14': 60.0
+                    },
+                    'macd': {
+                        'dif': 100.0,
+                        'dea': 80.0,
+                        'bar': 20.0
+                    },
+                    'kdj': {
+                        'k': 65.0,
+                        'd': 60.0,
+                        'j': 75.0
+                    },
+                    'atr': {
+                        'atr7': 500.0,
+                        'atr14': 600.0,
+                        'atr21': 650.0
+                    },
+                    'vol': {
+                        'vol': volume,
+                        'buy_vol': volume * 0.55,
+                        'sell_vol': volume * 0.45,
+                        'mavol5': volume * 0.9,
+                        'mavol10': volume * 0.95,
+                        'mavol60': volume * 1.0
+                    }
+                }
+            }
+
+        # 生成100根15分钟K线（覆盖开仓时间 2026-02-10 14:00:00）
+        klines_15m = []
+        from datetime import datetime, timedelta
+        base_time = datetime(2026, 2, 10, 10, 0, 0)  # 从10:00开始，确保14:00在范围内
+        for i in range(100):
+            open_time = base_time + timedelta(minutes=15 * i)
+            close_time = open_time + timedelta(minutes=15)
+            klines_15m.append(create_kline_with_indicators(
+                49000.0, 51000.0, 48000.0, 50000.0, 1000.0,
+                open_time.strftime('%Y-%m-%d %H:%M:%S'),
+                close_time.strftime('%Y-%m-%d %H:%M:%S')
+            ))
+
+        # 生成100根1小时K线
+        klines_1h = []
+        base_time_1h = datetime(2026, 2, 9, 14, 0, 0)  # 从前一天14:00开始
+        for i in range(100):
+            open_time = base_time_1h + timedelta(hours=i)
+            close_time = open_time + timedelta(hours=1)
+            klines_1h.append(create_kline_with_indicators(
+                49000.0, 51000.0, 48000.0, 50000.0, 1000.0,
+                open_time.strftime('%Y-%m-%d %H:%M:%S'),
+                close_time.strftime('%Y-%m-%d %H:%M:%S')
+            ))
+
+        # 生成其他时间周期的K线（使用相同的方法）
+        klines_1m = []
+        base_time_1m = datetime(2026, 2, 10, 12, 0, 0)
+        for i in range(100):
+            open_time = base_time_1m + timedelta(minutes=i)
+            close_time = open_time + timedelta(minutes=1)
+            klines_1m.append(create_kline_with_indicators(
+                49000.0, 51000.0, 48000.0, 50000.0, 1000.0,
+                open_time.strftime('%Y-%m-%d %H:%M:%S'),
+                close_time.strftime('%Y-%m-%d %H:%M:%S')
+            ))
+
+        klines_5m = []
+        base_time_5m = datetime(2026, 2, 10, 11, 0, 0)
+        for i in range(100):
+            open_time = base_time_5m + timedelta(minutes=5 * i)
+            close_time = open_time + timedelta(minutes=5)
+            klines_5m.append(create_kline_with_indicators(
+                49000.0, 51000.0, 48000.0, 50000.0, 1000.0,
+                open_time.strftime('%Y-%m-%d %H:%M:%S'),
+                close_time.strftime('%Y-%m-%d %H:%M:%S')
+            ))
+
+        klines_30m = []
+        base_time_30m = datetime(2026, 2, 10, 8, 0, 0)
+        for i in range(100):
+            open_time = base_time_30m + timedelta(minutes=30 * i)
+            close_time = open_time + timedelta(minutes=30)
+            klines_30m.append(create_kline_with_indicators(
+                49000.0, 51000.0, 48000.0, 50000.0, 1000.0,
+                open_time.strftime('%Y-%m-%d %H:%M:%S'),
+                close_time.strftime('%Y-%m-%d %H:%M:%S')
+            ))
+
+        klines_4h = []
+        base_time_4h = datetime(2026, 2, 8, 14, 0, 0)
+        for i in range(100):
+            open_time = base_time_4h + timedelta(hours=4 * i)
+            close_time = open_time + timedelta(hours=4)
+            klines_4h.append(create_kline_with_indicators(
+                49000.0, 51000.0, 48000.0, 50000.0, 1000.0,
+                open_time.strftime('%Y-%m-%d %H:%M:%S'),
+                close_time.strftime('%Y-%m-%d %H:%M:%S')
+            ))
+
+        klines_1d = []
+        base_time_1d = datetime(2026, 1, 1, 0, 0, 0)
+        for i in range(100):
+            open_time = base_time_1d + timedelta(days=i)
+            close_time = open_time + timedelta(days=1)
+            klines_1d.append(create_kline_with_indicators(
+                49000.0, 51000.0, 48000.0, 50000.0, 1000.0,
+                open_time.strftime('%Y-%m-%d %H:%M:%S'),
+                close_time.strftime('%Y-%m-%d %H:%M:%S')
+            ))
+
+        klines_1w = []
+        base_time_1w = datetime(2025, 10, 1, 0, 0, 0)
+        for i in range(100):
+            open_time = base_time_1w + timedelta(weeks=i)
+            close_time = open_time + timedelta(weeks=1)
+            klines_1w.append(create_kline_with_indicators(
+                49000.0, 51000.0, 48000.0, 50000.0, 1000.0,
+                open_time.strftime('%Y-%m-%d %H:%M:%S'),
+                close_time.strftime('%Y-%m-%d %H:%M:%S')
+            ))
 
         mock_market_state = {
             'BTCUSDT': {
-                'price': 50000.0,
+                'price': 50000.0,  # 当前价格
                 'contract_symbol': 'BTCUSDT',
-                'quote_volume': 1000000.0,
-                'base_volume': 20.0,
-                'change_24h': 2.5,
-                'source': 'future',
+                'quote_volume': 1000000.0,  # 24小时成交额（USDT）
+                'base_volume': 20.0,  # 24小时成交量（BTC）
+                'change_24h': 2.5,  # 24小时涨跌幅（%）
+                'source': 'future',  # 数据源
                 'previous_close_prices': {
                     '1m': 49950.0,
                     '5m': 49900.0,
@@ -481,46 +642,14 @@ class StrategyCodeTesterSell:
                 },
                 'indicators': {
                     'timeframes': {
-                        '1m': {
-                            'klines': [
-                                {'open': 49000.0, 'high': 51000.0, 'low': 48000.0, 'close': 50000.0, 'volume': 1000.0}
-                            ] * 100  # 生成100根K线用于计算MA(99)
-                        },
-                        '5m': {
-                            'klines': [
-                                {'open': 49000.0, 'high': 51000.0, 'low': 48000.0, 'close': 50000.0, 'volume': 1000.0}
-                            ] * 100
-                        },
-                        '15m': {
-                            'klines': [
-                                {'open': 49000.0, 'high': 51000.0, 'low': 48000.0, 'close': 50000.0, 'volume': 1000.0}
-                            ] * 100
-                        },
-                        '30m': {
-                            'klines': [
-                                {'open': 49000.0, 'high': 51000.0, 'low': 48000.0, 'close': 50000.0, 'volume': 1000.0}
-                            ] * 100
-                        },
-                        '1h': {
-                            'klines': [
-                                {'open': 49000.0, 'high': 51000.0, 'low': 48000.0, 'close': 50000.0, 'volume': 1000.0}
-                            ] * 100  # 生成100根K线用于计算MA(99)
-                        },
-                        '4h': {
-                            'klines': [
-                                {'open': 49000.0, 'high': 51000.0, 'low': 48000.0, 'close': 50000.0, 'volume': 1000.0}
-                            ] * 100
-                        },
-                        '1d': {
-                            'klines': [
-                                {'open': 49000.0, 'high': 51000.0, 'low': 48000.0, 'close': 50000.0, 'volume': 1000.0}
-                            ] * 100
-                        },
-                        '1w': {
-                            'klines': [
-                                {'open': 49000.0, 'high': 51000.0, 'low': 48000.0, 'close': 50000.0, 'volume': 1000.0}
-                            ] * 100
-                        }
+                        '1m': {'klines': klines_1m},
+                        '5m': {'klines': klines_5m},
+                        '15m': {'klines': klines_15m},
+                        '30m': {'klines': klines_30m},
+                        '1h': {'klines': klines_1h},
+                        '4h': {'klines': klines_4h},
+                        '1d': {'klines': klines_1d},
+                        '1w': {'klines': klines_1w}
                     }
                 }
             }
