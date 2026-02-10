@@ -71,32 +71,22 @@ public class AiProviderController {
         String strategyContext = request.get("strategyContext");
         String strategyType = request.get("strategyType");
 
-        log.info("[生成策略代码] 收到请求: providerId={}, modelName={}, strategyType={}, strategyContext长度={} 字符",
-                providerId, modelName, strategyType,
-                strategyContext != null ? strategyContext.length() : 0);
-
         if (providerId == null || modelName == null || strategyContext == null || strategyType == null) {
             Map<String, Object> error = new HashMap<>();
             error.put("error", "providerId, modelName, strategyContext, and strategyType are required");
-            log.warn("[生成策略代码] 请求参数不完整");
             return new ResponseEntity<>(error, HttpStatus.BAD_REQUEST);
         }
 
         if (!strategyType.equals("buy") && !strategyType.equals("sell")) {
             Map<String, Object> error = new HashMap<>();
             error.put("error", "strategyType must be 'buy' or 'sell'");
-            log.warn("[生成策略代码] 无效的strategyType: {}", strategyType);
             return new ResponseEntity<>(error, HttpStatus.BAD_REQUEST);
         }
 
         try {
-            log.info("[生成策略代码] 开始调用AI服务生成策略代码");
             String strategyCode = aiProviderService.generateStrategyCode(
                     providerId, modelName, strategyContext, strategyType);
 
-            log.info("[生成策略代码] AI服务返回策略代码，长度: {} 字符", strategyCode != null ? strategyCode.length() : 0);
-
-            // 记录生成的策略代码（用于调试）
             log.info("[生成策略代码] 生成的策略代码: {}", strategyCode);
 
             // 自动测试生成的策略代码
@@ -105,20 +95,17 @@ public class AiProviderController {
                 strategyName = "新" + ("buy".equals(strategyType) ? "买入" : "卖出") + "策略";
             }
 
-            log.info("[生成策略代码] 开始测试策略代码: strategyName={}", strategyName);
             Map<String, Object> testResult = strategyCodeTesterService.testStrategyCode(
                     strategyCode, strategyType, strategyName);
 
             boolean testPassed = (Boolean) testResult.get("passed");
-            log.info("[生成策略代码] 策略代码测试完成: testPassed={}, message={}",
-                    testPassed, testResult.get("message"));
+            log.info("[生成策略代码] 策略代码测试完成: testPassed={}", testPassed);
 
             Map<String, Object> response = new HashMap<>();
             response.put("strategyCode", strategyCode);
             response.put("testResult", testResult);
             response.put("testPassed", testPassed);
 
-            log.info("[生成策略代码] 请求处理完成，返回结果");
             return new ResponseEntity<>(response, HttpStatus.OK);
         } catch (Exception e) {
             Map<String, Object> error = new HashMap<>();

@@ -141,13 +141,14 @@ public class AiProviderServiceImpl implements AiProviderService {
             // 规范化base_url，确保以/v1结尾，参考Python版本的逻辑
             String baseUrl = normalizeApiUrl(apiUrl);
             String url = baseUrl + "/chat/completions";
-            
+
             // 获取配置参数
             Map<String, Object> config = getStrategyConfig();
             Double temperature = getConfigDouble(config, "strategy_temperature", 0.0);
             Integer maxTokens = getConfigInteger(config, "strategy_max_tokens", 8192);
-            // OpenAI API 限制：max_tokens 范围 [1, 8192]
-            maxTokens = Math.max(1, Math.min(8192, maxTokens));
+            // 确保max_tokens至少为1，使用数据库配置的值，不做上限限制
+            maxTokens = Math.max(1, maxTokens);
+            log.info("[OpenAI API] 使用配置参数: max_tokens={} (从数据库读取)", maxTokens);
             Double topP = getConfigDouble(config, "strategy_top_p", 0.9);
             
             // 构建请求体，参考Python版本的实现
@@ -206,11 +207,8 @@ public class AiProviderServiceImpl implements AiProviderService {
             // 记录响应信息
             log.info("[OpenAI API] 收到响应: status_code={}, elapsed_time={}ms", response.statusCode(), elapsedTime);
 
-            // 记录完整响应体（用于调试）
-            String responseBody = response.body();
-            log.info("[OpenAI API] 完整响应体: {}", responseBody);
-
             // 处理响应
+            String responseBody = response.body();
             if (response.statusCode() == 200) {
                 JsonNode jsonNode = objectMapper.readTree(responseBody);
                 
@@ -235,7 +233,7 @@ public class AiProviderServiceImpl implements AiProviderService {
                         String content = message.get("content").asText();
                         int responseContentLength = content != null ? content.length() : 0;
                         int responseTokenEstimate = estimateTokenCount(content);
-                        log.info("[OpenAI API] 响应内容: length={} chars, estimated_tokens={}",
+                        log.info("[OpenAI API] 响应内容长度: {} chars, 估算tokens: {}",
                                 responseContentLength, responseTokenEstimate);
 
                         // 记录原始返回内容（用于调试）
@@ -286,12 +284,13 @@ public class AiProviderServiceImpl implements AiProviderService {
             // 规范化base_url，确保以/v1结尾
             String baseUrl = normalizeApiUrl(apiUrl);
             String url = baseUrl + "/messages";
-            
+
             // 获取配置参数
             Map<String, Object> config = getStrategyConfig();
             Integer maxTokens = getConfigInteger(config, "strategy_max_tokens", 8192);
-            // Anthropic API 限制：max_tokens 范围 [1, 4096]（Claude 3）或 [1, 8192]（Claude 3.5）
-            maxTokens = Math.max(1, Math.min(8192, maxTokens));
+            // 确保max_tokens至少为1，使用数据库配置的值，不做上限限制
+            maxTokens = Math.max(1, maxTokens);
+            log.info("[Anthropic API] 使用配置参数: max_tokens={} (从数据库读取)", maxTokens);
             Double temperature = getConfigDouble(config, "strategy_temperature", 0.0);
             Double topP = getConfigDouble(config, "strategy_top_p", 0.9);
             
@@ -348,11 +347,8 @@ public class AiProviderServiceImpl implements AiProviderService {
             // 记录响应信息
             log.info("[Anthropic API] 收到响应: status_code={}, elapsed_time={}ms", response.statusCode(), elapsedTime);
 
-            // 记录完整响应体（用于调试）
-            String responseBody = response.body();
-            log.info("[Anthropic API] 完整响应体: {}", responseBody);
-
             // 处理响应
+            String responseBody = response.body();
             if (response.statusCode() == 200) {
                 JsonNode jsonNode = objectMapper.readTree(responseBody);
                 
@@ -374,7 +370,7 @@ public class AiProviderServiceImpl implements AiProviderService {
                     String text = content.get(0).get("text").asText();
                     int responseContentLength = text != null ? text.length() : 0;
                     int responseTokenEstimate = estimateTokenCount(text);
-                    log.info("[Anthropic API] 响应内容: length={} chars, estimated_tokens={}",
+                    log.info("[Anthropic API] 响应内容长度: {} chars, 估算tokens: {}",
                             responseContentLength, responseTokenEstimate);
 
                     // 记录原始返回内容（用于调试）
@@ -436,13 +432,14 @@ public class AiProviderServiceImpl implements AiProviderService {
             content.put("parts", parts);
             contents.add(content);
             requestBody.put("contents", contents);
-            
+
             // 获取配置参数
             Map<String, Object> config = getStrategyConfig();
             Double temperature = getConfigDouble(config, "strategy_temperature", 0.0);
             Integer maxTokens = getConfigInteger(config, "strategy_max_tokens", 8192);
-            // Gemini API 限制：maxOutputTokens 范围 [1, 8192]
-            maxTokens = Math.max(1, Math.min(8192, maxTokens));
+            // 确保max_tokens至少为1，使用数据库配置的值，不做上限限制
+            maxTokens = Math.max(1, maxTokens);
+            log.info("[Gemini API] 使用配置参数: max_tokens={} (从数据库读取)", maxTokens);
             Double topP = getConfigDouble(config, "strategy_top_p", 0.9);
             Integer topK = getConfigInteger(config, "strategy_top_k", 50);
             
@@ -492,11 +489,8 @@ public class AiProviderServiceImpl implements AiProviderService {
             // 记录响应信息
             log.info("[Gemini API] 收到响应: status_code={}, elapsed_time={}ms", response.statusCode(), elapsedTime);
 
-            // 记录完整响应体（用于调试）
-            String responseBody = response.body();
-            log.info("[Gemini API] 完整响应体: {}", responseBody);
-
             // 处理响应
+            String responseBody = response.body();
             if (response.statusCode() == 200) {
                 JsonNode jsonNode = objectMapper.readTree(responseBody);
                 
@@ -524,7 +518,7 @@ public class AiProviderServiceImpl implements AiProviderService {
                             String text = candidateParts.get(0).get("text").asText();
                             int responseContentLength = text != null ? text.length() : 0;
                             int responseTokenEstimate = estimateTokenCount(text);
-                            log.info("[Gemini API] 响应内容: length={} chars, estimated_tokens={}",
+                            log.info("[Gemini API] 响应内容长度: {} chars, 估算tokens: {}",
                                     responseContentLength, responseTokenEstimate);
 
                             // 记录原始返回内容（用于调试）
@@ -897,24 +891,19 @@ public class AiProviderServiceImpl implements AiProviderService {
         String trimmed = response.trim();
         String extractedCode = null;
 
-        log.info("[代码提取] 开始提取代码，原始内容长度: {} 字符", trimmed.length());
-
         // 尝试解析JSON格式
         try {
             JsonNode jsonNode = objectMapper.readTree(trimmed);
             // 检查是否有code字段
             if (jsonNode.has("code")) {
                 extractedCode = jsonNode.get("code").asText();
-                log.info("[代码提取] 从JSON响应中提取code字段，代码长度: {} 字符", extractedCode.length());
             }
             // 检查是否有strategy_code字段
             else if (jsonNode.has("strategy_code")) {
                 extractedCode = jsonNode.get("strategy_code").asText();
-                log.info("[代码提取] 从JSON响应中提取strategy_code字段，代码长度: {} 字符", extractedCode.length());
             }
         } catch (Exception e) {
             // 不是JSON格式，继续处理
-            log.info("[代码提取] 响应不是JSON格式，尝试其他解析方式: {}", e.getMessage());
         }
 
         // 如果没有从JSON中提取到代码，尝试提取Markdown代码块
@@ -927,21 +916,17 @@ public class AiProviderServiceImpl implements AiProviderService {
             java.util.regex.Matcher matcher = markdownPattern.matcher(trimmed);
             if (matcher.find()) {
                 extractedCode = matcher.group(1).trim();
-                log.info("[代码提取] 从Markdown代码块中提取代码，代码长度: {} 字符", extractedCode.length());
             }
         }
 
         // 如果还是没有提取到代码，使用原始内容
         if (extractedCode == null) {
             extractedCode = trimmed;
-            log.info("[代码提取] 直接使用原始响应内容，代码长度: {} 字符", extractedCode.length());
         }
 
         // 处理转义字符：将字符串形式的转义字符转换为实际字符
         // 例如：将 "\n" 转换为实际的换行符
         String normalizedCode = normalizeEscapeCharacters(extractedCode);
-
-        log.info("[代码提取] 转义字符处理完成，最终代码长度: {} 字符", normalizedCode.length());
 
         return normalizedCode;
     }
