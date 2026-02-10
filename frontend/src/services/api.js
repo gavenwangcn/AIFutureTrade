@@ -116,12 +116,12 @@ export const modelApi = {
   setAutoClosePercent: (modelId, autoClosePercent) => apiPost(`/api/models/${modelId}/auto_close_percent`, { auto_close_percent: autoClosePercent }),
 
   /**
-   * 设置每日成交量过滤阈值（千万单位）
+   * 设置当日成交额过滤阈值（千万单位）
    */
   setBaseVolume: (modelId, baseVolume) => apiPost(`/api/models/${modelId}/base_volume`, { base_volume: baseVolume }),
   
   /**
-   * 设置每日成交量过滤阈值（千万单位）- 兼容旧接口
+   * 设置当日成交额过滤阈值（千万单位）- 兼容旧接口
    */
   setQuoteVolume: (modelId, quoteVolume) => apiPost(`/api/models/${modelId}/base_volume`, { base_volume: quoteVolume }),
 

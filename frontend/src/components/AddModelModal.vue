@@ -42,7 +42,7 @@
         <input v-model.number="formData.autoClosePercent" type="number" class="form-input" min="0" max="100" step="0.1" />
       </div>
       <div class="form-group">
-        <label title="只交易每日成交量大于此阈值的合约（以千万为单位，例如：10 表示1亿成交量）。留空或0表示不过滤。">每日成交量过滤阈值（千万单位）</label>
+        <label title="只交易当日成交额大于此阈值的合约（以千万为单位，例如：10 表示1亿成交额）。留空或0表示不过滤。">当日成交额过滤阈值（千万单位）</label>
         <input v-model.number="formData.baseVolume" type="number" class="form-input" min="0" step="0.1" />
       </div>
       <div class="form-group">
@@ -198,7 +198,7 @@ const formData = ref({
   initialCapital: 100000,
   maxPositions: 3,  // 默认最大持仓数量为3
   autoClosePercent: null,  // 自动平仓百分比，默认不启用
-  baseVolume: null,  // 每日成交量过滤阈值（千万单位），默认不过滤
+  baseVolume: null,  // 当日成交额过滤阈值（千万单位），默认不过滤
   dailyReturn: null,  // 目标每日收益率（百分比），默认不限制
   lossesNum: null,  // 连续亏损次数阈值，默认不限制
   forbidBuyStart: null, // 禁止买入开始时间 HH:mm:ss（UTC+8）
