@@ -282,7 +282,8 @@ class PortfoliosDatabase:
                     else:
                         # Existing record (后续买入/卖出): position_init 保持不变，使用 NULL（UPDATE时不会更新该字段）
                         position_init_value = None
-                        existing_position_init = existing_row[0] if existing_row else None
+                        # Access by column name since cursor returns dict
+                        existing_position_init = existing_row.get('position_init') if existing_row else None
                         logger.debug(f"[Portfolios] 后续交易，position_init 保持不变={existing_position_init}")
                     
                     sql = f"""
@@ -312,7 +313,8 @@ class PortfoliosDatabase:
                     if cursor.rowcount == 1:
                         logger.debug(f"[Portfolios] Position inserted: model_id={model_uuid}, symbol={normalized_symbol}, position_side={position_side_upper}, id={position_id}, position_init={position_init_value} (首次买入)")
                     elif cursor.rowcount == 2:
-                        existing_position_init = existing_row[0] if existing_row else None
+                        # Access by column name since cursor returns dict
+                        existing_position_init = existing_row.get('position_init') if existing_row else None
                         logger.debug(f"[Portfolios] Position updated: model_id={model_uuid}, symbol={normalized_symbol}, position_side={position_side_upper}, position_amt={position_amt}, position_init={existing_position_init} (保持不变)")
                     elif cursor.rowcount == 0:
                         # This should not happen normally, but log a warning instead of raising an exception

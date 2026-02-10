@@ -205,10 +205,14 @@ public class AiProviderServiceImpl implements AiProviderService {
             
             // 记录响应信息
             log.info("[OpenAI API] 收到响应: status_code={}, elapsed_time={}ms", response.statusCode(), elapsedTime);
-            
+
+            // 记录完整响应体（用于调试）
+            String responseBody = response.body();
+            log.info("[OpenAI API] 完整响应体: {}", responseBody);
+
             // 处理响应
             if (response.statusCode() == 200) {
-                JsonNode jsonNode = objectMapper.readTree(response.body());
+                JsonNode jsonNode = objectMapper.readTree(responseBody);
                 
                 // 尝试提取 token 使用信息（如果 API 返回）
                 try {
@@ -231,9 +235,19 @@ public class AiProviderServiceImpl implements AiProviderService {
                         String content = message.get("content").asText();
                         int responseContentLength = content != null ? content.length() : 0;
                         int responseTokenEstimate = estimateTokenCount(content);
-                        log.info("[OpenAI API] 响应内容: length={} chars, estimated_tokens={}", 
+                        log.info("[OpenAI API] 响应内容: length={} chars, estimated_tokens={}",
                                 responseContentLength, responseTokenEstimate);
-                        return extractCodeFromResponse(content);
+
+                        // 记录原始返回内容（用于调试）
+                        log.info("[OpenAI API] 原始返回内容: {}", content);
+
+                        // 提取代码
+                        String extractedCode = extractCodeFromResponse(content);
+
+                        // 记录提取后的代码（用于调试）
+                        log.info("[OpenAI API] 提取的策略代码: {}", extractedCode);
+
+                        return extractedCode;
                     }
                 }
             }
@@ -333,10 +347,14 @@ public class AiProviderServiceImpl implements AiProviderService {
             
             // 记录响应信息
             log.info("[Anthropic API] 收到响应: status_code={}, elapsed_time={}ms", response.statusCode(), elapsedTime);
-            
+
+            // 记录完整响应体（用于调试）
+            String responseBody = response.body();
+            log.info("[Anthropic API] 完整响应体: {}", responseBody);
+
             // 处理响应
             if (response.statusCode() == 200) {
-                JsonNode jsonNode = objectMapper.readTree(response.body());
+                JsonNode jsonNode = objectMapper.readTree(responseBody);
                 
                 // 尝试提取 token 使用信息（如果 API 返回）
                 try {
@@ -356,9 +374,19 @@ public class AiProviderServiceImpl implements AiProviderService {
                     String text = content.get(0).get("text").asText();
                     int responseContentLength = text != null ? text.length() : 0;
                     int responseTokenEstimate = estimateTokenCount(text);
-                    log.info("[Anthropic API] 响应内容: length={} chars, estimated_tokens={}", 
+                    log.info("[Anthropic API] 响应内容: length={} chars, estimated_tokens={}",
                             responseContentLength, responseTokenEstimate);
-                    return extractCodeFromResponse(text);
+
+                    // 记录原始返回内容（用于调试）
+                    log.info("[Anthropic API] 原始返回内容: {}", text);
+
+                    // 提取代码
+                    String extractedCode = extractCodeFromResponse(text);
+
+                    // 记录提取后的代码（用于调试）
+                    log.info("[Anthropic API] 提取的策略代码: {}", extractedCode);
+
+                    return extractedCode;
                 }
             }
             
@@ -463,10 +491,14 @@ public class AiProviderServiceImpl implements AiProviderService {
             
             // 记录响应信息
             log.info("[Gemini API] 收到响应: status_code={}, elapsed_time={}ms", response.statusCode(), elapsedTime);
-            
+
+            // 记录完整响应体（用于调试）
+            String responseBody = response.body();
+            log.info("[Gemini API] 完整响应体: {}", responseBody);
+
             // 处理响应
             if (response.statusCode() == 200) {
-                JsonNode jsonNode = objectMapper.readTree(response.body());
+                JsonNode jsonNode = objectMapper.readTree(responseBody);
                 
                 // 尝试提取 token 使用信息（如果 API 返回）
                 try {
@@ -492,9 +524,19 @@ public class AiProviderServiceImpl implements AiProviderService {
                             String text = candidateParts.get(0).get("text").asText();
                             int responseContentLength = text != null ? text.length() : 0;
                             int responseTokenEstimate = estimateTokenCount(text);
-                            log.info("[Gemini API] 响应内容: length={} chars, estimated_tokens={}", 
+                            log.info("[Gemini API] 响应内容: length={} chars, estimated_tokens={}",
                                     responseContentLength, responseTokenEstimate);
-                            return extractCodeFromResponse(text);
+
+                            // 记录原始返回内容（用于调试）
+                            log.info("[Gemini API] 原始返回内容: {}", text);
+
+                            // 提取代码
+                            String extractedCode = extractCodeFromResponse(text);
+
+                            // 记录提取后的代码（用于调试）
+                            log.info("[Gemini API] 提取的策略代码: {}", extractedCode);
+
+                            return extractedCode;
                         }
                     }
                 }
@@ -842,60 +884,65 @@ public class AiProviderServiceImpl implements AiProviderService {
      * 1. JSON格式：{"code": "..."} 或 {"strategy_code": "..."}
      * 2. Markdown代码块：```python ... ``` 或 ``` ... ```
      * 3. 纯代码：直接返回
-     * 
+     *
      * @param response AI返回的原始内容
      * @return 提取的Python代码（已处理转义字符）
      */
     private String extractCodeFromResponse(String response) {
         if (response == null || response.trim().isEmpty()) {
+            log.warn("[代码提取] 响应内容为空");
             return response;
         }
-        
+
         String trimmed = response.trim();
         String extractedCode = null;
-        
+
+        log.info("[代码提取] 开始提取代码，原始内容长度: {} 字符", trimmed.length());
+
         // 尝试解析JSON格式
         try {
             JsonNode jsonNode = objectMapper.readTree(trimmed);
             // 检查是否有code字段
             if (jsonNode.has("code")) {
                 extractedCode = jsonNode.get("code").asText();
-                log.debug("从JSON响应中提取code字段");
+                log.info("[代码提取] 从JSON响应中提取code字段，代码长度: {} 字符", extractedCode.length());
             }
             // 检查是否有strategy_code字段
             else if (jsonNode.has("strategy_code")) {
                 extractedCode = jsonNode.get("strategy_code").asText();
-                log.debug("从JSON响应中提取strategy_code字段");
+                log.info("[代码提取] 从JSON响应中提取strategy_code字段，代码长度: {} 字符", extractedCode.length());
             }
         } catch (Exception e) {
             // 不是JSON格式，继续处理
-            log.debug("响应不是JSON格式，尝试其他解析方式");
+            log.info("[代码提取] 响应不是JSON格式，尝试其他解析方式: {}", e.getMessage());
         }
-        
+
         // 如果没有从JSON中提取到代码，尝试提取Markdown代码块
         if (extractedCode == null) {
             // 匹配 ```python ... ``` 或 ``` ... ```
             java.util.regex.Pattern markdownPattern = java.util.regex.Pattern.compile(
-                "```(?:python)?\\s*\\n?(.*?)\\n?```", 
+                "```(?:python)?\\s*\\n?(.*?)\\n?```",
                 java.util.regex.Pattern.DOTALL
             );
             java.util.regex.Matcher matcher = markdownPattern.matcher(trimmed);
             if (matcher.find()) {
                 extractedCode = matcher.group(1).trim();
-                log.debug("从Markdown代码块中提取代码");
+                log.info("[代码提取] 从Markdown代码块中提取代码，代码长度: {} 字符", extractedCode.length());
             }
         }
-        
+
         // 如果还是没有提取到代码，使用原始内容
         if (extractedCode == null) {
             extractedCode = trimmed;
-            log.debug("直接使用原始响应内容");
+            log.info("[代码提取] 直接使用原始响应内容，代码长度: {} 字符", extractedCode.length());
         }
-        
+
         // 处理转义字符：将字符串形式的转义字符转换为实际字符
         // 例如：将 "\n" 转换为实际的换行符
         String normalizedCode = normalizeEscapeCharacters(extractedCode);
-        
+
+        log.info("[代码提取] 转义字符处理完成，最终代码长度: {} 字符", normalizedCode.length());
+
         return normalizedCode;
     }
     
