@@ -55,13 +55,13 @@ logging:
     com.aifuturetrade.asyncservice: info
     # 详细日志配置 - 便于排查问题
     com.aifuturetrade.asyncservice.service.impl.PriceRefreshServiceImpl: warn
-    com.aifuturetrade.asyncservice.service.impl.MarketTickerStreamServiceImpl: warn
+    com.aifuturetrade.asyncservice.service.impl.MarketTickerStreamServiceImpl: info
     com.aifuturetrade.asyncservice.service.impl.MarketSymbolOfflineServiceImpl: warn
     com.aifuturetrade.asyncservice.service.impl.AsyncAgentServiceImpl: info
     com.aifuturetrade.asyncservice.service.impl.AutoCloseServiceImpl: warn
     com.aifuturetrade.asyncservice.service.impl.AccountValuesDailyServiceImpl: warn
     com.aifuturetrade.asyncservice.service.impl.AlgoOrderServiceImpl: warn
-    com.aifuturetrade.asyncservice.service.impl.AlgoOrderCleanupServiceImpl: info
+    com.aifuturetrade.asyncservice.service.impl.AlgoOrderCleanupServiceImpl: warn
     com.aifuturetrade.asyncservice.api.binance: warn
     com.aifuturetrade.asyncservice.dao.mapper: info
     # 第三方库日志级别
