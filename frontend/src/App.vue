@@ -1123,7 +1123,7 @@
               >
             </div>
             <div class="form-group">
-              <label for="settingsBaseVolumeInput" title="只交易每日成交量大于此阈值的合约（以千万为单位，例如：10 表示1亿成交量）。留空或0表示不过滤。">每日成交量过滤阈值（千万单位）</label>
+              <label for="settingsBaseVolumeInput" title="只交易当日成交额大于此阈值的合约（以千万为单位，例如：10 表示1亿成交额）。留空或0表示不过滤。">当日成交额过滤阈值（千万单位）</label>
               <input 
                 type="number" 
                 id="settingsBaseVolumeInput" 

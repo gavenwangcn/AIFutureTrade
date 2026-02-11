@@ -2866,7 +2866,7 @@ let portfolioRefreshInterval = null // 投资组合数据自动刷新定时器�
         promises.push(modelApi.updateProvider(pendingModelSettingsId.value, providerId, modelName))
       }
       
-      // 更新杠杆、最大持仓数量、自动平仓百分比、每日成交量过滤阈值、目标每日收益率和连续亏损次数阈值
+      // 更新杠杆、最大持仓数量、自动平仓百分比、当日成交额过滤阈值、目标每日收益率和连续亏损次数阈值
       const autoClosePercentValue = tempModelSettings.value.auto_close_percent
       const baseVolumeValue = tempModelSettings.value.base_volume
       const dailyReturnValue = tempModelSettings.value.daily_return

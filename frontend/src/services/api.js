@@ -116,12 +116,12 @@ export const modelApi = {
   setAutoClosePercent: (modelId, autoClosePercent) => apiPost(`/api/models/${modelId}/auto_close_percent`, { auto_close_percent: autoClosePercent }),
 
   /**
-   * 设置每日成交量过滤阈值（千万单位）
+   * 设置当日成交额过滤阈值（千万单位）
    */
   setBaseVolume: (modelId, baseVolume) => apiPost(`/api/models/${modelId}/base_volume`, { base_volume: baseVolume }),
   
   /**
-   * 设置每日成交量过滤阈值（千万单位）- 兼容旧接口
+   * 设置当日成交额过滤阈值（千万单位）- 兼容旧接口
    */
   setQuoteVolume: (modelId, quoteVolume) => apiPost(`/api/models/${modelId}/base_volume`, { base_volume: quoteVolume }),
 
@@ -428,9 +428,9 @@ export const aiProviderApi = {
   fetchModels: (providerId) => apiPost('/api/ai/models', { providerId }),
 
   /**
-   * 生成策略代码（超时时间6分钟，因为后端AI生成需要较长时间）
+   * 生成策略代码（超时时间15分钟，因为后端AI生成需要较长时间）
    */
-  generateStrategyCode: (data) => apiPost('/api/ai/generate-strategy-code', data, {}, 360000)
+  generateStrategyCode: (data) => apiPost('/api/ai/generate-strategy-code', data, {}, 900000)
 }
 
 /**
