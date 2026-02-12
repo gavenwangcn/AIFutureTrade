@@ -269,7 +269,8 @@ def validate_position_for_trade(
     if actual_position_side != position_side:
         return None, f'持仓方向不匹配：期望{position_side}，实际{actual_position_side}'
     
-    position_amt = int(abs(position.get('position_amt', 0)))
+    # 使用 float 保留小数持仓（如 RIVERUSDT 0.32），int() 会导致 0.32 被截断为 0
+    position_amt = float(abs(position.get('position_amt', 0) or 0))
     if position_amt <= 0:
         return None, '持仓数量为0，无法平仓'
     

@@ -4124,8 +4124,8 @@ class TradingEngine:
         
         current_price = market_state[symbol]['price']
         entry_price = position.get('avg_price', 0)
-        # position_amt 转换为整数（与strategy_decisions表和portfolios表保持一致）
-        position_amt = int(abs(position.get('position_amt', 0)))
+        # 使用 float 保留小数持仓（如 RIVERUSDT 0.32），int() 会导致 0.32 被截断为 0
+        position_amt = float(abs(position.get('position_amt', 0) or 0))
         
         if position_amt <= 0:
             return {'symbol': symbol, 'error': '持仓数量为0，无法平仓'}
@@ -4148,7 +4148,8 @@ class TradingEngine:
                 return {'symbol': symbol, 'error': 'Strategy quantity must be greater than 0'}
 
         # 【最终校验】防止超出持有数量（SDK调用和交易记录前再次校验）
-        strategy_quantity = min(int(math.ceil(strategy_quantity)), int(position_amt))
+        # 使用 float 避免小数持仓（如 0.32）被 int() 截断为 0
+        strategy_quantity = min(float(strategy_quantity), float(position_amt))
         if strategy_quantity <= 0:
             return {'symbol': symbol, 'error': '持仓数量不足，无法执行平仓/卖出'}
         
@@ -4477,8 +4478,8 @@ class TradingEngine:
 
         current_price = market_state[symbol]['price']
         entry_price = position.get('avg_price', 0)
-        # position_amt 转换为整数（与strategy_decisions表和portfolios表保持一致）
-        position_amt = int(abs(position.get('position_amt', 0)))
+        # 使用 float 保留小数持仓（如 RIVERUSDT 0.32），int() 会导致 0.32 被截断为 0
+        position_amt = float(abs(position.get('position_amt', 0) or 0))
         position_side = position.get('position_side', 'LONG')
 
         if position_amt <= 0:
@@ -4501,7 +4502,8 @@ class TradingEngine:
                 return {'symbol': symbol, 'error': 'Strategy quantity must be greater than 0'}
 
         # 【最终校验】防止超出持有数量（SDK调用和交易记录前再次校验）
-        strategy_quantity = min(int(math.ceil(strategy_quantity)), int(position_amt))
+        # 使用 float 避免小数持仓（如 0.32）被 int() 截断为 0
+        strategy_quantity = min(float(strategy_quantity), float(position_amt))
         if strategy_quantity <= 0:
             return {'symbol': symbol, 'error': '持仓数量不足，无法执行平仓'}
 
@@ -4986,8 +4988,12 @@ class TradingEngine:
             return {'symbol': symbol, 'error': 'Position not found'}
 
         current_price = market_state[symbol]['price']
-        position_amt = int(abs(position.get('position_amt', 0)))
+        # 使用 float 保留小数持仓（如 RIVERUSDT 0.32），int() 会导致 0.32 被截断为 0
+        position_amt = float(abs(position.get('position_amt', 0) or 0))
         position_side = position.get('position_side', 'LONG')
+
+        if position_amt <= 0:
+            return {'symbol': symbol, 'error': '持仓数量为0，无法创建止损单'}
         
         # 获取策略决策中的quantity
         original_strategy_quantity = decision.get('quantity', 0)
@@ -5010,7 +5016,8 @@ class TradingEngine:
             strategy_quantity = position_amt
 
         # 【最终校验】防止超出持有数量（创建条件单和交易记录前再次校验）
-        strategy_quantity = min(int(math.ceil(strategy_quantity)), int(position_amt))
+        # 使用 float 避免小数持仓（如 0.32）被 int() 截断为 0
+        strategy_quantity = min(float(strategy_quantity), float(position_amt))
         if strategy_quantity <= 0:
             return {'symbol': symbol, 'error': '持仓数量不足，无法创建止损单'}
         
@@ -5255,8 +5262,12 @@ class TradingEngine:
             return {'symbol': symbol, 'error': 'Position not found'}
 
         current_price = market_state[symbol]['price']
-        position_amt = int(abs(position.get('position_amt', 0)))
+        # 使用 float 保留小数持仓（如 RIVERUSDT 0.32），int() 会导致 0.32 被截断为 0
+        position_amt = float(abs(position.get('position_amt', 0) or 0))
         position_side = position.get('position_side', 'LONG')
+
+        if position_amt <= 0:
+            return {'symbol': symbol, 'error': '持仓数量为0，无法创建止盈单'}
         
         # 获取策略决策中的quantity
         original_strategy_quantity = decision.get('quantity', 0)
@@ -5279,7 +5290,8 @@ class TradingEngine:
             strategy_quantity = position_amt
 
         # 【最终校验】防止超出持有数量（创建条件单和交易记录前再次校验）
-        strategy_quantity = min(int(math.ceil(strategy_quantity)), int(position_amt))
+        # 使用 float 避免小数持仓（如 0.32）被 int() 截断为 0
+        strategy_quantity = min(float(strategy_quantity), float(position_amt))
         if strategy_quantity <= 0:
             return {'symbol': symbol, 'error': '持仓数量不足，无法创建止盈单'}
         
