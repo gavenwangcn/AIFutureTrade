@@ -4365,10 +4365,11 @@ class TradingEngine:
                     initial_margin = float(portfolio_row[0][0])
             except Exception as e:
                 logger.warning(f"[TradingEngine] Failed to get initial_margin from portfolios table: {e}")
-        # 部分平仓时，trades表记录的initial_margin按平仓比例计算
-        if position_amt > 0 and strategy_quantity < position_amt:
-            initial_margin = initial_margin * (strategy_quantity / position_amt)
-        
+        # 优化：部分平仓时，trades表记录的initial_margin保持为原始开仓保证金，不按比例计算
+        # 这样盈亏百分比始终相对于原始总投入计算，更直观地反映整体收益率
+        # if position_amt > 0 and strategy_quantity < position_amt:
+        #     initial_margin = initial_margin * (strategy_quantity / position_amt)
+
         # 获取 portfolios_id：从 position 对象中获取 id
         portfolios_id = position.get('id') if position else None
         if not portfolios_id:
@@ -4669,10 +4670,11 @@ class TradingEngine:
                     initial_margin = float(portfolio_row[0][0])
             except Exception as e:
                 logger.warning(f"[TradingEngine] Failed to get initial_margin from portfolios table: {e}")
-        # 部分平仓时，trades表记录的initial_margin按平仓比例计算
-        if position_amt > 0 and strategy_quantity < position_amt:
-            initial_margin = initial_margin * (strategy_quantity / position_amt)
-        
+        # 优化：部分平仓时，trades表记录的initial_margin保持为原始开仓保证金，不按比例计算
+        # 这样盈亏百分比始终相对于原始总投入计算，更直观地反映整体收益率
+        # if position_amt > 0 and strategy_quantity < position_amt:
+        #     initial_margin = initial_margin * (strategy_quantity / position_amt)
+
         # 获取 portfolios_id：从 position 对象中获取 id
         portfolios_id = position.get('id') if position else None
         if not portfolios_id:
