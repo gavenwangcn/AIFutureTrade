@@ -24,6 +24,87 @@ const VOL_DOWN = 'rgba(45,192,142,0.7)'
 const MACD_UP = 'rgba(249,40,85,0.7)'
 const MACD_DOWN = 'rgba(45,192,142,0.7)'
 
+// EMA曲线颜色配置（与indicators/ema.ts一致：EMA5、EMA20、EMA30、EMA60、EMA99）
+const EMA_COLORS = ['#2196F3', '#E91E63', '#FF9800', '#4CAF50', '#9C27B0']
+
+/**
+ * 注册EMA指标到KLineChart
+ * 自定义EMA：EMA5、EMA20、EMA30、EMA60、EMA99（覆盖默认的EMA6、EMA12、EMA20）
+ * 构建方式与ATR指标一致，运行时注册覆盖默认
+ * @param {object} klinecharts - KLineChart库对象（window.klinecharts）
+ * @returns {boolean} 是否成功注册
+ */
+export function registerEMAIndicator(klinecharts) {
+  if (!klinecharts || typeof klinecharts.registerIndicator !== 'function') {
+    console.error('[EMA] klinecharts.registerIndicator is not available')
+    return false
+  }
+
+  // EMA已存在时也需要覆盖（默认是6,12,20，我们使用5,20,30,60,99）
+  try {
+    const emaIndicator = {
+      name: 'EMA',
+      shortName: 'EMA',
+      series: 'price',
+      precision: 6,
+      shouldOhlc: true,
+      calcParams: [5, 20, 30, 60, 99],
+      figures: [
+        { key: 'ema1', title: 'EMA5: ', type: 'line', styles: ({ indicator }) => ({ color: indicator?.styles?.lines?.[0]?.color || EMA_COLORS[0], size: 1.5 }) },
+        { key: 'ema2', title: 'EMA20: ', type: 'line', styles: ({ indicator }) => ({ color: indicator?.styles?.lines?.[1]?.color || EMA_COLORS[1], size: 1.5 }) },
+        { key: 'ema3', title: 'EMA30: ', type: 'line', styles: ({ indicator }) => ({ color: indicator?.styles?.lines?.[2]?.color || EMA_COLORS[2], size: 1.5 }) },
+        { key: 'ema4', title: 'EMA60: ', type: 'line', styles: ({ indicator }) => ({ color: indicator?.styles?.lines?.[3]?.color || EMA_COLORS[3], size: 1.5 }) },
+        { key: 'ema5', title: 'EMA99: ', type: 'line', styles: ({ indicator }) => ({ color: indicator?.styles?.lines?.[4]?.color || EMA_COLORS[4], size: 1.5 }) }
+      ],
+      regenerateFigures: (params) => params.map((p, index) => ({
+        key: `ema${index + 1}`,
+        title: `EMA${p}: `,
+        type: 'line',
+        styles: () => ({ color: EMA_COLORS[index % EMA_COLORS.length], size: 1.5 })
+      })),
+      calc: (dataList, indicator) => {
+        const { calcParams: params, figures } = indicator
+        const emaValues = []
+        const closeSums = []
+
+        return dataList.map((kLineData, i) => {
+          const ema = {}
+          const close = kLineData.close
+
+          params.forEach((p, index) => {
+            if (i === 0) {
+              emaValues[index] = close
+              closeSums[index] = close
+            } else if (i < p - 1) {
+              closeSums[index] = (closeSums[index] ?? 0) + close
+              emaValues[index] = closeSums[index] / (i + 1)
+            } else if (i === p - 1) {
+              closeSums[index] = (closeSums[index] ?? 0) + close
+              emaValues[index] = closeSums[index] / p
+            } else {
+              const alpha = 2 / (p + 1)
+              emaValues[index] = close * alpha + emaValues[index] * (1 - alpha)
+            }
+
+            if (i >= p - 1) {
+              ema[figures[index].key] = emaValues[index]
+            }
+          })
+
+          return ema
+        })
+      }
+    }
+
+    klinecharts.registerIndicator(emaIndicator)
+    console.log('[EMA] Custom EMA indicator registered (5,20,30,60,99) at runtime')
+    return true
+  } catch (error) {
+    console.error('[EMA] Failed to register custom EMA indicator:', error)
+    return false
+  }
+}
+
 /**
  * 注册RSI指标到KLineChart
  * 自定义RSI：支持RSI6、RSI9（与默认的RSI6、RSI12、RSI24不同）
@@ -538,6 +619,7 @@ export function registerMACDIndicator(klinecharts) {
  * @param {object} klinecharts - KLineChart库对象（window.klinecharts）
  */
 export function registerAllCustomIndicators(klinecharts) {
+  registerEMAIndicator(klinecharts)
   registerRSIIndicator(klinecharts)
   registerATRIndicator(klinecharts)
   registerKDJIndicator(klinecharts)

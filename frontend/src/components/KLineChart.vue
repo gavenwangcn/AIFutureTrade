@@ -45,13 +45,14 @@
 <script setup>
 import { ref, watch, nextTick, onUnmounted } from 'vue'
 import { createDataLoader } from '../utils/customDatafeed.js'
-import { registerRSIIndicator, registerATRIndicator, registerKDJIndicator, registerVOLIndicator, registerMACDIndicator } from '../utils/registerCustomIndicators.js'
+import { registerEMAIndicator, registerRSIIndicator, registerATRIndicator, registerKDJIndicator, registerVOLIndicator, registerMACDIndicator } from '../utils/registerCustomIndicators.js'
 
 // 获取 KLineChart 库（UMD 方式）
 const getKLineCharts = () => {
   if (typeof window !== 'undefined' && window.klinecharts) {
     const klinecharts = window.klinecharts
     // 在首次获取时注册自定义指标（覆盖默认参数，与 indicators/*.ts 一致）
+    registerEMAIndicator(klinecharts)
     registerRSIIndicator(klinecharts)
     registerATRIndicator(klinecharts)
     registerKDJIndicator(klinecharts)
