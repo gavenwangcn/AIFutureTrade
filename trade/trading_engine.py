@@ -4849,18 +4849,29 @@ class TradingEngine:
                         logger.info(f"TRADE: SDK中未找到条件单，不执行取消操作 | model={self.model_id} symbol={symbol}")
                         return True  # 返回True表示没有需要取消的条件单
                     
-                    # SDK中有条件单，执行取消操作
-                    try:
-                        cancel_response = binance_client.cancel_all_algo_open_orders(
-                            symbol=symbol,
-                            model_id=model_uuid,
-                            conversation_id=conversation_id,
-                            trade_id=trade_id,
-                            db=self.binance_trade_logs_db
-                        )
-                        logger.info(f"TRADE: SDK取消条件单成功 | model={self.model_id} symbol={symbol}")
-                    except Exception as cancel_err:
-                        logger.error(f"TRADE: SDK取消条件单失败 | model={self.model_id} symbol={symbol} error={cancel_err}")
+                    # 使用cancel_algo_order按algo_id逐个取消条件单
+                    cancel_failed = False
+                    for order_row in existing_orders:
+                        order_algo_id = order_row.get('algoId') or order_row.get('algo_id')
+                        if not order_algo_id:
+                            logger.warning(f"TRADE: 条件单无algoId，跳过取消 | order_id={order_row.get('id')} symbol={symbol}")
+                            continue
+                        order_algo_id = int(order_algo_id) if isinstance(order_algo_id, (int, str)) else None
+                        if not order_algo_id or order_algo_id not in sdk_algo_ids:
+                            continue
+                        try:
+                            binance_client.cancel_algo_order(
+                                algo_id=order_algo_id,
+                                model_id=model_uuid,
+                                conversation_id=conversation_id,
+                                trade_id=trade_id,
+                                db=self.binance_trade_logs_db
+                            )
+                            logger.info(f"TRADE: SDK取消条件单成功 | model={self.model_id} symbol={symbol} algoId={order_algo_id}")
+                        except Exception as cancel_err:
+                            logger.error(f"TRADE: SDK取消条件单失败 | model={self.model_id} symbol={symbol} algoId={order_algo_id} error={cancel_err}")
+                            cancel_failed = True
+                    if cancel_failed:
                         return False
                     
                     # SDK取消成功后，更新数据库
@@ -4965,7 +4976,6 @@ class TradingEngine:
             logger.error(f"TRADE: 检查重复条件单失败 | model={self.model_id} symbol={symbol} error={e}", exc_info=True)
             # 出错时返回False，允许继续创建条件单
             return False
-
     def _execute_stop_loss(self, symbol: str, decision: Dict, market_state: Dict, portfolio: Dict) -> Dict:
         """
         执行止损操作 - 使用条件单方式
@@ -5174,7 +5184,7 @@ class TradingEngine:
             logger.warning(f"TRADE: ⚠️ Binance客户端不可用，real模式无法创建条件单 | symbol={symbol}")
         
         # 【插入algo_order表】
-        # real模式：只有接口调用成功才插入；virtual模式：直接使用入参数据插入
+        # real模式：只有接口调用成功才插入，使用SDK返回的数据填写；virtual模式：直接使用入参数据插入
         if trade_mode == 'real' and not api_call_success:
             logger.warning(f"TRADE: ⚠️ real模式接口调用失败，不插入algo_order记录 | symbol={symbol} | error={sdk_error}")
             return {
@@ -5185,23 +5195,54 @@ class TradingEngine:
         
         try:
             algo_order_id = str(uuid.uuid4())
+            fallbacks = {
+                'quantity': strategy_quantity,
+                'triggerPrice': stop_price,
+                'price': price_value,
+                'orderType': order_type,
+                'symbol': symbol.upper(),
+                'side': side_value,
+                'positionSide': position_side.upper()
+            }
+            if trade_mode == 'real' and sdk_response and isinstance(sdk_response, dict) and binance_client:
+                extracted = binance_client.extract_algo_order_from_sdk_response(sdk_response, fallbacks)
+                order_type_val = extracted.get('orderType') or order_type
+                symbol_val = extracted.get('symbol') or symbol.upper()
+                side_val = extracted.get('side') or side_value
+                position_side_val = extracted.get('positionSide') or position_side.upper()
+                quantity_val = extracted.get('quantity') if extracted.get('quantity') is not None else strategy_quantity
+                trigger_price_val = extracted.get('triggerPrice') if extracted.get('triggerPrice') is not None else stop_price
+                price_val = extracted.get('price') if extracted.get('price') is not None else price_value
+                algo_status_val = extracted.get('algoStatus') or 'NEW'
+                algo_id_val = extracted.get('algoId') if 'algoId' in extracted else algo_id
+            else:
+                order_type_val = order_type
+                symbol_val = symbol.upper()
+                side_val = side_value
+                position_side_val = position_side.upper()
+                quantity_val = strategy_quantity
+                trigger_price_val = stop_price
+                price_val = price_value
+                algo_status_val = 'NEW'
+                algo_id_val = algo_id
+
             algo_order_data = {
                 'id': algo_order_id,
-                'algoId': algo_id,  # 币安返回的algoId，real模式可能为NULL
-                'clientAlgoId': client_algo_id,  # 系统生成的UUID
-                'type': type_value,  # 'real' or 'virtual'
-                'algoType': 'CONDITIONAL',  # algoType
-                'orderType': order_type,  # 'STOP' or 'STOP_MARKET'
-                'symbol': symbol.upper(),
-                'side': side_value,  # 'buy' or 'sell'
-                'positionSide': position_side.upper(),  # 'LONG' or 'SHORT'
-                'quantity': strategy_quantity,
-                'algoStatus': 'NEW',  # algoStatus
-                'triggerPrice': stop_price,  # triggerPrice
-                'price': price_value,  # price（STOP订单需要，STOP_MARKET为NULL）
+                'algoId': algo_id_val,
+                'clientAlgoId': client_algo_id,
+                'type': type_value,
+                'algoType': 'CONDITIONAL',
+                'orderType': order_type_val,
+                'symbol': symbol_val,
+                'side': side_val,
+                'positionSide': position_side_val,
+                'quantity': quantity_val,
+                'algoStatus': algo_status_val,
+                'triggerPrice': trigger_price_val,
+                'price': price_val,
                 'model_id': model_uuid,
                 'strategy_decision_id': strategy_decision_id,
-                'trade_id': None,  # trade_id（初始为NULL，异步执行后更新）
+                'trade_id': None,
                 'created_at': datetime.now(timezone(timedelta(hours=8))).replace(tzinfo=None)
             }
 
@@ -5210,13 +5251,13 @@ class TradingEngine:
             if trade_mode == 'real':
                 logger.info(f"TRADE: ALGO_ORDER CREATED (real) - Model {self.model_id} STOP_LOSS {symbol} | "
                            f"algo_order_id={algo_order_id} | clientAlgoId={client_algo_id} | "
-                           f"algoId={algo_id} | order_type={order_type} | quantity={strategy_quantity} | "
-                           f"stop_price={stop_price} | 接口返回数据已保存")
+                           f"algoId={algo_id_val} | order_type={order_type_val} | quantity={quantity_val} | "
+                           f"stop_price={trigger_price_val} | 使用SDK返回数据填写algo_order表")
             else:
                 logger.info(f"TRADE: ALGO_ORDER CREATED (virtual) - Model {self.model_id} STOP_LOSS {symbol} | "
                            f"algo_order_id={algo_order_id} | clientAlgoId={client_algo_id} | "
-                           f"order_type={order_type} | quantity={strategy_quantity} | "
-                           f"stop_price={stop_price} | 使用入参数据")
+                           f"order_type={order_type_val} | quantity={quantity_val} | "
+                           f"stop_price={trigger_price_val} | 使用入参数据")
         except Exception as db_err:
             logger.error(f"TRADE: Insert algo_order failed (STOP_LOSS) model={self.model_id} symbol={symbol}: {db_err}")
             raise
@@ -5448,7 +5489,7 @@ class TradingEngine:
             logger.warning(f"TRADE: ⚠️ Binance客户端不可用，real模式无法创建条件单 | symbol={symbol}")
         
         # 【插入algo_order表】
-        # real模式：只有接口调用成功才插入；virtual模式：直接使用入参数据插入
+        # real模式：只有接口调用成功才插入，使用SDK返回的数据填写；virtual模式：直接使用入参数据插入
         if trade_mode == 'real' and not api_call_success:
             logger.warning(f"TRADE: ⚠️ real模式接口调用失败，不插入algo_order记录 | symbol={symbol} | error={sdk_error}")
             return {
@@ -5459,23 +5500,54 @@ class TradingEngine:
         
         try:
             algo_order_id = str(uuid.uuid4())
+            fallbacks = {
+                'quantity': strategy_quantity,
+                'triggerPrice': stop_price,
+                'price': price_value,
+                'orderType': order_type,
+                'symbol': symbol.upper(),
+                'side': side_value,
+                'positionSide': position_side.upper()
+            }
+            if trade_mode == 'real' and sdk_response and isinstance(sdk_response, dict) and binance_client:
+                extracted = binance_client.extract_algo_order_from_sdk_response(sdk_response, fallbacks)
+                order_type_val = extracted.get('orderType') or order_type
+                symbol_val = extracted.get('symbol') or symbol.upper()
+                side_val = extracted.get('side') or side_value
+                position_side_val = extracted.get('positionSide') or position_side.upper()
+                quantity_val = extracted.get('quantity') if extracted.get('quantity') is not None else strategy_quantity
+                trigger_price_val = extracted.get('triggerPrice') if extracted.get('triggerPrice') is not None else stop_price
+                price_val = extracted.get('price') if extracted.get('price') is not None else price_value
+                algo_status_val = extracted.get('algoStatus') or 'NEW'
+                algo_id_val = extracted.get('algoId') if 'algoId' in extracted else algo_id
+            else:
+                order_type_val = order_type
+                symbol_val = symbol.upper()
+                side_val = side_value
+                position_side_val = position_side.upper()
+                quantity_val = strategy_quantity
+                trigger_price_val = stop_price
+                price_val = price_value
+                algo_status_val = 'NEW'
+                algo_id_val = algo_id
+
             algo_order_data = {
                 'id': algo_order_id,
-                'algoId': algo_id,  # 币安返回的algoId，real模式可能为NULL
-                'clientAlgoId': client_algo_id,  # 系统生成的UUID
-                'type': type_value,  # 'real' or 'virtual'
-                'algoType': 'CONDITIONAL',  # algoType
-                'orderType': order_type,  # 'TAKE_PROFIT' or 'TAKE_PROFIT_MARKET'
-                'symbol': symbol.upper(),
-                'side': side_value,  # 'buy' or 'sell'
-                'positionSide': position_side.upper(),  # 'LONG' or 'SHORT'
-                'quantity': strategy_quantity,
-                'algoStatus': 'NEW',  # algoStatus
-                'triggerPrice': stop_price,  # triggerPrice
-                'price': price_value,  # price（TAKE_PROFIT订单需要，TAKE_PROFIT_MARKET为NULL）
+                'algoId': algo_id_val,
+                'clientAlgoId': client_algo_id,
+                'type': type_value,
+                'algoType': 'CONDITIONAL',
+                'orderType': order_type_val,
+                'symbol': symbol_val,
+                'side': side_val,
+                'positionSide': position_side_val,
+                'quantity': quantity_val,
+                'algoStatus': algo_status_val,
+                'triggerPrice': trigger_price_val,
+                'price': price_val,
                 'model_id': model_uuid,
                 'strategy_decision_id': strategy_decision_id,
-                'trade_id': None,  # trade_id（初始为NULL，异步执行后更新）
+                'trade_id': None,
                 'created_at': datetime.now(timezone(timedelta(hours=8))).replace(tzinfo=None)
             }
 
@@ -5484,13 +5556,13 @@ class TradingEngine:
             if trade_mode == 'real':
                 logger.info(f"TRADE: ALGO_ORDER CREATED (real) - Model {self.model_id} TAKE_PROFIT {symbol} | "
                            f"algo_order_id={algo_order_id} | clientAlgoId={client_algo_id} | "
-                           f"algoId={algo_id} | order_type={order_type} | quantity={strategy_quantity} | "
-                           f"stop_price={stop_price} | 接口返回数据已保存")
+                           f"algoId={algo_id_val} | order_type={order_type_val} | quantity={quantity_val} | "
+                           f"stop_price={trigger_price_val} | 使用SDK返回数据填写algo_order表")
             else:
                 logger.info(f"TRADE: ALGO_ORDER CREATED (virtual) - Model {self.model_id} TAKE_PROFIT {symbol} | "
                            f"algo_order_id={algo_order_id} | clientAlgoId={client_algo_id} | "
-                           f"order_type={order_type} | quantity={strategy_quantity} | "
-                           f"stop_price={stop_price} | 使用入参数据")
+                           f"order_type={order_type_val} | quantity={quantity_val} | "
+                           f"stop_price={trigger_price_val} | 使用入参数据")
         except Exception as db_err:
             logger.error(f"TRADE: Insert algo_order failed (TAKE_PROFIT) model={self.model_id} symbol={symbol}: {db_err}")
             raise

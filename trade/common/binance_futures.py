@@ -2247,6 +2247,197 @@ class BinanceFuturesOrderClient(_BinanceFuturesBase):
             
             raise
 
+    def cancel_algo_order(
+        self,
+        algo_id: Optional[int] = None,
+        client_algo_id: Optional[str] = None,
+        recv_window: Optional[int] = None,
+        model_id: Optional[str] = None,
+        conversation_id: Optional[str] = None,
+        trade_id: Optional[str] = None,
+        db=None,
+    ) -> Dict[str, Any]:
+        """
+        取消单个条件单（使用algo_id或client_algo_id）
+        
+        对应币安API: cancel_algo_order，返回 CancelAlgoOrderResponse 格式。
+        Either algo_id or client_algo_id must be sent.
+        
+        Args:
+            algo_id: 币安返回的算法订单ID（与client_algo_id二选一必填）
+            client_algo_id: 系统生成的clientAlgoId（与algo_id二选一必填）
+            recv_window: 请求有效时间窗口（毫秒，可选）
+            model_id: 模型ID（可选，用于日志记录）
+            conversation_id: 对话ID（可选，用于日志记录）
+            trade_id: 交易ID（可选，用于日志记录）
+            db: 数据库实例（可选，用于日志记录）
+        
+        Returns:
+            CancelAlgoOrderResponse 格式的dict，包含 algoId、clientAlgoId、code、msg 等字段
+        
+        Raises:
+            ValueError: 当algo_id和client_algo_id均未提供时
+        """
+        if algo_id is None and not client_algo_id:
+            raise ValueError("Either algo_id or client_algo_id must be provided")
+        try:
+            params = {}
+            if algo_id is not None:
+                params["algo_id"] = int(algo_id)
+            if client_algo_id:
+                params["client_algo_id"] = str(client_algo_id)
+            if recv_window is not None:
+                params["recv_window"] = int(recv_window)
+
+            logger.info(f"[Binance Futures] 取消条件单，参数: {params}")
+            response = self._client.rest_api.cancel_algo_order(**params)
+
+            data = response.data()
+            logger.info(f"[Binance Futures] 取消条件单成功: {data}")
+            response_dict = self._flatten_to_dicts(data, "cancel_algo_order")[0] if data else {}
+
+            response_type = self._extract_response_type(response)
+            self._log_trade(db, "cancel_algo_order", "real", params, response_dict, response_type,
+                          None, model_id, conversation_id, trade_id)
+
+            return response_dict
+        except Exception as exc:
+            logger.error(f"[Binance Futures] 取消条件单失败: {exc}", exc_info=True)
+            error_context = str(exc)
+            response_type = self._extract_response_type(exc)
+            params = {"algo_id": algo_id, "client_algo_id": client_algo_id}
+            self._log_trade(db, "cancel_algo_order", "real", params, {}, response_type,
+                          error_context, model_id, conversation_id, trade_id)
+            raise
+
+    def query_algo_order(
+        self,
+        algo_id: Optional[int] = None,
+        client_algo_id: Optional[str] = None,
+        recv_window: Optional[int] = None,
+        model_id: Optional[str] = None,
+        conversation_id: Optional[str] = None,
+        trade_id: Optional[str] = None,
+        db=None,
+    ) -> Dict[str, Any]:
+        """
+        查询单个条件单（使用algo_id或client_algo_id）
+        
+        对应币安API: query_algo_order，返回 QueryAlgoOrderResponse 格式。
+        Either algo_id or client_algo_id must be sent.
+        
+        Args:
+            algo_id: 币安返回的算法订单ID（与client_algo_id二选一必填）
+            client_algo_id: 系统生成的clientAlgoId（与algo_id二选一必填）
+            recv_window: 请求有效时间窗口（毫秒，可选）
+            model_id: 模型ID（可选，用于日志记录）
+            conversation_id: 对话ID（可选，用于日志记录）
+            trade_id: 交易ID（可选，用于日志记录）
+            db: 数据库实例（可选，用于日志记录）
+        
+        Returns:
+            QueryAlgoOrderResponse 格式的dict，包含 algoId、clientAlgoId、algoType、orderType、
+            symbol、side、positionSide、quantity、algoStatus、triggerPrice、price 等字段
+        
+        Raises:
+            ValueError: 当algo_id和client_algo_id均未提供时
+        """
+        if algo_id is None and not client_algo_id:
+            raise ValueError("Either algo_id or client_algo_id must be provided")
+        try:
+            params = {}
+            if algo_id is not None:
+                params["algo_id"] = int(algo_id)
+            if client_algo_id:
+                params["client_algo_id"] = str(client_algo_id)
+            if recv_window is not None:
+                params["recv_window"] = int(recv_window)
+
+            logger.info(f"[Binance Futures] 查询条件单，参数: {params}")
+            response = self._client.rest_api.query_algo_order(**params)
+
+            data = response.data()
+            logger.info(f"[Binance Futures] 查询条件单成功: {data}")
+            response_dict = self._flatten_to_dicts(data, "query_algo_order")[0] if data else {}
+
+            response_type = self._extract_response_type(response)
+            self._log_trade(db, "query_algo_order", "real", params, response_dict, response_type,
+                          None, model_id, conversation_id, trade_id)
+
+            return response_dict
+        except Exception as exc:
+            logger.error(f"[Binance Futures] 查询条件单失败: {exc}", exc_info=True)
+            error_context = str(exc)
+            response_type = self._extract_response_type(exc)
+            params = {"algo_id": algo_id, "client_algo_id": client_algo_id}
+            self._log_trade(db, "query_algo_order", "real", params, {}, response_type,
+                          error_context, model_id, conversation_id, trade_id)
+            raise
+
+    def extract_algo_order_from_sdk_response(
+        self, sdk_response: Dict[str, Any], fallbacks: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """
+        从SDK返回的NewAlgoOrderResponse/QueryAlgoOrderResponse格式数据中提取algo_order表字段。
+        用于创建条件单（止损/止盈）成功时，优先使用API返回的数据填写algo_order表。
+        取消条件单、查询条件单等SDK返回数据也可由此统一解析。
+        
+        Args:
+            sdk_response: API返回的dict，字段可能为camelCase（algoId）或snake_case（algo_id）
+            fallbacks: 回退值字典，当API未返回某字段时使用，需包含: quantity, triggerPrice, price,
+                       orderType, symbol, side, positionSide
+        
+        Returns:
+            Dict: 用于algo_order表插入的字段值（algoId, quantity, triggerPrice, price, orderType,
+                  symbol, side, positionSide, algoStatus）
+        """
+        def _get(obj: Any, *keys: str, default: Any = None) -> Any:
+            for k in keys:
+                v = obj.get(k) if isinstance(obj, dict) else None
+                if v is not None:
+                    return v
+            return default
+
+        def _to_float(val: Any) -> Optional[float]:
+            if val is None:
+                return None
+            try:
+                return float(val)
+            except (TypeError, ValueError):
+                return None
+
+        result: Dict[str, Any] = {}
+        # algoId
+        algo_id_raw = _get(sdk_response, 'algoId', 'algo_id')
+        if algo_id_raw is not None:
+            try:
+                result['algoId'] = int(algo_id_raw) if algo_id_raw else None
+            except (TypeError, ValueError):
+                result['algoId'] = None
+        # quantity - API返回可能为字符串
+        qty = _get(sdk_response, 'quantity')
+        result['quantity'] = _to_float(qty) if qty is not None else fallbacks.get('quantity')
+        # triggerPrice - API可能用triggerPrice或activatePrice
+        trigger = _get(sdk_response, 'triggerPrice', 'trigger_price', 'activatePrice', 'activate_price')
+        result['triggerPrice'] = _to_float(trigger) if trigger is not None else fallbacks.get('triggerPrice')
+        # price
+        pr = _get(sdk_response, 'price')
+        result['price'] = _to_float(pr) if pr is not None else fallbacks.get('price')
+        # orderType
+        result['orderType'] = _get(sdk_response, 'orderType', 'order_type') or fallbacks.get('orderType')
+        # symbol
+        sym = _get(sdk_response, 'symbol')
+        result['symbol'] = (sym or fallbacks.get('symbol', '')).upper()
+        # side - 转为小写
+        sd = _get(sdk_response, 'side')
+        result['side'] = (sd or fallbacks.get('side', '')).lower()
+        # positionSide - 转为大写
+        ps = _get(sdk_response, 'positionSide', 'position_side')
+        result['positionSide'] = (ps or fallbacks.get('positionSide', 'LONG')).upper()
+        # algoStatus
+        result['algoStatus'] = _get(sdk_response, 'algoStatus', 'algo_status') or 'NEW'
+        return result
+
     def cancel_all_algo_open_orders(self, symbol: str, 
                                     model_id: Optional[str] = None, conversation_id: Optional[str] = None, 
                                     trade_id: Optional[str] = None, db = None) -> Dict[str, Any]:
