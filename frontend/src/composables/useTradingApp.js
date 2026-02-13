@@ -3095,12 +3095,14 @@ let portfolioRefreshInterval = null // 投资组合数据自动刷新定时器�
   
   /**
    * 获取盈亏样式类
+   * 当盈亏为0（如0.00）时不加任何颜色，仅正数绿色、负数红色
    */
   const getPnlClass = (value, isPnl = false) => {
     if (!isPnl) return ''
     const num = parseFloat(value)
     if (isNaN(num)) return ''
-    return num >= 0 ? 'positive' : 'negative'
+    if (num === 0) return ''  // 0 不显示颜色
+    return num > 0 ? 'positive' : 'negative'
   }
   
   /**
