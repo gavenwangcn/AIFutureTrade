@@ -3073,11 +3073,13 @@ let portfolioRefreshInterval = null // 投资组合数据自动刷新定时器�
   
   /**
    * 格式化盈亏（带符号，保留2位小数）
+   * 当值为0（如0.00）时显示"--"
    */
   const formatPnl = (value, isPnl = false) => {
-    if (value === null || value === undefined) return '$0.00'
+    if (value === null || value === undefined) return '--'
     const num = parseFloat(value)
-    if (isNaN(num)) return '$0.00'
+    if (isNaN(num)) return '--'
+    if (num === 0) return '--'
     const sign = isPnl && num >= 0 ? '+' : ''
     return `${sign}$${num.toFixed(2)}`
   }
@@ -3133,6 +3135,7 @@ let portfolioRefreshInterval = null // 投资组合数据自动刷新定时器�
     
     // 计算盈亏百分比：(盈亏值 / 原始保证金) * 100
     const percent = (pnlNum / marginNum) * 100
+    if (percent === 0) return '--'  // 0.00% 显示"--"
     const sign = percent >= 0 ? '+' : ''
     return `${sign}${percent.toFixed(2)}%`
   }
