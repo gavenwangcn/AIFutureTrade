@@ -3804,6 +3804,7 @@ class TradingEngine:
         binance_client = self._create_binance_order_client()
         if binance_client:
             try:
+                # ⚠️ 重要：杠杆和逐仓仅在买入循环中设置，卖出（平仓/止损/止盈）不需要设置（开仓时已设置）
                 # 首先设置杠杆
                 logger.info(f"@API@ [Model {self.model_id}] [change_initial_leverage] === 准备设置杠杆 ===" 
                           f" | symbol={symbol} | leverage={leverage}")
@@ -3816,7 +3817,8 @@ class TradingEngine:
                 logger.info(f"@API@ [Model {self.model_id}] [change_initial_leverage] === 杠杆设置成功 ==="
                           f" | symbol={symbol} | leverage={leverage}")
 
-                # ⚠️ 重要：只有真实交易模式（real）才需要设置逐仓模式，虚拟交易模式（test/virtual）不需要设置
+                # 然后设置逐仓模式（仅real模式）
+                # 只有真实交易模式（real）才需要设置，虚拟交易模式（test/virtual）不需要
                 if trade_mode == 'real':
                     # 设置为逐仓模式
                     logger.info(f"@API@ [Model {self.model_id}] [change_margin_isolated] === 准备设置逐仓模式 ==="
@@ -4193,19 +4195,8 @@ class TradingEngine:
         
         if binance_client:
             try:
-                # 首先设置杠杆（使用 _resolve_leverage 解析，优先使用 decision 中的 leverage，否则使用模型配置的 leverage）
+                # 杠杆仅在买入循环中设置，卖出循环不调用 change_initial_leverage
                 leverage = self._resolve_leverage(decision)
-                
-                logger.info(f"@API@ [Model {self.model_id}] [change_initial_leverage] === 准备设置杠杆 ===" 
-                          f" | symbol={symbol} | leverage={leverage}")
-                
-                binance_client.change_initial_leverage(
-                    symbol=symbol,
-                    leverage=leverage
-                )
-                
-                logger.info(f"@API@ [Model {self.model_id}] [change_initial_leverage] === 杠杆设置成功 ===" 
-                          f" | symbol={symbol} | leverage={leverage}")
                 
                 # 然后执行交易（使用策略指定的数量 strategy_quantity）
                 logger.info(f"@API@ [Model {self.model_id}] [market_trade] === 准备调用接口 ===" 
@@ -4551,19 +4542,8 @@ class TradingEngine:
         
         if binance_client:
             try:
-                # 首先设置杠杆（使用 _resolve_leverage 解析，优先使用 decision 中的 leverage，否则使用模型配置的 leverage）
+                # 杠杆仅在买入循环中设置，平仓循环不调用 change_initial_leverage
                 leverage = self._resolve_leverage(decision)
-                
-                logger.info(f"@API@ [Model {self.model_id}] [change_initial_leverage] === 准备设置杠杆 ===" 
-                          f" | symbol={symbol} | leverage={leverage}")
-                
-                binance_client.change_initial_leverage(
-                    symbol=symbol,
-                    leverage=leverage
-                )
-                
-                logger.info(f"@API@ [Model {self.model_id}] [change_initial_leverage] === 杠杆设置成功 ===" 
-                          f" | symbol={symbol} | leverage={leverage}")
                 
                 # 然后执行交易（使用策略指定的数量 strategy_quantity）
                 logger.info(f"@API@ [Model {self.model_id}] [market_trade] === 准备调用接口 ===" 
@@ -5123,17 +5103,7 @@ class TradingEngine:
         
         if trade_mode == 'real' and binance_client:
             try:
-                # 首先设置杠杆
-                leverage = self._resolve_leverage(decision)
-                logger.info(f"@API@ [Model {self.model_id}] [change_initial_leverage] === 准备设置杠杆 ===" 
-                          f" | symbol={symbol} | leverage={leverage}")
-                binance_client.change_initial_leverage(
-                    symbol=symbol,
-                    leverage=leverage
-                )
-                logger.info(f"@API@ [Model {self.model_id}] [change_initial_leverage] === 杠杆设置成功 ===" 
-                          f" | symbol={symbol} | leverage={leverage}")
-                
+                # 杠杆仅在买入循环中设置，止损条件单不调用 change_initial_leverage
                 # 【调用前日志】记录调用参数
                 logger.info(f"@API@ [Model {self.model_id}] [stop_loss_trade] === 准备调用条件单接口（止损操作）==="
                           f" | symbol={symbol} | side={side_for_trade} | order_type={order_type} | "
@@ -5428,17 +5398,7 @@ class TradingEngine:
         
         if trade_mode == 'real' and binance_client:
             try:
-                # 首先设置杠杆
-                leverage = self._resolve_leverage(decision)
-                logger.info(f"@API@ [Model {self.model_id}] [change_initial_leverage] === 准备设置杠杆 ===" 
-                          f" | symbol={symbol} | leverage={leverage}")
-                binance_client.change_initial_leverage(
-                    symbol=symbol,
-                    leverage=leverage
-                )
-                logger.info(f"@API@ [Model {self.model_id}] [change_initial_leverage] === 杠杆设置成功 ===" 
-                          f" | symbol={symbol} | leverage={leverage}")
-                
+                # 杠杆仅在买入循环中设置，止盈条件单不调用 change_initial_leverage
                 # 【调用前日志】记录调用参数
                 logger.info(f"@API@ [Model {self.model_id}] [take_profit_trade] === 准备调用条件单接口（止盈操作）==="
                           f" | symbol={symbol} | side={side_for_trade} | order_type={order_type} | "
