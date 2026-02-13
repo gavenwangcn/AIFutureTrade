@@ -3935,23 +3935,23 @@ class TradingEngine:
             else:
                 logger.warn(f"TRADE: Skipped portfolios update (real mode, SDK success but invalid data) - "
                           f"Model {self.model_id} {symbol} executedQty={executed_qty} avgPrice={avg_price_from_sdk}")
-        elif trade_mode == 'test' or (trade_mode == 'real' and (not parsed_response or parsed_response.get('error'))):
-            # test模式或real模式但SDK调用失败，使用策略返回的值更新portfolios表
+        elif trade_mode == 'test':
+            # test模式：使用策略返回的值更新portfolios表
             try:
                 self._update_position(
                     self.model_id, symbol=symbol, position_amt=position_amt, avg_price=price, 
                     leverage=leverage, position_side=position_side,
                     initial_margin=initial_margin
                 )
-                if trade_mode == 'test':
-                    logger.info(f"TRADE: Updated portfolios (test mode) - Model {self.model_id} {symbol} "
-                              f"position_amt={position_amt} avg_price={price} position_side={position_side}")
-                else:
-                    logger.warn(f"TRADE: Updated portfolios (real mode, SDK failed, using strategy values) - "
-                              f"Model {self.model_id} {symbol} position_amt={position_amt} avg_price={price} position_side={position_side}")
+                logger.info(f"TRADE: Updated portfolios (test mode) - Model {self.model_id} {symbol} "
+                          f"position_amt={position_amt} avg_price={price} position_side={position_side}")
             except Exception as db_err:
                 logger.error(f"TRADE: Update position failed ({trade_signal.upper()}) model={self.model_id} future={symbol}: {db_err}")
                 raise
+        elif trade_mode == 'real' and (not parsed_response or parsed_response.get('error')):
+            # real模式SDK调用失败：不写入portfolios表，错误信息已通过trades表记录
+            logger.warn(f"TRADE: Skipped portfolios update (real mode, SDK failed) - "
+                      f"Model {self.model_id} {symbol} | error will be recorded in trades table")
         
         # 【确定trades表的字段】
         # side字段：交易方向（buy/sell），从signal中提取
@@ -4283,11 +4283,11 @@ class TradingEngine:
             except Exception as db_err:
                 logger.error(f"TRADE: Update position failed (real mode, SDK success) model={self.model_id} future={symbol}: {db_err}")
                 raise
-        elif trade_mode == 'test' or (trade_mode == 'real' and (not parsed_response or parsed_response.get('error'))):
+        elif trade_mode == 'test':
             try:
                 if strategy_quantity >= position_amt:
                     self._close_position(self.model_id, symbol=symbol, position_side=position_side)
-                    logger.info(f"TRADE: Closed position (test/fail mode) - Model {self.model_id} {symbol} position_side={position_side} quantity={strategy_quantity}")
+                    logger.info(f"TRADE: Closed position (test mode) - Model {self.model_id} {symbol} position_side={position_side} quantity={strategy_quantity}")
                 else:
                     remaining_amt = position_amt - strategy_quantity
                     leverage = self._resolve_leverage(decision)
@@ -4296,10 +4296,14 @@ class TradingEngine:
                         leverage=leverage, position_side=position_side, initial_margin=original_initial_margin,
                         unrealized_profit=0.0
                     )
-                    logger.info(f"TRADE: Partial close (test/fail mode) - Model {self.model_id} {symbol} position_side={position_side} closed={strategy_quantity} remaining={remaining_amt} margin_unchanged")
+                    logger.info(f"TRADE: Partial close (test mode) - Model {self.model_id} {symbol} position_side={position_side} closed={strategy_quantity} remaining={remaining_amt} margin_unchanged")
             except Exception as db_err:
                 logger.error(f"TRADE: Update position failed ({trade_signal.upper()}) model={self.model_id} future={symbol}: {db_err}")
                 raise
+        elif trade_mode == 'real' and (not parsed_response or parsed_response.get('error')):
+            # real模式SDK调用失败：不写入portfolios表，错误信息已通过trades表记录
+            logger.warn(f"TRADE: Skipped portfolios update (real mode, SDK failed) - "
+                      f"Model {self.model_id} {symbol} position_side={position_side} | error will be recorded in trades table")
         
         # 【确定trades表的字段】
         # side字段：交易方向（buy/sell），从signal中提取
@@ -4639,11 +4643,11 @@ class TradingEngine:
             except Exception as db_err:
                 logger.error(f"TRADE: Update position failed (real mode, SDK success) model={self.model_id} future={symbol}: {db_err}")
                 raise
-        elif trade_mode == 'test' or (trade_mode == 'real' and (not parsed_response or parsed_response.get('error'))):
+        elif trade_mode == 'test':
             try:
                 if strategy_quantity >= position_amt:
                     self._close_position(self.model_id, symbol=symbol, position_side=position_side)
-                    logger.info(f"TRADE: Closed position (test/fail mode) - Model {self.model_id} {symbol} position_side={position_side} quantity={strategy_quantity}")
+                    logger.info(f"TRADE: Closed position (test mode) - Model {self.model_id} {symbol} position_side={position_side} quantity={strategy_quantity}")
                 else:
                     remaining_amt = position_amt - strategy_quantity
                     leverage = self._resolve_leverage(decision)
@@ -4652,10 +4656,14 @@ class TradingEngine:
                         leverage=leverage, position_side=position_side, initial_margin=original_initial_margin,
                         unrealized_profit=0.0
                     )
-                    logger.info(f"TRADE: Partial close (test/fail mode) - Model {self.model_id} {symbol} position_side={position_side} closed={strategy_quantity} remaining={remaining_amt} margin_unchanged")
+                    logger.info(f"TRADE: Partial close (test mode) - Model {self.model_id} {symbol} position_side={position_side} closed={strategy_quantity} remaining={remaining_amt} margin_unchanged")
             except Exception as db_err:
                 logger.error(f"TRADE: Update position failed (CLOSE) model={self.model_id} future={symbol}: {db_err}")
                 raise
+        elif trade_mode == 'real' and (not parsed_response or parsed_response.get('error')):
+            # real模式SDK调用失败：不写入portfolios表，错误信息已通过trades表记录
+            logger.warn(f"TRADE: Skipped portfolios update (real mode, SDK failed) - "
+                      f"Model {self.model_id} {symbol} position_side={position_side} | error will be recorded in trades table")
         
         # 获取持仓的initial_margin（用于计算盈亏百分比）
         # 从position中获取initial_margin，如果不存在则从portfolios表查询
