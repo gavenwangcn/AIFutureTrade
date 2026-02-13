@@ -30,6 +30,7 @@
                 <th>平均盈利</th>
                 <th>平均亏损</th>
                 <th>盈亏比</th>
+                <th>总盈亏比</th>
                 <th>期望值</th>
               </tr>
             </thead>
@@ -62,6 +63,12 @@
                 <td>
                   <span v-if="item.profit_loss_ratio !== null && item.profit_loss_ratio !== undefined">
                     {{ formatNumber(item.profit_loss_ratio, 2) }}
+                  </span>
+                  <span v-else class="empty-value">-</span>
+                </td>
+                <td>
+                  <span v-if="item.total_profit_ratio !== null && item.total_profit_ratio !== undefined">
+                    {{ formatNumber(item.total_profit_ratio, 2) }}
                   </span>
                   <span v-else class="empty-value">-</span>
                 </td>

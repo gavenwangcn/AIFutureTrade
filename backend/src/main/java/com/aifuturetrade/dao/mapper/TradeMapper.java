@@ -117,8 +117,9 @@ public interface TradeMapper extends BaseMapper<TradeDO> {
      * - 平均亏损：合并后交易中总pnl<0的交易的总pnl之和 / 亏损交易数
      * - 盈亏比：平均盈利 / 平均亏损（取绝对值）
      * - 期望值：EV = (胜率 × 平均盈利) - ((1 - 胜率) × 平均亏损)
+     * - 总盈亏比：总盈利 / |总亏损|
      *
-     * @return 所有模型的统计信息列表，每个元素包含：model_id, model_name, trade_count, win_rate, avg_profit, avg_loss, profit_loss_ratio, expected_value
+     * @return 所有模型的统计信息列表，每个元素包含：model_id, model_name, trade_count, win_rate, avg_profit, avg_loss, profit_loss_ratio, expected_value, total_profit, total_loss, total_profit_ratio
      */
     @Select("SELECT " +
             "    merged.model_id as model_id, " +
@@ -152,7 +153,13 @@ public interface TradeMapper extends BaseMapper<TradeDO> {
             "             (SUM(CASE WHEN merged.total_pnl > 0 THEN merged.total_pnl ELSE 0 END) / SUM(CASE WHEN merged.total_pnl > 0 THEN 1 ELSE 0 END)) - " +
             "             (1 - CAST(SUM(CASE WHEN merged.total_pnl > 0 THEN 1 ELSE 0 END) AS DECIMAL(10, 5)) / COUNT(merged.portfolios_id)) * " +
             "             ABS(SUM(CASE WHEN merged.total_pnl < 0 THEN merged.total_pnl ELSE 0 END) / SUM(CASE WHEN merged.total_pnl < 0 THEN 1 ELSE 0 END)) " +
-            "    END as expected_value " +
+            "    END as expected_value, " +
+            "    SUM(CASE WHEN merged.total_pnl > 0 THEN merged.total_pnl ELSE 0 END) as total_profit, " +
+            "    SUM(CASE WHEN merged.total_pnl < 0 THEN merged.total_pnl ELSE 0 END) as total_loss, " +
+            "    CASE " +
+            "        WHEN SUM(CASE WHEN merged.total_pnl < 0 THEN merged.total_pnl ELSE 0 END) = 0 THEN NULL " +
+            "        ELSE SUM(CASE WHEN merged.total_pnl > 0 THEN merged.total_pnl ELSE 0 END) / ABS(SUM(CASE WHEN merged.total_pnl < 0 THEN merged.total_pnl ELSE 0 END)) " +
+            "    END as total_profit_ratio " +
             "FROM ( " +
             "    SELECT " +
             "        t.model_id, " +

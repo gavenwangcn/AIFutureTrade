@@ -2470,6 +2470,16 @@ public class ModelServiceImpl implements ModelService {
                     analysisItem.put("expected_value", null);
                 }
                 
+                // 总盈亏比（总盈利 / |总亏损|）
+                Object totalProfitRatioObj = item.get("total_profit_ratio");
+                if (totalProfitRatioObj != null) {
+                    Double totalProfitRatio = totalProfitRatioObj instanceof Number ? 
+                        ((Number) totalProfitRatioObj).doubleValue() : Double.parseDouble(totalProfitRatioObj.toString());
+                    analysisItem.put("total_profit_ratio", totalProfitRatio);
+                } else {
+                    analysisItem.put("total_profit_ratio", null);
+                }
+                
                 result.add(analysisItem);
             }
             
