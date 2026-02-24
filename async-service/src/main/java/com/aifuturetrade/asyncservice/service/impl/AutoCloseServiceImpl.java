@@ -189,14 +189,17 @@ public class AutoCloseServiceImpl implements AutoCloseService {
                     double lossPercent = calculateLossPercent(
                             avgPrice, currentPrice, positionAmt, positionSide, initialMargin);
                     
-                    log.debug("[AutoClose] {} (模型: {}): 持仓价格={}, 当前价格={}, 损失百分比={:.2f}%, 阈值={:.2f}%", 
+                    log.debug("[AutoClose] {} (模型: {}): 持仓价格={}, 当前价格={}, 损失百分比={}%, 阈值={}%",
                             symbol, modelId, avgPrice, currentPrice, String.format("%.2f", lossPercent), String.format("%.2f", autoClosePercent));
                     
                     // 检查是否达到阈值
                     if (lossPercent >= autoClosePercent) {
-                        log.warn("[AutoClose] 🚨 {} (模型: {}) 触发自动平仓: 损失 {:.2f}% >= 阈值 {:.2f}%", 
+                        log.warn("[AutoClose] 🚨 {} (模型: {}) 触发自动平仓: 损失 {}% >= 阈值 {}%",
                                 symbol, modelId, String.format("%.2f", lossPercent), String.format("%.2f", autoClosePercent));
-                        
+
+                        log.info("[AutoClose] 📤 准备执行平仓 | symbol={}, positionSide={}, positionAmt={}, modelTradeMode={}",
+                                symbol, positionSide, positionAmt, modelTradeMode);
+
                         // 执行平仓（传递trade_mode）
                         boolean success = executeClosePosition(model, symbol, positionSide, positionAmt, modelTradeMode);
                         if (success) {
@@ -331,14 +334,19 @@ public class AutoCloseServiceImpl implements AutoCloseService {
      * @param modelTradeMode 模型交易模式（'real'或'test'），根据is_virtual判断
      */
     private boolean executeClosePosition(ModelDO model, String symbol, String positionSide, Double positionAmt, String modelTradeMode) {
+        log.info("[AutoClose] 🔧 进入executeClosePosition | modelId={}, symbol={}, positionSide={}, positionAmt={}, modelTradeMode={}",
+                model.getId(), symbol, positionSide, positionAmt, modelTradeMode);
+
         try {
             // 先取消已存在的条件单
             String formattedSymbol = symbol.toUpperCase();
             if (!formattedSymbol.endsWith(quoteAsset)) {
                 formattedSymbol = formattedSymbol + quoteAsset;
             }
+            log.info("[AutoClose] 🔄 准备取消条件单 | formattedSymbol={}, modelTradeMode={}", formattedSymbol, modelTradeMode);
             cancelExistingAlgoOrders(model, formattedSymbol, modelTradeMode);
-            
+            log.info("[AutoClose] ✅ 条件单取消完成（或无需取消）");
+
             BinanceFuturesOrderClient orderClient = getOrCreateOrderClient(model);
             if (orderClient == null) {
                 log.error("[AutoClose] 无法创建 Binance 订单客户端");
