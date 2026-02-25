@@ -80,18 +80,18 @@ public class MarketTickerStreamServiceImpl implements MarketTickerStreamService 
      */
     @PostConstruct
     public void init() {
-        log.info("[MarketTickerStreamService] 🚀 开始初始化市场Ticker流服务");
+        log.info("[MarketTickerStreamService] 开始初始化市场Ticker流服务");
         
         try {
             // 获取API实例
-            log.info("[MarketTickerStreamService] 📋 获取WebSocket API实例...");
+            log.info("[MarketTickerStreamService] 获取WebSocket API实例...");
             getApi();
-            log.info("[MarketTickerStreamService] ✅ API实例获取成功");
+            log.info("[MarketTickerStreamService] API实例获取成功");
             
-            log.info("[MarketTickerStreamService] 🎉 市场Ticker流服务初始化完成");
+            log.info("[MarketTickerStreamService] 市场Ticker流服务初始化完成");
             
         } catch (Exception e) {
-            log.error("[MarketTickerStreamService] ❌ 服务初始化失败", e);
+            log.error("[MarketTickerStreamService] 服务初始化失败", e);
             throw new RuntimeException("MarketTickerStreamService服务初始化失败", e);
         }
     }
@@ -101,9 +101,9 @@ public class MarketTickerStreamServiceImpl implements MarketTickerStreamService 
      */
     @PreDestroy
     public void destroy() {
-        log.info("[MarketTickerStreamService] 🛑 正在关闭市场Ticker流服务...");
+        log.info("[MarketTickerStreamService] 正在关闭市场Ticker流服务...");
         stopStream();
-        log.info("[MarketTickerStreamService] ✅ 市场Ticker流服务已关闭");
+        log.info("[MarketTickerStreamService] 市场Ticker流服务已关闭");
     }
     
     /**
@@ -163,7 +163,7 @@ public class MarketTickerStreamServiceImpl implements MarketTickerStreamService 
         }
         lastReconnectAtMs.set(now);
 
-        log.warn("[MarketTickerStreamService] ⚠️ WebSocketError(断链/异常)触发重连: {}",
+        log.warn("[MarketTickerStreamService] WebSocketError(断链/异常)触发重连: {}",
                 cause != null ? cause.getMessage() : "null", cause);
 
         reconnectRequested.set(true);
@@ -179,7 +179,7 @@ public class MarketTickerStreamServiceImpl implements MarketTickerStreamService 
      * 重新创建API实例（用于处理MessageTooLargeException后调整消息大小）
      */
     private void recreateApi() {
-        log.info("[MarketTickerStreamService] 🔄 重新创建API实例...");
+        log.info("[MarketTickerStreamService] 重新创建API实例...");
         closeCurrentConnectionNoThrow();
         api = null; // 强制重新创建
         getApi(); // 触发重新创建
@@ -201,9 +201,9 @@ public class MarketTickerStreamServiceImpl implements MarketTickerStreamService 
             // 设置主动重连标志，避免stop()触发的close事件被当作异常断链
             isActiveReconnecting.set(true);
             ws.stop();
-            log.info("[MarketTickerStreamService] 🧹 已停止旧 WebSocketClient，释放旧连接资源");
+            log.info("[MarketTickerStreamService] 已停止旧 WebSocketClient，释放旧连接资源");
         } catch (Exception e) {
-            log.warn("[MarketTickerStreamService] ⚠️ 停止旧 WebSocketClient 失败（忽略）", e);
+            log.warn("[MarketTickerStreamService] 停止旧 WebSocketClient 失败（忽略）", e);
         } finally {
             // 延迟重置标志，确保所有close事件都被忽略
             try {
@@ -276,14 +276,14 @@ public class MarketTickerStreamServiceImpl implements MarketTickerStreamService 
         long maxAllowedSize = 500 * 1024; // 500KB
         if (newMaxSize > maxAllowedSize) {
             newMaxSize = maxAllowedSize;
-            log.warn("[MarketTickerStreamService] ⚠️ 新计算的最大消息大小 {} bytes 超过限制 {} bytes，使用限制值", 
+            log.warn("[MarketTickerStreamService] 新计算的最大消息大小 {} bytes 超过限制 {} bytes，使用限制值", 
                     newMaxSize, maxAllowedSize);
         }
         
-        log.warn("[MarketTickerStreamService] ⚠️ 检测到MessageTooLargeException: {}", errorMessage);
-        log.warn("[MarketTickerStreamService] 📊 当前最大消息大小: {} bytes, 实际消息大小: {} bytes", 
+        log.warn("[MarketTickerStreamService] 检测到MessageTooLargeException: {}", errorMessage);
+        log.warn("[MarketTickerStreamService] 当前最大消息大小: {} bytes, 实际消息大小: {} bytes", 
                 configuredSize, actualSize > 0 ? actualSize : "未知");
-        log.info("[MarketTickerStreamService] 🔧 将最大消息大小从 {} bytes 增加到 {} bytes", 
+        log.info("[MarketTickerStreamService] 将最大消息大小从 {} bytes 增加到 {} bytes", 
                 configuredSize, newMaxSize);
         
         // 更新最大消息大小
@@ -335,7 +335,7 @@ public class MarketTickerStreamServiceImpl implements MarketTickerStreamService 
     private boolean handleWebSocketException(Exception e) {
         // 检查是否是MessageTooLargeException，需要特殊处理（调整消息大小）
         if (e instanceof MessageTooLargeException) {
-            log.error("[MarketTickerStreamService] ❌ 捕获到MessageTooLargeException异常，将调整消息大小并重新建立连接", e);
+            log.error("[MarketTickerStreamService] 捕获到MessageTooLargeException异常，将调整消息大小并重新建立连接", e);
             return handleMessageTooLargeException(e);
         }
         
@@ -343,7 +343,7 @@ public class MarketTickerStreamServiceImpl implements MarketTickerStreamService 
         Throwable cause = e.getCause();
         while (cause != null) {
             if (cause instanceof MessageTooLargeException) {
-                log.error("[MarketTickerStreamService] ❌ 在异常链中检测到MessageTooLargeException，将调整消息大小并重新建立连接", cause);
+                log.error("[MarketTickerStreamService] 在异常链中检测到MessageTooLargeException，将调整消息大小并重新建立连接", cause);
                 // 直接处理MessageTooLargeException，不需要再封装
                 return handleMessageTooLargeException(cause);
             }
@@ -351,7 +351,7 @@ public class MarketTickerStreamServiceImpl implements MarketTickerStreamService 
         }
         
         // 其他WebSocket异常，直接重新建立连接
-        log.error("[MarketTickerStreamService] ❌ 捕获到WebSocket异常，将重新建立连接", e);
+        log.error("[MarketTickerStreamService] 捕获到WebSocket异常，将重新建立连接", e);
         return reconnectStream();
     }
     
@@ -364,7 +364,7 @@ public class MarketTickerStreamServiceImpl implements MarketTickerStreamService 
         try {
             // 断链后不要立即重连：休息2分钟再重建，避免频繁重连风暴
             if (running.get()) {
-                log.warn("[MarketTickerStreamService] ⏳ 2分钟后重建WebSocket连接（可被停止/中断提前结束等待）");
+                log.warn("[MarketTickerStreamService] 2分钟后重建WebSocket连接（可被停止/中断提前结束等待）");
                 try {
                     // 分段睡眠，便于 stopStream() interrupt 及时生效（2分钟 = 120秒）
                     for (int i = 0; i < 120 && running.get(); i++) {
@@ -379,7 +379,7 @@ public class MarketTickerStreamServiceImpl implements MarketTickerStreamService 
                 }
             }
 
-            log.info("[MarketTickerStreamService] 🔄 开始重新建立WebSocket连接...");
+            log.info("[MarketTickerStreamService] 开始重新建立WebSocket连接...");
             
             // 重新创建API实例（使用当前的最大消息大小）
             recreateApi();
@@ -388,10 +388,10 @@ public class MarketTickerStreamServiceImpl implements MarketTickerStreamService 
             AllMarketTickersStreamsRequest request = new AllMarketTickersStreamsRequest();
             response = getApi().allMarketTickersStreams(request);
             
-            log.info("[MarketTickerStreamService] ✅ WebSocket连接已重新建立");
+            log.info("[MarketTickerStreamService] WebSocket连接已重新建立");
             return true;
         } catch (Exception e) {
-            log.error("[MarketTickerStreamService] ❌ 重新建立WebSocket连接失败", e);
+            log.error("[MarketTickerStreamService] 重新建立WebSocket连接失败", e);
             return false;
         }
     }
@@ -406,7 +406,7 @@ public class MarketTickerStreamServiceImpl implements MarketTickerStreamService 
     private boolean handleException(Exception e) {
         // 检查是否是WebSocket异常
         if (isWebSocketException(e)) {
-            log.warn("[MarketTickerStreamService] ⚠️ 检测到WebSocket异常: {} - {}", 
+            log.warn("[MarketTickerStreamService] 检测到WebSocket异常: {} - {}", 
                     e.getClass().getSimpleName(), 
                     e.getMessage() != null ? e.getMessage() : "");
             return handleWebSocketException(e);
@@ -416,7 +416,7 @@ public class MarketTickerStreamServiceImpl implements MarketTickerStreamService 
         Throwable cause = e.getCause();
         while (cause != null) {
             if (isWebSocketException(cause)) {
-                log.warn("[MarketTickerStreamService] ⚠️ 在异常链中检测到WebSocket异常: {} - {}", 
+                log.warn("[MarketTickerStreamService] 在异常链中检测到WebSocket异常: {} - {}", 
                         cause.getClass().getSimpleName(), 
                         cause.getMessage() != null ? cause.getMessage() : "");
                 return handleWebSocketException(new Exception(cause));
@@ -427,7 +427,7 @@ public class MarketTickerStreamServiceImpl implements MarketTickerStreamService 
         // 其他异常只记录日志，不进行重连
         String errorMessage = e.getMessage() != null ? e.getMessage() : "";
         String exceptionType = e.getClass().getSimpleName();
-        log.warn("[MarketTickerStreamService] ⚠️ 处理异常: {} - {}", exceptionType, errorMessage);
+        log.warn("[MarketTickerStreamService] 处理异常: {} - {}", exceptionType, errorMessage);
         
         return false;
     }
@@ -437,11 +437,11 @@ public class MarketTickerStreamServiceImpl implements MarketTickerStreamService 
      */
     @Override
     public void startStream(Integer runSeconds) throws Exception {
-        log.info("[MarketTickerStreamService] 🚀 启动ticker流服务（运行时长: {}秒）", 
+        log.info("[MarketTickerStreamService] 启动ticker流服务（运行时长: {}秒）", 
                 runSeconds != null ? runSeconds : "无限");
         
         if (running.get()) {
-            log.warn("[MarketTickerStreamService] ⚠️ 服务已在运行中，跳过启动");
+            log.warn("[MarketTickerStreamService] 服务已在运行中，跳过启动");
             return;
         }
         
@@ -459,20 +459,20 @@ public class MarketTickerStreamServiceImpl implements MarketTickerStreamService 
             try {
                 streamOnce(runSeconds);
             } catch (Exception e) {
-                log.error("[MarketTickerStreamService] ❌ 流处理异常", e);
+                log.error("[MarketTickerStreamService] 流处理异常", e);
             } finally {
                 running.set(false);
             }
         });
         
-        log.info("[MarketTickerStreamService] ✅ ticker流服务启动成功");
+        log.info("[MarketTickerStreamService] ticker流服务启动成功");
     }
     
     /**
      * 运行流处理
      */
     private void streamOnce(Integer runSeconds) throws Exception {
-        log.info("[MarketTickerStreamService] 📡 开始流处理（运行{}秒）", 
+        log.info("[MarketTickerStreamService] 开始流处理（运行{}秒）", 
                 runSeconds != null ? runSeconds : "无限");
         
         try {
@@ -482,7 +482,7 @@ public class MarketTickerStreamServiceImpl implements MarketTickerStreamService 
             // 创建请求并获取流
             AllMarketTickersStreamsRequest request = new AllMarketTickersStreamsRequest();
             response = getApi().allMarketTickersStreams(request);
-            log.info("[MarketTickerStreamService] ✅ WebSocket连接已建立");
+            log.info("[MarketTickerStreamService] WebSocket连接已建立");
             
             // 计算结束时间（如果指定了运行时间）
             Long endTime = null;
@@ -494,14 +494,14 @@ public class MarketTickerStreamServiceImpl implements MarketTickerStreamService 
             while (running.get()) {
                 // 检查是否超时
                 if (endTime != null && System.currentTimeMillis() >= endTime) {
-                    log.info("[MarketTickerStreamService] ⏰ 运行时间到达限制，停止流处理");
+                    log.info("[MarketTickerStreamService] 运行时间到达限制，停止流处理");
                     break;
                 }
                 
                 try {
                     // 若 SDK 回调触发了重连请求，则优先重连再取数据，避免继续阻塞旧连接
                     if (reconnectRequested.getAndSet(false)) {
-                        log.info("[MarketTickerStreamService] 🔄 收到断链重连请求，开始重建连接...");
+                        log.info("[MarketTickerStreamService] 收到断链重连请求，开始重建连接...");
                         reconnectStream();
                         continue;
                     }
@@ -510,32 +510,32 @@ public class MarketTickerStreamServiceImpl implements MarketTickerStreamService 
                     handleMessage(tickerResponse);
                 } catch (InterruptedException e) {
                     if (!running.get()) {
-                        log.warn("[MarketTickerStreamService] ⚠️ 流处理被中断（服务停止）");
+                        log.warn("[MarketTickerStreamService] 流处理被中断（服务停止）");
                         Thread.currentThread().interrupt();
                         break;
                     }
                     // 通常是 onWebSocketError 触发的 interrupt，用于打断 take()，以便重连后继续运行
-                    log.warn("[MarketTickerStreamService] ⚠️ 流处理被中断（触发重连）");
+                    log.warn("[MarketTickerStreamService] 流处理被中断（触发重连）");
                     reconnectRequested.set(false); // 避免重复
                     reconnectStream();
                     continue;
                 } catch (Exception e) {
-                    log.info("[MarketTickerStreamService] ⚠️ 流处理出现异常: {}", e.getMessage());
+                    log.info("[MarketTickerStreamService] 流处理出现异常: {}", e.getMessage());
                     // 处理所有WebSocket异常（包括MessageTooLargeException），并重新建立连接
                     if (handleException(e)) {
                         // handleException已经处理了重连逻辑，这里只需要记录日志
-                        log.info("[MarketTickerStreamService] 🔧 已处理WebSocket异常并重新建立连接，继续处理消息");
+                        log.info("[MarketTickerStreamService] 已处理WebSocket异常并重新建立连接，继续处理消息");
                     } else {
-                        log.error("[MarketTickerStreamService] ❌ 处理消息时出错（非WebSocket异常）", e);
+                        log.error("[MarketTickerStreamService] 处理消息时出错（非WebSocket异常）", e);
                         // 非WebSocket异常，继续处理下一条消息，不进行重连
                     }
                 }
             }
             
-            log.info("[MarketTickerStreamService] ✅ 流处理完成");
+            log.info("[MarketTickerStreamService] 流处理完成");
             
         } catch (Exception e) {
-            log.error("[MarketTickerStreamService] ❌ 流处理失败", e);
+            log.error("[MarketTickerStreamService] 流处理失败", e);
             throw e;
         } finally {
             streamThread.set(null);
@@ -765,17 +765,17 @@ public class MarketTickerStreamServiceImpl implements MarketTickerStreamService 
                 marketTickerMapper.batchUpsertTickers(finalTickers);
                 long duration = System.currentTimeMillis() - startTime;
                 log.debug("[MarketTickerStreamService] Successfully completed batchUpsertTickers in {} ms", duration);
-                log.info("[MarketTickerStreamService] ✅ 成功同步{}个ticker数据到数据库（耗时{}ms）", finalCount, duration);
+                log.info("[MarketTickerStreamService] 成功同步{}个ticker数据到数据库（耗时{}ms）", finalCount, duration);
             } catch (Exception e) {
                 log.error("[MarketTickerStreamService] Error during batchUpsertTickers: {}", e.getMessage(), e);
-                log.error("[MarketTickerStreamService] ❌ 批量同步ticker数据到数据库失败", e);
+                log.error("[MarketTickerStreamService] 批量同步ticker数据到数据库失败", e);
             }
             
             log.debug("[MarketTickerStreamService] Finished handling message");
             
         } catch (Exception e) {
             log.error("[MarketTickerStreamService] Unexpected error in message handling: {}", e.getMessage(), e);
-            log.error("[MarketTickerStreamService] ❌ 处理ticker消息时出错", e);
+            log.error("[MarketTickerStreamService] 处理ticker消息时出错", e);
         }
     }
     
@@ -975,7 +975,7 @@ public class MarketTickerStreamServiceImpl implements MarketTickerStreamService 
             return tickerDO;
             
         } catch (Exception e) {
-            log.error("[MarketTickerStreamService] ❌ 标准化ticker数据时出错", e);
+            log.error("[MarketTickerStreamService] 标准化ticker数据时出错", e);
             return null;
         }
     }
@@ -985,7 +985,7 @@ public class MarketTickerStreamServiceImpl implements MarketTickerStreamService 
      */
     @Override
     public void stopStream() {
-        log.info("[MarketTickerStreamService] 🛑 正在停止ticker流...");
+        log.info("[MarketTickerStreamService] 正在停止ticker流...");
         
         running.set(false);
         Thread t = streamThread.get();
@@ -998,19 +998,19 @@ public class MarketTickerStreamServiceImpl implements MarketTickerStreamService 
             streamExecutor.shutdown();
             try {
                 if (!streamExecutor.awaitTermination(60, TimeUnit.SECONDS)) {
-                    log.warn("[MarketTickerStreamService] ⚠️ 流处理线程未在60秒内完全关闭，强制关闭");
+                    log.warn("[MarketTickerStreamService] 流处理线程未在60秒内完全关闭，强制关闭");
                     streamExecutor.shutdownNow();
                 } else {
-                    log.info("[MarketTickerStreamService] ✅ 流处理线程已成功关闭");
+                    log.info("[MarketTickerStreamService] 流处理线程已成功关闭");
                 }
             } catch (InterruptedException e) {
-                log.error("[MarketTickerStreamService] ❌ 等待流处理线程关闭时被中断", e);
+                log.error("[MarketTickerStreamService] 等待流处理线程关闭时被中断", e);
                 streamExecutor.shutdownNow();
                 Thread.currentThread().interrupt();
             }
         }
         
-        log.info("[MarketTickerStreamService] ✅ ticker流已停止");
+        log.info("[MarketTickerStreamService] ticker流已停止");
     }
     
     /**
