@@ -136,6 +136,12 @@
             <artifactId>mybatis-plus-boot-starter</artifactId>
             <version>${mybatis-plus.version}</version>
         </dependency>
+        <!-- 修复 Spring Boot 3.2+ 与 MyBatis 的 factoryBeanObjectType 兼容性问题 -->
+        <dependency>
+            <groupId>org.mybatis</groupId>
+            <artifactId>mybatis-spring</artifactId>
+            <version>3.0.3</version>
+        </dependency>
 
         <!-- MySQL Driver -->
         <dependency>

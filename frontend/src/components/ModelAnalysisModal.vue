@@ -81,8 +81,8 @@
                   <span v-else class="empty-value">-</span>
                 </td>
                 <td>
-                  <span v-if="item.avg_duration_seconds !== null && item.avg_duration_seconds !== undefined">
-                    {{ formatDuration(item.avg_duration_seconds) }}
+                  <span v-if="getAvgDurationSeconds(item) !== null && getAvgDurationSeconds(item) !== undefined">
+                    {{ formatDuration(getAvgDurationSeconds(item)) }}
                   </span>
                   <span v-else class="empty-value">-</span>
                 </td>
@@ -146,6 +146,11 @@ const getExpectedValueClass = (value) => {
   if (value === null || value === undefined) return ''
   const num = Number(value)
   return num >= 0 ? 'expected-value-positive' : 'expected-value-negative'
+}
+
+// 获取每笔交易平均时长（兼容 camelCase 和 snake_case）
+const getAvgDurationSeconds = (item) => {
+  return item.avgDurationSeconds ?? item.avg_duration_seconds
 }
 
 // 格式化时长（秒 -> 分钟，支持小数，不满1分钟的显示小数）
