@@ -42,7 +42,7 @@ import org.eclipse.jetty.websocket.client.WebSocketClient;
  * 解析数据并同步到MySQL数据库。
  * 
  * 主要特性：
- * - 使用SDK泛型类解析数据（不使用反射）
+ * - 使用SDK泛型类解析数据(不使用反射)
  * - 简化的异常处理：仅对MessageTooLargeException进行特殊处理
  * - 批量同步：使用batchUpsertTickers批量插入/更新数据
  * - 异常处理：完善的错误处理和日志记录
@@ -64,7 +64,7 @@ public class MarketTickerStreamServiceImpl implements MarketTickerStreamService 
     // 由本服务创建并持有，用于在重连前显式关闭旧连接，避免连接/线程泄漏
     private volatile WebSocketClient currentWebSocketClient;
     
-    // 动态调整的最大消息大小（初始值为配置值，遇到MessageTooLargeException时自动增加）
+    // 动态调整的最大消息大小(初始值为配置值，遇到MessageTooLargeException时自动增加)
     private final AtomicLong currentMaxMessageSize;
     
     @Autowired
@@ -178,7 +178,7 @@ public class MarketTickerStreamServiceImpl implements MarketTickerStreamService 
     }
     
     /**
-     * 重新创建API实例（用于处理MessageTooLargeException后调整消息大小）
+     * 重新创建API实例(用于处理MessageTooLargeException后调整消息大小)
      */
     private void recreateApi() {
         log.info("[MarketTickerStreamService] 重新创建API实例...");
@@ -205,7 +205,7 @@ public class MarketTickerStreamServiceImpl implements MarketTickerStreamService 
             ws.stop();
             log.info("[MarketTickerStreamService] 已停止旧 WebSocketClient，释放旧连接资源");
         } catch (Exception e) {
-            log.warn("[MarketTickerStreamService] 停止旧 WebSocketClient 失败（忽略）", e);
+            log.warn("[MarketTickerStreamService] 停止旧 WebSocketClient 失败(忽略)", e);
         } finally {
             // 延迟重置标志，确保所有close事件都被忽略
             try {
@@ -221,7 +221,7 @@ public class MarketTickerStreamServiceImpl implements MarketTickerStreamService 
      * 检测并处理MessageTooLargeException
      * 如果检测到此异常，自动增加最大消息大小并重新创建API实例
      * 
-     * @param e 异常对象（可以是Exception或Throwable）
+     * @param e 异常对象(可以是Exception或Throwable)
      * @return true如果检测到MessageTooLargeException并已处理，false otherwise
      */
     private boolean handleMessageTooLargeException(Throwable e) {
@@ -233,7 +233,7 @@ public class MarketTickerStreamServiceImpl implements MarketTickerStreamService 
         MessageTooLargeException mte = (MessageTooLargeException) e;
         String errorMessage = mte.getMessage() != null ? mte.getMessage() : "";
         
-        // 从异常消息中提取实际消息大小（如果可能）
+        // 从异常消息中提取实际消息大小(如果可能)
         long actualSize = 0;
         long configuredSize = currentMaxMessageSize.get();
         
@@ -335,7 +335,7 @@ public class MarketTickerStreamServiceImpl implements MarketTickerStreamService 
      * @return true如果处理了WebSocket异常并重新建立了连接，false otherwise
      */
     private boolean handleWebSocketException(Exception e) {
-        // 检查是否是MessageTooLargeException，需要特殊处理（调整消息大小）
+        // 检查是否是MessageTooLargeException，需要特殊处理(调整消息大小)
         if (e instanceof MessageTooLargeException) {
             log.error("[MarketTickerStreamService] 捕获到MessageTooLargeException异常，将调整消息大小并重新建立连接", e);
             return handleMessageTooLargeException(e);
@@ -366,9 +366,9 @@ public class MarketTickerStreamServiceImpl implements MarketTickerStreamService 
         try {
             // 断链后不要立即重连：休息2分钟再重建，避免频繁重连风暴
             if (running.get()) {
-                log.warn("[MarketTickerStreamService] 2分钟后重建WebSocket连接（可被停止/中断提前结束等待）");
+                log.warn("[MarketTickerStreamService] 2分钟后重建WebSocket连接(可被停止/中断提前结束等待)");
                 try {
-                    // 分段睡眠，便于 stopStream() interrupt 及时生效（2分钟 = 120秒）
+                    // 分段睡眠，便于 stopStream() interrupt 及时生效(2分钟 = 120秒)
                     for (int i = 0; i < 120 && running.get(); i++) {
                         TimeUnit.SECONDS.sleep(1);
                     }
@@ -383,7 +383,7 @@ public class MarketTickerStreamServiceImpl implements MarketTickerStreamService 
 
             log.info("[MarketTickerStreamService] 开始重新建立WebSocket连接...");
             
-            // 重新创建API实例（使用当前的最大消息大小）
+            // 重新创建API实例(使用当前的最大消息大小)
             recreateApi();
             
             // 重新创建请求并获取流
@@ -439,7 +439,7 @@ public class MarketTickerStreamServiceImpl implements MarketTickerStreamService 
      */
     @Override
     public void startStream(Integer runSeconds) throws Exception {
-        log.info("[MarketTickerStreamService] 启动ticker流服务（运行时长: {}秒）", 
+        log.info("[MarketTickerStreamService] 启动ticker流服务(运行时长: {}秒)", 
                 runSeconds != null ? runSeconds : "无限");
         
         if (running.get()) {
@@ -474,7 +474,7 @@ public class MarketTickerStreamServiceImpl implements MarketTickerStreamService 
      * 运行流处理
      */
     private void streamOnce(Integer runSeconds) throws Exception {
-        log.info("[MarketTickerStreamService] 开始流处理（运行{}秒）", 
+        log.info("[MarketTickerStreamService] 开始流处理(运行{}秒)", 
                 runSeconds != null ? runSeconds : "无限");
         
         try {
@@ -486,7 +486,7 @@ public class MarketTickerStreamServiceImpl implements MarketTickerStreamService 
             response = getApi().allMarketTickersStreams(request);
             log.info("[MarketTickerStreamService] WebSocket连接已建立");
             
-            // 计算结束时间（如果指定了运行时间）
+            // 计算结束时间(如果指定了运行时间)
             Long endTime = null;
             if (runSeconds != null) {
                 endTime = System.currentTimeMillis() + (runSeconds * 1000L);
@@ -512,23 +512,23 @@ public class MarketTickerStreamServiceImpl implements MarketTickerStreamService 
                     handleMessage(tickerResponse);
                 } catch (InterruptedException e) {
                     if (!running.get()) {
-                        log.warn("[MarketTickerStreamService] 流处理被中断（服务停止）");
+                        log.warn("[MarketTickerStreamService] 流处理被中断(服务停止)");
                         Thread.currentThread().interrupt();
                         break;
                     }
                     // 通常是 onWebSocketError 触发的 interrupt，用于打断 take()，以便重连后继续运行
-                    log.warn("[MarketTickerStreamService] 流处理被中断（触发重连）");
+                    log.warn("[MarketTickerStreamService] 流处理被中断(触发重连)");
                     reconnectRequested.set(false); // 避免重复
                     reconnectStream();
                     continue;
                 } catch (Exception e) {
                     log.info("[MarketTickerStreamService] 流处理出现异常: {}", e.getMessage());
-                    // 处理所有WebSocket异常（包括MessageTooLargeException），并重新建立连接
+                    // 处理所有WebSocket异常(包括MessageTooLargeException)，并重新建立连接
                     if (handleException(e)) {
                         // handleException已经处理了重连逻辑，这里只需要记录日志
                         log.info("[MarketTickerStreamService] 已处理WebSocket异常并重新建立连接，继续处理消息");
                     } else {
-                        log.error("[MarketTickerStreamService] 处理消息时出错（非WebSocket异常）", e);
+                        log.error("[MarketTickerStreamService] 处理消息时出错(非WebSocket异常)", e);
                         // 非WebSocket异常，继续处理下一条消息，不进行重连
                     }
                 }
@@ -553,10 +553,10 @@ public class MarketTickerStreamServiceImpl implements MarketTickerStreamService 
      * 
      * 参考Python版本的_handle_message实现：
      * 1. 从AllMarketTickersStreamsResponse中提取ticker数据列表
-     * 2. 标准化每个ticker数据（参考_normalize_ticker）
+     * 2. 标准化每个ticker数据(参考_normalize_ticker)
      * 3. 筛选USDT交易对
      * 4. 查询现有数据并计算price_change等字段
-     * 5. 批量插入/更新到数据库（使用batchUpsertTickers）
+     * 5. 批量插入/更新到数据库(使用batchUpsertTickers)
      * 
      * @param tickerResponse SDK返回的AllMarketTickersStreamsResponse对象
      */
@@ -591,7 +591,7 @@ public class MarketTickerStreamServiceImpl implements MarketTickerStreamService 
                 return;
             }
             
-            // 步骤2: 筛选USDT交易对（参考Python版本的逻辑）
+            // 步骤2: 筛选USDT交易对(参考Python版本的逻辑)
             List<MarketTickerDO> usdtTickers = allNormalizedTickers.stream()
                     .filter(t -> t.getSymbol() != null && t.getSymbol().endsWith("USDT"))
                     .collect(Collectors.toList());
@@ -604,7 +604,7 @@ public class MarketTickerStreamServiceImpl implements MarketTickerStreamService 
                 return;
             }
             
-            // 步骤3: 查询现有数据（参考Python版本的get_existing_symbol_data）
+            // 步骤3: 查询现有数据(参考Python版本的get_existing_symbol_data)
             List<String> symbols = usdtTickers.stream()
                     .map(MarketTickerDO::getSymbol)
                     .collect(Collectors.toList());
@@ -619,7 +619,7 @@ public class MarketTickerStreamServiceImpl implements MarketTickerStreamService 
             }
             log.debug("[MarketTickerStreamService] Retrieved existing data for {} symbols", existingDataMap.size());
             
-            // 步骤4: 计算price_change等字段并准备最终数据（参考Python版本的逻辑）
+            // 步骤4: 计算price_change等字段并准备最终数据(参考Python版本的逻辑)
             List<MarketTickerDO> finalTickers = new ArrayList<>();
             for (MarketTickerDO ticker : usdtTickers) {
                 String symbol = ticker.getSymbol();
@@ -631,7 +631,7 @@ public class MarketTickerStreamServiceImpl implements MarketTickerStreamService 
                     currentLastPrice = 0.0;
                 }
                 
-                // 获取existing_open_price（参考Python版本的逻辑）
+                // 获取existing_open_price(参考Python版本的逻辑)
                 // Python版本逻辑：
                 // if open_price_raw == 0.0 and update_price_date is None:
                 //     open_price = None
@@ -643,7 +643,7 @@ public class MarketTickerStreamServiceImpl implements MarketTickerStreamService 
                     Double openPriceRaw = existingData.getOpenPrice();
                     LocalDateTime updatePriceDate = existingData.getUpdatePriceDate();
                     
-                    // 如果open_price为0.0且update_price_date为null，则表示不存在（open_price应该为None/null）
+                    // 如果open_price为0.0且update_price_date为null，则表示不存在(open_price应该为None/null)
                     if (openPriceRaw != null && openPriceRaw == 0.0 && updatePriceDate == null) {
                         existingOpenPrice = null; // 表示不存在
                     } else if (openPriceRaw != null) {
@@ -655,7 +655,7 @@ public class MarketTickerStreamServiceImpl implements MarketTickerStreamService 
                             symbol, existingOpenPrice, existingUpdatePriceDate);
                 }
                 
-                // 计算price_change等字段（参考Python版本的逻辑）
+                // 计算price_change等字段(参考Python版本的逻辑)
                 if (existingOpenPrice != null && existingOpenPrice != 0.0 && currentLastPrice != 0.0) {
                     try {
                         double priceChange = currentLastPrice - existingOpenPrice;
@@ -693,7 +693,7 @@ public class MarketTickerStreamServiceImpl implements MarketTickerStreamService 
                     if (existingData == null) {
                         ticker.setOpenPrice(0.0);
                         ticker.setUpdatePriceDate(null);
-                        log.debug("[MarketTickerStreamService] 设置{}的open_price为0.0（新插入）", symbol);
+                        log.debug("[MarketTickerStreamService] 设置{}的open_price为0.0(新插入)", symbol);
                     } else {
                         ticker.setOpenPrice(existingOpenPrice != null ? existingOpenPrice : 0.0);
                         ticker.setUpdatePriceDate(existingUpdatePriceDate);
@@ -704,13 +704,13 @@ public class MarketTickerStreamServiceImpl implements MarketTickerStreamService 
                 // 如果存在existing_symbol_data，则使用existing_open_price和existing_update_price_date
                 // 参考Python版本：insert_open_price和insert_update_price_date的处理
                 if (existingData == null) {
-                    // 新插入：open_price=0.0，update_price_date=NULL（参考Python版本：if not existing_symbol_data）
+                    // 新插入：open_price=0.0，update_price_date=NULL(参考Python版本：if not existing_symbol_data)
                     ticker.setOpenPrice(0.0);
                     ticker.setUpdatePriceDate(null);
                 }
-                // 如果存在existing_symbol_data，则使用上面已设置的值（existing_open_price和existing_update_price_date）
+                // 如果存在existing_symbol_data，则使用上面已设置的值(existing_open_price和existing_update_price_date)
                 
-                // 设置默认值（参考Python版本的逻辑）
+                // 设置默认值(参考Python版本的逻辑)
                 if (ticker.getPriceChange() == null) ticker.setPriceChange(0.0);
                 if (ticker.getPriceChangePercent() == null) ticker.setPriceChangePercent(0.0);
                 if (ticker.getSide() == null) ticker.setSide("");
@@ -727,7 +727,7 @@ public class MarketTickerStreamServiceImpl implements MarketTickerStreamService 
                 if (ticker.getLastTradeId() == null) ticker.setLastTradeId(0L);
                 if (ticker.getTradeCount() == null) ticker.setTradeCount(0L);
                 
-                // 转换时区为北京时区（UTC+8）（参考Python版本的_to_beijing_datetime）
+                // 转换时区为北京时区(UTC+8)(参考Python版本的_to_beijing_datetime)
                 if (ticker.getEventTime() != null) {
                     ticker.setEventTime(toBeijingDateTime(ticker.getEventTime()));
                 }
@@ -748,7 +748,7 @@ public class MarketTickerStreamServiceImpl implements MarketTickerStreamService 
             log.debug("[MarketTickerStreamService] Normalized {} tickers for database upsert", finalCount);
             log.debug("[MarketTickerStreamService] 标准化了{}个ticker数据，准备批量同步到数据库", finalCount);
             
-            // 记录部分关键数据用于调试（前3个作为样本）
+            // 记录部分关键数据用于调试(前3个作为样本)
             if (finalTickers.size() > 0) {
                 int sampleSize = Math.min(3, finalTickers.size());
                 List<MarketTickerDO> sample = finalTickers.subList(0, sampleSize);
@@ -767,7 +767,7 @@ public class MarketTickerStreamServiceImpl implements MarketTickerStreamService 
                 marketTickerMapper.batchUpsertTickers(finalTickers);
                 long duration = System.currentTimeMillis() - startTime;
                 log.debug("[MarketTickerStreamService] Successfully completed batchUpsertTickers in {} ms", duration);
-                log.info("[MarketTickerStreamService] 成功同步{}个ticker数据到数据库（耗时{}ms）", finalCount, duration);
+                log.info("[MarketTickerStreamService] 成功同步{}个ticker数据到数据库(耗时{}ms)", finalCount, duration);
             } catch (Exception e) {
                 log.error("[MarketTickerStreamService] Error during batchUpsertTickers: {}", e.getMessage(), e);
                 log.error("[MarketTickerStreamService] 批量同步ticker数据到数据库失败", e);
@@ -782,25 +782,25 @@ public class MarketTickerStreamServiceImpl implements MarketTickerStreamService 
     }
     
     /**
-     * 将时间转换为北京时区（UTC+8）
+     * 将时间转换为北京时区(UTC+8)
      * 参考Python版本的_to_beijing_datetime实现
      * 
      * Python版本的逻辑：
-     * 1. 先将naive datetime转换为UTC（假设输入是UTC）
-     * 2. 转换为北京时区（UTC+8）
-     * 3. 返回naive datetime（去掉时区信息）
+     * 1. 先将naive datetime转换为UTC(假设输入是UTC)
+     * 2. 转换为北京时区(UTC+8)
+     * 3. 返回naive datetime(去掉时区信息)
      * 
-     * @param dateTime 原始时间（假设为UTC naive datetime）
-     * @return 北京时区时间（naive datetime）
+     * @param dateTime 原始时间(假设为UTC naive datetime)
+     * @return 北京时区时间(naive datetime)
      */
     private LocalDateTime toBeijingDateTime(LocalDateTime dateTime) {
         if (dateTime == null) {
             return null;
         }
         try {
-            // 假设输入是UTC时间（naive datetime），先转换为UTC Instant
+            // 假设输入是UTC时间(naive datetime)，先转换为UTC Instant
             Instant instant = dateTime.atZone(ZoneOffset.UTC).toInstant();
-            // 转换为北京时区（UTC+8）
+            // 转换为北京时区(UTC+8)
             return LocalDateTime.ofInstant(instant, ZoneOffset.ofHours(8));
         } catch (Exception e) {
             log.warn("[MarketTickerStreamService] Failed to convert to Beijing time: {}", e.getMessage());
@@ -817,7 +817,7 @@ public class MarketTickerStreamServiceImpl implements MarketTickerStreamService 
      * 注意：不再从报文中解析以下字段，这些字段将在PriceRefreshService中根据业务逻辑计算：
      * - price_change: 价格变化
      * - price_change_percent: 价格变化百分比
-     * - side: 涨跌方向（gainer/loser）
+     * - side: 涨跌方向(gainer/loser)
      * - change_percent_text: 价格变化百分比文本
      * - open_price: 开盘价
      * 
@@ -834,14 +834,14 @@ public class MarketTickerStreamServiceImpl implements MarketTickerStreamService 
             String symbol = inner.getsLowerCase();
             log.debug("[MarketTickerStreamService] Normalizing ticker data for symbol: {}", symbol);
             
-            // 记录原始数据（仅关键字段）
+            // 记录原始数据(仅关键字段)
             log.debug("[MarketTickerStreamService] Raw ticker data for {}: E={}, s={}, w={}, c={}, h={}, l={}, v={}, q={}", 
                     symbol, inner.getE(), symbol, inner.getwLowerCase(), inner.getcLowerCase(), 
                     inner.gethLowerCase(), inner.getlLowerCase(), inner.getvLowerCase(), inner.getqLowerCase());
             
             MarketTickerDO tickerDO = new MarketTickerDO();
             
-            // 事件时间（E字段，毫秒时间戳）
+            // 事件时间(E字段，毫秒时间戳)
             // 注意：币安返回的时间戳是UTC时间，后续会在handleMessage中转换为北京时区
             Long eventTimeMs = inner.getE();
             if (eventTimeMs != null && eventTimeMs > 0) {
@@ -850,14 +850,14 @@ public class MarketTickerStreamServiceImpl implements MarketTickerStreamService 
                     Instant.ofEpochMilli(eventTimeMs), ZoneOffset.UTC));
             }
             
-            // 交易对符号（s字段，小写）
+            // 交易对符号(s字段，小写)
             if (symbol == null || symbol.isEmpty()) {
                 log.debug("[MarketTickerStreamService] Symbol为空，跳过此ticker");
                 return null;
             }
             tickerDO.setSymbol(symbol);
             
-            // 加权平均价（w字段，小写）
+            // 加权平均价(w字段，小写)
             String wValue = inner.getwLowerCase();
             if (wValue != null && !wValue.isEmpty()) {
                 try {
@@ -867,7 +867,7 @@ public class MarketTickerStreamServiceImpl implements MarketTickerStreamService 
                 }
             }
             
-            // 最新价格（c字段，小写）
+            // 最新价格(c字段，小写)
             String cValue = inner.getcLowerCase();
             if (cValue != null && !cValue.isEmpty()) {
                 try {
@@ -877,7 +877,7 @@ public class MarketTickerStreamServiceImpl implements MarketTickerStreamService 
                 }
             }
             
-            // 最新交易量（Q字段）
+            // 最新交易量(Q字段)
             String qValue = inner.getQ();
             if (qValue != null && !qValue.isEmpty()) {
                 try {
@@ -887,7 +887,7 @@ public class MarketTickerStreamServiceImpl implements MarketTickerStreamService 
                 }
             }
             
-            // 24小时最高价（h字段，小写）
+            // 24小时最高价(h字段，小写)
             String hValue = inner.gethLowerCase();
             if (hValue != null && !hValue.isEmpty()) {
                 try {
@@ -897,7 +897,7 @@ public class MarketTickerStreamServiceImpl implements MarketTickerStreamService 
                 }
             }
             
-            // 24小时最低价（l字段，小写）
+            // 24小时最低价(l字段，小写)
             String lValue = inner.getlLowerCase();
             if (lValue != null && !lValue.isEmpty()) {
                 try {
@@ -907,7 +907,7 @@ public class MarketTickerStreamServiceImpl implements MarketTickerStreamService 
                 }
             }
             
-            // 24小时基础资产成交量（v字段，小写）
+            // 24小时基础资产成交量(v字段，小写)
             String vValue = inner.getvLowerCase();
             if (vValue != null && !vValue.isEmpty()) {
                 try {
@@ -917,7 +917,7 @@ public class MarketTickerStreamServiceImpl implements MarketTickerStreamService 
                 }
             }
             
-            // 24小时计价资产成交量（q字段，小写）
+            // 24小时计价资产成交量(q字段，小写)
             String qLowerValue = inner.getqLowerCase();
             if (qLowerValue != null && !qLowerValue.isEmpty()) {
                 try {
@@ -927,7 +927,7 @@ public class MarketTickerStreamServiceImpl implements MarketTickerStreamService 
                 }
             }
             
-            // 统计开始时间（O字段，毫秒时间戳）
+            // 统计开始时间(O字段，毫秒时间戳)
             // 注意：币安返回的时间戳是UTC时间，后续会在handleMessage中转换为北京时区
             Long oValue = inner.getO();
             if (oValue != null && oValue > 0) {
@@ -935,7 +935,7 @@ public class MarketTickerStreamServiceImpl implements MarketTickerStreamService 
                     Instant.ofEpochMilli(oValue), ZoneOffset.UTC));
             }
             
-            // 统计结束时间（C字段，毫秒时间戳）
+            // 统计结束时间(C字段，毫秒时间戳)
             // 注意：币安返回的时间戳是UTC时间，后续会在handleMessage中转换为北京时区
             Long cValueLong = inner.getC();
             if (cValueLong != null && cValueLong > 0) {
@@ -943,28 +943,28 @@ public class MarketTickerStreamServiceImpl implements MarketTickerStreamService 
                     Instant.ofEpochMilli(cValueLong), ZoneOffset.UTC));
             }
             
-            // 第一笔交易ID（F字段）
+            // 第一笔交易ID(F字段)
             Long fValue = inner.getF();
             if (fValue != null) {
                 tickerDO.setFirstTradeId(fValue);
             }
             
-            // 最后一笔交易ID（L字段）
+            // 最后一笔交易ID(L字段)
             Long lValueLong = inner.getL();
             if (lValueLong != null) {
                 tickerDO.setLastTradeId(lValueLong);
             }
             
-            // 24小时交易笔数（n字段，小写）
+            // 24小时交易笔数(n字段，小写)
             Long nValue = inner.getnLowerCase();
             if (nValue != null) {
                 tickerDO.setTradeCount(nValue);
             }
             
-            // 数据摄入时间（当前时间，将在handleMessage中设置为北京时区）
+            // 数据摄入时间(当前时间，将在handleMessage中设置为北京时区)
             // 这里先不设置，在handleMessage中统一处理
             
-            // 记录标准化后的数据（仅关键字段）
+            // 记录标准化后的数据(仅关键字段)
             log.debug("[MarketTickerStreamService] Normalized ticker data for {}: symbol={}, eventTime={}, " +
                     "averagePrice={}, lastPrice={}, highPrice={}, lowPrice={}, baseVolume={}, quoteVolume={}, " +
                     "tradeCount={}", 
