@@ -59,6 +59,7 @@ public class MarketTickerStreamServiceImpl implements MarketTickerStreamService 
     private final AtomicBoolean reconnectRequested = new AtomicBoolean(false);
     private final AtomicLong lastReconnectAtMs = new AtomicLong(0);
     private final AtomicReference<Thread> streamThread = new AtomicReference<>();
+    private final AtomicBoolean isActiveReconnecting = new AtomicBoolean(false);
 
     // 由本服务创建并持有，用于在重连前显式关闭旧连接，避免连接/线程泄漏
     private volatile WebSocketClient currentWebSocketClient;
@@ -131,11 +132,29 @@ public class MarketTickerStreamServiceImpl implements MarketTickerStreamService 
 
     /**
      * SDK ConnectionWrapper.onWebSocketError 回调：触发业务侧重连。
-     * 说明：此回调可能发生在 Jetty/WebSocket 线程；这里不做重连耗时操作，只做“去抖 + 唤醒流线程”。
+     * 说明：此回调可能发生在 Jetty/WebSocket 线程；这里不做重连耗时操作，只做”去抖 + 唤醒流线程”。
      */
     private void onWrapperWebSocketError(Throwable cause) {
         if (!running.get()) {
+            log.debug(“[MarketTickerStreamService] 服务已停止，忽略WebSocket错误回调”);
             return;
+        }
+
+        // 如果正在主动重连，忽略由stop()触发的close事件，避免重连死循环
+        if (isActiveReconnecting.get()) {
+            log.debug(“[MarketTickerStreamService] 正在主动重连中，忽略WebSocket关闭事件”);
+            return;
+        }
+
+        // 检查是否是正常关闭（应用关闭时触发）
+        if (cause != null) {
+            String msg = cause.getMessage();
+            if (msg != null && (msg.contains(“Container being shut down”) ||
+                               msg.contains(“Session Closed”) ||
+                               msg.contains(“is not started”))) {
+                log.debug(“[MarketTickerStreamService] 检测到正常关闭事件，不触发重连: {}”, msg);
+                return;
+            }
         }
 
         long now = System.currentTimeMillis();
@@ -146,8 +165,8 @@ public class MarketTickerStreamServiceImpl implements MarketTickerStreamService 
         }
         lastReconnectAtMs.set(now);
 
-        log.warn("[MarketTickerStreamService] ⚠️ WebSocketError(断链/异常)触发重连: {}",
-                cause != null ? cause.getMessage() : "null", cause);
+        log.warn(“[MarketTickerStreamService] ⚠️ WebSocketError(断链/异常)触发重连: {}”,
+                cause != null ? cause.getMessage() : “null”, cause);
 
         reconnectRequested.set(true);
 
@@ -181,10 +200,20 @@ public class MarketTickerStreamServiceImpl implements MarketTickerStreamService 
             return;
         }
         try {
+            // 设置主动重连标志，避免stop()触发的close事件被当作异常断链
+            isActiveReconnecting.set(true);
             ws.stop();
             log.info("[MarketTickerStreamService] 🧹 已停止旧 WebSocketClient，释放旧连接资源");
         } catch (Exception e) {
             log.warn("[MarketTickerStreamService] ⚠️ 停止旧 WebSocketClient 失败（忽略）", e);
+        } finally {
+            // 延迟重置标志，确保所有close事件都被忽略
+            try {
+                TimeUnit.MILLISECONDS.sleep(500);
+            } catch (InterruptedException ie) {
+                Thread.currentThread().interrupt();
+            }
+            isActiveReconnecting.set(false);
         }
     }
     
@@ -330,17 +359,17 @@ public class MarketTickerStreamServiceImpl implements MarketTickerStreamService 
     
     /**
      * 重新建立WebSocket连接
-     * 
+     *
      * @return true如果成功重新建立连接，false otherwise
      */
     private boolean reconnectStream() {
         try {
-            // 断链后不要立即重连：休息3分钟再重建，避免频繁重连风暴
+            // 断链后不要立即重连：休息2分钟再重建，避免频繁重连风暴
             if (running.get()) {
-                log.warn("[MarketTickerStreamService] ⏳ 3分钟后重建WebSocket连接（可被停止/中断提前结束等待）");
+                log.warn("[MarketTickerStreamService] ⏳ 2分钟后重建WebSocket连接（可被停止/中断提前结束等待）");
                 try {
-                    // 分段睡眠，便于 stopStream() interrupt 及时生效（3分钟 = 180秒）
-                    for (int i = 0; i < 180 && running.get(); i++) {
+                    // 分段睡眠，便于 stopStream() interrupt 及时生效（2分钟 = 120秒）
+                    for (int i = 0; i < 120 && running.get(); i++) {
                         TimeUnit.SECONDS.sleep(1);
                     }
                 } catch (InterruptedException ie) {
