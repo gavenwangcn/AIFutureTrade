@@ -60,7 +60,7 @@ docker:
 
 # 微信通知配置
 wechat:
-  webhook-url: ${WECHAT_WEBHOOK_URL:}
+  webhook-url: ${WECHAT_WEBHOOK_URL:https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=9f081d45-efc0-421d-ae22-343141e61eff}
 
 # 日志配置
 logging:

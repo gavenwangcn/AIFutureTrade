@@ -2480,6 +2480,16 @@ public class ModelServiceImpl implements ModelService {
                     analysisItem.put("total_profit_ratio", null);
                 }
                 
+                // 每笔交易平均时长（秒），从首次买入到最后一笔卖出的间隔
+                Object avgDurationObj = item.get("avg_duration_seconds");
+                if (avgDurationObj != null) {
+                    Double avgDuration = avgDurationObj instanceof Number ? 
+                        ((Number) avgDurationObj).doubleValue() : Double.parseDouble(avgDurationObj.toString());
+                    analysisItem.put("avg_duration_seconds", avgDuration);
+                } else {
+                    analysisItem.put("avg_duration_seconds", null);
+                }
+                
                 result.add(analysisItem);
             }
             

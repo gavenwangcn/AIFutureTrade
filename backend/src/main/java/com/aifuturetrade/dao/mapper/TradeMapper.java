@@ -118,8 +118,9 @@ public interface TradeMapper extends BaseMapper<TradeDO> {
      * - 盈亏比：平均盈利 / 平均亏损（取绝对值）
      * - 期望值：EV = (胜率 × 平均盈利) - ((1 - 胜率) × 平均亏损)
      * - 总盈亏比：总盈利 / |总亏损|
+     * - 每笔交易平均时长：按portfolios_id为一笔，从首次买入到最后一笔卖出完成的间隔（秒），取平均
      *
-     * @return 所有模型的统计信息列表，每个元素包含：model_id, model_name, trade_count, win_rate, avg_profit, avg_loss, profit_loss_ratio, expected_value, total_profit, total_loss, total_profit_ratio
+     * @return 所有模型的统计信息列表，每个元素包含：model_id, model_name, trade_count, win_rate, avg_profit, avg_loss, profit_loss_ratio, expected_value, total_profit, total_loss, total_profit_ratio, avg_duration_seconds
      */
     @Select("SELECT " +
             "    merged.model_id as model_id, " +
@@ -159,15 +160,17 @@ public interface TradeMapper extends BaseMapper<TradeDO> {
             "    CASE " +
             "        WHEN SUM(CASE WHEN merged.total_pnl < 0 THEN merged.total_pnl ELSE 0 END) = 0 THEN NULL " +
             "        ELSE SUM(CASE WHEN merged.total_pnl > 0 THEN merged.total_pnl ELSE 0 END) / ABS(SUM(CASE WHEN merged.total_pnl < 0 THEN merged.total_pnl ELSE 0 END)) " +
-            "    END as total_profit_ratio " +
+            "    END as total_profit_ratio, " +
+            "    AVG(merged.duration_seconds) as avg_duration_seconds " +
             "FROM ( " +
             "    SELECT " +
             "        t.model_id, " +
             "        t.portfolios_id, " +
-            "        SUM(t.pnl) as total_pnl " +
+            "        SUM(CASE WHEN t.side = 'sell' THEN t.pnl ELSE 0 END) as total_pnl, " +
+            "        TIMESTAMPDIFF(SECOND, MIN(t.timestamp), MAX(CASE WHEN t.side = 'sell' THEN t.timestamp END)) as duration_seconds " +
             "    FROM trades t " +
-            "    WHERE t.side = 'sell' " +
-            "        AND t.portfolios_id IS NOT NULL " +
+            "    WHERE t.portfolios_id IS NOT NULL " +
+            "        AND EXISTS (SELECT 1 FROM trades t2 WHERE t2.portfolios_id = t.portfolios_id AND t2.side = 'sell') " +
             "    GROUP BY t.model_id, t.portfolios_id " +
             ") merged " +
             "LEFT JOIN models m ON merged.model_id = m.id " +

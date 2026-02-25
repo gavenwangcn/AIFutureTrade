@@ -32,6 +32,7 @@
                 <th>盈亏比</th>
                 <th>总盈亏比</th>
                 <th>期望值</th>
+                <th>每笔交易平均时长</th>
               </tr>
             </thead>
             <tbody>
@@ -76,6 +77,12 @@
                   <span v-if="item.expected_value !== null && item.expected_value !== undefined" 
                         :class="getExpectedValueClass(item.expected_value)">
                     {{ formatExpectedValue(item.expected_value) }}
+                  </span>
+                  <span v-else class="empty-value">-</span>
+                </td>
+                <td>
+                  <span v-if="item.avg_duration_seconds !== null && item.avg_duration_seconds !== undefined">
+                    {{ formatDuration(item.avg_duration_seconds) }}
                   </span>
                   <span v-else class="empty-value">-</span>
                 </td>
@@ -139,6 +146,15 @@ const getExpectedValueClass = (value) => {
   if (value === null || value === undefined) return ''
   const num = Number(value)
   return num >= 0 ? 'expected-value-positive' : 'expected-value-negative'
+}
+
+// 格式化时长（秒 -> 分钟，支持小数，不满1分钟的显示小数）
+const formatDuration = (seconds) => {
+  if (seconds === null || seconds === undefined || isNaN(Number(seconds))) return '-'
+  const s = Number(seconds)
+  if (s < 0) return '-'
+  const minutes = (s / 60).toFixed(2)
+  return `${minutes}分钟`
 }
 
 // 加载分析数据
