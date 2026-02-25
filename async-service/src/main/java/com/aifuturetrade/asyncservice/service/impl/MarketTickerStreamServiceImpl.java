@@ -136,41 +136,41 @@ public class MarketTickerStreamServiceImpl implements MarketTickerStreamService 
      */
     private void onWrapperWebSocketError(Throwable cause) {
         if (!running.get()) {
-            log.debug(“[MarketTickerStreamService] 服务已停止，忽略WebSocket错误回调”);
+            log.debug(“[MarketTickerStreamService] 服务已停止, 忽略WebSocket错误回调”);
             return;
         }
 
-        // 如果正在主动重连，忽略由stop()触发的close事件，避免重连死循环
+        // 如果正在主动重连, 忽略由stop()触发的close事件, 避免重连死循环
         if (isActiveReconnecting.get()) {
-            log.debug(“[MarketTickerStreamService] 正在主动重连中，忽略WebSocket关闭事件”);
+            log.debug(“[MarketTickerStreamService] 正在主动重连中, 忽略WebSocket关闭事件”);
             return;
         }
 
-        // 检查是否是正常关闭（应用关闭时触发）
+        // 检查是否是正常关闭(应用关闭时触发)
         if (cause != null) {
             String msg = cause.getMessage();
             if (msg != null && (msg.contains(“Container being shut down”) ||
                                msg.contains(“Session Closed”) ||
                                msg.contains(“is not started”))) {
-                log.debug(“[MarketTickerStreamService] 检测到正常关闭事件，不触发重连: {}”, msg);
+                log.debug(“[MarketTickerStreamService] 检测到正常关闭事件, 不触发重连: {}”, msg);
                 return;
             }
         }
 
         long now = System.currentTimeMillis();
         long last = lastReconnectAtMs.get();
-        // 1 秒内多次错误只触发一次，避免风暴
+        // 1 秒内多次错误只触发一次, 避免风暴
         if (now - last < 1000) {
             return;
         }
         lastReconnectAtMs.set(now);
 
-        log.warn(“[MarketTickerStreamService] ⚠️ WebSocketError(断链/异常)触发重连: {}”,
+        log.warn(“[MarketTickerStreamService] WebSocketError(断链/异常)触发重连: {}”,
                 cause != null ? cause.getMessage() : “null”, cause);
 
         reconnectRequested.set(true);
 
-        // 唤醒正在 response.take() 阻塞的流线程，让其切换到新连接
+        // 唤醒正在 response.take() 阻塞的流线程, 让其切换到新连接
         Thread t = streamThread.get();
         if (t != null) {
             t.interrupt();
