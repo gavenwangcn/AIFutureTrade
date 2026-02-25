@@ -1,0 +1,66 @@
+spring:
+  datasource:
+    # 生产环境使用环境变量配置的数据库连接
+    url: ${SPRING_DATASOURCE_URL:jdbc:mysql://154.89.148.172:32123/aifuturetrade?useSSL=false&serverTimezone=UTC&characterEncoding=utf8}
+    username: ${SPRING_DATASOURCE_USERNAME:aifuturetrade}
+    password: ${SPRING_DATASOURCE_PASSWORD:aifuturetrade123}
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    type: com.alibaba.druid.pool.DruidDataSource
+    # Druid连接池配置（生产环境优化 - 解决连接数过多问题）
+    druid:
+      # 连接池大小（降低以避免连接数过多）
+      initial-size: 5
+      min-idle: 5
+      max-active: 20  # 降低最大连接数，避免超过MySQL限制
+      # 连接获取超时（毫秒）
+      max-wait: 10000  # 降低等待时间，快速失败
+      # 连接空闲时间配置
+      min-evictable-idle-time-millis: 300000  # 5分钟，空闲连接5分钟后可被回收
+      max-evictable-idle-time-millis: 600000  # 10分钟，空闲连接10分钟后强制回收
+      time-between-eviction-runs-millis: 60000  # 每60秒检查一次空闲连接
+      # 连接有效性检查
+      validation-query: SELECT 1
+      validation-query-timeout: 3  # 降低验证超时时间
+      test-on-borrow: false
+      test-on-return: false
+      test-while-idle: true  # 空闲时验证连接有效性
+      # 连接泄漏检测和回收（生产环境禁用，避免性能影响）
+      # 注意：remove-abandoned 在生产环境不建议使用，Druid会输出警告
+      # 如果确实需要检测连接泄漏，建议通过监控和日志来排查，而不是启用此功能
+      remove-abandoned: false  # 生产环境禁用连接泄漏自动检测
+      # remove-abandoned-timeout-millis: 300000  # 已禁用，无需配置
+      # log-abandoned: true  # 已禁用，无需配置
+      # 连接池监控
+      filters: stat,wall
+      pool-name: DruidCP
+      use-global-data-source-stat: true
+      # 连接超时配置
+      connect-timeout: 5000  # 连接建立超时5秒
+      socket-timeout: 30000  # Socket读取超时30秒
+      # 连接池统计
+      keep-alive: true  # 保持连接活跃
+      phy-timeout-millis: 28800000  # 物理连接最大生存时间8小时
+
+# 日志配置（生产环境）
+logging:
+  level:
+    root: info
+    com.aifuturetrade: info
+
+# Binance API配置（生产环境使用正式网）
+binance:
+  api-key: ${BINANCE_API_KEY:}
+  secret-key: ${BINANCE_SECRET_KEY:}
+  private-key-path: ${BINANCE_PRIVATE_KEY_PATH:}
+  private-key-pass: ${BINANCE_PRIVATE_KEY_PASS:}
+  base-url: https://fapi.binance.com
+  testnet: false
+  quote-asset: USDT
+  # 连接超时时间（毫秒）- 增加到30秒，减少连接超时错误
+  connect-timeout: 30000
+  # 读取超时时间（毫秒）- 增加到60秒，减少读取超时错误
+  read-timeout: 60000
+  retries: 3
+  backoff: 200
+  compression: true
+

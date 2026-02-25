@@ -35,4 +35,17 @@ Thank you for considering contributing to this project!
 ## Questions?
 
 Open an issue for discussion.
+docker run --rm -it --net=container:aifuturetrade-async-service alpine sh -c "apk add iproute2 && watch -n 1 'ss -tunp | grep :443'"
+
+http://156.254.6.176:5004/api/market-data/klines?symbol=MYXUSDT&interval=1d&limit=2
+http://185.242.232.42:5004/api/market-data/klines?symbol=MYXUSDT&interval=1d&limit=2
+docker stop $(docker ps -q --filter "name=buy-*")
+docker rm $(docker ps -a -q -f "name=buy-*")
+docker stop $(docker ps -q --filter "name=sell-*")
+docker rm $(docker ps -a -q -f "name=sell-*")
+
+cash = 初始资金 + 已实现盈亏 - 已用保证金（可用于新开仓的资金）
+margin_used = Σ((持仓数量 × 开仓均价) / 杠杆倍数)（所有持仓占用的保证金）
+positions_value = Σ(持仓数量 × 开仓均价)（持仓的开仓价值总和）
+total_value = 初始资金 + 已实现盈亏 + 未实现盈亏（账户总价值）
 

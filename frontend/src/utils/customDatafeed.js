@@ -1,11 +1,10 @@
 /**
- * 自定义数据接入类
- * 实现 KLineChart Pro 版本的数据接入接口
- * 参考 klinecharts-pro/index.html 中的 AkshareDatafeed 实现方式
+ * 自定义数据加载器
+ * 实现 KLineChart 10.0.0 版本的 DataLoader 接口
+ * 参考 https://klinecharts.com/guide/quick-start
  * 使用 fetch API 直接调用后端接口，避免 ES6 模块依赖
+ * 注意：K线页面仅使用历史数据，不使用WebSocket实时更新
  */
-
-import { createSocketConnection } from './websocket.js'
 
 // 获取 API 基础 URL（与 api.js 保持一致）
 function getApiBaseUrl() {
@@ -25,198 +24,164 @@ function getApiBaseUrl() {
 }
 
 /**
- * 自定义数据接入类
- * 实现 @klinecharts/pro 的 Datafeed 接口
+ * 创建数据加载器
+ * 实现 KLineChart 10.0.0 的 DataLoader 接口
+ * @returns {DataLoader} 数据加载器对象
  */
-export class CustomDatafeed {
-  constructor() {
-    this.socket = null
-    this.subscriptions = new Map() // 存储订阅信息: key = `${symbol.ticker}:${period.text}`, value = { callback, symbol, period }
-    this.marketPrices = [] // 缓存市场行情数据
-  }
+export function createDataLoader() {
+  const subscriptions = new Map() // 存储订阅信息: key = `${symbol.ticker}:${period.text}`, value = { callback, symbol, period }
+  const marketPrices = [] // 缓存市场行情数据
+  let isFirstLoadCompleted = false // 标记第一次加载是否已完成
 
   /**
-   * 模糊搜索标的
-   * 在搜索框输入的时候触发
-   * 返回标的信息数组
-   * 参考 klinecharts-pro/index.html 中的 searchSymbols 实现
-   * @param {string} search - 搜索关键词
-   * @returns {Promise<SymbolInfo[]>}
+   * 调用 /api/market/prices API 获取市场价格
+   * 仅在第一次K线数据加载完成后调用一次
    */
-  async searchSymbols(search = '') {
+  async function fetchMarketPrices() {
+    // 如果已经调用过，不再重复调用
+    if (isFirstLoadCompleted) {
+      console.log('[DataLoader] Market prices API already called, skipping...')
+      return
+    }
+
     try {
-      console.log('[CustomDatafeed] Searching symbols:', search)
+      const apiBaseUrl = getApiBaseUrl()
+      const apiUrl = `${apiBaseUrl}/api/market/prices`
       
-      // 获取市场行情数据（使用 fetch API，参考参考实现）
-      if (this.marketPrices.length === 0) {
-        const apiBaseUrl = getApiBaseUrl()
-        const response = await fetch(`${apiBaseUrl}/api/market/prices`)
-        
-        if (!response.ok) {
-          throw new Error(`HTTP error! status: ${response.status}`)
-        }
-        
-        const prices = await response.json()
-        this.marketPrices = Object.keys(prices).map(symbol => ({
-          symbol,
-          name: prices[symbol].name || `${symbol}永续合约`,
-          contract_symbol: prices[symbol].contract_symbol || symbol
-        }))
+      console.log('[DataLoader] Calling /api/market/prices after first K-line data load...')
+      const response = await fetch(apiUrl)
+      
+      if (!response.ok) {
+        const errorText = await response.text()
+        console.error('[DataLoader] Failed to fetch market prices:', errorText)
+        return
       }
-
-      // 过滤匹配的标的（参考参考实现的过滤逻辑）
-      const searchUpper = search.toUpperCase()
-      const matched = this.marketPrices
-        .filter(item => {
-          const symbol = item.symbol.toUpperCase()
-          const name = (item.name || '').toUpperCase()
-          return symbol.includes(searchUpper) || name.includes(searchUpper)
-        })
-        .slice(0, 20) // 限制返回数量
-
-      // 转换为 SymbolInfo 格式
-      const symbols = matched.map(item => ({
-        ticker: item.contract_symbol || item.symbol,
-        shortName: item.symbol.replace('USDT', ''),
-        name: item.name || `${item.symbol}永续合约`,
-        exchange: 'BINANCE',
-        market: 'futures',
-        priceCurrency: 'usd',
-        type: 'PERPETUAL'
-      }))
-
-      console.log('[CustomDatafeed] Found symbols:', symbols.length)
-      return symbols
+      
+      const prices = await response.json()
+      console.log('[DataLoader] Market prices fetched successfully:', Object.keys(prices).length, 'symbols')
+      
+      // 标记为已调用，防止重复调用
+      isFirstLoadCompleted = true
     } catch (error) {
-      console.error('[CustomDatafeed] Error searching symbols:', error)
-      return []
+      console.error('[DataLoader] Error fetching market prices:', error)
     }
   }
 
   /**
    * 获取历史K线数据
-   * 当标的和周期发生变化的时候触发
-   * @param {SymbolInfo} symbol - 标的信息
-   * @param {Period} period - 周期信息
-   * @param {number} from - 开始时间戳（毫秒）
-   * @param {number} to - 结束时间戳（毫秒）
-   * @returns {Promise<KLineData[]>}
+   * 当标的和周期发生变化或图表拖动到边界时触发
+   * @param {DataLoaderGetBarsParams} params - 参数对象
+   * @param {DataLoadType} params.type - 加载类型: 'init' | 'forward' | 'backward' | 'update'
+   * @param {number|null} params.timestamp - 时间戳（毫秒），用于向前或向后加载
+   * @param {SymbolInfo} params.symbol - 标的信息
+   * @param {Period} params.period - 周期信息
+   * @param {Function} params.callback - 回调函数，用于返回数据
    */
-  async getHistoryKLineData(symbol, period, from, to) {
+  async function getBars(params) {
     try {
-      console.log('[CustomDatafeed] Getting history K-line data:', {
+      const { type, timestamp, symbol, period, callback } = params
+      
+      console.log('[DataLoader] Getting K-line data:', {
+        type,
+        timestamp: timestamp ? new Date(timestamp).toISOString() : null,
         ticker: symbol?.ticker || symbol,
-        period: period?.text || period,
-        from: new Date(from).toISOString(),
-        to: new Date(to).toISOString(),
-        fromTimestamp: from,
-        toTimestamp: to
+        period: period?.span && period?.type ? `${period.span}${period.type}` : (period?.text || period)
       })
 
       // 将 period 转换为后端支持的 interval
-      const interval = this.periodToInterval(period)
+      const interval = periodToInterval(period)
       if (!interval) {
-        console.warn('[CustomDatafeed] Unsupported period:', period)
-        return []
+        console.warn('[DataLoader] Unsupported period:', period)
+        callback([])
+        return
       }
 
-      // 获取 ticker（支持 symbol 对象或字符串）
+      // 获取 ticker
       const ticker = symbol?.ticker || symbol
       if (!ticker) {
-        console.warn('[CustomDatafeed] Invalid symbol:', symbol)
-        return []
+        console.warn('[DataLoader] Invalid symbol:', symbol)
+        callback([])
+        return
       }
 
-      // 计算需要的数据量（根据时间范围估算，但后端限制最多500条）
-      // Pro 版本可能会请求较大的时间范围，我们需要获取足够的数据
-      const limit = 500
+      // 计算需要的数据量
+      // 1天（1d）和1周（1w）返回99根，其他interval返回499根
+      let limit = 499
+      if (interval === '1d' || interval === '1w') {
+        limit = 99
+      }
 
-      // 将时间戳转换为 ISO 格式字符串（后端期望的格式）
-      // from 和 to 是毫秒时间戳，需要转换为 ISO 格式
-      const startTimeISO = new Date(from).toISOString()
-      const endTimeISO = new Date(to).toISOString()
-
-      console.log('[CustomDatafeed] Requesting K-line data with time range:', {
-        ticker,
-        interval,
-        limit,
-        startTimeISO,
-        endTimeISO,
-        fromTimestamp: from,
-        toTimestamp: to
-      })
-
-      // 调用后端 API 获取 K 线数据（使用 fetch API，参考参考实现）
+      // 构建请求参数（不传入startTime和endTime）
       const apiBaseUrl = getApiBaseUrl()
-      const params = new URLSearchParams({
+      const urlParams = new URLSearchParams({
         symbol: ticker,
         interval: interval,
         limit: limit.toString()
       })
-      if (startTimeISO) {
-        params.append('start_time', startTimeISO)
-      }
-      if (endTimeISO) {
-        params.append('end_time', endTimeISO)
-      }
       
-      const response = await fetch(`${apiBaseUrl}/api/market/klines?${params.toString()}`)
+      const apiUrl = `${apiBaseUrl}/api/market/klines?${urlParams.toString()}`
+      const response = await fetch(apiUrl)
       
       if (!response.ok) {
         const errorText = await response.text()
-        console.error('[CustomDatafeed] HTTP错误详情:', errorText)
-        throw new Error(`HTTP error! status: ${response.status}, details: ${errorText}`)
+        console.error('[DataLoader] HTTP错误详情:', errorText)
+        callback([])
+        return
       }
       
       const result = await response.json()
 
-      if (!result || !result.data || !Array.isArray(result.data)) {
-        console.warn('[CustomDatafeed] Invalid response format:', result)
-        return []
+      // 处理响应格式：后端可能直接返回数组，也可能返回 {data: [...]} 格式
+      let klinesData = null
+      if (Array.isArray(result)) {
+        // 后端直接返回数组格式
+        klinesData = result
+      } else if (result && result.data && Array.isArray(result.data)) {
+        // 后端返回 {data: [...]} 格式
+        klinesData = result.data
+      } else {
+        console.warn('[DataLoader] Invalid response format:', result)
+        callback([])
+        return
       }
 
-      // 转换数据格式并过滤时间范围（参考参考实现的数据转换方式）
-      const klines = result.data
+      // 转换数据格式为 KLineChart 所需格式
+      // 后端返回格式：{ timestamp, open, high, low, close, volume, turnover }
+      // KLineChart 需要格式：{ timestamp, open, high, low, close, volume }
+      const klines = klinesData
         .map(kline => {
-          // 处理时间戳：确保是数字类型（毫秒）
-          let timestamp = kline.timestamp
+          // 处理时间戳：后端返回的是毫秒时间戳
+          let ts = kline.timestamp
           
-          if (timestamp === null || timestamp === undefined) {
-            // 如果没有 timestamp，尝试使用其他时间字段
-            if (kline.kline_start_time) {
-              timestamp = typeof kline.kline_start_time === 'number' 
-                ? kline.kline_start_time 
-                : new Date(kline.kline_start_time).getTime()
-            } else if (kline.kline_end_time) {
-              timestamp = typeof kline.kline_end_time === 'number'
-                ? kline.kline_end_time
-                : new Date(kline.kline_end_time).getTime()
-            } else {
-              return null // 无法确定时间戳，跳过
-            }
-          } else if (typeof timestamp === 'string') {
-            // 字符串时间戳需要转换
-            timestamp = new Date(timestamp).getTime()
-            if (isNaN(timestamp)) {
-              return null // 无效的时间戳
-            }
-          } else if (typeof timestamp !== 'number') {
-            return null // 无效的时间戳类型
+          if (ts === null || ts === undefined) {
+            return null
           }
-
-          // 确保时间戳是毫秒（如果后端返回的是秒，需要乘以1000）
-          // 通常时间戳大于 1e12 表示是毫秒，小于表示是秒
-          if (timestamp < 1e12) {
-            timestamp = timestamp * 1000
-          }
-
-          // 过滤时间范围：Pro 版本会传入 from 和 to，我们需要返回这个范围内的数据
-          // 注意：Pro 版本可能会请求未来的数据，我们返回空数组即可
-          if (timestamp < from || timestamp > to) {
+          
+          // 转换为数字类型
+          if (typeof ts === 'string') {
+            ts = parseInt(ts, 10)
+            if (isNaN(ts)) {
+              return null
+            }
+          } else if (typeof ts !== 'number') {
             return null
           }
 
-          // 转换价格和成交量数据，确保是数字类型
+          // 确保时间戳是毫秒（如果小于 1e12，说明是秒，需要转换为毫秒）
+          if (ts < 1e12) {
+            ts = ts * 1000
+          }
+
+          // 根据加载类型过滤数据
+          if (timestamp) {
+            if (type === 'backward' && ts >= timestamp) {
+              return null
+            } else if (type === 'forward' && ts <= timestamp) {
+              return null
+            }
+          }
+
+          // 转换价格和成交量数据（后端返回的是字符串，需要转换为数字）
           const open = parseFloat(kline.open)
           const high = parseFloat(kline.high)
           const low = parseFloat(kline.low)
@@ -225,17 +190,18 @@ export class CustomDatafeed {
 
           // 验证数据有效性
           if (isNaN(open) || isNaN(high) || isNaN(low) || isNaN(close) || close <= 0) {
-            return null // 无效的价格数据
+            return null
           }
 
-          // 确保 high >= max(open, close) 和 low <= min(open, close)
+          // 确保价格数据的逻辑正确性
           const maxPrice = Math.max(open, close)
           const minPrice = Math.min(open, close)
           const validHigh = Math.max(high, maxPrice)
           const validLow = Math.min(low, minPrice)
 
+          // 返回 KLineChart 所需的数据格式
           return {
-            timestamp: Math.floor(timestamp), // 确保是整数
+            timestamp: Math.floor(ts),
             open: open,
             high: validHigh,
             low: validLow,
@@ -244,60 +210,66 @@ export class CustomDatafeed {
           }
         })
         .filter(kline => kline !== null && kline.timestamp > 0)
-        .sort((a, b) => a.timestamp - b.timestamp) // 按时间升序排序（Pro 版本要求）
+        .sort((a, b) => a.timestamp - b.timestamp)
 
-      console.log('[CustomDatafeed] Loaded K-line data:', {
+      console.log('[DataLoader] Loaded K-line data:', {
         total: klines.length,
+        type,
         firstTimestamp: klines.length > 0 ? new Date(klines[0].timestamp).toISOString() : null,
-        lastTimestamp: klines.length > 0 ? new Date(klines[klines.length - 1].timestamp).toISOString() : null,
-        requestedFrom: new Date(from).toISOString(),
-        requestedTo: new Date(to).toISOString()
+        lastTimestamp: klines.length > 0 ? new Date(klines[klines.length - 1].timestamp).toISOString() : null
       })
 
-      return klines
+      // limit是传递给API的参数，用于控制后端返回的K线数据量
+      // 不需要判断是否还有更多数据，所有加载类型都只返回false，表示没有更多数据
+      // 这样KLineChart就不会自动触发backward/forward加载
+      let more = false
+      
+      // 第一次加载完成后，调用 /api/market/prices API
+      // 注意：仅调用一次，不再使用WebSocket等实时加载数据
+        if (type === 'init') {
+        fetchMarketPrices()
+        }
+      
+      callback(klines, more)
     } catch (error) {
-      console.error('[CustomDatafeed] Error getting history K-line data:', error)
-      return []
+      console.error('[DataLoader] Error getting K-line data:', error)
+      callback([])
     }
   }
 
   /**
-   * 订阅标的在某个周期的实时数据（已禁用，仅使用历史数据）
-   * 
-   * 注意：K线页面已改为仅使用历史数据，不再订阅实时K线更新，避免BUG
-   * 此方法保留空实现以兼容 klinecharts-pro 库的接口要求
-   * 
-   * @param {SymbolInfo} symbol - 标的信息
-   * @param {Period} period - 周期信息
-   * @param {Function} callback - 数据回调函数（不会被调用）
+   * 订阅实时K线数据（可选）
+   * 当设置标的和周期后，getBars 完成之后触发
+   * @param {DataLoaderSubscribeBarParams} params - 参数对象
+   * @param {SymbolInfo} params.symbol - 标的信息
+   * @param {Period} params.period - 周期信息
+   * @param {Function} params.callback - 数据回调函数
    */
-  subscribe(symbol, period, callback) {
+  function subscribeBar(params) {
     // K线页面已改为仅使用历史数据，不再订阅实时K线更新
-    // 此方法保留空实现以兼容 klinecharts-pro 库的接口要求
-    console.log('[CustomDatafeed] subscribe called but real-time subscription is disabled (using history data only)')
+    // 此方法保留空实现以兼容 KLineChart 库的接口要求
+    console.log('[DataLoader] subscribeBar called but real-time subscription is disabled (using history data only)')
   }
 
   /**
-   * 取消订阅标的在某个周期的实时数据（已禁用，仅使用历史数据）
-   * 
-   * 注意：K线页面已改为仅使用历史数据，不再订阅实时K线更新，避免BUG
-   * 此方法保留空实现以兼容 klinecharts-pro 库的接口要求
-   * 
-   * @param {SymbolInfo} symbol - 标的信息
-   * @param {Period} period - 周期信息
+   * 取消订阅实时K线数据（可选）
+   * 当设置标的和周期后触发
+   * @param {DataLoaderUnsubscribeBarParams} params - 参数对象
+   * @param {SymbolInfo} params.symbol - 标的信息
+   * @param {Period} params.period - 周期信息
    */
-  unsubscribe(symbol, period) {
+  function unsubscribeBar(params) {
     // K线页面已改为仅使用历史数据，不再订阅实时K线更新
-    // 此方法保留空实现以兼容 klinecharts-pro 库的接口要求
-    console.log('[CustomDatafeed] unsubscribe called but real-time subscription is disabled (using history data only)')
+    // 此方法保留空实现以兼容 KLineChart 库的接口要求
+    console.log('[DataLoader] unsubscribeBar called but real-time subscription is disabled (using history data only)')
   }
 
   /**
-   * 将 Pro 版本的 Period 转换为后端支持的 interval
-   * @param {Period} period - Pro 版本的周期对象，格式：{ multiplier: number, timespan: string, text: string }
+   * 将 Period 转换为后端支持的 interval
+   * @param {Period} period - 周期对象，格式：{ span: number, type: string } 或 { multiplier: number, timespan: string, text: string }
    * @returns {string|null} - 后端支持的 interval 字符串
    */
-  periodToInterval(period) {
+  function periodToInterval(period) {
     if (!period) {
       return null
     }
@@ -307,7 +279,21 @@ export class CustomDatafeed {
       return period
     }
 
-    // 如果 period 有 text 属性，使用 text
+    // KLineChart 10.0.0 使用 { span: number, type: string } 格式
+    if (period.span && period.type) {
+      const typeMap = {
+        'minute': 'm',
+        'hour': 'h',
+        'day': 'd',
+        'week': 'w'
+      }
+      const suffix = typeMap[period.type]
+      if (suffix) {
+        return `${period.span}${suffix}`
+      }
+    }
+
+    // 兼容旧格式：如果 period 有 text 属性，使用 text
     if (period.text) {
       const periodMap = {
         '1m': '1m',
@@ -326,7 +312,7 @@ export class CustomDatafeed {
       return periodMap[period.text] || null
     }
 
-    // 如果 period 有 multiplier 和 timespan，尝试构建
+    // 兼容旧格式：如果 period 有 multiplier 和 timespan，尝试构建
     if (period.multiplier && period.timespan) {
       const timespanMap = {
         'minute': 'm',
@@ -343,21 +329,11 @@ export class CustomDatafeed {
     return null
   }
 
-  /**
-   * 清理资源
-   */
-  destroy() {
-    // 取消所有订阅
-    for (const [key, subscription] of this.subscriptions.entries()) {
-      this.unsubscribe(subscription.symbol, subscription.period)
-    }
-    this.subscriptions.clear()
-
-    // 断开 WebSocket 连接
-    if (this.socket) {
-      this.socket.disconnect()
-      this.socket = null
-    }
+  // 返回 DataLoader 对象
+  return {
+    getBars,
+    subscribeBar,
+    unsubscribeBar
   }
 }
 

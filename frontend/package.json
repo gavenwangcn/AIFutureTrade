@@ -10,9 +10,8 @@
     "start": "npm run build && npm run preview"
   },
   "dependencies": {
-    "@klinecharts/pro": "latest",
-    "echarts": "^5.4.3",
-    "klinecharts": "^9.0.0",
+    "ansi_up": "^6.0.6",
+    "echarts": "^6.0.0",
     "socket.io-client": "^4.7.5",
     "vue": "^3.4.21"
   },

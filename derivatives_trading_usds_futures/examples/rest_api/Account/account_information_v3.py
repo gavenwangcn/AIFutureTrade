@@ -31,7 +31,7 @@ def account_information_v3():
         rate_limits = response.rate_limits
         logging.info(f"account_information_v3() rate limits: {rate_limits}")
 
-        data = response.data()
+        data = response.data().to_json()
         logging.info(f"account_information_v3() response: {data}")
     except Exception as e:
         logging.error(f"account_information_v3() error: {e}")

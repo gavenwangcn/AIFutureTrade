@@ -160,26 +160,26 @@ app.get('/lib/*', (req, res, next) => {
 });
 
 // ------------------------------------------------------------------------------
-// 6. /klinecharts-pro/ 路径文件服务（自定义构建的 klinecharts-pro）
+// 6. /klinecharts/ 路径文件服务（KLineChart 10.0.0）
 // ------------------------------------------------------------------------------
-// 提供 /klinecharts-pro/ 路径的文件服务
-// 优先使用 dist/klinecharts-pro/（构建时从 public/klinecharts-pro/ 复制），
-// 否则使用 public/klinecharts-pro/（开发环境），最后回退到本地构建产物
-const klinechartsProDistPath = path.join(__dirname, 'dist', 'klinecharts-pro');
-const klinechartsProPublicPath = path.join(__dirname, 'public', 'klinecharts-pro');
-const klinechartsProLocalPath = path.join(__dirname, '..', 'klinecharts-pro', 'dist');
-const klinechartsProPath = fs.existsSync(klinechartsProDistPath) 
-    ? klinechartsProDistPath 
-    : (fs.existsSync(klinechartsProPublicPath) 
-        ? klinechartsProPublicPath 
-        : klinechartsProLocalPath);
+// 提供 /klinecharts/ 路径的文件服务
+// 优先使用 dist/klinecharts/（构建时从 public/klinecharts/ 复制），
+// 否则使用 public/klinecharts/（开发环境），最后回退到本地构建产物
+const klinechartsDistPath = path.join(__dirname, 'dist', 'klinecharts');
+const klinechartsPublicPath = path.join(__dirname, 'public', 'klinecharts');
+const klinechartsLocalPath = path.join(__dirname, '..', 'KLineChart', 'dist', 'umd');
+const klinechartsPath = fs.existsSync(klinechartsDistPath) 
+    ? klinechartsDistPath 
+    : (fs.existsSync(klinechartsPublicPath) 
+        ? klinechartsPublicPath 
+        : klinechartsLocalPath);
 
-app.get('/klinecharts-pro/*', (req, res, next) => {
-    const filePath = req.path.replace('/klinecharts-pro/', '');
-    const fullPath = path.join(klinechartsProPath, filePath);
+app.get('/klinecharts/*', (req, res, next) => {
+    const filePath = req.path.replace('/klinecharts/', '');
+    const fullPath = path.join(klinechartsPath, filePath);
     
     // 安全检查：确保文件路径在dist目录内
-    if (!fullPath.startsWith(klinechartsProPath)) {
+    if (!fullPath.startsWith(klinechartsPath)) {
         return res.status(403).send('Forbidden');
     }
     
@@ -208,9 +208,9 @@ app.get('*', (req, res, next) => {
     const staticExtensions = ['.css', '.js', '.svg', '.png', '.jpg', '.jpeg', '.gif', '.ico', '.woff', '.woff2', '.ttf', '.eot', '.json'];
     const ext = path.extname(req.path).toLowerCase();
     
-    // 排除特定路径（如 /api/, /socket.io/, /klinecharts-pro/）
-    // 注意：/lib/ 和 /klinecharts-pro/ 路径已经在上面单独处理了
-    if (req.path.startsWith('/api/') || req.path.startsWith('/socket.io/') || req.path.startsWith('/klinecharts-pro/')) {
+    // 排除特定路径（如 /api/, /socket.io/, /klinecharts/）
+    // 注意：/lib/ 和 /klinecharts/ 路径已经在上面单独处理了
+    if (req.path.startsWith('/api/') || req.path.startsWith('/socket.io/') || req.path.startsWith('/klinecharts/')) {
         return res.status(404).send(`File not found: ${req.path}`);
     }
     

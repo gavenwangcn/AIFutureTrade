@@ -1,0 +1,83 @@
+# ==============================================================================
+# Docker 构建忽略文件（根目录）
+# ==============================================================================
+# 注意：此文件用于后端Dockerfile构建
+# 前端Dockerfile构建时，需要访问frontend/目录，所以不能排除
+# ==============================================================================
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+.venv
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Node.js (根目录，但不排除frontend/node_modules)
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+package-lock.json
+
+# 注意：frontend/ 目录不能排除，因为前端Dockerfile需要访问它
+# 后端Dockerfile会在COPY指令中排除frontend目录（通过精确的COPY路径）
+# 前端Dockerfile需要包含 frontend/node_modules 和 frontend/klinecharts-pro/node_modules
+!frontend/node_modules/
+!frontend/klinecharts-pro/node_modules/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# 数据文件（排除数据存储目录，但保留 Python 包目录）
+# 注意：data/ Python 包目录需要被包含，所以不在这里排除
+# 数据文件通过其他方式排除（如 *.db）
+*.db
+*.db-journal
+data/*.db
+data/*.db-journal
+
+# 测试
+tests/
+*.test.py
+
+# 文档
+*.md
+docs/
+
+# Git
+.git/
+.gitignore
+
+# Docker
+Dockerfile
+docker-compose.yml
+.dockerignore
+
+# TA-Lib 缓存文件（如果需要使用本地缓存，请注释掉下面这行）
+# ta-lib-0.4.0-src.tar.gz
+
+# Maven（本地构建产生的文件，不需要复制到 Docker 构建上下文）
+backend/target/
+backend/.m2/
+backend/.settings/
+backend/.classpath
+backend/.project
+
+# 其他
+*.log
+.env
+.env.local

@@ -1,0 +1,83 @@
+package com.aifuturetrade.controller;
+
+import com.aifuturetrade.service.FutureService;
+import com.aifuturetrade.service.dto.FutureDTO;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.tags.Tag;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.*;
+
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+
+/**
+ * 控制器：合约配置
+ * 处理合约配置相关的HTTP请求
+ */
+@RestController
+@RequestMapping("/api/futures")
+@Tag(name = "合约配置管理", description = "合约配置管理接口")
+public class FutureController {
+
+    @Autowired
+    private FutureService futureService;
+
+    /**
+     * 获取所有合约配置
+     * @return 合约配置列表
+     */
+    @GetMapping
+    @Operation(summary = "获取所有合约配置")
+    public ResponseEntity<List<FutureDTO>> listFutures() {
+        List<FutureDTO> futures = futureService.getAllFutures();
+        return new ResponseEntity<>(futures, HttpStatus.OK);
+    }
+
+    /**
+     * 添加新的合约配置
+     * @param futureDTO 合约配置信息
+     * @return 新增的合约配置
+     */
+    @PostMapping
+    @Operation(summary = "添加新的合约配置")
+    public ResponseEntity<FutureDTO> addFutureConfig(@RequestBody FutureDTO futureDTO) {
+        FutureDTO addedFuture = futureService.addFuture(futureDTO);
+        return new ResponseEntity<>(addedFuture, HttpStatus.CREATED);
+    }
+
+    /**
+     * 删除合约配置
+     * @param futureId 合约ID（UUID格式）
+     * @return 删除操作结果
+     */
+    @DeleteMapping("/{futureId}")
+    @Operation(summary = "删除合约配置")
+    public ResponseEntity<Map<String, Object>> deleteFutureConfig(@PathVariable(value = "futureId") String futureId) {
+        Boolean deleted = futureService.deleteFuture(futureId);
+        Map<String, Object> response = new HashMap<>();
+        if (deleted) {
+            response.put("success", true);
+            response.put("message", "Future deleted successfully");
+            return new ResponseEntity<>(response, HttpStatus.OK);
+        } else {
+            response.put("success", false);
+            response.put("error", "Failed to delete future");
+            return new ResponseEntity<>(response, HttpStatus.INTERNAL_SERVER_ERROR);
+        }
+    }
+
+    /**
+     * 获取所有合约符号列表
+     * @return 合约符号列表
+     */
+    @GetMapping("/symbols")
+    @Operation(summary = "获取所有合约符号列表")
+    public ResponseEntity<List<String>> getTrackedSymbols() {
+        List<String> symbols = futureService.getTrackedSymbols();
+        return new ResponseEntity<>(symbols, HttpStatus.OK);
+    }
+
+}

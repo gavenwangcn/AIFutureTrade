@@ -5,6 +5,20 @@
         <div class="kline-modal-header">
           <h3>{{ title }}</h3>
           <div class="kline-toolbar">
+            <div class="kline-indicator-buttons">
+              <button
+                :class="{ 'indicator-btn': true, 'active': currentIndicator === 'MA' }"
+                @click="handleIndicatorChange('MA')"
+              >
+                MA
+              </button>
+              <button
+                :class="{ 'indicator-btn': true, 'active': currentIndicator === 'EMA' }"
+                @click="handleIndicatorChange('EMA')"
+              >
+                EMA
+              </button>
+            </div>
             <div class="kline-timeframes">
               <button
                 v-for="tf in timeframes"
@@ -29,25 +43,26 @@
 </template>
 
 <script setup>
-import { ref, onMounted, onUnmounted, watch, nextTick } from 'vue'
-import { CustomDatafeed } from '../utils/customDatafeed.js'
+import { ref, watch, nextTick, onUnmounted } from 'vue'
+import { createDataLoader } from '../utils/customDatafeed.js'
+import { registerEMAIndicator, registerRSIIndicator, registerATRIndicator, registerKDJIndicator, registerVOLIndicator, registerMACDIndicator } from '../utils/registerCustomIndicators.js'
 
-// 使用 UMD 方式引入自定义构建的 klinecharts-pro
-// 参考 klinecharts-pro/index.html 的实现方式：
-// 1. CSS: 通过 <link> 标签引入（在 index.html 中）
-// 2. JS: 通过 <script> 标签引入 klinecharts.js 和 klinecharts-pro.umd.js（在 index.html 中）
-// 3. UMD 构建会将库挂载到 window.klinechartspro（参考 vite.config.ts 中的 name: 'klinechartspro'）
-// 在 Docker 构建环境中，文件由 Dockerfile 确保存在并复制到 public/klinecharts-pro/
-const getKLineChartPro = () => {
-  if (typeof window !== 'undefined' && window.klinechartspro && window.klinechartspro.KLineChartPro) {
-    return window.klinechartspro.KLineChartPro
+// 获取 KLineChart 库（UMD 方式）
+const getKLineCharts = () => {
+  if (typeof window !== 'undefined' && window.klinecharts) {
+    const klinecharts = window.klinecharts
+    // 在首次获取时注册自定义指标（覆盖默认参数，与 indicators/*.ts 一致）
+    registerEMAIndicator(klinecharts)
+    registerRSIIndicator(klinecharts)
+    registerATRIndicator(klinecharts)
+    registerKDJIndicator(klinecharts)
+    registerVOLIndicator(klinecharts)
+    registerMACDIndicator(klinecharts)
+    return klinecharts
   }
-  
-  // 如果 UMD 版本不可用，说明构建或加载有问题
   throw new Error(
-    'klinecharts-pro (UMD) is not available. ' +
-    'Please ensure /klinecharts-pro/klinecharts-pro.umd.js is loaded via script tag in index.html. ' +
-    'This should be handled automatically by Dockerfile build process.'
+    'klinecharts (UMD) is not available. ' +
+    'Please ensure /klinecharts/klinecharts.min.js is loaded via script tag in index.html.'
   )
 }
 
@@ -73,28 +88,32 @@ const emit = defineEmits(['close', 'interval-change'])
 // Reactive data
 const chartContainerRef = ref(null)
 const chartInstance = ref(null)
-const datafeedInstance = ref(null)
+const dataLoader = ref(null)
 const currentInterval = ref(props.interval)
 const title = ref(`${props.symbol} - K线图`)
+const isInitializing = ref(false) // 标记是否正在初始化
+const initTimeoutId = ref(null) // 存储初始化定时器ID
+const currentIndicator = ref('MA') // 当前显示的指标：'MA' 或 'EMA'
 
-// Timeframes configuration
+// 时间周期配置
+// KLineChart 10.0.0 使用 { span: number, type: string } 格式
 const timeframes = [
-  { value: '1m', label: '1分钟', period: { multiplier: 1, timespan: 'minute', text: '1m' } },
-  { value: '5m', label: '5分钟', period: { multiplier: 5, timespan: 'minute', text: '5m' } },
-  { value: '15m', label: '15分钟', period: { multiplier: 15, timespan: 'minute', text: '15m' } },
-  { value: '1h', label: '1小时', period: { multiplier: 1, timespan: 'hour', text: '1h' } },
-  { value: '4h', label: '4小时', period: { multiplier: 4, timespan: 'hour', text: '4h' } },
-  { value: '1d', label: '1天', period: { multiplier: 1, timespan: 'day', text: '1d' } },
-  { value: '1w', label: '1周', period: { multiplier: 1, timespan: 'week', text: '1w' } }
+  { value: '1m', label: '1分钟', period: { span: 1, type: 'minute' } },
+  { value: '5m', label: '5分钟', period: { span: 5, type: 'minute' } },
+  { value: '15m', label: '15分钟', period: { span: 15, type: 'minute' } },
+  { value: '1h', label: '1小时', period: { span: 1, type: 'hour' } },
+  { value: '4h', label: '4小时', period: { span: 4, type: 'hour' } },
+  { value: '1d', label: '1天', period: { span: 1, type: 'day' } },
+  { value: '1w', label: '1周', period: { span: 1, type: 'week' } }
 ]
 
-// Convert interval string to Period object
+// 将 interval 字符串转换为 Period 对象
 const intervalToPeriod = (interval) => {
   const timeframe = timeframes.find(tf => tf.value === interval)
-  return timeframe ? timeframe.period : timeframes[1].period // Default to 5m
+  return timeframe ? timeframe.period : timeframes[1].period // 默认 5m
 }
 
-// Convert symbol string to SymbolInfo object
+// 将 symbol 字符串转换为 SymbolInfo 对象
 const symbolToSymbolInfo = (symbol) => {
   return {
     ticker: symbol,
@@ -104,154 +123,325 @@ const symbolToSymbolInfo = (symbol) => {
     market: 'futures',
     priceCurrency: 'usd',
     type: 'PERPETUAL',
-    pricePrecision: 6,  // 价格精度设置为6位小数
-    volumePrecision: 0  // 成交量精度保持0位小数
+    pricePrecision: 6,
+    volumePrecision: 0
   }
 }
 
-// Initialize chart
+// 初始化图表
 const initChart = async () => {
-  // Wait for DOM to be ready
-  await nextTick()
-  
-  // Destroy existing chart if it exists
-  destroyChart()
-  
-  if (!chartContainerRef.value) {
-    console.error('[KLineChart] Chart container not found')
+  if (!props.visible || !chartContainerRef.value) {
     return
   }
-  
+
+  // 如果正在初始化，直接返回，避免重复初始化
+  if (isInitializing.value) {
+    console.log('[KLineChart] Chart is already initializing, skipping...')
+    return
+  }
+
+  // 清除之前的定时器
+  if (initTimeoutId.value) {
+    clearTimeout(initTimeoutId.value)
+    initTimeoutId.value = null
+  }
+
+  // 标记为正在初始化
+  isInitializing.value = true
+
   try {
-    // 获取 KLineChartPro 类（UMD 方式，自定义构建版本）
-    const KLineChartProClass = getKLineChartPro()
-    
-    // Clear container
-    chartContainerRef.value.innerHTML = ''
-    
-    // Create datafeed instance
-    datafeedInstance.value = new CustomDatafeed()
-    
-    // Convert symbol and period
+  // 等待 DOM 渲染完成
+  await nextTick()
+
+  // 检查容器尺寸
+  const container = chartContainerRef.value
+  const rect = container.getBoundingClientRect()
+  if (rect.width === 0 || rect.height === 0) {
+    console.warn('[KLineChart] Container has zero size, retrying...')
+      // 使用ref存储定时器ID，以便后续清除
+      initTimeoutId.value = setTimeout(() => {
+        initTimeoutId.value = null
+        isInitializing.value = false
+        initChart()
+      }, 100)
+    return
+  }
+
+    // 销毁已存在的图表
+    if (chartInstance.value) {
+      destroyChart()
+      await nextTick()
+    }
+
+    // 清空容器
+    container.innerHTML = ''
+
+    // 获取 KLineChart 库
+    const klinecharts = getKLineCharts()
+    const { init } = klinecharts
+
+    // 创建数据加载器
+    dataLoader.value = createDataLoader()
+
+    // 转换 symbol 和 period
     const symbolInfo = symbolToSymbolInfo(props.symbol)
     const period = intervalToPeriod(currentInterval.value)
-    
-    // Create KLineChartPro instance
-    // 明确指定副指标配置，确保使用预期的默认值
-    chartInstance.value = new KLineChartProClass({
-      container: chartContainerRef.value,
-      symbol: symbolInfo,
-      period: period,
-      // 指定默认的主指标和副指标
-      mainIndicators: ['MA'],
-      subIndicators: ['RSI', 'MACD', 'VOL'],
-      datafeed: datafeedInstance.value,
-      theme: 'light'
+
+    // K线样式配置：红涨绿跌（中国股市习惯）
+    // 参考：https://klinecharts.com/guide/styles
+    const chartStyles = {
+      candle: {
+        type: 'candle_solid',
+        bar: {
+          compareRule: 'current_open',
+          upColor: '#F92855',
+          upBorderColor: '#F92855',
+          upWickColor: '#F92855',
+          downColor: '#2DC08E',
+          downBorderColor: '#2DC08E',
+          downWickColor: '#2DC08E',
+          noChangeColor: '#888888',
+          noChangeBorderColor: '#888888',
+          noChangeWickColor: '#888888'
+        },
+        priceMark: {
+          show: true,
+          last: {
+            show: true,
+            compareRule: 'current_open',
+            upColor: '#F92855',
+            downColor: '#2DC08E',
+            noChangeColor: '#888888',
+            line: {
+              show: true,
+              style: 'dashed',
+              dashedValue: [4, 4],
+              size: 1
+            },
+            text: {
+              show: true,
+              style: 'fill',
+              size: 12,
+              paddingLeft: 4,
+              paddingTop: 4,
+              paddingRight: 4,
+              paddingBottom: 4,
+              borderStyle: 'solid',
+              borderSize: 0,
+              borderColor: 'transparent',
+              color: '#FFFFFF',
+              family: 'Helvetica Neue',
+              weight: 'normal',
+              borderRadius: 2
+            }
+          }
+        }
+      }
+    }
+
+    // 初始化图表
+    // 参考：https://klinecharts.com/api/chart/init
+    chartInstance.value = init(container, {
+      styles: chartStyles
     })
+
+    // 设置标的和周期
+    chartInstance.value.setSymbol(symbolInfo)
+    chartInstance.value.setPeriod(period)
+
+    // 设置数据加载器
+    chartInstance.value.setDataLoader(dataLoader.value)
+
+    // 创建默认指标（根据当前选中的指标类型）
+    chartInstance.value.createIndicator(currentIndicator.value, false, { id: 'candle_pane' })
+
+    // 创建VOL指标（使用自定义版本：vol.ts，MA5、MA10，红涨绿跌）
+    if (registerVOLIndicator(klinecharts)) {
+      const volIndicatorId = chartInstance.value.createIndicator('VOL', false)
+      console.log('[KLineChart] VOL indicator registered and created with id:', volIndicatorId)
+    } else {
+      console.error('[KLineChart] Failed to register VOL indicator')
+    }
+
+    // 创建MACD指标（使用自定义版本：macd.ts，12,26,9，红涨绿跌）
+    if (registerMACDIndicator(klinecharts)) {
+      const macdIndicatorId = chartInstance.value.createIndicator('MACD', false)
+      console.log('[KLineChart] MACD indicator registered and created with id:', macdIndicatorId)
+    } else {
+      console.error('[KLineChart] Failed to register MACD indicator')
+    }
+
+    // 创建KDJ指标（使用自定义版本：60,20,5）
+    // 直接使用运行时注册方式，确保使用自定义版本
+    if (registerKDJIndicator(klinecharts)) {
+      const kdjIndicatorId = chartInstance.value.createIndicator('KDJ', false)
+      console.log('[KLineChart] KDJ indicator registered and created with id:', kdjIndicatorId)
+    } else {
+      console.error('[KLineChart] Failed to register KDJ indicator')
+    }
+
+    // 创建RSI指标（使用自定义版本：RSI6、RSI9）
+    // 直接使用运行时注册方式，确保覆盖默认的RSI（RSI6、RSI12、RSI24），使用自定义版本
+    if (registerRSIIndicator(klinecharts)) {
+      const rsiIndicatorId = chartInstance.value.createIndicator('RSI', false)
+      console.log('[KLineChart] Custom RSI indicator registered and created with id:', rsiIndicatorId)
+    } else {
+      console.error('[KLineChart] Failed to register custom RSI indicator')
+    }
     
+    // 创建ATR指标
+    // 直接使用运行时注册方式，确保使用自定义版本
+    if (registerATRIndicator(klinecharts)) {
+      const atrIndicatorId = chartInstance.value.createIndicator('ATR', false)
+      console.log('[KLineChart] ATR indicator registered and created with id:', atrIndicatorId)
+    } else {
+      console.error('[KLineChart] Failed to register ATR indicator')
+    }
+
     console.log('[KLineChart] Chart initialized successfully')
   } catch (error) {
     console.error('[KLineChart] Failed to initialize chart:', error)
+  } finally {
+    // 初始化完成，重置标志
+    isInitializing.value = false
+    initTimeoutId.value = null
   }
 }
 
-// Handle timeframe change
+// 处理指标切换
+const handleIndicatorChange = (indicator) => {
+  if (!chartInstance.value || currentIndicator.value === indicator) {
+    return
+  }
+
+  // 移除当前指标
+  chartInstance.value.removeIndicator({ 
+    name: currentIndicator.value, 
+    paneId: 'candle_pane' 
+  })
+
+  // 创建新指标
+  chartInstance.value.createIndicator(indicator, false, { id: 'candle_pane' })
+
+  // 更新当前指标状态
+  currentIndicator.value = indicator
+
+  console.log(`[KLineChart] Indicator switched to: ${indicator}`)
+}
+
+// 处理时间周期切换
 const handleTimeframeChange = (interval) => {
+  // 如果interval没有变化，直接返回，避免重复调用
+  if (currentInterval.value === interval && chartInstance.value) {
+    console.log('[KLineChart] Interval unchanged, skipping update:', interval)
+    return
+  }
+
   currentInterval.value = interval
   emit('interval-change', interval)
-  
-  if (chartInstance.value && typeof chartInstance.value.setPeriod === 'function') {
+
+  // 只有在图表已初始化且interval确实变化时才调用setPeriod
+  if (chartInstance.value) {
     const period = intervalToPeriod(interval)
     chartInstance.value.setPeriod(period)
   }
 }
 
-// Handle close
+// 处理关闭
 const handleClose = () => {
   emit('close')
 }
 
-// Watch for visibility changes
+// 销毁图表
+const destroyChart = () => {
+  // 清除初始化定时器
+  if (initTimeoutId.value) {
+    clearTimeout(initTimeoutId.value)
+    initTimeoutId.value = null
+  }
+
+  // 重置初始化标志
+  isInitializing.value = false
+
+  if (chartInstance.value) {
+    try {
+      const klinecharts = getKLineCharts()
+      const { dispose } = klinecharts
+
+      if (chartContainerRef.value && chartContainerRef.value.parentNode) {
+        dispose(chartContainerRef.value)
+      }
+    } catch (error) {
+      console.error('[KLineChart] Error destroying chart:', error)
+    }
+  }
+
+  chartInstance.value = null
+  dataLoader.value = null
+
+  if (chartContainerRef.value) {
+    chartContainerRef.value.innerHTML = ''
+  }
+}
+
+// 监听 visible 变化
 watch(() => props.visible, async (newVal) => {
   if (newVal) {
+    // 清除之前的定时器
+    if (initTimeoutId.value) {
+      clearTimeout(initTimeoutId.value)
+      initTimeoutId.value = null
+    }
+
     title.value = `${props.symbol} - K线图`
     currentInterval.value = props.interval
+    // 等待模态框完全渲染后再初始化
     await nextTick()
-    // Add small delay to ensure modal is fully rendered
-    setTimeout(() => {
-      initChart()
+    initTimeoutId.value = setTimeout(() => {
+      initTimeoutId.value = null
+      if (props.visible && !isInitializing.value) {
+        initChart()
+      }
     }, 100)
   } else {
+    // 清除定时器
+    if (initTimeoutId.value) {
+      clearTimeout(initTimeoutId.value)
+      initTimeoutId.value = null
+    }
     destroyChart()
   }
 }, { immediate: false })
 
-// Watch for symbol changes
+// 监听 symbol 变化
 watch(() => props.symbol, (newVal) => {
-  if (newVal && props.visible) {
+  if (newVal && props.visible && chartInstance.value) {
     title.value = `${newVal} - K线图`
-    
-    if (chartInstance.value && typeof chartInstance.value.setSymbol === 'function') {
-      const symbolInfo = symbolToSymbolInfo(newVal)
-      chartInstance.value.setSymbol(symbolInfo)
-    } else {
-      // Reinitialize if setSymbol is not available
-      initChart()
-    }
+    const symbolInfo = symbolToSymbolInfo(newVal)
+    chartInstance.value.setSymbol(symbolInfo)
   }
 })
 
-// Watch for interval changes
-watch(() => props.interval, (newVal) => {
-  if (newVal && props.visible) {
+// 监听 interval 变化
+watch(() => props.interval, (newVal, oldVal) => {
+  // 如果interval没有变化，直接返回
+  if (newVal === oldVal) {
+    return
+  }
+
+  // 如果interval与currentInterval相同，说明已经通过handleTimeframeChange更新过了，避免重复调用
+  if (newVal === currentInterval.value) {
+    return
+  }
+
+  if (newVal && props.visible && chartInstance.value) {
     currentInterval.value = newVal
-    
-    if (chartInstance.value && typeof chartInstance.value.setPeriod === 'function') {
-      const period = intervalToPeriod(newVal)
-      chartInstance.value.setPeriod(period)
-    }
+    const period = intervalToPeriod(newVal)
+    chartInstance.value.setPeriod(period)
   }
 })
 
-// Destroy chart and cleanup
-const destroyChart = () => {
-  // Destroy datafeed
-  if (datafeedInstance.value && typeof datafeedInstance.value.destroy === 'function') {
-    try {
-      datafeedInstance.value.destroy()
-    } catch (error) {
-      console.error('[KLineChart] Error destroying datafeed:', error)
-    }
-  }
-  datafeedInstance.value = null
-  
-  // Destroy chart
-  if (chartInstance.value) {
-    try {
-      // Try multiple destruction methods
-      if (typeof chartInstance.value.destroy === 'function') {
-        chartInstance.value.destroy()
-      } else if (typeof chartInstance.value.dispose === 'function') {
-        chartInstance.value.dispose()
-      }
-      
-      // Clear container
-      if (chartContainerRef.value) {
-        chartContainerRef.value.innerHTML = ''
-      }
-    } catch (error) {
-      console.error('[KLineChart] Error destroying chart:', error)
-      
-      // Fallback: clear container
-      if (chartContainerRef.value) {
-        chartContainerRef.value.innerHTML = ''
-      }
-    }
-  }
-  chartInstance.value = null
-}
-
-// Cleanup on unmount
+// 组件卸载时清理
 onUnmounted(() => {
   destroyChart()
 })
@@ -276,24 +466,23 @@ onUnmounted(() => {
   border-radius: 8px;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
   width: 80%;
-  height: 85vh;
+  height: 98vh;
   display: flex;
   flex-direction: column;
   overflow: hidden;
 }
 
-/* 响应式调整，确保在不同屏幕尺寸下都能占满3/4屏幕 */
 @media (max-width: 1200px) {
   .kline-modal-content {
     width: 85%;
-    height: 90vh;
+    height: 98vh;
   }
 }
 
 @media (max-width: 768px) {
   .kline-modal-content {
     width: 95%;
-    height: 95vh;
+    height: 98vh;
   }
 }
 
@@ -303,6 +492,7 @@ onUnmounted(() => {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  flex-shrink: 0;
 }
 
 .kline-modal-header h3 {
@@ -315,6 +505,33 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   gap: 16px;
+}
+
+.kline-indicator-buttons {
+  display: flex;
+  gap: 8px;
+  margin-right: 8px;
+}
+
+.indicator-btn {
+  padding: 6px 12px;
+  border: 1px solid #ddd;
+  background: #fff;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 14px;
+  transition: all 0.2s;
+  font-weight: 500;
+}
+
+.indicator-btn:hover {
+  background: #f5f5f5;
+}
+
+.indicator-btn.active {
+  background: #1677ff;
+  color: white;
+  border-color: #1677ff;
 }
 
 .kline-timeframes {
@@ -362,45 +579,19 @@ onUnmounted(() => {
 .kline-modal-body {
   flex: 1;
   padding: 0;
-  min-height: 500px;
   display: flex;
   flex-direction: column;
+  position: relative;
+  overflow: hidden;
+  min-height: 0;
 }
 
 .kline-chart-container {
   flex: 1;
-  min-height: 500px;
-  width: 100%;
-}
-
-/* Scoped styles for klinecharts-pro component */
-.kline-chart-container :deep(.klinecharts-pro) {
   width: 100%;
   height: 100%;
-  /* Light theme colors (default) */
-  --klinecharts-pro-primary-color: #1677ff;
-  --klinecharts-pro-hover-background-color: rgba(22, 119, 255, 0.15);
-  --klinecharts-pro-background-color: #FFFFFF;
-  --klinecharts-pro-popover-background-color: #FFFFFF;
-  --klinecharts-pro-text-color: #051441;
-  --klinecharts-pro-text-second-color: #76808F;
-  --klinecharts-pro-border-color: #ebedf1;
-  --klinecharts-pro-selected-color: rgba(22, 119, 255, 0.15);
-}
-
-/* Dark theme support */
-.kline-chart-container :deep(.klinecharts-pro[data-theme="dark"]) {
-  --klinecharts-pro-hover-background-color: rgba(22, 119, 255, 0.15);
-  --klinecharts-pro-background-color: #151517;
-  --klinecharts-pro-popover-background-color: #1c1c1f;
-  --klinecharts-pro-text-color: #F8F8F8;
-  --klinecharts-pro-text-second-color: #929AA5;
-  --klinecharts-pro-border-color: #292929;
-}
-
-/* 确保全局样式正确加载 */
-:global(.klinecharts-pro) {
-  width: 100%;
-  height: 100%;
+  position: relative;
+  overflow: hidden;
+  min-height: 0;
 }
 </style>

@@ -1,0 +1,20 @@
+Flask==3.0.0
+Flask-CORS==4.0.0
+flask-socketio>=5.3.6
+requests==2.31.0
+aiohttp>=3.9.0
+openai>=1.0.0
+tiktoken>=0.5.0  # Token计算库，用于精确计算prompt的token数量
+pyinstaller>=5.13.0
+binance-sdk-derivatives-trading-usds-futures>=4.0.0
+PyMySQL>=1.1.0
+cryptography>=41.0.0  # Required for MySQL 8.0 authentication (sha256_password/caching_sha2_password)
+DBUtils>=3.0.0  # Database connection pool utilities
+gunicorn>=21.2.0
+eventlet>=0.33.3
+python-engineio>=4.7.1
+python-socketio>=5.9.0
+# 数据分析和科学计算库（用于技术指标计算）
+numpy>=1.24.0  # 数值计算库，TA-Lib的依赖
+pandas>=2.0.0  # 数据分析库，用于K线数据处理和技术指标计算
+TA-Lib>=0.4.28  # 技术分析库，用于计算MA、MACD、RSI等指标

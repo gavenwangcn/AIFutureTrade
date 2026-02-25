@@ -1,0 +1,474 @@
+"""
+Strategy Code Executor - 策略代码执行器
+
+本模块提供StrategyCodeExecutor类，用于安全地执行策略代码。
+支持TA-Lib库和动态代码加载，提供安全的执行环境。
+
+主要功能：
+1. 安全执行策略代码：在受限环境中执行用户提供的策略代码
+2. TA-Lib支持：预加载TA-Lib库，支持技术指标计算
+3. 动态模块加载：使用importlib动态加载和执行代码
+4. 上下文管理：提供candidates、portfolio、account_info等上下文数据
+"""
+import importlib.util
+import re
+import sys
+import types
+import logging
+from typing import Any, Dict, Optional, List, Tuple
+from abc import ABC, abstractmethod
+import traceback
+import json
+import datetime
+
+logger = logging.getLogger(__name__)
+
+
+def strip_markdown_code_block(code: str) -> str:
+    """
+    从策略代码中剥离 Markdown 代码块标记。
+    AI 生成的代码有时会包含 ```python ... ``` 包装，直接 exec 会导致 SyntaxError。
+    
+    Args:
+        code: 原始策略代码字符串（可能包含 Markdown 代码块）
+    
+    Returns:
+        剥离 Markdown 标记后的纯 Python 代码
+    """
+    if not code or not isinstance(code, str):
+        return code
+    stripped = code.strip()
+    # 移除开头的 ```python 或 ``` (不区分大小写)
+    stripped = re.sub(r'^```(?:[pP]ython)?\s*\n?', '', stripped)
+    # 移除结尾的 ```
+    stripped = re.sub(r'\n?```\s*$', '', stripped)
+    return stripped.strip()
+
+
+# 尝试导入TA-Lib和numpy、pandas
+try:
+    import talib
+    TALIB_AVAILABLE = True
+except ImportError:
+    TALIB_AVAILABLE = False
+    logger.warning("TA-Lib not available, strategy code using TA-Lib will fail")
+
+try:
+    import numpy as np
+    NUMPY_AVAILABLE = True
+except ImportError:
+    NUMPY_AVAILABLE = False
+    logger.warning("NumPy not available")
+
+try:
+    import pandas as pd
+    PANDAS_AVAILABLE = True
+except ImportError:
+    PANDAS_AVAILABLE = False
+    logger.warning("Pandas not available")
+
+
+class StrategyCodeExecutor:
+    """
+    策略代码执行器
+    
+    提供安全的策略代码执行环境，支持TA-Lib、numpy、pandas等库。
+    用于执行model_strategy表中的strategy_code字段内容。
+    
+    使用示例：
+        executor = StrategyCodeExecutor()
+        result = executor.execute_strategy_code(
+            strategy_code="...",
+            strategy_name="测试策略",
+            candidates=[...],
+            portfolio={...},
+            account_info={...},
+            market_state={...},
+            decision_type='buy'
+        )
+    """
+    
+    def __init__(self, 
+                 preload_talib: bool = True,
+                 allow_imports: List[str] = None):
+        """
+        初始化执行器
+        
+        Args:
+            preload_talib: 是否预加载TA-Lib库
+            allow_imports: 允许导入的模块列表（额外允许的模块）
+        """
+        self.modules = {}
+        self.module_counter = 0
+        self.execution_history = []
+        
+        # 预加载允许的模块
+        self.allowed_modules = {}
+        
+        # 加载TA-Lib
+        if preload_talib and TALIB_AVAILABLE:
+            try:
+                self.allowed_modules['talib'] = talib
+                self.allowed_modules['TA'] = talib  # 别名
+                logger.debug("TA-Lib 库加载成功")
+            except Exception as e:
+                logger.warning(f"无法加载 TA-Lib: {e}")
+        
+        # 加载NumPy
+        if NUMPY_AVAILABLE:
+            self.allowed_modules['numpy'] = np
+            self.allowed_modules['np'] = np
+        
+        # 加载Pandas
+        if PANDAS_AVAILABLE:
+            self.allowed_modules['pandas'] = pd
+            self.allowed_modules['pd'] = pd
+        
+        # 默认允许的模块（包括 logging）
+        default_allowed = ['math', 'datetime', 'json', 'time', 'random', 'logging']
+        if allow_imports:
+            default_allowed.extend(allow_imports)
+        
+        for module_name in default_allowed:
+            try:
+                module = __import__(module_name)
+                self.allowed_modules[module_name] = module
+            except ImportError:
+                pass
+        
+        logger.info(f"[StrategyCodeExecutor] 初始化完成，已加载模块: {list(self.allowed_modules.keys())}")
+    
+    def get_available_libraries(self) -> Dict:
+        """
+        获取可用的Python库信息
+        
+        Returns:
+            Dict: 包含可用库的字典，格式为{库名: 描述}
+        """
+        libraries = {
+            'talib': 'TA-Lib 技术指标库（可用）' if TALIB_AVAILABLE else 'TA-Lib 技术指标库（不可用）',
+            'numpy': 'NumPy 数值计算库（可用）' if NUMPY_AVAILABLE else 'NumPy 数值计算库（不可用）',
+            'pandas': 'Pandas 数据分析库（可用）' if PANDAS_AVAILABLE else 'Pandas 数据分析库（不可用）',
+            'math': 'Python 数学函数库（内置）',
+            'datetime': 'Python 日期时间库（内置）',
+            'json': 'Python JSON 处理库（内置）',
+            'time': 'Python 时间库（内置）',
+            'random': 'Python 随机数库（内置）',
+            'sys': 'Python 系统库（内置）',
+            'os': 'Python 操作系统接口（内置）',
+            're': 'Python 正则表达式库（内置）',
+            'collections': 'Python 集合工具库（内置）',
+            'itertools': 'Python 迭代工具库（内置）',
+            'functools': 'Python 函数工具库（内置）',
+            'typing': 'Python 类型注解库（内置）',
+            'ast': 'Python 抽象语法树库（内置）',
+            'logging': 'Python 日志库（内置）',
+            'traceback': 'Python 异常追踪库（内置）',
+        }
+        
+        # 检查并添加其他常用第三方库
+        try:
+            import requests
+            libraries['requests'] = 'HTTP 请求库（可用）'
+        except ImportError:
+            libraries['requests'] = 'HTTP 请求库（不可用）'
+        
+        try:
+            import matplotlib
+            libraries['matplotlib'] = '绘图库（可用）'
+        except ImportError:
+            libraries['matplotlib'] = '绘图库（不可用）'
+        
+        try:
+            import scipy
+            libraries['scipy'] = '科学计算库（可用）'
+        except ImportError:
+            libraries['scipy'] = '科学计算库（不可用）'
+        
+        return libraries
+
+    def _create_execution_globals(self, extra_globals: Dict = None) -> Dict:
+        """
+        创建完整的Python执行环境
+        
+        Args:
+            extra_globals: 额外的全局变量字典
+        
+        Returns:
+            Dict: 完整的全局变量字典
+        """
+        execution_globals = {
+            '__builtins__': __builtins__,  # 使用完整的builtins
+            '__name__': '__main__',
+            '__doc__': None,
+        }
+        
+        # 添加预加载的模块
+        execution_globals.update(self.allowed_modules)
+        
+        # 添加额外的全局变量
+        if extra_globals:
+            execution_globals.update(extra_globals)
+            
+        return execution_globals
+    
+    def execute_strategy_code(
+        self,
+        strategy_code: str,
+        strategy_name: str,
+        candidates: Optional[List[Dict]] = None,
+        portfolio: Optional[Dict] = None,
+        account_info: Optional[Dict] = None,
+        market_state: Optional[Dict] = None,
+        decision_type: str = 'buy',
+        conditional_orders: Optional[Dict[str, List[Dict]]] = None
+    ) -> Optional[Dict]:
+        """
+        执行策略代码
+
+        在安全的执行环境中执行策略代码。策略代码必须是一个继承自 StrategyBase 的类。
+        系统会实例化策略类并调用相应的方法。
+
+        Args:
+            strategy_code: 策略代码字符串（必须是一个继承 StrategyBase 的类定义）
+            strategy_name: 策略名称（用于日志）
+            candidates: 候选交易对列表（买入决策需要）
+            portfolio: 持仓组合信息
+            account_info: 账户信息
+            market_state: 市场状态字典，key为交易对符号，value包含价格、技术指标等
+            decision_type: 决策类型，'buy' 或 'sell'
+            conditional_orders: 条件单信息字典（可选），按symbol分组的条件单列表
+
+        Returns:
+            Optional[Dict]: 策略代码返回的决策结果，格式为：
+                {
+                    "decisions": {
+                        "SYMBOL": {
+                            "signal": "...",
+                            ...
+                        }
+                    }
+                }
+                如果执行失败或返回None，则返回None
+
+        Note:
+            - 策略代码接口统一使用 market_state，不再使用 market_snapshot 和 constraints
+            - market_state 格式：{"SYMBOL": {"price": float, "indicators": {"timeframes": {...}}}, ...}
+        """
+        try:
+            # 剥离可能的 Markdown 代码块包装（AI 可能输出 ```python ... ```）
+            strategy_code = strip_markdown_code_block(strategy_code)
+            
+            # 构建执行上下文
+            execution_context = self._create_execution_globals()
+
+            # 根据决策类型导入对应的策略基类
+            if decision_type == 'buy':
+                from trade.strategy.strategy_template_buy import StrategyBaseBuy
+                execution_context['StrategyBaseBuy'] = StrategyBaseBuy
+                StrategyBase = StrategyBaseBuy
+                base_class_name = 'StrategyBaseBuy'
+            elif decision_type == 'sell':
+                from trade.strategy.strategy_template_sell import StrategyBaseSell
+                execution_context['StrategyBaseSell'] = StrategyBaseSell
+                StrategyBase = StrategyBaseSell
+                base_class_name = 'StrategyBaseSell'
+            else:
+                # 未知的决策类型，抛出错误
+                raise ValueError(f"不支持的决策类型: {decision_type}，仅支持 'buy' 或 'sell'")
+
+            execution_context['StrategyBase'] = StrategyBase
+            execution_context['ABC'] = ABC
+            execution_context['abstractmethod'] = abstractmethod
+
+            # 添加 typing 模块（用于类型注解）
+            try:
+                from typing import Dict, List, Optional
+                execution_context['Dict'] = Dict
+                execution_context['List'] = List
+                execution_context['Optional'] = Optional
+            except ImportError:
+                pass
+
+            # 生成唯一的模块名
+            self.module_counter += 1
+            module_name = f"strategy_module_{self.module_counter}_{strategy_name.replace(' ', '_')}"
+
+            # 创建模块，并以模块 __dict__ 作为 exec 的全局命名空间，使方法内对 datetime 等名的查找使用模块命名空间
+            module = types.ModuleType(module_name)
+            module.__dict__.update(execution_context)
+            # 执行策略代码（定义策略类），globals=locals=module.__dict__，使方法 __globals__ 指向模块
+            exec(strategy_code, module.__dict__, module.__dict__)
+            # 执行后注入 datetime/timedelta 为类（非模块），确保方法内 datetime.now()/datetime.strptime() 可用
+            module.__dict__['datetime'] = datetime.datetime
+            module.__dict__['timedelta'] = datetime.timedelta
+
+            # 存储模块引用
+            self.modules[module_name] = module
+
+            # 查找策略类（查找第一个继承自对应基类的类）
+            strategy_class = None
+            for name in dir(module):
+                obj = getattr(module, name)
+                if (isinstance(obj, type) and
+                    issubclass(obj, StrategyBase) and
+                    obj != StrategyBase):
+                    strategy_class = obj
+                    logger.debug(f"[StrategyCodeExecutor] 找到策略类: {name} (继承自 {base_class_name})")
+                    break
+
+            if strategy_class is None:
+                raise ValueError(f"策略代码中未找到继承自 {base_class_name} 的类")
+
+            # 实例化策略类
+            strategy_instance = strategy_class()
+
+            # 根据决策类型调用相应方法
+            if decision_type == 'buy':
+                # 调用买入决策方法（统一使用 market_state）
+                decisions = strategy_instance.execute_buy_decision(
+                    candidates=candidates or [],
+                    portfolio=portfolio or {},
+                    account_info=account_info or {},
+                    market_state=market_state or {},
+                    conditional_orders=conditional_orders or {}
+                )
+            elif decision_type == 'sell':
+                # 调用卖出决策方法
+                co = conditional_orders or {}
+                total_co = sum(len(v) for v in (co.values() if isinstance(co, dict) else []))
+                logger.info(
+                    f"[StrategyCodeExecutor] [策略代码执行] 策略 {strategy_name} 传入条件单: "
+                    f"共 {total_co} 个，涉及 {len(co)} 个symbol，keys={list(co.keys())}"
+                )
+                if co:
+                    for sym, orders in (co.items() if isinstance(co, dict) else []):
+                        for i, o in enumerate(orders or []):
+                            logger.info(
+                                f"[StrategyCodeExecutor] 条件单[{sym}][{i}]: "
+                                f"orderType={o.get('orderType')}, positionSide={o.get('positionSide')}, "
+                                f"triggerPrice={o.get('triggerPrice')}, quantity={o.get('quantity')}"
+                            )
+                decisions = strategy_instance.execute_sell_decision(
+                    portfolio=portfolio or {},
+                    market_state=market_state or {},
+                    account_info=account_info or {},
+                    conditional_orders=co
+                )
+            else:
+                raise ValueError(f"未知的决策类型: {decision_type}")
+            
+            # 验证返回结果格式
+            if decisions is None:
+                decisions = {}
+            
+            if not isinstance(decisions, dict):
+                raise ValueError(f"策略方法返回结果格式不正确，期望 dict，实际 {type(decisions)}")
+            
+            # 策略只返回 Dict[symbol, List[decision]]，总条数 = sum(len(v) for v in decisions.values())
+            _total_count = sum(len(v) if isinstance(v, list) else 0 for v in (decisions or {}).values())
+            logger.info(f"[StrategyCodeExecutor] [策略代码执行] 策略 {strategy_name} (类型: {decision_type}) 执行完成，返回 {len(decisions)} 个 symbol、共 {_total_count} 条决策")
+            
+            # 记录决策内容日志（完整JSON格式，便于调试）
+            if decisions:
+                logger.info(f"[StrategyCodeExecutor] [策略代码执行] 策略 {strategy_name} 返回的完整决策内容: {json.dumps(decisions, ensure_ascii=False, default=str)}")
+            else:
+                logger.info(f"[StrategyCodeExecutor] [策略代码执行] 策略 {strategy_name} 无决策返回（返回空字典）")
+            
+            # 包装成标准格式
+            result = {
+                "decisions": decisions
+            }
+            
+            # 记录执行历史
+            self.execution_history.append({
+                'timestamp': datetime.datetime.now().isoformat(),
+                'module': module_name,
+                'strategy_name': strategy_name,
+                'strategy_class': strategy_class.__name__,
+                'decision_type': decision_type,
+                'success': True,
+                'decisions_count': _total_count
+            })
+            
+            # ⚠️ 重要：详细记录每个交易信号的信息（支持同一 symbol 多条决策）
+            if decisions:
+                logger.info(f"[StrategyCodeExecutor] [策略代码执行] [交易信号详情] 策略 {strategy_name} 返回了 {_total_count} 个交易信号:")
+                idx = 0
+                for symbol, val in decisions.items():
+                    dec_list = val if isinstance(val, list) else []
+                    for decision in dec_list:
+                        idx += 1
+                        if not isinstance(decision, dict):
+                            logger.warning(f"[StrategyCodeExecutor] [策略代码执行] [交易信号详情] 决策 {idx}: {symbol} - 决策格式不正确（不是字典）")
+                            continue
+                        decision_info = []
+                        decision_info.append(f"  [交易信号 {idx}] Symbol: {symbol}")
+                        signal = decision.get('signal', 'N/A')
+                        decision_info.append(f"    Signal: {signal}")
+                        if 'quantity' in decision:
+                            decision_info.append(f"    Quantity: {decision['quantity']}")
+                        if 'leverage' in decision:
+                            decision_info.append(f"    Leverage: {decision['leverage']}")
+                        if 'price' in decision:
+                            decision_info.append(f"    Price: {decision['price']}")
+                        if 'position_side' in decision:
+                            decision_info.append(f"    PositionSide: {decision['position_side']}")
+                        if 'justification' in decision:
+                            justification = decision['justification']
+                            if len(str(justification)) > 150:
+                                justification = str(justification)[:150] + "..."
+                            decision_info.append(f"    Justification: {justification}")
+                        elif 'reason' in decision:
+                            reason = decision['reason']
+                            if len(str(reason)) > 150:
+                                reason = str(reason)[:150] + "..."
+                            decision_info.append(f"    Reason: {reason}")
+                        printed_fields = {'signal', 'quantity', 'leverage', 'price', 'position_side', 'reason', 'justification'}
+                        other_fields = {k: v for k, v in decision.items() if k not in printed_fields}
+                        if other_fields:
+                            other_fields_str = json.dumps(other_fields, ensure_ascii=False, default=str)
+                            if len(other_fields_str) > 200:
+                                other_fields_str = other_fields_str[:200] + "..."
+                            decision_info.append(f"    其他字段: {other_fields_str}")
+                        logger.info("\n".join(decision_info))
+            else:
+                logger.info(f"[StrategyCodeExecutor] [策略代码执行] 策略 {strategy_name} 无决策返回（decisions为空字典）")
+            
+            return result
+        
+        except Exception as e:
+            error_info = {
+                'success': False,
+                'error': str(e),
+                'traceback': traceback.format_exc(),
+                'code_snippet': strategy_code[:200] + "..." if len(strategy_code) > 200 else strategy_code
+            }
+            
+            self.execution_history.append({
+                'timestamp': datetime.datetime.now().isoformat(),
+                'module': module_name if 'module_name' in locals() else 'unknown',
+                'strategy_name': strategy_name,
+                'decision_type': decision_type,
+                'success': False,
+                'error': str(e)
+            })
+            
+            logger.error(f"[StrategyCodeExecutor] 执行策略代码失败 ({strategy_name}): {e}")
+            logger.error(f"[StrategyCodeExecutor] 异常堆栈:\n{traceback.format_exc()}")
+            return None
+    
+    def get_execution_history(self) -> List[Dict]:
+        """
+        获取执行历史记录
+        
+        Returns:
+            List[Dict]: 执行历史记录列表
+        """
+        return self.execution_history.copy()
+    
+    def clear_history(self):
+        """清空执行历史记录"""
+        self.execution_history.clear()
+        logger.debug("[StrategyCodeExecutor] 执行历史已清空")
+

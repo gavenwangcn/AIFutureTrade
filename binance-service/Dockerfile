@@ -1,0 +1,87 @@
+# syntax=docker/dockerfile:1
+# ============ Binance Service Dockerfile ============
+# Binance Service微服务
+# 所有配置从application.yml读取，可通过环境变量覆盖
+# 构建时需启用 BuildKit：DOCKER_BUILDKIT=1 docker compose build binance-service
+
+# 多阶段构建：第一阶段构建JAR文件
+FROM maven:3.9.6-eclipse-temurin-17 AS builder
+
+WORKDIR /app
+
+# Maven 依赖缓存优化策略：
+# 1. 先只复制 pom.xml，依赖变更时此层失效，会重新下载依赖
+# 2. 使用 BuildKit 缓存挂载持久化 .m2/repository，跨构建复用依赖
+# 3. 仅代码变更时，依赖层命中缓存，无需重新拉取
+# 4. 构建阶段不使用 -U，避免强制更新依赖
+
+# 第一步：只复制 pom.xml（依赖变更时此层失效）
+COPY pom.xml .
+
+# 第二步：下载依赖到缓存（使用 BuildKit 缓存挂载，依赖在多次构建间复用）
+RUN --mount=type=cache,target=/root/.m2/repository \
+    mvn dependency:go-offline -B -DskipTests || \
+    (echo "Warning: dependency:go-offline failed, trying dependency:resolve" && \
+     mvn dependency:resolve -B -DskipTests)
+
+# 第三步：复制源代码（代码变更时仅此层及后续层失效）
+COPY src ./src
+
+# 第四步：构建应用（不使用 -U，使用已缓存的依赖；仅编译不重复拉取）
+RUN --mount=type=cache,target=/root/.m2/repository \
+    mvn clean package -DskipTests -B || \
+    (echo "Build failed, showing error details..." && \
+     mvn clean package -DskipTests && \
+     exit 1)
+
+# 验证 JAR 文件是否存在且包含主清单属性
+RUN echo "=== Verifying JAR file ===" && \
+    if [ ! -f /app/target/binance-service-1.0.0.jar ]; then \
+        echo "ERROR: JAR file not found. Available files:" && \
+        ls -lh /app/target/ && \
+        exit 1; \
+    fi && \
+    echo "JAR file found, checking manifest..." && \
+    jar xf /app/target/binance-service-1.0.0.jar META-INF/MANIFEST.MF && \
+    if grep -q "Main-Class" META-INF/MANIFEST.MF; then \
+        echo "Main-Class found in manifest:" && \
+        grep "Main-Class" META-INF/MANIFEST.MF && \
+        rm -rf META-INF && \
+        echo "JAR file verification passed"; \
+    else \
+        echo "ERROR: JAR file missing Main-Class in manifest" && \
+        echo "Manifest content:" && \
+        cat META-INF/MANIFEST.MF && \
+        rm -rf META-INF && \
+        exit 1; \
+    fi
+
+# 第二阶段：运行阶段
+FROM eclipse-temurin:17-jre
+
+# 设置工作目录
+WORKDIR /app
+
+# 从构建阶段复制JAR文件
+COPY --from=builder /app/target/binance-service-1.0.0.jar app.jar
+
+# 暴露服务端口（默认5004，实际端口由application.yml配置）
+EXPOSE 5004
+
+# 设置JVM参数（高性能优化）
+# -Xms: 初始堆内存1G，-Xmx: 最大堆内存2G（允许动态调整以适应负载）
+# -XX:+UseG1GC: 使用G1垃圾收集器，适合大内存和低延迟场景
+# -XX:MaxGCPauseMillis: 最大GC暂停时间目标（毫秒）
+# -XX:+UseStringDeduplication: 字符串去重，减少内存占用
+# -XX:+OptimizeStringConcat: 优化字符串拼接
+# -XX:+UseCompressedOops: 使用压缩指针，节省内存
+# -XX:+UseCompressedClassPointers: 使用压缩类指针
+# -Djava.awt.headless=true: 无头模式，不需要图形界面
+# -Dfile.encoding=UTF-8: 文件编码
+# 添加 --add-opens 参数以解决 Java 9+ 上的反射访问警告
+# 注意：所有服务配置（包括端口）都从application.yml读取，可通过环境变量覆盖
+ENV JAVA_OPTS="-Xms1g -Xmx2g -XX:+UseG1GC -XX:MaxGCPauseMillis=200 -XX:+UseStringDeduplication -XX:+OptimizeStringConcat -XX:+UseCompressedOops -XX:+UseCompressedClassPointers -Djava.awt.headless=true -Dfile.encoding=UTF-8 --add-opens java.base/java.lang.invoke=ALL-UNNAMED"
+
+# 启动应用（所有配置从application.yml读取，可通过环境变量覆盖）
+ENTRYPOINT ["sh", "-c", "java $JAVA_OPTS -jar app.jar"]
+

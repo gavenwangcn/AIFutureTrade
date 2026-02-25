@@ -153,9 +153,79 @@
     gap: 12px;
 }
 
+.column-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 12px;
+    flex-wrap: wrap;
+}
+
 .column-title {
     font-size: 16px;
     font-weight: 600;
+    flex: 1;
+}
+
+.status-indicator.small {
+    padding: 4px 8px;
+    font-size: 11px;
+}
+
+/* 最后刷新时间样式 */
+.last-refresh-time {
+    padding: 4px 8px;
+    font-size: 11px;
+    background: rgba(14, 165, 233, 0.1);
+    color: var(--info);
+    border-radius: 999px;
+    font-weight: 500;
+    transition: all 0.3s ease;
+}
+
+.btn-small {
+    padding: 4px 8px;
+    font-size: 12px;
+    min-width: auto;
+}
+
+/* 通用按钮样式 */
+.btn {
+    border: none;
+    border-radius: var(--radius);
+    cursor: pointer;
+    font-size: 14px;
+    transition: all 0.2s ease;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    user-select: none;
+    -webkit-tap-highlight-color: transparent;
+}
+
+.btn-sm {
+    padding: 4px 12px;
+    font-size: 12px;
+    min-width: auto;
+}
+
+/* 分页容器样式 */
+.pagination-container {
+    margin-top: 16px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.pagination-info {
+    color: var(--text-secondary);
+    font-size: 14px;
+}
+
+.pagination-controls {
+    display: flex;
+    gap: 8px;
 }
 
 .leaderboard-list {
@@ -166,7 +236,7 @@
 
 .leaderboard-item {
     display: grid;
-    grid-template-columns: 50px 1fr 100px 110px 110px;
+    grid-template-columns: 50px 1fr 100px 110px 110px 110px;
     align-items: center;
     gap: 12px;
     padding: 12px 14px;
@@ -517,6 +587,34 @@ body {
     transform: none;
 }
 
+.btn-danger {
+    background: var(--danger);
+    color: #ffffff;
+    border: none;
+    padding: 10px 20px;
+    border-radius: var(--radius);
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.btn-danger:hover:not(:disabled) {
+    background: #d32f2f;
+    transform: translateY(-1px);
+    box-shadow: var(--shadow-2);
+}
+
+.btn-danger:active:not(:disabled) {
+    transform: translateY(0);
+    box-shadow: var(--shadow-1);
+}
+
+.btn-danger:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
 .btn-secondary.refreshing {
     position: relative;
     pointer-events: none;
@@ -656,6 +754,28 @@ body {
     display: flex;
     justify-content: space-between;
     align-items: center;
+}
+
+.section-header-btn {
+    background: transparent;
+    border: none;
+    padding: 4px 8px;
+    cursor: pointer;
+    color: var(--text-3);
+    transition: all 0.2s ease;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 4px;
+}
+
+.section-header-btn:hover {
+    color: var(--primary);
+    background: rgba(51, 112, 255, 0.1);
+}
+
+.section-header-btn i {
+    font-size: 14px;
 }
 
 .section-header i {
@@ -828,6 +948,192 @@ body {
     padding: 16px;
     background: var(--bg-1);
     border-radius: 12px;
+}
+
+/* Model Portfolio Symbols */
+.model-portfolio-symbols-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+    gap: 16px;
+    max-width: 100%;
+}
+
+@media (min-width: 1800px) {
+    .model-portfolio-symbols-grid {
+        grid-template-columns: repeat(6, 1fr);
+    }
+}
+
+@media (min-width: 1500px) and (max-width: 1799px) {
+    .model-portfolio-symbols-grid {
+        grid-template-columns: repeat(5, 1fr);
+    }
+}
+
+@media (min-width: 1200px) and (max-width: 1499px) {
+    .model-portfolio-symbols-grid {
+        grid-template-columns: repeat(4, 1fr);
+    }
+}
+
+@media (min-width: 900px) and (max-width: 1199px) {
+    .model-portfolio-symbols-grid {
+        grid-template-columns: repeat(3, 1fr);
+    }
+}
+
+@media (min-width: 600px) and (max-width: 899px) {
+    .model-portfolio-symbols-grid {
+        grid-template-columns: repeat(2, 1fr);
+    }
+}
+
+@media (max-width: 599px) {
+    .model-portfolio-symbols-grid {
+        grid-template-columns: 1fr;
+    }
+}
+
+.model-portfolio-symbol-item {
+    padding: 16px;
+    background: var(--bg-1);
+    border-radius: 12px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+    transition: all 0.2s ease;
+    cursor: pointer;
+    position: relative;
+}
+
+.model-portfolio-symbol-item:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+}
+
+.model-portfolio-symbol-item .price-card {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    width: 100%;
+    height: 100%;
+}
+
+.model-portfolio-symbol-item .price-left {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 4px;
+}
+
+.model-portfolio-symbol-item .price-symbol-large {
+    font-size: 18px;
+    font-weight: 700;
+    color: var(--text-1);
+}
+
+.model-portfolio-symbol-item .price-contract-name {
+    font-size: 12px;
+    color: var(--text-2);
+}
+
+.model-portfolio-symbol-item .price-right {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 4px;
+}
+
+.model-portfolio-symbol-item .price-value-large {
+    font-size: 16px;
+    font-weight: 700;
+    color: var(--text-1);
+}
+
+.model-portfolio-symbol-item .price-change-with-arrow {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 14px;
+    font-weight: 600;
+}
+
+/* 持仓合约实时行情模块：红涨绿跌（与中国股市习惯一致） */
+.model-portfolio-symbol-item .price-change-with-arrow.positive {
+    color: var(--danger);  /* 红色表示涨 */
+}
+
+.model-portfolio-symbol-item .price-change-with-arrow.negative {
+    color: var(--success);  /* 绿色表示跌 */
+}
+
+.model-portfolio-symbol-item .change-arrow {
+    font-size: 12px;
+}
+
+.model-portfolio-symbol-item .change-value {
+    font-size: 14px;
+}
+
+.model-portfolio-symbol-item .price-volume-chinese {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 2px;
+    font-size: 12px;
+    color: var(--text-2);
+}
+
+.model-portfolio-symbol-item .volume-label {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.model-portfolio-symbol-item .volume-value {
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--text-1);
+}
+
+/* 卖出按钮样式 */
+.sell-button {
+    position: absolute;
+    top: 8px;
+    left: 8px;
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    border: 2px solid var(--danger);
+    background: rgba(245, 63, 63, 0.1);
+    color: var(--danger);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    z-index: 10;
+    padding: 0;
+    font-size: 16px;
+    line-height: 1;
+}
+
+.sell-button:hover:not(:disabled) {
+    background: var(--danger);
+    color: white;
+    transform: scale(1.1);
+    box-shadow: 0 2px 8px rgba(245, 63, 63, 0.3);
+}
+
+.sell-button:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.sell-icon {
+    font-size: 18px;
+    line-height: 1;
+}
+
+.price-item {
     border: 1px solid var(--border-1);
     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
     position: relative;
@@ -930,6 +1236,51 @@ body {
     color: var(--text-2);
     font-weight: 500;
     font-size: 12px;
+}
+
+/* 无数据提示样式 */
+.no-data-container {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 60px 20px;
+    text-align: center;
+    background-color: var(--bg-2);
+    border-radius: 8px;
+}
+
+.loading-container {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 60px 20px;
+    text-align: center;
+    min-height: 200px;
+}
+
+.loading-container i {
+    animation: spin 1s linear infinite;
+}
+
+.no-data-icon {
+    font-size: 48px;
+    margin-bottom: 16px;
+    opacity: 0.6;
+}
+
+.no-data-text {
+    font-size: 18px;
+    font-weight: 600;
+    color: var(--text-1);
+    margin-bottom: 8px;
+}
+
+.no-data-subtext {
+    font-size: 14px;
+    color: var(--text-3);
+    line-height: 1.5;
 }
 
 .price-item::after {
@@ -1431,7 +1782,7 @@ body {
 /* Stats Grid */
 .stats-grid {
     display: grid;
-    grid-template-columns: repeat(4, 1fr);
+    grid-template-columns: repeat(5, 1fr);
     gap: 16px;
     margin-bottom: 24px;
 }
@@ -1523,10 +1874,25 @@ body {
     overflow: hidden;
 }
 
+/* 为账户价值走势图表容器设置overflow:visible，确保tooltip能正常显示 */
+.card-body:has(#accountChart) {
+    overflow: visible;
+}
+
+/* 如果浏览器不支持:has选择器，使用更通用的方式 */
+.card-body > #accountChart {
+    position: relative;
+    z-index: 1;
+}
+
 #accountChart {
     width: 100% !important;
     height: 300px !important;
+    min-width: 0;
+    min-height: 0;
+    display: block;
 }
+
 
 /* Tabs */
 .card-tabs {
@@ -1662,10 +2028,56 @@ body {
     border-bottom: none;
 }
 
-.conversation-time {
-    font-size: 12px;
-    color: var(--text-3);
+.conversation-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
     margin-bottom: 8px;
+    gap: 12px;
+}
+
+.conversation-tokens {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-1);
+}
+
+.conversation-tokens i {
+    color: #0fc6c2;
+    font-size: 14px;
+}
+
+.tokens-label {
+    color: var(--text-2);
+    font-weight: 500;
+}
+
+.tokens-value {
+    color: #0fc6c2;
+    font-weight: 700;
+    font-family: 'JetBrains Mono', 'Fira Code', Consolas, monospace;
+}
+
+.conversation-time-wrapper {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-shrink: 0;
+}
+
+.conversation-time {
+    font-size: 11px;
+    color: var(--text-3);
+}
+
+.conversation-type-badge {
+    font-size: 11px;
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-weight: 500;
 }
 
 .conversation-bubble {
@@ -1718,6 +2130,101 @@ body {
     word-break: break-word;
 }
 
+.error-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 12px;
+    gap: 12px;
+    flex-wrap: wrap;
+    max-width: 100%;
+    box-sizing: border-box;
+}
+
+.error-time {
+    font-size: 13px;
+    color: var(--text-2);
+    font-weight: 500;
+}
+
+.error-meta {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+}
+
+.error-provider {
+    color: var(--text-1);
+    font-weight: 600;
+}
+
+.error-separator {
+    color: var(--text-3);
+}
+
+.error-model {
+    color: var(--text-2);
+}
+
+.error-section {
+    margin-bottom: 12px;
+    max-width: 100%;
+    overflow-wrap: break-word;
+    word-break: break-word;
+}
+
+.error-section:last-child {
+    margin-bottom: 0;
+}
+
+.error-label {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-1);
+    margin-bottom: 6px;
+}
+
+.error-label i {
+    font-size: 14px;
+    color: var(--text-2);
+}
+
+.error-message .error-label i {
+    color: #f53f3f;
+}
+
+.error-text {
+    font-family: 'JetBrains Mono', 'Fira Code', Consolas, monospace;
+    font-size: 12px;
+    white-space: pre-wrap;
+    word-break: break-word;
+    overflow-wrap: break-word;
+    max-width: 100%;
+    color: var(--text-2);
+    background: var(--bg-2);
+    padding: 10px 12px;
+    border-radius: var(--radius);
+    border-left: 3px solid var(--border-1);
+    margin: 0;
+    box-sizing: border-box;
+}
+
+.error-text-danger {
+    color: #f53f3f;
+    background: #fff1f0;
+    border-left-color: #f53f3f;
+    cursor: help;
+    position: relative;
+}
+
+.error-text-danger:hover {
+    background: #ffe7e7;
+}
+
 /* Modal */
 .modal {
     display: none;
@@ -1767,6 +2274,45 @@ body {
     display: flex;
     justify-content: flex-end;
     gap: 12px;
+}
+
+/* Trade详情弹框样式 */
+.trade-detail-content {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+}
+
+.trade-detail-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 12px 0;
+    border-bottom: 1px solid var(--border-1);
+}
+
+.trade-detail-row:last-child {
+    border-bottom: none;
+}
+
+.trade-detail-label {
+    font-size: 14px;
+    color: var(--text-2);
+    font-weight: 500;
+}
+
+.trade-detail-value {
+    font-size: 14px;
+    color: var(--text-1);
+    font-weight: 600;
+}
+
+.trade-detail-value.profit {
+    color: var(--danger);
+}
+
+.trade-detail-value.loss {
+    color: var(--success);
 }
 
 /* Form */
@@ -1990,7 +2536,7 @@ body {
     }
 
     .stats-grid {
-        grid-template-columns: repeat(2, minmax(0, 1fr));
+        grid-template-columns: repeat(3, minmax(0, 1fr));
     }
 }
 
@@ -2353,6 +2899,49 @@ body {
         opacity: 0.8;
         transform: scale(1.02);
     }
+}
+
+/* 消息提示样式 */
+.message-toast {
+  position: fixed;
+  top: 20px;
+  right: 20px;
+  padding: 16px 24px;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 500;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  z-index: 10000;
+  opacity: 0;
+  transform: translateX(100%);
+  transition: all 0.3s ease;
+  min-width: 200px;
+  max-width: 400px;
+}
+
+.message-toast.show {
+  opacity: 1;
+  transform: translateX(0);
+}
+
+.message-toast.message-success {
+  background: var(--success);
+  color: white;
+}
+
+.message-toast.message-error {
+  background: var(--danger);
+  color: white;
+}
+
+.message-toast.message-info {
+  background: var(--info);
+  color: white;
+}
+
+.message-toast.message-warning {
+  background: var(--warning);
+  color: white;
 }
 
 @keyframes statusFlash {

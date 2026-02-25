@@ -1,6 +1,6 @@
 <template>
   <div v-if="visible" class="modal show" @click.self="handleClose">
-    <div class="modal-content" :class="{ large: large }">
+    <div class="modal-content" :class="{ large: large, extraLarge: extraLarge }">
       <div class="modal-header">
         <div>
           <h3>{{ title }}</h3>
@@ -39,6 +39,10 @@ const props = defineProps({
   large: {
     type: Boolean,
     default: false
+  },
+  extraLarge: {
+    type: Boolean,
+    default: false
   }
 })
 
@@ -63,6 +67,21 @@ watch(() => props.visible, (newVal) => {
 .modal-content.large {
   width: 800px;
   max-width: 95vw;
+}
+
+.modal-content.extraLarge {
+  width: 75vw;
+  height: 75vh;
+  max-width: 95vw;
+  max-height: 95vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.modal-content.extraLarge .modal-body {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
 }
 
 .modal-subtitle {

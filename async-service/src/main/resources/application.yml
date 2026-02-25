@@ -1,0 +1,188 @@
+spring:
+  application:
+    name: async-service
+  profiles:
+    active: dev
+  main:
+    banner-mode: console
+  mvc:
+    pathmatch:
+      matching-strategy: ant_path_matcher
+  
+  # 数据库配置（可通过环境变量覆盖）
+  # 注意：serverTimezone设置为Asia/Shanghai（UTC+8），确保所有时间字段都使用UTC+8时区
+  datasource:
+    url: ${SPRING_DATASOURCE_URL:jdbc:mysql://154.89.148.172:32123/aifuturetrade?useSSL=false&serverTimezone=Asia/Shanghai&characterEncoding=utf8}
+    username: ${SPRING_DATASOURCE_USERNAME:aifuturetrade}
+    password: ${SPRING_DATASOURCE_PASSWORD:aifuturetrade123}
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    type: com.alibaba.druid.pool.DruidDataSource
+    druid:
+      initial-size: 5
+      min-idle: 5
+      max-active: 20
+      max-wait: 10000
+      min-evictable-idle-time-millis: 300000
+      max-evictable-idle-time-millis: 600000
+      time-between-eviction-runs-millis: 60000
+      validation-query: SELECT 1
+      validation-query-timeout: 3
+      test-on-borrow: false
+      test-on-return: false
+      test-while-idle: true
+      filters: stat,wall
+
+# 服务器配置
+server:
+  port: ${SERVER_PORT:5003}  # 默认使用5003端口，可通过环境变量SERVER_PORT覆盖
+
+# MyBatis Plus配置
+mybatis-plus:
+  configuration:
+    map-underscore-to-camel-case: true
+    log-impl: org.apache.ibatis.logging.slf4j.Slf4jImpl
+  global-config:
+    db-config:
+      id-type: auto
+      logic-delete-field: deleted
+      logic-delete-value: 1
+      logic-not-delete-value: 0
+
+# 日志配置
+logging:
+  level:
+    root: info
+    com.aifuturetrade.asyncservice: info
+    # 详细日志配置 - 便于排查问题
+    com.aifuturetrade.asyncservice.service.impl.PriceRefreshServiceImpl: warn
+    com.aifuturetrade.asyncservice.service.impl.MarketTickerStreamServiceImpl: info
+    com.aifuturetrade.asyncservice.service.impl.MarketSymbolOfflineServiceImpl: warn
+    com.aifuturetrade.asyncservice.service.impl.AsyncAgentServiceImpl: info
+    com.aifuturetrade.asyncservice.service.impl.AutoCloseServiceImpl: warn
+    com.aifuturetrade.asyncservice.service.impl.AccountValuesDailyServiceImpl: warn
+    com.aifuturetrade.asyncservice.service.impl.AlgoOrderServiceImpl: warn
+    com.aifuturetrade.asyncservice.service.impl.AlgoOrderCleanupServiceImpl: warn
+    com.aifuturetrade.asyncservice.api.binance: warn
+    com.aifuturetrade.asyncservice.dao.mapper: info
+    # 第三方库日志级别
+    com.binance: info
+    org.springframework.boot.autoconfigure: WARN
+    org.springframework.boot.autoconfigure.condition: WARN
+    org.apache.coyote.http11: WARN
+    org.apache.tomcat: WARN
+    org.springframework: WARN
+    org.springframework.web: WARN
+    org.springframework.boot: WARN
+    org.springframework.web.client: WARN
+    org.apache.http: WARN
+  pattern:
+    console: "%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n"
+    file: "%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n"
+  file:
+    name: logs/async-service.log
+    max-size: 10MB
+    max-history: 7
+
+# Binance API配置（可通过环境变量覆盖）
+binance:
+  api-key: ${BINANCE_API_KEY:LBtjhBgX1RCksNJDdOoJPeDD30Z70YIGHHH9DrqjIDDkK7xcPRQcgydPxGRr6MN1}
+  secret-key: ${BINANCE_SECRET_KEY:55arJnwlytDflHv151UpHN1s32ACnJZEs86mbc79wGyeuSUJNHTDPN7jEgBbqO6I}
+  base-url: https://api.binance.com
+  testnet: false
+  quote-asset: USDT
+  connect-timeout: 10000
+  read-timeout: 50000
+  retries: 3
+  backoff: 200
+  compression: true
+
+# 异步服务配置
+async:
+  # 自动启动配置
+  # 是否在应用启动时自动启动服务（默认true）
+  auto-start-enabled: ${ASYNC_AUTO_START_ENABLED:true}
+  # 启动时自动启动的任务（默认all，启动所有服务）
+  # 可选值：market_tickers, price_refresh, market_symbol_offline, all
+  auto-start-task: ${ASYNC_AUTO_START_TASK:all}
+  # 启动延迟（秒），确保所有Bean初始化完成（默认3秒）
+  auto-start-delay: ${ASYNC_AUTO_START_DELAY:3}
+  
+  # WebSocket配置
+  websocket:
+    # WebSocket消息大小配置（字节）
+    # 币安市场ticker数据实际约68KB，默认限制65KB不够
+    max-text-message-size: ${ASYNC_WEBSOCKET_MAX_TEXT_MESSAGE_SIZE:204800}  # 200KB
+    max-binary-message-size: ${ASYNC_WEBSOCKET_MAX_BINARY_MESSAGE_SIZE:204800}  # 200KB
+    # WebSocket客户端配置
+
+    
+    client:
+      # 连接超时时间（毫秒）
+      connect-timeout: ${ASYNC_WEBSOCKET_CONNECT_TIMEOUT:10000}
+      # 读取超时时间（毫秒）
+      read-timeout: ${ASYNC_WEBSOCKET_READ_TIMEOUT:60000}
+      # 写入超时时间（毫秒）
+      write-timeout: ${ASYNC_WEBSOCKET_WRITE_TIMEOUT:10000}
+      # 缓冲区大小（字节）
+      buffer-size: ${ASYNC_WEBSOCKET_BUFFER_SIZE:8192}
+    # Jetty特定配置
+    jetty:
+      # 是否启用WebSocket压缩
+      compression-enabled: ${ASYNC_WEBSOCKET_COMPRESSION_ENABLED:true}
+      # 压缩最小大小（字节）
+      compression-min-size: ${ASYNC_WEBSOCKET_COMPRESSION_MIN_SIZE:1024}
+      # 最大压缩输入大小（字节）
+      compression-max-input-size: ${ASYNC_WEBSOCKET_COMPRESSION_MAX_INPUT_SIZE:1048576}  # 1MB
+
+  # 市场Ticker流配置
+  market-ticker:
+    # WebSocket连接最大时长（分钟），币安限制30分钟
+    max-connection-minutes: 30
+    # 重连延迟（秒）
+    reconnect-delay: 120
+    # 消息处理超时（秒）
+    message-timeout: 30
+    # 数据库操作超时（秒）
+    db-operation-timeout: 20
+    # 价格刷新服务配置
+    cron: "0 */5 * * * *"
+    # 每分钟最多刷新数量
+    max-per-minute: 1000
+  
+  # 市场Symbol下线服务配置
+  market-symbol-offline:
+    # Cron表达式（每30分钟执行，格式：秒 分 时 日 月 周）
+    cron: "0 */30 * * * *"
+    # 数据保留分钟数
+    retention-minutes: 30
+  
+  # 自动平仓服务配置
+  auto-close:
+    # 执行周期（秒），默认3秒
+    interval-seconds: ${ASYNC_AUTO_CLOSE_INTERVAL_SECONDS:3}
+    # 交易模式：'test' 使用测试接口（默认，不会真实成交），'real' 使用真实交易接口
+    trade-mode: ${ASYNC_AUTO_CLOSE_TRADE_MODE:test}
+  
+  # 账户每日价值服务配置
+  account-values-daily:
+    # Cron表达式（每天0点执行，格式：秒 分 时 日 月 周）由于是香港服务器 时区差8小时
+    cron: "0 0 0 * * ?"
+  
+  # 条件订单服务配置
+  algo-order:
+    # 执行周期（秒），默认2秒
+    interval-seconds: ${ASYNC_ALGO_ORDER_INTERVAL_SECONDS:2}
+
+  # 条件订单清理服务配置
+  algo-order-cleanup:
+    # 是否启用清理任务（默认true）
+    enabled: ${ASYNC_ALGO_ORDER_CLEANUP_ENABLED:true}
+    # Cron表达式（每10分钟执行，格式：秒 分 时 日 月 周）
+    cron: "0 */10 * * * *"
+    # 数据保留时长（小时），默认1小时
+    retention-hours: ${ASYNC_ALGO_ORDER_CLEANUP_RETENTION_HOURS:1}
+
+# 交易配置
+trade:
+  # 交易费率（单边费率，如0.001表示0.1%）
+  fee-rate: ${TRADE_FEE_RATE:0.001}

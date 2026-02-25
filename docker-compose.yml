@@ -4,126 +4,262 @@
 # 注意：version字段在新版本Docker Compose中已废弃，但保留以兼容旧版本
 # 如果看到警告，可以安全地忽略或移除version字段
 # ==============================================================================
+# 环境变量配置：
+# 1. 所有配置已抽离到 .env 文件中，便于统一管理
+# 2. 首次使用前，请创建 .env 文件（参考 ENV_SETUP.md）
+# 3. Docker Compose 会自动读取 .env 文件中的环境变量
+# 4. 所有变量都有默认值，可以不设置 .env 文件（不推荐）
+# ==============================================================================
 # 使用说明：
-# 1. 默认启动：docker-compose up -d（启动backend、frontend和async-agent服务）
-# 2. 启动数据服务：docker-compose -f docker-compose-data.yml up -d（启动data-manager和data-agent服务）
-# 3. 启动所有服务：docker-compose up -d && docker-compose -f docker-compose-data.yml up -d
+# 1. 启动MySQL服务：docker-compose -f docker-compose-mysql.yml up -d（必须先启动）
+# 2. 默认启动：docker-compose up -d（启动backend、binance-service、trade、frontend、async-service服务）
+# ==============================================================================
+# 注意：
+# - MySQL服务已拆分到 docker-compose-mysql.yml，需要先启动
+# - 其他服务通过 depends_on 依赖 MySQL 服务，但需要确保 MySQL 服务已启动
+# - 生产环境请修改 .env 文件中的默认密码和 API 密钥
 # ==============================================================================
 
 services:
   # ============================================================================
-  # 后端服务（Python Flask API）
+  # 后端服务（Java Spring Boot API服务）
   # ============================================================================
   backend:
     build:
-      context: .
+      context: ./backend
       dockerfile: Dockerfile
-    container_name: aifuturetrade-backend
+    container_name: ${BACKEND_CONTAINER_NAME:-aifuturetrade-backend}
     ports:
-      - "5002:5002"  # 后端API端口
+      - "${BACKEND_PORT:-5002}:5002"  # 后端API端口，供前端调用
     volumes:
-      - ./data:/app/data
+      # 挂载Docker socket，允许backend容器访问宿主机Docker来查询其他容器日志
+      - /var/run/docker.sock:/var/run/docker.sock:ro
     environment:
-      # 基础配置
-      - DATABASE_PATH=/app/data/trading_bot.db
-      - USE_GUNICORN=true
-      - FLASK_ENV=production
-      # Gunicorn配置
-      - GUNICORN_WORKERS=${GUNICORN_WORKERS}
-      - GUNICORN_WORKER_CLASS=${GUNICORN_WORKER_CLASS}
-      - GUNICORN_WORKER_CONNECTIONS=${GUNICORN_WORKER_CONNECTIONS}
-      - GUNICORN_TIMEOUT=${GUNICORN_TIMEOUT}
-      - GUNICORN_KEEPALIVE=${GUNICORN_KEEPALIVE}
-      - GUNICORN_MAX_REQUESTS=${GUNICORN_MAX_REQUESTS}
-      # ClickHouse配置
-      - CLICKHOUSE_HOST=${CLICKHOUSE_HOST}
-      - CLICKHOUSE_PORT=${CLICKHOUSE_PORT}
-      - CLICKHOUSE_USER=${CLICKHOUSE_USER}
-      - CLICKHOUSE_PASSWORD=${CLICKHOUSE_PASSWORD}
-      - CLICKHOUSE_DATABASE=${CLICKHOUSE_DATABASE}
-      - CLICKHOUSE_SECURE=${CLICKHOUSE_SECURE}
-      - CLICKHOUSE_MARKET_TICKER_TABLE=${CLICKHOUSE_MARKET_TICKER_TABLE}
-      - CLICKHOUSE_LEADERBOARD_TABLE=${CLICKHOUSE_LEADERBOARD_TABLE}
-      - CLICKHOUSE_LEADERBOARD_SYNC_INTERVAL=${CLICKHOUSE_LEADERBOARD_SYNC_INTERVAL}
-      - CLICKHOUSE_LEADERBOARD_TIME_WINDOW=${CLICKHOUSE_LEADERBOARD_TIME_WINDOW}
-      - CLICKHOUSE_LEADERBOARD_TOP_N=${CLICKHOUSE_LEADERBOARD_TOP_N}
-      - CLICKHOUSE_LEADERBOARD_CLEANUP_INTERVAL_MINUTES=${CLICKHOUSE_LEADERBOARD_CLEANUP_INTERVAL_MINUTES}
-      - CLICKHOUSE_LEADERBOARD_RETENTION_MINUTES=${CLICKHOUSE_LEADERBOARD_RETENTION_MINUTES}
-      - CLICKHOUSE_MARKET_KLINES_TABLE=${CLICKHOUSE_MARKET_KLINES_TABLE}
+      # Spring Profile配置（生产环境）
+      - SPRING_PROFILES_ACTIVE=${SPRING_PROFILES_ACTIVE:-prod}
+      # 服务器端口配置
+      - SERVER_PORT=${SERVER_PORT:-5002}
+      # MySQL配置
+      - SPRING_DATASOURCE_URL=jdbc:mysql://${MYSQL_HOST:-154.89.148.172}:${MYSQL_PORT:-32123}/${MYSQL_DATABASE:-aifuturetrade}?useSSL=false&serverTimezone=UTC&characterEncoding=utf8
+      - SPRING_DATASOURCE_USERNAME=${MYSQL_USER:-aifuturetrade}
+      - SPRING_DATASOURCE_PASSWORD=${MYSQL_PASSWORD:-aifuturetrade123}
       # Binance配置
       - BINANCE_API_KEY=${BINANCE_API_KEY}
-      - BINANCE_API_SECRET=${BINANCE_API_SECRET}
-      # 价格刷新服务配置
-      - PRICE_REFRESH_CRON=${PRICE_REFRESH_CRON}
-      - PRICE_REFRESH_MAX_PER_MINUTE=${PRICE_REFRESH_MAX_PER_MINUTE}
+      - BINANCE_SECRET_KEY=${BINANCE_API_SECRET}
+      # 应用配置
+      - APP_AUTO_TRADING=${AUTO_TRADING:-true}
+      - APP_TRADE_FEE_RATE=${TRADE_FEE_RATE:-0.001}
+      # Trade服务配置
+      - TRADE_SERVICE_URL=${TRADE_SERVICE_URL:-http://trade:5000}
+      # JVM参数
+      # 添加 --add-opens 参数以解决 MyBatis-Plus 在 Java 9+ 上的反射访问警告
+      - JAVA_OPTS=${JAVA_OPTS:--Xms512m -Xmx1024m -Dserver.port=5002 --add-opens java.base/java.lang.invoke=ALL-UNNAMED}
+    restart: unless-stopped
+    networks:
+      - aifuturetrade-network
+    # 注意：MySQL服务在docker-compose-mysql.yml中，需要先启动
+    # 如果MySQL服务未启动，请先运行：docker-compose -f docker-compose-mysql.yml up -d
+
+  # ============================================================================
+  # Binance服务（Java Spring Boot Binance API微服务）
+  # ============================================================================
+  binance-service:
+    build:
+      context: ./binance-service
+      dockerfile: Dockerfile
+    container_name: ${BINANCE_SERVICE_CONTAINER_NAME:-aifuturetrade-binance-service}
+    ports:
+      - "${BINANCE_SERVICE_PORT:-5004}:5004"  # Binance服务端口
+    environment:
+      # Spring Profile配置（生产环境）
+      - SPRING_PROFILES_ACTIVE=${SPRING_PROFILES_ACTIVE:-prod}
+      # 服务器端口配置
+      - SERVER_PORT=${BINANCE_SERVICE_PORT:-5004}
+      # MySQL配置
+      - SPRING_DATASOURCE_URL=jdbc:mysql://${MYSQL_HOST:-154.89.148.172}:${MYSQL_PORT:-32123}/${MYSQL_DATABASE:-aifuturetrade}?useSSL=false&serverTimezone=UTC&characterEncoding=utf8
+      - SPRING_DATASOURCE_USERNAME=${MYSQL_USER:-aifuturetrade}
+      - SPRING_DATASOURCE_PASSWORD=${MYSQL_PASSWORD:-aifuturetrade123}
+      # Binance配置
+      - BINANCE_API_KEY=${BINANCE_API_KEY}
+      - BINANCE_SECRET_KEY=${BINANCE_API_SECRET}
+      # JVM参数
+      # -Xms1g: 初始堆内存1G，-Xmx2g: 最大堆内存2G
+      # -XX:+UseG1GC: 使用G1垃圾收集器
+      # -XX:MaxGCPauseMillis: 最大GC暂停时间目标
+      # 添加 --add-opens 参数以解决 Java 9+ 上的反射访问警告
+      - JAVA_OPTS=${JAVA_OPTS:--Xms1g -Xmx2g -XX:+UseG1GC -XX:MaxGCPauseMillis=200 --add-opens java.base/java.lang.invoke=ALL-UNNAMED}
+    restart: unless-stopped
+    networks:
+      - aifuturetrade-network
+    # 注意：MySQL服务在docker-compose-mysql.yml中，需要先启动
+    # 如果MySQL服务未启动，请先运行：docker-compose -f docker-compose-mysql.yml up -d
+
+  # ============================================================================
+  # 异步服务（Java Spring Boot 异步服务 - 价格刷新、市场Ticker流等）
+  # ============================================================================
+  async-service:
+    build:
+      context: ./async-service
+      dockerfile: Dockerfile
+    container_name: ${ASYNC_SERVICE_CONTAINER_NAME:-aifuturetrade-async-service}
+    ports:
+      - "${ASYNC_SERVICE_PORT:-5003}:5003"  # 异步服务端口
+    environment:
+      # Spring Profile配置（生产环境）
+      - SPRING_PROFILES_ACTIVE=${SPRING_PROFILES_ACTIVE:-prod}
+      # 服务器端口配置
+      - SERVER_PORT=${ASYNC_SERVICE_PORT:-5003}
+      # MySQL配置
+      - SPRING_DATASOURCE_URL=jdbc:mysql://${MYSQL_HOST:-154.89.148.172}:${MYSQL_PORT:-32123}/${MYSQL_DATABASE:-aifuturetrade}?useSSL=false&serverTimezone=UTC&characterEncoding=utf8
+      - SPRING_DATASOURCE_USERNAME=${MYSQL_USER:-aifuturetrade}
+      - SPRING_DATASOURCE_PASSWORD=${MYSQL_PASSWORD:-aifuturetrade123}
+      # Binance配置
+      - BINANCE_API_KEY=${BINANCE_API_KEY}
+      - BINANCE_SECRET_KEY=${BINANCE_API_SECRET}
+      # 异步服务配置
+      - ASYNC_AUTO_START_ENABLED=${ASYNC_AUTO_START_ENABLED:-true}
+      - ASYNC_AUTO_START_TASK=${ASYNC_AUTO_START_TASK:-all}
+      - ASYNC_AUTO_START_DELAY=${ASYNC_AUTO_START_DELAY:-3}
+      # JVM参数
+      # -Xms1g: 初始堆内存1G，-Xmx2g: 最大堆内存2G
+      # -Dserver.port: 服务端口，与容器映射端口一致
+      - JAVA_OPTS=${JAVA_OPTS:--Xms1g -Xmx2g -XX:+UseG1GC -XX:MaxGCPauseMillis=200 --add-opens java.base/java.lang.invoke=ALL-UNNAMED}
+    restart: unless-stopped
+    networks:
+      - aifuturetrade-network
+    # 注意：MySQL服务在docker-compose-mysql.yml中，需要先启动
+    # 如果MySQL服务未启动，请先运行：docker-compose -f docker-compose-mysql.yml up -d
+
+  # ============================================================================
+  # 交易服务（Python Flask Trading Service）
+  # ============================================================================
+  trade:
+    build:
+      context: .
+      dockerfile: trade/Dockerfile
+    container_name: ${TRADE_CONTAINER_NAME:-aifuturetrade-trade}
+    ports:
+      - "${TRADE_PORT:-5000}:5000"  # 交易服务端口
+    environment:
+      # 基础配置
+      - USE_GUNICORN=${USE_GUNICORN:-true}
+      - FLASK_ENV=${FLASK_ENV:-production}
+      # Gunicorn配置
+      - GUNICORN_WORKERS=${GUNICORN_WORKERS:-5}
+      - GUNICORN_WORKER_CLASS=${GUNICORN_WORKER_CLASS:-eventlet}
+      - GUNICORN_WORKER_CONNECTIONS=${GUNICORN_WORKER_CONNECTIONS:-1000}
+      - GUNICORN_TIMEOUT=${GUNICORN_TIMEOUT:-120}
+      - GUNICORN_KEEPALIVE=${GUNICORN_KEEPALIVE:-5}
+      - GUNICORN_MAX_REQUESTS=${GUNICORN_MAX_REQUESTS:-1000}
+      # MySQL配置
+      - MYSQL_HOST=${MYSQL_HOST:-154.89.148.172}
+      - MYSQL_PORT=${MYSQL_PORT:-32123}
+      - MYSQL_USER=${MYSQL_USER:-aifuturetrade}
+      - MYSQL_PASSWORD=${MYSQL_PASSWORD:-aifuturetrade123}
+      - MYSQL_DATABASE=${MYSQL_DATABASE:-aifuturetrade}
+      # Binance配置
+      - BINANCE_API_KEY=${BINANCE_API_KEY}
+      - BINANCE_SECRET_KEY=${BINANCE_API_SECRET}
     restart: unless-stopped
     networks:
       - aifuturetrade-network
 
   # ============================================================================
-  # 前端服务（Node.js Express + klinecharts-pro）
+  # 模型买入服务镜像（仅构建，不自动启动）
   # ============================================================================
-  # 注意：此服务会在构建时先构建 klinecharts-pro 基础库，然后构建前端应用
-  # klinecharts-pro 的构建产物会自动复制到 public/klinecharts-pro/ 目录
-  # 前端页面通过 /klinecharts-pro/ 路径访问这些文件
+  # 说明：
+  # 1. 此服务仅用于构建镜像，不自动启动容器
+  # 2. 后续由 Java Backend 服务通过 Docker API 动态创建容器
+  # 3. 使用以下命令来构建但不启动容器：
+  #    - docker-compose up --build -d --scale model-buy=0 --scale model-sell=0
+  #    - 或使用脚本: ./scripts/docker-compose-up.sh (Linux/Mac)
+  #    - 或使用脚本: scripts\docker-compose-up.bat (Windows)
+  # 4. 或者使用 docker-compose build model-buy 来只构建镜像
+  # ============================================================================
+  model-buy:
+    build:
+      context: .
+      dockerfile: trade/Dockerfile
+    image: aifuturetrade-model-buy:latest  # 明确指定镜像名称，与后端配置一致
+    # 不设置 container_name，因为容器由 Java Backend 动态创建
+    # 不设置 ports，因为容器由 Java Backend 动态创建时指定
+    # 不设置 restart，确保容器不会自动重启
+    environment:
+      # MODEL_ID 由 Java Backend 在创建容器时动态设置
+      - MODEL_ID=${MODEL_ID:-1}
+      # MySQL配置
+      - MYSQL_HOST=${MYSQL_HOST:-154.89.148.172}
+      - MYSQL_PORT=${MYSQL_PORT:-32123}
+      - MYSQL_USER=${MYSQL_USER:-aifuturetrade}
+      - MYSQL_PASSWORD=${MYSQL_PASSWORD:-aifuturetrade123}
+      - MYSQL_DATABASE=${MYSQL_DATABASE:-aifuturetrade}
+      # Binance配置
+      - BINANCE_API_KEY=${BINANCE_API_KEY}
+      - BINANCE_SECRET_KEY=${BINANCE_API_SECRET}
+    # 覆盖 CMD，使用 model_start_buy.py 启动
+    command: ["python", "-m", "trade.start.model_start_buy"]
+    networks:
+      - aifuturetrade-network
+
+  # ============================================================================
+  # 模型卖出服务镜像（仅构建，不自动启动）
+  # ============================================================================
+  # 说明：
+  # 1. 此服务仅用于构建镜像，不自动启动容器
+  # 2. 后续由 Java Backend 服务通过 Docker API 动态创建容器
+  # 3. 使用以下命令来构建但不启动容器：
+  #    - docker-compose up --build -d --scale model-buy=0 --scale model-sell=0
+  #    - 或使用脚本: ./scripts/docker-compose-up.sh (Linux/Mac)
+  #    - 或使用脚本: scripts\docker-compose-up.bat (Windows)
+  # 4. 或者使用 docker-compose build model-sell 来只构建镜像
+  # ============================================================================
+  model-sell:
+    build:
+      context: .
+      dockerfile: trade/Dockerfile
+    image: aifuturetrade-model-sell:latest  # 明确指定镜像名称，与后端配置一致
+    # 不设置 container_name，因为容器由 Java Backend 动态创建
+    # 不设置 ports，因为容器由 Java Backend 动态创建时指定
+    # 不设置 restart，确保容器不会自动重启
+    environment:
+      # MODEL_ID 由 Java Backend 在创建容器时动态设置
+      - MODEL_ID=${MODEL_ID:-1}
+      # MySQL配置
+      - MYSQL_HOST=${MYSQL_HOST:-154.89.148.172}
+      - MYSQL_PORT=${MYSQL_PORT:-32123}
+      - MYSQL_USER=${MYSQL_USER:-aifuturetrade}
+      - MYSQL_PASSWORD=${MYSQL_PASSWORD:-aifuturetrade123}
+      - MYSQL_DATABASE=${MYSQL_DATABASE:-aifuturetrade}
+      # Binance配置
+      - BINANCE_API_KEY=${BINANCE_API_KEY}
+      - BINANCE_SECRET_KEY=${BINANCE_API_SECRET}
+    # 覆盖 CMD，使用 model_start_sell.py 启动
+    command: ["python", "-m", "trade.start.model_start_sell"]
+    networks:
+      - aifuturetrade-network
+
+  # ============================================================================
+  # 前端服务（Vue 3 + KLineChart 10.0.0）
+  # ============================================================================
+  # 注意：此服务会在构建时先构建 KLineChart 10.0.0 基础库，然后构建前端应用
+  # KLineChart 的构建产物会自动复制到 public/klinecharts/ 目录
+  # 前端页面通过 /klinecharts/ 路径访问这些文件
   frontend:
     build:
       context: .
       dockerfile: ./frontend/Dockerfile
-    container_name: aifuturetrade-frontend
+    container_name: ${FRONTEND_CONTAINER_NAME:-aifuturetrade-frontend}
     ports:
-      - "3000:3000"  # 前端服务端口
+      - "${FRONTEND_PORT:-3000}:3000"  # 前端服务端口
     environment:
-      - BACKEND_URL=http://backend:5002
-      - FRONTEND_PORT=3000
-      - NODE_ENV=production
+      - BACKEND_URL=${BACKEND_URL:-http://backend:5002}
+      - FRONTEND_PORT=${FRONTEND_PORT:-3000}
+      - NODE_ENV=${NODE_ENV:-production}
     depends_on:
       backend:
         condition: service_started
-    restart: unless-stopped
-    networks:
-      - aifuturetrade-network
-
-  # ============================================================================
-  # 异步代理服务（后台数据同步）
-  # ============================================================================
-  async-agent:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    container_name: aifuturetrade-async-agent
-    command: ["python", "async/async_agent.py", "--task", "all"]
-    # 注意：async-agent 是后台数据同步服务，不需要暴露端口
-    volumes:
-      - ./data:/app/data
-    environment:
-      # 设置PYTHONPATH，确保可以找到所有模块
-      - PYTHONPATH=/app
-      # ClickHouse配置
-      - CLICKHOUSE_HOST=${CLICKHOUSE_HOST}
-      - CLICKHOUSE_PORT=${CLICKHOUSE_PORT}
-      - CLICKHOUSE_USER=${CLICKHOUSE_USER}
-      - CLICKHOUSE_PASSWORD=${CLICKHOUSE_PASSWORD}
-      - CLICKHOUSE_DATABASE=${CLICKHOUSE_DATABASE}
-      - CLICKHOUSE_SECURE=${CLICKHOUSE_SECURE}
-      - CLICKHOUSE_MARKET_TICKER_TABLE=${CLICKHOUSE_MARKET_TICKER_TABLE}
-      - CLICKHOUSE_LEADERBOARD_TABLE=${CLICKHOUSE_LEADERBOARD_TABLE}
-      - CLICKHOUSE_MARKET_KLINES_TABLE=${CLICKHOUSE_MARKET_KLINES_TABLE}
-      # K线同步配置
-      - KLINE_SYNC_CHECK_INTERVAL=${KLINE_SYNC_CHECK_INTERVAL}
-      - KLINE_CLEANUP_CRON=${KLINE_CLEANUP_CRON}
-      - KLINE_CLEANUP_RETENTION_DAYS=${KLINE_CLEANUP_RETENTION_DAYS}
-      # Data Agent配置
-      - DATA_AGENT_MAX_SYMBOL=${DATA_AGENT_MAX_SYMBOL}
-      - DATA_AGENT_PORT=${DATA_AGENT_PORT}
-      - DATA_AGENT_REGISTER_IP=${DATA_AGENT_REGISTER_IP}
-      - DATA_AGENT_REGISTER_PORT=${DATA_AGENT_REGISTER_PORT}
-      - DATA_AGENT_BATCH_SYMBOL_SIZE=${DATA_AGENT_BATCH_SYMBOL_SIZE}
-      - DATA_AGENT_HEARTBEAT_TIMEOUT=${DATA_AGENT_HEARTBEAT_TIMEOUT}
-      - DATA_AGENT_STATUS_CHECK_INTERVAL=${DATA_AGENT_STATUS_CHECK_INTERVAL}
-      # Binance配置
-      - BINANCE_API_KEY=${BINANCE_API_KEY}
-      - BINANCE_API_SECRET=${BINANCE_API_SECRET}
+    # 注意：MySQL服务在docker-compose-mysql.yml中，需要先启动
+    # 如果MySQL服务未启动，请先运行：docker-compose -f docker-compose-mysql.yml up -d
     restart: unless-stopped
     networks:
       - aifuturetrade-network
@@ -131,6 +267,17 @@ services:
 # ==============================================================================
 # 网络配置
 # ==============================================================================
+# 注意：网络名称与docker-compose-mysql.yml中的网络名称相同
+# Docker Compose会自动合并相同名称的网络，使服务可以互相通信
+# 注意：网络名称使用硬编码，确保与docker-compose-mysql.yml一致
 networks:
   aifuturetrade-network:
     driver: bridge
+
+# ==============================================================================
+# 数据卷配置
+# ==============================================================================
+# 注意：卷名称与docker-compose-mysql.yml中的卷名称相同
+# Docker Compose会自动合并相同名称的卷，使数据可以共享
+volumes:
+  mysql_data:

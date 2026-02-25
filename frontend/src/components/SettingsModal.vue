@@ -6,16 +6,28 @@
     @close="$emit('close')"
   >
     <div class="form-group">
-      <label>交易频率（分钟）</label>
+      <label>买入执行频率（分钟）</label>
       <input
-        v-model.number="formData.tradingFrequency"
+        v-model.number="formData.buyFrequency"
         type="number"
         min="1"
         max="1440"
         class="form-input"
-        placeholder="60"
+        placeholder="5"
       />
-      <small class="form-help">设置AI交易决策的时间间隔（1-1440分钟）</small>
+      <small class="form-help">设置AI买入决策的时间间隔（1-1440分钟）</small>
+    </div>
+    <div class="form-group">
+      <label>卖出执行频率（分钟）</label>
+      <input
+        v-model.number="formData.sellFrequency"
+        type="number"
+        min="1"
+        max="1440"
+        class="form-input"
+        placeholder="5"
+      />
+      <small class="form-help">设置AI卖出决策的时间间隔（1-1440分钟）</small>
     </div>
     <div class="form-group">
       <label>交易费率</label>
@@ -42,6 +54,18 @@
       </div>
       <small class="form-help">开启后，AI对话列表会展示系统提交给模型的提示词。</small>
     </div>
+    <div class="form-group">
+      <label>AI对话显示数量</label>
+      <input
+        v-model.number="formData.conversationLimit"
+        type="number"
+        min="1"
+        max="100"
+        class="form-input"
+        placeholder="5"
+      />
+      <small class="form-help">设置AI对话模块显示的最大对话记录数量（1-100，默认5条）</small>
+    </div>
     <template #footer>
       <button class="btn-secondary" @click="handleCancel">取消</button>
       <button class="btn-primary" @click="handleSave">保存设置</button>
@@ -64,9 +88,11 @@ const props = defineProps({
 const emit = defineEmits(['update:visible', 'close'])
 
 const formData = ref({
-  tradingFrequency: 60,
+  buyFrequency: 5,
+  sellFrequency: 5,
   tradingFeeRate: 0.001,
-  showSystemPrompt: false
+  showSystemPrompt: false,
+  conversationLimit: 5
 })
 
 const loading = ref(false)
@@ -76,9 +102,11 @@ const loadSettings = async () => {
   try {
     const data = await settingsApi.get()
     formData.value = {
-      tradingFrequency: data.trading_frequency_minutes || 60,
+      buyFrequency: data.buy_frequency_minutes || 5,
+      sellFrequency: data.sell_frequency_minutes || 5,
       tradingFeeRate: data.trading_fee_rate || 0.001,
-      showSystemPrompt: Boolean(data.show_system_prompt)
+      showSystemPrompt: Boolean(data.show_system_prompt),
+      conversationLimit: data.conversation_limit || 5
     }
   } catch (error) {
     console.error('[SettingsModal] Error loading settings:', error)
@@ -91,9 +119,11 @@ const handleSave = async () => {
   loading.value = true
   try {
     await settingsApi.update({
-      trading_frequency_minutes: formData.value.tradingFrequency,
+      buy_frequency_minutes: formData.value.buyFrequency,
+      sell_frequency_minutes: formData.value.sellFrequency,
       trading_fee_rate: formData.value.tradingFeeRate,
-      show_system_prompt: formData.value.showSystemPrompt
+      show_system_prompt: formData.value.showSystemPrompt,
+      conversation_limit: formData.value.conversationLimit
     })
     alert('设置保存成功')
     emit('update:visible', false)

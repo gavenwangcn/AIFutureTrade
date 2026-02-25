@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.aifuturetrade.asyncservice.dao.mapper.MarketTickerMapper">
+
+    <!-- 批量插入或更新ticker数据 -->
+    <!-- 参考Python版本的upsert_market_tickers实现：
+         1. 插入时包含price_change等计算字段
+         2. 如果不存在existing_symbol_data，则open_price=0.0，update_price_date=NULL
+         3. 如果存在existing_symbol_data，则使用existing_open_price和existing_update_price_date
+         4. 在ON DUPLICATE KEY UPDATE中不更新open_price和update_price_date（保留原有值）
+         5. 所有时间字段（event_time, stats_open_time, stats_close_time, ingestion_time）都使用UTC+8时区
+             - Java代码中已经将时间转换为UTC+8时区的LocalDateTime
+             - 数据库连接URL中设置了serverTimezone=Asia/Shanghai，确保JDBC驱动正确解释时间
+    -->
+    <insert id="batchUpsertTickers" parameterType="java.util.List">
+        INSERT INTO `24_market_tickers` (
+            `event_time`, `symbol`, `price_change`, `price_change_percent`, 
+            `side`, `change_percent_text`, `average_price`, `last_price`, 
+            `last_trade_volume`, `open_price`, `high_price`, `low_price`, 
+            `base_volume`, `quote_volume`, `stats_open_time`, `stats_close_time`, 
+            `first_trade_id`, `last_trade_id`, `trade_count`, `update_price_date`,
+            `ingestion_time`
+        ) VALUES
+        <foreach collection="tickers" item="ticker" separator=",">
+            (
+                #{ticker.eventTime}, #{ticker.symbol}, #{ticker.priceChange}, 
+                #{ticker.priceChangePercent}, #{ticker.side}, #{ticker.changePercentText}, 
+                #{ticker.averagePrice}, #{ticker.lastPrice}, #{ticker.lastTradeVolume}, 
+                #{ticker.openPrice}, #{ticker.highPrice}, #{ticker.lowPrice}, 
+                #{ticker.baseVolume}, #{ticker.quoteVolume}, #{ticker.statsOpenTime}, 
+                #{ticker.statsCloseTime}, #{ticker.firstTradeId}, #{ticker.lastTradeId}, 
+                #{ticker.tradeCount}, #{ticker.updatePriceDate}, #{ticker.ingestionTime}
+            )
+        </foreach>
+        ON DUPLICATE KEY UPDATE
+            `event_time` = VALUES(`event_time`),
+            `price_change` = VALUES(`price_change`),
+            `price_change_percent` = VALUES(`price_change_percent`),
+            `side` = VALUES(`side`),
+            `change_percent_text` = VALUES(`change_percent_text`),
+            `average_price` = VALUES(`average_price`),
+            `last_price` = VALUES(`last_price`),
+            `last_trade_volume` = VALUES(`last_trade_volume`),
+            `high_price` = VALUES(`high_price`),
+            `low_price` = VALUES(`low_price`),
+            `base_volume` = VALUES(`base_volume`),
+            `quote_volume` = VALUES(`quote_volume`),
+            `stats_open_time` = VALUES(`stats_open_time`),
+            `stats_close_time` = VALUES(`stats_close_time`),
+            `first_trade_id` = VALUES(`first_trade_id`),
+            `last_trade_id` = VALUES(`last_trade_id`),
+            `trade_count` = VALUES(`trade_count`),
+            `ingestion_time` = VALUES(`ingestion_time`)
+            <!-- 注意：不更新open_price和update_price_date，保留原有值 -->
+    </insert>
+
+</mapper>
+

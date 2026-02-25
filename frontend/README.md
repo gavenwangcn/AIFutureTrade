@@ -4,6 +4,35 @@
 
 前端服务使用 Vue 3 + Vite 构建。开发环境使用 Vite 开发服务器（支持代理），生产环境使用 Vite 预览服务器或 nginx。
 
+## 🏝️ 环境要求
+
+### 浏览器支持
+
+图表基于 html5 canvas 构建，需要运行在支持 canvas 的浏览器上，如果需要运行在移动端，请用 webview 加载。
+
+### 兼容处理
+
+#### [core.js](https://github.com/zloirock/core-js)
+
+图表内部集合使用 `Map` ，用于兼容不支持的老版浏览器。
+
+```javascript
+import 'core.js';
+import { init } from 'klinecharts';
+```
+
+#### [Intl.js](https://github.com/andyearnshaw/Intl.js)
+
+图表依赖 `Intl` ，某些浏览器无此 API。
+
+```javascript
+import 'intl';
+import 'intl/local-data/jsonp/en';
+import { init } from 'klinecharts';
+```
+
+> 参考：[KLineChart 官方环境要求文档](https://klinecharts.com/guide/environment)
+
 ## 快速开始
 
 ### 本地开发

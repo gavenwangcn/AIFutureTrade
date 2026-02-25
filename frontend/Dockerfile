@@ -1,16 +1,16 @@
 # ==============================================================================
 # 前端服务 Dockerfile
 # ==============================================================================
-# 用途：在同一个Docker容器中构建 klinecharts-pro 基础库和前端应用
+# 用途：在同一个Docker容器中构建 KLineChart 10.0.0 基础库和前端应用
 # 构建上下文：项目根目录
 # 要求：使用各自的依赖管理，不使用已有的node_modules
 # ==============================================================================
 
 # ==============================================================================
-# 阶段1：构建 klinecharts-pro 基础库
+# 阶段1：构建 KLineChart 10.0.0 基础库
 # ==============================================================================
 
-FROM node:20-slim AS klinecharts-pro-builder
+FROM node:22-slim AS klinecharts-builder
 WORKDIR /app
 
 # 安装系统依赖
@@ -19,37 +19,63 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
-# 复制klinecharts-pro的依赖文件和源代码
-COPY frontend/klinecharts-pro/package.json frontend/klinecharts-pro/package-lock.json* ./klinecharts-pro/
-COPY frontend/klinecharts-pro/tsconfig.json frontend/klinecharts-pro/tsconfig.node.json ./klinecharts-pro/
-COPY frontend/klinecharts-pro/vite.config.ts ./klinecharts-pro/
-COPY frontend/klinecharts-pro/.babelrc.json ./klinecharts-pro/
-COPY frontend/klinecharts-pro/.eslintrc.cjs ./klinecharts-pro/
-COPY frontend/klinecharts-pro/src/ ./klinecharts-pro/src/
-COPY frontend/klinecharts-pro/indicators/ ./klinecharts-pro/indicators/
+# 安装 pnpm（KLineChart 使用 pnpm 作为包管理器）
+RUN npm install -g pnpm@10.4.1
 
-WORKDIR /app/klinecharts-pro
+# 复制 KLineChart 的依赖文件和源代码
+COPY frontend/KLineChart/package.json frontend/KLineChart/pnpm-lock.yaml* ./KLineChart/
+COPY frontend/KLineChart/tsconfig.json ./KLineChart/
+COPY frontend/KLineChart/eslint.config.js ./KLineChart/
+COPY frontend/KLineChart/scripts/ ./KLineChart/scripts/
+COPY frontend/KLineChart/src/ ./KLineChart/src/
+COPY frontend/KLineChart/indicators/ ./KLineChart/indicators/
 
-# 安装klinecharts-pro依赖（根据package.json安装，适应跨平台构建）
-    RUN npm install --no-fund --no-audit
+WORKDIR /app/KLineChart
 
-# 构建klinecharts-pro
-RUN npm run build
-
-# 验证构建结果
-RUN if [ ! -d dist ] || [ ! -f dist/klinecharts-pro.umd.js ] || [ ! -f dist/klinecharts-pro.css ]; then \
-        echo "ERROR: klinecharts-pro build failed" && \
-        exit 1; \
+# 安装 KLineChart 依赖（优先使用 pnpm，如果失败则使用 npm）
+# 注意：跳过 prepare 脚本（husky 在 Docker 构建中不需要）
+RUN if [ -f pnpm-lock.yaml ]; then \
+        pnpm install --no-frozen-lockfile --ignore-scripts || npm install --no-fund --no-audit --ignore-scripts; \
+    else \
+        npm install --no-fund --no-audit --ignore-scripts; \
     fi
 
-# 将构建好的klinecharts-pro包链接到全局，方便frontend使用
-RUN npm link
+# 验证indicators目录存在且包含ATR指标
+RUN if [ ! -f indicators/atr.ts ] || [ ! -f indicators/index.ts ]; then \
+        echo "ERROR: Custom indicators directory is missing or incomplete" && \
+        echo "Checking indicators directory:" && \
+        ls -la indicators/ 2>/dev/null || echo "indicators directory not found" && \
+        exit 1; \
+    else \
+        echo "✓ Custom indicators directory verified:" && \
+        ls -lh indicators/ && \
+        echo ""; \
+    fi
+
+# 构建 KLineChart（构建 UMD 版本用于浏览器）
+# 注意：构建时会自动包含indicators目录中的自定义指标
+RUN if command -v pnpm > /dev/null && [ -f pnpm-lock.yaml ]; then \
+        pnpm run build-umd:prod; \
+    else \
+        npm run build-umd:prod; \
+    fi
+
+# 验证构建结果
+RUN if [ ! -d dist ] || [ ! -f dist/umd/klinecharts.min.js ]; then \
+        echo "ERROR: KLineChart build failed" && \
+        ls -la dist/ 2>/dev/null || echo "dist directory not found" && \
+        exit 1; \
+    else \
+        echo "✓ KLineChart UMD build successful" && \
+        ls -lh dist/umd/klinecharts.min.js && \
+        echo ""; \
+    fi
 
 # ==============================================================================
 # 阶段2：构建前端应用
 # ==============================================================================
 
-FROM node:20-slim AS frontend-builder
+FROM node:22-slim AS frontend-builder
 WORKDIR /app/frontend
 
 # 安装系统依赖
@@ -65,49 +91,24 @@ COPY frontend/index.html ./
 COPY frontend/vite.config.js ./
 COPY frontend/public/ ./public/
 
-# 创建klinecharts-pro资源目录
-RUN mkdir -p public/klinecharts-pro
+# 创建 klinecharts 资源目录
+RUN mkdir -p public/klinecharts
 
-# 从klinecharts-pro-builder阶段复制构建好的产物和package.json
-    COPY --from=klinecharts-pro-builder /app/klinecharts-pro/dist/ ./klinecharts-pro-build/
-    COPY --from=klinecharts-pro-builder /app/klinecharts-pro/package.json ./klinecharts-pro-build/
+# 从 klinecharts-builder 阶段复制构建好的产物
+COPY --from=klinecharts-builder /app/KLineChart/dist/umd/klinecharts.min.js ./public/klinecharts/klinecharts.min.js
 
-    # 安装frontend依赖（使用package.json安装，适应跨平台构建）
-    RUN npm install --no-fund --no-audit
-
-    # 创建node_modules/@klinecharts/pro目录并复制自构建的包
-    RUN mkdir -p node_modules/@klinecharts/pro
-    RUN cp -r ./klinecharts-pro-build/* node_modules/@klinecharts/pro/
-
-# 复制klinecharts基础库（如果需要的话）
-RUN if [ -f node_modules/klinecharts/dist/klinecharts.umd.js ]; then \
-        cp node_modules/klinecharts/dist/klinecharts.umd.js public/klinecharts-pro/klinecharts.js && \
-        echo "Using klinecharts from node_modules"; \
-    elif [ -f node_modules/klinecharts/dist/umd/klinecharts.js ]; then \
-        cp node_modules/klinecharts/dist/umd/klinecharts.js public/klinecharts-pro/klinecharts.js && \
-        echo "Using klinecharts from node_modules"; \
-    elif [ -f node_modules/klinecharts/dist/klinecharts.js ]; then \
-        cp node_modules/klinecharts/dist/klinecharts.js public/klinecharts-pro/klinecharts.js && \
-        echo "Using klinecharts from node_modules"; \
-    else \
-        echo "WARNING: klinecharts.js not found in node_modules"; \
-    fi
-
-# 复制自构建的klinecharts-pro产物到public目录，供动态加载使用
-RUN cp ./klinecharts-pro-build/klinecharts-pro.umd.js public/klinecharts-pro/ && \
-    cp ./klinecharts-pro-build/klinecharts-pro.css public/klinecharts-pro/
+# 安装frontend依赖（使用package.json安装，适应跨平台构建）
+RUN npm install --no-fund --no-audit
 
 # 验证所有必需文件是否存在
-RUN if [ ! -f public/klinecharts-pro/klinecharts-pro.umd.js ] || \
-        [ ! -f public/klinecharts-pro/klinecharts-pro.css ] || \
-        [ ! -f public/klinecharts-pro/klinecharts.js ]; then \
-        echo "ERROR: Required klinecharts-pro files missing" && \
-        echo "Checking public/klinecharts-pro/ directory:" && \
-        ls -la public/klinecharts-pro/ && \
+RUN if [ ! -f public/klinecharts/klinecharts.min.js ]; then \
+        echo "ERROR: Required klinecharts files missing" && \
+        echo "Checking public/klinecharts/ directory:" && \
+        ls -la public/klinecharts/ && \
         exit 1; \
     else \
-        echo "✓ All klinecharts-pro files are present:" && \
-        ls -lh public/klinecharts-pro/ && \
+        echo "✓ All klinecharts files are present:" && \
+        ls -lh public/klinecharts/ && \
         echo ""; \
     fi
 

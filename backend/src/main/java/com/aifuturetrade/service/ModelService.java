@@ -1,0 +1,296 @@
+package com.aifuturetrade.service;
+
+import com.aifuturetrade.service.dto.ModelDTO;
+import com.aifuturetrade.common.util.PageResult;
+import com.aifuturetrade.common.util.PageRequest;
+
+import java.util.List;
+import java.util.Map;
+
+/**
+ * 业务逻辑接口：交易模型
+ */
+public interface ModelService {
+
+    /**
+     * 查询所有交易模型
+     * @return 交易模型列表
+     */
+    List<ModelDTO> getAllModels();
+
+    /**
+     * 根据ID查询交易模型
+     * @param id 模型ID（UUID格式）
+     * @return 交易模型
+     */
+    ModelDTO getModelById(String id);
+
+    /**
+     * 添加交易模型
+     * @param modelDTO 交易模型信息
+     * @return 新增的交易模型
+     */
+    ModelDTO addModel(ModelDTO modelDTO);
+
+    /**
+     * 更新交易模型
+     * @param modelDTO 交易模型信息
+     * @return 更新后的交易模型
+     */
+    ModelDTO updateModel(ModelDTO modelDTO);
+
+    /**
+     * 删除交易模型
+     * @param id 模型ID（UUID格式）
+     * @return 是否删除成功
+     */
+    Boolean deleteModel(String id);
+
+    /**
+     * 分页查询交易模型
+     * @param pageRequest 分页请求
+     * @return 分页查询结果
+     */
+    PageResult<ModelDTO> getModelsByPage(PageRequest pageRequest);
+
+    /**
+     * 检查模型是否启用自动买入
+     * @param modelId 模型ID（UUID格式）
+     * @return 1：启用，0：未启用
+     */
+    Boolean isModelAutoBuyEnabled(String modelId);
+
+    /**
+     * 检查模型是否启用自动卖出
+     * @param modelId 模型ID（UUID格式）
+     * @return 1：启用，0：未启用
+     */
+    Boolean isModelAutoSellEnabled(String modelId);
+
+    /**
+     * 获取模型的投资组合数据
+     * @param modelId 模型ID（UUID格式）
+     * @return 投资组合数据
+     */
+    Map<String, Object> getPortfolio(String modelId);
+
+    /**
+     * 根据时间范围获取模型的账户价值历史
+     * @param modelId 模型ID（UUID格式）
+     * @param startTime 开始时间（可选，ISO格式字符串，如 "2024-01-01T00:00:00"）
+     * @param endTime 结束时间（可选，ISO格式字符串，如 "2024-01-31T23:59:59"）
+     * @return 账户价值历史记录列表
+     */
+    List<Map<String, Object>> getAccountValueHistory(String modelId, String startTime, String endTime);
+
+    /**
+     * 获取模型的持仓合约symbol列表
+     * @param modelId 模型ID（UUID格式）
+     * @return 持仓合约symbol列表
+     */
+    Map<String, Object> getModelPortfolioSymbols(String modelId);
+
+    /**
+     * 获取模型的交易历史记录（分页）
+     * @param modelId 模型ID（UUID格式）
+     * @param pageRequest 分页请求参数
+     * @return 分页的交易历史记录
+     */
+    PageResult<Map<String, Object>> getTradesByPage(String modelId, PageRequest pageRequest);
+    
+    /**
+     * 获取模型的交易历史记录（保留旧方法以兼容）
+     * @param modelId 模型ID（UUID格式）
+     * @param limit 限制数量
+     * @return 交易历史记录
+     */
+    List<Map<String, Object>> getTrades(String modelId, Integer limit);
+
+    /**
+     * 获取模型的对话历史记录
+     * @param modelId 模型ID（UUID格式）
+     * @param limit 限制数量
+     * @return 对话历史记录
+     */
+    List<Map<String, Object>> getConversations(String modelId, Integer limit);
+
+    /**
+     * 获取模型的提示词配置
+     * @param modelId 模型ID（UUID格式）
+     * @return 提示词配置
+     */
+    Map<String, Object> getModelPrompts(String modelId);
+
+    /**
+     * 更新模型的提示词配置
+     * @param modelId 模型ID（UUID格式）
+     * @param buyPrompt 买入提示词
+     * @param sellPrompt 卖出提示词
+     * @return 更新结果
+     */
+    Map<String, Object> updateModelPrompts(String modelId, String buyPrompt, String sellPrompt);
+
+    /**
+     * 更新模型的批次配置
+     * @param modelId 模型ID（UUID格式）
+     * @param batchConfig 批次配置
+     * @return 更新结果
+     */
+    Map<String, Object> updateModelBatchConfig(String modelId, Map<String, Object> batchConfig);
+
+    /**
+     * 更新模型的最大持仓数量
+     * @param modelId 模型ID（UUID格式）
+     * @param maxPositions 最大持仓数量
+     * @return 更新结果
+     */
+    Map<String, Object> updateModelMaxPositions(String modelId, Integer maxPositions);
+
+    /**
+     * 更新模型的杠杆倍数
+     * @param modelId 模型ID（UUID格式）
+     * @param leverage 杠杆倍数
+     * @return 更新结果
+     */
+    Map<String, Object> updateModelLeverage(String modelId, Integer leverage);
+
+    /**
+     * 更新模型的自动平仓百分比
+     * @param modelId 模型ID（UUID格式）
+     * @param autoClosePercent 自动平仓百分比（0-100，null表示不启用）
+     * @return 更新结果
+     */
+    Map<String, Object> updateModelAutoClosePercent(String modelId, Double autoClosePercent);
+
+    /**
+     * 更新模型的每日成交量过滤阈值（千万单位）
+     * @param modelId 模型ID（UUID格式）
+     * @param baseVolume 每日成交量过滤阈值（千万单位，null表示不过滤）
+     * @return 更新结果
+     */
+    Map<String, Object> updateModelBaseVolume(String modelId, Double baseVolume);
+
+    /**
+     * 更新模型的目标每日收益率（百分比）
+     * @param modelId 模型ID（UUID格式）
+     * @param dailyReturn 目标每日收益率（百分比，null表示不限制）
+     * @return 更新结果
+     */
+    Map<String, Object> updateModelDailyReturn(String modelId, Double dailyReturn);
+
+    /**
+     * 更新模型的连续亏损次数阈值
+     * @param modelId 模型ID（UUID格式）
+     * @param lossesNum 连续亏损次数阈值（null表示不限制）
+     * @return 更新结果
+     */
+    Map<String, Object> updateModelLossesNum(String modelId, Integer lossesNum);
+
+    /**
+     * 更新模型的禁止买入时间段（小时，UTC+8）
+     * @param modelId 模型ID（UUID格式）
+     * @param forbidBuyStart 禁止买入开始小时（0-23，null表示不限制）
+     * @param forbidBuyEnd 禁止买入结束小时（1-24，null表示不限制）
+     * @return 更新结果
+     */
+    Map<String, Object> updateModelForbidBuyTime(String modelId, String forbidBuyStart, String forbidBuyEnd);
+
+    /**
+     * 更新模型的同币种最小买入间隔（分钟）
+     * @param modelId 模型ID（UUID格式）
+     * @param sameSymbolInterval 同币种最小买入间隔（分钟），null表示不过滤
+     * @return 更新结果
+     */
+    Map<String, Object> updateModelSameSymbolInterval(String modelId, Integer sameSymbolInterval);
+
+    /**
+     * 更新模型的API提供方和模型名称
+     * @param modelId 模型ID（UUID格式）
+     * @param providerId 新的API提供方ID（UUID格式）
+     * @param modelName 新的模型名称
+     * @return 更新结果
+     */
+    Map<String, Object> updateModelProvider(String modelId, String providerId, String modelName);
+
+    /**
+     * 设置模型的自动交易开关
+     * @param modelId 模型ID（UUID格式）
+     * @param autoBuyEnabled 是否启用自动买入
+     * @param autoSellEnabled 是否启用自动卖出
+     * @return 更新结果
+     */
+    Map<String, Object> setModelAutoTrading(String modelId, Boolean autoBuyEnabled, Boolean autoSellEnabled);
+
+    /**
+     * 获取聚合投资组合数据（所有模型）
+     * @return 聚合投资组合数据
+     */
+    Map<String, Object> getAggregatedPortfolio();
+
+    /**
+     * 手动执行一次交易周期（同时执行买入和卖出）
+     * @param modelId 模型ID（UUID格式）
+     * @return 交易执行结果
+     */
+    Map<String, Object> executeTrading(String modelId);
+
+    /**
+     * 手动执行一次买入交易周期
+     * @param modelId 模型ID（UUID格式）
+     * @return 买入交易执行结果
+     */
+    Map<String, Object> executeBuyTrading(String modelId);
+
+    /**
+     * 手动执行一次卖出交易周期
+     * @param modelId 模型ID（UUID格式）
+     * @return 卖出交易执行结果
+     */
+    Map<String, Object> executeSellTrading(String modelId);
+
+    /**
+     * 禁用模型的自动买入功能
+     * @param modelId 模型ID（UUID格式）
+     * @return 更新后的自动买入状态
+     */
+    Map<String, Object> disableBuyTrading(String modelId);
+
+    /**
+     * 禁用模型的自动卖出功能
+     * @param modelId 模型ID（UUID格式）
+     * @return 更新后的自动卖出状态
+     */
+    Map<String, Object> disableSellTrading(String modelId);
+
+    /**
+     * 获取模型的交易数据分析（按策略名称分组统计）
+     * @param modelId 模型ID（UUID格式）
+     * @return 策略分析数据列表，每个元素包含：strategy_name（策略名称/模型信息）、trade_count（交易次数）、
+     *         win_rate（胜率）、avg_profit（平均盈利）、avg_loss（平均亏损）、profit_loss_ratio（盈亏比）
+     */
+    List<Map<String, Object>> getModelAnalysis(String modelId);
+
+    /**
+     * 获取所有模型的交易数据分析（按模型ID和策略名称分组统计）
+     * @return 所有模型的分析数据列表，每个元素包含：model_id（模型ID）、model_name（模型名称）、
+     *         strategy_name（策略名称/模型信息）、trade_count（交易次数）、win_rate（胜率）、
+     *         avg_profit（平均盈利）、avg_loss（平均亏损）、profit_loss_ratio（盈亏比）
+     */
+    List<Map<String, Object>> getAllModelsAnalysis();
+
+    /**
+     * 获取模型的每日收益率
+     * 
+     * 计算逻辑：
+     * 1. 从account_values_daily表查询当前模型的当日账户总值（当日为早8点到下一天的早8点）
+     * 2. 与当前的账户总值（portfolio.total_value）做比较计算每日收益率
+     * 3. 如果account_values_daily表中没有一条当前model的数据，则使用models表对应的initial_capital初始资金作为当日账户总值
+     * 4. 如果account_values_daily查不到当日的balance账户总值信息，则返回null（前端显示为--）
+     * 
+     * @param modelId 模型ID（UUID格式）
+     * @param currentTotalValue 当前账户总值（从portfolio获取）
+     * @return 每日收益率（百分比），如果无法计算则返回null
+     */
+    Double getDailyReturnRate(String modelId, Double currentTotalValue);
+
+}
