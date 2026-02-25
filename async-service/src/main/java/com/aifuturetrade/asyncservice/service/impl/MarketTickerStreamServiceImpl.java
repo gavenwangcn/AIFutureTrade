@@ -150,7 +150,7 @@ public class MarketTickerStreamServiceImpl implements MarketTickerStreamService 
             if (msg != null && (msg.contains("Container being shut down") ||
                                msg.contains("Session Closed") ||
                                msg.contains("is not started"))) {
-                log.debug("[MarketTickerStreamService] 检测到正常关闭事件，不触发重连: {}", msg);
+                log.info("[MarketTickerStreamService] 检测到正常关闭事件，不触发重连: {}", msg);
                 return;
             }
         }
