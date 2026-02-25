@@ -3,6 +3,7 @@
     :visible="visible"
     title="交易模型数据分析"
     large
+    width="960px"
     @update:visible="$emit('update:visible', $event)"
     @close="handleClose"
   >
