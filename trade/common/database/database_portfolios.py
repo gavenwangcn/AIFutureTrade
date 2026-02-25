@@ -583,10 +583,10 @@ class PortfoliosDatabase:
                 WHERE symbol = '{normalized_symbol}' AND position_amt != 0
             """)
             if remaining_rows and remaining_rows[0][0] == 0:
-                # Delete record from futures table (use MySQL DELETE FROM syntax)
-                delete_futures_sql = f"DELETE FROM {self.futures_table} WHERE symbol = '{normalized_symbol}'"
-                logger.debug(f"[Portfolios] Executing SQL: {delete_futures_sql}")
-                self.command(delete_futures_sql)
+                # Note: Auto-cleanup of futures table is disabled to preserve symbol configurations
+                # Previously would delete: DELETE FROM futures WHERE symbol = '{normalized_symbol}'
+                logger.debug(f"[Portfolios] All positions closed for {normalized_symbol}, but keeping futures table record")
+                pass
         except Exception as e:
             logger.error(f"[Portfolios] Failed to close position: model_id={model_id}, symbol={symbol}, position_side={position_side}, error_type={type(e).__name__}, error={e}")
             raise
