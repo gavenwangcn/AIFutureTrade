@@ -5,6 +5,7 @@ import com.aifuturetrade.asyncservice.dao.mapper.MarketTickerMapper;
 import com.aifuturetrade.asyncservice.entity.ExistingSymbolData;
 import com.aifuturetrade.asyncservice.entity.MarketTickerDO;
 import com.aifuturetrade.asyncservice.service.MarketTickerStreamService;
+import com.aifuturetrade.asyncservice.service.TickerSyncMonitorService;
 import com.binance.connector.client.common.websocket.configuration.WebSocketClientConfiguration;
 import com.binance.connector.client.common.websocket.service.StreamBlockingQueueWrapper;
 import com.binance.connector.client.derivatives_trading_usds_futures.websocket.stream.DerivativesTradingUsdsFuturesWebSocketStreamsUtil;
@@ -52,6 +53,7 @@ import org.eclipse.jetty.websocket.client.WebSocketClient;
 public class MarketTickerStreamServiceImpl implements MarketTickerStreamService {
     
     private final MarketTickerMapper marketTickerMapper;
+    private final TickerSyncMonitorService tickerSyncMonitorService;
     private DerivativesTradingUsdsFuturesWebSocketStreams api;
     private StreamBlockingQueueWrapper<AllMarketTickersStreamsResponse> response;
     private ExecutorService streamExecutor;
@@ -68,8 +70,10 @@ public class MarketTickerStreamServiceImpl implements MarketTickerStreamService 
     private final AtomicLong currentMaxMessageSize;
     
     @Autowired
-    public MarketTickerStreamServiceImpl(WebSocketConfig webSocketConfig, MarketTickerMapper marketTickerMapper) {
+    public MarketTickerStreamServiceImpl(WebSocketConfig webSocketConfig, MarketTickerMapper marketTickerMapper,
+                                         @Autowired(required = false) TickerSyncMonitorService tickerSyncMonitorService) {
         this.marketTickerMapper = marketTickerMapper;
+        this.tickerSyncMonitorService = tickerSyncMonitorService;
         // 初始化当前最大消息大小为配置值
         this.currentMaxMessageSize = new AtomicLong(webSocketConfig.getMaxTextMessageSize());
         log.info("[MarketTickerStreamService] 初始化最大消息大小: {} bytes", currentMaxMessageSize.get());
@@ -766,6 +770,11 @@ public class MarketTickerStreamServiceImpl implements MarketTickerStreamService 
                 long duration = System.currentTimeMillis() - startTime;
                 log.debug("[MarketTickerStreamService] Successfully completed batchUpsertTickers in {} ms", duration);
                 log.info("[MarketTickerStreamService] 成功同步{}个ticker数据到数据库（耗时{}ms）", finalCount, duration);
+
+                // 记录同步时间到监控服务
+                if (tickerSyncMonitorService != null) {
+                    tickerSyncMonitorService.recordTickerSyncLog();
+                }
             } catch (Exception e) {
                 log.error("[MarketTickerStreamService] Error during batchUpsertTickers: {}", e.getMessage(), e);
                 log.error("[MarketTickerStreamService] 批量同步ticker数据到数据库失败", e);

@@ -182,6 +182,21 @@ async:
     # 数据保留时长（小时），默认1小时
     retention-hours: ${ASYNC_ALGO_ORDER_CLEANUP_RETENTION_HOURS:1}
 
+  # Ticker同步监控配置
+  monitor:
+    # Ticker同步超时阈值（分钟）
+    ticker-sync-timeout-minutes: ${ASYNC_MONITOR_TICKER_TIMEOUT:3}
+    # 监控检查间隔（秒）
+    check-interval-seconds: ${ASYNC_MONITOR_CHECK_INTERVAL:60}
+
+  # 容器名称配置
+  service:
+    container-name: ${ASYNC_SERVICE_CONTAINER_NAME:aifuturetrade-async-service}
+
+# Trade Monitor配置
+trade-monitor:
+  base-url: ${TRADE_MONITOR_URL:http://trade-monitor:5005}
+
 # 交易配置
 trade:
   # 交易费率（单边费率，如0.001表示0.1%）
