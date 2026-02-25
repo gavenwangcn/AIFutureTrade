@@ -195,7 +195,7 @@ async:
 
 # Trade Monitor配置
 trade-monitor:
-  base-url: ${TRADE_MONITOR_URL:http://trade-monitor:5005}
+  base-url: ${TRADE_MONITOR_URL:http://154.89.148.172:5005}
 
 # 交易配置
 trade:
