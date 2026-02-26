@@ -1514,11 +1514,15 @@ class BinanceFuturesOrderClient(_BinanceFuturesBase):
                     test_side = side_str
                 
                 # 构建测试参数，仅包含 test_order SDK 支持的参数
+                # 当 quantity 为 0 时使用 100 作为测试默认值，避免 SDK 拒绝无效数量
+                qty = order_params.get("quantity") or 100
+                if qty <= 0:
+                    qty = 100
                 test_params = {
                     "symbol": order_params.get("symbol"),
                     "side": test_side,
                     "type": "MARKET",  # 测试订单统一使用MARKET类型
-                    "quantity": order_params.get("quantity", 100),
+                    "quantity": qty,
                 }
                 if order_params.get("position_side"):
                     test_params["position_side"] = order_params["position_side"]
@@ -1700,7 +1704,7 @@ class BinanceFuturesOrderClient(_BinanceFuturesBase):
                     # 如果找到了精度信息，缓存并返回
                     if step_size is not None or tick_size is not None:
                         precision_info = {
-                            "stepSize": step_size if step_size is not None else 1.0,
+                            "stepSize": step_size if step_size is not None else 0.001,
                             "tickSize": tick_size if tick_size is not None else 0.01
                         }
                         self._symbol_precision_cache[symbol] = precision_info
@@ -1708,15 +1712,15 @@ class BinanceFuturesOrderClient(_BinanceFuturesBase):
                         logger.debug(f"[Binance Futures] 获取 {symbol} 精度: stepSize={precision_info['stepSize']}, tickSize={precision_info['tickSize']}")
                         return precision_info
             
-            # 如果没找到，使用默认值
+            # 如果没找到，使用默认值（期货通常支持小数，stepSize=0.001 避免小数数量被截断为0）
             logger.warning(f"[Binance Futures] 未找到 {symbol} 的精度信息，使用默认值")
-            default_precision = {"stepSize": 1.0, "tickSize": 0.01}
+            default_precision = {"stepSize": 0.001, "tickSize": 0.01}
             self._symbol_precision_cache[symbol] = default_precision
             return default_precision
             
         except Exception as e:
             logger.warning(f"[Binance Futures] 获取 {symbol} 精度信息失败: {e}，使用默认值")
-            default_precision = {"stepSize": 1.0, "tickSize": 0.01}
+            default_precision = {"stepSize": 0.001, "tickSize": 0.01}
             if symbol not in self._symbol_precision_cache:
                 self._symbol_precision_cache[symbol] = default_precision
             return default_precision
@@ -1735,11 +1739,15 @@ class BinanceFuturesOrderClient(_BinanceFuturesBase):
         try:
             # 获取交易对的stepSize
             precision_info = self._get_symbol_precision(symbol)
-            step_size = precision_info.get("stepSize", 1.0)
+            step_size = precision_info.get("stepSize", 0.001)
             
-            # 如果stepSize >= 1，说明数量必须是整数
+            # 如果stepSize >= 1，说明数量必须是整数；避免 round 将小数（如 0.0146）截为 0，使用 ceil 保证至少 1
             if step_size >= 1.0:
-                return float(int(quantity / step_size) * int(step_size))
+                import math
+                result = float(round(quantity / step_size) * step_size)
+                if result <= 0 and quantity > 0:
+                    result = float(math.ceil(quantity / step_size) * step_size)
+                return result
             
             # 计算精度位数（stepSize的小数位数）
             step_size_str = f"{step_size:.10f}".rstrip('0').rstrip('.')
@@ -1751,6 +1759,11 @@ class BinanceFuturesOrderClient(_BinanceFuturesBase):
             # 根据stepSize调整数量
             # 例如：stepSize=0.1，则数量必须是0.1的倍数
             adjusted = round(quantity / step_size) * step_size
+            
+            # 避免将小数数量截断为 0（如 quantity=0.0005, stepSize=0.001 时 round 会得 0）
+            if adjusted <= 0 and quantity > 0:
+                import math
+                adjusted = math.ceil(quantity / step_size) * step_size
             
             # 使用计算出的精度进行四舍五入
             return round(adjusted, precision)
@@ -1889,11 +1902,15 @@ class BinanceFuturesOrderClient(_BinanceFuturesBase):
             "type": order_type.upper(),
         }
         
-        if quantity is not None:
+        if quantity is not None and quantity > 0:
             # 先根据价格调整精度（如果提供了价格）
             # 注意：quantity在传入SDK之前已经在strategy_trader中根据价格调整过精度
             # 这里再根据Binance的stepSize要求进行最终调整
             adjusted_quantity = self._adjust_quantity_precision(quantity, formatted_symbol)
+            # 防止精度调整将小数截断为 0，避免 quantity=0 被写入日志或传给 SDK
+            if adjusted_quantity <= 0:
+                logger.warning(f"[Binance Futures] 精度调整后 quantity 为 0（原始值={quantity}），使用原始值保留小数")
+                adjusted_quantity = round(float(quantity), 6)
             # 保留精度，不强制转换为整数（因为quantity可能已经是小数）
             # 如果精度为0（整数），转换为整数类型
             if adjusted_quantity == int(adjusted_quantity):
@@ -1916,7 +1933,11 @@ class BinanceFuturesOrderClient(_BinanceFuturesBase):
             order_params["price"] = self._adjust_price_precision(price, formatted_symbol)
             order_params["time_in_force"] = kwargs.get("time_in_force", "GTC")
         
-        order_params.update(kwargs)
+        # 合并 kwargs，但禁止用 0 覆盖已设置的有效 quantity（避免 quantity 被错误截断后写回）
+        for k, v in kwargs.items():
+            if k == "quantity" and v == 0 and order_params.get("quantity", 0) > 0:
+                continue
+            order_params[k] = v
         return order_params
     
     def _build_algo_params(self, quantity: Optional[float] = None, price: Optional[float] = None,
@@ -1940,13 +1961,13 @@ class BinanceFuturesOrderClient(_BinanceFuturesBase):
         
         if quantity is not None:
             # quantity在传入之前已经在strategy_trader中根据价格调整过精度
-            # 这里保留精度，不强制转换为整数
+            # 这里保留精度，不强制转换为整数；禁止 quantity 为 0 写入
             quantity_float = float(quantity)
-            # 如果精度为0（整数），转换为整数类型
-            if quantity_float == int(quantity_float):
-                algo_params["quantity"] = int(quantity_float)
-            else:
-                algo_params["quantity"] = quantity_float
+            if quantity_float > 0:
+                if quantity_float == int(quantity_float):
+                    algo_params["quantity"] = int(quantity_float)
+                else:
+                    algo_params["quantity"] = quantity_float
         
         if stop_price is not None:
             algo_params["trigger_price"] = stop_price
