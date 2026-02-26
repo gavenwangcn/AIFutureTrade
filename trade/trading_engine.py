@@ -1542,7 +1542,7 @@ class TradingEngine:
 
             # 调用SDK获取账户信息
             logger.info(f"[Model {self.model_id}] 开始从币安SDK获取账户信息, account_alias={account_alias}")
-            account_info = account_client.getAccount()
+            account_info = json.loads(account_client.get_account())
 
             if not account_info:
                 logger.error(f"[Model {self.model_id}] SDK返回的账户信息为空")
