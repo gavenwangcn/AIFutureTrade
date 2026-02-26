@@ -39,7 +39,7 @@
 - **典型错误**：在条件判断中使用变量，但该变量的赋值语句写在了后面。例如：
   ```python
   # ❌ 错误：condition2 使用了 ema20_prev，但 ema20_prev 的赋值在下一行
-  condition2_long = (ema20 > ema30 and ema20_prev <= ema30_prev) and ...
+  condition2_long = (ema20 >= ema30 and ema20_prev <= ema30_prev) and ...
   ema20_prev = prev_indicators.get('ema', {}).get('ema20')
   ema30_prev = prev_indicators.get('ema', {}).get('ema30')
   ```
@@ -48,7 +48,7 @@
   # ✅ 正确：先定义 ema20_prev、ema30_prev，再在 condition2 中使用
   ema20_prev = prev_indicators.get('ema', {}).get('ema20')
   ema30_prev = prev_indicators.get('ema', {}).get('ema30')
-  condition2_long = (ema20 > ema30 and ema20_prev is not None and ema30_prev is not None and ema20_prev <= ema30_prev) and ...
+  condition2_long = (ema20 >= ema30 and ema20_prev is not None and ema30_prev is not None and ema20_prev <= ema30_prev) and ...
   ```
 - 当多个条件分支共用同一批变量时，**务必在第一个使用它们的条件之前完成所有变量的定义**。
 
@@ -590,6 +590,9 @@ mavol60 = vol_data.get('mavol60')  # 可能为None
 ```
 
 **金叉和死叉判断（必须检查空值）：**
+- **⚠️⚠️⚠️ 必须使用等于判断（极其重要）**：金叉和死叉的**当前K线和前一根K线**两侧比较**都必须**使用 `>=` 和 `<=`（含等于），**禁止**使用 `>` 和 `<`（不含等于）。否则会漏掉"相切"形态的交叉信号。
+  - ❌ 错误示例：`ema20_latest <= ema30_latest and ema20_prev > ema30_prev`（前一根用了 `>`，漏掉等于情况）
+  - ✅ 正确示例：`ema20_latest <= ema30_latest and ema20_prev >= ema30_prev`（两侧都用 `<=`/`>=`）
 - **金叉**：快速均线上穿慢速均线，适合开多单
   ```python
   # 获取当前K线和前一根K线的MA值
@@ -607,7 +610,7 @@ mavol60 = vol_data.get('mavol60')  # 可能为None
       self.log.warning(f"{symbol} MA指标值不足，无法判断金叉，跳过")
       continue  # 或使用其他逻辑
 
-  # 判断金叉：当前MA5 >= MA20 且 前一根MA5 <= MA20
+  # 判断金叉：当前MA5 >= MA20 且 前一根MA5 <= MA20（两侧都必须用 >= 和 <=，含等于）
   is_golden_cross = ma5_current >= ma20_current and ma5_prev <= ma20_prev
   ```
 - **死叉**：快速均线下穿慢速均线，适合开空单
@@ -617,7 +620,7 @@ mavol60 = vol_data.get('mavol60')  # 可能为None
       self.log.warning(f"{symbol} MA指标值不足，无法判断死叉，跳过")
       continue  # 或使用其他逻辑
 
-  # 判断死叉：当前MA5 <= MA20 且 前一根MA5 >= MA20
+  # 判断死叉：当前MA5 <= MA20 且 前一根MA5 >= MA20（两侧都必须用 <= 和 >=，含等于）
   is_death_cross = ma5_current <= ma20_current and ma5_prev >= ma20_prev
   ```
 

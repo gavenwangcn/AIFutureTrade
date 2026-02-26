@@ -50,8 +50,8 @@
       <!-- 微信群列表 -->
       <div class="wechat-group-list-section">
         <div v-if="loading" class="loading-container">
-          <i class="bi bi-arrow-repeat spin" style="font-size: 24px; color: var(--primary-color);"></i>
-          <p style="margin-top: 12px; color: var(--text-secondary);">加载中...</p>
+          <i class="bi bi-arrow-repeat spin" style="font-size: 24px; color: var(--primary);"></i>
+          <p style="margin-top: 12px; color: var(--text-2);">加载中...</p>
         </div>
         <div v-else class="wechat-group-table-container">
           <table class="data-table">
@@ -139,7 +139,7 @@
 
     <!-- 查看详情弹框 -->
     <div v-if="showViewModal" class="modal-overlay" @click.self="closeViewModal">
-      <div class="modal-content view-modal">
+      <div class="modal-content wechat-view-modal">
         <div class="modal-header">
           <h3>微信群详情</h3>
           <button class="btn-close" @click="closeViewModal">
@@ -373,95 +373,52 @@ function formatDateTime(dateTime) {
 .wechat-group-management-container {
   display: flex;
   flex-direction: column;
-  gap: 20px;
+  gap: 24px;
+  height: 100%;
 }
 
 .search-section {
   display: flex;
   justify-content: space-between;
   align-items: flex-start;
-  gap: 20px;
-  padding: 20px;
-  background: var(--card-bg);
-  border-radius: 8px;
-  border: 1px solid var(--border-color);
+  gap: 16px;
+  padding: 16px;
+  background: var(--bg-2);
+  border-radius: var(--radius);
 }
 
 .search-form {
   display: flex;
-  gap: 12px;
-  flex-wrap: wrap;
+  gap: 16px;
   flex: 1;
+  align-items: flex-end;
 }
 
-.form-group {
+.search-form .form-group {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 8px;
+  min-width: 150px;
 }
 
-.form-group label {
+.search-form .form-group label {
   font-size: 13px;
-  color: var(--text-secondary);
+  color: var(--text-2);
   font-weight: 500;
-}
-
-.form-input {
-  padding: 8px 12px;
-  border: 1px solid var(--border-color);
-  border-radius: 6px;
-  background: var(--input-bg);
-  color: var(--text-primary);
-  font-size: 14px;
-  min-width: 180px;
 }
 
 .action-section {
   display: flex;
-  gap: 10px;
-}
-
-.btn-primary, .btn-secondary {
-  padding: 8px 16px;
-  border-radius: 6px;
-  font-size: 14px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: all 0.2s;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  border: none;
-}
-
-.btn-primary {
-  background: var(--primary-color);
-  color: white;
-}
-
-.btn-primary:hover:not(:disabled) {
-  background: var(--primary-hover);
-}
-
-.btn-secondary {
-  background: var(--secondary-bg);
-  color: var(--text-primary);
-  border: 1px solid var(--border-color);
-}
-
-.btn-secondary:hover:not(:disabled) {
-  background: var(--hover-bg);
-}
-
-.btn-primary:disabled, .btn-secondary:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
+  gap: 8px;
 }
 
 .wechat-group-list-section {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
+  flex: 1;
+  overflow: auto;
+}
+
+.wechat-group-table-container {
+  overflow-x: auto;
 }
 
 .loading-container {
@@ -469,42 +426,11 @@ function formatDateTime(dateTime) {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  padding: 60px 20px;
-}
-
-.data-table {
-  width: 100%;
-  border-collapse: collapse;
-  background: var(--card-bg);
-  border-radius: 8px;
-  overflow: hidden;
-}
-
-.data-table thead {
-  background: var(--secondary-bg);
-}
-
-.data-table th {
-  padding: 12px 16px;
-  text-align: left;
-  font-weight: 600;
-  font-size: 13px;
-  color: var(--text-secondary);
-  border-bottom: 1px solid var(--border-color);
-}
-
-.data-table td {
-  padding: 12px 16px;
-  border-bottom: 1px solid var(--border-color);
-  font-size: 14px;
-}
-
-.data-table tbody tr:hover {
-  background: var(--hover-bg);
+  padding: 40px;
 }
 
 .text-truncate {
-  max-width: 300px;
+  max-width: 200px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -523,60 +449,60 @@ function formatDateTime(dateTime) {
 }
 
 .badge-secondary {
-  background: var(--secondary-bg);
-  color: var(--text-secondary);
+  background: var(--bg-2);
+  color: var(--text-2);
 }
 
 .btn-icon {
-  padding: 6px 8px;
   background: transparent;
   border: none;
+  color: var(--text-2);
   cursor: pointer;
-  color: var(--text-secondary);
-  border-radius: 4px;
+  padding: 4px 8px;
+  border-radius: var(--radius);
   transition: all 0.2s;
 }
 
 .btn-icon:hover {
-  background: var(--hover-bg);
-  color: var(--primary-color);
+  background: var(--bg-2);
+  color: var(--primary);
 }
 
 .btn-icon.btn-danger:hover {
-  color: #ef4444;
+  color: #dc3545;
 }
 
 .empty-state {
   text-align: center;
   padding: 40px 20px;
-  color: var(--text-secondary);
+  color: var(--text-2);
+  font-size: 14px;
 }
 
 .pagination-section {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 16px 20px;
-  background: var(--card-bg);
-  border-radius: 8px;
-  border: 1px solid var(--border-color);
+  padding: 16px;
+  margin-top: 16px;
+  border-top: 1px solid var(--border-1);
 }
 
 .pagination-info {
+  color: var(--text-2);
   font-size: 14px;
-  color: var(--text-secondary);
 }
 
 .pagination-controls {
   display: flex;
-  align-items: center;
   gap: 12px;
+  align-items: center;
 }
 
 .page-info {
+  padding: 0 12px;
+  color: var(--text-2);
   font-size: 14px;
-  color: var(--text-primary);
-  font-weight: 500;
 }
 
 .modal-overlay {
@@ -589,25 +515,24 @@ function formatDateTime(dateTime) {
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 2000;
+  z-index: 1000;
 }
 
-.modal-content {
-  background: var(--card-bg);
-  border-radius: 12px;
-  max-width: 600px;
+.wechat-view-modal {
+  background: var(--bg-1);
+  border-radius: var(--radius);
   width: 90%;
-  max-height: 80vh;
-  overflow-y: auto;
-  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+  max-width: 600px;
+  max-height: 90vh;
+  overflow: auto;
 }
 
 .modal-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 20px 24px;
-  border-bottom: 1px solid var(--border-color);
+  padding: 20px;
+  border-bottom: 1px solid var(--border-1);
 }
 
 .modal-header h3 {
@@ -620,19 +545,19 @@ function formatDateTime(dateTime) {
   background: transparent;
   border: none;
   cursor: pointer;
-  color: var(--text-secondary);
+  color: var(--text-2);
   padding: 4px;
-  border-radius: 4px;
+  border-radius: var(--radius);
   transition: all 0.2s;
 }
 
 .btn-close:hover {
-  background: var(--hover-bg);
-  color: var(--text-primary);
+  background: var(--bg-2);
+  color: var(--primary);
 }
 
 .modal-body {
-  padding: 24px;
+  padding: 20px;
 }
 
 .detail-item {
@@ -646,14 +571,14 @@ function formatDateTime(dateTime) {
 .detail-item label {
   display: block;
   font-size: 13px;
-  color: var(--text-secondary);
+  color: var(--text-2);
   font-weight: 500;
   margin-bottom: 6px;
 }
 
 .detail-value {
   font-size: 14px;
-  color: var(--text-primary);
+  color: var(--text-1);
   word-break: break-all;
 }
 
@@ -661,8 +586,8 @@ function formatDateTime(dateTime) {
   display: flex;
   justify-content: flex-end;
   gap: 12px;
-  padding: 16px 24px;
-  border-top: 1px solid var(--border-color);
+  padding: 20px;
+  border-top: 1px solid var(--border-1);
 }
 
 .spin {

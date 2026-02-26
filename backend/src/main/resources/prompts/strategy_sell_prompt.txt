@@ -648,6 +648,9 @@ mavol60 = vol_data.get('mavol60', 0)
 ```
 
 **金叉和死叉判断：**
+- **⚠️⚠️⚠️ 必须使用等于判断（极其重要）**：金叉和死叉的**当前K线和前一根K线**两侧比较**都必须**使用 `>=` 和 `<=`（含等于），**禁止**使用 `>` 和 `<`（不含等于）。否则会漏掉"相切"形态的交叉信号。
+  - ❌ 错误示例：`ema20_latest <= ema30_latest and ema20_prev > ema30_prev`（前一根用了 `>`，漏掉等于情况）
+  - ✅ 正确示例：`ema20_latest <= ema30_latest and ema20_prev >= ema30_prev`（两侧都用 `<=`/`>=`）
 - **金叉**：快速均线上穿慢速均线
 - **死叉**：快速均线下穿慢速均线
 ```python
@@ -660,7 +663,7 @@ ma20_current = current_kline.get('indicators', {}).get('ma', {}).get('ma20', 0)
 ma5_prev = prev_kline.get('indicators', {}).get('ma', {}).get('ma5', 0)
 ma20_prev = prev_kline.get('indicators', {}).get('ma', {}).get('ma20', 0)
 
-# 判断金叉或死叉
+# 判断金叉或死叉（两侧都必须用 >= 和 <=，含等于，禁止用 > 和 <）
 is_golden_cross = ma5_current >= ma20_current and ma5_prev <= ma20_prev
 is_death_cross = ma5_current <= ma20_current and ma5_prev >= ma20_prev
 ```
@@ -674,9 +677,10 @@ is_death_cross = ma5_current <= ma20_current and ma5_prev >= ma20_prev
 ### 3. 技术指标数据获取方式（统一使用 market_state）
 
 **金叉和死叉判断（卖出策略）：**
+- **⚠️⚠️⚠️ 必须使用等于判断**：金叉和死叉的**当前K线和前一根K线**两侧比较**都必须**使用 `>=` 和 `<=`（含等于），**禁止**使用 `>` 和 `<`（不含等于）。否则会漏掉"相切"形态的交叉信号。
 - **金叉**：快速均线上穿慢速均线，对于多单持仓是利好信号（通常不平仓），对于空单持仓是平仓信号
 - **死叉**：快速均线下穿慢速均线，对于多单持仓是平仓信号，对于空单持仓是利好信号（通常不平仓）
-- 判断条件：`fast_ma_current >= slow_ma_current and fast_ma_prev <= slow_ma_prev`（金叉），`fast_ma_current <= slow_ma_current and fast_ma_prev >= slow_ma_prev`（死叉）
+- 判断条件（两侧都必须含等于）：`fast_ma_current >= slow_ma_current and fast_ma_prev <= slow_ma_prev`（金叉），`fast_ma_current <= slow_ma_current and fast_ma_prev >= slow_ma_prev`（死叉）
 - 示例：使用 MA5 和 MA20 判断，需要至少 21 根 K 线
 
 **技术指标计算注意事项：**

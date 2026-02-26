@@ -1,6 +1,6 @@
 <template>
   <div v-if="visible" class="modal-overlay" @click.self="handleClose">
-    <div class="modal-content">
+    <div class="modal-content wechat-group-form-modal">
       <div class="modal-header">
         <h3>{{ group ? '编辑微信群' : '添加微信群' }}</h3>
         <button class="btn-close" @click="handleClose">
@@ -236,25 +236,24 @@ function handleClose() {
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 2000;
+  z-index: 1000;
 }
 
-.modal-content {
-  background: var(--card-bg);
-  border-radius: 12px;
-  max-width: 600px;
+.wechat-group-form-modal {
+  background: var(--bg-1);
+  border-radius: var(--radius);
   width: 90%;
-  max-height: 80vh;
-  overflow-y: auto;
-  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+  max-width: 600px;
+  max-height: 90vh;
+  overflow: auto;
 }
 
 .modal-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 20px 24px;
-  border-bottom: 1px solid var(--border-color);
+  padding: 20px;
+  border-bottom: 1px solid var(--border-1);
 }
 
 .modal-header h3 {
@@ -267,32 +266,33 @@ function handleClose() {
   background: transparent;
   border: none;
   cursor: pointer;
-  color: var(--text-secondary);
+  color: var(--text-2);
   padding: 4px;
-  border-radius: 4px;
+  border-radius: var(--radius);
   transition: all 0.2s;
 }
 
 .btn-close:hover {
-  background: var(--hover-bg);
-  color: var(--text-primary);
+  background: var(--bg-2);
+  color: var(--primary);
 }
 
 .modal-body {
-  padding: 24px;
+  padding: 20px;
 }
 
 .alert {
-  padding: 12px 16px;
-  border-radius: 6px;
-  margin-bottom: 20px;
-  font-size: 14px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  margin-bottom: 18px;
+  font-size: 13px;
+  border: 1px solid transparent;
 }
 
 .alert-error {
-  background: rgba(239, 68, 68, 0.1);
-  color: #ef4444;
-  border: 1px solid rgba(239, 68, 68, 0.2);
+  background: rgba(245, 63, 63, 0.1);
+  color: var(--danger);
+  border-color: rgba(245, 63, 63, 0.3);
 }
 
 .form-group {
@@ -306,35 +306,55 @@ function handleClose() {
 .form-group label {
   display: block;
   font-size: 14px;
-  color: var(--text-primary);
+  color: var(--text-1);
   font-weight: 500;
   margin-bottom: 8px;
 }
 
 .required {
-  color: #ef4444;
+  color: #dc3545;
 }
 
-.form-input, .form-textarea {
+.form-input {
   width: 100%;
-  padding: 10px 12px;
-  border: 1px solid var(--border-color);
-  border-radius: 6px;
-  background: var(--input-bg);
-  color: var(--text-primary);
+  padding: 12px;
+  border: 1px solid var(--border-1);
+  border-radius: var(--radius);
+  font-size: 14px;
+  background: var(--bg-1);
+  color: var(--text-1);
+}
+
+.form-input:focus {
+  outline: none;
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px rgba(51, 112, 255, 0.1);
+}
+
+.form-textarea {
+  width: 100%;
+  padding: 12px;
+  border: 1px solid var(--border-1);
+  border-radius: var(--radius);
   font-size: 14px;
   font-family: inherit;
+  resize: vertical;
+  background: var(--bg-1);
+  color: var(--text-1);
 }
 
-.form-input:focus, .form-textarea:focus {
+.form-textarea:focus {
   outline: none;
-  border-color: var(--primary-color);
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px rgba(51, 112, 255, 0.1);
 }
 
 .form-hint {
-  margin-top: 6px;
+  display: block;
+  margin-top: 4px;
   font-size: 12px;
-  color: var(--text-secondary);
+  color: var(--text-2);
+  font-style: italic;
 }
 
 .checkbox-group {
@@ -349,7 +369,7 @@ function handleClose() {
   gap: 8px;
   cursor: pointer;
   font-size: 14px;
-  color: var(--text-primary);
+  color: var(--text-1);
 }
 
 .checkbox-item input[type="checkbox"] {
@@ -360,41 +380,7 @@ function handleClose() {
   display: flex;
   justify-content: flex-end;
   gap: 12px;
-  padding: 16px 24px;
-  border-top: 1px solid var(--border-color);
-}
-
-.btn-primary, .btn-secondary {
-  padding: 10px 20px;
-  border-radius: 6px;
-  font-size: 14px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: all 0.2s;
-  border: none;
-}
-
-.btn-primary {
-  background: var(--primary-color);
-  color: white;
-}
-
-.btn-primary:hover:not(:disabled) {
-  background: var(--primary-hover);
-}
-
-.btn-secondary {
-  background: var(--secondary-bg);
-  color: var(--text-primary);
-  border: 1px solid var(--border-color);
-}
-
-.btn-secondary:hover {
-  background: var(--hover-bg);
-}
-
-.btn-primary:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
+  padding: 20px;
+  border-top: 1px solid var(--border-1);
 }
 </style>
