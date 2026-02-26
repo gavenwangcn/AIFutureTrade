@@ -51,6 +51,29 @@ except ImportError as exc:  # pragma: no cover - handled at runtime
 logger = logging.getLogger(__name__)
 
 
+# 传入 SDK 时价格/数量等数值最多保留的小数位数（避免 "Precision is over the maximum" 错误）
+_SDK_PRICE_MAX_DECIMALS = 5
+
+# SDK 价格相关参数名（需格式化为最多5位小数）
+_SDK_PRICE_PARAM_KEYS = frozenset({
+    "price", "stop_price", "trigger_price", "activation_price", "activate_price", "callback_rate",
+})
+
+
+def _format_price_for_sdk(value: Any, max_decimals: int = _SDK_PRICE_MAX_DECIMALS) -> float:
+    """
+    将价格数值格式化为最多 max_decimals 位小数，避免浮点精度问题导致 API 报错。
+    调用 SDK 接口时，所有价格相关参数均应经此函数处理。
+    """
+    if value is None:
+        return 0.0
+    try:
+        v = float(value)
+        return float(f"{round(v, max_decimals):.{max_decimals}f}")
+    except (ValueError, TypeError):
+        return 0.0
+
+
 def _to_epoch_milli(ts: Any) -> int:
     """将时间戳统一为毫秒，支持 10 位（秒）或 13 位（毫秒），与 Java binance-service 一致。"""
     if ts is None:
@@ -1350,6 +1373,7 @@ class BinanceFuturesOrderClient(_BinanceFuturesBase):
     def _filter_params_for_sdk(params: Dict[str, Any], allowed_keys: frozenset) -> Dict[str, Any]:
         """
         按 SDK 入参要求过滤参数字典，仅保留白名单内的键，并统一参数命名。
+        价格相关参数统一格式化为最多5位小数，避免浮点精度导致 API 报错。
         
         Args:
             params: 原始参数字典
@@ -1372,6 +1396,8 @@ class BinanceFuturesOrderClient(_BinanceFuturesBase):
                 # close_position 等布尔值转成 API 期望的字符串
                 if actual_key in ("close_position", "price_protect", "reduce_only") and isinstance(v, bool):
                     result[actual_key] = "true" if v else "false"
+                elif actual_key in _SDK_PRICE_PARAM_KEYS and isinstance(v, (int, float)):
+                    result[actual_key] = _format_price_for_sdk(v)
                 else:
                     result[actual_key] = v
         return result
@@ -1940,13 +1966,14 @@ class BinanceFuturesOrderClient(_BinanceFuturesBase):
             order_params[k] = v
         return order_params
     
-    def _build_algo_params(self, quantity: Optional[float] = None, price: Optional[float] = None,
+    def _build_algo_params(self, formatted_symbol: str, quantity: Optional[float] = None, price: Optional[float] = None,
                           stop_price: Optional[float] = None, position_side: Optional[str] = None,
                           close_position: bool = False, **kwargs) -> Dict[str, Any]:
         """
         构建算法订单参数字典
         
         Args:
+            formatted_symbol: 格式化后的交易对符号，用于价格/数量精度调整
             quantity: 订单数量
             price: 订单价格
             stop_price: 触发价格
@@ -1970,13 +1997,15 @@ class BinanceFuturesOrderClient(_BinanceFuturesBase):
                     algo_params["quantity"] = quantity_float
         
         if stop_price is not None:
-            algo_params["trigger_price"] = stop_price
+            # trigger_price 需按 tickSize 调整精度，避免 "Precision is over the maximum" 错误
+            algo_params["trigger_price"] = self._adjust_price_precision(float(stop_price), formatted_symbol)
         
         if position_side:
             algo_params["position_side"] = position_side
         
         if price is not None:
-            algo_params["price"] = price
+            # price 需按 tickSize 调整精度
+            algo_params["price"] = self._adjust_price_precision(float(price), formatted_symbol)
             algo_params["time_in_force"] = kwargs.get("time_in_force", "GTC")
         
         if close_position:

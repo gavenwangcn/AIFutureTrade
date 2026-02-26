@@ -193,17 +193,21 @@ public class BinanceFuturesOrderServiceImpl implements BinanceFuturesOrderServic
 
             log.info("[BinanceFuturesOrderService] 获取实时价格成功: {}", currentPrice);
 
-            // 4. 计算反方向的positionSide
-            String oppositePositionSide = "LONG".equalsIgnoreCase(portfolio.getPositionSide()) ? "SHORT" : "LONG";
-            String signal = "LONG".equalsIgnoreCase(portfolio.getPositionSide()) ? "sell_to_long" : "sell_to_short";
+            // 4. 确定 SDK 调用参数：持仓方向传实际方向（为多传多、为空传空），side 统一为 SELL
+            // 平多(LONG): side=SELL, position_side=LONG
+            // 平空(SHORT): side=SELL, position_side=SHORT
+            String positionSide = portfolio.getPositionSide();
+            boolean isLong = "LONG".equalsIgnoreCase(positionSide);
+            String sdkSide = "SELL";
+            String sdkPositionSide = isLong ? "LONG" : "SHORT";
+            String signal = isLong ? "sell_to_long" : "sell_to_short";
 
-            log.info("[BinanceFuturesOrderService] 计算持仓方向: 原方向={}, 反方向={}, signal={}", 
-                    portfolio.getPositionSide(), oppositePositionSide, signal);
+            log.info("[BinanceFuturesOrderService] 计算平仓参数: 持仓方向={}, side={}, position_side={}, signal={}",
+                    positionSide, sdkSide, sdkPositionSide, signal);
 
             // 5. 计算盈亏和手续费
             Double entryPrice = portfolio.getAvgPrice();
             Double positionAmt = Math.abs(portfolio.getPositionAmt());
-            String positionSide = portfolio.getPositionSide();
             
             // 计算毛盈亏
             Double grossPnl;
@@ -257,10 +261,10 @@ public class BinanceFuturesOrderServiceImpl implements BinanceFuturesOrderServic
             
             Map<String, Object> orderParams = new HashMap<>();
             orderParams.put("symbol", formattedSymbol);
-            orderParams.put("side", "SELL");
+            orderParams.put("side", sdkSide);
             orderParams.put("quantity", positionAmt);
             orderParams.put("orderType", "MARKET");
-            orderParams.put("positionSide", oppositePositionSide);
+            orderParams.put("positionSide", sdkPositionSide);
             orderParams.put("testMode", useTestMode);
 
             log.info("[BinanceFuturesOrderService] 调用SDK执行卖出，交易模式: {} (is_virtual={}, {})", 
@@ -274,10 +278,10 @@ public class BinanceFuturesOrderServiceImpl implements BinanceFuturesOrderServic
             try {
                 sdkResponse = orderClient.marketTrade(
                         formattedSymbol,
-                        "SELL",
+                        sdkSide,
                         positionAmt,
                         "MARKET",
-                        oppositePositionSide,
+                        sdkPositionSide,
                         useTestMode
                 );
                 log.info("[BinanceFuturesOrderService] SDK调用成功: {}", sdkResponse);
@@ -382,20 +386,12 @@ public class BinanceFuturesOrderServiceImpl implements BinanceFuturesOrderServic
                 finalQuantity = 0.0;
                 finalPrice = 0.0;
                 errorMsg = sdkError;
-                // 从signal中提取交易方向
-                if (signal != null && signal.toLowerCase().startsWith("buy")) {
-                    finalSideDirection = "buy";
-                } else {
-                    finalSideDirection = "sell";
-                }
+                // 使用实际调用的 sdkSide 作为交易方向
+                finalSideDirection = "BUY".equalsIgnoreCase(sdkSide) ? "buy" : "sell";
                 log.warn("[BinanceFuturesOrderService] real模式调用失败，quantity和price设置为0，signal和side使用策略返回的值");
             } else {
-                // test模式，从signal中提取交易方向
-                if (signal != null && signal.toLowerCase().startsWith("buy")) {
-                    finalSideDirection = "buy";
-                } else {
-                    finalSideDirection = "sell";
-                }
+                // test模式，使用实际调用的 sdkSide 作为交易方向
+                finalSideDirection = "BUY".equalsIgnoreCase(sdkSide) ? "buy" : "sell";
             }
             
             // 9. 插入trades表记录（使用传入的modelId，而不是system_user）
