@@ -1800,7 +1800,6 @@ class TradingEngine:
                 # 获取API凭证
                 api_key = model.get('api_key')
                 api_secret = model.get('api_secret')
-                account_alias = model.get('account_alias')
 
                 if not api_key or not api_secret:
                     logger.warning(f"[Model {model_id}] API凭证缺失，无法查询条件单")
@@ -1808,10 +1807,12 @@ class TradingEngine:
 
                 # 创建Binance客户端
                 try:
+                    testnet = getattr(app_config, 'BINANCE_TESTNET', False)
                     order_client = BinanceFuturesOrderClient(
                         api_key=api_key,
                         api_secret=api_secret,
-                        account_alias=account_alias
+                        quote_asset='USDT',
+                        testnet=testnet
                     )
 
                     # 如果没有指定symbols，从持仓中获取
