@@ -1325,6 +1325,57 @@ class BinanceFuturesOrderClient(_BinanceFuturesBase):
                 return "5XX"
             return "ERROR"
     
+    # SDK 方法参数白名单（与 binance_sdk_derivatives_trading_usds_futures REST API 签名一致）
+    _NEW_ORDER_PARAMS = frozenset({
+        "symbol", "side", "type", "position_side", "time_in_force", "quantity",
+        "reduce_only", "price", "new_client_order_id", "new_order_resp_type",
+        "price_match", "self_trade_prevention_mode", "good_till_date", "recv_window",
+    })
+    _TEST_ORDER_PARAMS = frozenset({
+        "symbol", "side", "type", "position_side", "time_in_force", "quantity",
+        "reduce_only", "price", "new_client_order_id", "stop_price", "close_position",
+        "activation_price", "callback_rate", "working_type", "price_protect",
+        "new_order_resp_type", "price_match", "self_trade_prevention_mode",
+        "good_till_date", "recv_window",
+    })
+    _NEW_ALGO_ORDER_PARAMS = frozenset({
+        "algo_type", "symbol", "side", "type", "position_side", "time_in_force",
+        "quantity", "price", "trigger_price", "working_type", "price_match",
+        "close_position", "price_protect", "reduce_only", "activate_price",
+        "callback_rate", "client_algo_id", "new_order_resp_type",
+        "self_trade_prevention_mode", "good_till_date", "recv_window",
+    })
+    
+    @staticmethod
+    def _filter_params_for_sdk(params: Dict[str, Any], allowed_keys: frozenset) -> Dict[str, Any]:
+        """
+        按 SDK 入参要求过滤参数字典，仅保留白名单内的键，并统一参数命名。
+        
+        Args:
+            params: 原始参数字典
+            allowed_keys: 允许的键集合（SDK 方法签名中的参数名）
+            
+        Returns:
+            过滤后的参数字典，排除 None 值
+        """
+        # 参数名映射：内部/API 命名 -> SDK 入参命名
+        key_aliases = {
+            "newOrderRespType": "new_order_resp_type",
+            "activation_price": "activate_price",  # test_order 用 activation_price，new_algo_order 用 activate_price
+        }
+        result = {}
+        for k, v in params.items():
+            if v is None:
+                continue
+            actual_key = key_aliases.get(k, k)
+            if actual_key in allowed_keys:
+                # close_position 等布尔值转成 API 期望的字符串
+                if actual_key in ("close_position", "price_protect", "reduce_only") and isinstance(v, bool):
+                    result[actual_key] = "true" if v else "false"
+                else:
+                    result[actual_key] = v
+        return result
+    
     def _log_trade(self, db, method_name: str, trade_mode: str, order_params: Dict[str, Any],
                    response_dict: Dict[str, Any], response_type: str, error_context: Optional[str],
                    model_id: Optional[str] = None, conversation_id: Optional[str] = None,
@@ -1462,34 +1513,24 @@ class BinanceFuturesOrderClient(_BinanceFuturesBase):
                 else:
                     test_side = side_str
                 
-                # 构建测试参数，统一使用与market_trade相同的方式
+                # 构建测试参数，仅包含 test_order SDK 支持的参数
                 test_params = {
                     "symbol": order_params.get("symbol"),
                     "side": test_side,
                     "type": "MARKET",  # 测试订单统一使用MARKET类型
+                    "quantity": order_params.get("quantity", 100),
                 }
-                
-                # 添加quantity参数（必填，默认100）
-                if "quantity" in order_params:
-                    test_params["quantity"] = order_params["quantity"]
-                else:
-                    # 无论是否是平仓操作，都添加默认quantity=100
-                    test_params["quantity"] = 100
-                
-                # 添加其他可能需要的参数
-                # 注意：测试模式下使用MARKET类型订单，不能同时设置close_position=true
-                # if "close_position" in order_params:
-                #     test_params["close_position"] = order_params["close_position"]
-                if "position_side" in order_params:
+                if order_params.get("position_side"):
                     test_params["position_side"] = order_params["position_side"]
-                
+                test_params = self._filter_params_for_sdk(test_params, self._TEST_ORDER_PARAMS)
                 response = self._rest.test_order(**test_params)
                 logger.info(f"[Binance Futures] [{context}] 测试接口调用成功（未真实下单）")
                 response_context = "test_order"
             else:
-                # 使用真实交易接口
+                # 使用真实交易接口，按 SDK new_order 入参要求过滤参数
                 logger.info(f"[Binance Futures] [{context}] 使用真实交易接口下单")
-                response = self._rest.new_order(**order_params)
+                sdk_params = self._filter_params_for_sdk(order_params, self._NEW_ORDER_PARAMS)
+                response = self._rest.new_order(**sdk_params)
                 response_context = "new_order"
             
             # 处理响应
@@ -1577,9 +1618,10 @@ class BinanceFuturesOrderClient(_BinanceFuturesBase):
             algo_params["side"] = NewAlgoOrderSideEnum[side.upper()].value if NewAlgoOrderSideEnum else side.upper()
             algo_params["type"] = order_type.upper()
             
-            # 调用new_algo_order方法
-            logger.info(f"[Binance Futures] {context}使用new_algo_order方法，参数: {algo_params}")
-            response = self._client.rest_api.new_algo_order(**algo_params)
+            # 按 SDK new_algo_order 入参要求过滤参数
+            sdk_params = self._filter_params_for_sdk(algo_params, self._NEW_ALGO_ORDER_PARAMS)
+            logger.info(f"[Binance Futures] {context}使用new_algo_order方法，参数: {sdk_params}")
+            response = self._client.rest_api.new_algo_order(**sdk_params)
             
             # 处理响应
             data = response.data()
@@ -2109,7 +2151,7 @@ class BinanceFuturesOrderClient(_BinanceFuturesBase):
             order_params = self._build_order_params(
                 formatted_symbol, side, order_type, quantity, position_side=position_side, **kwargs
             )
-            order_params["newOrderRespType"] = new_order_resp_type
+            order_params["new_order_resp_type"] = new_order_resp_type
             
             return self._execute_order(order_params, context="市场交易",
                                      model_id=model_id, conversation_id=conversation_id,
