@@ -51,25 +51,77 @@ except ImportError as exc:  # pragma: no cover - handled at runtime
 logger = logging.getLogger(__name__)
 
 
-# 传入 SDK 时价格/数量等数值最多保留的小数位数（避免 "Precision is over the maximum" 错误）
-_SDK_PRICE_MAX_DECIMALS = 5
+# 传入 SDK 时价格最多保留的小数位数（与 symbol 价格位数一致，最多7位）
+_SDK_PRICE_MAX_DECIMALS = 7
 
-# SDK 价格相关参数名（需格式化为最多5位小数）
+# 数量最多保留的小数位数（根据价格数量级动态确定，此处为上限）
+_SDK_QUANTITY_MAX_DECIMALS = 4
+
+# SDK 价格相关参数名（需格式化，与 symbol 价格位数一致，最多7位小数）
 _SDK_PRICE_PARAM_KEYS = frozenset({
     "price", "stop_price", "trigger_price", "activation_price", "activate_price", "callback_rate",
 })
 
 
-def _format_price_for_sdk(value: Any, max_decimals: int = _SDK_PRICE_MAX_DECIMALS) -> float:
+def _get_quantity_decimals_by_price(price: Optional[float]) -> int:
     """
-    将价格数值格式化为最多 max_decimals 位小数，避免浮点精度问题导致 API 报错。
+    根据价格数量级确定数量可保留的小数位数。
+    规则：0.几->0位, 个位->1位, 十百->2位, 千->3位, 万及以上->4位（最多）。
+    """
+    if price is None or price <= 0:
+        return _SDK_QUANTITY_MAX_DECIMALS
+    if price < 1:
+        return 0
+    if price < 10:
+        return 1
+    if price < 1000:
+        return 2
+    if price < 10000:
+        return 3
+    return _SDK_QUANTITY_MAX_DECIMALS
+
+
+def _format_quantity_for_sdk(quantity: Any, ref_price: Optional[float] = None) -> float:
+    """
+    根据参考价格格式化数量，用于SDK提交和落库。
+    """
+    if quantity is None:
+        return 0.0
+    try:
+        q = float(quantity)
+        if q <= 0:
+            return 0.0
+        decimals = _get_quantity_decimals_by_price(ref_price)
+        result = round(q, decimals)
+        if decimals == 0:
+            result = float(int(result))
+        return result
+    except (ValueError, TypeError):
+        return 0.0
+
+
+def _format_price_for_sdk(value: Any, ref_price: Optional[float] = None,
+                          max_decimals: int = _SDK_PRICE_MAX_DECIMALS) -> float:
+    """
+    将价格数值格式化为与 symbol 价格位数一致，最多 max_decimals 位小数，避免浮点精度问题导致 API 报错。
     调用 SDK 接口时，所有价格相关参数均应经此函数处理。
+    
+    Args:
+        value: 要格式化的价格值
+        ref_price: 参考价格（用于确定小数位数，与当前 symbol 价格一致）；若为 None 则根据 value 自身确定
+        max_decimals: 最多保留的小数位数，默认7
     """
     if value is None:
         return 0.0
     try:
         v = float(value)
-        return float(f"{round(v, max_decimals):.{max_decimals}f}")
+        rounded = round(v, max_decimals)
+        # 根据参考价格或自身值确定实际小数位（与 symbol 价格位数一致，最多 max_decimals 位）
+        ref = ref_price if (ref_price is not None and ref_price > 0) else rounded
+        ref_str = f"{ref:.10f}".rstrip('0').rstrip('.')
+        decimals = len(ref_str.split('.')[1]) if '.' in ref_str else 0
+        decimals = min(decimals, max_decimals)
+        return float(f"{rounded:.{decimals}f}" if decimals > 0 else str(int(round(rounded))))
     except (ValueError, TypeError):
         return 0.0
 
@@ -1397,7 +1449,11 @@ class BinanceFuturesOrderClient(_BinanceFuturesBase):
                 if actual_key in ("close_position", "price_protect", "reduce_only") and isinstance(v, bool):
                     result[actual_key] = "true" if v else "false"
                 elif actual_key in _SDK_PRICE_PARAM_KEYS and isinstance(v, (int, float)):
-                    result[actual_key] = _format_price_for_sdk(v)
+                    ref_price = params.get("price") or params.get("trigger_price") or params.get("stop_price")
+                    result[actual_key] = _format_price_for_sdk(v, ref_price=ref_price)
+                elif actual_key == "quantity" and isinstance(v, (int, float)) and v > 0:
+                    ref_price = params.get("price") or params.get("trigger_price") or params.get("stop_price")
+                    result[actual_key] = _format_quantity_for_sdk(v, ref_price)
                 else:
                     result[actual_key] = v
         return result
@@ -1843,15 +1899,13 @@ class BinanceFuturesOrderClient(_BinanceFuturesBase):
             
         except Exception as e:
             logger.warning(f"[Binance Futures] 调整价格精度失败: {e}，使用保守策略")
-            # 如果获取精度失败，使用保守的精度策略
+            # 如果获取精度失败，使用保守的精度策略（与 symbol 价格位数一致，最多7位）
             price_str = f"{price:.10f}".rstrip('0').rstrip('.')
             if '.' in price_str:
                 decimal_places = len(price_str.split('.')[1])
             else:
                 decimal_places = 0
-            
-            # 使用保守的精度（最多2位小数）
-            precision = min(2, decimal_places)
+            precision = min(_SDK_PRICE_MAX_DECIMALS, decimal_places)
             return round(price, precision)
     
     def _validate_position_side(self, position_side: Optional[str]) -> Optional[str]:
@@ -1929,20 +1983,20 @@ class BinanceFuturesOrderClient(_BinanceFuturesBase):
         }
         
         if quantity is not None and quantity > 0:
-            # 先根据价格调整精度（如果提供了价格）
-            # 注意：quantity在传入SDK之前已经在strategy_trader中根据价格调整过精度
-            # 这里再根据Binance的stepSize要求进行最终调整
+            # 1. 根据 Binance stepSize 调整数量精度
             adjusted_quantity = self._adjust_quantity_precision(quantity, formatted_symbol)
-            # 防止精度调整将小数截断为 0，避免 quantity=0 被写入日志或传给 SDK
             if adjusted_quantity <= 0:
                 logger.warning(f"[Binance Futures] 精度调整后 quantity 为 0（原始值={quantity}），使用原始值保留小数")
-                adjusted_quantity = round(float(quantity), 6)
-            # 保留精度，不强制转换为整数（因为quantity可能已经是小数）
-            # 如果精度为0（整数），转换为整数类型
-            if adjusted_quantity == int(adjusted_quantity):
-                order_params["quantity"] = int(adjusted_quantity)
+                adjusted_quantity = float(quantity)
+            # 2. 根据价格数量级格式化数量小数位（用于 SDK 和落库）
+            ref_price = price or stop_price
+            formatted_qty = _format_quantity_for_sdk(adjusted_quantity, ref_price)
+            if formatted_qty <= 0 and quantity > 0:
+                formatted_qty = _format_quantity_for_sdk(quantity, ref_price)
+            if formatted_qty == int(formatted_qty):
+                order_params["quantity"] = int(formatted_qty)
             else:
-                order_params["quantity"] = adjusted_quantity
+                order_params["quantity"] = formatted_qty
         
         if close_position:
             order_params["close_position"] = True
@@ -1987,14 +2041,17 @@ class BinanceFuturesOrderClient(_BinanceFuturesBase):
         algo_params = {}
         
         if quantity is not None:
-            # quantity在传入之前已经在strategy_trader中根据价格调整过精度
-            # 这里保留精度，不强制转换为整数；禁止 quantity 为 0 写入
             quantity_float = float(quantity)
             if quantity_float > 0:
-                if quantity_float == int(quantity_float):
-                    algo_params["quantity"] = int(quantity_float)
+                # 根据价格数量级格式化数量（用于 SDK 和落库）
+                ref_price = price or stop_price
+                formatted_qty = _format_quantity_for_sdk(quantity_float, ref_price)
+                if formatted_qty <= 0:
+                    formatted_qty = quantity_float
+                if formatted_qty == int(formatted_qty):
+                    algo_params["quantity"] = int(formatted_qty)
                 else:
-                    algo_params["quantity"] = quantity_float
+                    algo_params["quantity"] = formatted_qty
         
         if stop_price is not None:
             # trigger_price 需按 tickSize 调整精度，避免 "Precision is over the maximum" 错误
@@ -2073,7 +2130,7 @@ class BinanceFuturesOrderClient(_BinanceFuturesBase):
                                          trade_id=trade_id, method_name="stop_loss_trade", db=db, trade_mode=trade_mode)
             else:
                 algo_params = self._build_algo_params(
-                    quantity, price, stop_price, position_side, **kwargs
+                    formatted_symbol, quantity, price, stop_price, position_side, **kwargs
                 )
                 return self._execute_algo_order(
                     method_name="stop_loss_trade",
@@ -2149,7 +2206,7 @@ class BinanceFuturesOrderClient(_BinanceFuturesBase):
                                          trade_id=trade_id, method_name="take_profit_trade", db=db, trade_mode=trade_mode)
             else:
                 algo_params = self._build_algo_params(
-                    quantity, price, stop_price, position_side, **kwargs
+                    formatted_symbol, quantity, price, stop_price, position_side, **kwargs
                 )
                 return self._execute_algo_order(
                     method_name="take_profit_trade",
@@ -2272,7 +2329,7 @@ class BinanceFuturesOrderClient(_BinanceFuturesBase):
                                           trade_id=trade_id, method_name="close_position_trade", db=db)
             else:
                 algo_params = self._build_algo_params(
-                    position_side=position_side, stop_price=stop_price,
+                    formatted_symbol, position_side=position_side, stop_price=stop_price,
                     close_position=True, **kwargs
                 )
                 return self._execute_algo_order(
@@ -2506,15 +2563,17 @@ class BinanceFuturesOrderClient(_BinanceFuturesBase):
                 result['algoId'] = int(algo_id_raw) if algo_id_raw else None
             except (TypeError, ValueError):
                 result['algoId'] = None
-        # quantity - API返回可能为字符串
-        qty = _get(sdk_response, 'quantity')
-        result['quantity'] = _to_float(qty) if qty is not None else fallbacks.get('quantity')
-        # triggerPrice - API可能用triggerPrice或activatePrice
+        # triggerPrice - API可能用triggerPrice或activatePrice（先提取，用于quantity格式化）
         trigger = _get(sdk_response, 'triggerPrice', 'trigger_price', 'activatePrice', 'activate_price')
         result['triggerPrice'] = _to_float(trigger) if trigger is not None else fallbacks.get('triggerPrice')
         # price
         pr = _get(sdk_response, 'price')
         result['price'] = _to_float(pr) if pr is not None else fallbacks.get('price')
+        # quantity - API返回可能为字符串，按价格数量级格式化后落库
+        qty_raw = _get(sdk_response, 'quantity')
+        qty_val = _to_float(qty_raw) if qty_raw is not None else fallbacks.get('quantity')
+        ref_price = result.get('triggerPrice') or result.get('price')
+        result['quantity'] = _format_quantity_for_sdk(qty_val, ref_price) if qty_val is not None and qty_val > 0 else (qty_val or 0)
         # orderType
         result['orderType'] = _get(sdk_response, 'orderType', 'order_type') or fallbacks.get('orderType')
         # symbol

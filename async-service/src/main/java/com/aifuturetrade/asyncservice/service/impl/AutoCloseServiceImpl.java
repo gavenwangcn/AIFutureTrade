@@ -11,6 +11,7 @@ import com.aifuturetrade.asyncservice.entity.AlgoOrderDO;
 import com.aifuturetrade.asyncservice.entity.PortfolioWithModelInfo;
 import com.aifuturetrade.asyncservice.service.AutoCloseResult;
 import com.aifuturetrade.asyncservice.service.AutoCloseService;
+import com.aifuturetrade.asyncservice.util.QuantityFormatUtil;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
@@ -200,8 +201,12 @@ public class AutoCloseServiceImpl implements AutoCloseService {
                         log.info("[AutoClose] 📤 准备执行平仓 | symbol={}, positionSide={}, positionAmt={}, modelTradeMode={}",
                                 symbol, positionSide, positionAmt, modelTradeMode);
 
-                        // 执行平仓（传递trade_mode）
-                        boolean success = executeClosePosition(model, symbol, positionSide, positionAmt, modelTradeMode);
+                        // 根据当前价格格式化数量小数位后执行平仓
+                        double formattedAmt = QuantityFormatUtil.formatQuantityForSdk(positionAmt, currentPrice);
+                        if (formattedAmt <= 0 && positionAmt > 0) {
+                            formattedAmt = positionAmt;
+                        }
+                        boolean success = executeClosePosition(model, symbol, positionSide, formattedAmt, modelTradeMode);
                         if (success) {
                             closedCount++;
                             log.info("[AutoClose] ✅ {} (模型: {}) 自动平仓成功", symbol, modelId);

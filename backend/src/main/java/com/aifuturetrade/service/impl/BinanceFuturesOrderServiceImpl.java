@@ -2,6 +2,7 @@ package com.aifuturetrade.service.impl;
 
 import com.aifuturetrade.common.api.binance.BinanceConfig;
 import com.aifuturetrade.common.api.binance.BinanceFuturesOrderClient;
+import com.aifuturetrade.common.util.QuantityFormatUtil;
 import com.aifuturetrade.dao.entity.AlgoOrderDO;
 import com.aifuturetrade.dao.entity.BinanceTradeLogDO;
 import com.aifuturetrade.dao.entity.ModelDO;
@@ -207,7 +208,12 @@ public class BinanceFuturesOrderServiceImpl implements BinanceFuturesOrderServic
 
             // 5. 计算盈亏和手续费
             Double entryPrice = portfolio.getAvgPrice();
-            Double positionAmt = Math.abs(portfolio.getPositionAmt());
+            Double positionAmtRaw = Math.abs(portfolio.getPositionAmt());
+            // 根据当前价格格式化数量小数位（用于SDK和落库）
+            Double positionAmt = QuantityFormatUtil.formatQuantityForSdk(positionAmtRaw, currentPrice);
+            if (positionAmt <= 0 && positionAmtRaw > 0) {
+                positionAmt = positionAmtRaw;
+            }
             
             // 计算毛盈亏
             Double grossPnl;

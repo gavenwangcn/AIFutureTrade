@@ -958,15 +958,13 @@ else:
      - 平仓100%：`quantity = position_amt`
      - 平仓50%：`quantity = position_amt * 0.5`
      - 平仓部分：`quantity = position_amt * 平仓比例`
-  5. **根据symbol价格动态调整quantity精度**（重要！）：
+  5. **根据symbol价格动态调整quantity精度**（重要！数量最多4位小数）：
      - **quantity使用向后取整**（向上取整）：例如 20.5 取 21，0.5 取 1。使用 `import math` 后 `quantity = math.ceil(quantity)` 或按精度：`quantity = math.ceil(quantity * 10**精度) / 10**精度`
-     - 价格 < 1：取整数（向后取整）`quantity = math.ceil(quantity)`
-     - 1 <= 价格 < 10：小数点后1位（向后取整）`quantity = math.ceil(quantity * 10) / 10`
-     - 10 <= 价格 < 100：小数点后2位 `quantity = math.ceil(quantity * 100) / 100`
-     - 100 <= 价格 < 1000：小数点后3位 `quantity = math.ceil(quantity * 1000) / 1000`
-     - 1000 <= 价格 < 10000：小数点后4位 `quantity = math.ceil(quantity * 10000) / 10000`
-     - 10000 <= 价格 < 100000：小数点后5位 `quantity = math.ceil(quantity * 100000) / 100000`
-     - 价格 >= 100000：小数点后6位（最多）`quantity = math.ceil(quantity * 1000000) / 1000000`
+     - 价格 < 1（0.几）：取整数 `quantity = math.ceil(quantity)`
+     - 1 <= 价格 < 10（个位）：1位小数 `quantity = math.ceil(quantity * 10) / 10`
+     - 10 <= 价格 < 1000（十、百位）：2位小数 `quantity = math.ceil(quantity * 100) / 100`
+     - 1000 <= 价格 < 10000（千位）：3位小数 `quantity = math.ceil(quantity * 1000) / 1000`
+     - 价格 >= 10000（万位）：4位小数（最多）`quantity = math.ceil(quantity * 10000) / 10000`
   6. 杠杆：通常与持仓时的杠杆一致，从 `position.get('leverage', 5)` 获取
 - **系统会自动**：若策略返回的 quantity 大于当前持仓数量，则使用持仓数量；计算平仓时的 USDT 数量：`quantity * 当前价格`
 
@@ -976,22 +974,18 @@ position_amt = abs(position.get('position_amt', 0))  # 持仓合约数量
 close_quantity = position_amt  # 平仓100%
 # 或平仓50%：close_quantity = position_amt * 0.5
 
-# 根据symbol价格动态调整quantity精度（向后取整：20.5取21；若quantity>持仓数量，系统会自动使用持仓数量）
+# 根据symbol价格动态调整quantity精度（向后取整，数量最多4位小数；若quantity>持仓数量，系统会自动使用持仓数量）
 import math
 if current_price < 1:
-    close_quantity = math.ceil(close_quantity)  # 取整数，向后取整
+    close_quantity = math.ceil(close_quantity)  # 价格<1取整数
 elif current_price < 10:
-    close_quantity = math.ceil(close_quantity * 10) / 10  # 小数点后1位
-elif current_price < 100:
-    close_quantity = math.ceil(close_quantity * 100) / 100  # 小数点后2位
+    close_quantity = math.ceil(close_quantity * 10) / 10  # 个位价格1位小数
 elif current_price < 1000:
-    close_quantity = math.ceil(close_quantity * 1000) / 1000  # 小数点后3位
+    close_quantity = math.ceil(close_quantity * 100) / 100  # 十百位2位小数
 elif current_price < 10000:
-    close_quantity = math.ceil(close_quantity * 10000) / 10000  # 小数点后4位
-elif current_price < 100000:
-    close_quantity = math.ceil(close_quantity * 100000) / 100000  # 小数点后5位
+    close_quantity = math.ceil(close_quantity * 1000) / 1000  # 千位3位小数
 else:
-    close_quantity = math.ceil(close_quantity * 1000000) / 1000000  # 小数点后6位（最多）
+    close_quantity = math.ceil(close_quantity * 10000) / 10000  # 万位4位小数（最多）
 # 若计算出的close_quantity超过持仓数量，系统会自动使用持仓数量
 close_quantity = min(close_quantity, position_amt)
 
@@ -1221,21 +1215,17 @@ decisions[symbol] = {
       # 计算合约数量：quantity = (本金 × 杠杆) / symbol价格
       quantity = (capital_usdt * leverage) / current_price
       
-      # 根据symbol价格动态调整quantity精度
+      # 根据symbol价格动态调整quantity精度（最多4位小数）
       if current_price < 1:
-          quantity = math.ceil(quantity)  # 取整数，向后取整
+          quantity = math.ceil(quantity)
       elif current_price < 10:
-          quantity = math.ceil(quantity * 10) / 10  # 小数点后1位
-      elif current_price < 100:
-          quantity = math.ceil(quantity * 100) / 100  # 小数点后2位
+          quantity = math.ceil(quantity * 10) / 10
       elif current_price < 1000:
-          quantity = math.ceil(quantity * 1000) / 1000  # 小数点后3位
+          quantity = math.ceil(quantity * 100) / 100
       elif current_price < 10000:
-          quantity = math.ceil(quantity * 10000) / 10000  # 小数点后4位
-      elif current_price < 100000:
-          quantity = math.ceil(quantity * 100000) / 100000  # 小数点后5位
+          quantity = math.ceil(quantity * 1000) / 1000
       else:
-          quantity = math.ceil(quantity * 1000000) / 1000000  # 小数点后6位（最多）
+          quantity = math.ceil(quantity * 10000) / 10000
       
       self.log.info(f"{symbol} 计算合约数量: 开仓资金={capital_usdt:.2f} USDT, 杠杆={leverage}x, 当前价格={current_price:.4f}, 合约数量={quantity}")
       ```

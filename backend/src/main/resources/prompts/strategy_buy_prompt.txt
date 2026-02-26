@@ -457,21 +457,17 @@ class GeneratedBuyStrategy(StrategyBaseBuy):
                 #     leverage = 5  # 杠杆倍数
                 #     # 计算合约数量：quantity = (本金 × 杠杆) / symbol价格
                 #     quantity = (capital_usdt * leverage) / current_price
-                #     # 根据symbol价格动态调整quantity精度
-                #     if current_price < 1:
-                #         quantity = round(quantity, 0)  # 取整数
-                #     elif current_price < 10:
-                #         quantity = round(quantity, 1)  # 小数点后1位
-                #     elif current_price < 100:
-                #         quantity = round(quantity, 2)  # 小数点后2位
-                #     elif current_price < 1000:
-                #         quantity = round(quantity, 3)  # 小数点后3位
-                #     elif current_price < 10000:
-                #         quantity = round(quantity, 4)  # 小数点后4位
-                #     elif current_price < 100000:
-                #         quantity = round(quantity, 5)  # 小数点后5位
-                #     else:
-                #         quantity = round(quantity, 6)  # 小数点后6位（最多）
+    #     # 根据symbol价格动态调整quantity精度（最多4位小数）
+    #     if current_price < 1:
+    #         quantity = math.ceil(quantity)  # 价格<1取整数
+    #     elif current_price < 10:
+    #         quantity = math.ceil(quantity * 10) / 10  # 个位1位小数
+    #     elif current_price < 1000:
+    #         quantity = math.ceil(quantity * 100) / 100  # 十百位2位小数
+    #     elif current_price < 10000:
+    #         quantity = math.ceil(quantity * 1000) / 1000  # 千位3位小数
+    #     else:
+    #         quantity = math.ceil(quantity * 10000) / 10000  # 万位4位小数（最多）
                 #     self.log.info(f"{symbol} 满足开多条件，准备开多单，使用本金={capital_usdt:.2f} USDT，杠杆={leverage}，计算合约数量={quantity}")
                 #     decisions[symbol] = {
                 #         "signal": "buy_to_long",  # 开多单信号
@@ -820,15 +816,13 @@ else:
   2. 确定使用的本金 USDT 数量（如 50 USDT 或可用资金的 25%）：`capital_usdt = available_cash * 0.5`
   3. 设置杠杆倍数（如 5 倍或 10 倍）：`leverage = 5`
   4. 计算合约数量：`quantity = (capital_usdt * leverage) / current_price`
-  5. **根据symbol价格动态调整quantity精度**（重要！）：
+  5. **根据symbol价格动态调整quantity精度**（重要！数量最多4位小数）：
      - **quantity使用向后取整**（向上取整）：例如 20.5 取 21，0.5 取 1。使用 `import math` 后 `quantity = math.ceil(quantity)` 或按精度：`quantity = math.ceil(quantity * 10**精度) / 10**精度`
-     - 价格 < 1：取整数（向后取整）`quantity = math.ceil(quantity)`
-     - 1 <= 价格 < 10：小数点后1位（向后取整）`quantity = math.ceil(quantity * 10) / 10`
-     - 10 <= 价格 < 100：小数点后2位 `quantity = math.ceil(quantity * 100) / 100`
-     - 100 <= 价格 < 1000：小数点后3位 `quantity = math.ceil(quantity * 1000) / 1000`
-     - 1000 <= 价格 < 10000：小数点后4位 `quantity = math.ceil(quantity * 10000) / 10000`
-     - 10000 <= 价格 < 100000：小数点后5位 `quantity = math.ceil(quantity * 100000) / 100000`
-     - 价格 >= 100000：小数点后6位（最多）`quantity = math.ceil(quantity * 1000000) / 1000000`
+     - 价格 < 1（0.几）：取整数 `quantity = math.ceil(quantity)`
+     - 1 <= 价格 < 10（个位）：1位小数 `quantity = math.ceil(quantity * 10) / 10`
+     - 10 <= 价格 < 1000（十、百位）：2位小数 `quantity = math.ceil(quantity * 100) / 100`
+     - 1000 <= 价格 < 10000（千位）：3位小数 `quantity = math.ceil(quantity * 1000) / 1000`
+     - 价格 >= 10000（万位）：4位小数（最多）`quantity = math.ceil(quantity * 10000) / 10000`
 - **系统会自动**：根据 quantity 反推需要的本金并验证是否足够（包括手续费），计算 initial_margin（本金）
 
 **示例：**
@@ -838,22 +832,18 @@ capital_usdt = available_cash * 0.5  # 使用50%本金，例如：500 USDT
 leverage = 5  # 杠杆倍数
 quantity = (capital_usdt * leverage) / current_price  # 计算合约数量
 
-# 根据symbol价格动态调整quantity精度（向后取整：20.5取21）
+# 根据symbol价格动态调整quantity精度（向后取整：20.5取21，数量最多4位小数）
 import math
 if current_price < 1:
-    quantity = math.ceil(quantity)  # 取整数，向后取整
+    quantity = math.ceil(quantity)  # 价格<1取整数
 elif current_price < 10:
-    quantity = math.ceil(quantity * 10) / 10  # 小数点后1位
-elif current_price < 100:
-    quantity = math.ceil(quantity * 100) / 100  # 小数点后2位
+    quantity = math.ceil(quantity * 10) / 10  # 个位价格1位小数
 elif current_price < 1000:
-    quantity = math.ceil(quantity * 1000) / 1000  # 小数点后3位
+    quantity = math.ceil(quantity * 100) / 100  # 十百位2位小数
 elif current_price < 10000:
-    quantity = math.ceil(quantity * 10000) / 10000  # 小数点后4位
-elif current_price < 100000:
-    quantity = math.ceil(quantity * 100000) / 100000  # 小数点后5位
+    quantity = math.ceil(quantity * 1000) / 1000  # 千位3位小数
 else:
-    quantity = math.ceil(quantity * 1000000) / 1000000  # 小数点后6位（最多）
+    quantity = math.ceil(quantity * 10000) / 10000  # 万位4位小数（最多）
 
 decisions[symbol] = [
     {"signal": "buy_to_long", "quantity": quantity, "leverage": leverage, "justification": "理由"}
@@ -1029,21 +1019,17 @@ decisions[symbol] = [
       # 计算合约数量：quantity = (本金 × 杠杆) / symbol价格
       quantity = (capital_usdt * leverage) / current_price
       
-      # 根据symbol价格动态调整quantity精度（向后取整：20.5取21）
+      # 根据symbol价格动态调整quantity精度（向后取整，最多4位小数）
       if current_price < 1:
-          quantity = math.ceil(quantity)  # 取整数，向后取整
+          quantity = math.ceil(quantity)
       elif current_price < 10:
-          quantity = math.ceil(quantity * 10) / 10  # 小数点后1位
-      elif current_price < 100:
-          quantity = math.ceil(quantity * 100) / 100  # 小数点后2位
+          quantity = math.ceil(quantity * 10) / 10
       elif current_price < 1000:
-          quantity = math.ceil(quantity * 1000) / 1000  # 小数点后3位
+          quantity = math.ceil(quantity * 100) / 100
       elif current_price < 10000:
-          quantity = math.ceil(quantity * 10000) / 10000  # 小数点后4位
-      elif current_price < 100000:
-          quantity = math.ceil(quantity * 100000) / 100000  # 小数点后5位
+          quantity = math.ceil(quantity * 1000) / 1000
       else:
-          quantity = math.ceil(quantity * 1000000) / 1000000  # 小数点后6位（最多）
+          quantity = math.ceil(quantity * 10000) / 10000
       
       self.log.info(f"{symbol} 计算合约数量: 开仓资金={capital_usdt:.2f} USDT, 杠杆={leverage}x, 当前价格={current_price:.4f}, 合约数量={quantity}")
       ```
