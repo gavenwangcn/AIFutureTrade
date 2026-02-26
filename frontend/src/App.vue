@@ -93,6 +93,10 @@
             <i class="bi bi-diagram-3"></i>
             策略管理
           </button>
+          <button class="btn-secondary" @click="showWeChatGroupManagementModal = true">
+            <i class="bi bi-wechat"></i>
+            微信通知
+          </button>
           <button class="btn-primary" @click="showAddModelModal = true">
             <i class="bi bi-plus-lg"></i>
             添加模型
@@ -614,9 +618,11 @@
                       </td>
                       <td>{{ (trade.quantity || 0).toFixed(4) }}</td>
                       <td>${{ formatPrice6(trade.price) }}</td>
-                      <td :class="getPnlClass(trade.pnl || 0, true)">{{ formatPnl(trade.pnl || 0, true) }}</td>
-                      <td :class="getPnlClass(trade.pnl || 0, true)">
-                        <strong>{{ formatPnlPercent(trade.pnl, trade.initialMargin || trade.initial_margin) }}</strong>
+                      <td :class="trade.side === 'buy' ? '' : getPnlClass(trade.pnl || 0, true)">
+                        {{ trade.side === 'buy' ? '--' : formatPnl(trade.pnl || 0, true) }}
+                      </td>
+                      <td :class="trade.side === 'buy' ? '' : getPnlClass(trade.pnl || 0, true)">
+                        <strong>{{ trade.side === 'buy' ? '--' : formatPnlPercent(trade.pnl, trade.initialMargin || trade.initial_margin) }}</strong>
                       </td>
                       <td>${{ formatCurrency(trade.fee || 0) }}</td>
                       <td>
@@ -978,7 +984,13 @@
       @update:visible="showStrategyManagementModal = $event"
       @close="showStrategyManagementModal = false"
     />
-    
+
+    <WeChatGroupManagementModal
+      :visible="showWeChatGroupManagementModal"
+      @update:visible="showWeChatGroupManagementModal = $event"
+      @close="showWeChatGroupManagementModal = false"
+    />
+
     <FutureConfigModal
       :visible="showFutureConfigModal"
       @update:visible="showFutureConfigModal = $event"
@@ -1264,6 +1276,7 @@ import KLineChart from './components/KLineChart.vue'
 import SettingsModal from './components/SettingsModal.vue'
 import Modal from './components/Modal.vue'
 import StrategyManagementModal from './components/StrategyManagementModal.vue'
+import WeChatGroupManagementModal from './components/WeChatGroupManagementModal.vue'
 import FutureConfigModal from './components/FutureConfigModal.vue'
 import ApiProviderModal from './components/ApiProviderModal.vue'
 import AccountModal from './components/AccountModal.vue'
