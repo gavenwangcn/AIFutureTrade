@@ -194,12 +194,12 @@ public class BinanceFuturesOrderServiceImpl implements BinanceFuturesOrderServic
 
             log.info("[BinanceFuturesOrderService] 获取实时价格成功: {}", currentPrice);
 
-            // 4. 确定 SDK 调用参数：持仓方向传实际方向（为多传多、为空传空），side 统一为 SELL
+            // 4. 确定 SDK 调用参数：持仓方向传实际方向，side 根据持仓方向确定
             // 平多(LONG): side=SELL, position_side=LONG
-            // 平空(SHORT): side=SELL, position_side=SHORT
+            // 平空(SHORT): side=BUY, position_side=SHORT
             String positionSide = portfolio.getPositionSide();
             boolean isLong = "LONG".equalsIgnoreCase(positionSide);
-            String sdkSide = "SELL";
+            String sdkSide = isLong ? "SELL" : "BUY";
             String sdkPositionSide = isLong ? "LONG" : "SHORT";
             String signal = isLong ? "sell_to_long" : "sell_to_short";
 

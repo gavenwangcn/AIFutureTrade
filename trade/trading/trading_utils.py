@@ -152,17 +152,36 @@ def get_side_for_trade(position_side: str) -> str:
 
 def get_side_for_sell_cycle(position_side: str) -> str:
     """
-    卖出循环专用：获取交易方向
+    卖出/平仓循环专用：获取交易方向（平仓）
 
-    在卖出循环中，无论持仓方向如何，都统一使用SELL方向
+    平多仓: side=SELL, position_side=LONG
+    平空仓: side=BUY, position_side=SHORT
 
     Args:
         position_side: 持仓方向（LONG或SHORT）
 
     Returns:
-        str: 交易方向（始终返回SELL）
+        str: 交易方向（平多用SELL，平空用BUY）
     """
-    return 'SELL'  # 卖出循环统一使用SELL
+    return get_side_for_trade(position_side)
+
+
+def get_side_for_open(position_side: str) -> str:
+    """
+    开仓专用：根据持仓方向获取交易方向
+
+    开多仓: side=BUY, position_side=LONG
+    开空仓: side=SELL, position_side=SHORT
+
+    Args:
+        position_side: 持仓方向（LONG或SHORT）
+
+    Returns:
+        str: 交易方向（开多用BUY，开空用SELL）
+    """
+    if position_side and position_side.upper() == 'SHORT':
+        return 'SELL'
+    return 'BUY'
 
 
 def calculate_quantity_with_risk(

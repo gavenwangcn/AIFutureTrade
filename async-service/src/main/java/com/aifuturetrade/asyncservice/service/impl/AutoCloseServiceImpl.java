@@ -361,12 +361,14 @@ public class AutoCloseServiceImpl implements AutoCloseService {
             // 判断是否使用测试模式（使用模型自己的trade_mode，而不是全局配置）
             boolean useTestMode = "test".equalsIgnoreCase(modelTradeMode);
 
-            log.info("[AutoClose] 执行平仓: symbol={}, positionSide={}, quantity={}, 模式={}",
-                    symbol, positionSide, positionAmt, useTestMode ? "测试" : "真实");
+            // 平多仓: side=SELL, position_side=LONG；平空仓: side=BUY, position_side=SHORT
+            String sdkSide = "LONG".equalsIgnoreCase(positionSide) ? "SELL" : "BUY";
+            log.info("[AutoClose] 执行平仓: symbol={}, positionSide={}, side={}, quantity={}, 模式={}",
+                    symbol, positionSide, sdkSide, positionAmt, useTestMode ? "测试" : "真实");
 
             // 使用 BinanceFuturesOrderClient 的 marketTrade 方法
             Map<String, Object> tradeResult = orderClient.marketTrade(
-                    symbol, "SELL", positionAmt, positionSide, useTestMode);
+                    symbol, sdkSide, positionAmt, positionSide, useTestMode);
 
             if (tradeResult != null) {
                 log.info("[AutoClose] ✅ 平仓订单提交成功: {}", tradeResult);

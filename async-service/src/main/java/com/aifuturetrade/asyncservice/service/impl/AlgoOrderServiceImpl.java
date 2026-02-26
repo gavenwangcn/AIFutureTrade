@@ -646,7 +646,6 @@ public class AlgoOrderServiceImpl implements AlgoOrderService {
         String symbol = order.getSymbol().toUpperCase();
         String positionSide = order.getPositionSide();
         Double quantity = order.getQuantity();
-        String side = order.getSide(); // 'buy' or 'sell'
         String orderType = order.getOrderType();
         
         // 查询持仓信息
@@ -670,12 +669,16 @@ public class AlgoOrderServiceImpl implements AlgoOrderService {
         // 判断交易模式
         boolean isVirtual = model.getIsVirtual() != null && model.getIsVirtual();
         boolean useTestMode = isVirtual;
-        
+
+        // 平多: side=SELL, position_side=LONG；平空: side=BUY, position_side=SHORT
+        // 以 positionSide 为准推导正确的 side，兼容历史错误数据
+        String sdkSide = "LONG".equalsIgnoreCase(positionSide) ? "SELL" : "BUY";
+
         // 执行交易
         Long binanceOrderId = null;
         Double executedPrice = currentPrice;
         Double executedQuantity = quantity;
-        
+
         if (!useTestMode) {
             // real模式：调用真实交易接口
             BinanceFuturesOrderClient orderClient = getOrCreateOrderClient(model);
@@ -685,7 +688,7 @@ public class AlgoOrderServiceImpl implements AlgoOrderService {
 
             try {
                 // 使用 BinanceFuturesOrderClient 的 marketTrade 方法
-                Map<String, Object> tradeResult = orderClient.marketTrade(symbol, side, quantity, positionSide);
+                Map<String, Object> tradeResult = orderClient.marketTrade(symbol, sdkSide, quantity, positionSide);
 
                 // 从响应中获取订单信息
                 if (tradeResult != null) {
@@ -749,7 +752,7 @@ public class AlgoOrderServiceImpl implements AlgoOrderService {
         trade.setQuantity(executedQuantity);
         trade.setPrice(executedPrice);
         trade.setLeverage(leverage);
-        trade.setSide(side);
+        trade.setSide(sdkSide.toLowerCase());
         trade.setPositionSide(positionSide);
         trade.setPnl(netPnl);
         trade.setFee(tradeFee);

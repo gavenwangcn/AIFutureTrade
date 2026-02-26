@@ -41,6 +41,7 @@ from trade.trading.trading_utils import (
     parse_signal_to_position_side,
     get_side_for_trade,
     get_side_for_sell_cycle,
+    get_side_for_open,
     calculate_quantity_with_risk,
     validate_position_for_trade,
     calculate_trade_requirements,
@@ -3701,10 +3702,10 @@ class TradingEngine:
         - trades表中记录的signal字段：buy_to_long 或 buy_to_short
         
         【SDK接口参数说明】
-        - SDK调用的side参数：统一使用'BUY'（开多和开空都使用BUY）
+        - 开多仓: side=BUY, position_side=LONG
+        - 开空仓: side=SELL, position_side=SHORT
         - SDK调用的positionSide参数：根据signal自动确定（LONG或SHORT）
-        - 数据库记录的position_side：根据signal自动确定
-        - trades表的side字段：统一使用'buy'（开多和开空都使用buy）
+        - trades表的side字段：buy（开多）或sell（开空）
         """
         quantity = decision.get('quantity', 0)
         leverage = self._resolve_leverage(decision)
@@ -3784,9 +3785,10 @@ class TradingEngine:
         trade_fee = buy_fee + sell_fee
         # initial_margin 四舍五入保留两位小数（已在 calculate_trade_requirements 中处理）
 
-        # 【确定SDK调用的side参数】统一使用BUY（开多和开空都使用BUY）
-        # positionSide参数会根据signal自动确定（LONG或SHORT）
-        sdk_side = 'BUY'  # 统一使用BUY
+        # 【确定SDK调用的side参数】开多用BUY，开空用SELL
+        # 开多仓: side=BUY, position_side=LONG
+        # 开空仓: side=SELL, position_side=SHORT
+        sdk_side = get_side_for_open(position_side)
         
         # 获取交易上下文
         model_uuid, trade_id = self._get_trade_context()
@@ -4105,10 +4107,10 @@ class TradingEngine:
         - trades表中记录的signal字段：sell_to_long 或 sell_to_short
         
         【SDK接口参数说明】
-        - SDK调用的side参数：统一使用'SELL'（平多和平空都使用SELL）
+        - 平多仓: side=SELL, position_side=LONG
+        - 平空仓: side=BUY, position_side=SHORT
         - SDK调用的positionSide参数：根据signal自动确定（LONG或SHORT）
-        - 数据库记录的position_side：根据signal自动确定
-        - trades表的side字段：统一使用'sell'（平多和平空都使用sell）
+        - trades表的side字段：sell（平多）或buy（平空）
         
         【持仓检查】
         - 必须检查是否有对应方向的持仓
@@ -4161,8 +4163,10 @@ class TradingEngine:
             entry_price, current_price, strategy_quantity, position_side, self.trade_fee_rate
         )
         
-        # 【确定SDK调用的side参数】统一使用SELL（平多和平空都使用SELL）
-        sdk_side = 'SELL'  # 统一使用SELL
+        # 【确定SDK调用的side参数】平多用SELL，平空用BUY
+        # 平多仓: side=SELL, position_side=LONG
+        # 平空仓: side=BUY, position_side=SHORT
+        sdk_side = get_side_for_trade(position_side)
         
         # 获取交易上下文
         model_uuid, trade_id = self._get_trade_context()
@@ -4443,8 +4447,9 @@ class TradingEngine:
         """
         执行平仓操作
 
-        卖出循环中的平仓逻辑：
-        - 无论LONG还是SHORT持仓，都统一使用SELL方向
+        平仓逻辑：
+        - 平多(LONG): side=SELL, position_side=LONG
+        - 平空(SHORT): side=BUY, position_side=SHORT
 
         Args:
             symbol: 交易对符号
@@ -4508,7 +4513,7 @@ class TradingEngine:
             entry_price, current_price, strategy_quantity, position_side, self.trade_fee_rate
         )
 
-        # 卖出循环专用：统一使用SELL方向
+        # 平多: side=SELL，平空: side=BUY
         side_for_trade = get_side_for_sell_cycle(position_side)
 
         # 获取交易上下文
@@ -5026,7 +5031,7 @@ class TradingEngine:
             return {'symbol': symbol, 'error': 'Stop price not provided'}
         stop_price = float(stop_price)
 
-        # 卖出循环专用：统一使用SELL方向
+        # 平多: side=SELL，平空: side=BUY
         side_for_trade = get_side_for_sell_cycle(position_side)
 
         # 获取交易上下文
@@ -5321,7 +5326,7 @@ class TradingEngine:
             return {'symbol': symbol, 'error': 'Take profit price not provided'}
         stop_price = float(stop_price)
 
-        # 卖出循环专用：统一使用SELL方向
+        # 平多: side=SELL，平空: side=BUY
         side_for_trade = get_side_for_sell_cycle(position_side)
 
         # 获取交易上下文
