@@ -317,12 +317,14 @@ class StrategyTrader(Trader):
             """
             预估需要占用的本金（USDT），与交易执行模块一致采用：
             required_capital_usdt = (position_amt * price) / leverage
+            
+            注意：期货 quantity 可为小数（如 0.0146 ETH），需使用 float 而非 int。
             """
             try:
-                qty = int(float(dec.get('quantity') or 0))
+                qty = float(dec.get('quantity') or 0)
                 if qty <= 0:
                     return 0.0
-            except Exception:
+            except (ValueError, TypeError):
                 return 0.0
 
             # leverage：优先取决策字段，其次fallback为1
@@ -753,7 +755,9 @@ class StrategyTrader(Trader):
                                 f"Quantity={dec.get('quantity', 'N/A')}, Price={dec.get('price', 'N/A')}, Reason={dec.get('reason', dec.get('justification', 'N/A'))}"
                             )
 
-                normalized_decisions = self._normalize_quantity_to_int(decisions)
+                # 使用 _normalize_quantity_by_price 而非 _normalize_quantity_to_int：
+                # 期货 quantity 可为小数（如 0.0146 ETH），int(ceil(0.0146))=1 会错误放大数量
+                normalized_decisions = self._normalize_quantity_by_price(decisions, filtered_market_state)
 
                 # 按 symbol 归一化为 upper key，value 为 List[decision]
                 decisions_by_symbol: Dict[str, List[Dict]] = {}
