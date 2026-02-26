@@ -744,6 +744,10 @@ public class AlgoOrderServiceImpl implements AlgoOrderService {
         LocalDateTime now = LocalDateTime.now(ZoneId.of("Asia/Shanghai"));
         
         // 1. 插入trades表记录
+        // 【trades表记录逻辑】止损/止盈触发为“平仓”操作，统一按业务语义记录：
+        // - side 固定为 "sell"（平仓操作）
+        // - signal 为 "stop_loss" 或 "take_profit"
+        // - quantity/price 使用实际成交数据（real模式从SDK获取，virtual模式用当前价格和订单数量）
         TradeDO trade = new TradeDO();
         trade.setId(tradeId);
         trade.setModelId(modelId);
@@ -752,7 +756,7 @@ public class AlgoOrderServiceImpl implements AlgoOrderService {
         trade.setQuantity(executedQuantity);
         trade.setPrice(executedPrice);
         trade.setLeverage(leverage);
-        trade.setSide(sdkSide.toLowerCase());
+        trade.setSide("sell");  // 平仓操作固定为 sell
         trade.setPositionSide(positionSide);
         trade.setPnl(netPnl);
         trade.setFee(tradeFee);
