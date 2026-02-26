@@ -607,8 +607,8 @@ mavol60 = vol_data.get('mavol60')  # 可能为None
       self.log.warning(f"{symbol} MA指标值不足，无法判断金叉，跳过")
       continue  # 或使用其他逻辑
 
-  # 判断金叉：当前MA5 > MA20 且 前一根MA5 <= MA20
-  is_golden_cross = ma5_current > ma20_current and ma5_prev <= ma20_prev
+  # 判断金叉：当前MA5 >= MA20 且 前一根MA5 <= MA20
+  is_golden_cross = ma5_current >= ma20_current and ma5_prev <= ma20_prev
   ```
 - **死叉**：快速均线下穿慢速均线，适合开空单
   ```python
@@ -617,8 +617,8 @@ mavol60 = vol_data.get('mavol60')  # 可能为None
       self.log.warning(f"{symbol} MA指标值不足，无法判断死叉，跳过")
       continue  # 或使用其他逻辑
 
-  # 判断死叉：当前MA5 < MA20 且 前一根MA5 >= MA20
-  is_death_cross = ma5_current < ma20_current and ma5_prev >= ma20_prev
+  # 判断死叉：当前MA5 <= MA20 且 前一根MA5 >= MA20
+  is_death_cross = ma5_current <= ma20_current and ma5_prev >= ma20_prev
   ```
 
 **读取历史K线的指标：**
