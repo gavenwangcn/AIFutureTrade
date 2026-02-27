@@ -3884,7 +3884,7 @@ class TradingEngine:
         parsed_response = None
         if trade_mode == 'real' and sdk_response:
             parsed_response = self._parse_sdk_response(sdk_response, trade_signal, position_side.lower())
-        elif trade_mode == 'real' and sdk_error:
+        elif sdk_error:
             # real模式调用失败，使用策略返回的值，quantity和price设置为0
             parsed_response = {
                 'executedQty': 0.0,
@@ -4259,7 +4259,7 @@ class TradingEngine:
         parsed_response = None
         if trade_mode == 'real' and sdk_response:
             parsed_response = self._parse_sdk_response(sdk_response, trade_signal, position_side.lower())
-        elif trade_mode == 'real' and sdk_error:
+        elif sdk_error:
             # real模式调用失败，使用策略返回的值，quantity和price设置为0
             parsed_response = {
                 'executedQty': 0.0,
@@ -4610,7 +4610,7 @@ class TradingEngine:
         parsed_response = None
         if trade_mode == 'real' and sdk_response:
             parsed_response = self._parse_sdk_response(sdk_response, 'close_position', position_side.lower())
-        elif trade_mode == 'real' and sdk_error:
+        elif sdk_error:
             # real模式调用失败，使用策略返回的值，quantity和price设置为0
             parsed_response = {
                 'executedQty': 0.0,
