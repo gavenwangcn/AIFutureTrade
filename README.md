@@ -644,6 +644,7 @@ docker-compose -f docker-compose.prod.yml logs -f
 | Binance Service | 1-2 cores | 1-2GB | 500MB | 100Mbps |
 | Async Service | 1-2 cores | 1-2GB | 500MB | 100Mbps |
 | Trade Service | 1-2 cores | 1-2GB | 1GB | 100Mbps |
+| Trade Monitor | 0.5-1 core | 512MB-1GB | 500MB | 50Mbps |
 | Frontend | 0.5-1 core | 512MB-1GB | 500MB | 50Mbps |
 | MySQL | 2-4 cores | 2-4GB | 20GB+ | 100Mbps |
 | Model Container | 0.5-1 core | 512MB-1GB | 500MB | 50Mbps |
@@ -1199,7 +1200,118 @@ AIFutureTrade 是面向 Binance 合约的智能自动交易系统，采用微服
 - **异步服务**：行情流处理与定时任务
 - **币安服务**：Binance API 调用与限流
 
-详细拓扑与数据流示意图请见英文部分的 Architecture 段落。
+#### 系统架构图
+
+```mermaid
+graph TB
+    subgraph "Client Layer"
+        USER[User Browser]
+    end
+
+    subgraph "Frontend Layer"
+        FE[Vue 3 Frontend<br/>Port 3000<br/>Vite + KLineChart]
+    end
+
+    subgraph "API Gateway Layer"
+        BE[Backend Service<br/>Java Spring Boot<br/>Port 5002<br/>User/Model Management]
+    end
+
+    subgraph "Core Services Layer"
+        BS[Binance Service<br/>Java + Undertow<br/>Port 5004<br/>Market Data API]
+        AS[Async Service<br/>Java Spring Boot<br/>Port 5003<br/>WebSocket Stream]
+        TS[Trade Service<br/>Python Flask<br/>Port 5000<br/>Trading Engine]
+    end
+
+    subgraph "Dynamic Model Layer"
+        MB1[Buy Model 1<br/>Python Container]
+        MB2[Buy Model 2<br/>Python Container]
+        MS1[Sell Model 1<br/>Python Container]
+        MS2[Sell Model 2<br/>Python Container]
+    end
+
+    subgraph "External Services"
+        BINANCE[Binance API<br/>Futures Market<br/>WebSocket + REST]
+        DB[(MySQL 8.0<br/>Port 32123<br/>Trade Data)]
+    end
+
+    subgraph "Docker Infrastructure"
+        DOCKER[Docker Engine<br/>Container Management]
+    end
+
+    USER -->|HTTPS| FE
+    FE -->|HTTP/WebSocket| BE
+    BE -->|REST API| TS
+    BE -->|REST API| BS
+    BE -->|REST API| AS
+    BE -->|Docker API| DOCKER
+    BE -->|JDBC| DB
+
+    DOCKER -->|Manage| MB1
+    DOCKER -->|Manage| MB2
+    DOCKER -->|Manage| MS1
+    DOCKER -->|Manage| MS2
+
+    BS -->|HTTPS| BINANCE
+    AS -->|WebSocket| BINANCE
+    AS -->|JDBC| DB
+    TS -->|HTTPS| BINANCE
+    TS -->|JDBC| DB
+
+    MB1 -->|Trade Logic| TS
+    MB2 -->|Trade Logic| TS
+    MS1 -->|Trade Logic| TS
+    MS2 -->|Trade Logic| TS
+```
+
+#### 网络架构
+
+```mermaid
+graph LR
+    subgraph "Public Network"
+        INTERNET[Internet]
+    end
+
+    subgraph "Docker Bridge Network: aifuturetrade-network"
+        subgraph "Frontend Container"
+            FE[frontend:3000]
+        end
+
+        subgraph "Backend Container"
+            BE[backend:5002]
+        end
+
+        subgraph "Service Containers"
+            BS[binance-service:5004]
+            AS[async-service:5003]
+            TS[trade:5000]
+        end
+
+        subgraph "Model Containers"
+            MB["buy-<modelId>"]
+            MS["sell-<modelId>"]
+        end
+
+        subgraph "Database Container"
+            DB[mysql:32123]
+        end
+    end
+
+    INTERNET -->|Port 3000| FE
+    INTERNET -->|Port 5002| BE
+
+    FE -.->|Internal DNS| BE
+    BE -.->|Internal DNS| BS
+    BE -.->|Internal DNS| AS
+    BE -.->|Internal DNS| TS
+    BE -.->|Internal DNS| DB
+
+    BS -.->|Internal DNS| DB
+    AS -.->|Internal DNS| DB
+    TS -.->|Internal DNS| DB
+
+    MB -.->|Internal DNS| TS
+    MS -.->|Internal DNS| TS
+```
 
 ### 快速开始
 
@@ -1237,6 +1349,16 @@ AIFutureTrade 是面向 Binance 合约的智能自动交易系统，采用微服
 
 - 建议使用独立数据库与反向代理（Nginx/Traefik）
 - 开启 HTTPS、日志与监控、资源限制、备份策略
+
+#### 生产环境清单
+
+- 独立 MySQL / 云数据库，开启备份与只读账号
+- 反向代理 + HTTPS，配置安全头与限流
+- 日志与监控（Prometheus/Grafana/ELK）
+- Docker 资源限制与自动重启策略
+- 秘钥与环境变量通过安全方式注入（避免硬编码）
+- 时区统一（Asia/Shanghai）与系统时间同步
+- 定期清理与归档历史数据
 
 #### Docker 部署
 
