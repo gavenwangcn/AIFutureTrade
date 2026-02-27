@@ -702,18 +702,27 @@ public class AlgoOrderServiceImpl implements AlgoOrderService {
                     }
 
                     // 从响应中获取实际成交价格和数量
+                    // 优先使用cumQty（累计成交数量），其次使用executedQty
                     String avgPriceStr = (String) tradeResult.get("avgPrice");
                     if (avgPriceStr != null && !avgPriceStr.isEmpty()) {
                         executedPrice = Double.parseDouble(avgPriceStr);
+                        log.debug("[AlgoOrderService] 从SDK响应获取成交价格: {} (字段: avgPrice)", executedPrice);
                     }
 
-                    String executedQtyStr = (String) tradeResult.get("executedQty");
-                    if (executedQtyStr != null && !executedQtyStr.isEmpty()) {
-                        executedQuantity = Double.parseDouble(executedQtyStr);
+                    Object cumQtyObj = tradeResult.get("cumQty");
+                    Object executedQtyObj = tradeResult.get("executedQty");
+                    Object quantityObj = (cumQtyObj != null && !"".equals(cumQtyObj.toString())) ? cumQtyObj : executedQtyObj;
+
+                    if (quantityObj != null && !"".equals(quantityObj.toString())) {
+                        try {
+                            executedQuantity = Double.parseDouble(quantityObj.toString());
+                            String quantitySource = cumQtyObj != null ? "cumQty" : "executedQty";
+                            log.debug("[AlgoOrderService] 从SDK响应获取成交数量: {} (字段: {})", executedQuantity, quantitySource);
+                        } catch (NumberFormatException ignored) {}
                     }
 
-                    log.info("[AlgoOrderService] ✅ 交易执行成功: orderId={}, binanceOrderId={}, executedPrice={}, executedQuantity={}",
-                            orderId, binanceOrderId, executedPrice, executedQuantity);
+                    log.info("[AlgoOrderService] ✅ 交易执行成功: orderId={}, binanceOrderId={}, executedPrice={}, executedQuantity={}, cumQty={}, executedQty={}",
+                            orderId, binanceOrderId, executedPrice, executedQuantity, tradeResult.get("cumQty"), tradeResult.get("executedQty"));
                 } else {
                     throw new RuntimeException("交易接口返回为空");
                 }

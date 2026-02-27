@@ -290,7 +290,9 @@ public class BinanceFuturesOrderServiceImpl implements BinanceFuturesOrderServic
                         sdkPositionSide,
                         useTestMode
                 );
-                log.info("[BinanceFuturesOrderService] SDK调用成功: {}", sdkResponse);
+                log.info("[BinanceFuturesOrderService] SDK调用成功，响应数据: cumQty={}, avgPrice={}, executedQty={}, orderId={}, status={}",
+                        sdkResponse.get("cumQty"), sdkResponse.get("avgPrice"), sdkResponse.get("executedQty"),
+                        sdkResponse.get("orderId"), sdkResponse.get("status"));
             } catch (Exception e) {
                 sdkError = e.getMessage();
                 log.error("[BinanceFuturesOrderService] SDK调用失败: {}", sdkError, e);
@@ -317,23 +319,30 @@ public class BinanceFuturesOrderServiceImpl implements BinanceFuturesOrderServic
             
             if (!useTestMode && sdkResponse != null) {
                 // real模式且调用成功，从SDK响应提取成交数量、成交价、orderId等
+                // 优先使用cumQty（累计成交数量），其次使用executedQty
+                Object cumQtyObj = sdkResponse.get("cumQty");
                 Object executedQtyObj = sdkResponse.get("executedQty");
                 Object avgPriceObj = sdkResponse.get("avgPrice");
                 Object positionSideObj = sdkResponse.get("positionSide");
                 Object orderIdObj = sdkResponse.get("orderId");
                 Object typeObj = sdkResponse.get("type");
                 Object origTypeObj = sdkResponse.get("origType");
-                
-                if (executedQtyObj != null && !"".equals(executedQtyObj.toString())) {
+
+                // 优先使用cumQty，如果为空则使用executedQty
+                Object quantityObj = (cumQtyObj != null && !"".equals(cumQtyObj.toString())) ? cumQtyObj : executedQtyObj;
+                if (quantityObj != null && !"".equals(quantityObj.toString())) {
                     try {
-                        finalQuantity = Double.parseDouble(executedQtyObj.toString());
+                        finalQuantity = Double.parseDouble(quantityObj.toString());
+                        log.debug("[BinanceFuturesOrderService] 从SDK响应获取成交数量: {} (字段: {})",
+                                finalQuantity, cumQtyObj != null ? "cumQty" : "executedQty");
                     } catch (Exception e) {
-                        log.warn("[BinanceFuturesOrderService] 解析executedQty失败: {}", e.getMessage());
+                        log.warn("[BinanceFuturesOrderService] 解析成交数量失败: {}", e.getMessage());
                     }
                 }
                 if (avgPriceObj != null && !"".equals(avgPriceObj.toString())) {
                     try {
                         finalPrice = Double.parseDouble(avgPriceObj.toString());
+                        log.debug("[BinanceFuturesOrderService] 从SDK响应获取成交价格: {} (字段: avgPrice)", finalPrice);
                     } catch (Exception e) {
                         log.warn("[BinanceFuturesOrderService] 解析avgPrice失败: {}", e.getMessage());
                     }
@@ -376,6 +385,11 @@ public class BinanceFuturesOrderServiceImpl implements BinanceFuturesOrderServic
             // 设置原始保证金（从portfolio中获取，用于计算盈亏百分比）
             Double initialMargin = portfolio.getInitialMargin();
             trade.setInitialMargin(initialMargin != null ? initialMargin : 0.0);
+            // 设置杠杆倍数（从portfolio中获取）
+            Integer leverage = portfolio.getLeverage();
+            if (leverage != null && leverage > 0) {
+                trade.setLeverage(leverage);
+            }
             // 设置 portfolios_id（关联的持仓ID）
             trade.setPortfoliosId(portfolio.getId());
             // 设置新字段（如果real模式有值）
@@ -395,8 +409,8 @@ public class BinanceFuturesOrderServiceImpl implements BinanceFuturesOrderServic
             trade.setTimestamp(LocalDateTime.now(ZoneOffset.ofHours(8)));
             tradeMapper.insert(trade);
 
-            log.info("[BinanceFuturesOrderService] 插入trades表记录成功: tradeId={}, modelId={}, signal={}, quantity={}, price={}, pnl={}, fee={}", 
-                    trade.getId(), modelId, finalSignal, finalQuantity, finalPrice, netPnl, fee);
+            log.info("[BinanceFuturesOrderService] 插入trades表记录成功: tradeId={}, modelId={}, signal={}, quantity={}, price={}, pnl={}, fee={}, leverage={}",
+                    trade.getId(), modelId, finalSignal, finalQuantity, finalPrice, netPnl, fee, trade.getLeverage());
 
             // 9. 只有在real模式且SDK返回成功时才删除portfolios表记录
             if (!useTestMode && sdkResponse != null && sdkError == null) {

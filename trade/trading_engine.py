@@ -1085,23 +1085,28 @@ class TradingEngine:
             return result
         
         try:
-            # 提取executedQty（成交量）
-            if 'executedQty' in sdk_response:
-                executed_qty = sdk_response.get('executedQty')
-                if executed_qty is not None:
-                    try:
-                        result['executedQty'] = float(executed_qty)
-                    except (ValueError, TypeError):
-                        pass
-            
+            # 提取成交量（优先使用cumQty，其次使用executedQty）
+            cum_qty = sdk_response.get('cumQty')
+            executed_qty = sdk_response.get('executedQty')
+            quantity_obj = cum_qty if cum_qty is not None else executed_qty
+            quantity_source = 'cumQty' if cum_qty is not None else 'executedQty'
+
+            if quantity_obj is not None:
+                try:
+                    result['executedQty'] = float(quantity_obj)
+                    logger.debug(f"[TradingEngine] 从SDK响应获取成交数量: {result['executedQty']} (字段: {quantity_source})")
+                except (ValueError, TypeError):
+                    logger.warning(f"[TradingEngine] 解析成交数量失败: {quantity_obj}")
+
             # 提取avgPrice（平均成交价）
             if 'avgPrice' in sdk_response:
                 avg_price = sdk_response.get('avgPrice')
                 if avg_price is not None:
                     try:
                         result['avgPrice'] = float(avg_price)
+                        logger.debug(f"[TradingEngine] 从SDK响应获取成交价格: {result['avgPrice']} (字段: avgPrice)")
                     except (ValueError, TypeError):
-                        pass
+                        logger.warning(f"[TradingEngine] 解析avgPrice失败: {avg_price}")
             
             # 提取side（买卖方向），映射到signal
             if 'side' in sdk_response:
@@ -3879,7 +3884,7 @@ class TradingEngine:
         parsed_response = None
         if trade_mode == 'real' and sdk_response:
             parsed_response = self._parse_sdk_response(sdk_response, trade_signal, position_side.lower())
-        elif trade_mode == 'real' and sdk_error:
+        elif sdk_error:
             # real模式调用失败，使用策略返回的值，quantity和price设置为0
             parsed_response = {
                 'executedQty': 0.0,
@@ -3893,20 +3898,27 @@ class TradingEngine:
             }
 
         # 【更新持仓】只有在real模式且SDK返回成功时才更新portfolios表
-        # 对于real模式：使用SDK返回的executedQty, avgPrice, positionSide
+        # 对于real模式：优先使用SDK返回的cumQty，其次使用executedQty；使用avgPrice
         # 对于test模式：使用策略返回的值
         if trade_mode == 'real' and parsed_response and not parsed_response.get('error'):
             # real模式且SDK返回成功，使用SDK返回的数据更新portfolios表
-            executed_qty = parsed_response.get('executedQty', 0.0)
+            # 优先使用cumQty，其次使用executedQty
+            cum_qty = parsed_response.get('cumQty')
+            executed_qty_fallback = parsed_response.get('executedQty', 0.0)
+            executed_qty = cum_qty if cum_qty is not None else executed_qty_fallback
+            quantity_source = 'cumQty' if cum_qty is not None else 'executedQty'
+
             avg_price_from_sdk = parsed_response.get('avgPrice', 0.0)
             position_side_from_sdk = parsed_response.get('positionSide', position_side.lower())
-            
+
+            logger.debug(f"[TradingEngine] 从SDK响应获取成交数量: {executed_qty} (字段: {quantity_source}), 成交价格: {avg_price_from_sdk}")
+
             # 将position_side转换为大写（数据库存储为大写）
             if position_side_from_sdk:
                 position_side_from_sdk = position_side_from_sdk.upper()
             else:
                 position_side_from_sdk = position_side
-            
+
             # 根据价格调整executedQty精度（与strategy_decisions表保持一致）
             if executed_qty and avg_price_from_sdk:
                 executed_qty_adjusted = adjust_quantity_precision_by_price(float(executed_qty), float(avg_price_from_sdk))
@@ -3965,11 +3977,18 @@ class TradingEngine:
         if parsed_response:
             trade_signal_final = parsed_response.get('side', trade_signal)
             trade_position_side_final = parsed_response.get('positionSide', position_side.lower())
-            # real模式：使用SDK返回的executedQty，并根据价格调整精度
+            # real模式：优先使用SDK返回的cumQty，其次使用executedQty；使用avgPrice
             # test模式：使用quantity（已经根据价格调整过精度）
             if trade_mode == 'real':
-                executed_qty = parsed_response.get('executedQty', 0.0)
+                # 优先使用cumQty，其次使用executedQty
+                cum_qty = parsed_response.get('cumQty')
+                executed_qty_fallback = parsed_response.get('executedQty', 0.0)
+                executed_qty = cum_qty if cum_qty is not None else executed_qty_fallback
+                quantity_source = 'cumQty' if cum_qty is not None else 'executedQty'
+
                 avg_price = parsed_response.get('avgPrice', price)
+                logger.debug(f"[TradingEngine] 从SDK响应获取成交数量: {executed_qty} (字段: {quantity_source}), 成交价格: {avg_price}")
+
                 # 如果SDK返回了成交数量和价格，根据价格调整精度
                 if executed_qty and avg_price:
                     trade_quantity = adjust_quantity_precision_by_price(float(executed_qty), float(avg_price))
@@ -3981,6 +4000,12 @@ class TradingEngine:
             else:
                 trade_quantity = quantity  # test模式，quantity已经根据价格调整过精度
             trade_price = parsed_response.get('avgPrice', 0.0) if trade_mode == 'real' else price
+
+            # 【real模式下确保使用SDK返回的avgPrice作为开仓价格】
+            if trade_mode == 'real' and parsed_response.get('avgPrice'):
+                logger.info(f"[TradingEngine] 买入操作使用SDK返回的avgPrice作为开仓价格: {trade_price}")
+            elif trade_mode == 'real' and not parsed_response.get('avgPrice'):
+                logger.warning(f"[TradingEngine] 买入操作未获取到SDK返回的avgPrice，使用默认值: {trade_price}")
             order_id = parsed_response.get('orderId')
             order_type = parsed_response.get('type')
             orig_type = parsed_response.get('origType')
@@ -4234,7 +4259,7 @@ class TradingEngine:
         parsed_response = None
         if trade_mode == 'real' and sdk_response:
             parsed_response = self._parse_sdk_response(sdk_response, trade_signal, position_side.lower())
-        elif trade_mode == 'real' and sdk_error:
+        elif sdk_error:
             # real模式调用失败，使用策略返回的值，quantity和price设置为0
             parsed_response = {
                 'executedQty': 0.0,
@@ -4322,11 +4347,18 @@ class TradingEngine:
             order_type = parsed_response.get('type')
             orig_type = parsed_response.get('origType')
             error_msg = parsed_response.get('error')
-            # real模式：使用SDK返回的executedQty和avgPrice；失败时用0
+            # real模式：优先使用SDK返回的cumQty，其次使用executedQty；使用avgPrice；失败时用0
             # test模式：使用strategy_quantity和current_price
             if trade_mode == 'real':
-                executed_qty = parsed_response.get('executedQty', 0.0)
+                # 优先使用cumQty，其次使用executedQty
+                cum_qty = parsed_response.get('cumQty')
+                executed_qty_fallback = parsed_response.get('executedQty', 0.0)
+                executed_qty = cum_qty if cum_qty is not None else executed_qty_fallback
+                quantity_source = 'cumQty' if cum_qty is not None else 'executedQty'
+
                 avg_price = parsed_response.get('avgPrice', current_price)
+                logger.debug(f"[TradingEngine] 从SDK响应获取成交数量: {executed_qty} (字段: {quantity_source}), 成交价格: {avg_price}")
+
                 if parsed_response.get('error'):
                     trade_quantity = 0.0
                     trade_price = 0.0
@@ -4578,7 +4610,7 @@ class TradingEngine:
         parsed_response = None
         if trade_mode == 'real' and sdk_response:
             parsed_response = self._parse_sdk_response(sdk_response, 'close_position', position_side.lower())
-        elif trade_mode == 'real' and sdk_error:
+        elif sdk_error:
             # real模式调用失败，使用策略返回的值，quantity和price设置为0
             parsed_response = {
                 'executedQty': 0.0,
@@ -4692,18 +4724,24 @@ class TradingEngine:
             order_type = parsed_response.get('type')
             orig_type = parsed_response.get('origType')
             error_msg = parsed_response.get('error')
-            # real模式：使用SDK返回的executedQty和avgPrice；失败时用0
+            # real模式：优先使用SDK返回的cumQty，其次使用executedQty；使用avgPrice；失败时用0
             # test模式：使用strategy_quantity和current_price
             if trade_mode == 'real':
                 if parsed_response.get('error'):
                     trade_quantity = 0.0
                     trade_price = 0.0
                 else:
-                    executed_qty = parsed_response.get('executedQty')
+                    # 优先使用cumQty，其次使用executedQty
+                    cum_qty = parsed_response.get('cumQty')
+                    executed_qty_fallback = parsed_response.get('executedQty')
+                    executed_qty = cum_qty if cum_qty is not None else executed_qty_fallback
+                    quantity_source = 'cumQty' if cum_qty is not None else 'executedQty'
+
                     avg_price = parsed_response.get('avgPrice')
                     if executed_qty is not None and executed_qty != '' and avg_price is not None and avg_price != '':
                         trade_quantity = float(executed_qty)
                         trade_price = float(avg_price)
+                        logger.debug(f"[TradingEngine] 从SDK响应获取成交数量: {trade_quantity} (字段: {quantity_source}), 成交价格: {trade_price}")
                     else:
                         trade_quantity = strategy_quantity
                         trade_price = current_price

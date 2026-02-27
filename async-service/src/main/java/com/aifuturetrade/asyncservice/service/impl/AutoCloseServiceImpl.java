@@ -405,19 +405,33 @@ public class AutoCloseServiceImpl implements AutoCloseService {
                 log.info("[AutoClose] ✅ 平仓订单提交成功: {}", tradeResult);
 
                 // 插入trades表记录（与backend/async-service平仓逻辑一致：side=sell）
+                // 优先使用cumQty（累计成交数量），其次使用executedQty
                 Double executedQuantity = positionAmt;
                 Double executedPrice = currentPrice;
                 Long orderId = null;
-                if (tradeResult.get("executedQty") != null && !"".equals(tradeResult.get("executedQty").toString())) {
+                String quantitySource = "default";
+                String priceSource = "default";
+
+                Object cumQtyObj = tradeResult.get("cumQty");
+                Object executedQtyObj = tradeResult.get("executedQty");
+                Object quantityObj = (cumQtyObj != null && !"".equals(cumQtyObj.toString())) ? cumQtyObj : executedQtyObj;
+
+                if (quantityObj != null && !"".equals(quantityObj.toString())) {
                     try {
-                        executedQuantity = Double.parseDouble(tradeResult.get("executedQty").toString());
+                        executedQuantity = Double.parseDouble(quantityObj.toString());
+                        quantitySource = cumQtyObj != null ? "cumQty" : "executedQty";
+                        log.debug("[AutoClose] 从SDK响应获取成交数量: {} (字段: {})", executedQuantity, quantitySource);
                     } catch (NumberFormatException ignored) {}
                 }
+
                 if (tradeResult.get("avgPrice") != null && !"".equals(tradeResult.get("avgPrice").toString())) {
                     try {
                         executedPrice = Double.parseDouble(tradeResult.get("avgPrice").toString());
+                        priceSource = "avgPrice";
+                        log.debug("[AutoClose] 从SDK响应获取成交价格: {} (字段: avgPrice)", executedPrice);
                     } catch (NumberFormatException ignored) {}
                 }
+
                 if (tradeResult.get("orderId") != null) {
                     try {
                         orderId = Long.parseLong(tradeResult.get("orderId").toString());
