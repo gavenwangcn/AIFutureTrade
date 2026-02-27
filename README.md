@@ -182,8 +182,8 @@ graph LR
         end
 
         subgraph "Model Containers"
-            MB[buy-{modelId}]
-            MS[sell-{modelId}]
+            MB["buy-<modelId>"]
+            MS["sell-<modelId>"]
         end
 
         subgraph "Database Container"
