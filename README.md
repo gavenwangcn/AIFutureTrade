@@ -1406,25 +1406,25 @@ docker-compose up -d --build --scale model-buy=0 --scale model-sell=0
 
 本项目基于 MIT License，详见 `LICENSE`。
 
-### 🖼️ 界面截图
+### 🖼️ 部分功能界面截图
 
-**行情总览与涨跌排行**  
-![行情总览](img/Attached_image.png)  
-展示 USDS-M 行情总览、涨跌幅排行以及左侧快速合约导航。
+**K 线与指标分析**  
+![K线图](img/Attached_image.png)  
+交互式 K 线图，支持 MA/EMA、MACD、KDJ、RSI、ATR 等指标叠加分析。
 
-**策略绩效与交易列表**  
-![策略绩效](img/Attached2_image.png)  
-展示策略收益走势与近期交易明细，便于复盘与跟踪执行结果。
+**策略管理**  
+![策略管理](img/Attached2_image.png)  
+集中管理策略列表、状态与快捷操作（编辑/启动等）。
 
 **模型级买入执行日志**  
 ![买入日志](img/Attached3_image.png)  
 提供模型实时执行日志，便于排障与运行审计。
 
-**策略管理**  
-![策略管理](img/Attached4_image.png)  
-集中管理策略列表、状态与快捷操作（编辑/启动等）。
+**策略绩效与交易列表**  
+![策略绩效](img/Attached4_image.png)  
+展示策略收益走势与近期交易明细，便于复盘与跟踪执行结果。
 
-**K 线与指标分析**  
-![K线图](img/Attached5_image.png)  
-交互式 K 线图，支持 MA/EMA、MACD、KDJ、RSI、ATR 等指标叠加分析。
+**行情总览与涨跌排行**  
+![行情总览](img/Attached5_image.png)  
+展示 USDS-M 行情总览、涨跌幅排行以及左侧快速合约导航。
 
