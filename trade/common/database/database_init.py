@@ -40,6 +40,8 @@ MODEL_STRATEGY_TABLE = "model_strategy"
 STRATEGY_DECISIONS_TABLE = "strategy_decisions"
 MARKET_TICKER_TABLE = "24_market_tickers"
 ALGO_ORDER_TABLE = "algo_order"
+WECHAT_GROUPS_TABLE = "wechat_groups"
+ALERT_RECORDS_TABLE = "alert_records"
 
 
 class DatabaseInitializer:
@@ -536,6 +538,52 @@ class DatabaseInitializer:
         self.command(ddl)
         logger.debug(f"[DatabaseInit] Ensured table {table_name} exists")
 
+    def ensure_wechat_groups_table(self, table_name: str = "wechat_groups"):
+        """Create wechat_groups table if not exists"""
+        ddl = f"""
+        CREATE TABLE IF NOT EXISTS `{table_name}` (
+            `id` BIGINT NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+            `group_name` VARCHAR(100) NOT NULL COMMENT '群组名称',
+            `webhook_url` VARCHAR(500) NOT NULL COMMENT '企业微信Webhook URL',
+            `alert_types` VARCHAR(500) DEFAULT NULL COMMENT '告警类型(逗号分隔,如:TICKER_SYNC_TIMEOUT,CONTAINER_DOWN)',
+            `is_enabled` TINYINT(1) NOT NULL DEFAULT 1 COMMENT '是否启用(0:禁用,1:启用)',
+            `description` VARCHAR(500) DEFAULT NULL COMMENT '描述',
+            `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+            `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+            PRIMARY KEY (`id`),
+            KEY `idx_is_enabled` (`is_enabled`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='微信群配置表'
+        """
+        self.command(ddl)
+        logger.debug(f"[DatabaseInit] Ensured table {table_name} exists")
+
+    def ensure_alert_records_table(self, table_name: str = "alert_records"):
+        """Create alert_records table if not exists"""
+        ddl = f"""
+        CREATE TABLE IF NOT EXISTS `{table_name}` (
+            `id` BIGINT NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+            `alert_type` VARCHAR(50) NOT NULL COMMENT '告警类型(TICKER_SYNC_TIMEOUT,CONTAINER_DOWN等)',
+            `service_name` VARCHAR(100) NOT NULL COMMENT '服务名称',
+            `severity` VARCHAR(20) NOT NULL COMMENT '严重程度(INFO,WARNING,ERROR,CRITICAL)',
+            `title` VARCHAR(200) NOT NULL COMMENT '告警标题',
+            `message` TEXT NOT NULL COMMENT '告警详细信息',
+            `status` VARCHAR(20) NOT NULL DEFAULT 'OPEN' COMMENT '状态(OPEN,HANDLING,RESOLVED)',
+            `action_taken` VARCHAR(500) DEFAULT NULL COMMENT '已执行的处置动作',
+            `wechat_sent` TINYINT(1) NOT NULL DEFAULT 0 COMMENT '是否已发送微信通知(0:否,1:是)',
+            `wechat_sent_at` DATETIME DEFAULT NULL COMMENT '微信通知发送时间',
+            `resolved_at` DATETIME DEFAULT NULL COMMENT '解决时间',
+            `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+            `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+            PRIMARY KEY (`id`),
+            KEY `idx_alert_type` (`alert_type`),
+            KEY `idx_service_name` (`service_name`),
+            KEY `idx_status` (`status`),
+            KEY `idx_created_at` (`created_at`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='告警记录表'
+        """
+        self.command(ddl)
+        logger.debug(f"[DatabaseInit] Ensured table {table_name} exists")
+
     # ============ Market Data Table Initialization Methods ============
     
     def ensure_market_ticker_table(self, table_name: str = "24_market_tickers"):
@@ -648,7 +696,13 @@ def init_database_tables(command_func: Callable[[str], Any], table_names: dict, 
     
     # Algo order table (conditional orders)
     initializer.ensure_algo_order_table(table_names.get('algo_order_table', 'algo_order'))
-    
+
+    # Wechat groups table (wechat notification configuration)
+    initializer.ensure_wechat_groups_table(table_names.get('wechat_groups_table', 'wechat_groups'))
+
+    # Alert records table (alert history records)
+    initializer.ensure_alert_records_table(table_names.get('alert_records_table', 'alert_records'))
+
     logger.info("[DatabaseInit] MySQL business tables initialized")
 
 
@@ -702,6 +756,9 @@ def init_all_database_tables(command_func: Callable[[str, tuple], Any], query_fu
         'binance_trade_logs_table': BINANCE_TRADE_LOGS_TABLE,
         'strategy_table': STRATEGYS_TABLE,
         'model_strategy_table': MODEL_STRATEGY_TABLE,
+        'algo_order_table': ALGO_ORDER_TABLE,
+        'wechat_groups_table': WECHAT_GROUPS_TABLE,
+        'alert_records_table': ALERT_RECORDS_TABLE,
     }
     
     # Initialize business tables (migration will be handled inside, query_func is optional)

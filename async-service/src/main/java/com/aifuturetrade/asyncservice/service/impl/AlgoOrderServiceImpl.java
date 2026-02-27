@@ -646,7 +646,6 @@ public class AlgoOrderServiceImpl implements AlgoOrderService {
         String symbol = order.getSymbol().toUpperCase();
         String positionSide = order.getPositionSide();
         Double quantity = order.getQuantity();
-        String side = order.getSide(); // 'buy' or 'sell'
         String orderType = order.getOrderType();
         
         // 查询持仓信息
@@ -670,12 +669,16 @@ public class AlgoOrderServiceImpl implements AlgoOrderService {
         // 判断交易模式
         boolean isVirtual = model.getIsVirtual() != null && model.getIsVirtual();
         boolean useTestMode = isVirtual;
-        
+
+        // 平多: side=SELL, position_side=LONG；平空: side=BUY, position_side=SHORT
+        // 以 positionSide 为准推导正确的 side，兼容历史错误数据
+        String sdkSide = "LONG".equalsIgnoreCase(positionSide) ? "SELL" : "BUY";
+
         // 执行交易
         Long binanceOrderId = null;
         Double executedPrice = currentPrice;
         Double executedQuantity = quantity;
-        
+
         if (!useTestMode) {
             // real模式：调用真实交易接口
             BinanceFuturesOrderClient orderClient = getOrCreateOrderClient(model);
@@ -685,7 +688,7 @@ public class AlgoOrderServiceImpl implements AlgoOrderService {
 
             try {
                 // 使用 BinanceFuturesOrderClient 的 marketTrade 方法
-                Map<String, Object> tradeResult = orderClient.marketTrade(symbol, side, quantity, positionSide);
+                Map<String, Object> tradeResult = orderClient.marketTrade(symbol, sdkSide, quantity, positionSide);
 
                 // 从响应中获取订单信息
                 if (tradeResult != null) {
@@ -699,18 +702,27 @@ public class AlgoOrderServiceImpl implements AlgoOrderService {
                     }
 
                     // 从响应中获取实际成交价格和数量
+                    // 优先使用cumQty（累计成交数量），其次使用executedQty
                     String avgPriceStr = (String) tradeResult.get("avgPrice");
                     if (avgPriceStr != null && !avgPriceStr.isEmpty()) {
                         executedPrice = Double.parseDouble(avgPriceStr);
+                        log.debug("[AlgoOrderService] 从SDK响应获取成交价格: {} (字段: avgPrice)", executedPrice);
                     }
 
-                    String executedQtyStr = (String) tradeResult.get("executedQty");
-                    if (executedQtyStr != null && !executedQtyStr.isEmpty()) {
-                        executedQuantity = Double.parseDouble(executedQtyStr);
+                    Object cumQtyObj = tradeResult.get("cumQty");
+                    Object executedQtyObj = tradeResult.get("executedQty");
+                    Object quantityObj = (cumQtyObj != null && !"".equals(cumQtyObj.toString())) ? cumQtyObj : executedQtyObj;
+
+                    if (quantityObj != null && !"".equals(quantityObj.toString())) {
+                        try {
+                            executedQuantity = Double.parseDouble(quantityObj.toString());
+                            String quantitySource = cumQtyObj != null ? "cumQty" : "executedQty";
+                            log.debug("[AlgoOrderService] 从SDK响应获取成交数量: {} (字段: {})", executedQuantity, quantitySource);
+                        } catch (NumberFormatException ignored) {}
                     }
 
-                    log.info("[AlgoOrderService] ✅ 交易执行成功: orderId={}, binanceOrderId={}, executedPrice={}, executedQuantity={}",
-                            orderId, binanceOrderId, executedPrice, executedQuantity);
+                    log.info("[AlgoOrderService] ✅ 交易执行成功: orderId={}, binanceOrderId={}, executedPrice={}, executedQuantity={}, cumQty={}, executedQty={}",
+                            orderId, binanceOrderId, executedPrice, executedQuantity, tradeResult.get("cumQty"), tradeResult.get("executedQty"));
                 } else {
                     throw new RuntimeException("交易接口返回为空");
                 }
@@ -741,6 +753,10 @@ public class AlgoOrderServiceImpl implements AlgoOrderService {
         LocalDateTime now = LocalDateTime.now(ZoneId.of("Asia/Shanghai"));
         
         // 1. 插入trades表记录
+        // 【trades表记录逻辑】止损/止盈触发为“平仓”操作，统一按业务语义记录：
+        // - side 固定为 "sell"（平仓操作）
+        // - signal 为 "stop_loss" 或 "take_profit"
+        // - quantity/price 使用实际成交数据（real模式从SDK获取，virtual模式用当前价格和订单数量）
         TradeDO trade = new TradeDO();
         trade.setId(tradeId);
         trade.setModelId(modelId);
@@ -749,7 +765,7 @@ public class AlgoOrderServiceImpl implements AlgoOrderService {
         trade.setQuantity(executedQuantity);
         trade.setPrice(executedPrice);
         trade.setLeverage(leverage);
-        trade.setSide(side);
+        trade.setSide("sell");  // 平仓操作固定为 sell
         trade.setPositionSide(positionSide);
         trade.setPnl(netPnl);
         trade.setFee(tradeFee);

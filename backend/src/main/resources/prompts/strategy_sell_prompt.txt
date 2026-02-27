@@ -648,6 +648,9 @@ mavol60 = vol_data.get('mavol60', 0)
 ```
 
 **金叉和死叉判断：**
+- **⚠️⚠️⚠️ 必须使用等于判断（极其重要）**：金叉和死叉的**当前K线和前一根K线**两侧比较**都必须**使用 `>=` 和 `<=`（含等于），**禁止**使用 `>` 和 `<`（不含等于）。否则会漏掉"相切"形态的交叉信号。
+  - ❌ 错误示例：`ema20_latest <= ema30_latest and ema20_prev > ema30_prev`（前一根用了 `>`，漏掉等于情况）
+  - ✅ 正确示例：`ema20_latest <= ema30_latest and ema20_prev >= ema30_prev`（两侧都用 `<=`/`>=`）
 - **金叉**：快速均线上穿慢速均线
 - **死叉**：快速均线下穿慢速均线
 ```python
@@ -660,9 +663,9 @@ ma20_current = current_kline.get('indicators', {}).get('ma', {}).get('ma20', 0)
 ma5_prev = prev_kline.get('indicators', {}).get('ma', {}).get('ma5', 0)
 ma20_prev = prev_kline.get('indicators', {}).get('ma', {}).get('ma20', 0)
 
-# 判断金叉或死叉
-is_golden_cross = ma5_current > ma20_current and ma5_prev <= ma20_prev
-is_death_cross = ma5_current < ma20_current and ma5_prev >= ma20_prev
+# 判断金叉或死叉（两侧都必须用 >= 和 <=，含等于，禁止用 > 和 <）
+is_golden_cross = ma5_current >= ma20_current and ma5_prev <= ma20_prev
+is_death_cross = ma5_current <= ma20_current and ma5_prev >= ma20_prev
 ```
 
 **技术指标数据说明：**
@@ -674,9 +677,10 @@ is_death_cross = ma5_current < ma20_current and ma5_prev >= ma20_prev
 ### 3. 技术指标数据获取方式（统一使用 market_state）
 
 **金叉和死叉判断（卖出策略）：**
+- **⚠️⚠️⚠️ 必须使用等于判断**：金叉和死叉的**当前K线和前一根K线**两侧比较**都必须**使用 `>=` 和 `<=`（含等于），**禁止**使用 `>` 和 `<`（不含等于）。否则会漏掉"相切"形态的交叉信号。
 - **金叉**：快速均线上穿慢速均线，对于多单持仓是利好信号（通常不平仓），对于空单持仓是平仓信号
 - **死叉**：快速均线下穿慢速均线，对于多单持仓是平仓信号，对于空单持仓是利好信号（通常不平仓）
-- 判断条件：`fast_ma_current > slow_ma_current and fast_ma_prev <= slow_ma_prev`（金叉），`fast_ma_current < slow_ma_current and fast_ma_prev >= slow_ma_prev`（死叉）
+- 判断条件（两侧都必须含等于）：`fast_ma_current >= slow_ma_current and fast_ma_prev <= slow_ma_prev`（金叉），`fast_ma_current <= slow_ma_current and fast_ma_prev >= slow_ma_prev`（死叉）
 - 示例：使用 MA5 和 MA20 判断，需要至少 21 根 K 线
 
 **技术指标计算注意事项：**
@@ -954,15 +958,13 @@ else:
      - 平仓100%：`quantity = position_amt`
      - 平仓50%：`quantity = position_amt * 0.5`
      - 平仓部分：`quantity = position_amt * 平仓比例`
-  5. **根据symbol价格动态调整quantity精度**（重要！）：
+  5. **根据symbol价格动态调整quantity精度**（重要！数量最多4位小数）：
      - **quantity使用向后取整**（向上取整）：例如 20.5 取 21，0.5 取 1。使用 `import math` 后 `quantity = math.ceil(quantity)` 或按精度：`quantity = math.ceil(quantity * 10**精度) / 10**精度`
-     - 价格 < 1：取整数（向后取整）`quantity = math.ceil(quantity)`
-     - 1 <= 价格 < 10：小数点后1位（向后取整）`quantity = math.ceil(quantity * 10) / 10`
-     - 10 <= 价格 < 100：小数点后2位 `quantity = math.ceil(quantity * 100) / 100`
-     - 100 <= 价格 < 1000：小数点后3位 `quantity = math.ceil(quantity * 1000) / 1000`
-     - 1000 <= 价格 < 10000：小数点后4位 `quantity = math.ceil(quantity * 10000) / 10000`
-     - 10000 <= 价格 < 100000：小数点后5位 `quantity = math.ceil(quantity * 100000) / 100000`
-     - 价格 >= 100000：小数点后6位（最多）`quantity = math.ceil(quantity * 1000000) / 1000000`
+     - 价格 < 1（0.几）：取整数 `quantity = math.ceil(quantity)`
+     - 1 <= 价格 < 10（个位）：1位小数 `quantity = math.ceil(quantity * 10) / 10`
+     - 10 <= 价格 < 1000（十、百位）：2位小数 `quantity = math.ceil(quantity * 100) / 100`
+     - 1000 <= 价格 < 10000（千位）：3位小数 `quantity = math.ceil(quantity * 1000) / 1000`
+     - 价格 >= 10000（万位）：4位小数（最多）`quantity = math.ceil(quantity * 10000) / 10000`
   6. 杠杆：通常与持仓时的杠杆一致，从 `position.get('leverage', 5)` 获取
 - **系统会自动**：若策略返回的 quantity 大于当前持仓数量，则使用持仓数量；计算平仓时的 USDT 数量：`quantity * 当前价格`
 
@@ -972,22 +974,18 @@ position_amt = abs(position.get('position_amt', 0))  # 持仓合约数量
 close_quantity = position_amt  # 平仓100%
 # 或平仓50%：close_quantity = position_amt * 0.5
 
-# 根据symbol价格动态调整quantity精度（向后取整：20.5取21；若quantity>持仓数量，系统会自动使用持仓数量）
+# 根据symbol价格动态调整quantity精度（向后取整，数量最多4位小数；若quantity>持仓数量，系统会自动使用持仓数量）
 import math
 if current_price < 1:
-    close_quantity = math.ceil(close_quantity)  # 取整数，向后取整
+    close_quantity = math.ceil(close_quantity)  # 价格<1取整数
 elif current_price < 10:
-    close_quantity = math.ceil(close_quantity * 10) / 10  # 小数点后1位
-elif current_price < 100:
-    close_quantity = math.ceil(close_quantity * 100) / 100  # 小数点后2位
+    close_quantity = math.ceil(close_quantity * 10) / 10  # 个位价格1位小数
 elif current_price < 1000:
-    close_quantity = math.ceil(close_quantity * 1000) / 1000  # 小数点后3位
+    close_quantity = math.ceil(close_quantity * 100) / 100  # 十百位2位小数
 elif current_price < 10000:
-    close_quantity = math.ceil(close_quantity * 10000) / 10000  # 小数点后4位
-elif current_price < 100000:
-    close_quantity = math.ceil(close_quantity * 100000) / 100000  # 小数点后5位
+    close_quantity = math.ceil(close_quantity * 1000) / 1000  # 千位3位小数
 else:
-    close_quantity = math.ceil(close_quantity * 1000000) / 1000000  # 小数点后6位（最多）
+    close_quantity = math.ceil(close_quantity * 10000) / 10000  # 万位4位小数（最多）
 # 若计算出的close_quantity超过持仓数量，系统会自动使用持仓数量
 close_quantity = min(close_quantity, position_amt)
 
@@ -1185,7 +1183,7 @@ decisions[symbol] = {
       #     # 可以根据减仓比例进行策略判断
 
       # 规则3：KDJ死叉
-      rule3_satisfied = k_value < d_value and k_prev >= d_prev
+      rule3_satisfied = k_value <= d_value and k_prev >= d_prev
       self.log.info(f"{symbol} [规则3] KDJ死叉检查: K={k_value:.2f}, D={d_value:.2f}, K_prev={k_prev:.2f}, D_prev={d_prev:.2f}, 结果={rule3_satisfied}")
 
       # 综合判断（任一规则满足即平仓）
@@ -1217,21 +1215,17 @@ decisions[symbol] = {
       # 计算合约数量：quantity = (本金 × 杠杆) / symbol价格
       quantity = (capital_usdt * leverage) / current_price
       
-      # 根据symbol价格动态调整quantity精度
+      # 根据symbol价格动态调整quantity精度（最多4位小数）
       if current_price < 1:
-          quantity = math.ceil(quantity)  # 取整数，向后取整
+          quantity = math.ceil(quantity)
       elif current_price < 10:
-          quantity = math.ceil(quantity * 10) / 10  # 小数点后1位
-      elif current_price < 100:
-          quantity = math.ceil(quantity * 100) / 100  # 小数点后2位
+          quantity = math.ceil(quantity * 10) / 10
       elif current_price < 1000:
-          quantity = math.ceil(quantity * 1000) / 1000  # 小数点后3位
+          quantity = math.ceil(quantity * 100) / 100
       elif current_price < 10000:
-          quantity = math.ceil(quantity * 10000) / 10000  # 小数点后4位
-      elif current_price < 100000:
-          quantity = math.ceil(quantity * 100000) / 100000  # 小数点后5位
+          quantity = math.ceil(quantity * 1000) / 1000
       else:
-          quantity = math.ceil(quantity * 1000000) / 1000000  # 小数点后6位（最多）
+          quantity = math.ceil(quantity * 10000) / 10000
       
       self.log.info(f"{symbol} 计算合约数量: 开仓资金={capital_usdt:.2f} USDT, 杠杆={leverage}x, 当前价格={current_price:.4f}, 合约数量={quantity}")
       ```

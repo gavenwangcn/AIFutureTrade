@@ -39,58 +39,45 @@ def _calculate_rsi_tradingview(close_array: np.ndarray, period: int) -> np.ndarr
     """
     使用TradingView的计算逻辑计算RSI（Wilder's Smoothing方法）
 
-    参考：https://www.tradingview.com/support/solutions/43000521824-relative-strength-index-rsi/
-
-    Wilder's Smoothing公式（与前端JavaScript实现完全一致）：
-    - 第一个period根K线：使用简单平均
-    - 之后：AvgGain = (PrevAvgGain * (period - 1) + CurrentGain) / period
-    - 之后：AvgLoss = (PrevAvgLoss * (period - 1) + CurrentLoss) / period
-    - RS = AvgGain / AvgLoss
-    - RSI = 100 - (100 / (1 + RS))
-
-    参数:
-        close_array: 收盘价数组（numpy数组）
-        period: RSI周期（如6、9、14等）
-
-    返回:
-        RSI值数组（numpy数组），与输入数组长度相同，前period个值为NaN
+    与前端实现完全一致（frontend/KLineChart/indicators/rsi.ts）：
+    - i==0：初始化AvgGain/AvgLoss
+    - i < period：累计gain/loss
+    - i == period-1：计算初始平均
+    - i > period-1：Wilder's Smoothing
+    - i >= period-1 输出RSI
     """
-    if len(close_array) < period + 1:
-        return np.full(len(close_array), np.nan)
+    if len(close_array) == 0:
+        return np.full(0, np.nan)
 
-    # 计算价格变化
-    delta = np.diff(close_array, prepend=close_array[0])
-
-    # 分离涨跌
-    gains = np.where(delta > 0, delta, 0)
-    losses = np.where(delta < 0, -delta, 0)
-
-    # 初始化结果数组
     rsi = np.full(len(close_array), np.nan)
+    avg_gain = 0.0
+    avg_loss = 0.0
 
-    # 计算第一个period的简单平均（跳过第一个值，因为是prepend的）
-    avg_gain = np.mean(gains[1:period+1])
-    avg_loss = np.mean(losses[1:period+1])
+    for i in range(len(close_array)):
+        prev_close = close_array[i - 1] if i > 0 else close_array[i]
+        change = close_array[i] - prev_close
+        gain = change if change > 0 else 0.0
+        loss = -change if change < 0 else 0.0
 
-    # 计算第一个RSI值（索引为period）
-    if avg_loss != 0:
-        rs = avg_gain / avg_loss
-        rsi[period] = 100 - (100 / (1 + rs))
-    else:
-        rsi[period] = 100.0 if avg_gain > 0 else 50.0
-
-    # 使用Wilder's Smoothing计算后续RSI值
-    for i in range(period + 1, len(close_array)):
-        # Wilder's Smoothing公式（与前端完全一致）
-        avg_gain = (avg_gain * (period - 1) + gains[i]) / period
-        avg_loss = (avg_loss * (period - 1) + losses[i]) / period
-
-        # 计算RSI
-        if avg_loss != 0:
-            rs = avg_gain / avg_loss
-            rsi[i] = 100 - (100 / (1 + rs))
+        if i == 0:
+            avg_gain = gain
+            avg_loss = loss
+        elif i < period:
+            avg_gain += gain
+            avg_loss += loss
+            if i == period - 1:
+                avg_gain = avg_gain / period
+                avg_loss = avg_loss / period
         else:
-            rsi[i] = 100.0 if avg_gain > 0 else 50.0
+            avg_gain = (avg_gain * (period - 1) + gain) / period
+            avg_loss = (avg_loss * (period - 1) + loss) / period
+
+        if i >= period - 1:
+            if avg_loss != 0:
+                rs = avg_gain / avg_loss
+                rsi[i] = 100 - (100 / (1 + rs))
+            else:
+                rsi[i] = 100.0 if avg_gain > 0 else 50.0
 
     return rsi
 
@@ -1009,20 +996,87 @@ class MarketDataFetcher:
             ma60 = talib.SMA(closes, timeperiod=60)
             ma99 = talib.SMA(closes, timeperiod=99)
 
-            # EMA指标
-            ema5 = talib.EMA(closes, timeperiod=5)
-            ema20 = talib.EMA(closes, timeperiod=20)
-            ema30 = talib.EMA(closes, timeperiod=30)
-            ema60 = talib.EMA(closes, timeperiod=60)
-            ema99 = talib.EMA(closes, timeperiod=99)
+            # EMA指标（与前端K线一致的初始化逻辑）
+            # EMA(t) = Close(t) * α + EMA(t-1) * (1 - α), α = 2 / (N + 1)
+            # 初始化规则：
+            # - i==0: EMA = close
+            # - i < N-1: EMA = 累计均值(closeSums/(i+1))
+            # - i == N-1: EMA = N日SMA(closeSums/N)
+            # - i > N-1: 使用递推公式
+            def _ema_frontend(values: np.ndarray, period: int) -> np.ndarray:
+                ema_arr = np.zeros_like(values, dtype=np.float64)
+                close_sum = 0.0
+                alpha = 2.0 / (period + 1.0)
+                for i in range(len(values)):
+                    close = float(values[i])
+                    if i == 0:
+                        ema_arr[i] = close
+                        close_sum = close
+                    elif i < period - 1:
+                        close_sum += close
+                        ema_arr[i] = close_sum / (i + 1)
+                    elif i == period - 1:
+                        close_sum += close
+                        ema_arr[i] = close_sum / period
+                    else:
+                        ema_arr[i] = close * alpha + ema_arr[i - 1] * (1 - alpha)
+                return ema_arr
+
+            ema5 = _ema_frontend(closes, 5)
+            ema20 = _ema_frontend(closes, 20)
+            ema30 = _ema_frontend(closes, 30)
+            ema60 = _ema_frontend(closes, 60)
+            ema99 = _ema_frontend(closes, 99)
 
             # RSI指标（使用Wilder's Smoothing方法）
             rsi6 = _calculate_rsi_tradingview(closes, period=6)
             rsi9 = _calculate_rsi_tradingview(closes, period=9)
             rsi14 = _calculate_rsi_tradingview(closes, period=14)
 
-            # MACD指标
-            macd_dif, macd_dea, macd_bar = talib.MACD(closes, fastperiod=12, slowperiod=26, signalperiod=9)
+            # MACD指标（与前端K线一致的计算逻辑）
+            # DIF/DEA 与前端算法一致，柱值 = (DIF - DEA) * 2
+            def _macd_frontend(values: np.ndarray, fast: int = 12, slow: int = 26, signal: int = 9):
+                dif_arr = np.full(len(values), np.nan)
+                dea_arr = np.full(len(values), np.nan)
+                bar_arr = np.full(len(values), np.nan)
+                ema_short = 0.0
+                ema_long = 0.0
+                close_sum = 0.0
+                dif_sum = 0.0
+                dea = 0.0
+                max_period = max(fast, slow)
+
+                for i in range(len(values)):
+                    close = float(values[i])
+                    close_sum += close
+
+                    if i >= fast - 1:
+                        if i > fast - 1:
+                            ema_short = (2 * close + (fast - 1) * ema_short) / (fast + 1)
+                        else:
+                            ema_short = close_sum / fast
+
+                    if i >= slow - 1:
+                        if i > slow - 1:
+                            ema_long = (2 * close + (slow - 1) * ema_long) / (slow + 1)
+                        else:
+                            ema_long = close_sum / slow
+
+                    if i >= max_period - 1:
+                        dif = ema_short - ema_long
+                        dif_arr[i] = dif
+                        dif_sum += dif
+                        if i >= max_period + signal - 2:
+                            if i > max_period + signal - 2:
+                                dea = (dif * 2 + dea * (signal - 1)) / (signal + 1)
+                            else:
+                                dea = dif_sum / signal
+                            dea_arr[i] = dea
+                            bar_arr[i] = (dif - dea) * 2
+
+                return dif_arr, dea_arr, bar_arr
+
+            macd_dif, macd_dea, macd_bar = _macd_frontend(closes, fast=12, slow=26, signal=9)
 
             # KDJ指标（使用TradingView计算逻辑，参数60,20,5）
             kdj_k, kdj_d, kdj_j = self._calculate_kdj_tradingview(highs, lows, closes, k_period=60, smooth_k=20, smooth_d=5)

@@ -95,6 +95,42 @@ services:
     # 如果MySQL服务未启动，请先运行：docker-compose -f docker-compose-mysql.yml up -d
 
   # ============================================================================
+  # Trade Monitor服务（Java Spring Boot 监控告警服务）
+  # ============================================================================
+  trade-monitor:
+    build:
+      context: ./trade-monitor
+      dockerfile: Dockerfile
+    container_name: ${TRADE_MONITOR_CONTAINER_NAME:-aifuturetrade-trade-monitor}
+    ports:
+      - "${TRADE_MONITOR_PORT:-5005}:5005"  # 监控服务端口
+    volumes:
+      # 挂载Docker socket，允许trade-monitor容器管理其他容器
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      # Spring Profile配置（生产环境）
+      - SPRING_PROFILES_ACTIVE=${SPRING_PROFILES_ACTIVE:-prod}
+      # 服务器端口配置
+      - SERVER_PORT=${TRADE_MONITOR_PORT:-5005}
+      # MySQL配置
+      - MYSQL_HOST=${MYSQL_HOST:-154.89.148.172}
+      - MYSQL_PORT=${MYSQL_PORT:-32123}
+      - MYSQL_USER=${MYSQL_USER:-aifuturetrade}
+      - MYSQL_PASSWORD=${MYSQL_PASSWORD:-aifuturetrade123}
+      - MYSQL_DATABASE=${MYSQL_DATABASE:-aifuturetrade}
+      # Docker配置
+      - DOCKER_HOST=${DOCKER_HOST:-unix:///var/run/docker.sock}
+      # 微信通知配置
+      - WECHAT_WEBHOOK_URL=${WECHAT_WEBHOOK_URL}
+      # JVM参数
+      - JAVA_OPTS=${JAVA_OPTS:--Xms512m -Xmx1024m -XX:+UseG1GC -XX:MaxGCPauseMillis=200 --add-opens java.base/java.lang.invoke=ALL-UNNAMED}
+    restart: unless-stopped
+    networks:
+      - aifuturetrade-network
+    # 注意：MySQL服务在docker-compose-mysql.yml中，需要先启动
+    # 如果MySQL服务未启动，请先运行：docker-compose -f docker-compose-mysql.yml up -d
+
+  # ============================================================================
   # 异步服务（Java Spring Boot 异步服务 - 价格刷新、市场Ticker流等）
   # ============================================================================
   async-service:
@@ -120,11 +156,18 @@ services:
       - ASYNC_AUTO_START_ENABLED=${ASYNC_AUTO_START_ENABLED:-true}
       - ASYNC_AUTO_START_TASK=${ASYNC_AUTO_START_TASK:-all}
       - ASYNC_AUTO_START_DELAY=${ASYNC_AUTO_START_DELAY:-3}
+      # 监控配置
+      - TRADE_MONITOR_URL=${TRADE_MONITOR_URL:-http://trade-monitor:5005}
+      - ASYNC_MONITOR_TICKER_TIMEOUT=${ASYNC_MONITOR_TICKER_TIMEOUT:-3}
+      - ASYNC_MONITOR_CHECK_INTERVAL=${ASYNC_MONITOR_CHECK_INTERVAL:-60}
+      - ASYNC_SERVICE_CONTAINER_NAME=${ASYNC_SERVICE_CONTAINER_NAME:-aifuturetrade-async-service}
       # JVM参数
       # -Xms1g: 初始堆内存1G，-Xmx2g: 最大堆内存2G
       # -Dserver.port: 服务端口，与容器映射端口一致
       - JAVA_OPTS=${JAVA_OPTS:--Xms1g -Xmx2g -XX:+UseG1GC -XX:MaxGCPauseMillis=200 --add-opens java.base/java.lang.invoke=ALL-UNNAMED}
     restart: unless-stopped
+    depends_on:
+      - trade-monitor
     networks:
       - aifuturetrade-network
     # 注意：MySQL服务在docker-compose-mysql.yml中，需要先启动

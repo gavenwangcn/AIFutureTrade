@@ -104,6 +104,9 @@ class StrategyBaseSell(ABC):
                 格式示例：{"SYMBOL": [{"signal": "close_position", "quantity": 100, ...}, {"signal": "stop_loss", ...}]}
                 每条决策需包含：signal（close_position|stop_loss|take_profit）、quantity、price、stop_price、leverage、justification 等。
                 如果没有决策，返回空字典 {}
+
+        Note（quantity精度）:
+            quantity小数位按该symbol当前价格：价格<1取整；1~10最多1位；10~1000最多2位；1000~10000最多3位；≥10000最多4位。
         """
         pass
     

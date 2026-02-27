@@ -41,6 +41,7 @@ from trade.trading.trading_utils import (
     parse_signal_to_position_side,
     get_side_for_trade,
     get_side_for_sell_cycle,
+    get_side_for_open,
     calculate_quantity_with_risk,
     validate_position_for_trade,
     calculate_trade_requirements,
@@ -1052,18 +1053,20 @@ class TradingEngine:
     def _parse_sdk_response(self, sdk_response: Optional[Dict], strategy_signal: str, strategy_side: str) -> Dict[str, Any]:
         """
         解析SDK真实接口返回数据，提取关键字段
-        
+
+        【重要】保持原始策略信号不变，只提取SDK返回的数量、价格等信息
+
         Args:
             sdk_response: SDK返回的响应数据
-            strategy_signal: 策略返回的signal值（用于错误情况下的fallback）
-            strategy_side: 策略返回的side值（用于错误情况下的fallback）
-        
+            strategy_signal: 策略返回的signal值（保持不变，直接使用）
+            strategy_side: 策略返回的side值（保持不变，直接使用）
+
         Returns:
             包含解析后字段的字典：
             - executedQty: 成交量（对应quantity）
             - avgPrice: 平均成交价（对应price）
-            - side: 买卖方向（对应signal->side）
-            - positionSide: 持仓方向（对应side->positionSide）
+            - side: 交易信号（保持策略原始signal不变）
+            - positionSide: 持仓方向（保持策略原始side不变）
             - orderId: 系统订单号
             - type: 订单类型
             - origType: 触发前订单类型
@@ -1072,65 +1075,54 @@ class TradingEngine:
         result = {
             'executedQty': 0.0,
             'avgPrice': 0.0,
-            'side': strategy_signal,  # 默认使用策略返回的signal
-            'positionSide': strategy_side,  # 默认使用策略返回的side
+            'side': strategy_signal,  # 保持策略原始signal不变
+            'positionSide': strategy_side,  # 保持策略原始side不变
             'orderId': None,
             'type': None,
             'origType': None,
             'error': None
         }
-        
+
         if not sdk_response:
             return result
-        
+
         try:
-            # 提取executedQty（成交量）
-            if 'executedQty' in sdk_response:
-                executed_qty = sdk_response.get('executedQty')
-                if executed_qty is not None:
-                    try:
-                        result['executedQty'] = float(executed_qty)
-                    except (ValueError, TypeError):
-                        pass
-            
+            # 提取成交量（优先使用cumQty，其次使用executedQty）
+            cum_qty = sdk_response.get('cumQty')
+            executed_qty = sdk_response.get('executedQty')
+            quantity_obj = cum_qty if cum_qty is not None else executed_qty
+            quantity_source = 'cumQty' if cum_qty is not None else 'executedQty'
+
+            if quantity_obj is not None:
+                try:
+                    result['executedQty'] = float(quantity_obj)
+                    logger.debug(f"[TradingEngine] 从SDK响应获取成交数量: {result['executedQty']} (字段: {quantity_source})")
+                except (ValueError, TypeError):
+                    logger.warning(f"[TradingEngine] 解析成交数量失败: {quantity_obj}")
+
             # 提取avgPrice（平均成交价）
             if 'avgPrice' in sdk_response:
                 avg_price = sdk_response.get('avgPrice')
                 if avg_price is not None:
                     try:
                         result['avgPrice'] = float(avg_price)
+                        logger.debug(f"[TradingEngine] 从SDK响应获取成交价格: {result['avgPrice']} (字段: avgPrice)")
                     except (ValueError, TypeError):
-                        pass
-            
-            # 提取side（买卖方向），映射到signal
-            if 'side' in sdk_response:
-                side = sdk_response.get('side', '').upper()
-                # 将BUY/SELL映射到对应的signal
-                if side == 'BUY':
-                    # BUY对应buy_to_long或buy_to_short，需要根据positionSide判断
-                    position_side = sdk_response.get('positionSide', '').upper()
-                    if position_side == 'SHORT':
-                        result['side'] = 'buy_to_short'
-                    else:
-                        result['side'] = 'buy_to_long'
-                elif side == 'SELL':
-                    # SELL对应sell_to_long或sell_to_short，需要根据positionSide判断
-                    position_side = sdk_response.get('positionSide', '').upper()
-                    if position_side == 'SHORT':
-                        result['side'] = 'sell_to_short'
-                    else:
-                        result['side'] = 'sell_to_long'
-                else:
-                    result['side'] = strategy_signal  # 使用策略返回的值
-            
-            # 提取positionSide（持仓方向），映射到side字段
+                        logger.warning(f"[TradingEngine] 解析avgPrice失败: {avg_price}")
+
+            # 【重要】不再从SDK响应中提取side和positionSide，保持策略原始信号不变
+            # SDK返回的side（BUY/SELL）仅用于API调用，不应覆盖策略信号
+            # 策略信号（buy_to_long, buy_to_short, sell_to_long, sell_to_short）应保持不变
+            logger.debug(f"[TradingEngine] 保持策略原始信号: side={strategy_signal}, positionSide={strategy_side}")
+
+            # 提取positionSide（持仓方向），仅用于验证，不覆盖策略值
             if 'positionSide' in sdk_response:
-                position_side = sdk_response.get('positionSide', '').upper()
-                if position_side in ['LONG', 'SHORT']:
-                    result['positionSide'] = position_side.lower()
-                else:
-                    result['positionSide'] = strategy_side  # 使用策略返回的值
-            
+                sdk_position_side = sdk_response.get('positionSide', '').upper()
+                if sdk_position_side in ['LONG', 'SHORT']:
+                    # 验证SDK返回的positionSide与策略一致
+                    if sdk_position_side.lower() != strategy_side.lower():
+                        logger.warning(f"[TradingEngine] SDK返回的positionSide({sdk_position_side})与策略不一致({strategy_side})，保持策略值")
+
             # 提取orderId
             if 'orderId' in sdk_response:
                 order_id = sdk_response.get('orderId')
@@ -1139,19 +1131,19 @@ class TradingEngine:
                         result['orderId'] = int(order_id)
                     except (ValueError, TypeError):
                         pass
-            
+
             # 提取type
             if 'type' in sdk_response:
                 result['type'] = str(sdk_response.get('type', ''))
-            
+
             # 提取origType
             if 'origType' in sdk_response:
                 result['origType'] = str(sdk_response.get('origType', ''))
-            
+
         except Exception as e:
             logger.warning(f"[Model {self.model_id}] Failed to parse SDK response: {e}")
             result['error'] = str(e)
-        
+
         return result
     
     # ============ Binance客户端管理方法 ============
@@ -1542,7 +1534,7 @@ class TradingEngine:
 
             # 调用SDK获取账户信息
             logger.info(f"[Model {self.model_id}] 开始从币安SDK获取账户信息, account_alias={account_alias}")
-            account_info = account_client.getAccount()
+            account_info = json.loads(account_client.get_account())
 
             if not account_info:
                 logger.error(f"[Model {self.model_id}] SDK返回的账户信息为空")
@@ -1800,7 +1792,6 @@ class TradingEngine:
                 # 获取API凭证
                 api_key = model.get('api_key')
                 api_secret = model.get('api_secret')
-                account_alias = model.get('account_alias')
 
                 if not api_key or not api_secret:
                     logger.warning(f"[Model {model_id}] API凭证缺失，无法查询条件单")
@@ -1808,10 +1799,12 @@ class TradingEngine:
 
                 # 创建Binance客户端
                 try:
+                    testnet = getattr(app_config, 'BINANCE_TESTNET', False)
                     order_client = BinanceFuturesOrderClient(
                         api_key=api_key,
                         api_secret=api_secret,
-                        account_alias=account_alias
+                        quote_asset='USDT',
+                        testnet=testnet
                     )
 
                     # 如果没有指定symbols，从持仓中获取
@@ -1884,6 +1877,28 @@ class TradingEngine:
         except Exception as e:
             logger.error(f"[TradingEngine] Failed to get portfolio for model {model_id}: {e}")
             raise
+
+    def _get_realtime_price_for_symbol(self, symbol: str) -> Optional[float]:
+        """从SDK获取单个symbol的实时价格（用于非真实交易校验）"""
+        if not self.market_fetcher:
+            return None
+        try:
+            prices = self.market_fetcher.get_current_prices([symbol])
+            info = prices.get(symbol) or prices.get(symbol.upper())
+            if info and info.get('price') is not None:
+                return float(info.get('price'))
+
+            quote_asset = getattr(self.market_fetcher, '_futures_quote_asset', 'USDT')
+            contract_symbol = symbol.upper()
+            if not contract_symbol.endswith(quote_asset.upper()):
+                contract_symbol = f"{contract_symbol}{quote_asset.upper()}"
+            prices = self.market_fetcher.get_current_prices_by_contract([contract_symbol])
+            info = prices.get(contract_symbol) or prices.get(contract_symbol.upper())
+            if info and info.get('price') is not None:
+                return float(info.get('price'))
+        except Exception as e:
+            logger.warning(f"[TradingEngine] 获取实时价格失败: symbol={symbol}, error={e}")
+        return None
     
     def _update_position(self, model_id: int, symbol: str, position_amt: float,
                         avg_price: float, leverage: int = 1, position_side: str = 'LONG',
@@ -3700,10 +3715,10 @@ class TradingEngine:
         - trades表中记录的signal字段：buy_to_long 或 buy_to_short
         
         【SDK接口参数说明】
-        - SDK调用的side参数：统一使用'BUY'（开多和开空都使用BUY）
+        - 开多仓: side=BUY, position_side=LONG
+        - 开空仓: side=SELL, position_side=SHORT
         - SDK调用的positionSide参数：根据signal自动确定（LONG或SHORT）
-        - 数据库记录的position_side：根据signal自动确定
-        - trades表的side字段：统一使用'buy'（开多和开空都使用buy）
+        - trades表的side字段：buy（开多）或sell（开空）
         """
         quantity = decision.get('quantity', 0)
         leverage = self._resolve_leverage(decision)
@@ -3783,9 +3798,10 @@ class TradingEngine:
         trade_fee = buy_fee + sell_fee
         # initial_margin 四舍五入保留两位小数（已在 calculate_trade_requirements 中处理）
 
-        # 【确定SDK调用的side参数】统一使用BUY（开多和开空都使用BUY）
-        # positionSide参数会根据signal自动确定（LONG或SHORT）
-        sdk_side = 'BUY'  # 统一使用BUY
+        # 【确定SDK调用的side参数】开多用BUY，开空用SELL
+        # 开多仓: side=BUY, position_side=LONG
+        # 开空仓: side=SELL, position_side=SHORT
+        sdk_side = get_side_for_open(position_side)
         
         # 获取交易上下文
         model_uuid, trade_id = self._get_trade_context()
@@ -3876,7 +3892,7 @@ class TradingEngine:
         parsed_response = None
         if trade_mode == 'real' and sdk_response:
             parsed_response = self._parse_sdk_response(sdk_response, trade_signal, position_side.lower())
-        elif trade_mode == 'real' and sdk_error:
+        elif sdk_error:
             # real模式调用失败，使用策略返回的值，quantity和price设置为0
             parsed_response = {
                 'executedQty': 0.0,
@@ -3890,20 +3906,27 @@ class TradingEngine:
             }
 
         # 【更新持仓】只有在real模式且SDK返回成功时才更新portfolios表
-        # 对于real模式：使用SDK返回的executedQty, avgPrice, positionSide
+        # 对于real模式：优先使用SDK返回的cumQty，其次使用executedQty；使用avgPrice
         # 对于test模式：使用策略返回的值
         if trade_mode == 'real' and parsed_response and not parsed_response.get('error'):
             # real模式且SDK返回成功，使用SDK返回的数据更新portfolios表
-            executed_qty = parsed_response.get('executedQty', 0.0)
+            # 优先使用cumQty，其次使用executedQty
+            cum_qty = parsed_response.get('cumQty')
+            executed_qty_fallback = parsed_response.get('executedQty', 0.0)
+            executed_qty = cum_qty if cum_qty is not None else executed_qty_fallback
+            quantity_source = 'cumQty' if cum_qty is not None else 'executedQty'
+
             avg_price_from_sdk = parsed_response.get('avgPrice', 0.0)
             position_side_from_sdk = parsed_response.get('positionSide', position_side.lower())
-            
+
+            logger.debug(f"[TradingEngine] 从SDK响应获取成交数量: {executed_qty} (字段: {quantity_source}), 成交价格: {avg_price_from_sdk}")
+
             # 将position_side转换为大写（数据库存储为大写）
             if position_side_from_sdk:
                 position_side_from_sdk = position_side_from_sdk.upper()
             else:
                 position_side_from_sdk = position_side
-            
+
             # 根据价格调整executedQty精度（与strategy_decisions表保持一致）
             if executed_qty and avg_price_from_sdk:
                 executed_qty_adjusted = adjust_quantity_precision_by_price(float(executed_qty), float(avg_price_from_sdk))
@@ -3956,17 +3979,25 @@ class TradingEngine:
                       f"Model {self.model_id} {symbol} | error will be recorded in trades table")
         
         # 【确定trades表的字段】
-        # side字段：交易方向（buy/sell），从signal中提取
+        # signal字段：保持策略原始信号不变（buy_to_long, buy_to_short等）
         # position_side字段：持仓方向（LONG/SHORT）
         # 如果是real模式且解析成功，使用解析后的值；否则使用策略返回的值
         if parsed_response:
-            trade_signal_final = parsed_response.get('side', trade_signal)
+            # 保持策略原始信号不变，不从SDK响应中覆盖
+            trade_signal_final = trade_signal
             trade_position_side_final = parsed_response.get('positionSide', position_side.lower())
-            # real模式：使用SDK返回的executedQty，并根据价格调整精度
+            # real模式：优先使用SDK返回的cumQty，其次使用executedQty；使用avgPrice
             # test模式：使用quantity（已经根据价格调整过精度）
             if trade_mode == 'real':
-                executed_qty = parsed_response.get('executedQty', 0.0)
+                # 优先使用cumQty，其次使用executedQty
+                cum_qty = parsed_response.get('cumQty')
+                executed_qty_fallback = parsed_response.get('executedQty', 0.0)
+                executed_qty = cum_qty if cum_qty is not None else executed_qty_fallback
+                quantity_source = 'cumQty' if cum_qty is not None else 'executedQty'
+
                 avg_price = parsed_response.get('avgPrice', price)
+                logger.debug(f"[TradingEngine] 从SDK响应获取成交数量: {executed_qty} (字段: {quantity_source}), 成交价格: {avg_price}")
+
                 # 如果SDK返回了成交数量和价格，根据价格调整精度
                 if executed_qty and avg_price:
                     trade_quantity = adjust_quantity_precision_by_price(float(executed_qty), float(avg_price))
@@ -3978,6 +4009,12 @@ class TradingEngine:
             else:
                 trade_quantity = quantity  # test模式，quantity已经根据价格调整过精度
             trade_price = parsed_response.get('avgPrice', 0.0) if trade_mode == 'real' else price
+
+            # 【real模式下确保使用SDK返回的avgPrice作为开仓价格】
+            if trade_mode == 'real' and parsed_response.get('avgPrice'):
+                logger.info(f"[TradingEngine] 买入操作使用SDK返回的avgPrice作为开仓价格: {trade_price}")
+            elif trade_mode == 'real' and not parsed_response.get('avgPrice'):
+                logger.warning(f"[TradingEngine] 买入操作未获取到SDK返回的avgPrice，使用默认值: {trade_price}")
             order_id = parsed_response.get('orderId')
             order_type = parsed_response.get('type')
             orig_type = parsed_response.get('origType')
@@ -3997,10 +4034,10 @@ class TradingEngine:
         if trade_mode == 'real' and (not error_msg) and sdk_call_skipped and sdk_skip_reason:
             error_msg = sdk_skip_reason
         
-        # 【买入方法中统一使用'buy'】
-        # 根据方法文档：trades表的side字段统一使用'buy'（开多和开空都使用buy）
-        # 不再根据signal判断，始终使用'buy'
-        trade_side_direction = 'buy'
+        # 【买入方法中按信号确定side，保持signal不变】
+        # buy_to_long -> buy（开多）
+        # buy_to_short -> sell（开空）
+        trade_side_direction = 'sell' if trade_signal_final == 'buy_to_short' else 'buy'
         
         # 确保position_side为大写（LONG/SHORT）
         trade_position_side_final_upper = trade_position_side_final.upper() if trade_position_side_final else position_side
@@ -4104,10 +4141,10 @@ class TradingEngine:
         - trades表中记录的signal字段：sell_to_long 或 sell_to_short
         
         【SDK接口参数说明】
-        - SDK调用的side参数：统一使用'SELL'（平多和平空都使用SELL）
+        - 平多仓: side=SELL, position_side=LONG
+        - 平空仓: side=BUY, position_side=SHORT
         - SDK调用的positionSide参数：根据signal自动确定（LONG或SHORT）
-        - 数据库记录的position_side：根据signal自动确定
-        - trades表的side字段：统一使用'sell'（平多和平空都使用sell）
+        - trades表的side字段：sell（平多）或buy（平空）
         
         【持仓检查】
         - 必须检查是否有对应方向的持仓
@@ -4160,8 +4197,10 @@ class TradingEngine:
             entry_price, current_price, strategy_quantity, position_side, self.trade_fee_rate
         )
         
-        # 【确定SDK调用的side参数】统一使用SELL（平多和平空都使用SELL）
-        sdk_side = 'SELL'  # 统一使用SELL
+        # 【确定SDK调用的side参数】平多用SELL，平空用BUY
+        # 平多仓: side=SELL, position_side=LONG
+        # 平空仓: side=BUY, position_side=SHORT
+        sdk_side = get_side_for_trade(position_side)
         
         # 获取交易上下文
         model_uuid, trade_id = self._get_trade_context()
@@ -4229,7 +4268,7 @@ class TradingEngine:
         parsed_response = None
         if trade_mode == 'real' and sdk_response:
             parsed_response = self._parse_sdk_response(sdk_response, trade_signal, position_side.lower())
-        elif trade_mode == 'real' and sdk_error:
+        elif sdk_error:
             # real模式调用失败，使用策略返回的值，quantity和price设置为0
             parsed_response = {
                 'executedQty': 0.0,
@@ -4297,51 +4336,53 @@ class TradingEngine:
                       f"Model {self.model_id} {symbol} position_side={position_side} | error will be recorded in trades table")
         
         # 【确定trades表的字段】
-        # side字段：交易方向（buy/sell），从signal中提取
-        # position_side字段：持仓方向（LONG/SHORT）
-        # 如果是real模式且解析成功，使用解析后的值；否则使用策略返回的值
+        # 【trades表记录逻辑】平仓操作用户视角为“卖出”，统一按业务语义记录，不随SDK的side变化：
+        # - signal 固定为策略的 trade_signal（sell_to_long 或 sell_to_short）
+        # - side 固定为 'sell'
+        # - quantity/price 优先用SDK返回的成交数据，否则用计算值
+        trade_signal_final = trade_signal  # 固定用策略信号，不用SDK返回的side映射
+        trade_position_side_final = position_side.lower()
+        trade_side_direction = 'sell'  # 平仓操作固定为 sell
+        trade_quantity = strategy_quantity
+        trade_price = current_price
+        order_id = None
+        order_type = None
+        orig_type = None
+        error_msg = None
+
         if parsed_response:
-            trade_signal_final = parsed_response.get('side', trade_signal)
             trade_position_side_final = parsed_response.get('positionSide', position_side.lower())
-            # real模式：使用SDK返回的executedQty，并根据价格调整精度
-            # test模式：使用strategy_quantity（策略指定的数量）
-            if trade_mode == 'real':
-                executed_qty = parsed_response.get('executedQty', 0.0)
-                avg_price = parsed_response.get('avgPrice', current_price)
-                # 如果SDK返回了成交数量和价格，根据价格调整精度
-                if executed_qty and avg_price:
-                    trade_quantity = adjust_quantity_precision_by_price(float(executed_qty), float(avg_price))
-                    # 如果精度为0（整数），转换为整数类型
-                    if trade_quantity == int(trade_quantity):
-                        trade_quantity = int(trade_quantity)
-                else:
-                    trade_quantity = executed_qty
-            else:
-                trade_quantity = strategy_quantity  # test模式，使用策略指定的数量
-            trade_price = parsed_response.get('avgPrice', 0.0) if trade_mode == 'real' else current_price
             order_id = parsed_response.get('orderId')
             order_type = parsed_response.get('type')
             orig_type = parsed_response.get('origType')
             error_msg = parsed_response.get('error')
-        else:
-            # test模式或未解析，使用策略返回的值
-            trade_signal_final = trade_signal
-            trade_position_side_final = position_side.lower()
-            trade_quantity = strategy_quantity
-            trade_price = current_price
-            order_id = None
-            order_type = None
-            orig_type = None
-            error_msg = None
+            # real模式：优先使用SDK返回的cumQty，其次使用executedQty；使用avgPrice；失败时用0
+            # test模式：使用strategy_quantity和current_price
+            if trade_mode == 'real':
+                # 优先使用cumQty，其次使用executedQty
+                cum_qty = parsed_response.get('cumQty')
+                executed_qty_fallback = parsed_response.get('executedQty', 0.0)
+                executed_qty = cum_qty if cum_qty is not None else executed_qty_fallback
+                quantity_source = 'cumQty' if cum_qty is not None else 'executedQty'
+
+                avg_price = parsed_response.get('avgPrice', current_price)
+                logger.debug(f"[TradingEngine] 从SDK响应获取成交数量: {executed_qty} (字段: {quantity_source}), 成交价格: {avg_price}")
+
+                if parsed_response.get('error'):
+                    trade_quantity = 0.0
+                    trade_price = 0.0
+                elif executed_qty and avg_price:
+                    trade_quantity = adjust_quantity_precision_by_price(float(executed_qty), float(avg_price))
+                    if trade_quantity == int(trade_quantity):
+                        trade_quantity = int(trade_quantity)
+                    trade_price = float(avg_price)
+            else:
+                trade_quantity = strategy_quantity
+                trade_price = current_price
 
         # real 模式下 SDK 调用被跳过（如无法创建客户端）时，也应记录/回填错误信息
         if trade_mode == 'real' and (not error_msg) and sdk_call_skipped and sdk_skip_reason:
             error_msg = sdk_skip_reason
-        
-        # 【卖出方法中统一使用'sell'】
-        # 根据方法文档：trades表的side字段统一使用'sell'（平多和平空都使用sell）
-        # 不再根据signal判断，始终使用'sell'
-        trade_side_direction = 'sell'
         
         # 确保position_side为大写（LONG/SHORT）
         trade_position_side_final_upper = trade_position_side_final.upper() if trade_position_side_final else position_side
@@ -4442,8 +4483,9 @@ class TradingEngine:
         """
         执行平仓操作
 
-        卖出循环中的平仓逻辑：
-        - 无论LONG还是SHORT持仓，都统一使用SELL方向
+        平仓逻辑：
+        - 平多(LONG): side=SELL, position_side=LONG
+        - 平空(SHORT): side=BUY, position_side=SHORT
 
         Args:
             symbol: 交易对符号
@@ -4507,7 +4549,7 @@ class TradingEngine:
             entry_price, current_price, strategy_quantity, position_side, self.trade_fee_rate
         )
 
-        # 卖出循环专用：统一使用SELL方向
+        # 平多: side=SELL，平空: side=BUY
         side_for_trade = get_side_for_sell_cycle(position_side)
 
         # 获取交易上下文
@@ -4577,7 +4619,7 @@ class TradingEngine:
         parsed_response = None
         if trade_mode == 'real' and sdk_response:
             parsed_response = self._parse_sdk_response(sdk_response, 'close_position', position_side.lower())
-        elif trade_mode == 'real' and sdk_error:
+        elif sdk_error:
             # real模式调用失败，使用策略返回的值，quantity和price设置为0
             parsed_response = {
                 'executedQty': 0.0,
@@ -4671,42 +4713,54 @@ class TradingEngine:
             logger.warning(f"[TradingEngine] No portfolios_id found in position for model={self.model_id} symbol={symbol} position_side={position_side}")
         
         # 【确定trades表的字段值】
-        # side字段：交易方向（buy/sell），从signal中提取
-        # position_side字段：持仓方向（LONG/SHORT）
-        # 如果是real模式且解析成功，使用解析后的值；否则使用策略返回的值
+        # 【trades表记录逻辑】close_position为平仓操作，统一按业务语义记录，不随SDK的side变化：
+        # - signal 固定为 'close_position'
+        # - side 固定为 'sell'
+        # - quantity/price 优先用SDK返回的成交数据，否则用计算值
+        trade_signal_final = 'close_position'
+        trade_position_side_final = position_side.lower()
+        trade_side_direction = 'sell'  # 平仓操作固定为 sell
+        trade_quantity = strategy_quantity
+        trade_price = current_price
+        order_id = None
+        order_type = None
+        orig_type = None
+        error_msg = None
+
         if parsed_response:
-            trade_signal_final = parsed_response.get('side', 'close_position')
             trade_position_side_final = parsed_response.get('positionSide', position_side.lower())
-            trade_quantity = parsed_response.get('executedQty', 0.0) if trade_mode == 'real' else strategy_quantity
-            trade_price = parsed_response.get('avgPrice', 0.0) if trade_mode == 'real' else current_price
             order_id = parsed_response.get('orderId')
             order_type = parsed_response.get('type')
             orig_type = parsed_response.get('origType')
             error_msg = parsed_response.get('error')
-        else:
-            # test模式或未解析，使用策略返回的值
-            trade_signal_final = 'close_position'
-            trade_position_side_final = position_side.lower()
-            trade_quantity = strategy_quantity
-            trade_price = current_price
-            order_id = None
-            order_type = None
-            orig_type = None
-            error_msg = None
+            # real模式：优先使用SDK返回的cumQty，其次使用executedQty；使用avgPrice；失败时用0
+            # test模式：使用strategy_quantity和current_price
+            if trade_mode == 'real':
+                if parsed_response.get('error'):
+                    trade_quantity = 0.0
+                    trade_price = 0.0
+                else:
+                    # 优先使用cumQty，其次使用executedQty
+                    cum_qty = parsed_response.get('cumQty')
+                    executed_qty_fallback = parsed_response.get('executedQty')
+                    executed_qty = cum_qty if cum_qty is not None else executed_qty_fallback
+                    quantity_source = 'cumQty' if cum_qty is not None else 'executedQty'
+
+                    avg_price = parsed_response.get('avgPrice')
+                    if executed_qty is not None and executed_qty != '' and avg_price is not None and avg_price != '':
+                        trade_quantity = float(executed_qty)
+                        trade_price = float(avg_price)
+                        logger.debug(f"[TradingEngine] 从SDK响应获取成交数量: {trade_quantity} (字段: {quantity_source}), 成交价格: {trade_price}")
+                    else:
+                        trade_quantity = strategy_quantity
+                        trade_price = current_price
+            else:
+                trade_quantity = strategy_quantity
+                trade_price = current_price
 
         # real 模式下 SDK 调用被跳过（如无法创建客户端）时，也应记录/回填错误信息
         if trade_mode == 'real' and (not error_msg) and sdk_call_skipped and sdk_skip_reason:
             error_msg = sdk_skip_reason
-        
-        # 从signal中提取交易方向（buy/sell）
-        # close_position, stop_loss, take_profit -> sell
-        trade_side_direction = 'sell'  # 默认值（卖出）
-        if trade_signal_final:
-            signal_lower = trade_signal_final.lower()
-            if signal_lower.startswith('buy'):
-                trade_side_direction = 'buy'
-            elif signal_lower.startswith('sell') or signal_lower in ['close_position', 'stop_loss', 'take_profit']:
-                trade_side_direction = 'sell'
         
         # 确保position_side为大写（LONG/SHORT）
         trade_position_side_final_upper = trade_position_side_final.upper() if trade_position_side_final else position_side
@@ -5025,7 +5079,7 @@ class TradingEngine:
             return {'symbol': symbol, 'error': 'Stop price not provided'}
         stop_price = float(stop_price)
 
-        # 卖出循环专用：统一使用SELL方向
+        # 平多: side=SELL，平空: side=BUY
         side_for_trade = get_side_for_sell_cycle(position_side)
 
         # 获取交易上下文
@@ -5037,6 +5091,12 @@ class TradingEngine:
         # 根据is_virtual判断使用real还是virtual模式
         trade_mode = self._get_trade_mode()
         type_value = 'real' if trade_mode == 'real' else 'virtual'
+
+        # 非真实交易：重新从SDK获取实时价格用于校验
+        if trade_mode != 'real':
+            realtime_price = self._get_realtime_price_for_symbol(symbol)
+            if realtime_price and realtime_price > 0:
+                current_price = realtime_price
         
         # 生成clientAlgoId（UUID）
         client_algo_id = str(uuid.uuid4())
@@ -5055,6 +5115,17 @@ class TradingEngine:
             price_value = decision.get('price')
             if price_value:
                 price_value = float(price_value)
+
+        # 非真实交易：校验止损触发价合理性（仅对STOP_MARKET）
+        if trade_mode != 'real' and order_type == 'STOP_MARKET':
+            if side_for_trade == 'BUY':
+                # 做多止损：stopPrice 必须 > 当前价格
+                if stop_price <= current_price:
+                    return {'symbol': symbol, 'error': 'Stop price would trigger immediately'}
+            else:
+                # 做空止损：stopPrice 必须 < 当前价格
+                if stop_price >= current_price:
+                    return {'symbol': symbol, 'error': 'Stop price would trigger immediately'}
 
         # 确定交易方向（buy/sell）
         side_value = side_for_trade.lower()  # 'buy' or 'sell'
@@ -5320,7 +5391,7 @@ class TradingEngine:
             return {'symbol': symbol, 'error': 'Take profit price not provided'}
         stop_price = float(stop_price)
 
-        # 卖出循环专用：统一使用SELL方向
+        # 平多: side=SELL，平空: side=BUY
         side_for_trade = get_side_for_sell_cycle(position_side)
 
         # 获取交易上下文
@@ -5332,6 +5403,12 @@ class TradingEngine:
         # 根据is_virtual判断使用real还是virtual模式
         trade_mode = self._get_trade_mode()
         type_value = 'real' if trade_mode == 'real' else 'virtual'
+
+        # 非真实交易：重新从SDK获取实时价格用于校验
+        if trade_mode != 'real':
+            realtime_price = self._get_realtime_price_for_symbol(symbol)
+            if realtime_price and realtime_price > 0:
+                current_price = realtime_price
         
         # 生成clientAlgoId（UUID）
         client_algo_id = str(uuid.uuid4())
@@ -5350,6 +5427,17 @@ class TradingEngine:
             price_value = decision.get('price')
             if price_value:
                 price_value = float(price_value)
+
+        # 非真实交易：校验止盈触发价合理性（仅对TAKE_PROFIT_MARKET）
+        if trade_mode != 'real' and order_type == 'TAKE_PROFIT_MARKET':
+            if side_for_trade == 'BUY':
+                # 做多止盈：stopPrice 必须 < 当前价格
+                if stop_price >= current_price:
+                    return {'symbol': symbol, 'error': 'Stop price would trigger immediately'}
+            else:
+                # 做空止盈：stopPrice 必须 > 当前价格
+                if stop_price <= current_price:
+                    return {'symbol': symbol, 'error': 'Stop price would trigger immediately'}
 
         # 确定交易方向（buy/sell）
         side_value = side_for_trade.lower()  # 'buy' or 'sell'

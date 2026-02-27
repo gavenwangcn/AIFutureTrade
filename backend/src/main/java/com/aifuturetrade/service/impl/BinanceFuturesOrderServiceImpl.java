@@ -2,6 +2,7 @@ package com.aifuturetrade.service.impl;
 
 import com.aifuturetrade.common.api.binance.BinanceConfig;
 import com.aifuturetrade.common.api.binance.BinanceFuturesOrderClient;
+import com.aifuturetrade.common.util.QuantityFormatUtil;
 import com.aifuturetrade.dao.entity.AlgoOrderDO;
 import com.aifuturetrade.dao.entity.BinanceTradeLogDO;
 import com.aifuturetrade.dao.entity.ModelDO;
@@ -193,17 +194,26 @@ public class BinanceFuturesOrderServiceImpl implements BinanceFuturesOrderServic
 
             log.info("[BinanceFuturesOrderService] 获取实时价格成功: {}", currentPrice);
 
-            // 4. 计算反方向的positionSide
-            String oppositePositionSide = "LONG".equalsIgnoreCase(portfolio.getPositionSide()) ? "SHORT" : "LONG";
-            String signal = "LONG".equalsIgnoreCase(portfolio.getPositionSide()) ? "sell_to_long" : "sell_to_short";
+            // 4. 确定 SDK 调用参数：持仓方向传实际方向，side 根据持仓方向确定
+            // 平多(LONG): side=SELL, position_side=LONG
+            // 平空(SHORT): side=BUY, position_side=SHORT
+            String positionSide = portfolio.getPositionSide();
+            boolean isLong = "LONG".equalsIgnoreCase(positionSide);
+            String sdkSide = isLong ? "SELL" : "BUY";
+            String sdkPositionSide = isLong ? "LONG" : "SHORT";
+            String signal = isLong ? "sell_to_long" : "sell_to_short";
 
-            log.info("[BinanceFuturesOrderService] 计算持仓方向: 原方向={}, 反方向={}, signal={}", 
-                    portfolio.getPositionSide(), oppositePositionSide, signal);
+            log.info("[BinanceFuturesOrderService] 计算平仓参数: 持仓方向={}, side={}, position_side={}, signal={}",
+                    positionSide, sdkSide, sdkPositionSide, signal);
 
             // 5. 计算盈亏和手续费
             Double entryPrice = portfolio.getAvgPrice();
-            Double positionAmt = Math.abs(portfolio.getPositionAmt());
-            String positionSide = portfolio.getPositionSide();
+            Double positionAmtRaw = Math.abs(portfolio.getPositionAmt());
+            // 根据当前价格格式化数量小数位（用于SDK和落库）
+            Double positionAmt = QuantityFormatUtil.formatQuantityForSdk(positionAmtRaw, currentPrice);
+            if (positionAmt <= 0 && positionAmtRaw > 0) {
+                positionAmt = positionAmtRaw;
+            }
             
             // 计算毛盈亏
             Double grossPnl;
@@ -257,10 +267,10 @@ public class BinanceFuturesOrderServiceImpl implements BinanceFuturesOrderServic
             
             Map<String, Object> orderParams = new HashMap<>();
             orderParams.put("symbol", formattedSymbol);
-            orderParams.put("side", "SELL");
+            orderParams.put("side", sdkSide);
             orderParams.put("quantity", positionAmt);
             orderParams.put("orderType", "MARKET");
-            orderParams.put("positionSide", oppositePositionSide);
+            orderParams.put("positionSide", sdkPositionSide);
             orderParams.put("testMode", useTestMode);
 
             log.info("[BinanceFuturesOrderService] 调用SDK执行卖出，交易模式: {} (is_virtual={}, {})", 
@@ -274,13 +284,15 @@ public class BinanceFuturesOrderServiceImpl implements BinanceFuturesOrderServic
             try {
                 sdkResponse = orderClient.marketTrade(
                         formattedSymbol,
-                        "SELL",
+                        sdkSide,
                         positionAmt,
                         "MARKET",
-                        oppositePositionSide,
+                        sdkPositionSide,
                         useTestMode
                 );
-                log.info("[BinanceFuturesOrderService] SDK调用成功: {}", sdkResponse);
+                log.info("[BinanceFuturesOrderService] SDK调用成功，响应数据: cumQty={}, avgPrice={}, executedQty={}, orderId={}, status={}",
+                        sdkResponse.get("cumQty"), sdkResponse.get("avgPrice"), sdkResponse.get("executedQty"),
+                        sdkResponse.get("orderId"), sdkResponse.get("status"));
             } catch (Exception e) {
                 sdkError = e.getMessage();
                 log.error("[BinanceFuturesOrderService] SDK调用失败: {}", sdkError, e);
@@ -290,10 +302,14 @@ public class BinanceFuturesOrderServiceImpl implements BinanceFuturesOrderServic
                 log.warn("[BinanceFuturesOrderService] SDK调用失败，将继续记录到trades表（{}模式）", modelTradeMode);
             }
 
-            // 8. 解析SDK返回数据（如果是real模式且调用成功）
-            String finalSignal = signal;
+            // 8. 解析SDK返回数据，构建trades表记录
+            // 【trades表记录逻辑】一键卖出是“卖出/平仓”操作，统一按业务语义记录，不随SDK的side变化：
+            // - side 固定为 "sell"（用户执行的是卖出操作）
+            // - signal 为 "sell_to_long"（平多）或 "sell_to_short"（平空）
+            // - quantity/price 优先用SDK返回的成交数据，否则用计算值
+            String finalSignal = signal;  // 已为 sell_to_long 或 sell_to_short
             String finalPositionSide = positionSide;  // 持仓方向（LONG/SHORT）
-            String finalSideDirection = "sell";  // 交易方向（buy/sell），默认sell
+            String finalSideDirection = "sell";  // 一键卖出固定为 sell
             Double finalQuantity = positionAmt;
             Double finalPrice = currentPrice;
             Long orderId = null;
@@ -302,64 +318,41 @@ public class BinanceFuturesOrderServiceImpl implements BinanceFuturesOrderServic
             String errorMsg = null;
             
             if (!useTestMode && sdkResponse != null) {
-                // real模式且调用成功，解析SDK返回数据
+                // real模式且调用成功，从SDK响应提取成交数量、成交价、orderId等
+                // 优先使用cumQty（累计成交数量），其次使用executedQty
+                Object cumQtyObj = sdkResponse.get("cumQty");
                 Object executedQtyObj = sdkResponse.get("executedQty");
                 Object avgPriceObj = sdkResponse.get("avgPrice");
-                Object sideObj = sdkResponse.get("side");
                 Object positionSideObj = sdkResponse.get("positionSide");
                 Object orderIdObj = sdkResponse.get("orderId");
                 Object typeObj = sdkResponse.get("type");
                 Object origTypeObj = sdkResponse.get("origType");
-                
-                // 提取executedQty（成交量）
-                if (executedQtyObj != null) {
+
+                // 优先使用cumQty，如果为空则使用executedQty
+                Object quantityObj = (cumQtyObj != null && !"".equals(cumQtyObj.toString())) ? cumQtyObj : executedQtyObj;
+                if (quantityObj != null && !"".equals(quantityObj.toString())) {
                     try {
-                        finalQuantity = Double.parseDouble(executedQtyObj.toString());
+                        finalQuantity = Double.parseDouble(quantityObj.toString());
+                        log.debug("[BinanceFuturesOrderService] 从SDK响应获取成交数量: {} (字段: {})",
+                                finalQuantity, cumQtyObj != null ? "cumQty" : "executedQty");
                     } catch (Exception e) {
-                        log.warn("[BinanceFuturesOrderService] 解析executedQty失败: {}", e.getMessage());
+                        log.warn("[BinanceFuturesOrderService] 解析成交数量失败: {}", e.getMessage());
                     }
                 }
-                
-                // 提取avgPrice（平均成交价）
-                if (avgPriceObj != null) {
+                if (avgPriceObj != null && !"".equals(avgPriceObj.toString())) {
                     try {
                         finalPrice = Double.parseDouble(avgPriceObj.toString());
+                        log.debug("[BinanceFuturesOrderService] 从SDK响应获取成交价格: {} (字段: avgPrice)", finalPrice);
                     } catch (Exception e) {
                         log.warn("[BinanceFuturesOrderService] 解析avgPrice失败: {}", e.getMessage());
                     }
                 }
-                
-                // 提取side（买卖方向），映射到signal和交易方向
-                if (sideObj != null) {
-                    String sideStr = sideObj.toString().toUpperCase();
-                    if ("BUY".equals(sideStr)) {
-                        finalSideDirection = "buy";
-                        String posSide = positionSideObj != null ? positionSideObj.toString().toUpperCase() : "";
-                        if ("SHORT".equals(posSide)) {
-                            finalSignal = "buy_to_short";
-                        } else {
-                            finalSignal = "buy_to_long";
-                        }
-                    } else if ("SELL".equals(sideStr)) {
-                        finalSideDirection = "sell";
-                        String posSide = positionSideObj != null ? positionSideObj.toString().toUpperCase() : "";
-                        if ("SHORT".equals(posSide)) {
-                            finalSignal = "sell_to_short";
-                        } else {
-                            finalSignal = "sell_to_long";
-                        }
-                    }
-                }
-                
-                // 提取positionSide（持仓方向），存储到position_side字段
                 if (positionSideObj != null) {
                     String posSide = positionSideObj.toString().toUpperCase();
                     if ("LONG".equals(posSide) || "SHORT".equals(posSide)) {
                         finalPositionSide = posSide;
                     }
                 }
-                
-                // 提取orderId
                 if (orderIdObj != null) {
                     try {
                         orderId = Long.parseLong(orderIdObj.toString());
@@ -367,36 +360,16 @@ public class BinanceFuturesOrderServiceImpl implements BinanceFuturesOrderServic
                         log.warn("[BinanceFuturesOrderService] 解析orderId失败: {}", e.getMessage());
                     }
                 }
-                
-                // 提取type
-                if (typeObj != null) {
-                    orderType = typeObj.toString();
-                }
-                
-                // 提取origType
-                if (origTypeObj != null) {
-                    origType = origTypeObj.toString();
-                }
+                if (typeObj != null) orderType = typeObj.toString();
+                if (origTypeObj != null) origType = origTypeObj.toString();
             } else if (!useTestMode && sdkError != null) {
-                // real模式调用失败，quantity和price设置为0，signal和side使用策略返回的值
+                // real模式调用失败
                 finalQuantity = 0.0;
                 finalPrice = 0.0;
                 errorMsg = sdkError;
-                // 从signal中提取交易方向
-                if (signal != null && signal.toLowerCase().startsWith("buy")) {
-                    finalSideDirection = "buy";
-                } else {
-                    finalSideDirection = "sell";
-                }
-                log.warn("[BinanceFuturesOrderService] real模式调用失败，quantity和price设置为0，signal和side使用策略返回的值");
-            } else {
-                // test模式，从signal中提取交易方向
-                if (signal != null && signal.toLowerCase().startsWith("buy")) {
-                    finalSideDirection = "buy";
-                } else {
-                    finalSideDirection = "sell";
-                }
+                log.warn("[BinanceFuturesOrderService] real模式调用失败，quantity和price置0: {}", sdkError);
             }
+            // test模式：finalQuantity/finalPrice 保持 positionAmt/currentPrice，finalSideDirection/finalSignal 已按业务语义设置
             
             // 9. 插入trades表记录（使用传入的modelId，而不是system_user）
             TradeDO trade = new TradeDO();
@@ -412,6 +385,11 @@ public class BinanceFuturesOrderServiceImpl implements BinanceFuturesOrderServic
             // 设置原始保证金（从portfolio中获取，用于计算盈亏百分比）
             Double initialMargin = portfolio.getInitialMargin();
             trade.setInitialMargin(initialMargin != null ? initialMargin : 0.0);
+            // 设置杠杆倍数（从portfolio中获取）
+            Integer leverage = portfolio.getLeverage();
+            if (leverage != null && leverage > 0) {
+                trade.setLeverage(leverage);
+            }
             // 设置 portfolios_id（关联的持仓ID）
             trade.setPortfoliosId(portfolio.getId());
             // 设置新字段（如果real模式有值）
@@ -431,8 +409,8 @@ public class BinanceFuturesOrderServiceImpl implements BinanceFuturesOrderServic
             trade.setTimestamp(LocalDateTime.now(ZoneOffset.ofHours(8)));
             tradeMapper.insert(trade);
 
-            log.info("[BinanceFuturesOrderService] 插入trades表记录成功: tradeId={}, modelId={}, signal={}, quantity={}, price={}, pnl={}, fee={}", 
-                    trade.getId(), modelId, finalSignal, finalQuantity, finalPrice, netPnl, fee);
+            log.info("[BinanceFuturesOrderService] 插入trades表记录成功: tradeId={}, modelId={}, signal={}, quantity={}, price={}, pnl={}, fee={}, leverage={}",
+                    trade.getId(), modelId, finalSignal, finalQuantity, finalPrice, netPnl, fee, trade.getLeverage());
 
             // 9. 只有在real模式且SDK返回成功时才删除portfolios表记录
             if (!useTestMode && sdkResponse != null && sdkError == null) {

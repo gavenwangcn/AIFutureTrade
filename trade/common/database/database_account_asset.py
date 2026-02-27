@@ -218,3 +218,53 @@ class AccountAssetDatabase:
         except Exception as e:
             logger.error(f"[AccountAsset] Failed to get account asset {account_alias}: {e}")
             return None
+    
+    def update_account_asset(self, account_alias: str, update_data: Dict[str, Any]) -> bool:
+        """
+        Update account asset fields by account_alias.
+        
+        Args:
+            account_alias: Account unique identifier
+            update_data: Dict of field names to values. Supported fields:
+                total_wallet_balance, available_balance, total_cross_wallet_balance,
+                total_cross_un_pnl, total_initial_margin, total_maint_margin,
+                total_unrealized_profit, total_margin_balance, total_position_initial_margin,
+                total_open_order_initial_margin, max_withdraw_amount
+                
+        Returns:
+            True if update succeeded, False otherwise
+        """
+        allowed_fields = {
+            'total_wallet_balance', 'available_balance', 'total_cross_wallet_balance',
+            'total_cross_un_pnl', 'total_initial_margin', 'total_maint_margin',
+            'total_unrealized_profit', 'total_margin_balance', 'total_position_initial_margin',
+            'total_open_order_initial_margin', 'max_withdraw_amount'
+        }
+        filtered = {k: v for k, v in update_data.items() if k in allowed_fields and v is not None}
+        if not filtered:
+            return False
+        
+        import time
+        filtered['update_time'] = int(time.time() * 1000)
+        
+        set_clauses = ", ".join(f"`{k}` = %s" for k in filtered.keys())
+        params = tuple(filtered.values()) + (account_alias,)
+        
+        def _execute_update(conn):
+            cursor = conn.cursor()
+            try:
+                sql = f"""
+                    UPDATE `{self.account_asset_table}`
+                    SET {set_clauses}
+                    WHERE `account_alias` = %s
+                """
+                cursor.execute(sql, params)
+                return cursor.rowcount > 0
+            finally:
+                cursor.close()
+        
+        try:
+            return self._with_connection(_execute_update)
+        except Exception as e:
+            logger.error(f"[AccountAsset] Failed to update account asset {account_alias}: {e}")
+            return False

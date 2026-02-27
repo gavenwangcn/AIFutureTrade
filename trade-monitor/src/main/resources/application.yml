@@ -1,0 +1,72 @@
+server:
+  port: ${TRADE_MONITOR_PORT:5005}
+  undertow:
+    threads:
+      io: 4
+      worker: 20
+    buffer-size: 1024
+    direct-buffers: true
+
+spring:
+  application:
+    name: trade-monitor
+  datasource:
+    url: jdbc:mysql://${MYSQL_HOST:154.89.148.172}:${MYSQL_PORT:32123}/${MYSQL_DATABASE:aifuturetrade}?useUnicode=true&characterEncoding=utf8&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true
+    username: ${MYSQL_USER:aifuturetrade}
+    password: ${MYSQL_PASSWORD:aifuturetrade123}
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    hikari:
+      maximum-pool-size: 10
+      minimum-idle: 5
+      connection-timeout: 30000
+      idle-timeout: 600000
+      max-lifetime: 1800000
+
+# MyBatis Plus配置
+mybatis-plus:
+  mapper-locations: classpath*:/mapper/**/*.xml
+  type-aliases-package: com.aifuturetrade.trademonitor.entity
+  configuration:
+    map-underscore-to-camel-case: true
+    log-impl: org.apache.ibatis.logging.slf4j.Slf4jImpl
+  global-config:
+    db-config:
+      id-type: auto
+      logic-delete-field: deleted
+      logic-delete-value: 1
+      logic-not-delete-value: 0
+
+# SpringDoc OpenAPI配置
+springdoc:
+  api-docs:
+    path: /v3/api-docs
+  swagger-ui:
+    path: /swagger-ui.html
+    tags-sorter: alpha
+    operations-sorter: alpha
+  packages-to-scan: com.aifuturetrade.trademonitor.controller
+
+# Docker配置
+docker:
+  host: ${DOCKER_HOST:unix:///var/run/docker.sock}
+  tls-verify: ${DOCKER_TLS_VERIFY:false}
+  cert-path: ${DOCKER_CERT_PATH:}
+  config: ${DOCKER_CONFIG:}
+  api-version: ${DOCKER_API_VERSION:1.41}
+  registry-url: ${DOCKER_REGISTRY_URL:}
+  registry-username: ${DOCKER_REGISTRY_USERNAME:}
+  registry-password: ${DOCKER_REGISTRY_PASSWORD:}
+  registry-email: ${DOCKER_REGISTRY_EMAIL:}
+
+# 微信通知配置
+wechat:
+  webhook-url: ${WECHAT_WEBHOOK_URL:https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=9f081d45-efc0-421d-ae22-343141e61eff}
+
+# 日志配置
+logging:
+  level:
+    root: INFO
+    com.aifuturetrade.trademonitor: DEBUG
+    com.baomidou.mybatisplus: DEBUG
+  pattern:
+    console: "%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{50} - %msg%n"

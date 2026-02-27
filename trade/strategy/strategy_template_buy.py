@@ -111,9 +111,9 @@ class StrategyBaseBuy(ABC):
                 如果没有决策，返回空字典 {}
 
         Note:
-            - 从 market_state 中获取技术指标数据：market_state[symbol]['indicators']['timeframes']
-            - 从 market_state 中获取当前价格：market_state[symbol]['price']
-            - 约束条件可以从 portfolio 中获取（如 cash、positions 数量等）
+            - quantity小数位按该symbol价格：价格<1取整；1~10最多1位；10~1000最多2位；1000~10000最多3位；≥10000最多4位
+            - 从 market_state[symbol]['price'] 获取当前价格，从 market_state[symbol]['indicators']['timeframes'] 获取技术指标
+            - 约束条件可从 portfolio 获取（如 cash、positions 数量等）
         """
         pass
     
