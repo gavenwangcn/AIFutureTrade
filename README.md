@@ -87,23 +87,23 @@ AIFutureTrade is a comprehensive automated trading system designed for Binance F
 
 **Market Overview & Top Movers**  
 ![Market Overview](img/Attached_image.png)  
-Displays the USDS-M market overview, top gainers/losers, and a quick symbol list for fast navigation.
+Shows the USDS-M market overview, top movers, and a quick symbol navigation list on the left.
 
 **Strategy Performance & Trade List**  
 ![Strategy Performance](img/Attached2_image.png)  
-Shows strategy performance trends and a consolidated trade list for recent execution results.
+Shows strategy performance trends and recent trade details for review and tracking.
 
 **Buy Execution Logs (Model Level)**  
 ![Buy Logs](img/Attached3_image.png)  
-Provides real-time model execution logs for debugging and operational audit.
+Provides real-time model execution logs for troubleshooting and operational auditing.
 
 **Strategy Management**  
 ![Strategy Management](img/Attached4_image.png)  
-Centralized strategy list with status, type, and quick actions for editing or starting models.
+Centralized strategy list with status and quick actions (edit/start).
 
 **K-Line Chart with Indicators**  
 ![K-Line Chart](img/Attached5_image.png)  
-Interactive candlestick chart with MA/EMA, MACD, KDJ, RSI, and ATR overlays for analysis.
+Interactive candlestick chart with MA/EMA, MACD, KDJ, RSI, and ATR overlays.
 
 ### 🏗️ Architecture
 
