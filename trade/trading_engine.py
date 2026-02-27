@@ -1053,18 +1053,20 @@ class TradingEngine:
     def _parse_sdk_response(self, sdk_response: Optional[Dict], strategy_signal: str, strategy_side: str) -> Dict[str, Any]:
         """
         解析SDK真实接口返回数据，提取关键字段
-        
+
+        【重要】保持原始策略信号不变，只提取SDK返回的数量、价格等信息
+
         Args:
             sdk_response: SDK返回的响应数据
-            strategy_signal: 策略返回的signal值（用于错误情况下的fallback）
-            strategy_side: 策略返回的side值（用于错误情况下的fallback）
-        
+            strategy_signal: 策略返回的signal值（保持不变，直接使用）
+            strategy_side: 策略返回的side值（保持不变，直接使用）
+
         Returns:
             包含解析后字段的字典：
             - executedQty: 成交量（对应quantity）
             - avgPrice: 平均成交价（对应price）
-            - side: 买卖方向（对应signal->side）
-            - positionSide: 持仓方向（对应side->positionSide）
+            - side: 交易信号（保持策略原始signal不变）
+            - positionSide: 持仓方向（保持策略原始side不变）
             - orderId: 系统订单号
             - type: 订单类型
             - origType: 触发前订单类型
@@ -1073,17 +1075,17 @@ class TradingEngine:
         result = {
             'executedQty': 0.0,
             'avgPrice': 0.0,
-            'side': strategy_signal,  # 默认使用策略返回的signal
-            'positionSide': strategy_side,  # 默认使用策略返回的side
+            'side': strategy_signal,  # 保持策略原始signal不变
+            'positionSide': strategy_side,  # 保持策略原始side不变
             'orderId': None,
             'type': None,
             'origType': None,
             'error': None
         }
-        
+
         if not sdk_response:
             return result
-        
+
         try:
             # 提取成交量（优先使用cumQty，其次使用executedQty）
             cum_qty = sdk_response.get('cumQty')
@@ -1107,36 +1109,20 @@ class TradingEngine:
                         logger.debug(f"[TradingEngine] 从SDK响应获取成交价格: {result['avgPrice']} (字段: avgPrice)")
                     except (ValueError, TypeError):
                         logger.warning(f"[TradingEngine] 解析avgPrice失败: {avg_price}")
-            
-            # 提取side（买卖方向），映射到signal
-            if 'side' in sdk_response:
-                side = sdk_response.get('side', '').upper()
-                # 将BUY/SELL映射到对应的signal
-                if side == 'BUY':
-                    # BUY对应buy_to_long或buy_to_short，需要根据positionSide判断
-                    position_side = sdk_response.get('positionSide', '').upper()
-                    if position_side == 'SHORT':
-                        result['side'] = 'buy_to_short'
-                    else:
-                        result['side'] = 'buy_to_long'
-                elif side == 'SELL':
-                    # SELL对应sell_to_long或sell_to_short，需要根据positionSide判断
-                    position_side = sdk_response.get('positionSide', '').upper()
-                    if position_side == 'SHORT':
-                        result['side'] = 'sell_to_short'
-                    else:
-                        result['side'] = 'sell_to_long'
-                else:
-                    result['side'] = strategy_signal  # 使用策略返回的值
-            
-            # 提取positionSide（持仓方向），映射到side字段
+
+            # 【重要】不再从SDK响应中提取side和positionSide，保持策略原始信号不变
+            # SDK返回的side（BUY/SELL）仅用于API调用，不应覆盖策略信号
+            # 策略信号（buy_to_long, buy_to_short, sell_to_long, sell_to_short）应保持不变
+            logger.debug(f"[TradingEngine] 保持策略原始信号: side={strategy_signal}, positionSide={strategy_side}")
+
+            # 提取positionSide（持仓方向），仅用于验证，不覆盖策略值
             if 'positionSide' in sdk_response:
-                position_side = sdk_response.get('positionSide', '').upper()
-                if position_side in ['LONG', 'SHORT']:
-                    result['positionSide'] = position_side.lower()
-                else:
-                    result['positionSide'] = strategy_side  # 使用策略返回的值
-            
+                sdk_position_side = sdk_response.get('positionSide', '').upper()
+                if sdk_position_side in ['LONG', 'SHORT']:
+                    # 验证SDK返回的positionSide与策略一致
+                    if sdk_position_side.lower() != strategy_side.lower():
+                        logger.warning(f"[TradingEngine] SDK返回的positionSide({sdk_position_side})与策略不一致({strategy_side})，保持策略值")
+
             # 提取orderId
             if 'orderId' in sdk_response:
                 order_id = sdk_response.get('orderId')
@@ -1145,19 +1131,19 @@ class TradingEngine:
                         result['orderId'] = int(order_id)
                     except (ValueError, TypeError):
                         pass
-            
+
             # 提取type
             if 'type' in sdk_response:
                 result['type'] = str(sdk_response.get('type', ''))
-            
+
             # 提取origType
             if 'origType' in sdk_response:
                 result['origType'] = str(sdk_response.get('origType', ''))
-            
+
         except Exception as e:
             logger.warning(f"[Model {self.model_id}] Failed to parse SDK response: {e}")
             result['error'] = str(e)
-        
+
         return result
     
     # ============ Binance客户端管理方法 ============
@@ -3971,11 +3957,12 @@ class TradingEngine:
                       f"Model {self.model_id} {symbol} | error will be recorded in trades table")
         
         # 【确定trades表的字段】
-        # side字段：交易方向（buy/sell），从signal中提取
+        # signal字段：保持策略原始信号不变（buy_to_long, buy_to_short等）
         # position_side字段：持仓方向（LONG/SHORT）
         # 如果是real模式且解析成功，使用解析后的值；否则使用策略返回的值
         if parsed_response:
-            trade_signal_final = parsed_response.get('side', trade_signal)
+            # 保持策略原始信号不变，不从SDK响应中覆盖
+            trade_signal_final = trade_signal
             trade_position_side_final = parsed_response.get('positionSide', position_side.lower())
             # real模式：优先使用SDK返回的cumQty，其次使用executedQty；使用avgPrice
             # test模式：使用quantity（已经根据价格调整过精度）
