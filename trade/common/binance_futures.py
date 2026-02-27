@@ -1829,6 +1829,8 @@ class BinanceFuturesOrderClient(_BinanceFuturesBase):
                 result = float(round(quantity / step_size) * step_size)
                 if result <= 0 and quantity > 0:
                     result = float(math.ceil(quantity / step_size) * step_size)
+                if result != quantity:
+                    logger.info(f"[Binance Futures] 数量精度调整: {symbol} | 原始={quantity} | stepSize={step_size} | 调整后={result}")
                 return result
             
             # 计算精度位数（stepSize的小数位数）
@@ -1841,14 +1843,20 @@ class BinanceFuturesOrderClient(_BinanceFuturesBase):
             # 根据stepSize调整数量
             # 例如：stepSize=0.1，则数量必须是0.1的倍数
             adjusted = round(quantity / step_size) * step_size
-            
+
             # 避免将小数数量截断为 0（如 quantity=0.0005, stepSize=0.001 时 round 会得 0）
             if adjusted <= 0 and quantity > 0:
                 import math
                 adjusted = math.ceil(quantity / step_size) * step_size
-            
+                logger.info(f"[Binance Futures] 数量精度调整(ceil): {symbol} | 原始={quantity} | stepSize={step_size} | 调整后={adjusted}")
+            elif adjusted != quantity:
+                logger.info(f"[Binance Futures] 数量精度调整(round): {symbol} | 原始={quantity} | stepSize={step_size} | 调整后={adjusted}")
+
             # 使用计算出的精度进行四舍五入
-            return round(adjusted, precision)
+            final_result = round(adjusted, precision)
+            if final_result != adjusted:
+                logger.info(f"[Binance Futures] 数量小数位调整: {symbol} | 调整前={adjusted} | 精度={precision} | 最终={final_result}")
+            return final_result
             
         except Exception as e:
             logger.warning(f"[Binance Futures] 调整数量精度失败: {e}，使用保守策略")
