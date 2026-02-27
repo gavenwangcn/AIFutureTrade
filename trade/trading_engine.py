@@ -1877,6 +1877,28 @@ class TradingEngine:
         except Exception as e:
             logger.error(f"[TradingEngine] Failed to get portfolio for model {model_id}: {e}")
             raise
+
+    def _get_realtime_price_for_symbol(self, symbol: str) -> Optional[float]:
+        """从SDK获取单个symbol的实时价格（用于非真实交易校验）"""
+        if not self.market_fetcher:
+            return None
+        try:
+            prices = self.market_fetcher.get_current_prices([symbol])
+            info = prices.get(symbol) or prices.get(symbol.upper())
+            if info and info.get('price') is not None:
+                return float(info.get('price'))
+
+            quote_asset = getattr(self.market_fetcher, '_futures_quote_asset', 'USDT')
+            contract_symbol = symbol.upper()
+            if not contract_symbol.endswith(quote_asset.upper()):
+                contract_symbol = f"{contract_symbol}{quote_asset.upper()}"
+            prices = self.market_fetcher.get_current_prices_by_contract([contract_symbol])
+            info = prices.get(contract_symbol) or prices.get(contract_symbol.upper())
+            if info and info.get('price') is not None:
+                return float(info.get('price'))
+        except Exception as e:
+            logger.warning(f"[TradingEngine] 获取实时价格失败: symbol={symbol}, error={e}")
+        return None
     
     def _update_position(self, model_id: int, symbol: str, position_amt: float,
                         avg_price: float, leverage: int = 1, position_side: str = 'LONG',
@@ -4012,10 +4034,10 @@ class TradingEngine:
         if trade_mode == 'real' and (not error_msg) and sdk_call_skipped and sdk_skip_reason:
             error_msg = sdk_skip_reason
         
-        # 【买入方法中统一使用'buy'】
-        # 根据方法文档：trades表的side字段统一使用'buy'（开多和开空都使用buy）
-        # 不再根据signal判断，始终使用'buy'
-        trade_side_direction = 'buy'
+        # 【买入方法中按信号确定side，保持signal不变】
+        # buy_to_long -> buy（开多）
+        # buy_to_short -> sell（开空）
+        trade_side_direction = 'sell' if trade_signal_final == 'buy_to_short' else 'buy'
         
         # 确保position_side为大写（LONG/SHORT）
         trade_position_side_final_upper = trade_position_side_final.upper() if trade_position_side_final else position_side
@@ -5069,6 +5091,12 @@ class TradingEngine:
         # 根据is_virtual判断使用real还是virtual模式
         trade_mode = self._get_trade_mode()
         type_value = 'real' if trade_mode == 'real' else 'virtual'
+
+        # 非真实交易：重新从SDK获取实时价格用于校验
+        if trade_mode != 'real':
+            realtime_price = self._get_realtime_price_for_symbol(symbol)
+            if realtime_price and realtime_price > 0:
+                current_price = realtime_price
         
         # 生成clientAlgoId（UUID）
         client_algo_id = str(uuid.uuid4())
@@ -5087,6 +5115,17 @@ class TradingEngine:
             price_value = decision.get('price')
             if price_value:
                 price_value = float(price_value)
+
+        # 非真实交易：校验止损触发价合理性（仅对STOP_MARKET）
+        if trade_mode != 'real' and order_type == 'STOP_MARKET':
+            if side_for_trade == 'BUY':
+                # 做多止损：stopPrice 必须 > 当前价格
+                if stop_price <= current_price:
+                    return {'symbol': symbol, 'error': 'Stop price would trigger immediately'}
+            else:
+                # 做空止损：stopPrice 必须 < 当前价格
+                if stop_price >= current_price:
+                    return {'symbol': symbol, 'error': 'Stop price would trigger immediately'}
 
         # 确定交易方向（buy/sell）
         side_value = side_for_trade.lower()  # 'buy' or 'sell'
@@ -5364,6 +5403,12 @@ class TradingEngine:
         # 根据is_virtual判断使用real还是virtual模式
         trade_mode = self._get_trade_mode()
         type_value = 'real' if trade_mode == 'real' else 'virtual'
+
+        # 非真实交易：重新从SDK获取实时价格用于校验
+        if trade_mode != 'real':
+            realtime_price = self._get_realtime_price_for_symbol(symbol)
+            if realtime_price and realtime_price > 0:
+                current_price = realtime_price
         
         # 生成clientAlgoId（UUID）
         client_algo_id = str(uuid.uuid4())
@@ -5382,6 +5427,17 @@ class TradingEngine:
             price_value = decision.get('price')
             if price_value:
                 price_value = float(price_value)
+
+        # 非真实交易：校验止盈触发价合理性（仅对TAKE_PROFIT_MARKET）
+        if trade_mode != 'real' and order_type == 'TAKE_PROFIT_MARKET':
+            if side_for_trade == 'BUY':
+                # 做多止盈：stopPrice 必须 < 当前价格
+                if stop_price >= current_price:
+                    return {'symbol': symbol, 'error': 'Stop price would trigger immediately'}
+            else:
+                # 做空止盈：stopPrice 必须 > 当前价格
+                if stop_price <= current_price:
+                    return {'symbol': symbol, 'error': 'Stop price would trigger immediately'}
 
         # 确定交易方向（buy/sell）
         side_value = side_for_trade.lower()  # 'buy' or 'sell'
