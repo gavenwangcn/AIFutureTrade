@@ -19,6 +19,7 @@ public final class QuantityFormatUtil {
 
     /**
      * 根据参考价格格式化数量，用于SDK提交和落库
+     * 自动去除尾部的0，例如 225.7000 -> 225.7
      */
     public static double formatQuantityForSdk(Double quantity, Double refPrice) {
         if (quantity == null || quantity <= 0) {
@@ -29,7 +30,21 @@ public final class QuantityFormatUtil {
         if (decimals == 0) {
             result = Math.round(result);
         }
-        return result;
+        // 去除尾部的0：将double转为字符串，去除尾部0和小数点，再转回double
+        return stripTrailingZeros(result);
+    }
+
+    /**
+     * 去除数字尾部的0
+     * 例如: 225.7000 -> 225.7, 100.0 -> 100, 0.1000 -> 0.1
+     */
+    private static double stripTrailingZeros(double value) {
+        String str = String.valueOf(value);
+        // 如果包含小数点，去除尾部的0和小数点
+        if (str.contains(".")) {
+            str = str.replaceAll("0+$", "").replaceAll("\\.$", "");
+        }
+        return Double.parseDouble(str);
     }
 
     public static int getQuantityDecimalsByPrice(Double price) {

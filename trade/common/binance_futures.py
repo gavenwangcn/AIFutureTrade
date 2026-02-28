@@ -84,6 +84,7 @@ def _get_quantity_decimals_by_price(price: Optional[float]) -> int:
 def _format_quantity_for_sdk(quantity: Any, ref_price: Optional[float] = None) -> float:
     """
     根据参考价格格式化数量，用于SDK提交和落库。
+    自动去除尾部的0，例如 225.7000 -> 225.7
     """
     if quantity is None:
         return 0.0
@@ -95,7 +96,9 @@ def _format_quantity_for_sdk(quantity: Any, ref_price: Optional[float] = None) -
         result = round(q, decimals)
         if decimals == 0:
             result = float(int(result))
-        return result
+        # 去除尾部的0：转为字符串，去除尾部0和小数点，再转回float
+        result_str = f"{result:.10f}".rstrip('0').rstrip('.')
+        return float(result_str)
     except (ValueError, TypeError):
         return 0.0
 

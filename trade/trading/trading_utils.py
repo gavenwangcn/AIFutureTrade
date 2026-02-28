@@ -46,65 +46,70 @@ def get_quantity_decimals_by_price(price: float) -> int:
 
 def adjust_quantity_precision_by_price(quantity: float, price: float) -> float:
     """
-    根据symbol价格动态调整quantity的精度
-    
+    根据symbol价格动态调整quantity的精度，并去除尾部的0
+    例如：225.7000 -> 225.7, 100.0 -> 100
+
     规则（数量最多保留4位小数）：
     - 价格 < 1（0.几）：取整数
     - 1 <= 价格 < 10（个位）：小数点后1位
     - 10 <= 价格 < 1000（十、百）：小数点后2位
     - 1000 <= 价格 < 10000（千）：小数点后3位
     - 价格 >= 10000（万）：小数点后4位
-    
+
     Args:
         quantity: 原始数量
         price: symbol的当前价格
-        
+
     Returns:
-        调整精度后的数量
+        调整精度后的数量（去除尾部0）
     """
     if quantity <= 0:
         return 0.0
-    
+
     if price <= 0:
         return float(int(quantity))
-    
+
     precision = get_quantity_decimals_by_price(price)
     adjusted_quantity = round(quantity, precision)
-    
+
     if precision == 0:
         adjusted_quantity = float(int(adjusted_quantity))
-    
-    return adjusted_quantity
+
+    # 去除尾部的0：转为字符串，去除尾部0和小数点，再转回float
+    result_str = f"{adjusted_quantity:.10f}".rstrip('0').rstrip('.')
+    return float(result_str)
 
 
 def adjust_quantity_precision_by_price_ceil(quantity: float, price: float) -> float:
     """
-    根据symbol价格动态调整quantity的精度，使用向后取整（向上取整）。
-    例如：20.5 -> 21，0.5 -> 1
-    
+    根据symbol价格动态调整quantity的精度，使用向后取整（向上取整），并去除尾部的0。
+    例如：20.5 -> 21，0.5 -> 1，225.7000 -> 225.7
+
     规则（数量最多保留4位小数）：同 adjust_quantity_precision_by_price
-    
+
     Args:
         quantity: 原始数量
         price: symbol的当前价格
-        
+
     Returns:
-        调整精度后的数量（向后取整）
+        调整精度后的数量（向后取整，去除尾部0）
     """
     if quantity <= 0:
         return 0.0
-    
+
     if price <= 0:
         return float(math.ceil(quantity))
-    
+
     precision = get_quantity_decimals_by_price(price)
     multiplier = 10 ** precision
     adjusted_quantity = math.ceil(quantity * multiplier) / multiplier
-    
+
     if precision == 0:
         adjusted_quantity = float(int(adjusted_quantity))
-    
-    return adjusted_quantity
+
+    # 去除尾部的0：转为字符串，去除尾部0和小数点，再转回float
+    result_str = f"{adjusted_quantity:.10f}".rstrip('0').rstrip('.')
+    return float(result_str)
 
 
 def parse_signal_to_position_side(signal: str) -> Tuple[str, str]:
