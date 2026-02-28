@@ -1,9 +1,15 @@
-"""Market package - 市场数据服务
+"""
+市场分析模块
 
-包含市场数据相关的服务：
-- market_data: 市场数据获取（价格、技术指标、涨跌榜等）
-
-注意：
-- market_streams 功能已迁移到 Java async-service 实现
+提供市场指标计算和分析功能
 """
 
+from .market_index import (
+    MarketIndexCalculator,
+    calculate_market_indicators
+)
+
+__all__ = [
+    'MarketIndexCalculator',
+    'calculate_market_indicators'
+]

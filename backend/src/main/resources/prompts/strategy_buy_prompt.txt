@@ -318,7 +318,32 @@ class GeneratedBuyStrategy(StrategyBaseBuy):
             #   previous_close_5m = previous_close_prices.get('5m', 0)   # 获取5分钟K线的上一根收盘价
             #   previous_close_1h = previous_close_prices.get('1h', 0)  # 获取1小时K线的上一根收盘价
             previous_close_prices = symbol_state.get('previous_close_prices', {})
-            
+
+            # ⚠️ 重要：获取市场指标数据（市场波动率和趋势强度）
+            # market_indicators 包含整体市场的波动率和趋势强度指标，已预先计算完成
+            # 反映整体市场状态，用于辅助交易决策
+            market_indicators = symbol_state.get('market_indicators', {})
+            # 市场波动率指标：
+            #   - market_atr_pct_mean: 市场平均波动率（float）
+            #   - market_atr_pct_median: 市场中位数波动率（float）
+            #   - high_vol_ratio: 高波动合约占比（float，0-1）
+            #   - vol_state: 波动率状态（str），可能值：'低波动'、'正常波动'、'高波动'、'未知'
+            # 市场趋势强度指标：
+            #   - market_adx_mean: 市场平均趋势强度（float）
+            #   - market_adx_median: 市场中位数趋势强度（float）
+            #   - strong_trend_ratio: 强趋势合约占比（float，0-1）
+            #   - trend_state: 趋势状态（str），可能值：'震荡'、'弱趋势'、'强趋势'、'未知'
+            # 综合市场状态：
+            #   - market_state_summary: 综合市场状态（str），格式为"波动率状态/趋势状态"，如"正常波动/弱趋势"
+            # 使用示例：
+            #   vol_state = market_indicators.get('vol_state', '未知')
+            #   trend_state = market_indicators.get('trend_state', '未知')
+            #   # 根据市场状态调整策略：
+            #   if vol_state == '高波动' and trend_state == '强趋势':
+            #       # 高波动+强趋势：适合趋势跟踪策略
+            #   elif vol_state == '低波动' and trend_state == '震荡':
+            #       # 低波动+震荡：适合区间交易策略
+
             # 获取技术指标数据
             # indicators 包含各时间周期的K线数据和技术指标计算结果
             indicators = symbol_state.get('indicators', {})

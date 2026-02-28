@@ -52,6 +52,7 @@ from trade.trading.trading_utils import (
 )
 from trade.trading.market_data_manager import MarketDataManager
 from trade.trading.batch_decision_processor import BatchDecisionProcessor
+from trade.market import calculate_market_indicators
 
 logger = logging.getLogger(__name__)
 
@@ -1360,6 +1361,60 @@ class TradingEngine:
             
             # 添加上一根K线收盘价信息
             market_state[original_symbol]['previous_close_prices'] = previous_close_prices
+
+        # ⚠️ 计算市场指标（波动率和趋势强度）
+        # 收集所有symbol的K线数据用于计算市场指标
+        try:
+            klines_data_for_indicators = {}
+            for symbol, state_info in market_state.items():
+                indicators = state_info.get('indicators', {})
+                timeframes = indicators.get('timeframes', {})
+
+                # 优先使用1h K线，其次4h、30m、15m
+                klines = None
+                for tf in ['1h', '4h', '30m', '15m']:
+                    tf_data = timeframes.get(tf, {})
+                    tf_klines = tf_data.get('klines', [])
+                    if tf_klines and len(tf_klines) > 0:
+                        klines = tf_klines
+                        break
+
+                if klines and len(klines) > 0:
+                    # 提取high、low、close数据
+                    high_prices = []
+                    low_prices = []
+                    close_prices = []
+                    for kline in klines:
+                        if isinstance(kline, dict):
+                            high_prices.append(float(kline.get('high', 0)))
+                            low_prices.append(float(kline.get('low', 0)))
+                            close_prices.append(float(kline.get('close', 0)))
+
+                    if high_prices and low_prices and close_prices:
+                        klines_data_for_indicators[symbol] = {
+                            'high': high_prices,
+                            'low': low_prices,
+                            'close': close_prices
+                        }
+
+            # 计算市场指标
+            if klines_data_for_indicators:
+                market_indicators = calculate_market_indicators(klines_data_for_indicators)
+                logger.debug(f"[Model {self.model_id}] 计算市场指标完成: {market_indicators}")
+
+                # 将market_indicators添加到每个symbol的market_state中
+                for symbol in market_state:
+                    market_state[symbol]['market_indicators'] = market_indicators
+            else:
+                logger.warning(f"[Model {self.model_id}] 没有有效的K线数据用于计算市场指标")
+                # 添加空的market_indicators
+                for symbol in market_state:
+                    market_state[symbol]['market_indicators'] = {}
+        except Exception as e:
+            logger.error(f"[Model {self.model_id}] 计算市场指标失败: {e}", exc_info=True)
+            # 添加空的market_indicators，确保不影响后续流程
+            for symbol in market_state:
+                market_state[symbol]['market_indicators'] = {}
 
         return market_state
 
@@ -3347,7 +3402,61 @@ class TradingEngine:
             
             if quote_volume_value > 0 or base_volume_value > 0:
                 logger.debug(f"[Model {self.model_id}] {symbol} 成交量: {base_volume_value}, 成交额: {quote_volume_value}")
-        
+
+        # ⚠️ 计算市场指标（波动率和趋势强度）
+        # 收集所有symbol的K线数据用于计算市场指标
+        try:
+            klines_data_for_indicators = {}
+            for symbol, state_info in market_state.items():
+                indicators = state_info.get('indicators', {})
+                timeframes = indicators.get('timeframes', {})
+
+                # 优先使用1h K线，其次4h、30m、15m
+                klines = None
+                for tf in ['1h', '4h', '30m', '15m']:
+                    tf_data = timeframes.get(tf, {})
+                    tf_klines = tf_data.get('klines', [])
+                    if tf_klines and len(tf_klines) > 0:
+                        klines = tf_klines
+                        break
+
+                if klines and len(klines) > 0:
+                    # 提取high、low、close数据
+                    high_prices = []
+                    low_prices = []
+                    close_prices = []
+                    for kline in klines:
+                        if isinstance(kline, dict):
+                            high_prices.append(float(kline.get('high', 0)))
+                            low_prices.append(float(kline.get('low', 0)))
+                            close_prices.append(float(kline.get('close', 0)))
+
+                    if high_prices and low_prices and close_prices:
+                        klines_data_for_indicators[symbol] = {
+                            'high': high_prices,
+                            'low': low_prices,
+                            'close': close_prices
+                        }
+
+            # 计算市场指标
+            if klines_data_for_indicators:
+                market_indicators = calculate_market_indicators(klines_data_for_indicators)
+                logger.debug(f"[Model {self.model_id}] 计算市场指标完成: {market_indicators}")
+
+                # 将market_indicators添加到每个symbol的market_state中
+                for symbol in market_state:
+                    market_state[symbol]['market_indicators'] = market_indicators
+            else:
+                logger.warning(f"[Model {self.model_id}] 没有有效的K线数据用于计算市场指标")
+                # 添加空的market_indicators
+                for symbol in market_state:
+                    market_state[symbol]['market_indicators'] = {}
+        except Exception as e:
+            logger.error(f"[Model {self.model_id}] 计算市场指标失败: {e}", exc_info=True)
+            # 添加空的market_indicators，确保不影响后续流程
+            for symbol in market_state:
+                market_state[symbol]['market_indicators'] = {}
+
         logger.info(f"[Model {self.model_id}] 为 {len(market_state)} 个候选symbol构建了市场状态信息")
         return market_state
     
