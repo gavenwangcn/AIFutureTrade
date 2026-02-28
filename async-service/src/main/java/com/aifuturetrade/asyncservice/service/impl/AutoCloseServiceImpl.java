@@ -398,8 +398,15 @@ public class AutoCloseServiceImpl implements AutoCloseService {
                     symbol, positionSide, sdkSide, positionAmt, useTestMode ? "测试" : "真实");
 
             // 使用 BinanceFuturesOrderClient 的 marketTrade 方法
-            Map<String, Object> tradeResult = orderClient.marketTrade(
-                    symbol, sdkSide, positionAmt, positionSide, useTestMode);
+            Map<String, Object> tradeResult = null;
+            String errorMsg = null;
+            try {
+                tradeResult = orderClient.marketTrade(
+                        symbol, sdkSide, positionAmt, positionSide, useTestMode);
+            } catch (Exception sdkErr) {
+                errorMsg = sdkErr.getMessage();
+                log.error("[AutoClose] ❌ SDK平仓调用失败: {}", errorMsg, sdkErr);
+            }
 
             if (tradeResult != null) {
                 log.info("[AutoClose] ✅ 平仓订单提交成功: {}", tradeResult);
@@ -410,7 +417,6 @@ public class AutoCloseServiceImpl implements AutoCloseService {
                 Double executedPrice = currentPrice;
                 Long orderId = null;
                 String quantitySource = "default";
-                String priceSource = "default";
 
                 Object cumQtyObj = tradeResult.get("cumQty");
                 Object executedQtyObj = tradeResult.get("executedQty");
@@ -427,7 +433,6 @@ public class AutoCloseServiceImpl implements AutoCloseService {
                 if (tradeResult.get("avgPrice") != null && !"".equals(tradeResult.get("avgPrice").toString())) {
                     try {
                         executedPrice = Double.parseDouble(tradeResult.get("avgPrice").toString());
-                        priceSource = "avgPrice";
                         log.debug("[AutoClose] 从SDK响应获取成交价格: {} (字段: avgPrice)", executedPrice);
                     } catch (NumberFormatException ignored) {}
                 }
@@ -495,7 +500,34 @@ public class AutoCloseServiceImpl implements AutoCloseService {
 
                 return true;
             } else {
-                log.error("[AutoClose] ❌ 平仓订单提交失败: 响应为空");
+                if (!useTestMode) {
+                    // real模式失败：写入trades表错误记录
+                    String finalError = errorMsg != null ? errorMsg : "SDK返回为空";
+                    TradeDO trade = new TradeDO();
+                    trade.setId(UUID.randomUUID().toString());
+                    trade.setModelId(model.getId());
+                    trade.setFuture(symbol.toUpperCase());
+                    trade.setSignal("auto_close");
+                    trade.setQuantity(0.0);
+                    trade.setPrice(0.0);
+                    trade.setLeverage(leverage);
+                    trade.setSide("sell");
+                    trade.setPositionSide(positionSide);
+                    trade.setPnl(0.0);
+                    trade.setFee(0.0);
+                    trade.setInitialMargin(initialMargin != null ? initialMargin : 0.0);
+                    trade.setPortfoliosId(portfoliosId);
+                    trade.setError(finalError);
+                    trade.setTimestamp(LocalDateTime.now(ZoneId.of("Asia/Shanghai")));
+                    try {
+                        tradeMapper.insert(trade);
+                        log.info("[AutoClose] ✅ 已插入trades失败记录: tradeId={}, modelId={}, symbol={}, error={}",
+                                trade.getId(), model.getId(), symbol, finalError);
+                    } catch (Exception dbErr) {
+                        log.error("[AutoClose] ❌ 插入trades失败记录失败: {}", dbErr.getMessage(), dbErr);
+                    }
+                }
+                log.error("[AutoClose] ❌ 平仓订单提交失败: {}", errorMsg != null ? errorMsg : "响应为空");
                 return false;
             }
             

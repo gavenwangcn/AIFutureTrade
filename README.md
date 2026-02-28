@@ -83,6 +83,28 @@ AIFutureTrade is a comprehensive automated trading system designed for Binance F
 - **WebSocket Support**: Real-time data push to frontend
 - **Logging & Monitoring**: Centralized logging with ELK stack support
 
+### 🖼️ UI Screenshots
+
+**Market Overview & Top Movers**  
+![Market Overview](img/Attached_image.png)  
+Displays the USDS-M market overview, top gainers/losers, and a quick symbol list for fast navigation.
+
+**Strategy Performance & Trade List**  
+![Strategy Performance](img/Attached2_image.png)  
+Shows strategy performance trends and a consolidated trade list for recent execution results.
+
+**Buy Execution Logs (Model Level)**  
+![Buy Logs](img/Attached3_image.png)  
+Provides real-time model execution logs for debugging and operational audit.
+
+**Strategy Management**  
+![Strategy Management](img/Attached4_image.png)  
+Centralized strategy list with status, type, and quick actions for editing or starting models.
+
+**K-Line Chart with Indicators**  
+![K-Line Chart](img/Attached5_image.png)  
+Interactive candlestick chart with MA/EMA, MACD, KDJ, RSI, and ATR overlays for analysis.
+
 ### 🏗️ Architecture
 
 #### System Architecture Diagram
@@ -182,8 +204,8 @@ graph LR
         end
 
         subgraph "Model Containers"
-            MB[buy-{modelId}]
-            MS[sell-{modelId}]
+            MB["buy-<modelId>"]
+            MS["sell-<modelId>"]
         end
 
         subgraph "Database Container"
@@ -622,6 +644,7 @@ docker-compose -f docker-compose.prod.yml logs -f
 | Binance Service | 1-2 cores | 1-2GB | 500MB | 100Mbps |
 | Async Service | 1-2 cores | 1-2GB | 500MB | 100Mbps |
 | Trade Service | 1-2 cores | 1-2GB | 1GB | 100Mbps |
+| Trade Monitor | 0.5-1 core | 512MB-1GB | 500MB | 50Mbps |
 | Frontend | 0.5-1 core | 512MB-1GB | 500MB | 50Mbps |
 | MySQL | 2-4 cores | 2-4GB | 20GB+ | 100Mbps |
 | Model Container | 0.5-1 core | 512MB-1GB | 500MB | 50Mbps |
@@ -1143,4 +1166,265 @@ Access interactive API documentation:
 - **Backend**: http://localhost:5002/swagger-ui.html
 - **Binance Service**: http://localhost:5004/swagger-ui.html
 - **Trade Service**: http://localhost:5000/api/docs
+
+---
+
+## <a name="chinese"></a>中文
+
+### 📋 目录
+
+- [概述](#概述)
+- [功能](#功能)
+- [架构](#架构-1)
+- [快速开始](#快速开始-1)
+- [配置](#配置-1)
+- [API 文档](#api-文档)
+- [界面截图](#界面截图)
+
+### 概述
+
+AIFutureTrade 是面向 Binance 合约的智能自动交易系统，采用微服务与容器化架构，覆盖策略管理、行情处理、风控与交易执行等全链路能力。
+
+### 功能
+
+- **策略与模型**：多模型独立容器运行，动态创建/启动/停止
+- **行情与指标**：WebSocket 实时行情，内置多种技术指标
+- **交易执行**：低延迟下单与持仓管理，支持止盈止损与风控
+- **数据与审计**：交易与持仓全量落库，日志可追溯
+
+### 架构
+
+- **前端**：Vue 3 + KLineChart 实时可视化
+- **后端**：Spring Boot 业务与模型管理
+- **交易服务**：Python 交易引擎与指标计算
+- **异步服务**：行情流处理与定时任务
+- **币安服务**：Binance API 调用与限流
+
+#### 系统架构图
+
+```mermaid
+graph TB
+    subgraph "Client Layer"
+        USER[User Browser]
+    end
+
+    subgraph "Frontend Layer"
+        FE[Vue 3 Frontend<br/>Port 3000<br/>Vite + KLineChart]
+    end
+
+    subgraph "API Gateway Layer"
+        BE[Backend Service<br/>Java Spring Boot<br/>Port 5002<br/>User/Model Management]
+    end
+
+    subgraph "Core Services Layer"
+        BS[Binance Service<br/>Java + Undertow<br/>Port 5004<br/>Market Data API]
+        AS[Async Service<br/>Java Spring Boot<br/>Port 5003<br/>WebSocket Stream]
+        TS[Trade Service<br/>Python Flask<br/>Port 5000<br/>Trading Engine]
+    end
+
+    subgraph "Dynamic Model Layer"
+        MB1[Buy Model 1<br/>Python Container]
+        MB2[Buy Model 2<br/>Python Container]
+        MS1[Sell Model 1<br/>Python Container]
+        MS2[Sell Model 2<br/>Python Container]
+    end
+
+    subgraph "External Services"
+        BINANCE[Binance API<br/>Futures Market<br/>WebSocket + REST]
+        DB[(MySQL 8.0<br/>Port 32123<br/>Trade Data)]
+    end
+
+    subgraph "Docker Infrastructure"
+        DOCKER[Docker Engine<br/>Container Management]
+    end
+
+    USER -->|HTTPS| FE
+    FE -->|HTTP/WebSocket| BE
+    BE -->|REST API| TS
+    BE -->|REST API| BS
+    BE -->|REST API| AS
+    BE -->|Docker API| DOCKER
+    BE -->|JDBC| DB
+
+    DOCKER -->|Manage| MB1
+    DOCKER -->|Manage| MB2
+    DOCKER -->|Manage| MS1
+    DOCKER -->|Manage| MS2
+
+    BS -->|HTTPS| BINANCE
+    AS -->|WebSocket| BINANCE
+    AS -->|JDBC| DB
+    TS -->|HTTPS| BINANCE
+    TS -->|JDBC| DB
+
+    MB1 -->|Trade Logic| TS
+    MB2 -->|Trade Logic| TS
+    MS1 -->|Trade Logic| TS
+    MS2 -->|Trade Logic| TS
+```
+
+#### 网络架构
+
+```mermaid
+graph LR
+    subgraph "Public Network"
+        INTERNET[Internet]
+    end
+
+    subgraph "Docker Bridge Network: aifuturetrade-network"
+        subgraph "Frontend Container"
+            FE[frontend:3000]
+        end
+
+        subgraph "Backend Container"
+            BE[backend:5002]
+        end
+
+        subgraph "Service Containers"
+            BS[binance-service:5004]
+            AS[async-service:5003]
+            TS[trade:5000]
+        end
+
+        subgraph "Model Containers"
+            MB["buy-<modelId>"]
+            MS["sell-<modelId>"]
+        end
+
+        subgraph "Database Container"
+            DB[mysql:32123]
+        end
+    end
+
+    INTERNET -->|Port 3000| FE
+    INTERNET -->|Port 5002| BE
+
+    FE -.->|Internal DNS| BE
+    BE -.->|Internal DNS| BS
+    BE -.->|Internal DNS| AS
+    BE -.->|Internal DNS| TS
+    BE -.->|Internal DNS| DB
+
+    BS -.->|Internal DNS| DB
+    AS -.->|Internal DNS| DB
+    TS -.->|Internal DNS| DB
+
+    MB -.->|Internal DNS| TS
+    MS -.->|Internal DNS| TS
+```
+
+### 快速开始
+
+1. 克隆仓库并进入目录  
+   `git clone https://github.com/gavenwangcn/AIFutureTrade.git`
+
+2. 准备环境变量  
+   复制 `.env.example` 为 `.env` 并补充配置（重点是 Binance API 与 MySQL）
+
+3. 启动 MySQL（必须先启动）  
+   `docker-compose -f docker-compose-mysql.yml up -d`
+
+4. 启动全部服务  
+   `docker-compose up -d --build --scale model-buy=0 --scale model-sell=0`
+
+### 配置
+
+核心配置均在 `.env`，包含数据库连接、Binance API 密钥、服务端口、异步任务与风控参数。  
+后端的详细配置位于 `backend/src/main/resources/application.yml`。
+
+### API 文档
+
+- **Backend**: http://localhost:5002/swagger-ui.html  
+- **Binance Service**: http://localhost:5004/swagger-ui.html  
+- **Trade Service**: http://localhost:5000/api/docs
+
+### 部署
+
+#### 开发环境
+
+- 适合本地调试与功能验证，可用 Docker 统一启动
+- 建议先启动 MySQL，再启动其余服务
+
+#### 生产环境
+
+- 建议使用独立数据库与反向代理（Nginx/Traefik）
+- 开启 HTTPS、日志与监控、资源限制、备份策略
+
+#### 生产环境清单
+
+- 独立 MySQL / 云数据库，开启备份与只读账号
+- 反向代理 + HTTPS，配置安全头与限流
+- 日志与监控（Prometheus/Grafana/ELK）
+- Docker 资源限制与自动重启策略
+- 秘钥与环境变量通过安全方式注入（避免硬编码）
+- 时区统一（Asia/Shanghai）与系统时间同步
+- 定期清理与归档历史数据
+
+#### Docker 部署
+
+```
+docker-compose -f docker-compose-mysql.yml up -d
+docker-compose up -d --build --scale model-buy=0 --scale model-sell=0
+```
+
+### 开发
+
+- Java 服务：`mvn clean package -DskipTests`
+- Python 交易服务：`pip install -r requirements.txt`，`python -m trade.app`
+- 前端：`npm install`，`npm run dev`
+
+### 监控与日志
+
+- 统一查看容器日志：`docker-compose logs -f <service>`
+- 关键服务健康检查：
+  - `http://localhost:5002/actuator/health`
+  - `http://localhost:5000/health`
+
+### 安全
+
+- Binance API 与数据库账号请勿提交到仓库
+- 生产环境请替换默认口令与密钥
+- JWT、CORS 与网络访问建议按最小权限配置
+
+### 性能优化
+
+- Java 服务开启 G1GC 与合理的堆内存参数
+- 异步服务与行情刷新任务支持可配置调度
+- 数据访问建议配合缓存/限流策略
+
+### 故障排查
+
+- 先确认 MySQL 容器健康
+- 检查端口占用与服务日志
+- SDK 依赖构建失败时，先构建 Binance SDK 子模块
+
+### 贡献指南
+
+请查看 `CONTRIBUTING.md`。
+
+### 许可证
+
+本项目基于 MIT License，详见 `LICENSE`。
+
+### 🖼️ 界面截图
+
+**行情总览与涨跌排行**  
+![行情总览](img/Attached_image.png)  
+展示 USDS-M 行情总览、涨跌幅排行以及左侧快速合约导航。
+
+**策略绩效与交易列表**  
+![策略绩效](img/Attached2_image.png)  
+展示策略收益走势与近期交易明细，便于复盘与跟踪执行结果。
+
+**模型级买入执行日志**  
+![买入日志](img/Attached3_image.png)  
+提供模型实时执行日志，便于排障与运行审计。
+
+**策略管理**  
+![策略管理](img/Attached4_image.png)  
+集中管理策略列表、状态与快捷操作（编辑/启动等）。
+
+**K 线与指标分析**  
+![K线图](img/Attached5_image.png)  
+交互式 K 线图，支持 MA/EMA、MACD、KDJ、RSI、ATR 等指标叠加分析。
 
