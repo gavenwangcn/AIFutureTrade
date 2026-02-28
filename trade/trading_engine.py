@@ -4034,10 +4034,10 @@ class TradingEngine:
         if trade_mode == 'real' and (not error_msg) and sdk_call_skipped and sdk_skip_reason:
             error_msg = sdk_skip_reason
         
-        # 【买入方法中按信号确定side，保持signal不变】
-        # buy_to_long -> buy（开多）
-        # buy_to_short -> sell（开空）
-        trade_side_direction = 'sell' if trade_signal_final == 'buy_to_short' else 'buy'
+        # 【买入方法中按策略类型确定side】
+        # 所有买入策略（buy_to_long, buy_to_short）都应该记录为 side='buy'
+        # 因为这是买入策略，无论是开多还是开空
+        trade_side_direction = 'buy'
         
         # 确保position_side为大写（LONG/SHORT）
         trade_position_side_final_upper = trade_position_side_final.upper() if trade_position_side_final else position_side
