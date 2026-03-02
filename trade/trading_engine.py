@@ -2427,7 +2427,7 @@ class TradingEngine:
                 market_indicators_info = {}
                 for symbol in valid_candidates:
                     symbol_data = market_state.get(symbol, {})
-                    market_indicators = symbol_data.get('market_indicators', )
+                    market_indicators = symbol_data.get('market_indicators', {})
                     if market_indicators:
                         market_indicators_info[symbol] = market_indicators
 
