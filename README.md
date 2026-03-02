@@ -437,7 +437,7 @@ sequenceDiagram
 #### Frontend
 - **Vue 3.3.4**: Composition API with `<script setup>`
 - **Vite 4.4.9**: Fast build tool with HMR
-- **KLineChart 9.5.0**: Professional candlestick charting
+- **KLineChart (Latest)**: Professional candlestick charting library
 - **Axios 1.5.0**: Promise-based HTTP client
 - **Pinia 2.1.6**: State management
 - **Vue Router 4.2.4**: Client-side routing
