@@ -7,6 +7,7 @@
 [![Python](https://img.shields.io/badge/Python-3.x-blue.svg)](https://www.python.org/)
 [![Vue](https://img.shields.io/badge/Vue-3.x-green.svg)](https://vuejs.org/)
 [![Docker](https://img.shields.io/badge/Docker-Ready-blue.svg)](https://www.docker.com/)
+[![Spring Boot](https://img.shields.io/badge/Spring%20Boot-3.2.0-brightgreen.svg)](https://spring.io/projects/spring-boot)
 
 An intelligent automated trading system for Binance Futures, powered by AI and built with microservices architecture.
 
@@ -23,11 +24,22 @@ An intelligent automated trading system for Binance Futures, powered by AI and b
 - [Overview](#overview)
 - [Features](#features)
 - [Architecture](#architecture)
+  - [System Architecture](#system-architecture-diagram)
+  - [Network Architecture](#network-architecture)
+  - [Database Schema](#database-schema)
+  - [Container Orchestration](#container-orchestration)
 - [Tech Stack](#tech-stack)
 - [Quick Start](#quick-start)
+- [Deployment](#deployment)
+  - [Development Environment](#development-environment)
+  - [Production Environment](#production-environment)
+  - [Docker Deployment](#docker-deployment)
 - [Configuration](#configuration)
 - [API Documentation](#api-documentation)
 - [Development](#development)
+- [Monitoring & Logging](#monitoring--logging)
+- [Security](#security)
+- [Performance Optimization](#performance-optimization)
 - [Troubleshooting](#troubleshooting)
 - [Contributing](#contributing)
 - [License](#license)
@@ -43,6 +55,8 @@ AIFutureTrade is a comprehensive automated trading system designed for Binance F
 - 🐳 Fully containerized with Docker for easy deployment
 - 📈 Interactive web interface with real-time K-line charts
 - ⚡ High-performance async I/O for market data processing
+- 🔒 Secure API authentication and data encryption
+- 📉 Advanced risk management and position control
 
 ### ✨ Features
 
@@ -51,18 +65,45 @@ AIFutureTrade is a comprehensive automated trading system designed for Binance F
 - **Risk Management**: Position sizing, stop-loss, and take-profit automation
 - **Multi-Symbol Support**: Trade multiple futures contracts simultaneously
 - **Real-time Execution**: Low-latency order placement and management
+- **Backtesting**: Historical data analysis and strategy validation
+- **Paper Trading**: Test strategies without real money
 
 #### Data Processing
 - **WebSocket Streaming**: Real-time market ticker data from Binance
 - **Historical Data**: K-line data storage and analysis
-- **Technical Indicators**: Built-in TA-Lib integration for technical analysis
+- **Technical Indicators**: Built-in TA-Lib integration (RSI, MACD, Bollinger Bands, etc.)
 - **Data Persistence**: MySQL database for trade history and positions
+- **Data Caching**: Redis for high-performance data access
 
 #### System Features
 - **Microservices Architecture**: Independent, scalable services
 - **Dynamic Container Management**: Auto-scaling trading model containers
 - **Health Monitoring**: Service status tracking and auto-restart
 - **RESTful APIs**: Comprehensive API endpoints with Swagger documentation
+- **WebSocket Support**: Real-time data push to frontend
+- **Logging & Monitoring**: Centralized logging with ELK stack support
+
+### 🖼️ UI Screenshots
+
+**Market Overview & Top Movers**  
+![Market Overview](img/Attached_image.png)  
+Displays the USDS-M market overview, top gainers/losers, and a quick symbol list for fast navigation.
+
+**Strategy Performance & Trade List**  
+![Strategy Performance](img/Attached2_image.png)  
+Shows strategy performance trends and a consolidated trade list for recent execution results.
+
+**Buy Execution Logs (Model Level)**  
+![Buy Logs](img/Attached3_image.png)  
+Provides real-time model execution logs for debugging and operational audit.
+
+**Strategy Management**  
+![Strategy Management](img/Attached4_image.png)  
+Centralized strategy list with status, type, and quick actions for editing or starting models.
+
+**K-Line Chart with Indicators**  
+![K-Line Chart](img/Attached5_image.png)  
+Interactive candlestick chart with MA/EMA, MACD, KDJ, RSI, and ATR overlays for analysis.
 
 ### 🏗️ Architecture
 
@@ -70,40 +111,52 @@ AIFutureTrade is a comprehensive automated trading system designed for Binance F
 
 ```mermaid
 graph TB
+    subgraph "Client Layer"
+        USER[User Browser]
+    end
+
     subgraph "Frontend Layer"
-        FE[Vue 3 Frontend<br/>Port 3000]
+        FE[Vue 3 Frontend<br/>Port 3000<br/>Vite + KLineChart]
     end
 
     subgraph "API Gateway Layer"
-        BE[Backend Service<br/>Java Spring Boot<br/>Port 5002]
+        BE[Backend Service<br/>Java Spring Boot<br/>Port 5002<br/>User/Model Management]
     end
 
-    subgraph "Core Services"
-        BS[Binance Service<br/>Market Data API<br/>Port 5004]
-        AS[Async Service<br/>WebSocket Stream<br/>Port 5003]
-        TS[Trade Service<br/>Python Flask<br/>Port 5000]
+    subgraph "Core Services Layer"
+        BS[Binance Service<br/>Java + Undertow<br/>Port 5004<br/>Market Data API]
+        AS[Async Service<br/>Java Spring Boot<br/>Port 5003<br/>WebSocket Stream]
+        TS[Trade Service<br/>Python Flask<br/>Port 5000<br/>Trading Engine]
     end
 
-    subgraph "Dynamic Trading Models"
-        MB1[Model Buy Container 1]
-        MB2[Model Buy Container 2]
-        MS1[Model Sell Container 1]
-        MS2[Model Sell Container 2]
+    subgraph "Dynamic Model Layer"
+        MB1[Buy Model 1<br/>Python Container]
+        MB2[Buy Model 2<br/>Python Container]
+        MS1[Sell Model 1<br/>Python Container]
+        MS2[Sell Model 2<br/>Python Container]
     end
 
     subgraph "External Services"
-        BINANCE[Binance API<br/>Futures Market]
-        DB[(MySQL Database<br/>Port 32123)]
+        BINANCE[Binance API<br/>Futures Market<br/>WebSocket + REST]
+        DB[(MySQL 8.0<br/>Port 32123<br/>Trade Data)]
     end
 
+    subgraph "Docker Infrastructure"
+        DOCKER[Docker Engine<br/>Container Management]
+    end
+
+    USER -->|HTTPS| FE
     FE -->|HTTP/WebSocket| BE
     BE -->|REST API| TS
     BE -->|REST API| BS
-    BE -->|Docker API| MB1
-    BE -->|Docker API| MB2
-    BE -->|Docker API| MS1
-    BE -->|Docker API| MS2
+    BE -->|REST API| AS
+    BE -->|Docker API| DOCKER
     BE -->|JDBC| DB
+
+    DOCKER -->|Manage| MB1
+    DOCKER -->|Manage| MB2
+    DOCKER -->|Manage| MS1
+    DOCKER -->|Manage| MS2
 
     BS -->|HTTPS| BINANCE
     AS -->|WebSocket| BINANCE
@@ -116,6 +169,7 @@ graph TB
     MS1 -->|Trade Logic| TS
     MS2 -->|Trade Logic| TS
 
+    style USER fill:#e1f5ff
     style FE fill:#42b983
     style BE fill:#ff6b6b
     style BS fill:#4ecdc4
@@ -123,26 +177,195 @@ graph TB
     style TS fill:#f38181
     style BINANCE fill:#ffd93d
     style DB fill:#6c5ce7
+    style DOCKER fill:#2496ed
+```
+
+#### Network Architecture
+
+```mermaid
+graph LR
+    subgraph "Public Network"
+        INTERNET[Internet]
+    end
+
+    subgraph "Docker Bridge Network: aifuturetrade-network"
+        subgraph "Frontend Container"
+            FE[frontend:3000]
+        end
+
+        subgraph "Backend Container"
+            BE[backend:5002]
+        end
+
+        subgraph "Service Containers"
+            BS[binance-service:5004]
+            AS[async-service:5003]
+            TS[trade:5000]
+        end
+
+        subgraph "Model Containers"
+            MB["buy-<modelId>"]
+            MS["sell-<modelId>"]
+        end
+
+        subgraph "Database Container"
+            DB[mysql:32123]
+        end
+    end
+
+    INTERNET -->|Port 3000| FE
+    INTERNET -->|Port 5002| BE
+
+    FE -.->|Internal DNS| BE
+    BE -.->|Internal DNS| BS
+    BE -.->|Internal DNS| AS
+    BE -.->|Internal DNS| TS
+    BE -.->|Internal DNS| DB
+
+    BS -.->|Internal DNS| DB
+    AS -.->|Internal DNS| DB
+    TS -.->|Internal DNS| DB
+
+    MB -.->|Internal DNS| TS
+    MS -.->|Internal DNS| TS
+
+    style INTERNET fill:#ffd93d
+    style FE fill:#42b983
+    style BE fill:#ff6b6b
+```
+
+#### Database Schema
+
+```mermaid
+erDiagram
+    USERS ||--o{ MODELS : creates
+    USERS ||--o{ TRADES : executes
+    MODELS ||--o{ POSITIONS : manages
+    MODELS ||--o{ TRADES : generates
+    POSITIONS ||--o{ TRADES : affects
+
+    USERS {
+        int id PK
+        string username
+        string password_hash
+        string email
+        decimal initial_capital
+        decimal current_balance
+        timestamp created_at
+    }
+
+    MODELS {
+        int id PK
+        int user_id FK
+        string model_name
+        string model_type
+        string strategy_params
+        string status
+        timestamp created_at
+    }
+
+    POSITIONS {
+        int id PK
+        int model_id FK
+        string symbol
+        string position_side
+        decimal position_amt
+        decimal entry_price
+        decimal unrealized_pnl
+        timestamp open_time
+    }
+
+    TRADES {
+        int id PK
+        int model_id FK
+        int user_id FK
+        string symbol
+        string side
+        decimal quantity
+        decimal price
+        decimal realized_pnl
+        timestamp trade_time
+    }
+
+    FUTURES {
+        int id PK
+        string symbol
+        decimal leverage
+        string margin_type
+        timestamp updated_at
+    }
+
+    MARKET_TICKERS {
+        int id PK
+        string symbol
+        decimal last_price
+        decimal volume_24h
+        decimal price_change_percent
+        timestamp update_time
+    }
+```
+
+#### Container Orchestration
+
+```mermaid
+graph TB
+    subgraph "Docker Compose Orchestration"
+        DC[docker-compose.yml]
+        DCM[docker-compose-mysql.yml]
+    end
+
+    subgraph "Static Containers (Always Running)"
+        MYSQL[MySQL Database]
+        BACKEND[Backend Service]
+        BINANCE[Binance Service]
+        ASYNC[Async Service]
+        TRADE[Trade Service]
+        FRONTEND[Frontend Service]
+    end
+
+    subgraph "Dynamic Containers (On-Demand)"
+        MB[Model Buy Containers<br/>Created by Backend API]
+        MS[Model Sell Containers<br/>Created by Backend API]
+    end
+
+    DC -->|Manages| BACKEND
+    DC -->|Manages| BINANCE
+    DC -->|Manages| ASYNC
+    DC -->|Manages| TRADE
+    DC -->|Manages| FRONTEND
+    DCM -->|Manages| MYSQL
+
+    BACKEND -->|Docker API| MB
+    BACKEND -->|Docker API| MS
+
+    style DC fill:#2496ed
+    style DCM fill:#2496ed
+    style MYSQL fill:#6c5ce7
+    style MB fill:#ff9ff3
+    style MS fill:#ff9ff3
 ```
 
 #### Service Responsibilities
 
-| Service | Port | Technology | Responsibility |
-|---------|------|------------|----------------|
-| **Frontend** | 3000 | Vue 3 + Vite | User interface, real-time charts, WebSocket client |
-| **Backend** | 5002 | Java 17 + Spring Boot | Main API, user/model management, Docker orchestration |
-| **Binance Service** | 5004 | Java 17 + Undertow | High-performance Binance API proxy |
-| **Async Service** | 5003 | Java 17 + Spring Boot | WebSocket streaming, scheduled tasks |
-| **Trade Service** | 5000 | Python 3 + Flask | Trading logic, strategy execution, risk management |
-| **Model Containers** | Dynamic | Python 3 | Independent buy/sell model execution |
+| Service | Port | Technology | Responsibility | Scalability |
+|---------|------|------------|----------------|-------------|
+| **Frontend** | 3000 | Vue 3 + Vite | User interface, real-time charts, WebSocket client | Horizontal |
+| **Backend** | 5002 | Java 17 + Spring Boot | Main API, user/model management, Docker orchestration | Horizontal |
+| **Binance Service** | 5004 | Java 17 + Undertow | High-performance Binance API proxy, rate limiting | Horizontal |
+| **Async Service** | 5003 | Java 17 + Spring Boot | WebSocket streaming, scheduled tasks, data sync | Vertical |
+| **Trade Service** | 5000 | Python 3 + Flask | Trading logic, strategy execution, risk management | Horizontal |
+| **Model Containers** | Dynamic | Python 3 | Independent buy/sell model execution | Auto-scaling |
+| **MySQL** | 32123 | MySQL 8.0 | Persistent data storage | Master-Slave |
 
-#### Data Flow
+#### Data Flow Sequence
 
 ```mermaid
 sequenceDiagram
     participant User
     participant Frontend
     participant Backend
+    participant Docker
+    participant Model
     participant Trade
     participant Binance
     participant DB
@@ -150,287 +373,799 @@ sequenceDiagram
     User->>Frontend: Create Trading Model
     Frontend->>Backend: POST /api/models
     Backend->>DB: Save Model Config
-    Backend->>Backend: Create Docker Container
-    Backend->>Trade: Initialize Strategy
+    Backend->>Docker: Create Container (buy-{modelId})
+    Docker-->>Backend: Container Created
+    Backend->>Model: Start Model Process
+    Model->>Trade: Initialize Strategy
     Trade->>Binance: Fetch Market Data
     Binance-->>Trade: K-line Data
-    Trade->>Trade: Calculate Indicators
-    Trade->>Binance: Place Order
+    Trade->>Trade: Calculate Indicators (RSI, MACD)
+    Trade->>Trade: Generate Signal
+    Trade->>Binance: Place Order (LIMIT/MARKET)
     Binance-->>Trade: Order Confirmation
     Trade->>DB: Save Trade Record
-    Backend-->>Frontend: Model Status Update
+    Trade->>DB: Update Position
+    Backend->>Frontend: WebSocket Push (Status Update)
     Frontend-->>User: Display Results
+```
+
+#### Real-time Data Flow
+
+```mermaid
+sequenceDiagram
+    participant Binance
+    participant AsyncService
+    participant DB
+    participant Backend
+    participant Frontend
+    participant User
+
+    Binance->>AsyncService: WebSocket Stream (Ticker Data)
+    AsyncService->>DB: Update 24_market_tickers
+    AsyncService->>Backend: Notify Data Update
+    Backend->>Frontend: WebSocket Push (Price Update)
+    Frontend-->>User: Update K-line Chart
+
+    Note over AsyncService: Every 5 minutes
+    AsyncService->>DB: Refresh Price Data
+
+    Note over AsyncService: Every 30 minutes
+    AsyncService->>DB: Clean Expired Data
 ```
 
 ### 🛠️ Tech Stack
 
 #### Backend Services
-- **Java 17**: Modern Java features and performance
-- **Spring Boot 3.2.0**: Microservices framework
-- **MyBatis Plus**: ORM and database operations
-- **Undertow**: High-performance async I/O server
-- **Docker Java API**: Dynamic container management
+- **Java 17**: Modern Java features (Records, Pattern Matching, Sealed Classes)
+- **Spring Boot 3.2.0**: Microservices framework with auto-configuration
+- **MyBatis Plus 3.5.5**: Enhanced ORM with code generator
+- **Undertow 2.3.10**: High-performance async I/O server (NIO)
+- **Docker Java API 3.3.4**: Dynamic container lifecycle management
+- **Lombok**: Reduce boilerplate code
+- **Swagger/OpenAPI 3.0**: API documentation
 
 #### Trading Engine
-- **Python 3**: Core trading logic
-- **Flask**: RESTful API framework
-- **Gunicorn + Eventlet**: Async worker management
-- **TA-Lib**: Technical analysis library
-- **Pandas/NumPy**: Data processing and analysis
+- **Python 3.9+**: Core trading logic and strategy execution
+- **Flask 2.3.0**: Lightweight RESTful API framework
+- **Gunicorn 21.2.0**: WSGI HTTP server
+- **Eventlet 0.33.3**: Concurrent networking library
+- **TA-Lib 0.4.28**: Technical analysis (150+ indicators)
+- **Pandas 2.1.0**: Data manipulation and analysis
+- **NumPy 1.25.0**: Numerical computing
+- **python-binance 1.0.19**: Binance API wrapper
 
 #### Frontend
-- **Vue 3**: Progressive JavaScript framework
-- **Vite**: Next-generation build tool
-- **KLineChart**: Professional K-line charting
-- **Axios**: HTTP client
-- **WebSocket**: Real-time data streaming
+- **Vue 3.3.4**: Composition API with `<script setup>`
+- **Vite 4.4.9**: Fast build tool with HMR
+- **KLineChart 9.5.0**: Professional candlestick charting
+- **Axios 1.5.0**: Promise-based HTTP client
+- **Pinia 2.1.6**: State management
+- **Vue Router 4.2.4**: Client-side routing
+- **Element Plus 2.3.14**: UI component library
 
 #### Infrastructure
-- **MySQL 8.0**: Relational database
-- **Docker**: Containerization
-- **Docker Compose**: Multi-container orchestration
+- **MySQL 8.0.35**: ACID-compliant relational database
+- **Docker 24.0+**: Container runtime
+- **Docker Compose 2.20+**: Multi-container orchestration
+- **Nginx** (Optional): Reverse proxy and load balancer
+- **Redis** (Optional): Caching and session storage
+
+#### Development Tools
+- **Maven 3.9+**: Java dependency management
+- **npm/pnpm**: JavaScript package management
 - **Git**: Version control
+- **IntelliJ IDEA / VS Code**: IDE
 
 ### 🚀 Quick Start
 
 #### Prerequisites
 
-- Docker 20.10+
-- Docker Compose 2.0+
-- Git
-- Binance Futures API Key (for live trading)
+```bash
+# Required
+- Docker 20.10+ and Docker Compose 2.0+
+- Git 2.30+
+- 4GB+ RAM available for containers
+- 10GB+ disk space
+
+# Optional (for local development)
+- Java 17 (OpenJDK or Oracle JDK)
+- Python 3.9+
+- Node.js 18+ and npm 9+
+- Maven 3.9+
+```
 
 #### Installation
 
 1. **Clone the repository**
 ```bash
-git clone https://github.com/yourusername/AIFutureTrade.git
+git clone https://github.com/gavenwangcn/AIFutureTrade.git
 cd AIFutureTrade
 ```
 
 2. **Configure environment variables**
 ```bash
+# Copy example environment file
 cp .env.example .env
+
 # Edit .env with your configuration
+# IMPORTANT: Set your Binance API credentials
+nano .env  # or use your preferred editor
 ```
 
-3. **Start MySQL database**
+3. **Start MySQL database (Required First)**
 ```bash
+# Start MySQL container
 docker-compose -f docker-compose-mysql.yml up -d
+
+# Wait for MySQL to be ready (about 30 seconds)
+docker-compose -f docker-compose-mysql.yml logs -f mysql
+
+# Verify MySQL is running
+docker-compose -f docker-compose-mysql.yml ps
 ```
 
 4. **Build and start all services**
 ```bash
+# Option 1: Use the provided script (Recommended)
+chmod +x scripts/docker-compose-up.sh
 ./scripts/docker-compose-up.sh --build
+
+# Option 2: Manual start (model containers won't auto-start)
+docker-compose up -d --build --scale model-buy=0 --scale model-sell=0
+
+# Option 3: Build specific services
+docker-compose build backend frontend trade
+docker-compose up -d backend frontend trade
 ```
 
-5. **Access the application**
-- Frontend: http://localhost:3000
-- Backend API: http://localhost:5002
-- Swagger UI: http://localhost:5002/swagger-ui.html
-
-### ⚙️ Configuration
-
-#### Environment Variables (.env)
-
+5. **Verify services are running**
 ```bash
-# MySQL Configuration
-MYSQL_HOST=your_mysql_host
-MYSQL_PORT=32123
-MYSQL_USER=aifuturetrade
-MYSQL_PASSWORD=your_password
-MYSQL_DATABASE=aifuturetrade
+# Check all containers status
+docker-compose ps
 
-# Binance API
-BINANCE_API_KEY=your_api_key
-BINANCE_API_SECRET=your_secret_key
+# Check logs
+docker-compose logs -f backend
+docker-compose logs -f trade
+docker-compose logs -f async-service
 
-# Service Ports
-BACKEND_PORT=5002
-BINANCE_SERVICE_PORT=5004
-ASYNC_SERVICE_PORT=5003
-TRADE_PORT=5000
-FRONTEND_PORT=3000
-
-# Async Service Auto-start
-ASYNC_AUTO_START_ENABLED=true
-ASYNC_AUTO_START_TASK=all
+# Health check
+curl http://localhost:5002/actuator/health
+curl http://localhost:5000/health
 ```
 
-#### JVM Parameters
+6. **Access the application**
+- **Frontend**: http://localhost:3000
+- **Backend API**: http://localhost:5002
+- **Swagger UI (Backend)**: http://localhost:5002/swagger-ui.html
+- **Swagger UI (Binance Service)**: http://localhost:5004/swagger-ui.html
+- **Async Service Status**: http://localhost:5003/api/async/status
 
-All Java services use optimized JVM settings:
+### 📦 Deployment
+
+#### Development Environment
+
+**Local Development without Docker:**
+
+1. **Start MySQL**
 ```bash
--Xms512m -Xmx1024m  # Backend
--Xms1g -Xmx2g -XX:+UseG1GC -XX:MaxGCPauseMillis=200  # Binance/Async Service
---add-opens java.base/java.lang.invoke=ALL-UNNAMED  # MyBatis-Plus compatibility
+docker-compose -f docker-compose-mysql.yml up -d
 ```
 
-### 📚 API Documentation
-
-#### Backend API Endpoints
-
-**User Management**
-- `POST /api/users/register` - Register new user
-- `POST /api/users/login` - User login
-- `GET /api/users/profile` - Get user profile
-
-**Model Management**
-- `POST /api/models` - Create trading model
-- `GET /api/models` - List all models
-- `PUT /api/models/{id}` - Update model
-- `DELETE /api/models/{id}` - Delete model
-- `POST /api/models/{id}/start` - Start model container
-- `POST /api/models/{id}/stop` - Stop model container
-
-**Trading Operations**
-- `POST /api/trades/execute` - Execute trade
-- `GET /api/trades/history` - Get trade history
-- `GET /api/positions` - Get current positions
-- `POST /api/positions/close` - Close position
-
-**Market Data**
-- `GET /api/market/klines` - Get K-line data
-- `GET /api/market/ticker` - Get ticker price
-- `GET /api/market/24hr` - Get 24-hour statistics
-
-#### Swagger Documentation
-
-Access interactive API documentation:
-- Backend: http://localhost:5002/swagger-ui.html
-- Binance Service: http://localhost:5004/swagger-ui.html
-
-### 💻 Development
-
-#### Project Structure
-
-```
-AIFutureTrade/
-├── backend/                 # Java Spring Boot main service
-│   ├── src/main/java/
-│   └── pom.xml
-├── binance-service/         # Binance API microservice
-│   ├── src/main/java/
-│   └── pom.xml
-├── async-service/           # Async data streaming service
-│   ├── src/main/java/
-│   └── pom.xml
-├── trade/                   # Python trading engine
-│   ├── app.py
-│   ├── strategies/
-│   ├── common/
-│   └── requirements.txt
-├── frontend/                # Vue 3 frontend
-│   ├── src/
-│   ├── package.json
-│   └── vite.config.js
-├── scripts/                 # Utility scripts
-├── docker-compose.yml       # Main compose file
-├── docker-compose-mysql.yml # MySQL compose file
-└── CLAUDE.md               # Development guidelines
-```
-
-#### Building Services
-
-**Java Services**
+2. **Backend Service**
 ```bash
-# Backend
-cd backend && mvn clean package -DskipTests
-
-# Binance Service
-cd binance-service && mvn clean package -DskipTests
-
-# Async Service
-cd async-service && mvn clean package -DskipTests
+cd backend
+mvn clean package -DskipTests
+java -jar target/backend-1.0.0.jar
 ```
 
-**Python Service**
+3. **Trade Service**
 ```bash
 cd trade
 pip install -r requirements.txt
-python -m pytest tests/
+python -m trade.app
 ```
 
-**Frontend**
+4. **Frontend**
 ```bash
 cd frontend
 npm install
 npm run dev
 ```
 
-#### Running Tests
+#### Production Environment
 
-```bash
-# Java tests
-mvn test
+**Production Deployment Checklist:**
 
-# Python tests
-cd trade && python -m pytest tests/
+- [ ] Use production-grade MySQL (RDS, Cloud SQL, etc.)
+- [ ] Configure reverse proxy (Nginx/Traefik)
+- [ ] Enable HTTPS with SSL certificates
+- [ ] Set up monitoring (Prometheus + Grafana)
+- [ ] Configure centralized logging (ELK Stack)
+- [ ] Enable database backups
+- [ ] Set resource limits for containers
+- [ ] Use secrets management (Vault, AWS Secrets Manager)
+- [ ] Configure firewall rules
+- [ ] Set up CI/CD pipeline
 
-# Frontend tests
-cd frontend && npm run test
+**Production Docker Compose:**
+
+```yaml
+# docker-compose.prod.yml
+version: '3.8'
+
+services:
+  backend:
+    image: aifuturetrade/backend:latest
+    restart: always
+    environment:
+      - SPRING_PROFILES_ACTIVE=prod
+      - JAVA_OPTS=-Xms1g -Xmx2g -XX:+UseG1GC
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 2G
+        reservations:
+          cpus: '1'
+          memory: 1G
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5002/actuator/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # ... other services
 ```
 
-### 🔧 Troubleshooting
+**Deploy to Production:**
 
-#### Common Issues
-
-**1. MySQL Connection Failed**
 ```bash
-# Check MySQL status
-docker-compose -f docker-compose-mysql.yml ps
+# Build production images
+docker-compose -f docker-compose.prod.yml build
 
-# View MySQL logs
-docker-compose -f docker-compose-mysql.yml logs -f
+# Push to registry
+docker-compose -f docker-compose.prod.yml push
+
+# Deploy on production server
+docker-compose -f docker-compose.prod.yml up -d
+
+# Monitor deployment
+docker-compose -f docker-compose.prod.yml logs -f
 ```
 
-**2. Port Already in Use**
-```bash
-# Find process using port
-netstat -tlnp | grep 5002
+#### Docker Deployment
 
-# Kill process
-kill -9 <PID>
+**Container Resource Allocation:**
+
+| Service | CPU | Memory | Disk | Network |
+|---------|-----|--------|------|---------|
+| Backend | 1-2 cores | 1-2GB | 1GB | 100Mbps |
+| Binance Service | 1-2 cores | 1-2GB | 500MB | 100Mbps |
+| Async Service | 1-2 cores | 1-2GB | 500MB | 100Mbps |
+| Trade Service | 1-2 cores | 1-2GB | 1GB | 100Mbps |
+| Trade Monitor | 0.5-1 core | 512MB-1GB | 500MB | 50Mbps |
+| Frontend | 0.5-1 core | 512MB-1GB | 500MB | 50Mbps |
+| MySQL | 2-4 cores | 2-4GB | 20GB+ | 100Mbps |
+| Model Container | 0.5-1 core | 512MB-1GB | 500MB | 50Mbps |
+
+**Docker Network Configuration:**
+
+```bash
+# Create custom network
+docker network create --driver bridge \
+  --subnet=172.20.0.0/16 \
+  --gateway=172.20.0.1 \
+  aifuturetrade-network
+
+# Inspect network
+docker network inspect aifuturetrade-network
+
+# Connect container to network
+docker network connect aifuturetrade-network <container_name>
 ```
 
-**3. Model Container Creation Failed**
+**Volume Management:**
+
 ```bash
-# Check Docker socket mount
-docker-compose ps backend
+# List volumes
+docker volume ls
 
-# View backend logs
-docker-compose logs -f backend
+# Backup MySQL data
+docker run --rm \
+  -v aifuturetrade_mysql_data:/data \
+  -v $(pwd):/backup \
+  alpine tar czf /backup/mysql-backup-$(date +%Y%m%d).tar.gz /data
 
-# Manually build model images
-docker-compose build model-buy model-sell
+# Restore MySQL data
+docker run --rm \
+  -v aifuturetrade_mysql_data:/data \
+  -v $(pwd):/backup \
+  alpine tar xzf /backup/mysql-backup-20260225.tar.gz -C /
 ```
 
-**4. WebSocket Connection Issues**
-```bash
-# Check async service status
-docker-compose logs -f async-service
+### ⚙️ Configuration
 
-# Restart async service
-docker-compose restart async-service
+#### Environment Variables (.env)
+
+```bash
+# ============================================
+# MySQL Database Configuration
+# ============================================
+MYSQL_HOST=154.89.148.172          # MySQL host (use 'mysql' for Docker internal)
+MYSQL_PORT=32123                    # MySQL port
+MYSQL_USER=aifuturetrade           # Database username
+MYSQL_PASSWORD=aifuturetrade123    # Database password (CHANGE IN PRODUCTION!)
+MYSQL_DATABASE=aifuturetrade       # Database name
+MYSQL_ROOT_PASSWORD=root123        # Root password (CHANGE IN PRODUCTION!)
+
+# ============================================
+# Binance API Configuration
+# ============================================
+BINANCE_API_KEY=your_api_key_here           # Get from Binance account
+BINANCE_API_SECRET=your_secret_key_here     # Keep this secret!
+BINANCE_TESTNET=false                        # Use testnet for testing
+BINANCE_BASE_URL=https://fapi.binance.com   # Futures API endpoint
+
+# ============================================
+# Service Ports Configuration
+# ============================================
+BACKEND_PORT=5002                   # Backend API port
+BINANCE_SERVICE_PORT=5004          # Binance service port
+ASYNC_SERVICE_PORT=5003            # Async service port
+TRADE_PORT=5000                    # Trade service port
+FRONTEND_PORT=3000                 # Frontend port
+
+# ============================================
+# Async Service Configuration
+# ============================================
+ASYNC_AUTO_START_ENABLED=true      # Auto-start async tasks on startup
+ASYNC_AUTO_START_TASK=all          # Tasks to start: all, ticker, price, cleanup
+ASYNC_TICKER_INTERVAL=1000         # Ticker update interval (ms)
+ASYNC_PRICE_REFRESH_CRON=0 */5 * * * *    # Price refresh cron (every 5 min)
+ASYNC_CLEANUP_CRON=0 */30 * * * *         # Cleanup cron (every 30 min)
+
+# ============================================
+# Trading Configuration
+# ============================================
+TRADE_MAX_POSITION_SIZE=10000      # Maximum position size (USDT)
+TRADE_DEFAULT_LEVERAGE=10          # Default leverage
+TRADE_RISK_PERCENT=2               # Risk per trade (%)
+TRADE_SLIPPAGE_TOLERANCE=0.1       # Slippage tolerance (%)
+
+# ============================================
+# Security Configuration
+# ============================================
+JWT_SECRET=your_jwt_secret_key_here_change_in_production
+JWT_EXPIRATION=86400               # JWT expiration (seconds, 24 hours)
+CORS_ALLOWED_ORIGINS=http://localhost:3000,https://yourdomain.com
+
+# ============================================
+# Logging Configuration
+# ============================================
+LOG_LEVEL=INFO                     # DEBUG, INFO, WARN, ERROR
+LOG_FILE_PATH=/var/log/aifuturetrade
+LOG_MAX_FILE_SIZE=100MB
+LOG_MAX_HISTORY=30                 # Days to keep logs
+
+# ============================================
+# Performance Configuration
+# ============================================
+THREAD_POOL_SIZE=20                # Thread pool size for async tasks
+CONNECTION_POOL_SIZE=20            # Database connection pool size
+CACHE_ENABLED=true                 # Enable caching
+CACHE_TTL=300                      # Cache TTL (seconds)
 ```
 
-### 🤝 Contributing
+#### Application Configuration (application.yml)
 
-We welcome contributions! Please follow these steps:
+**Backend Service (backend/src/main/resources/application.yml):**
 
-1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/AmazingFeature`)
-3. Commit your changes (`git commit -m 'Add some AmazingFeature'`)
-4. Push to the branch (`git push origin feature/AmazingFeature`)
-5. Open a Pull Request
+```yaml
+server:
+  port: ${BACKEND_PORT:5002}
+  compression:
+    enabled: true
+  tomcat:
+    threads:
+      max: 200
+      min-spare: 10
 
-### 📄 License
+spring:
+  application:
+    name: aifuturetrade-backend
+  datasource:
+    url: jdbc:mysql://${MYSQL_HOST}:${MYSQL_PORT}/${MYSQL_DATABASE}?useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true
+    username: ${MYSQL_USER}
+    password: ${MYSQL_PASSWORD}
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    hikari:
+      maximum-pool-size: 20
+      minimum-idle: 5
+      connection-timeout: 30000
+      idle-timeout: 600000
+      max-lifetime: 1800000
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+mybatis-plus:
+  configuration:
+    map-underscore-to-camel-case: true
+    log-impl: org.apache.ibatis.logging.slf4j.Slf4jImpl
+  global-config:
+    db-config:
+      id-type: auto
+      logic-delete-value: 1
+      logic-not-delete-value: 0
 
-### ⚠️ Disclaimer
+logging:
+  level:
+    root: INFO
+    com.aifuturetrade: DEBUG
+  pattern:
+    console: "%d{yyyy-MM-dd HH:mm:ss} [%thread] %-5level %logger{36} - %msg%n"
+```
 
-This software is for educational and research purposes only. Cryptocurrency trading involves substantial risk of loss. Use at your own risk. The authors and contributors are not responsible for any financial losses incurred through the use of this software.
+#### JVM Parameters
+
+**Backend Service:**
+```bash
+JAVA_OPTS="-Xms512m -Xmx1024m \
+  -XX:+UseG1GC \
+  -XX:MaxGCPauseMillis=200 \
+  -XX:+HeapDumpOnOutOfMemoryError \
+  -XX:HeapDumpPath=/var/log/heapdump.hprof \
+  --add-opens java.base/java.lang.invoke=ALL-UNNAMED"
+```
+
+**Binance/Async Service:**
+```bash
+JAVA_OPTS="-Xms1g -Xmx2g \
+  -XX:+UseG1GC \
+  -XX:MaxGCPauseMillis=200 \
+  -XX:+UseStringDeduplication \
+  -XX:+ParallelRefProcEnabled \
+  --add-opens java.base/java.lang.invoke=ALL-UNNAMED"
+```
+
+### 📚 API Documentation
+
+#### Authentication
+
+All API requests (except public endpoints) require authentication using JWT tokens.
+
+**Login Flow:**
+
+```bash
+# 1. Register user
+curl -X POST http://localhost:5002/api/users/register \
+  -H "Content-Type: application/json" \
+  -d '{
+    "username": "trader1",
+    "password": "SecurePass123!",
+    "email": "trader1@example.com",
+    "initialCapital": 10000
+  }'
+
+# 2. Login to get JWT token
+curl -X POST http://localhost:5002/api/users/login \
+  -H "Content-Type: application/json" \
+  -d '{
+    "username": "trader1",
+    "password": "SecurePass123!"
+  }'
+
+# Response:
+{
+  "code": 200,
+  "message": "Login successful",
+  "data": {
+    "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+    "userId": 1,
+    "username": "trader1",
+    "expiresIn": 86400
+  }
+}
+
+# 3. Use token in subsequent requests
+curl -X GET http://localhost:5002/api/users/profile \
+  -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+```
+
+#### API Endpoints
+
+**User Management**
+
+```bash
+# Register new user
+POST /api/users/register
+Content-Type: application/json
+
+{
+  "username": "string",
+  "password": "string",
+  "email": "string",
+  "initialCapital": 10000.00
+}
+
+# Response: 200 OK
+{
+  "code": 200,
+  "message": "User registered successfully",
+  "data": {
+    "userId": 1,
+    "username": "trader1",
+    "email": "trader1@example.com"
+  }
+}
+
+# Login
+POST /api/users/login
+Content-Type: application/json
+
+{
+  "username": "string",
+  "password": "string"
+}
+
+# Get user profile
+GET /api/users/profile
+Authorization: Bearer {token}
+
+# Response: 200 OK
+{
+  "code": 200,
+  "data": {
+    "userId": 1,
+    "username": "trader1",
+    "email": "trader1@example.com",
+    "initialCapital": 10000.00,
+    "currentBalance": 10523.45,
+    "totalPnl": 523.45,
+    "winRate": 65.5,
+    "totalTrades": 42
+  }
+}
+```
+
+**Model Management**
+
+```bash
+# Create trading model
+POST /api/models
+Authorization: Bearer {token}
+Content-Type: application/json
+
+{
+  "modelName": "BTC Long Strategy",
+  "modelType": "BUY",
+  "symbol": "BTCUSDT",
+  "leverage": 10,
+  "strategyParams": {
+    "indicator": "RSI",
+    "period": 14,
+    "overbought": 70,
+    "oversold": 30,
+    "stopLoss": 2.0,
+    "takeProfit": 5.0
+  }
+}
+
+# Response: 201 Created
+{
+  "code": 201,
+  "message": "Model created successfully",
+  "data": {
+    "modelId": 1,
+    "modelName": "BTC Long Strategy",
+    "status": "CREATED",
+    "containerId": "buy-1"
+  }
+}
+
+# List all models
+GET /api/models?page=1&size=10
+Authorization: Bearer {token}
+
+# Get model details
+GET /api/models/{id}
+Authorization: Bearer {token}
+
+# Start model container
+POST /api/models/{id}/start
+Authorization: Bearer {token}
+
+# Response: 200 OK
+{
+  "code": 200,
+  "message": "Model started successfully",
+  "data": {
+    "modelId": 1,
+    "status": "RUNNING",
+    "containerId": "buy-1",
+    "startTime": "2026-02-25T10:30:00Z"
+  }
+}
+
+# Stop model container
+POST /api/models/{id}/stop
+Authorization: Bearer {token}
+
+# Delete model
+DELETE /api/models/{id}
+Authorization: Bearer {token}
+```
+
+**Trading Operations**
+
+```bash
+# Execute trade
+POST /api/trades/execute
+Authorization: Bearer {token}
+Content-Type: application/json
+
+{
+  "modelId": 1,
+  "symbol": "BTCUSDT",
+  "side": "BUY",
+  "type": "LIMIT",
+  "quantity": 0.1,
+  "price": 50000.00,
+  "timeInForce": "GTC"
+}
+
+# Response: 200 OK
+{
+  "code": 200,
+  "message": "Trade executed successfully",
+  "data": {
+    "tradeId": 1001,
+    "orderId": "12345678",
+    "symbol": "BTCUSDT",
+    "side": "BUY",
+    "quantity": 0.1,
+    "price": 50000.00,
+    "status": "FILLED",
+    "commission": 0.5,
+    "timestamp": "2026-02-25T10:35:00Z"
+  }
+}
+
+# Get trade history
+GET /api/trades/history?symbol=BTCUSDT&startTime=1708848000000&endTime=1708934400000&page=1&size=20
+Authorization: Bearer {token}
+
+# Get current positions
+GET /api/positions?modelId=1
+Authorization: Bearer {token}
+
+# Response: 200 OK
+{
+  "code": 200,
+  "data": [
+    {
+      "positionId": 1,
+      "symbol": "BTCUSDT",
+      "positionSide": "LONG",
+      "positionAmt": 0.1,
+      "entryPrice": 50000.00,
+      "markPrice": 51000.00,
+      "unrealizedPnl": 100.00,
+      "leverage": 10,
+      "marginType": "ISOLATED"
+    }
+  ]
+}
+
+# Close position
+POST /api/positions/close
+Authorization: Bearer {token}
+Content-Type: application/json
+
+{
+  "positionId": 1,
+  "quantity": 0.1,
+  "type": "MARKET"
+}
+```
+
+**Market Data**
+
+```bash
+# Get K-line data
+GET /api/market/klines?symbol=BTCUSDT&interval=1h&limit=100
+Authorization: Bearer {token}
+
+# Response: 200 OK
+{
+  "code": 200,
+  "data": [
+    {
+      "openTime": 1708848000000,
+      "open": "50000.00",
+      "high": "51000.00",
+      "low": "49500.00",
+      "close": "50500.00",
+      "volume": "1234.56",
+      "closeTime": 1708851599999,
+      "quoteVolume": "62345678.90"
+    }
+  ]
+}
+
+# Get ticker price
+GET /api/market/ticker?symbol=BTCUSDT
+Authorization: Bearer {token}
+
+# Get 24-hour statistics
+GET /api/market/24hr?symbol=BTCUSDT
+Authorization: Bearer {token}
+
+# Response: 200 OK
+{
+  "code": 200,
+  "data": {
+    "symbol": "BTCUSDT",
+    "priceChange": "1000.00",
+    "priceChangePercent": "2.00",
+    "lastPrice": "51000.00",
+    "volume": "123456.78",
+    "quoteVolume": "6234567890.12",
+    "openTime": 1708848000000,
+    "closeTime": 1708934400000
+  }
+}
+```
+
+#### Error Codes
+
+| Code | Message | Description |
+|------|---------|-------------|
+| 200 | Success | Request successful |
+| 201 | Created | Resource created successfully |
+| 400 | Bad Request | Invalid request parameters |
+| 401 | Unauthorized | Authentication required or token invalid |
+| 403 | Forbidden | Insufficient permissions |
+| 404 | Not Found | Resource not found |
+| 409 | Conflict | Resource already exists |
+| 429 | Too Many Requests | Rate limit exceeded |
+| 500 | Internal Server Error | Server error |
+| 503 | Service Unavailable | Service temporarily unavailable |
+
+**Error Response Format:**
+
+```json
+{
+  "code": 400,
+  "message": "Invalid request parameters",
+  "error": "INVALID_PARAMETER",
+  "details": {
+    "field": "quantity",
+    "reason": "Quantity must be greater than 0"
+  },
+  "timestamp": "2026-02-25T10:30:00Z"
+}
+```
+
+#### Rate Limiting
+
+- **Public endpoints**: 100 requests per minute per IP
+- **Authenticated endpoints**: 1000 requests per minute per user
+- **Trading endpoints**: 50 requests per minute per user
+- **WebSocket connections**: 5 connections per user
+
+**Rate Limit Headers:**
+
+```
+X-RateLimit-Limit: 1000
+X-RateLimit-Remaining: 995
+X-RateLimit-Reset: 1708934400
+```
+
+#### Swagger Documentation
+
+Access interactive API documentation:
+- **Backend**: http://localhost:5002/swagger-ui.html
+- **Binance Service**: http://localhost:5004/swagger-ui.html
+- **Trade Service**: http://localhost:5000/api/docs
 
 ---
 
@@ -438,250 +1173,258 @@ This software is for educational and research purposes only. Cryptocurrency trad
 
 ### 📋 目录
 
-- [项目概述](#项目概述-1)
-- [功能特性](#功能特性-1)
-- [系统架构](#系统架构-1)
-- [技术栈](#技术栈-1)
+- [概述](#概述)
+- [功能](#功能)
+- [架构](#架构-1)
 - [快速开始](#快速开始-1)
-- [配置说明](#配置说明-1)
-- [API文档](#api文档-1)
-- [开发指南](#开发指南-1)
-- [故障排查](#故障排查-1)
-- [贡献指南](#贡献指南-1)
-- [许可证](#许可证-1)
+- [配置](#配置-1)
+- [API 文档](#api-文档)
+- [界面截图](#界面截图)
 
-### 🎯 项目概述
+### 概述
 
-AIFutureTrade 是一个专为币安期货市场设计的综合自动化交易系统。它利用AI驱动的策略、实时市场数据处理和可扩展的微服务架构，高效执行交易并有效管理风险。
+AIFutureTrade 是面向 Binance 合约的智能自动交易系统，采用微服务与容器化架构，覆盖策略管理、行情处理、风控与交易执行等全链路能力。
 
-**核心亮点：**
-- 🤖 AI驱动的交易策略，支持动态模型管理
-- 📊 通过WebSocket实时市场数据流
-- 🔄 微服务架构，可扩展且易维护
-- 🐳 完全容器化，使用Docker轻松部署
-- 📈 交互式Web界面，实时K线图表
-- ⚡ 高性能异步I/O处理市场数据
+### 功能
 
-### ✨ 功能特性
+- **策略与模型**：多模型独立容器运行，动态创建/启动/停止
+- **行情与指标**：WebSocket 实时行情，内置多种技术指标
+- **交易执行**：低延迟下单与持仓管理，支持止盈止损与风控
+- **数据与审计**：交易与持仓全量落库，日志可追溯
 
-#### 交易功能
-- **AI驱动策略**：动态买卖模型，独立容器执行
-- **风险管理**：仓位管理、止损止盈自动化
-- **多币种支持**：同时交易多个期货合约
-- **实时执行**：低延迟订单下单和管理
+### 架构
 
-#### 数据处理
-- **WebSocket流式传输**：从币安获取实时市场ticker数据
-- **历史数据**：K线数据存储和分析
-- **技术指标**：内置TA-Lib集成技术分析
-- **数据持久化**：MySQL数据库存储交易历史和持仓
+- **前端**：Vue 3 + KLineChart 实时可视化
+- **后端**：Spring Boot 业务与模型管理
+- **交易服务**：Python 交易引擎与指标计算
+- **异步服务**：行情流处理与定时任务
+- **币安服务**：Binance API 调用与限流
 
-#### 系统功能
-- **微服务架构**：独立、可扩展的服务
-- **动态容器管理**：自动扩展交易模型容器
-- **健康监控**：服务状态跟踪和自动重启
-- **RESTful API**：全面的API端点，带Swagger文档
+#### 系统架构图
 
-### 🏗️ 系统架构
+```mermaid
+graph TB
+    subgraph "Client Layer"
+        USER[User Browser]
+    end
 
-#### 服务职责
+    subgraph "Frontend Layer"
+        FE[Vue 3 Frontend<br/>Port 3000<br/>Vite + KLineChart]
+    end
 
-| 服务 | 端口 | 技术栈 | 职责 |
-|------|------|--------|------|
-| **Frontend** | 3000 | Vue 3 + Vite | 用户界面、实时图表、WebSocket客户端 |
-| **Backend** | 5002 | Java 17 + Spring Boot | 主API、用户/模型管理、Docker编排 |
-| **Binance Service** | 5004 | Java 17 + Undertow | 高性能币安API代理 |
-| **Async Service** | 5003 | Java 17 + Spring Boot | WebSocket流、定时任务 |
-| **Trade Service** | 5000 | Python 3 + Flask | 交易逻辑、策略执行、风险管理 |
-| **Model Containers** | 动态 | Python 3 | 独立买卖模型执行 |
+    subgraph "API Gateway Layer"
+        BE[Backend Service<br/>Java Spring Boot<br/>Port 5002<br/>User/Model Management]
+    end
 
-### 🛠️ 技术栈
+    subgraph "Core Services Layer"
+        BS[Binance Service<br/>Java + Undertow<br/>Port 5004<br/>Market Data API]
+        AS[Async Service<br/>Java Spring Boot<br/>Port 5003<br/>WebSocket Stream]
+        TS[Trade Service<br/>Python Flask<br/>Port 5000<br/>Trading Engine]
+    end
 
-#### 后端服务
-- **Java 17**：现代Java特性和性能
-- **Spring Boot 3.2.0**：微服务框架
-- **MyBatis Plus**：ORM和数据库操作
-- **Undertow**：高性能异步I/O服务器
-- **Docker Java API**：动态容器管理
+    subgraph "Dynamic Model Layer"
+        MB1[Buy Model 1<br/>Python Container]
+        MB2[Buy Model 2<br/>Python Container]
+        MS1[Sell Model 1<br/>Python Container]
+        MS2[Sell Model 2<br/>Python Container]
+    end
 
-#### 交易引擎
-- **Python 3**：核心交易逻辑
-- **Flask**：RESTful API框架
-- **Gunicorn + Eventlet**：异步工作进程管理
-- **TA-Lib**：技术分析库
-- **Pandas/NumPy**：数据处理和分析
+    subgraph "External Services"
+        BINANCE[Binance API<br/>Futures Market<br/>WebSocket + REST]
+        DB[(MySQL 8.0<br/>Port 32123<br/>Trade Data)]
+    end
 
-#### 前端
-- **Vue 3**：渐进式JavaScript框架
-- **Vite**：下一代构建工具
-- **KLineChart**：专业K线图表
-- **Axios**：HTTP客户端
-- **WebSocket**：实时数据流
+    subgraph "Docker Infrastructure"
+        DOCKER[Docker Engine<br/>Container Management]
+    end
 
-#### 基础设施
-- **MySQL 8.0**：关系型数据库
-- **Docker**：容器化
-- **Docker Compose**：多容器编排
-- **Git**：版本控制
+    USER -->|HTTPS| FE
+    FE -->|HTTP/WebSocket| BE
+    BE -->|REST API| TS
+    BE -->|REST API| BS
+    BE -->|REST API| AS
+    BE -->|Docker API| DOCKER
+    BE -->|JDBC| DB
 
-### 🚀 快速开始
+    DOCKER -->|Manage| MB1
+    DOCKER -->|Manage| MB2
+    DOCKER -->|Manage| MS1
+    DOCKER -->|Manage| MS2
 
-#### 前置要求
+    BS -->|HTTPS| BINANCE
+    AS -->|WebSocket| BINANCE
+    AS -->|JDBC| DB
+    TS -->|HTTPS| BINANCE
+    TS -->|JDBC| DB
 
-- Docker 20.10+
-- Docker Compose 2.0+
-- Git
-- 币安期货API密钥（用于实盘交易）
-
-#### 安装步骤
-
-1. **克隆仓库**
-```bash
-git clone https://github.com/yourusername/AIFutureTrade.git
-cd AIFutureTrade
+    MB1 -->|Trade Logic| TS
+    MB2 -->|Trade Logic| TS
+    MS1 -->|Trade Logic| TS
+    MS2 -->|Trade Logic| TS
 ```
 
-2. **配置环境变量**
-```bash
-cp .env.example .env
-# 编辑.env文件，填入你的配置
+#### 网络架构
+
+```mermaid
+graph LR
+    subgraph "Public Network"
+        INTERNET[Internet]
+    end
+
+    subgraph "Docker Bridge Network: aifuturetrade-network"
+        subgraph "Frontend Container"
+            FE[frontend:3000]
+        end
+
+        subgraph "Backend Container"
+            BE[backend:5002]
+        end
+
+        subgraph "Service Containers"
+            BS[binance-service:5004]
+            AS[async-service:5003]
+            TS[trade:5000]
+        end
+
+        subgraph "Model Containers"
+            MB["buy-<modelId>"]
+            MS["sell-<modelId>"]
+        end
+
+        subgraph "Database Container"
+            DB[mysql:32123]
+        end
+    end
+
+    INTERNET -->|Port 3000| FE
+    INTERNET -->|Port 5002| BE
+
+    FE -.->|Internal DNS| BE
+    BE -.->|Internal DNS| BS
+    BE -.->|Internal DNS| AS
+    BE -.->|Internal DNS| TS
+    BE -.->|Internal DNS| DB
+
+    BS -.->|Internal DNS| DB
+    AS -.->|Internal DNS| DB
+    TS -.->|Internal DNS| DB
+
+    MB -.->|Internal DNS| TS
+    MS -.->|Internal DNS| TS
 ```
 
-3. **启动MySQL数据库**
-```bash
+### 快速开始
+
+1. 克隆仓库并进入目录  
+   `git clone https://github.com/gavenwangcn/AIFutureTrade.git`
+
+2. 准备环境变量  
+   复制 `.env.example` 为 `.env` 并补充配置（重点是 Binance API 与 MySQL）
+
+3. 启动 MySQL（必须先启动）  
+   `docker-compose -f docker-compose-mysql.yml up -d`
+
+4. 启动全部服务  
+   `docker-compose up -d --build --scale model-buy=0 --scale model-sell=0`
+
+### 配置
+
+核心配置均在 `.env`，包含数据库连接、Binance API 密钥、服务端口、异步任务与风控参数。  
+后端的详细配置位于 `backend/src/main/resources/application.yml`。
+
+### API 文档
+
+- **Backend**: http://localhost:5002/swagger-ui.html  
+- **Binance Service**: http://localhost:5004/swagger-ui.html  
+- **Trade Service**: http://localhost:5000/api/docs
+
+### 部署
+
+#### 开发环境
+
+- 适合本地调试与功能验证，可用 Docker 统一启动
+- 建议先启动 MySQL，再启动其余服务
+
+#### 生产环境
+
+- 建议使用独立数据库与反向代理（Nginx/Traefik）
+- 开启 HTTPS、日志与监控、资源限制、备份策略
+
+#### 生产环境清单
+
+- 独立 MySQL / 云数据库，开启备份与只读账号
+- 反向代理 + HTTPS，配置安全头与限流
+- 日志与监控（Prometheus/Grafana/ELK）
+- Docker 资源限制与自动重启策略
+- 秘钥与环境变量通过安全方式注入（避免硬编码）
+- 时区统一（Asia/Shanghai）与系统时间同步
+- 定期清理与归档历史数据
+
+#### Docker 部署
+
+```
 docker-compose -f docker-compose-mysql.yml up -d
+docker-compose up -d --build --scale model-buy=0 --scale model-sell=0
 ```
 
-4. **构建并启动所有服务**
-```bash
-./scripts/docker-compose-up.sh --build
-```
+### 开发
 
-5. **访问应用**
-- 前端：http://localhost:3000
-- 后端API：http://localhost:5002
-- Swagger UI：http://localhost:5002/swagger-ui.html
+- Java 服务：`mvn clean package -DskipTests`
+- Python 交易服务：`pip install -r requirements.txt`，`python -m trade.app`
+- 前端：`npm install`，`npm run dev`
 
-### ⚙️ 配置说明
+### 监控与日志
 
-#### 环境变量 (.env)
+- 统一查看容器日志：`docker-compose logs -f <service>`
+- 关键服务健康检查：
+  - `http://localhost:5002/actuator/health`
+  - `http://localhost:5000/health`
 
-```bash
-# MySQL配置
-MYSQL_HOST=your_mysql_host
-MYSQL_PORT=32123
-MYSQL_USER=aifuturetrade
-MYSQL_PASSWORD=your_password
-MYSQL_DATABASE=aifuturetrade
+### 安全
 
-# 币安API
-BINANCE_API_KEY=your_api_key
-BINANCE_API_SECRET=your_secret_key
+- Binance API 与数据库账号请勿提交到仓库
+- 生产环境请替换默认口令与密钥
+- JWT、CORS 与网络访问建议按最小权限配置
 
-# 服务端口
-BACKEND_PORT=5002
-BINANCE_SERVICE_PORT=5004
-ASYNC_SERVICE_PORT=5003
-TRADE_PORT=5000
-FRONTEND_PORT=3000
+### 性能优化
 
-# 异步服务自动启动
-ASYNC_AUTO_START_ENABLED=true
-ASYNC_AUTO_START_TASK=all
-```
+- Java 服务开启 G1GC 与合理的堆内存参数
+- 异步服务与行情刷新任务支持可配置调度
+- 数据访问建议配合缓存/限流策略
 
-### 📚 API文档
+### 故障排查
 
-访问交互式API文档：
-- 后端：http://localhost:5002/swagger-ui.html
-- 币安服务：http://localhost:5004/swagger-ui.html
+- 先确认 MySQL 容器健康
+- 检查端口占用与服务日志
+- SDK 依赖构建失败时，先构建 Binance SDK 子模块
 
-### 💻 开发指南
+### 贡献指南
 
-#### 项目结构
+请查看 `CONTRIBUTING.md`。
 
-```
-AIFutureTrade/
-├── backend/                 # Java Spring Boot主服务
-├── binance-service/         # 币安API微服务
-├── async-service/           # 异步数据流服务
-├── trade/                   # Python交易引擎
-├── frontend/                # Vue 3前端
-├── scripts/                 # 工具脚本
-├── docker-compose.yml       # 主compose文件
-└── CLAUDE.md               # 开发指南
-```
+### 许可证
 
-#### 构建服务
+本项目基于 MIT License，详见 `LICENSE`。
 
-**Java服务**
-```bash
-cd backend && mvn clean package -DskipTests
-cd binance-service && mvn clean package -DskipTests
-cd async-service && mvn clean package -DskipTests
-```
+### 🖼️ 界面截图
 
-**Python服务**
-```bash
-cd trade
-pip install -r requirements.txt
-python -m pytest tests/
-```
+**行情总览与涨跌排行**  
+![行情总览](img/Attached_image.png)  
+展示 USDS-M 行情总览、涨跌幅排行以及左侧快速合约导航。
 
-**前端**
-```bash
-cd frontend
-npm install
-npm run dev
-```
+**策略绩效与交易列表**  
+![策略绩效](img/Attached2_image.png)  
+展示策略收益走势与近期交易明细，便于复盘与跟踪执行结果。
 
-### 🔧 故障排查
+**模型级买入执行日志**  
+![买入日志](img/Attached3_image.png)  
+提供模型实时执行日志，便于排障与运行审计。
 
-#### 常见问题
+**策略管理**  
+![策略管理](img/Attached4_image.png)  
+集中管理策略列表、状态与快捷操作（编辑/启动等）。
 
-**1. MySQL连接失败**
-```bash
-docker-compose -f docker-compose-mysql.yml ps
-docker-compose -f docker-compose-mysql.yml logs -f
-```
-
-**2. 端口被占用**
-```bash
-netstat -tlnp | grep 5002
-kill -9 <PID>
-```
-
-**3. 模型容器创建失败**
-```bash
-docker-compose logs -f backend
-docker-compose build model-buy model-sell
-```
-
-### 🤝 贡献指南
-
-欢迎贡献！请遵循以下步骤：
-
-1. Fork本仓库
-2. 创建特性分支 (`git checkout -b feature/AmazingFeature`)
-3. 提交更改 (`git commit -m 'Add some AmazingFeature'`)
-4. 推送到分支 (`git push origin feature/AmazingFeature`)
-5. 开启Pull Request
-
-### 📄 许可证
-
-本项目采用MIT许可证 - 详见 [LICENSE](LICENSE) 文件。
-
-### ⚠️ 免责声明
-
-本软件仅用于教育和研究目的。加密货币交易涉及重大损失风险。使用风险自负。作者和贡献者不对使用本软件造成的任何财务损失负责。
-
----
-
-<div align="center">
-
-**Made with ❤️ by AIFutureTrade Team**
-
-[⬆ Back to Top](#aifuturetrade---ai-powered-cryptocurrency-futures-trading-system)
-
-</div>
+**K 线与指标分析**  
+![K线图](img/Attached5_image.png)  
+交互式 K 线图，支持 MA/EMA、MACD、KDJ、RSI、ATR 等指标叠加分析。
 

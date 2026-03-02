@@ -396,10 +396,18 @@ class AITrader(Trader):
             prompt += "\n策略约束：\n" + constraints_block + "\n"
 
         prompt += """
+【quantity数量精度规则】根据该合约实时价格确定数量小数位（必须遵守）：
+- 价格<1（如0.5）：quantity必须为整数
+- 1≤价格<10（个位）：quantity最多1位小数
+- 10≤价格<1000（十、百位）：quantity最多2位小数
+- 1000≤价格<10000（千位）：quantity最多3位小数
+- 价格≥10000（万位）：quantity最多4位小数
+
 执行要求：
 1. 仅按上述候选与约束做出buy_to_long(开多)或buy_to_short(开空)或hold决策。
 2. 写明每个决策的依据与风控考量，必要时可保持观望。
 3. 严格按照下方 JSON 模板返回，仅包含需要动作的合约。
+4. quantity必须按上述规则根据该SYMBOL的实时价格确定小数位。
 
 【重要说明】
 - buy_to_long：开多仓（做多），系统会自动设置position_side为LONG
@@ -541,11 +549,19 @@ class AITrader(Trader):
             prompt += "\n策略约束：\n" + constraints_block + "\n"
 
         prompt += """
+【quantity数量精度规则】根据该合约当前价格确定数量小数位（必须遵守）：
+- 价格<1（如0.5）：quantity必须为整数
+- 1≤价格<10（个位）：quantity最多1位小数
+- 10≤价格<1000（十、百位）：quantity最多2位小数
+- 1000≤价格<10000（千位）：quantity最多3位小数
+- 价格≥10000（万位）：quantity最多4位小数
+
 执行要求：
 1. 仅针对现有持仓给出 close_position 或 stop_loss 或 take_profit 或 hold。
 2. 写明每个决策的依据与风控考量，必要时可保持观望。
-3. 若决定止损/止盈请给出 quantity数量，price价格（期望价格），stop_price止损/止盈触发价格（必填）,
-4. 严格按照下方 JSON 模板返回，仅包含需要动作的合约。
+3. 若决定止损/止盈请给出 quantity数量，price价格（期望价格），stop_price止损/止盈触发价格（必填）。
+4. quantity必须按上述规则根据该SYMBOL的当前价格确定小数位。
+5. 严格按照下方 JSON 模板返回，仅包含需要动作的合约。
 
 请返回：
 ```

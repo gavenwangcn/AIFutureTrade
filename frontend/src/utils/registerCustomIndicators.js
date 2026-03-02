@@ -13,6 +13,9 @@ const RSI_COLORS = ['#FF9600', '#935EBD']
 // ATR曲线颜色配置
 const ATR_COLORS = ['#2DC08E', '#935EBD', '#FF9600']
 
+// ADX曲线颜色配置
+const ADX_COLORS = ['#FF6B6B', '#4ECDC4', '#45B7D1']
+
 // KDJ曲线颜色配置
 const KDJ_COLORS = ['#E6AC00', '#935EBD', '#2DC08E']
 
@@ -24,12 +27,12 @@ const VOL_DOWN = 'rgba(45,192,142,0.7)'
 const MACD_UP = 'rgba(249,40,85,0.7)'
 const MACD_DOWN = 'rgba(45,192,142,0.7)'
 
-// EMA曲线颜色配置（与indicators/ema.ts一致：EMA5、EMA20、EMA30、EMA60、EMA99）
-const EMA_COLORS = ['#2196F3', '#E91E63', '#FF9800', '#4CAF50', '#9C27B0']
+// EMA曲线颜色配置：EMA5、EMA20、EMA30、EMA99（已移除EMA60）
+const EMA_COLORS = ['#2196F3', '#E91E63', '#FF9800', '#9C27B0']
 
 /**
  * 注册EMA指标到KLineChart
- * 自定义EMA：EMA5、EMA20、EMA30、EMA60、EMA99（覆盖默认的EMA6、EMA12、EMA20）
+ * 自定义EMA：EMA5、EMA20、EMA30、EMA99（已移除EMA60，覆盖默认的EMA6、EMA12、EMA20）
  * 构建方式与ATR指标一致，运行时注册覆盖默认
  * @param {object} klinecharts - KLineChart库对象（window.klinecharts）
  * @returns {boolean} 是否成功注册
@@ -40,7 +43,7 @@ export function registerEMAIndicator(klinecharts) {
     return false
   }
 
-  // EMA已存在时也需要覆盖（默认是6,12,20，我们使用5,20,30,60,99）
+  // EMA已存在时也需要覆盖（默认是6,12,20，我们使用5,20,30,99，已移除EMA60）
   try {
     const emaIndicator = {
       name: 'EMA',
@@ -48,13 +51,12 @@ export function registerEMAIndicator(klinecharts) {
       series: 'price',
       precision: 6,
       shouldOhlc: true,
-      calcParams: [5, 20, 30, 60, 99],
+      calcParams: [5, 20, 30, 99],
       figures: [
         { key: 'ema1', title: 'EMA5: ', type: 'line', styles: ({ indicator }) => ({ color: indicator?.styles?.lines?.[0]?.color || EMA_COLORS[0], size: 1.5 }) },
         { key: 'ema2', title: 'EMA20: ', type: 'line', styles: ({ indicator }) => ({ color: indicator?.styles?.lines?.[1]?.color || EMA_COLORS[1], size: 1.5 }) },
         { key: 'ema3', title: 'EMA30: ', type: 'line', styles: ({ indicator }) => ({ color: indicator?.styles?.lines?.[2]?.color || EMA_COLORS[2], size: 1.5 }) },
-        { key: 'ema4', title: 'EMA60: ', type: 'line', styles: ({ indicator }) => ({ color: indicator?.styles?.lines?.[3]?.color || EMA_COLORS[3], size: 1.5 }) },
-        { key: 'ema5', title: 'EMA99: ', type: 'line', styles: ({ indicator }) => ({ color: indicator?.styles?.lines?.[4]?.color || EMA_COLORS[4], size: 1.5 }) }
+        { key: 'ema4', title: 'EMA99: ', type: 'line', styles: ({ indicator }) => ({ color: indicator?.styles?.lines?.[3]?.color || EMA_COLORS[3], size: 1.5 }) }
       ],
       regenerateFigures: (params) => params.map((p, index) => ({
         key: `ema${index + 1}`,
@@ -97,7 +99,7 @@ export function registerEMAIndicator(klinecharts) {
     }
 
     klinecharts.registerIndicator(emaIndicator)
-    console.log('[EMA] Custom EMA indicator registered (5,20,30,60,99) at runtime')
+    console.log('[EMA] Custom EMA indicator registered (5,20,30,99) at runtime')
     return true
   } catch (error) {
     console.error('[EMA] Failed to register custom EMA indicator:', error)
@@ -382,6 +384,124 @@ export function registerATRIndicator(klinecharts) {
 }
 
 /**
+ * 注册ADX指标到KLineChart（TradingView计算逻辑）
+ * @param {object} klinecharts - KLineChart库对象（window.klinecharts）
+ * @returns {boolean} 是否成功注册
+ */
+export function registerADXIndicator(klinecharts) {
+  if (!klinecharts || typeof klinecharts.registerIndicator !== 'function') {
+    console.error('[ADX] klinecharts.registerIndicator is not available')
+    return false
+  }
+
+  try {
+    const adxIndicator = {
+      name: 'ADX',
+      shortName: 'ADX',
+      precision: 2,
+      calcParams: [14],
+      figures: [
+        {
+          key: 'adx',
+          title: 'ADX14: ',
+          type: 'line',
+          styles: ({ indicator }) => {
+            const color = indicator?.styles?.lines?.[0]?.color || ADX_COLORS[0]
+            return { color, size: 2 }
+          }
+        },
+        {
+          key: 'pdi',
+          title: '+DI14: ',
+          type: 'line',
+          styles: ({ indicator }) => {
+            const color = indicator?.styles?.lines?.[1]?.color || ADX_COLORS[1]
+            return { color, size: 1.5 }
+          }
+        },
+        {
+          key: 'ndi',
+          title: '-DI14: ',
+          type: 'line',
+          styles: ({ indicator }) => {
+            const color = indicator?.styles?.lines?.[2]?.color || ADX_COLORS[2]
+            return { color, size: 1.5 }
+          }
+        }
+      ],
+      calc: (dataList, indicator) => {
+        const period = indicator.calcParams[0]
+        const pdiValues = []
+        const ndiValues = []
+        const dxValues = []
+        const trValues = []
+        let adxValue = 0
+
+        return dataList.map((kLineData, i) => {
+          const adx = {}
+          const prevClose = i > 0 ? dataList[i - 1].close : kLineData.close
+
+          const tr1 = kLineData.high - kLineData.low
+          const tr2 = Math.abs(kLineData.high - prevClose)
+          const tr3 = Math.abs(kLineData.low - prevClose)
+          const tr = Math.max(tr1, tr2, tr3)
+          trValues.push(tr)
+
+          const upMove = kLineData.high - (i > 0 ? dataList[i - 1].high : kLineData.high)
+          const downMove = (i > 0 ? dataList[i - 1].low : kLineData.low) - kLineData.low
+          let pDm = 0
+          let nDm = 0
+
+          if (upMove > downMove && upMove > 0) pDm = upMove
+          if (downMove > upMove && downMove > 0) nDm = downMove
+
+          if (i >= period - 1) {
+            let trSum = 0, pDmSum = 0, nDmSum = 0
+            for (let j = i - period + 1; j <= i; j++) {
+              trSum += trValues[j]
+              const upM = dataList[j].high - (j > 0 ? dataList[j - 1].high : dataList[j].high)
+              const downM = (j > 0 ? dataList[j - 1].low : dataList[j].low) - dataList[j].low
+              if (upM > downM && upM > 0) pDmSum += upM
+              if (downM > upM && downM > 0) nDmSum += downM
+            }
+
+            const pDi = trSum !== 0 ? (pDmSum / trSum) * 100 : 0
+            const nDi = trSum !== 0 ? (nDmSum / trSum) * 100 : 0
+            pdiValues.push(pDi)
+            ndiValues.push(nDi)
+
+            const diSum = pDi + nDi
+            const dx = diSum !== 0 ? Math.abs((pDi - nDi) / diSum) * 100 : 0
+            dxValues.push(dx)
+
+            if (dxValues.length === 1) {
+              adxValue = dx
+            } else if (dxValues.length <= period) {
+              adxValue = (adxValue * (dxValues.length - 1) + dx) / dxValues.length
+            } else {
+              adxValue = (adxValue * (period - 1) + dx) / period
+            }
+
+            adx.adx = adxValue
+            adx.pdi = pDi
+            adx.ndi = nDi
+          }
+
+          return adx
+        })
+      }
+    }
+
+    klinecharts.registerIndicator(adxIndicator)
+    console.log('[ADX] ADX indicator registered successfully')
+    return true
+  } catch (error) {
+    console.error('[ADX] Failed to register ADX indicator:', error)
+    return false
+  }
+}
+
+/**
  * 注册KDJ指标到KLineChart（与后端一致：参数60,20,5，TradingView计算逻辑）
  * 运行时覆盖默认KDJ，确保页面显示(60,20,5)而非(9,3,3)
  * @param {object} klinecharts - KLineChart库对象（window.klinecharts）
@@ -622,6 +742,7 @@ export function registerAllCustomIndicators(klinecharts) {
   registerEMAIndicator(klinecharts)
   registerRSIIndicator(klinecharts)
   registerATRIndicator(klinecharts)
+  registerADXIndicator(klinecharts)
   registerKDJIndicator(klinecharts)
   registerVOLIndicator(klinecharts)
   registerMACDIndicator(klinecharts)

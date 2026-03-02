@@ -1,0 +1,83 @@
+package com.aifuturetrade.common.util;
+
+/**
+ * 数量格式化工具 - 根据价格数量级确定数量小数位数
+ *
+ * 规则（数量最多保留4位小数）：
+ * - 价格 < 1（0.几）：数量必须为整数，0位小数
+ * - 1 <= 价格 < 10（个位）：1位小数
+ * - 10 <= 价格 < 1000（十、百）：2位小数
+ * - 1000 <= 价格 < 10000（千）：3位小数
+ * - 价格 >= 10000（万及以上）：4位小数（最多）
+ */
+public final class QuantityFormatUtil {
+
+    private static final int MAX_DECIMALS = 4;
+
+    private QuantityFormatUtil() {
+    }
+
+    /**
+     * 根据参考价格格式化数量，用于SDK提交和落库
+     * 自动去除尾部的0，例如 225.7000 -> 225.7
+     *
+     * @param quantity  原始数量
+     * @param refPrice  参考价格（可为null，null时使用最大4位小数）
+     * @return 格式化后的数量（去除尾部0）
+     */
+    public static double formatQuantityForSdk(Double quantity, Double refPrice) {
+        if (quantity == null || quantity <= 0) {
+            return 0.0;
+        }
+        int decimals = getQuantityDecimalsByPrice(refPrice);
+        double result = roundToDecimals(quantity, decimals);
+        if (decimals == 0) {
+            result = Math.round(result);
+        }
+        // 去除尾部的0：将double转为字符串，去除尾部0和小数点，再转回double
+        return stripTrailingZeros(result);
+    }
+
+    /**
+     * 去除数字尾部的0
+     * 例如: 225.7000 -> 225.7, 100.0 -> 100, 0.1000 -> 0.1
+     */
+    private static double stripTrailingZeros(double value) {
+        String str = String.valueOf(value);
+        // 如果包含小数点，去除尾部的0和小数点
+        if (str.contains(".")) {
+            str = str.replaceAll("0+$", "").replaceAll("\\.$", "");
+        }
+        return Double.parseDouble(str);
+    }
+
+    /**
+     * 根据价格数量级获取数量可保留的小数位数
+     */
+    public static int getQuantityDecimalsByPrice(Double price) {
+        if (price == null || price <= 0) {
+            return MAX_DECIMALS;
+        }
+        if (price < 1) {
+            return 0;
+        }
+        if (price < 10) {
+            return 1;
+        }
+        if (price < 1000) {
+            return 2;
+        }
+        if (price < 10000) {
+            return 3;
+        }
+        return MAX_DECIMALS;
+    }
+
+    private static double roundToDecimals(double value, int decimals) {
+        if (decimals <= 0) {
+            return (double) Math.round(value);
+        }
+        double factor = Math.pow(10, decimals);
+        return Math.round(value * factor) / factor;
+    }
+}

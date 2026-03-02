@@ -2480,6 +2480,17 @@ public class ModelServiceImpl implements ModelService {
                     analysisItem.put("total_profit_ratio", null);
                 }
                 
+                // 每笔交易平均时长（秒），从首次买入到最后一笔卖出的间隔
+                // 注意：map-underscore-to-camel-case=true 时 MyBatis 返回 camelCase 键名
+                Object avgDurationObj = item.get("avgDurationSeconds") != null ? item.get("avgDurationSeconds") : item.get("avg_duration_seconds");
+                if (avgDurationObj != null) {
+                    Double avgDuration = avgDurationObj instanceof Number ? 
+                        ((Number) avgDurationObj).doubleValue() : Double.parseDouble(avgDurationObj.toString());
+                    analysisItem.put("avg_duration_seconds", avgDuration);
+                } else {
+                    analysisItem.put("avg_duration_seconds", null);
+                }
+                
                 result.add(analysisItem);
             }
             

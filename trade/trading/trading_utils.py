@@ -10,106 +10,106 @@ import math
 logger = logging.getLogger(__name__)
 
 
-def adjust_quantity_precision_by_price(quantity: float, price: float) -> float:
+# 数量最多保留的小数位数
+_QUANTITY_MAX_DECIMALS = 4
+
+
+def get_quantity_decimals_by_price(price: float) -> int:
     """
-    根据symbol价格动态调整quantity的精度
+    根据价格数量级确定数量可保留的小数位数
     
     规则：
-    - 价格 < 1：取整数
-    - 1 <= 价格 < 10：小数点后1位
-    - 10 <= 价格 < 100：小数点后2位
-    - 100 <= 价格 < 1000：小数点后3位
-    - 1000 <= 价格 < 10000：小数点后4位
-    - 10000 <= 价格 < 100000：小数点后5位
-    - 价格 >= 100000：小数点后6位（最多）
+    - 价格 < 1（0.几）：数量必须为整数，0位小数
+    - 1 <= 价格 < 10（个位）：1位小数
+    - 10 <= 价格 < 1000（十、百）：2位小数
+    - 1000 <= 价格 < 10000（千）：3位小数
+    - 价格 >= 10000（万及以上）：4位小数（最多）
     
+    Args:
+        price: 参考价格
+        
+    Returns:
+        数量可保留的小数位数（0-4）
+    """
+    if price is None or price <= 0:
+        return _QUANTITY_MAX_DECIMALS
+    if price < 1:
+        return 0
+    if price < 10:
+        return 1
+    if price < 1000:
+        return 2
+    if price < 10000:
+        return 3
+    return _QUANTITY_MAX_DECIMALS
+
+
+def adjust_quantity_precision_by_price(quantity: float, price: float) -> float:
+    """
+    根据symbol价格动态调整quantity的精度，并去除尾部的0
+    例如：225.7000 -> 225.7, 100.0 -> 100
+
+    规则（数量最多保留4位小数）：
+    - 价格 < 1（0.几）：取整数
+    - 1 <= 价格 < 10（个位）：小数点后1位
+    - 10 <= 价格 < 1000（十、百）：小数点后2位
+    - 1000 <= 价格 < 10000（千）：小数点后3位
+    - 价格 >= 10000（万）：小数点后4位
+
     Args:
         quantity: 原始数量
         price: symbol的当前价格
-        
+
     Returns:
-        调整精度后的数量
+        调整精度后的数量（去除尾部0）
     """
     if quantity <= 0:
         return 0.0
-    
+
     if price <= 0:
-        # 如果价格无效，默认取整数
         return float(int(quantity))
-    
-    # 根据价格范围确定精度
-    if price < 1:
-        precision = 0  # 取整数
-    elif price < 10:
-        precision = 1  # 小数点后1位
-    elif price < 100:
-        precision = 2  # 小数点后2位
-    elif price < 1000:
-        precision = 3  # 小数点后3位
-    elif price < 10000:
-        precision = 4  # 小数点后4位
-    elif price < 100000:
-        precision = 5  # 小数点后5位
-    else:
-        precision = 6  # 小数点后6位（最多）
-    
-    # 四舍五入到指定精度
+
+    precision = get_quantity_decimals_by_price(price)
     adjusted_quantity = round(quantity, precision)
-    
-    # 如果精度为0（整数），确保返回整数
+
     if precision == 0:
         adjusted_quantity = float(int(adjusted_quantity))
-    
-    return adjusted_quantity
+
+    # 去除尾部的0：转为字符串，去除尾部0和小数点，再转回float
+    result_str = f"{adjusted_quantity:.10f}".rstrip('0').rstrip('.')
+    return float(result_str)
 
 
 def adjust_quantity_precision_by_price_ceil(quantity: float, price: float) -> float:
     """
-    根据symbol价格动态调整quantity的精度，使用向后取整（向上取整）。
-    例如：20.5 -> 21，0.5 -> 1
-    
-    规则：
-    - 价格 < 1：取整数（ceil）
-    - 1 <= 价格 < 10：小数点后1位（ceil到1位）
-    - 其他精度同上，使用ceil向上取整
-    
+    根据symbol价格动态调整quantity的精度，使用向后取整（向上取整），并去除尾部的0。
+    例如：20.5 -> 21，0.5 -> 1，225.7000 -> 225.7
+
+    规则（数量最多保留4位小数）：同 adjust_quantity_precision_by_price
+
     Args:
         quantity: 原始数量
         price: symbol的当前价格
-        
+
     Returns:
-        调整精度后的数量（向后取整）
+        调整精度后的数量（向后取整，去除尾部0）
     """
     if quantity <= 0:
         return 0.0
-    
+
     if price <= 0:
         return float(math.ceil(quantity))
-    
-    # 根据价格范围确定精度
-    if price < 1:
-        precision = 0
-    elif price < 10:
-        precision = 1
-    elif price < 100:
-        precision = 2
-    elif price < 1000:
-        precision = 3
-    elif price < 10000:
-        precision = 4
-    elif price < 100000:
-        precision = 5
-    else:
-        precision = 6
-    
-    # 向后取整（向上取整）到指定精度
+
+    precision = get_quantity_decimals_by_price(price)
     multiplier = 10 ** precision
     adjusted_quantity = math.ceil(quantity * multiplier) / multiplier
-    
+
     if precision == 0:
         adjusted_quantity = float(int(adjusted_quantity))
-    
-    return adjusted_quantity
+
+    # 去除尾部的0：转为字符串，去除尾部0和小数点，再转回float
+    result_str = f"{adjusted_quantity:.10f}".rstrip('0').rstrip('.')
+    return float(result_str)
 
 
 def parse_signal_to_position_side(signal: str) -> Tuple[str, str]:
@@ -157,17 +157,36 @@ def get_side_for_trade(position_side: str) -> str:
 
 def get_side_for_sell_cycle(position_side: str) -> str:
     """
-    卖出循环专用：获取交易方向
+    卖出/平仓循环专用：获取交易方向（平仓）
 
-    在卖出循环中，无论持仓方向如何，都统一使用SELL方向
+    平多仓: side=SELL, position_side=LONG
+    平空仓: side=BUY, position_side=SHORT
 
     Args:
         position_side: 持仓方向（LONG或SHORT）
 
     Returns:
-        str: 交易方向（始终返回SELL）
+        str: 交易方向（平多用SELL，平空用BUY）
     """
-    return 'SELL'  # 卖出循环统一使用SELL
+    return get_side_for_trade(position_side)
+
+
+def get_side_for_open(position_side: str) -> str:
+    """
+    开仓专用：根据持仓方向获取交易方向
+
+    开多仓: side=BUY, position_side=LONG
+    开空仓: side=SELL, position_side=SHORT
+
+    Args:
+        position_side: 持仓方向（LONG或SHORT）
+
+    Returns:
+        str: 交易方向（开多用BUY，开空用SELL）
+    """
+    if position_side and position_side.upper() == 'SHORT':
+        return 'SELL'
+    return 'BUY'
 
 
 def calculate_quantity_with_risk(

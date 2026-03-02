@@ -138,6 +138,7 @@ const lastPortfolioSymbolsRefreshTime = ref(null) // 持仓合约列表最后刷
   const loggerEnabled = ref(localStorage.getItem('frontendLoggingEnabled') !== 'false')
   const showSettingsModal = ref(false)
   const showStrategyManagementModal = ref(false)
+  const showWeChatGroupManagementModal = ref(false)
   const showFutureConfigModal = ref(false)
   const showApiProviderModal = ref(false)
   const showAccountModal = ref(false)
@@ -3431,6 +3432,7 @@ let portfolioRefreshInterval = null // 投资组合数据自动刷新定时器�
     loggerEnabled,
     showSettingsModal,
     showStrategyManagementModal,
+    showWeChatGroupManagementModal,
     showFutureConfigModal,
     showApiProviderModal,
     showAccountModal,

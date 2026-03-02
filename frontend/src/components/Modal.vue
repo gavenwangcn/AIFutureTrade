@@ -1,6 +1,6 @@
 <template>
   <div v-if="visible" class="modal show" @click.self="handleClose">
-    <div class="modal-content" :class="{ large: large, extraLarge: extraLarge }">
+    <div class="modal-content" :class="{ large: large, extraLarge: extraLarge }" :style="width ? { width } : {}">
       <div class="modal-header">
         <div>
           <h3>{{ title }}</h3>
@@ -43,6 +43,10 @@ const props = defineProps({
   extraLarge: {
     type: Boolean,
     default: false
+  },
+  width: {
+    type: String,
+    default: ''
   }
 })
 

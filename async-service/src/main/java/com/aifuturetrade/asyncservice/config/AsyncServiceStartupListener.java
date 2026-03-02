@@ -2,6 +2,7 @@ package com.aifuturetrade.asyncservice.config;
 
 import com.aifuturetrade.asyncservice.service.AsyncAgentService;
 import com.aifuturetrade.asyncservice.service.AlgoOrderCleanupService;
+import com.aifuturetrade.asyncservice.service.TickerSyncMonitorService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
@@ -28,6 +29,9 @@ public class AsyncServiceStartupListener implements ApplicationListener<Applicat
 
     @Autowired
     private AlgoOrderCleanupService algoOrderCleanupService;
+
+    @Autowired(required = false)
+    private TickerSyncMonitorService tickerSyncMonitorService;
 
     /**
      * 启动时自动启动的任务
@@ -83,7 +87,14 @@ public class AsyncServiceStartupListener implements ApplicationListener<Applicat
                 
                 // 等待一小段时间让服务启动
                 Thread.sleep(2000);
-                
+
+                // 启动Ticker同步监控服务
+                if (tickerSyncMonitorService != null) {
+                    log.info("[AsyncServiceStartupListener] 🔍 启动Ticker同步监控服务...");
+                    tickerSyncMonitorService.startMonitoring();
+                    log.info("[AsyncServiceStartupListener] ✅ Ticker同步监控服务已启动");
+                }
+
                 log.info("[AsyncServiceStartupListener] ✅ 异步服务 '{}' 已启动", autoStartTask);
                 log.info("[AsyncServiceStartupListener] 📊 服务状态：");
                 log.info("[AsyncServiceStartupListener]   - market_tickers: {}",
