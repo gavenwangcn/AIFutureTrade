@@ -2425,7 +2425,10 @@ class TradingEngine:
             # ⚠️ 打印市场指标信息
             try:
                 market_indicators_info = {}
-                for symbol in valid_candidates:
+                for candidate in valid_candidates:
+                    symbol = candidate.get('symbol', '').upper()
+                    if not symbol:
+                        continue
                     symbol_data = market_state.get(symbol, {})
                     market_indicators = symbol_data.get('market_indicators', {})
                     if market_indicators:
