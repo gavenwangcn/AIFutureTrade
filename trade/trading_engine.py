@@ -2422,6 +2422,28 @@ class TradingEngine:
             logger.debug(f"[Model {self.model_id}] [批次 {batch_num}/{total_batches}] "
                         f"[步骤1] 调用AI模型获取买入决策... (有效symbol数: {len(valid_candidates)})")
 
+            # ⚠️ 打印市场指标信息
+            try:
+                market_indicators_info = {}
+                for symbol in valid_candidates:
+                    symbol_data = market_state.get(symbol, {})
+                    market_indicators = symbol_data.get('market_indicators', )
+                    if market_indicators:
+                        market_indicators_info[symbol] = market_indicators
+
+                if market_indicators_info:
+                    # 打印综合市场状态
+                    first_symbol = list(market_indicators_info.keys())[0]
+                    first_indicators = market_indicators_info[first_symbol]
+                    logger.info(f"[Model {self.model_id}] [批次 {batch_num}/{total_batches}] "
+                               f"[市场指标] 波动率状态={first_indicators.get('vol_state', '未知')}, "
+                               f"趋势状态={first_indicators.get('trend_state', '未知')}, "
+                               f"市场综合状态={first_indicators.get('market_state_summary', '未知')}, "
+                               f"平均波动率={first_indicators.get('market_atr_pct_mean', 0):.4f}, "
+                               f"平均趋势强度={first_indicators.get('market_adx_mean', 0):.2f}")
+            except Exception as e:
+                logger.warning(f"[Model {self.model_id}] 打印市场指标信息失败: {e}")
+
             ai_call_start = datetime.now(timezone(timedelta(hours=8)))
             buy_payload = self.trader.make_buy_decision(
                 valid_candidates,  # 只传递有效的candidates
@@ -3076,6 +3098,30 @@ class TradingEngine:
             # ========== 步骤2: 调用模型获取卖出决策 ==========
             logger.debug(f"[Model {self.model_id}] [卖出批次 {batch_num}/{total_batches}] "
                         f"[步骤2] 调用AI模型进行卖出决策... (有效symbol数: {len(valid_positions)})")
+
+            # ⚠️ 打印市场指标信息
+            try:
+                market_indicators_info = {}
+                for position in valid_positions:
+                    symbol = position.get('symbol')
+                    if symbol:
+                        symbol_data = market_state.get(symbol, {})
+                        market_indicators = symbol_data.get('market_indicators', {})
+                        if market_indicators:
+                            market_indicators_info[symbol] = market_indicators
+
+                if market_indicators_info:
+                    # 打印综合市场状态
+                    first_symbol = list(market_indicators_info.keys())[0]
+                    first_indicators = market_indicators_info[first_symbol]
+                    logger.info(f"[Model {self.model_id}] [卖出批次 {batch_num}/{total_batches}] "
+                               f"[市场指标] 波动率状态={first_indicators.get('vol_state', '未知')}, "
+                               f"趋势状态={first_indicators.get('trend_state', '未知')}, "
+                               f"市场综合状态={first_indicators.get('market_state_summary', '未知')}, "
+                               f"平均波动率={first_indicators.get('market_atr_pct_mean', 0):.4f}, "
+                               f"平均趋势强度={first_indicators.get('market_adx_mean', 0):.2f}")
+            except Exception as e:
+                logger.warning(f"[Model {self.model_id}] 打印市场指标信息失败: {e}")
 
             ai_call_start = datetime.now(timezone(timedelta(hours=8)))
             sell_payload = self.trader.make_sell_decision(

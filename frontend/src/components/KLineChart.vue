@@ -45,7 +45,7 @@
 <script setup>
 import { ref, watch, nextTick, onUnmounted } from 'vue'
 import { createDataLoader } from '../utils/customDatafeed.js'
-import { registerEMAIndicator, registerRSIIndicator, registerATRIndicator, registerKDJIndicator, registerVOLIndicator, registerMACDIndicator } from '../utils/registerCustomIndicators.js'
+import { registerEMAIndicator, registerRSIIndicator, registerATRIndicator, registerADXIndicator, registerKDJIndicator, registerVOLIndicator, registerMACDIndicator } from '../utils/registerCustomIndicators.js'
 
 // 获取 KLineChart 库（UMD 方式）
 const getKLineCharts = () => {
@@ -55,6 +55,7 @@ const getKLineCharts = () => {
     registerEMAIndicator(klinecharts)
     registerRSIIndicator(klinecharts)
     registerATRIndicator(klinecharts)
+    registerADXIndicator(klinecharts)
     registerKDJIndicator(klinecharts)
     registerVOLIndicator(klinecharts)
     registerMACDIndicator(klinecharts)
@@ -296,6 +297,14 @@ const initChart = async () => {
       console.log('[KLineChart] ATR indicator registered and created with id:', atrIndicatorId)
     } else {
       console.error('[KLineChart] Failed to register ATR indicator')
+    }
+
+    // 创建ADX指标（放在ATR之后）
+    if (registerADXIndicator(klinecharts)) {
+      const adxIndicatorId = chartInstance.value.createIndicator('ADX', false)
+      console.log('[KLineChart] ADX indicator registered and created with id:', adxIndicatorId)
+    } else {
+      console.error('[KLineChart] Failed to register ADX indicator')
     }
 
     console.log('[KLineChart] Chart initialized successfully')

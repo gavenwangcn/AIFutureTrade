@@ -68,9 +68,9 @@ class MarketIndexCalculator:
             return None
 
     def compute_adx(self, high: np.ndarray, low: np.ndarray,
-                   close: np.ndarray) -> Optional[np.ndarray]:
+                   close: np.ndarray) -> Optional[Tuple[np.ndarray, np.ndarray, np.ndarray]]:
         """
-        计算单个合约的ADX（平均趋向指数）
+        计算单个合约的ADX、+DI、-DI（TradingView算法）
 
         Args:
             high: 最高价数组
@@ -78,15 +78,75 @@ class MarketIndexCalculator:
             close: 收盘价数组
 
         Returns:
-            ADX数组，如果计算失败返回None
+            (ADX数组, +DI数组, -DI数组)，如果计算失败返回None
         """
         try:
             if len(high) < self.adx_period or len(low) < self.adx_period or len(close) < self.adx_period:
                 logger.warning(f"数据长度不足，需要至少{self.adx_period}条数据")
                 return None
 
-            adx = talib.ADX(high, low, close, timeperiod=self.adx_period)
-            return adx
+            period = self.adx_period
+            n = len(high)
+
+            # 初始化数组
+            tr_values = np.zeros(n)
+            pdi_values = np.zeros(n)
+            ndi_values = np.zeros(n)
+            dx_values = np.zeros(n)
+            adx_values = np.zeros(n)
+
+            # 计算TR（真实波幅）
+            for i in range(n):
+                prev_close = close[i-1] if i > 0 else close[i]
+                tr1 = high[i] - low[i]
+                tr2 = abs(high[i] - prev_close)
+                tr3 = abs(low[i] - prev_close)
+                tr_values[i] = max(tr1, tr2, tr3)
+
+            # 计算+DI和-DI
+            for i in range(n):
+                prev_high = high[i-1] if i > 0 else high[i]
+                prev_low = low[i-1] if i > 0 else low[i]
+
+                up_move = high[i] - prev_high
+                down_move = prev_low - low[i]
+
+                pDm = up_move if (up_move > down_move and up_move > 0) else 0
+                nDm = down_move if (down_move > up_move and down_move > 0) else 0
+
+                # 当有足够数据时计算DI
+                if i >= period - 1:
+                    tr_sum = np.sum(tr_values[i-period+1:i+1])
+                    pDm_sum = 0
+                    nDm_sum = 0
+
+                    for j in range(i-period+1, i+1):
+                        prev_h = high[j-1] if j > 0 else high[j]
+                        prev_l = low[j-1] if j > 0 else low[j]
+                        up_m = high[j] - prev_h
+                        down_m = prev_l - low[j]
+                        if up_m > down_m and up_m > 0:
+                            pDm_sum += up_m
+                        if down_m > up_m and down_m > 0:
+                            nDm_sum += down_m
+
+                    pdi_values[i] = (pDm_sum / tr_sum * 100) if tr_sum > 0 else 0
+                    ndi_values[i] = (nDm_sum / tr_sum * 100) if tr_sum > 0 else 0
+
+                    # 计算DX
+                    di_sum = pdi_values[i] + ndi_values[i]
+                    dx = (abs(pdi_values[i] - ndi_values[i]) / di_sum * 100) if di_sum > 0 else 0
+                    dx_values[i] = dx
+
+                    # 计算ADX（使用Wilder's Smoothing）
+                    if i == period - 1:
+                        adx_values[i] = dx
+                    elif i < 2 * period - 1:
+                        adx_values[i] = (adx_values[i-1] * (i - period + 1) + dx) / (i - period + 2)
+                    else:
+                        adx_values[i] = (adx_values[i-1] * (period - 1) + dx) / period
+
+            return adx_values, pdi_values, ndi_values
         except Exception as e:
             logger.error(f"计算ADX失败: {e}")
             return None
@@ -240,13 +300,15 @@ class MarketIndexCalculator:
                     if len(high) == 0 or len(low) == 0 or len(close) == 0:
                         continue
 
-                    adx = self.compute_adx(high, low, close)
-                    if adx is not None and len(adx) > 0:
-                        # 取最新值
-                        latest_adx = adx[-1]
-                        if not np.isnan(latest_adx):
-                            adx_values.append(latest_adx)
-                            valid_symbols.append(symbol)
+                    result = self.compute_adx(high, low, close)
+                    if result is not None:
+                        adx, pdi, ndi = result
+                        if len(adx) > 0:
+                            # 取最新值
+                            latest_adx = adx[-1]
+                            if not np.isnan(latest_adx):
+                                adx_values.append(latest_adx)
+                                valid_symbols.append(symbol)
                 except Exception as e:
                     logger.warning(f"计算{symbol}的ADX失败: {e}")
                     continue
