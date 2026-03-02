@@ -424,6 +424,14 @@ class GeneratedBuyStrategy(StrategyBaseBuy):
             atr14 = atr_data.get('atr14')  # 可能为None
             atr21 = atr_data.get('atr21')  # 可能为None
 
+            # ADX指标（平均趋向指数，可能为None）
+            adx_data = indicators_data.get('adx', {})
+            adx14 = adx_data.get('adx14')  # 可能为None
+            # ADX值说明：
+            #   - ADX < 20: 震荡市，趋势不明显
+            #   - 20 <= ADX < 25: 弱趋势
+            #   - ADX >= 25: 强趋势
+
             # VOL指标（成交量及均量线，vol/buy_vol/sell_vol通常不为None，但均量线可能为None）
             vol_data = indicators_data.get('vol', {})
             vol = vol_data.get('vol', 0)  # 成交量通常不为None

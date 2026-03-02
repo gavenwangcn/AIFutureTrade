@@ -27,6 +27,7 @@ from typing import Dict, List, Optional
 import pandas as pd
 import numpy as np
 import talib
+from trade.market.market_index import MarketIndexCalculator
 
 from trade.common.binance_futures import BinanceFuturesClient
 from trade.common.database.database_market_tickers import MarketTickersDatabase
@@ -1086,6 +1087,11 @@ class MarketDataFetcher:
             atr14 = self._calculate_atr_tradingview(highs, lows, closes, period=14)
             atr21 = self._calculate_atr_tradingview(highs, lows, closes, period=21)
 
+            # ADX指标（基于该symbol的K线数据）
+            calculator = MarketIndexCalculator(atr_period=14, adx_period=14)
+            adx_result = calculator.compute_adx(highs, lows, closes)
+            adx14 = adx_result[0] if adx_result else np.zeros_like(closes)
+
             # VOL均量线
             mavol5 = talib.SMA(volumes, timeperiod=5)
             mavol10 = talib.SMA(volumes, timeperiod=10)
@@ -1138,6 +1144,9 @@ class MarketDataFetcher:
                         'atr7': float(atr7[i]) if i >= 6 and not np.isnan(atr7[i]) else None,
                         'atr14': float(atr14[i]) if i >= 13 and not np.isnan(atr14[i]) else None,
                         'atr21': float(atr21[i]) if i >= 20 and not np.isnan(atr21[i]) else None
+                    },
+                    'adx': {
+                        'adx14': float(adx14[i]) if i >= 13 and not np.isnan(adx14[i]) else None
                     },
                     'vol': {
                         'vol': float(volumes[i]),
