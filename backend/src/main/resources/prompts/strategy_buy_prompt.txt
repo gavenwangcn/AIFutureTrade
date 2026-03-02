@@ -425,8 +425,11 @@ class GeneratedBuyStrategy(StrategyBaseBuy):
             atr21 = atr_data.get('atr21')  # 可能为None
 
             # ADX指标（平均趋向指数，可能为None）
+            # ⚠️ ADX已预先计算在indicators中，格式和EMA一样
             adx_data = indicators_data.get('adx', {})
-            adx14 = adx_data.get('adx14')  # 可能为None
+            adx_1h = adx_data.get('adx_1h')  # 1小时ADX，可能为None
+            adx_4h = adx_data.get('adx_4h')  # 4小时ADX，可能为None
+            adx_1d = adx_data.get('adx_1d')  # 1天ADX，可能为None
             # ADX值说明：
             #   - ADX < 20: 震荡市，趋势不明显
             #   - 20 <= ADX < 25: 弱趋势

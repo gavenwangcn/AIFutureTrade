@@ -53,6 +53,8 @@ from trade.trading.trading_utils import (
 from trade.trading.market_data_manager import MarketDataManager
 from trade.trading.batch_decision_processor import BatchDecisionProcessor
 from trade.market import calculate_market_indicators
+from trade.market.market_index import MarketIndexCalculator
+import numpy as np
 
 logger = logging.getLogger(__name__)
 
@@ -1355,7 +1357,9 @@ class TradingEngine:
                                 pass
             
             if query_symbol in merged_data:
-                market_state[original_symbol]['indicators'] = {'timeframes': timeframes_data}
+                # 计算多时间周期ADX并添加到timeframes中
+                timeframes_with_adx = self._calculate_symbol_adx(timeframes_data)
+                market_state[original_symbol]['indicators'] = {'timeframes': timeframes_with_adx}
             else:
                 market_state[original_symbol]['indicators'] = {'timeframes': {}}
             
@@ -1417,6 +1421,65 @@ class TradingEngine:
                 market_state[symbol]['market_indicators'] = {}
 
         return market_state
+
+    def _calculate_symbol_adx(self, timeframes_data: Dict) -> Dict:
+        """
+        为timeframes中的1h、4h、1d的每根K线添加ADX指标到indicators中
+
+        Args:
+            timeframes_data: 时间周期数据，格式为 {timeframe: {'klines': [...], ...}}
+
+        Returns:
+            Dict: 更新后的timeframes_data，每根K线的indicators中添加了adx字段
+        """
+        calculator = MarketIndexCalculator()
+        updated_timeframes = {}
+
+        for timeframe in ['1h', '4h', '1d']:
+            tf_data = timeframes_data.get(timeframe, {})
+            updated_timeframes[timeframe] = tf_data.copy() if tf_data else {}
+
+            klines = tf_data.get('klines', [])
+
+            if not klines or len(klines) < 14:
+                updated_timeframes[timeframe]['klines'] = klines
+                continue
+
+            try:
+                high = np.array([float(k.get('high', 0)) for k in klines if isinstance(k, dict)])
+                low = np.array([float(k.get('low', 0)) for k in klines if isinstance(k, dict)])
+                close = np.array([float(k.get('close', 0)) for k in klines if isinstance(k, dict)])
+
+                if len(high) > 0 and len(low) > 0 and len(close) > 0:
+                    result = calculator.compute_adx(high, low, close)
+                    if result is not None:
+                        adx_array, _, _ = result
+                        updated_klines = []
+                        for i, kline in enumerate(klines):
+                            kline_copy = kline.copy() if isinstance(kline, dict) else {}
+                            if 'indicators' not in kline_copy:
+                                kline_copy['indicators'] = {}
+
+                            # 添加adx字段到indicators中
+                            if i < len(adx_array) and not np.isnan(adx_array[i]):
+                                adx_value = float(adx_array[i])
+                            else:
+                                adx_value = None
+
+                            if 'adx' not in kline_copy['indicators']:
+                                kline_copy['indicators']['adx'] = {}
+                            kline_copy['indicators']['adx'][f'adx_{timeframe}'] = adx_value
+                            updated_klines.append(kline_copy)
+                        updated_timeframes[timeframe]['klines'] = updated_klines
+                    else:
+                        updated_timeframes[timeframe]['klines'] = klines
+                else:
+                    updated_timeframes[timeframe]['klines'] = klines
+            except Exception as e:
+                logger.warning(f"计算{timeframe} ADX失败: {e}")
+                updated_timeframes[timeframe]['klines'] = klines
+
+        return updated_timeframes
 
     def _validate_symbol_market_data(
         self,
@@ -3435,6 +3498,13 @@ class TradingEngine:
                 quote_volume_value = price_info.get('quote_volume', candidate.get('quote_volume', 0))
             
             # 构建市场状态条目（只包含klines，不包含indicators）
+            # 计算多时间周期ADX并添加到timeframes中
+            if timeframes_data:
+                timeframes_with_adx = self._calculate_symbol_adx(timeframes_data)
+                indicators_data = {'timeframes': timeframes_with_adx}
+            else:
+                indicators_data = {}
+
             market_state[symbol_upper] = {
                 'price': price_info.get('price', candidate.get('price', candidate.get('last_price', 0))),
                 'name': candidate.get('name', symbol),
@@ -3443,7 +3513,7 @@ class TradingEngine:
                 'change_24h': price_info.get('change_24h', candidate.get('change_percent', 0)),
                 'base_volume': base_volume_value,  # 24小时成交量（基础资产）
                 'quote_volume': quote_volume_value,  # 24小时成交额（计价资产，如USDT）
-                'indicators': {'timeframes': timeframes_data} if timeframes_data else {},  # 只包含klines
+                'indicators': indicators_data,
                 'previous_close_prices': previous_close_prices,  # 上一根K线收盘价，格式：{timeframe: close_price}
                 'source': symbol_source,
                 'leaderboard_source': candidate.get('leaderboard_source')  # 涨跌榜来源：'gainers'（涨幅榜）或 'losers'（跌幅榜），仅当 source='leaderboard' 时存在
