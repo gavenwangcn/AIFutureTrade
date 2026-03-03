@@ -81,11 +81,14 @@ TRADE_MARKET_SYMBOL_LIMIT = 5  # Number of symbols actually submitted to strateg
 # Format: list, each element is a service configuration dictionary
 # Note: Order placement and account query related interfaces do not use binance-service, only symbol-related data query interfaces use it
 BINANCE_SERVICE_LIST = [
-    # Example configuration (please modify according to actual situation):
-    # {
-    #     "base_url": "http://localhost:5004",  # Binance Service base URL
-    #     "timeout": 30,  # Request timeout (seconds), default 30 seconds
-    # },
+    {
+        "base_url": "http://109.206.245.131:5004",
+        "timeout": 30,
+    },
+    {
+        "base_url": "http://185.242.232.23:5004",
+        "timeout": 30,
+    },
 ]
 
 # Read Binance Service configuration from environment variables (JSON format)
