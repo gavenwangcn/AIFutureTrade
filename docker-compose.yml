@@ -40,9 +40,9 @@ services:
       # 服务器端口配置
       - SERVER_PORT=${SERVER_PORT:-5002}
       # MySQL配置
-      - SPRING_DATASOURCE_URL=jdbc:mysql://${MYSQL_HOST:-154.89.148.172}:${MYSQL_PORT:-32123}/${MYSQL_DATABASE:-aifuturetrade}?useSSL=false&serverTimezone=UTC&characterEncoding=utf8
+      - SPRING_DATASOURCE_URL=jdbc:mysql://${MYSQL_HOST:-localhost}:${MYSQL_PORT:-3306}/${MYSQL_DATABASE:-aifuturetrade}?useSSL=false&serverTimezone=UTC&characterEncoding=utf8
       - SPRING_DATASOURCE_USERNAME=${MYSQL_USER:-aifuturetrade}
-      - SPRING_DATASOURCE_PASSWORD=${MYSQL_PASSWORD:-aifuturetrade123}
+      - SPRING_DATASOURCE_PASSWORD=${MYSQL_PASSWORD:-your_password_here}
       # Binance配置
       - BINANCE_API_KEY=${BINANCE_API_KEY}
       - BINANCE_SECRET_KEY=${BINANCE_API_SECRET}
@@ -76,9 +76,9 @@ services:
       # 服务器端口配置
       - SERVER_PORT=${BINANCE_SERVICE_PORT:-5004}
       # MySQL配置
-      - SPRING_DATASOURCE_URL=jdbc:mysql://${MYSQL_HOST:-154.89.148.172}:${MYSQL_PORT:-32123}/${MYSQL_DATABASE:-aifuturetrade}?useSSL=false&serverTimezone=UTC&characterEncoding=utf8
+      - SPRING_DATASOURCE_URL=jdbc:mysql://${MYSQL_HOST:-localhost}:${MYSQL_PORT:-3306}/${MYSQL_DATABASE:-aifuturetrade}?useSSL=false&serverTimezone=UTC&characterEncoding=utf8
       - SPRING_DATASOURCE_USERNAME=${MYSQL_USER:-aifuturetrade}
-      - SPRING_DATASOURCE_PASSWORD=${MYSQL_PASSWORD:-aifuturetrade123}
+      - SPRING_DATASOURCE_PASSWORD=${MYSQL_PASSWORD:-your_password_here}
       # Binance配置
       - BINANCE_API_KEY=${BINANCE_API_KEY}
       - BINANCE_SECRET_KEY=${BINANCE_API_SECRET}
@@ -113,10 +113,10 @@ services:
       # 服务器端口配置
       - SERVER_PORT=${TRADE_MONITOR_PORT:-5005}
       # MySQL配置
-      - MYSQL_HOST=${MYSQL_HOST:-154.89.148.172}
+      - MYSQL_HOST=${MYSQL_HOST:-localhost}
       - MYSQL_PORT=${MYSQL_PORT:-32123}
       - MYSQL_USER=${MYSQL_USER:-aifuturetrade}
-      - MYSQL_PASSWORD=${MYSQL_PASSWORD:-aifuturetrade123}
+      - MYSQL_PASSWORD=${MYSQL_PASSWORD:-your_password_here}
       - MYSQL_DATABASE=${MYSQL_DATABASE:-aifuturetrade}
       # Docker配置
       - DOCKER_HOST=${DOCKER_HOST:-unix:///var/run/docker.sock}
@@ -146,9 +146,9 @@ services:
       # 服务器端口配置
       - SERVER_PORT=${ASYNC_SERVICE_PORT:-5003}
       # MySQL配置
-      - SPRING_DATASOURCE_URL=jdbc:mysql://${MYSQL_HOST:-154.89.148.172}:${MYSQL_PORT:-32123}/${MYSQL_DATABASE:-aifuturetrade}?useSSL=false&serverTimezone=UTC&characterEncoding=utf8
+      - SPRING_DATASOURCE_URL=jdbc:mysql://${MYSQL_HOST:-localhost}:${MYSQL_PORT:-3306}/${MYSQL_DATABASE:-aifuturetrade}?useSSL=false&serverTimezone=UTC&characterEncoding=utf8
       - SPRING_DATASOURCE_USERNAME=${MYSQL_USER:-aifuturetrade}
-      - SPRING_DATASOURCE_PASSWORD=${MYSQL_PASSWORD:-aifuturetrade123}
+      - SPRING_DATASOURCE_PASSWORD=${MYSQL_PASSWORD:-your_password_here}
       # Binance配置
       - BINANCE_API_KEY=${BINANCE_API_KEY}
       - BINANCE_SECRET_KEY=${BINANCE_API_SECRET}
@@ -195,10 +195,10 @@ services:
       - GUNICORN_KEEPALIVE=${GUNICORN_KEEPALIVE:-5}
       - GUNICORN_MAX_REQUESTS=${GUNICORN_MAX_REQUESTS:-1000}
       # MySQL配置
-      - MYSQL_HOST=${MYSQL_HOST:-154.89.148.172}
+      - MYSQL_HOST=${MYSQL_HOST:-localhost}
       - MYSQL_PORT=${MYSQL_PORT:-32123}
       - MYSQL_USER=${MYSQL_USER:-aifuturetrade}
-      - MYSQL_PASSWORD=${MYSQL_PASSWORD:-aifuturetrade123}
+      - MYSQL_PASSWORD=${MYSQL_PASSWORD:-your_password_here}
       - MYSQL_DATABASE=${MYSQL_DATABASE:-aifuturetrade}
       # Binance配置
       - BINANCE_API_KEY=${BINANCE_API_KEY}
@@ -231,10 +231,10 @@ services:
       # MODEL_ID 由 Java Backend 在创建容器时动态设置
       - MODEL_ID=${MODEL_ID:-1}
       # MySQL配置
-      - MYSQL_HOST=${MYSQL_HOST:-154.89.148.172}
+      - MYSQL_HOST=${MYSQL_HOST:-localhost}
       - MYSQL_PORT=${MYSQL_PORT:-32123}
       - MYSQL_USER=${MYSQL_USER:-aifuturetrade}
-      - MYSQL_PASSWORD=${MYSQL_PASSWORD:-aifuturetrade123}
+      - MYSQL_PASSWORD=${MYSQL_PASSWORD:-your_password_here}
       - MYSQL_DATABASE=${MYSQL_DATABASE:-aifuturetrade}
       # Binance配置
       - BINANCE_API_KEY=${BINANCE_API_KEY}
@@ -268,10 +268,10 @@ services:
       # MODEL_ID 由 Java Backend 在创建容器时动态设置
       - MODEL_ID=${MODEL_ID:-1}
       # MySQL配置
-      - MYSQL_HOST=${MYSQL_HOST:-154.89.148.172}
+      - MYSQL_HOST=${MYSQL_HOST:-localhost}
       - MYSQL_PORT=${MYSQL_PORT:-32123}
       - MYSQL_USER=${MYSQL_USER:-aifuturetrade}
-      - MYSQL_PASSWORD=${MYSQL_PASSWORD:-aifuturetrade123}
+      - MYSQL_PASSWORD=${MYSQL_PASSWORD:-your_password_here}
       - MYSQL_DATABASE=${MYSQL_DATABASE:-aifuturetrade}
       # Binance配置
       - BINANCE_API_KEY=${BINANCE_API_KEY}

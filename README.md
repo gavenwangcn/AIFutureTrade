@@ -835,12 +835,12 @@ docker run --rm \
 # ============================================
 # MySQL Database Configuration
 # ============================================
-MYSQL_HOST=154.89.148.172          # MySQL host (use 'mysql' for Docker internal)
-MYSQL_PORT=32123                    # MySQL port
+MYSQL_HOST=localhost                # MySQL host (use 'mysql' for Docker internal)
+MYSQL_PORT=3306                     # MySQL port
 MYSQL_USER=aifuturetrade           # Database username
-MYSQL_PASSWORD=aifuturetrade123    # Database password (CHANGE IN PRODUCTION!)
+MYSQL_PASSWORD=your_password_here  # Database password (CHANGE IN PRODUCTION!)
 MYSQL_DATABASE=aifuturetrade       # Database name
-MYSQL_ROOT_PASSWORD=root123        # Root password (CHANGE IN PRODUCTION!)
+MYSQL_ROOT_PASSWORD=your_root_password_here  # Root password (CHANGE IN PRODUCTION!)
 
 # ============================================
 # Binance API Configuration

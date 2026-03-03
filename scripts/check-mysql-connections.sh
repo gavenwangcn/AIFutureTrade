@@ -7,15 +7,15 @@ echo "=========================================="
 echo ""
 
 # 从环境变量或配置文件读取数据库连接信息
-MYSQL_HOST=${MYSQL_HOST:-154.89.148.172}
-MYSQL_PORT=${MYSQL_PORT:-32123}
+MYSQL_HOST=${MYSQL_HOST:-localhost}
+MYSQL_PORT=${MYSQL_PORT:-3306}
 MYSQL_USER=${MYSQL_USER:-aifuturetrade}
-MYSQL_PASSWORD=${MYSQL_PASSWORD:-aifuturetrade123}
+MYSQL_PASSWORD=${MYSQL_PASSWORD:-your_password_here}
 MYSQL_DATABASE=${MYSQL_DATABASE:-aifuturetrade}
 MYSQL_CONTAINER=${MYSQL_CONTAINER:-aifuturetrade-mysql}
 
 # Docker 环境下使用 root 用户（有完整权限查看所有连接信息）
-MYSQL_ROOT_PASSWORD=${MYSQL_ROOT_PASSWORD:-aifuturetrade_root123}
+MYSQL_ROOT_PASSWORD=${MYSQL_ROOT_PASSWORD:-your_root_password_here}
 
 # 检测是否使用 Docker
 USE_DOCKER=false

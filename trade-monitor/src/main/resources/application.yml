@@ -11,9 +11,9 @@ spring:
   application:
     name: trade-monitor
   datasource:
-    url: jdbc:mysql://${MYSQL_HOST:154.89.148.172}:${MYSQL_PORT:32123}/${MYSQL_DATABASE:aifuturetrade}?useUnicode=true&characterEncoding=utf8&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true
+    url: jdbc:mysql://${MYSQL_HOST:localhost}:${MYSQL_PORT:3306}/${MYSQL_DATABASE:aifuturetrade}?useUnicode=true&characterEncoding=utf8&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true
     username: ${MYSQL_USER:aifuturetrade}
-    password: ${MYSQL_PASSWORD:aifuturetrade123}
+    password: ${MYSQL_PASSWORD:your_password_here}
     driver-class-name: com.mysql.cj.jdbc.Driver
     hikari:
       maximum-pool-size: 10

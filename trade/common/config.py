@@ -30,10 +30,10 @@ import os
 # ============ MySQL Database Configuration ============
 
 # MySQL connection configuration
-MYSQL_HOST = os.getenv('MYSQL_HOST', '154.89.148.172')  # MySQL server address (default: 154.89.148.172)
-MYSQL_PORT = int(os.getenv('MYSQL_PORT', '32123'))  # MySQL server port
+MYSQL_HOST = os.getenv('MYSQL_HOST', 'localhost')  # MySQL server address (default: localhost)
+MYSQL_PORT = int(os.getenv('MYSQL_PORT', '3306'))  # MySQL server port
 MYSQL_USER = os.getenv('MYSQL_USER', 'aifuturetrade')  # MySQL username
-MYSQL_PASSWORD = os.getenv('MYSQL_PASSWORD', 'aifuturetrade123')  # MySQL password
+MYSQL_PASSWORD = os.getenv('MYSQL_PASSWORD', 'your_password_here')  # MySQL password
 MYSQL_DATABASE = os.getenv('MYSQL_DATABASE', 'aifuturetrade')  # MySQL database name
 
 
@@ -86,18 +86,6 @@ BINANCE_SERVICE_LIST = [
     #     "base_url": "http://localhost:5004",  # Binance Service base URL
     #     "timeout": 30,  # Request timeout (seconds), default 30 seconds
     # },
-    {
-         "base_url": "http://156.254.6.176:5004",
-         "timeout": 30,
-     },
-    {
-         "base_url": "http://185.242.232.23:5004",
-         "timeout": 30,
-     },
-    {
-         "base_url": "http://185.242.232.42:5004",
-         "timeout": 30,
-     },
 ]
 
 # Read Binance Service configuration from environment variables (JSON format)
