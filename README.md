@@ -43,6 +43,7 @@ An intelligent automated trading system for Binance Futures, powered by AI and b
 - [Troubleshooting](#troubleshooting)
 - [Contributing](#contributing)
 - [License](#license)
+- [Sponsorship Support](#sponsorship-support)
 
 ### 🎯 Overview
 
@@ -1309,6 +1310,22 @@ Access interactive API documentation:
 - **Binance Service**: http://localhost:5004/swagger-ui.html
 - **Trade Service**: http://localhost:5000/api/docs
 
+### 💖 Sponsorship Support
+
+If this project has been helpful to you, please consider supporting its continued development and maintenance:
+
+<div align="center">
+
+![Sponsorship Support](img/receive.jpg)
+
+**Thank you for your support! Your sponsorship will be used for:**
+- 🚀 Continuous optimization of trading strategies and algorithms
+- 🔧 Bug fixes and user experience improvements
+- 📚 Documentation and tutorial enhancements
+- 💡 Development of new features and capabilities
+
+</div>
+
 ---
 
 ## <a name="chinese"></a>中文
@@ -1321,6 +1338,7 @@ Access interactive API documentation:
 - [快速开始](#快速开始-1)
 - [配置](#配置-1)
 - [API 文档](#api-文档)
+- [赞助支持](#赞助支持)
 - [界面截图](#界面截图)
 
 ### 概述
@@ -1689,6 +1707,22 @@ docker-compose up -d --build --scale model-buy=0 --scale model-sell=0
 ### 许可证
 
 本项目基于 MIT License，详见 `LICENSE`。
+
+### 💖 赞助支持
+
+如果这个项目对您有帮助，欢迎通过以下方式支持项目的持续开发与维护：
+
+<div align="center">
+
+![赞助支持](img/receive.jpg)
+
+**感谢您的支持！您的赞助将用于：**
+- 🚀 持续优化交易策略与算法
+- 🔧 修复 Bug 与改进用户体验
+- 📚 完善文档与教程
+- 💡 开发新功能与特性
+
+</div>
 
 ### 🖼️ 界面截图
 

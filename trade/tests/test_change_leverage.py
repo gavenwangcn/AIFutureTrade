@@ -42,8 +42,8 @@ def test_change_initial_leverage(symbol: str = "MUSDT", leverage: int = 20) -> N
     """
     # 创建客户端实例（使用测试网络）
     client = BinanceFuturesOrderClient(
-        api_key='LBtjhBgX1RCksNJDdOoJPeDD30Z70YIGHHH9DrqjIDDkK7xcPRQcgydPxGRr6MN1',
-        api_secret='55arJnwlytDflHv151UpHN1s32ACnJZEs86mbc79wGyeuSUJNHTDPN7jEgBbqO6I',
+        api_key='your_api_key_here',
+        api_secret='your_api_secret_here',
         testnet=False
     )
     

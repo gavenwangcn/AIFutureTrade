@@ -41,8 +41,8 @@ MYSQL_DATABASE = os.getenv('MYSQL_DATABASE', 'aifuturetrade')  # MySQL database 
 # ============ Binance API Configuration ============
 
 # Binance API key configuration
-BINANCE_API_KEY = os.getenv('BINANCE_API_KEY', 'eric')  # Binance API key
-BINANCE_API_SECRET = os.getenv('BINANCE_API_SECRET', '55arJnwlytDflHv151UpHN1s32ACnJZEs86mbc79wGyeuSUJNHTDPN7jEgBbqO6I')  # Binance API secret
+BINANCE_API_KEY = os.getenv('BINANCE_API_KEY', 'your_api_key_here')  # Binance API key
+BINANCE_API_SECRET = os.getenv('BINANCE_API_SECRET', 'your_api_secret_here')  # Binance API secret
 FUTURES_QUOTE_ASSET = 'USDT'  # Futures quote asset, fixed as USDT
 
 # Binance trading mode configuration

@@ -16,8 +16,8 @@ logging.basicConfig(level=logging.INFO)
 
 # Create configuration for the REST API
 configuration_rest_api = ConfigurationRestAPI(
-    api_key=os.getenv("API_KEY", "LBtjhBgX1RCksNJDdOoJPeDD30Z70YIGHHH9DrqjIDDkK7xcPRQcgydPxGRr6MN1"),
-    api_secret=os.getenv("API_SECRET", "55arJnwlytDflHv151UpHN1s32ACnJZEs86mbc79wGyeuSUJNHTDPN7jEgBbqO6I"),
+    api_key=os.getenv("API_KEY", "your_api_key_here"),
+    api_secret=os.getenv("API_SECRET", "your_api_secret_here"),
     base_path=os.getenv(
         "BASE_PATH", DERIVATIVES_TRADING_USDS_FUTURES_REST_API_PROD_URL
     ),
