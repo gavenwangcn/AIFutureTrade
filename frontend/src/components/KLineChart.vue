@@ -18,6 +18,12 @@
               >
                 EMA
               </button>
+              <button
+                :class="{ 'indicator-btn': true, 'active': showADX }"
+                @click="handleADXToggle"
+              >
+                ADX
+              </button>
             </div>
             <div class="kline-timeframes">
               <button
@@ -92,9 +98,11 @@ const chartInstance = ref(null)
 const dataLoader = ref(null)
 const currentInterval = ref(props.interval)
 const title = ref(`${props.symbol} - K线图`)
-const isInitializing = ref(false) // 标记是否正在初始化
-const initTimeoutId = ref(null) // 存储初始化定时器ID
-const currentIndicator = ref('MA') // 当前显示的指标：'MA' 或 'EMA'
+const isInitializing = ref(false)
+const initTimeoutId = ref(null)
+const currentIndicator = ref('MA')
+const showADX = ref(false)
+const adxIndicatorId = ref(null)
 
 // 时间周期配置
 // KLineChart 10.0.0 使用 { span: number, type: string } 格式
@@ -299,10 +307,9 @@ const initChart = async () => {
       console.error('[KLineChart] Failed to register ATR indicator')
     }
 
-    // 创建ADX指标（放在ATR之后）
+    // 创建ADX指标（默认不显示，点击按钮时才显示）
     if (registerADXIndicator(klinecharts)) {
-      const adxIndicatorId = chartInstance.value.createIndicator('ADX', false)
-      console.log('[KLineChart] ADX indicator registered and created with id:', adxIndicatorId)
+      console.log('[KLineChart] ADX indicator registered')
     } else {
       console.error('[KLineChart] Failed to register ADX indicator')
     }
@@ -324,9 +331,9 @@ const handleIndicatorChange = (indicator) => {
   }
 
   // 移除当前指标
-  chartInstance.value.removeIndicator({ 
-    name: currentIndicator.value, 
-    paneId: 'candle_pane' 
+  chartInstance.value.removeIndicator({
+    name: currentIndicator.value,
+    paneId: 'candle_pane'
   })
 
   // 创建新指标
@@ -336,6 +343,28 @@ const handleIndicatorChange = (indicator) => {
   currentIndicator.value = indicator
 
   console.log(`[KLineChart] Indicator switched to: ${indicator}`)
+}
+
+// 处理ADX指标切换
+const handleADXToggle = () => {
+  if (!chartInstance.value) {
+    return
+  }
+
+  if (showADX.value) {
+    // 隐藏ADX指标
+    if (adxIndicatorId.value) {
+      chartInstance.value.removeIndicator({ id: adxIndicatorId.value })
+      adxIndicatorId.value = null
+    }
+    showADX.value = false
+  } else {
+    // 显示ADX指标
+    adxIndicatorId.value = chartInstance.value.createIndicator('ADX', false)
+    showADX.value = true
+  }
+
+  console.log(`[KLineChart] ADX indicator toggled: ${showADX.value}`)
 }
 
 // 处理时间周期切换
