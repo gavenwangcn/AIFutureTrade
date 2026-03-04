@@ -9,7 +9,7 @@
 [![Docker](https://img.shields.io/badge/Docker-Ready-blue.svg)](https://www.docker.com/)
 [![Spring Boot](https://img.shields.io/badge/Spring%20Boot-3.2.0-brightgreen.svg)](https://spring.io/projects/spring-boot)
 
-An intelligent automated trading system for Binance Futures, powered by AI and built with microservices architecture.
+一个生产级别的AI驱动数字资产交易系统，集成多时间周期技术分析、实时风险管理和智能决策引擎。支持币安期货实时交易、毫秒级订单执行、一键平仓、异步止损等企业级交易能力。采用Java+Python微服务架构，基于LLM的策略生成与优化，完整的交易日志与决策追踪。
 
 [English](#english) | [中文](#chinese)
 
