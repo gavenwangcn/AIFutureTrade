@@ -403,7 +403,7 @@ docker-compose up -d --build --scale model-buy=0 --scale model-sell=0
 
 <div align="center">
 
-![赞助支持](img/receive.jpg)
+<img src="img/receive.jpg" alt="赞助支持" width="50%" />
 
 **感谢您的支持！您的赞助将用于：**
 - 🚀 持续优化交易策略与算法
