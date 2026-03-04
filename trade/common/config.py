@@ -30,10 +30,10 @@ import os
 # ============ MySQL Database Configuration ============
 
 # MySQL connection configuration
-MYSQL_HOST = os.getenv('MYSQL_HOST', '154.89.148.172')  # MySQL server address (default: 154.89.148.172)
-MYSQL_PORT = int(os.getenv('MYSQL_PORT', '32123'))  # MySQL server port
+MYSQL_HOST = os.getenv('MYSQL_HOST', 'localhost')  # MySQL server address (default: localhost)
+MYSQL_PORT = int(os.getenv('MYSQL_PORT', '3306'))  # MySQL server port
 MYSQL_USER = os.getenv('MYSQL_USER', 'aifuturetrade')  # MySQL username
-MYSQL_PASSWORD = os.getenv('MYSQL_PASSWORD', 'aifuturetrade123')  # MySQL password
+MYSQL_PASSWORD = os.getenv('MYSQL_PASSWORD', 'your_password_here')  # MySQL password
 MYSQL_DATABASE = os.getenv('MYSQL_DATABASE', 'aifuturetrade')  # MySQL database name
 
 
@@ -41,8 +41,8 @@ MYSQL_DATABASE = os.getenv('MYSQL_DATABASE', 'aifuturetrade')  # MySQL database 
 # ============ Binance API Configuration ============
 
 # Binance API key configuration
-BINANCE_API_KEY = os.getenv('BINANCE_API_KEY', 'eric')  # Binance API key
-BINANCE_API_SECRET = os.getenv('BINANCE_API_SECRET', '55arJnwlytDflHv151UpHN1s32ACnJZEs86mbc79wGyeuSUJNHTDPN7jEgBbqO6I')  # Binance API secret
+BINANCE_API_KEY = os.getenv('BINANCE_API_KEY', 'your_api_key_here')  # Binance API key
+BINANCE_API_SECRET = os.getenv('BINANCE_API_SECRET', 'your_api_secret_here')  # Binance API secret
 FUTURES_QUOTE_ASSET = 'USDT'  # Futures quote asset, fixed as USDT
 
 # Binance trading mode configuration
@@ -81,11 +81,6 @@ TRADE_MARKET_SYMBOL_LIMIT = 5  # Number of symbols actually submitted to strateg
 # Format: list, each element is a service configuration dictionary
 # Note: Order placement and account query related interfaces do not use binance-service, only symbol-related data query interfaces use it
 BINANCE_SERVICE_LIST = [
-    # Example configuration (please modify according to actual situation):
-    # {
-    #     "base_url": "http://localhost:5004",  # Binance Service base URL
-    #     "timeout": 30,  # Request timeout (seconds), default 30 seconds
-    # },
     {
          "base_url": "http://156.254.6.176:5004",
          "timeout": 30,

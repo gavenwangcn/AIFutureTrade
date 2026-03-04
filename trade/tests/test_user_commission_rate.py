@@ -54,8 +54,8 @@ def _load_credentials() -> tuple[str, str]:
     if not api_key or not api_secret:
         try:
             import trade.common.config as config
-            api_key = "LBtjhBgX1RCksNJDdOoJPeDD30Z70YIGHHH9DrqjIDDkK7xcPRQcgydPxGRr6MN1"
-            api_secret = "55arJnwlytDflHv151UpHN1s32ACnJZEs86mbc79wGyeuSUJNHTDPN7jEgBbqO6I"
+            api_key = "your_api_key_here"
+            api_secret = "your_api_secret_here"
         except ImportError:
             pass
 

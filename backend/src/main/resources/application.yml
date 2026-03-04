@@ -13,9 +13,9 @@ spring:
   
   # 数据库配置（可通过环境变量覆盖）
   datasource:
-    url: ${SPRING_DATASOURCE_URL:jdbc:mysql://154.89.148.172:32123/aifuturetrade?useSSL=false&serverTimezone=UTC&characterEncoding=utf8}
+    url: ${SPRING_DATASOURCE_URL:jdbc:mysql://localhost:3306/aifuturetrade?useSSL=false&serverTimezone=UTC&characterEncoding=utf8}
     username: ${SPRING_DATASOURCE_USERNAME:aifuturetrade}
-    password: ${SPRING_DATASOURCE_PASSWORD:aifuturetrade123}
+    password: ${SPRING_DATASOURCE_PASSWORD:your_password_here}
     driver-class-name: com.mysql.cj.jdbc.Driver
     type: com.alibaba.druid.pool.DruidDataSource
     # Druid连接池配置（优化连接泄漏检测）
@@ -142,8 +142,8 @@ logging:
 
 # Binance API配置（可通过环境变量覆盖）
 binance:
-    api-key: ${BINANCE_API_KEY:LBtjhBgX1RCksNJDdOoJPeDD30Z70YIGHHH9DrqjIDDkK7xcPRQcgydPxGRr6MN1}
-    secret-key: ${BINANCE_SECRET_KEY:55arJnwlytDflHv151UpHN1s32ACnJZEs86mbc79wGyeuSUJNHTDPN7jEgBbqO6I}
+    api-key: ${BINANCE_API_KEY:your_api_key_here}
+    secret-key: ${BINANCE_SECRET_KEY:your_api_secret_here}
     private-key-path: 
     private-key-pass: 
     base-url: https://api.binance.com
@@ -177,7 +177,7 @@ socketio:
 
 # Trade服务配置（可通过环境变量覆盖）
 trade:
-  base-url: ${TRADE_SERVICE_URL:http://154.89.148.172:5000}  # Trade服务基础URL，默认 http://trade:5000
+  base-url: ${TRADE_SERVICE_URL:http://localhost:5000}  # Trade服务基础URL，默认 http://trade:5000
   connect-timeout: 10000  # 连接超时时间（毫秒）
   read-timeout: 30000  # 读取超时时间（毫秒）
   retries: 3  # 重试次数
@@ -217,10 +217,10 @@ docker:
 
 # MySQL配置（用于传递给模型容器）
 mysql:
-  host: ${MYSQL_HOST:154.89.148.172}  # 默认数据库地址：154.89.148.172
-  port: ${MYSQL_PORT:32123}
+  host: ${MYSQL_HOST:localhost}  # 默认数据库地址：localhost
+  port: ${MYSQL_PORT:3306}
   user: ${MYSQL_USER:aifuturetrade}
-  password: ${MYSQL_PASSWORD:aifuturetrade123}
+  password: ${MYSQL_PASSWORD:your_password_here}
   database: ${MYSQL_DATABASE:aifuturetrade}
 
 # Swagger配置

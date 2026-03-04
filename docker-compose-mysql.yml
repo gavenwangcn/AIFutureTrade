@@ -47,10 +47,10 @@ services:
       #   - <服务器IP>:32123
       - "0.0.0.0:32123:3306"
     environment:
-      - MYSQL_ROOT_PASSWORD=aifuturetrade_root123
+      - MYSQL_ROOT_PASSWORD=your_root_password_here
       - MYSQL_DATABASE=aifuturetrade
       - MYSQL_USER=aifuturetrade
-      - MYSQL_PASSWORD=aifuturetrade123
+      - MYSQL_PASSWORD=your_password_here
     volumes:
       - mysql_data:/var/lib/mysql
       # 挂载高性能配置文件（Windows环境相对路径）
@@ -84,7 +84,7 @@ services:
     networks:
       - mysql-network
     healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-paifuturetrade_root123"]
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-pyour_root_password_here"]
       interval: 10s
       timeout: 5s
       retries: 5

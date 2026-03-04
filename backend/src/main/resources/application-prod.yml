@@ -1,9 +1,9 @@
 spring:
   datasource:
     # 生产环境使用环境变量配置的数据库连接
-    url: ${SPRING_DATASOURCE_URL:jdbc:mysql://154.89.148.172:32123/aifuturetrade?useSSL=false&serverTimezone=UTC&characterEncoding=utf8}
+    url: ${SPRING_DATASOURCE_URL:jdbc:mysql://localhost:3306/aifuturetrade?useSSL=false&serverTimezone=UTC&characterEncoding=utf8}
     username: ${SPRING_DATASOURCE_USERNAME:aifuturetrade}
-    password: ${SPRING_DATASOURCE_PASSWORD:aifuturetrade123}
+    password: ${SPRING_DATASOURCE_PASSWORD:your_password_here}
     driver-class-name: com.mysql.cj.jdbc.Driver
     type: com.alibaba.druid.pool.DruidDataSource
     # Druid连接池配置（生产环境优化 - 解决连接数过多问题）
