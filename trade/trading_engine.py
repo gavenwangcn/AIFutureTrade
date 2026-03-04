@@ -5358,6 +5358,10 @@ class TradingEngine:
         # 确定交易方向（buy/sell）
         side_value = side_for_trade.lower()  # 'buy' or 'sell'
 
+        # 市场委托单始终使用 SELL
+        if 'MARKET' in order_type:
+            side_value = 'sell'
+
         # 【检查是否存在相同触发价格的条件单】
         binance_client = self._create_binance_order_client()
         conversation_id = self._get_conversation_id()
@@ -5669,6 +5673,10 @@ class TradingEngine:
 
         # 确定交易方向（buy/sell）
         side_value = side_for_trade.lower()  # 'buy' or 'sell'
+
+        # 市场委托单始终使用 SELL
+        if 'MARKET' in order_type:
+            side_value = 'sell'
 
         # 【检查是否存在相同触发价格的条件单】
         binance_client = self._create_binance_order_client()
