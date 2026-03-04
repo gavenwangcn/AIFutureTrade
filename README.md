@@ -1743,7 +1743,16 @@ If this project has been helpful to you, please consider supporting its continue
 
 <div align="center">
 
-![Sponsorship Support](img/receive.jpg)
+<table>
+  <tr>
+    <td align="center">
+      <img src="img/contact.jpg" alt="Contact" width="50%" />
+    </td>
+    <td align="center">
+      <img src="img/receive.jpg" alt="Sponsorship Support" width="50%" />
+    </td>
+  </tr>
+</table>
 
 **Thank you for your support! Your sponsorship will be used for:**
 - 🚀 Continuous optimization of trading strategies and algorithms
