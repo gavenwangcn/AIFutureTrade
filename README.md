@@ -11,11 +11,429 @@
 
 An intelligent automated trading system for Binance Futures, powered by AI and built with microservices architecture.
 
-[English](#english) | [中文](#chinese)
+[中文](#chinese) | [English](#english)
 
 </div>
 
 ---
+
+## <a name="chinese"></a>中文
+
+### 📋 目录
+
+- [概述](#概述)
+- [功能](#功能)
+- [架构](#架构-1)
+- [快速开始](#快速开始-1)
+- [配置](#配置-1)
+- [API 文档](#api-文档)
+- [赞助支持](#赞助支持)
+- [界面截图](#界面截图)
+
+### 概述
+
+AIFutureTrade 是面向 Binance 合约的智能自动交易系统，采用微服务与容器化架构，覆盖策略管理、行情处理、风控与交易执行等全链路能力。
+
+### 功能
+
+- **策略与模型**：多模型独立容器运行，动态创建/启动/停止
+- **行情与指标**：WebSocket 实时行情，内置多种技术指标
+- **交易执行**：低延迟下单与持仓管理，支持止盈止损与风控
+- **数据与审计**：交易与持仓全量落库，日志可追溯
+
+### 📊 系统功能全介绍
+
+#### 1. 模型与策略管理
+
+| 功能 | 说明 | 实现位置 |
+|------|------|---------|
+| **模型CRUD** | 创建、查询、更新、删除交易模型 | Backend API `/api/models` |
+| **模型配置** | 设置杠杆、最大持仓、初始资金 | ModelController |
+| **自动交易控制** | 独立启用/禁用买入和卖出循环 | Model auto_buy/auto_sell 标志 |
+| **风控参数** | 配置止损%、日收益目标、连续亏损限制 | ModelDO 实体 |
+| **批量执行** | 配置批量大小、执行间隔、分组执行 | 模型批量配置 |
+| **策略关联** | 将多个策略与优先级关联到模型 | ModelStrategyController |
+| **策略代码执行** | 执行数据库中的Python策略代码 | StrategyTrader 类 |
+| **AI提供商选择** | 选择OpenAI、Claude、DeepSeek、Gemini等 | AiProviderController |
+| **自定义提示词** | 为每个模型定义买入/卖出提示词 | ModelPromptDO 表 |
+
+#### 2. 交易执行
+
+| 功能 | 说明 | 实现位置 |
+|------|------|---------|
+| **买入循环** | 获取涨幅榜、过滤、执行AI决策 | TradingEngine._execute_buy_cycle() |
+| **卖出循环** | 监控持仓、执行卖出信号 | TradingEngine._execute_sell_cycle() |
+| **市价单** | 执行即时市价单 | BinanceFuturesOrderClient |
+| **限价单** | 以自定义价格下限价单 | 订单执行服务 |
+| **止损单** | 自动创建止损订单 | AlgoOrderService |
+| **止盈单** | 自动创建止盈订单 | AlgoOrderService |
+| **平仓** | 一键平仓功能 | BinanceFuturesOrderServiceImpl |
+| **数量精度** | 根据价格自动调整数量 | QuantityNormalizer |
+| **杠杆管理** | 设置和调整每个持仓的杠杆 | BinanceFuturesOrderClient |
+| **对冲模式** | 支持LONG/SHORT持仓模式 | 持仓模式配置 |
+
+#### 3. 市场数据与指标
+
+| 功能 | 说明 | 实现位置 |
+|------|------|---------|
+| **实时行情流** | WebSocket连接币安行情 | MarketTickerStreamService |
+| **K线数据** | 获取历史K线数据（1m-1w） | BinanceFuturesClient |
+| **多时间周期** | 支持15m、30m、1h、4h、1d周期 | MarketDataManager |
+| **ATR指标** | 平均真实波幅用于波动率计算 | MarketIndexCalculator |
+| **ADX指标** | 平均方向指数用于趋势强度 | MarketIndexCalculator |
+| **RSI指标** | 相对强弱指数（通过TA-Lib） | TA-Lib集成 |
+| **MACD指标** | 移动平均收敛散度 | TA-Lib集成 |
+| **布林带** | 布林带用于波动率带状 | TA-Lib集成 |
+| **市场波动率指数** | 计算市场范围内的波动率指标 | calculate_market_volatility() |
+| **市场趋势指数** | 计算市场范围内的趋势强度 | calculate_market_trend_strength() |
+| **价格刷新** | 定期更新所有合约价格 | PriceRefreshService |
+| **符号离线检测** | 检测下架或离线的合约 | MarketSymbolOfflineService |
+
+#### 4. 风险管理
+
+| 功能 | 说明 | 实现位置 |
+|------|------|---------|
+| **头寸规模** | 根据风险%计算头寸大小 | RiskCalculator |
+| **最大持仓限制** | 强制执行每个模型的最大持仓数 | Model max_positions 配置 |
+| **亏损自动平仓** | 在亏损阈值处自动平仓 | AutoCloseService |
+| **连续亏损追踪** | 追踪并限制连续亏损 | TradingEngine |
+| **日收益目标** | 监控并强制执行日利润目标 | AccountValuesDailyService |
+| **成交量过滤** | 按最小交易量过滤合约 | BaseVolumeFilter |
+| **禁止买入时间** | 限制特定时间段的买入订单 | ForbiddenBuyTimeFilter |
+| **同合约间隔** | 强制同一合约买入之间的最小间隔 | SameSymbolIntervalFilter |
+| **滑点容差** | 配置可接受的滑点百分比 | 交易执行配置 |
+| **账户价值追踪** | 监控账户价值随时间的变化 | AccountValueHistoryDO |
+
+#### 5. 前端UI组件
+
+| 功能 | 说明 | 技术栈 |
+|------|------|--------|
+| **仪表板** | 主交易仪表板与控制按钮 | Vue 3 + Vite |
+| **模型管理UI** | 创建、编辑、删除模型 | 模态对话框 |
+| **投资组合显示** | 显示当前持仓和盈亏 | 实时更新 |
+| **交易历史** | 分页交易列表与详情 | DataTable组件 |
+| **K线图表** | 交互式K线图 | KLineChart 10.0.0 |
+| **技术指标** | MA、EMA、MACD、KDJ、RSI、ATR叠加 | 图表指标 |
+| **市场排行榜** | 涨幅榜和跌幅榜显示 | MarketController |
+| **设置模态框** | 配置模型参数 | SettingsController |
+| **策略管理器** | 管理策略代码和关联 | StrategyController |
+| **买入/卖出日志** | 实时执行日志 | WebSocket流 |
+| **交易日志** | 合并的交易历史日志 | TradeLogsWebSocketHandler |
+| **微信通知** | 配置微信告警webhook | SettingsController |
+
+#### 6. 数据管理
+
+| 功能 | 说明 | 数据库表 |
+|------|------|---------|
+| **交易记录** | 完整的交易历史与信号 | trades |
+| **持仓追踪** | 当前和历史持仓 | portfolios |
+| **策略定义** | 策略代码和元数据 | strategys |
+| **模型配置** | 模型设置和参数 | models |
+| **账户价值** | 当前账户价值快照 | account_values |
+| **账户历史** | 历史账户价值追踪 | account_value_historys |
+| **日度汇总** | 日度账户价值汇总 | account_values_daily |
+| **策略决策** | AI决策记录和理由 | strategy_decisions |
+| **条件订单** | 条件订单追踪 | algo_order |
+| **市场行情** | 实时市场数据缓存 | market_tickers |
+| **合约配置** | 可交易合约配置 | futures |
+| **AI提供商** | API提供商凭证 | providers |
+| **对话历史** | AI对话历史 | conversations |
+
+#### 7. 系统集成
+
+| 功能 | 说明 | 集成方式 |
+|------|------|---------|
+| **币安REST API** | 账户、订单、持仓、行情数据 | BinanceFuturesClient |
+| **币安WebSocket** | 实时行情和订单更新 | MarketTickerStreamService |
+| **Docker管理** | 动态容器生命周期 | Docker Java API |
+| **MySQL数据库** | 持久化数据存储 | MyBatis Plus ORM |
+| **JWT认证** | 安全API认证 | JwtTokenProvider |
+| **CORS配置** | 跨域请求处理 | CorsConfig |
+| **WebSocket服务器** | 实时前端更新 | WebSocketConfig |
+| **REST API网关** | 集中式API路由 | Spring Boot |
+| **服务发现** | 容器DNS解析 | Docker桥接网络 |
+| **健康检查** | 服务健康监控 | Spring Boot Actuator |
+
+#### 8. 监控与告警
+
+| 功能 | 说明 | 实现位置 |
+|------|------|---------|
+| **容器健康** | 监控async-service容器状态 | TradeMonitorService |
+| **行情流超时** | 检测WebSocket连接失败 | ConnectionMonitor |
+| **自动重启** | 自动重启失败的容器 | ContainerRestartService |
+| **微信告警** | 发送通知到微信群 | WeChatNotificationService |
+| **服务日志** | 所有服务的集中式日志 | SLF4J + Logback |
+| **交易执行日志** | 详细的交易执行追踪 | TradeLogsWebSocketHandler |
+| **模型执行日志** | 每个模型的执行日志 | ModelLogsWebSocketHandler |
+| **错误追踪** | SDK错误记录和报告 | ErrorHandler |
+| **性能指标** | 追踪执行时间和吞吐量 | MetricsCollector |
+
+#### 9. 高级功能
+
+| 功能 | 说明 | 详情 |
+|------|------|------|
+| **多时间周期分析** | 1h、4h、1d的ADX计算 | _calculate_symbol_adx() |
+| **市场状态聚合** | 合并波动率和趋势指标 | calculate_comprehensive_market_state() |
+| **批量处理** | 并发AI决策处理 | BatchDecisionProcessor |
+| **策略优先级** | 按优先级执行策略 | ModelStrategyDO priority字段 |
+| **多策略合并** | 合并来自多个策略的决策 | StrategyTrader |
+| **对话历史** | 追踪AI决策推理 | ConversationDO 表 |
+| **Token使用追踪** | 监控LLM API Token消耗 | AiTrader |
+| **降级处理** | API失败时的优雅降级 | ErrorHandler |
+| **数据规范化** | 规范化价格和数量 | DataNormalizer |
+| **时区支持** | UTC+8时区处理 | TimeZoneConfig |
+
+### 架构
+
+- **前端**：Vue 3 + KLineChart 实时可视化
+- **后端**：Spring Boot 业务与模型管理
+- **交易服务**：Python 交易引擎与指标计算
+- **异步服务**：行情流处理与定时任务
+- **币安服务**：Binance API 调用与限流
+
+#### 系统架构图
+
+```mermaid
+graph TB
+    subgraph "Client Layer"
+        USER[User Browser]
+    end
+
+    subgraph "Frontend Layer"
+        FE[Vue 3 Frontend<br/>Port 3000<br/>Vite + KLineChart]
+    end
+
+    subgraph "API Gateway Layer"
+        BE[Backend Service<br/>Java Spring Boot<br/>Port 5002<br/>User/Model Management]
+    end
+
+    subgraph "Core Services Layer"
+        BS[Binance Service<br/>Java + Undertow<br/>Port 5004<br/>Market Data API]
+        AS[Async Service<br/>Java Spring Boot<br/>Port 5003<br/>WebSocket Stream]
+        TS[Trade Service<br/>Python Flask<br/>Port 5000<br/>Trading Engine]
+    end
+
+    subgraph "Dynamic Model Layer"
+        MB1[Buy Model 1<br/>Python Container]
+        MB2[Buy Model 2<br/>Python Container]
+        MS1[Sell Model 1<br/>Python Container]
+        MS2[Sell Model 2<br/>Python Container]
+    end
+
+    subgraph "External Services"
+        BINANCE[Binance API<br/>Futures Market<br/>WebSocket + REST]
+        DB[(MySQL 8.0<br/>Port 32123<br/>Trade Data)]
+    end
+
+    subgraph "Docker Infrastructure"
+        DOCKER[Docker Engine<br/>Container Management]
+    end
+
+    USER -->|HTTPS| FE
+    FE -->|HTTP/WebSocket| BE
+    BE -->|REST API| TS
+    BE -->|REST API| BS
+    BE -->|REST API| AS
+    BE -->|Docker API| DOCKER
+    BE -->|JDBC| DB
+
+    DOCKER -->|Manage| MB1
+    DOCKER -->|Manage| MB2
+    DOCKER -->|Manage| MS1
+    DOCKER -->|Manage| MS2
+
+    BS -->|HTTPS| BINANCE
+    AS -->|WebSocket| BINANCE
+    AS -->|JDBC| DB
+    TS -->|HTTPS| BINANCE
+    TS -->|JDBC| DB
+
+    MB1 -->|Trade Logic| TS
+    MB2 -->|Trade Logic| TS
+    MS1 -->|Trade Logic| TS
+    MS2 -->|Trade Logic| TS
+```
+
+#### 网络架构
+
+```mermaid
+graph LR
+    subgraph "Public Network"
+        INTERNET[Internet]
+    end
+
+    subgraph "Docker Bridge Network: aifuturetrade-network"
+        subgraph "Frontend Container"
+            FE[frontend:3000]
+        end
+
+        subgraph "Backend Container"
+            BE[backend:5002]
+        end
+
+        subgraph "Service Containers"
+            BS[binance-service:5004]
+            AS[async-service:5003]
+            TS[trade:5000]
+        end
+
+        subgraph "Model Containers"
+            MB["buy-<modelId>"]
+            MS["sell-<modelId>"]
+        end
+
+        subgraph "Database Container"
+            DB[mysql:32123]
+        end
+    end
+
+    INTERNET -->|Port 3000| FE
+    INTERNET -->|Port 5002| BE
+
+    FE -.->|Internal DNS| BE
+    BE -.->|Internal DNS| BS
+    BE -.->|Internal DNS| AS
+    BE -.->|Internal DNS| TS
+    BE -.->|Internal DNS| DB
+
+    BS -.->|Internal DNS| DB
+    AS -.->|Internal DNS| DB
+    TS -.->|Internal DNS| DB
+
+    MB -.->|Internal DNS| TS
+    MS -.->|Internal DNS| TS
+```
+
+### 快速开始
+
+1. 克隆仓库并进入目录  
+   `git clone https://github.com/gavenwangcn/AIFutureTrade.git`
+
+2. 准备环境变量  
+   复制 `.env.example` 为 `.env` 并补充配置（重点是 Binance API 与 MySQL）
+
+3. 启动 MySQL（必须先启动）  
+   `docker-compose -f docker-compose-mysql.yml up -d`
+
+4. 启动全部服务  
+   `docker-compose up -d --build --scale model-buy=0 --scale model-sell=0`
+
+### 配置
+
+核心配置均在 `.env`，包含数据库连接、Binance API 密钥、服务端口、异步任务与风控参数。  
+后端的详细配置位于 `backend/src/main/resources/application.yml`。
+
+### API 文档
+
+- **Backend**: http://localhost:5002/swagger-ui.html  
+- **Binance Service**: http://localhost:5004/swagger-ui.html  
+- **Trade Service**: http://localhost:5000/api/docs
+
+### 部署
+
+#### 开发环境
+
+- 适合本地调试与功能验证，可用 Docker 统一启动
+- 建议先启动 MySQL，再启动其余服务
+
+#### 生产环境
+
+- 建议使用独立数据库与反向代理（Nginx/Traefik）
+- 开启 HTTPS、日志与监控、资源限制、备份策略
+
+#### 生产环境清单
+
+- 独立 MySQL / 云数据库，开启备份与只读账号
+- 反向代理 + HTTPS，配置安全头与限流
+- 日志与监控（Prometheus/Grafana/ELK）
+- Docker 资源限制与自动重启策略
+- 秘钥与环境变量通过安全方式注入（避免硬编码）
+- 时区统一（Asia/Shanghai）与系统时间同步
+- 定期清理与归档历史数据
+
+#### Docker 部署
+
+```
+docker-compose -f docker-compose-mysql.yml up -d
+docker-compose up -d --build --scale model-buy=0 --scale model-sell=0
+```
+
+### 开发
+
+- Java 服务：`mvn clean package -DskipTests`
+- Python 交易服务：`pip install -r requirements.txt`，`python -m trade.app`
+- 前端：`npm install`，`npm run dev`
+
+### 监控与日志
+
+- 统一查看容器日志：`docker-compose logs -f <service>`
+- 关键服务健康检查：
+  - `http://localhost:5002/actuator/health`
+  - `http://localhost:5000/health`
+
+### 安全
+
+- Binance API 与数据库账号请勿提交到仓库
+- 生产环境请替换默认口令与密钥
+- JWT、CORS 与网络访问建议按最小权限配置
+
+### 性能优化
+
+- Java 服务开启 G1GC 与合理的堆内存参数
+- 异步服务与行情刷新任务支持可配置调度
+- 数据访问建议配合缓存/限流策略
+
+### 故障排查
+
+- 先确认 MySQL 容器健康
+- 检查端口占用与服务日志
+- SDK 依赖构建失败时，先构建 Binance SDK 子模块
+
+### 贡献指南
+
+请查看 `CONTRIBUTING.md`。
+
+### 许可证
+
+本项目基于 MIT License，详见 `LICENSE`。
+
+### 💖 赞助支持
+
+如果这个项目对您有帮助，欢迎通过以下方式支持项目的持续开发与维护：
+
+<div align="center">
+
+![赞助支持](img/receive.jpg)
+
+**感谢您的支持！您的赞助将用于：**
+- 🚀 持续优化交易策略与算法
+- 🔧 修复 Bug 与改进用户体验
+- 📚 完善文档与教程
+- 💡 开发新功能与特性
+
+</div>
+
+### 🖼️ 界面截图
+
+**K 线与指标分析**  
+![K线图](img/Attached_image.png)  
+交互式 K 线图，支持 MA/EMA、MACD、KDJ、RSI、ATR 等指标叠加分析。
+
+**策略管理**  
+![策略管理](img/Attached2_image.png)  
+集中管理策略列表、状态与快捷操作（编辑/启动等）。
+
+**模型级买入执行日志**  
+![买入日志](img/Attached3_image.png)  
+提供模型实时执行日志，便于排障与运行审计。
+
+**策略绩效与交易列表**  
+![策略绩效](img/Attached4_image.png)  
+展示策略收益走势与近期交易明细，便于复盘与跟踪执行结果。
+
+**行情总览与涨跌排行**  
+![行情总览](img/Attached5_image.png)  
+展示 USDS-M 行情总览、涨跌幅排行以及左侧快速合约导航。
 
 ## <a name="english"></a>English
 
@@ -1327,422 +1745,4 @@ If this project has been helpful to you, please consider supporting its continue
 </div>
 
 ---
-
-## <a name="chinese"></a>中文
-
-### 📋 目录
-
-- [概述](#概述)
-- [功能](#功能)
-- [架构](#架构-1)
-- [快速开始](#快速开始-1)
-- [配置](#配置-1)
-- [API 文档](#api-文档)
-- [赞助支持](#赞助支持)
-- [界面截图](#界面截图)
-
-### 概述
-
-AIFutureTrade 是面向 Binance 合约的智能自动交易系统，采用微服务与容器化架构，覆盖策略管理、行情处理、风控与交易执行等全链路能力。
-
-### 功能
-
-- **策略与模型**：多模型独立容器运行，动态创建/启动/停止
-- **行情与指标**：WebSocket 实时行情，内置多种技术指标
-- **交易执行**：低延迟下单与持仓管理，支持止盈止损与风控
-- **数据与审计**：交易与持仓全量落库，日志可追溯
-
-### 📊 系统功能全介绍
-
-#### 1. 模型与策略管理
-
-| 功能 | 说明 | 实现位置 |
-|------|------|---------|
-| **模型CRUD** | 创建、查询、更新、删除交易模型 | Backend API `/api/models` |
-| **模型配置** | 设置杠杆、最大持仓、初始资金 | ModelController |
-| **自动交易控制** | 独立启用/禁用买入和卖出循环 | Model auto_buy/auto_sell 标志 |
-| **风控参数** | 配置止损%、日收益目标、连续亏损限制 | ModelDO 实体 |
-| **批量执行** | 配置批量大小、执行间隔、分组执行 | 模型批量配置 |
-| **策略关联** | 将多个策略与优先级关联到模型 | ModelStrategyController |
-| **策略代码执行** | 执行数据库中的Python策略代码 | StrategyTrader 类 |
-| **AI提供商选择** | 选择OpenAI、Claude、DeepSeek、Gemini等 | AiProviderController |
-| **自定义提示词** | 为每个模型定义买入/卖出提示词 | ModelPromptDO 表 |
-
-#### 2. 交易执行
-
-| 功能 | 说明 | 实现位置 |
-|------|------|---------|
-| **买入循环** | 获取涨幅榜、过滤、执行AI决策 | TradingEngine._execute_buy_cycle() |
-| **卖出循环** | 监控持仓、执行卖出信号 | TradingEngine._execute_sell_cycle() |
-| **市价单** | 执行即时市价单 | BinanceFuturesOrderClient |
-| **限价单** | 以自定义价格下限价单 | 订单执行服务 |
-| **止损单** | 自动创建止损订单 | AlgoOrderService |
-| **止盈单** | 自动创建止盈订单 | AlgoOrderService |
-| **平仓** | 一键平仓功能 | BinanceFuturesOrderServiceImpl |
-| **数量精度** | 根据价格自动调整数量 | QuantityNormalizer |
-| **杠杆管理** | 设置和调整每个持仓的杠杆 | BinanceFuturesOrderClient |
-| **对冲模式** | 支持LONG/SHORT持仓模式 | 持仓模式配置 |
-
-#### 3. 市场数据与指标
-
-| 功能 | 说明 | 实现位置 |
-|------|------|---------|
-| **实时行情流** | WebSocket连接币安行情 | MarketTickerStreamService |
-| **K线数据** | 获取历史K线数据（1m-1w） | BinanceFuturesClient |
-| **多时间周期** | 支持15m、30m、1h、4h、1d周期 | MarketDataManager |
-| **ATR指标** | 平均真实波幅用于波动率计算 | MarketIndexCalculator |
-| **ADX指标** | 平均方向指数用于趋势强度 | MarketIndexCalculator |
-| **RSI指标** | 相对强弱指数（通过TA-Lib） | TA-Lib集成 |
-| **MACD指标** | 移动平均收敛散度 | TA-Lib集成 |
-| **布林带** | 布林带用于波动率带状 | TA-Lib集成 |
-| **市场波动率指数** | 计算市场范围内的波动率指标 | calculate_market_volatility() |
-| **市场趋势指数** | 计算市场范围内的趋势强度 | calculate_market_trend_strength() |
-| **价格刷新** | 定期更新所有合约价格 | PriceRefreshService |
-| **符号离线检测** | 检测下架或离线的合约 | MarketSymbolOfflineService |
-
-#### 4. 风险管理
-
-| 功能 | 说明 | 实现位置 |
-|------|------|---------|
-| **头寸规模** | 根据风险%计算头寸大小 | RiskCalculator |
-| **最大持仓限制** | 强制执行每个模型的最大持仓数 | Model max_positions 配置 |
-| **亏损自动平仓** | 在亏损阈值处自动平仓 | AutoCloseService |
-| **连续亏损追踪** | 追踪并限制连续亏损 | TradingEngine |
-| **日收益目标** | 监控并强制执行日利润目标 | AccountValuesDailyService |
-| **成交量过滤** | 按最小交易量过滤合约 | BaseVolumeFilter |
-| **禁止买入时间** | 限制特定时间段的买入订单 | ForbiddenBuyTimeFilter |
-| **同合约间隔** | 强制同一合约买入之间的最小间隔 | SameSymbolIntervalFilter |
-| **滑点容差** | 配置可接受的滑点百分比 | 交易执行配置 |
-| **账户价值追踪** | 监控账户价值随时间的变化 | AccountValueHistoryDO |
-
-#### 5. 前端UI组件
-
-| 功能 | 说明 | 技术栈 |
-|------|------|--------|
-| **仪表板** | 主交易仪表板与控制按钮 | Vue 3 + Vite |
-| **模型管理UI** | 创建、编辑、删除模型 | 模态对话框 |
-| **投资组合显示** | 显示当前持仓和盈亏 | 实时更新 |
-| **交易历史** | 分页交易列表与详情 | DataTable组件 |
-| **K线图表** | 交互式K线图 | KLineChart 10.0.0 |
-| **技术指标** | MA、EMA、MACD、KDJ、RSI、ATR叠加 | 图表指标 |
-| **市场排行榜** | 涨幅榜和跌幅榜显示 | MarketController |
-| **设置模态框** | 配置模型参数 | SettingsController |
-| **策略管理器** | 管理策略代码和关联 | StrategyController |
-| **买入/卖出日志** | 实时执行日志 | WebSocket流 |
-| **交易日志** | 合并的交易历史日志 | TradeLogsWebSocketHandler |
-| **微信通知** | 配置微信告警webhook | SettingsController |
-
-#### 6. 数据管理
-
-| 功能 | 说明 | 数据库表 |
-|------|------|---------|
-| **交易记录** | 完整的交易历史与信号 | trades |
-| **持仓追踪** | 当前和历史持仓 | portfolios |
-| **策略定义** | 策略代码和元数据 | strategys |
-| **模型配置** | 模型设置和参数 | models |
-| **账户价值** | 当前账户价值快照 | account_values |
-| **账户历史** | 历史账户价值追踪 | account_value_historys |
-| **日度汇总** | 日度账户价值汇总 | account_values_daily |
-| **策略决策** | AI决策记录和理由 | strategy_decisions |
-| **条件订单** | 条件订单追踪 | algo_order |
-| **市场行情** | 实时市场数据缓存 | market_tickers |
-| **合约配置** | 可交易合约配置 | futures |
-| **AI提供商** | API提供商凭证 | providers |
-| **对话历史** | AI对话历史 | conversations |
-
-#### 7. 系统集成
-
-| 功能 | 说明 | 集成方式 |
-|------|------|---------|
-| **币安REST API** | 账户、订单、持仓、行情数据 | BinanceFuturesClient |
-| **币安WebSocket** | 实时行情和订单更新 | MarketTickerStreamService |
-| **Docker管理** | 动态容器生命周期 | Docker Java API |
-| **MySQL数据库** | 持久化数据存储 | MyBatis Plus ORM |
-| **JWT认证** | 安全API认证 | JwtTokenProvider |
-| **CORS配置** | 跨域请求处理 | CorsConfig |
-| **WebSocket服务器** | 实时前端更新 | WebSocketConfig |
-| **REST API网关** | 集中式API路由 | Spring Boot |
-| **服务发现** | 容器DNS解析 | Docker桥接网络 |
-| **健康检查** | 服务健康监控 | Spring Boot Actuator |
-
-#### 8. 监控与告警
-
-| 功能 | 说明 | 实现位置 |
-|------|------|---------|
-| **容器健康** | 监控async-service容器状态 | TradeMonitorService |
-| **行情流超时** | 检测WebSocket连接失败 | ConnectionMonitor |
-| **自动重启** | 自动重启失败的容器 | ContainerRestartService |
-| **微信告警** | 发送通知到微信群 | WeChatNotificationService |
-| **服务日志** | 所有服务的集中式日志 | SLF4J + Logback |
-| **交易执行日志** | 详细的交易执行追踪 | TradeLogsWebSocketHandler |
-| **模型执行日志** | 每个模型的执行日志 | ModelLogsWebSocketHandler |
-| **错误追踪** | SDK错误记录和报告 | ErrorHandler |
-| **性能指标** | 追踪执行时间和吞吐量 | MetricsCollector |
-
-#### 9. 高级功能
-
-| 功能 | 说明 | 详情 |
-|------|------|------|
-| **多时间周期分析** | 1h、4h、1d的ADX计算 | _calculate_symbol_adx() |
-| **市场状态聚合** | 合并波动率和趋势指标 | calculate_comprehensive_market_state() |
-| **批量处理** | 并发AI决策处理 | BatchDecisionProcessor |
-| **策略优先级** | 按优先级执行策略 | ModelStrategyDO priority字段 |
-| **多策略合并** | 合并来自多个策略的决策 | StrategyTrader |
-| **对话历史** | 追踪AI决策推理 | ConversationDO 表 |
-| **Token使用追踪** | 监控LLM API Token消耗 | AiTrader |
-| **降级处理** | API失败时的优雅降级 | ErrorHandler |
-| **数据规范化** | 规范化价格和数量 | DataNormalizer |
-| **时区支持** | UTC+8时区处理 | TimeZoneConfig |
-
-### 架构
-
-- **前端**：Vue 3 + KLineChart 实时可视化
-- **后端**：Spring Boot 业务与模型管理
-- **交易服务**：Python 交易引擎与指标计算
-- **异步服务**：行情流处理与定时任务
-- **币安服务**：Binance API 调用与限流
-
-#### 系统架构图
-
-```mermaid
-graph TB
-    subgraph "Client Layer"
-        USER[User Browser]
-    end
-
-    subgraph "Frontend Layer"
-        FE[Vue 3 Frontend<br/>Port 3000<br/>Vite + KLineChart]
-    end
-
-    subgraph "API Gateway Layer"
-        BE[Backend Service<br/>Java Spring Boot<br/>Port 5002<br/>User/Model Management]
-    end
-
-    subgraph "Core Services Layer"
-        BS[Binance Service<br/>Java + Undertow<br/>Port 5004<br/>Market Data API]
-        AS[Async Service<br/>Java Spring Boot<br/>Port 5003<br/>WebSocket Stream]
-        TS[Trade Service<br/>Python Flask<br/>Port 5000<br/>Trading Engine]
-    end
-
-    subgraph "Dynamic Model Layer"
-        MB1[Buy Model 1<br/>Python Container]
-        MB2[Buy Model 2<br/>Python Container]
-        MS1[Sell Model 1<br/>Python Container]
-        MS2[Sell Model 2<br/>Python Container]
-    end
-
-    subgraph "External Services"
-        BINANCE[Binance API<br/>Futures Market<br/>WebSocket + REST]
-        DB[(MySQL 8.0<br/>Port 32123<br/>Trade Data)]
-    end
-
-    subgraph "Docker Infrastructure"
-        DOCKER[Docker Engine<br/>Container Management]
-    end
-
-    USER -->|HTTPS| FE
-    FE -->|HTTP/WebSocket| BE
-    BE -->|REST API| TS
-    BE -->|REST API| BS
-    BE -->|REST API| AS
-    BE -->|Docker API| DOCKER
-    BE -->|JDBC| DB
-
-    DOCKER -->|Manage| MB1
-    DOCKER -->|Manage| MB2
-    DOCKER -->|Manage| MS1
-    DOCKER -->|Manage| MS2
-
-    BS -->|HTTPS| BINANCE
-    AS -->|WebSocket| BINANCE
-    AS -->|JDBC| DB
-    TS -->|HTTPS| BINANCE
-    TS -->|JDBC| DB
-
-    MB1 -->|Trade Logic| TS
-    MB2 -->|Trade Logic| TS
-    MS1 -->|Trade Logic| TS
-    MS2 -->|Trade Logic| TS
-```
-
-#### 网络架构
-
-```mermaid
-graph LR
-    subgraph "Public Network"
-        INTERNET[Internet]
-    end
-
-    subgraph "Docker Bridge Network: aifuturetrade-network"
-        subgraph "Frontend Container"
-            FE[frontend:3000]
-        end
-
-        subgraph "Backend Container"
-            BE[backend:5002]
-        end
-
-        subgraph "Service Containers"
-            BS[binance-service:5004]
-            AS[async-service:5003]
-            TS[trade:5000]
-        end
-
-        subgraph "Model Containers"
-            MB["buy-<modelId>"]
-            MS["sell-<modelId>"]
-        end
-
-        subgraph "Database Container"
-            DB[mysql:32123]
-        end
-    end
-
-    INTERNET -->|Port 3000| FE
-    INTERNET -->|Port 5002| BE
-
-    FE -.->|Internal DNS| BE
-    BE -.->|Internal DNS| BS
-    BE -.->|Internal DNS| AS
-    BE -.->|Internal DNS| TS
-    BE -.->|Internal DNS| DB
-
-    BS -.->|Internal DNS| DB
-    AS -.->|Internal DNS| DB
-    TS -.->|Internal DNS| DB
-
-    MB -.->|Internal DNS| TS
-    MS -.->|Internal DNS| TS
-```
-
-### 快速开始
-
-1. 克隆仓库并进入目录  
-   `git clone https://github.com/gavenwangcn/AIFutureTrade.git`
-
-2. 准备环境变量  
-   复制 `.env.example` 为 `.env` 并补充配置（重点是 Binance API 与 MySQL）
-
-3. 启动 MySQL（必须先启动）  
-   `docker-compose -f docker-compose-mysql.yml up -d`
-
-4. 启动全部服务  
-   `docker-compose up -d --build --scale model-buy=0 --scale model-sell=0`
-
-### 配置
-
-核心配置均在 `.env`，包含数据库连接、Binance API 密钥、服务端口、异步任务与风控参数。  
-后端的详细配置位于 `backend/src/main/resources/application.yml`。
-
-### API 文档
-
-- **Backend**: http://localhost:5002/swagger-ui.html  
-- **Binance Service**: http://localhost:5004/swagger-ui.html  
-- **Trade Service**: http://localhost:5000/api/docs
-
-### 部署
-
-#### 开发环境
-
-- 适合本地调试与功能验证，可用 Docker 统一启动
-- 建议先启动 MySQL，再启动其余服务
-
-#### 生产环境
-
-- 建议使用独立数据库与反向代理（Nginx/Traefik）
-- 开启 HTTPS、日志与监控、资源限制、备份策略
-
-#### 生产环境清单
-
-- 独立 MySQL / 云数据库，开启备份与只读账号
-- 反向代理 + HTTPS，配置安全头与限流
-- 日志与监控（Prometheus/Grafana/ELK）
-- Docker 资源限制与自动重启策略
-- 秘钥与环境变量通过安全方式注入（避免硬编码）
-- 时区统一（Asia/Shanghai）与系统时间同步
-- 定期清理与归档历史数据
-
-#### Docker 部署
-
-```
-docker-compose -f docker-compose-mysql.yml up -d
-docker-compose up -d --build --scale model-buy=0 --scale model-sell=0
-```
-
-### 开发
-
-- Java 服务：`mvn clean package -DskipTests`
-- Python 交易服务：`pip install -r requirements.txt`，`python -m trade.app`
-- 前端：`npm install`，`npm run dev`
-
-### 监控与日志
-
-- 统一查看容器日志：`docker-compose logs -f <service>`
-- 关键服务健康检查：
-  - `http://localhost:5002/actuator/health`
-  - `http://localhost:5000/health`
-
-### 安全
-
-- Binance API 与数据库账号请勿提交到仓库
-- 生产环境请替换默认口令与密钥
-- JWT、CORS 与网络访问建议按最小权限配置
-
-### 性能优化
-
-- Java 服务开启 G1GC 与合理的堆内存参数
-- 异步服务与行情刷新任务支持可配置调度
-- 数据访问建议配合缓存/限流策略
-
-### 故障排查
-
-- 先确认 MySQL 容器健康
-- 检查端口占用与服务日志
-- SDK 依赖构建失败时，先构建 Binance SDK 子模块
-
-### 贡献指南
-
-请查看 `CONTRIBUTING.md`。
-
-### 许可证
-
-本项目基于 MIT License，详见 `LICENSE`。
-
-### 💖 赞助支持
-
-如果这个项目对您有帮助，欢迎通过以下方式支持项目的持续开发与维护：
-
-<div align="center">
-
-![赞助支持](img/receive.jpg)
-
-**感谢您的支持！您的赞助将用于：**
-- 🚀 持续优化交易策略与算法
-- 🔧 修复 Bug 与改进用户体验
-- 📚 完善文档与教程
-- 💡 开发新功能与特性
-
-</div>
-
-### 🖼️ 界面截图
-
-**K 线与指标分析**  
-![K线图](img/Attached_image.png)  
-交互式 K 线图，支持 MA/EMA、MACD、KDJ、RSI、ATR 等指标叠加分析。
-
-**策略管理**  
-![策略管理](img/Attached2_image.png)  
-集中管理策略列表、状态与快捷操作（编辑/启动等）。
-
-**模型级买入执行日志**  
-![买入日志](img/Attached3_image.png)  
-提供模型实时执行日志，便于排障与运行审计。
-
-**策略绩效与交易列表**  
-![策略绩效](img/Attached4_image.png)  
-展示策略收益走势与近期交易明细，便于复盘与跟踪执行结果。
-
-**行情总览与涨跌排行**  
-![行情总览](img/Attached5_image.png)  
-展示 USDS-M 行情总览、涨跌幅排行以及左侧快速合约导航。
 
