@@ -457,7 +457,7 @@ public class AutoCloseServiceImpl implements AutoCloseService {
                 trade.setId(UUID.randomUUID().toString());
                 trade.setModelId(model.getId());  // 写入对应 model_id
                 trade.setFuture(symbol.toUpperCase());
-                trade.setSignal("auto_close");
+                trade.setSignal("close_position");
                 trade.setQuantity(executedQuantity);
                 trade.setPrice(executedPrice);
                 trade.setLeverage(leverage);
@@ -478,24 +478,20 @@ public class AutoCloseServiceImpl implements AutoCloseService {
                     // 不返回 false，订单已成功
                 }
 
-                // 只有在real模式且SDK返回成功时才更新 portfolios 表：删除持仓记录
-                if (!useTestMode) {
-                    try {
-                        int deleted = portfolioMapper.deletePosition(model.getId(), symbol.toUpperCase(), positionSide);
-                        if (deleted > 0) {
-                            log.info("[AutoClose] ✅ 已更新 portfolios 表，删除持仓记录（real模式，SDK成功）: modelId={}, symbol={}, positionSide={}",
-                                    model.getId(), symbol, positionSide);
-                        } else {
-                            log.warn("[AutoClose] ⚠️  未找到要删除的持仓记录: modelId={}, symbol={}, positionSide={}",
-                                    model.getId(), symbol, positionSide);
-                        }
-                    } catch (Exception dbErr) {
-                        log.error("[AutoClose] ❌ 更新 portfolios 表失败: {}", dbErr.getMessage(), dbErr);
-                        // 不返回 false，因为订单已经提交成功
+                // 无论real还是test模式，SDK成功后都删除持仓记录（与Python代码逻辑一致）
+                // test模式也需要删除持仓，以同步数据库状态
+                try {
+                    int deleted = portfolioMapper.deletePosition(model.getId(), symbol.toUpperCase(), positionSide);
+                    if (deleted > 0) {
+                        log.info("[AutoClose] ✅ 已删除持仓记录: modelId={}, symbol={}, positionSide={}, mode={}",
+                                model.getId(), symbol, positionSide, useTestMode ? "test" : "real");
+                    } else {
+                        log.warn("[AutoClose] ⚠️  未找到要删除的持仓记录: modelId={}, symbol={}, positionSide={}",
+                                model.getId(), symbol, positionSide);
                     }
-                } else {
-                    // 测试模式下不更新数据库，因为不是真实交易
-                    log.info("[AutoClose] ℹ️  测试模式：跳过数据库更新（非真实交易）");
+                } catch (Exception dbErr) {
+                    log.error("[AutoClose] ❌ 删除持仓记录失败: {}", dbErr.getMessage(), dbErr);
+                    // 不返回 false，因为订单已经提交成功
                 }
 
                 return true;
@@ -507,7 +503,7 @@ public class AutoCloseServiceImpl implements AutoCloseService {
                     trade.setId(UUID.randomUUID().toString());
                     trade.setModelId(model.getId());
                     trade.setFuture(symbol.toUpperCase());
-                    trade.setSignal("auto_close");
+                    trade.setSignal("close_position");
                     trade.setQuantity(0.0);
                     trade.setPrice(0.0);
                     trade.setLeverage(leverage);
