@@ -14,6 +14,10 @@
     <!-- 引入 KLineChart 10.0.0（UMD 版本） -->
     <!-- 文件由 Dockerfile 构建时从 KLineChart/dist/umd/ 复制到 public/klinecharts/ -->
     <script src="/klinecharts/klinecharts.min.js"></script>
+
+    <!-- PageAgent 一行集成，使用官方 Demo LLM（技术评估用途） -->
+    <!-- 参考：https://github.com/alibaba/page-agent 和文档 https://alibaba.github.io/page-agent/docs/introduction/overview/ -->
+    <script src="https://registry.npmmirror.com/page-agent/1.5.7/files/dist/iife/page-agent.demo.js" crossorigin="true"></script>
     
     <script type="module" src="/src/main.js"></script>
 </body>
