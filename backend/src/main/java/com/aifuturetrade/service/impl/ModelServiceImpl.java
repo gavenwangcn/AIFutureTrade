@@ -2540,13 +2540,13 @@ public class ModelServiceImpl implements ModelService {
                 baseBalance = ((Number) todayRecord.get("balance")).doubleValue();
                 log.debug("[ModelService] 找到当天记录, baseBalance={}", baseBalance);
             } else {
-                // 没有找到当天的记录，检查是否有任何历史记录
-                Long recordCount = accountValuesDailyMapper.countByModelId(modelId);
+                // 没有找到当天的记录，尝试获取最近的历史记录
+                Map<String, Object> latestRecord = accountValuesDailyMapper.selectLatestAccountValue(modelId);
                 
-                if (recordCount != null && recordCount > 0) {
-                    // 有历史记录但没有当天的记录，返回null（前端显示为--）
-                    log.debug("[ModelService] 有历史记录但没有当天记录，返回null");
-                    return null;
+                if (latestRecord != null && latestRecord.get("balance") != null) {
+                    // 使用最近的历史记录作为基准
+                    baseBalance = ((Number) latestRecord.get("balance")).doubleValue();
+                    log.debug("[ModelService] 使用最近的历史记录作为基准, baseBalance={}", baseBalance);
                 } else {
                     // 没有任何记录，使用initial_capital作为基准
                     ModelDO model = modelMapper.selectById(modelId);

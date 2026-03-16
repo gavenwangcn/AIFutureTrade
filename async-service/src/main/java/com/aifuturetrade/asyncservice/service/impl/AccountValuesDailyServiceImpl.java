@@ -147,10 +147,10 @@ public class AccountValuesDailyServiceImpl implements AccountValuesDailyService 
     
     /**
      * 使用cron表达式启动定时调度器
-     * 默认每两分钟执行一次
+     * 默认每天0点执行（UTC时区，香港服务器实际为8点）
      */
     @Override
-    @Scheduled(cron = "${async.account-values-daily.cron:0 */2 * * * ?}")
+    @Scheduled(cron = "${async.account-values-daily.cron:0 0 0 * * ?}")
     public void startScheduler() {
         if (schedulerRunning.get()) {
             return;

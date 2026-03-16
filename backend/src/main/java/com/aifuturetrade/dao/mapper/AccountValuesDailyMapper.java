@@ -43,6 +43,19 @@ public interface AccountValuesDailyMapper extends BaseMapper<AccountValuesDailyD
     Long countByModelId(@Param("modelId") String modelId);
 
     /**
+     * 获取最近的账户价值记录（用于当天没有记录时的基准）
+     * 
+     * @param modelId 模型ID（UUID格式）
+     * @return 包含balance和available_balance的Map，如果不存在则返回null
+     */
+    @Select("SELECT balance, available_balance, created_at " +
+            "FROM account_values_daily " +
+            "WHERE model_id = #{modelId} " +
+            "ORDER BY created_at DESC " +
+            "LIMIT 1")
+    Map<String, Object> selectLatestAccountValue(@Param("modelId") String modelId);
+
+    /**
      * 根据模型ID删除账户每日价值记录
      * 
      * @param modelId 模型ID（UUID格式）
