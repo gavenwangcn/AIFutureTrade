@@ -7,6 +7,13 @@
     <link rel="icon" type="image/svg+xml" href="/favicon.svg">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.0/font/bootstrap-icons.css">
     <link rel="stylesheet" href="/style.css">
+    <style>
+        /* 通过 body 的 data 标记统一控制 PageAgent 可见性 */
+        body[data-page-agent-hidden="true"] ._wrapper_gtdpc_1,
+        body[data-page-agent-hidden="true"] ._wrapper_1ooyb_1 {
+            display: none !important;
+        }
+    </style>
 </head>
 <body>
     <div id="app"></div>
@@ -28,6 +35,13 @@
                     .filter(el => el.textContent === 'Ready');
                 statusNodes.forEach(el => {
                     el.textContent = '🤖 智能助手已就绪';
+                });
+
+                // 将顶部提示 "Waiting for task to start..." 翻译成中文
+                const waitingNodes = Array.from(document.querySelectorAll('div, span'))
+                    .filter(el => el.textContent === 'Waiting for task to start...');
+                waitingNodes.forEach(el => {
+                    el.textContent = '等待任务开始执行…';
                 });
 
                 // 修改输入框 placeholder，例如英文改成中文提示

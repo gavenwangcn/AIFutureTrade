@@ -34,6 +34,15 @@
           >
             <i class="bi bi-arrow-repeat" :class="{ spin: isRefreshingAll }"></i>
           </button>
+          <!-- 智能助手开关按钮（红框位置）：控制 PageAgent 显示/隐藏 -->
+          <button 
+            class="btn-icon" 
+            :class="{ active: isPageAgentVisible }"
+            @click="togglePageAgent"
+            title="智能助手"
+          >
+            <i class="bi bi-robot"></i>
+          </button>
           <button class="btn-icon" :class="{ active: loggerEnabled }" @click="toggleLogger" title="开启/关闭日志输出">
             <i class="bi" :class="loggerEnabled ? 'bi-play-fill' : 'bi-pause-fill'"></i>
           </button>
@@ -1683,8 +1692,19 @@ const getSymbolVolume = (symbol) => {
   return priceData ? (priceData.daily_volume || priceData.quote_volume || 0) : 0
 }
 
+// PageAgent 显示开关（通过 body data 属性控制）
+const isPageAgentVisible = ref(true)
+const togglePageAgent = () => {
+  isPageAgentVisible.value = !isPageAgentVisible.value
+  document.body.dataset.pageAgentHidden = isPageAgentVisible.value ? 'false' : 'true'
+}
+
 onMounted(() => {
   initApp()
+  // 初始默认显示 PageAgent
+  if (document && document.body) {
+    document.body.dataset.pageAgentHidden = 'false'
+  }
 })
 </script>
 
