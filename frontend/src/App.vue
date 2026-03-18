@@ -822,7 +822,7 @@
                         </span>
                       </td>
                       <td><strong>{{ decision.symbol || '-' }}</strong></td>
-                      <td>{{ decision.quantity ? decision.quantity.toFixed(4) : '-' }}</td>
+                      <td>{{ decision.quantity != null ? formatQuantityTrimZeros(decision.quantity, 8) : '-' }}</td>
                       <td>{{ decision.leverage ? decision.leverage + 'x' : '-' }}</td>
                       <td>{{ decision.price ? '$' + formatPrice6(decision.price) : '-' }}</td>
                       <td>{{ decision.stopPrice || decision.stop_price ? '$' + formatPrice6(decision.stopPrice || decision.stop_price) : '-' }}</td>
@@ -1491,6 +1491,15 @@ const formatAlgoStatus = (status) => {
     'failed': '失败'
   }
   return statusMap[status.toLowerCase()] || status
+}
+
+// 数量显示：最多保留 maxDecimals 位小数，并去掉末尾无意义的0（以及可能残留的小数点）
+const formatQuantityTrimZeros = (value, maxDecimals = 8) => {
+  if (value === null || value === undefined || value === '') return '-'
+  const n = Number(value)
+  if (!Number.isFinite(n)) return String(value)
+  const fixed = n.toFixed(Math.max(0, Math.min(20, Number(maxDecimals) || 0)))
+  return fixed.replace(/\.?0+$/, '')
 }
 
 // 格式化持仓方向（LONG -> 做多，SHORT -> 做空）

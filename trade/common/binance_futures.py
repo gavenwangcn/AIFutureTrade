@@ -1790,7 +1790,10 @@ class BinanceFuturesOrderClient(_BinanceFuturesBase):
                     if step_size is not None or tick_size is not None:
                         precision_info = {
                             "stepSize": step_size if step_size is not None else 0.001,
-                            "tickSize": tick_size if tick_size is not None else 0.01
+                            "tickSize": tick_size if tick_size is not None else 0.01,
+                            # 保留原始字符串，供 Decimal 精准计算与去0显示
+                            "stepSizeStr": step_size_str if step_size is not None else "0.001",
+                            "tickSizeStr": tick_size_str if tick_size is not None else "0.01",
                         }
                         self._symbol_precision_cache[symbol] = precision_info
                         self._cache_timestamp = current_time
@@ -1799,13 +1802,13 @@ class BinanceFuturesOrderClient(_BinanceFuturesBase):
             
             # 如果没找到，使用默认值（期货通常支持小数，stepSize=0.001 避免小数数量被截断为0）
             logger.warning(f"[Binance Futures] 未找到 {symbol} 的精度信息，使用默认值")
-            default_precision = {"stepSize": 0.001, "tickSize": 0.01}
+            default_precision = {"stepSize": 0.001, "tickSize": 0.01, "stepSizeStr": "0.001", "tickSizeStr": "0.01"}
             self._symbol_precision_cache[symbol] = default_precision
             return default_precision
             
         except Exception as e:
             logger.warning(f"[Binance Futures] 获取 {symbol} 精度信息失败: {e}，使用默认值")
-            default_precision = {"stepSize": 0.001, "tickSize": 0.01}
+            default_precision = {"stepSize": 0.001, "tickSize": 0.01, "stepSizeStr": "0.001", "tickSizeStr": "0.01"}
             if symbol not in self._symbol_precision_cache:
                 self._symbol_precision_cache[symbol] = default_precision
             return default_precision
@@ -1822,44 +1825,49 @@ class BinanceFuturesOrderClient(_BinanceFuturesBase):
             调整后的数量（根据stepSize精度要求）
         """
         try:
-            # 获取交易对的stepSize
+            # 获取交易对的 stepSize（同时保留字符串，避免 float 精度噪声）
             precision_info = self._get_symbol_precision(symbol)
             step_size = precision_info.get("stepSize", 0.001)
-            
-            # 如果stepSize >= 1，说明数量必须是整数；避免 round 将小数（如 0.0146）截为 0，使用 ceil 保证至少 1
-            if step_size >= 1.0:
-                import math
-                result = float(round(quantity / step_size) * step_size)
-                if result <= 0 and quantity > 0:
-                    result = float(math.ceil(quantity / step_size) * step_size)
-                if result != quantity:
-                    logger.info(f"[Binance Futures] 数量精度调整: {symbol} | 原始={quantity} | stepSize={step_size} | 调整后={result}")
-                return result
-            
-            # 计算精度位数（stepSize的小数位数）
-            step_size_str = f"{step_size:.10f}".rstrip('0').rstrip('.')
-            if '.' in step_size_str:
-                precision = len(step_size_str.split('.')[1])
-            else:
+            step_size_str = str(precision_info.get("stepSizeStr") or step_size)
+
+            # 使用 Decimal 做“按 stepSize 倍数”对齐，避免 0.30000000000004 这类浮点误差导致 -1111
+            from decimal import Decimal, ROUND_DOWN, ROUND_UP, InvalidOperation
+
+            try:
+                q = Decimal(str(quantity))
+                step = Decimal(step_size_str)
+            except (InvalidOperation, ValueError, TypeError):
+                q = Decimal(str(float(quantity)))
+                step = Decimal(str(float(step_size)))
+
+            if q <= 0 or step <= 0:
+                return 0.0
+
+            # 先按倍数对齐：默认向下取整，避免超过允许精度；若结果为0但原始>0，则向上取整保证至少一个 step
+            multiple = (q / step).to_integral_value(rounding=ROUND_DOWN)
+            adjusted = multiple * step
+            if adjusted <= 0 and q > 0:
+                multiple = (q / step).to_integral_value(rounding=ROUND_UP)
+                adjusted = multiple * step
+
+            # 再按 stepSize 小数位数裁剪显示（Decimal 本身不会产生尾部0噪声）
+            precision = abs(step.as_tuple().exponent)
+            if precision < 0:
                 precision = 0
-            
-            # 根据stepSize调整数量
-            # 例如：stepSize=0.1，则数量必须是0.1的倍数
-            adjusted = round(quantity / step_size) * step_size
+            quant = Decimal('1') if precision == 0 else (Decimal('1') / (Decimal(10) ** precision))
+            adjusted = adjusted.quantize(quant)
 
-            # 避免将小数数量截断为 0（如 quantity=0.0005, stepSize=0.001 时 round 会得 0）
-            if adjusted <= 0 and quantity > 0:
-                import math
-                adjusted = math.ceil(quantity / step_size) * step_size
-                logger.info(f"[Binance Futures] 数量精度调整(ceil): {symbol} | 原始={quantity} | stepSize={step_size} | 调整后={adjusted}")
-            elif adjusted != quantity:
-                logger.info(f"[Binance Futures] 数量精度调整(round): {symbol} | 原始={quantity} | stepSize={step_size} | 调整后={adjusted}")
+            adjusted_str = format(adjusted, 'f').rstrip('0').rstrip('.')
+            try:
+                adjusted_float = float(adjusted_str)
+            except Exception:
+                adjusted_float = float(adjusted)
 
-            # 使用计算出的精度进行四舍五入
-            final_result = round(adjusted, precision)
-            if final_result != adjusted:
-                logger.info(f"[Binance Futures] 数量小数位调整: {symbol} | 调整前={adjusted} | 精度={precision} | 最终={final_result}")
-            return final_result
+            if adjusted_float != float(quantity):
+                logger.info(
+                    f"[Binance Futures] 数量精度调整(Decimal): {symbol} | 原始={quantity} | stepSize={step_size_str} | 调整后={adjusted_str}"
+                )
+            return adjusted_float
             
         except Exception as e:
             logger.warning(f"[Binance Futures] 调整数量精度失败: {e}，使用保守策略")
@@ -2004,10 +2012,15 @@ class BinanceFuturesOrderClient(_BinanceFuturesBase):
             formatted_qty = _format_quantity_for_sdk(adjusted_quantity, ref_price)
             if formatted_qty <= 0 and quantity > 0:
                 formatted_qty = _format_quantity_for_sdk(quantity, ref_price)
-            if formatted_qty == int(formatted_qty):
-                order_params["quantity"] = int(formatted_qty)
+            # 3. SDK 入参使用“去0后的字符串”避免浮点噪声与无意义补0
+            try:
+                qty_str = f"{float(formatted_qty):.20f}".rstrip('0').rstrip('.')
+            except Exception:
+                qty_str = str(formatted_qty)
+            if qty_str.isdigit():
+                order_params["quantity"] = int(qty_str)
             else:
-                order_params["quantity"] = formatted_qty
+                order_params["quantity"] = qty_str
         
         if close_position:
             order_params["close_position"] = True
