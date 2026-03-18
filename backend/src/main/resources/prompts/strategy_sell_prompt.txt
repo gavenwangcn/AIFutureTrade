@@ -458,7 +458,7 @@ class GeneratedSellStrategy(StrategyBaseSell):
             macd_dea = macd_data.get('dea')  # 可能为None
             macd_bar = macd_data.get('bar')  # 可能为None
 
-            # KDJ指标（可能为None）
+            # KDJ指标（可能为None，参数已统一为 KDJ(9,3,3)）
             kdj_data = indicators_data.get('kdj', {})
             kdj_k = kdj_data.get('k')  # 可能为None
             kdj_d = kdj_data.get('d')  # 可能为None
@@ -471,15 +471,19 @@ class GeneratedSellStrategy(StrategyBaseSell):
             atr21 = atr_data.get('atr21')  # 可能为None
 
             # ADX指标（平均趋向指数，可能为None）
-            # ⚠️ ADX已预先计算在indicators中，格式和EMA一样
+            # ⚠️ ADX已预先计算在每根K线的 indicators['adx'] 中（与KDJ/EMA读取方式一致）
+            # 字段包含：adx14、+di14、-di14（均为14周期）
             adx_data = indicators_data.get('adx', {})
-            adx_1h = adx_data.get('adx_1h')  # 1小时ADX，可能为None
-            adx_4h = adx_data.get('adx_4h')  # 4小时ADX，可能为None
-            adx_1d = adx_data.get('adx_1d')  # 1天ADX，可能为None
+            adx14 = adx_data.get('adx14')        # 可能为None
+            plus_di14 = adx_data.get('+di14')    # 可能为None（+DI）
+            minus_di14 = adx_data.get('-di14')   # 可能为None（-DI）
             # ADX值说明：
             #   - ADX < 20: 震荡市，趋势不明显
             #   - 20 <= ADX < 25: 弱趋势
             #   - ADX >= 25: 强趋势
+            # +DI/-DI 用法示例：
+            #   - 趋势偏多：plus_di14 > minus_di14
+            #   - 趋势偏空：minus_di14 > plus_di14
 
             # VOL指标（成交量及均量线，vol/buy_vol/sell_vol通常不为None，但均量线可能为None）
             vol_data = indicators_data.get('vol', {})
@@ -661,11 +665,17 @@ macd_dif = macd_data.get('dif', 0)
 macd_dea = macd_data.get('dea', 0)
 macd_bar = macd_data.get('bar', 0)
 
-# 读取KDJ指标（随机指标）
+# 读取KDJ指标（随机指标，参数已统一为 KDJ(9,3,3)）
 kdj_data = indicators_data.get('kdj', {})
 kdj_k = kdj_data.get('k', 50)
 kdj_d = kdj_data.get('d', 50)
 kdj_j = kdj_data.get('j', 50)
+
+# 读取ADX指标（包含 adx14、+di14、-di14）
+adx_data = indicators_data.get('adx', {})
+adx14 = adx_data.get('adx14')        # 可能为None
+plus_di14 = adx_data.get('+di14')    # 可能为None（+DI）
+minus_di14 = adx_data.get('-di14')   # 可能为None（-DI）
 
 # 读取ATR指标（平均真实波幅）
 atr_data = indicators_data.get('atr', {})
