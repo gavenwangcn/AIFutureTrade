@@ -1,5 +1,5 @@
 {
     "java.compile.nullAnalysis.mode": "automatic",
-    "maven.view": "flat",
+    "maven.view": "hierarchical",
     "java.configuration.updateBuildConfiguration": "disabled"
 }
