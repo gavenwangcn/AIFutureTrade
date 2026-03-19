@@ -1079,8 +1079,18 @@ class MarketDataFetcher:
 
             macd_dif, macd_dea, macd_bar = _macd_frontend(closes, fast=12, slow=26, signal=9)
 
-            # KDJ指标（使用TradingView计算逻辑，参数60,20,5）
-            kdj_k, kdj_d, kdj_j = self._calculate_kdj_tradingview(highs, lows, closes, k_period=60, smooth_k=20, smooth_d=5)
+            # KDJ指标（使用TradingView计算逻辑，参数9,3,3）
+            kdj_k_period = 9
+            kdj_smooth_k = 3
+            kdj_smooth_d = 3
+            kdj_k, kdj_d, kdj_j = self._calculate_kdj_tradingview(
+                highs, lows, closes,
+                k_period=kdj_k_period,
+                smooth_k=kdj_smooth_k,
+                smooth_d=kdj_smooth_d
+            )
+            # KDJ(9,3,3) 的最早可用索引（raw_k需要k_period根；K的SMA需要smooth_k根raw_k；D的SMA需要smooth_d根K）
+            kdj_ready_index = (kdj_k_period - 1) + (kdj_smooth_k - 1) + (kdj_smooth_d - 1)
 
             # ATR指标（使用Wilder's Smoothing方法）
             atr7 = self._calculate_atr_tradingview(highs, lows, closes, period=7)
@@ -1091,6 +1101,8 @@ class MarketDataFetcher:
             calculator = MarketIndexCalculator(atr_period=14, adx_period=14)
             adx_result = calculator.compute_adx(highs, lows, closes)
             adx14 = adx_result[0] if adx_result else np.zeros_like(closes)
+            plus_di14 = adx_result[1] if adx_result else np.zeros_like(closes)
+            minus_di14 = adx_result[2] if adx_result else np.zeros_like(closes)
 
             # VOL均量线
             mavol5 = talib.SMA(volumes, timeperiod=5)
@@ -1109,7 +1121,7 @@ class MarketDataFetcher:
                 # MA60/EMA60/RSI14/ATR21: 需要60根历史数据
                 # MA99/EMA99: 需要99根历史数据
                 # MACD: 需要26根历史数据
-                # KDJ(60,20,5): 需要84根历史数据
+                # KDJ(9,3,3): 需要13根历史数据
                 
                 indicators = {
                     'ma': {
@@ -1136,9 +1148,9 @@ class MarketDataFetcher:
                         'bar': float(macd_bar[i]) if i >= 25 and not np.isnan(macd_bar[i]) else None
                     },
                     'kdj': {
-                        'k': float(kdj_k[i]) if i >= 82 and not np.isnan(kdj_k[i]) else None,
-                        'd': float(kdj_d[i]) if i >= 82 and not np.isnan(kdj_d[i]) else None,
-                        'j': float(kdj_j[i]) if i >= 82 and not np.isnan(kdj_j[i]) else None
+                        'k': float(kdj_k[i]) if i >= kdj_ready_index and not np.isnan(kdj_k[i]) else None,
+                        'd': float(kdj_d[i]) if i >= kdj_ready_index and not np.isnan(kdj_d[i]) else None,
+                        'j': float(kdj_j[i]) if i >= kdj_ready_index and not np.isnan(kdj_j[i]) else None
                     },
                     'atr': {
                         'atr7': float(atr7[i]) if i >= 6 and not np.isnan(atr7[i]) else None,
@@ -1146,7 +1158,9 @@ class MarketDataFetcher:
                         'atr21': float(atr21[i]) if i >= 20 and not np.isnan(atr21[i]) else None
                     },
                     'adx': {
-                        'adx14': float(adx14[i]) if i >= 13 and not np.isnan(adx14[i]) else None
+                        'adx14': float(adx14[i]) if i >= 13 and not np.isnan(adx14[i]) else None,
+                        '+di14': float(plus_di14[i]) if i >= 13 and not np.isnan(plus_di14[i]) else None,
+                        '-di14': float(minus_di14[i]) if i >= 13 and not np.isnan(minus_di14[i]) else None
                     },
                     'vol': {
                         'vol': float(volumes[i]),
@@ -1171,7 +1185,7 @@ class MarketDataFetcher:
             return []
 
     def _calculate_kdj_tradingview(self, high_array: np.ndarray, low_array: np.ndarray, close_array: np.ndarray,
-                                   k_period: int = 60, smooth_k: int = 20, smooth_d: int = 5) -> tuple:
+                                   k_period: int = 9, smooth_k: int = 3, smooth_d: int = 3) -> tuple:
         """
         计算与TradingView一致的KDJ指标
 
@@ -1185,9 +1199,9 @@ class MarketDataFetcher:
             high_array: 最高价数组
             low_array: 最低价数组
             close_array: 收盘价数组
-            k_period: K线周期（默认60）
-            smooth_k: K值平滑周期（默认20）
-            smooth_d: D值平滑周期（默认5）
+            k_period: K线周期（默认9）
+            smooth_k: K值平滑周期（默认3）
+            smooth_d: D值平滑周期（默认3）
 
         Returns:
             (k_line, d_line, j_line): K值、D值、J值数组

@@ -502,8 +502,8 @@ export function registerADXIndicator(klinecharts) {
 }
 
 /**
- * 注册KDJ指标到KLineChart（与后端一致：参数60,20,5，TradingView计算逻辑）
- * 运行时覆盖默认KDJ，确保页面显示(60,20,5)而非(9,3,3)
+ * 注册KDJ指标到KLineChart（与后端一致：参数9,3,3，TradingView计算逻辑）
+ * 运行时覆盖默认KDJ，确保页面显示(9,3,3)
  * @param {object} klinecharts - KLineChart库对象（window.klinecharts）
  * @returns {boolean} 是否成功注册
  */
@@ -517,7 +517,7 @@ export function registerKDJIndicator(klinecharts) {
     const kdjIndicator = {
       name: 'KDJ',
       shortName: 'KDJ',
-      calcParams: [60, 20, 5],
+      calcParams: [9, 3, 3],
       figures: [
         { key: 'k', title: 'K: ', type: 'line', styles: ({ indicator }) => ({ color: indicator?.styles?.lines?.[0]?.color || KDJ_COLORS[0], size: 1.5 }) },
         { key: 'd', title: 'D: ', type: 'line', styles: ({ indicator }) => ({ color: indicator?.styles?.lines?.[1]?.color || KDJ_COLORS[1], size: 1.5 }) },
@@ -572,7 +572,7 @@ export function registerKDJIndicator(klinecharts) {
     }
 
     klinecharts.registerIndicator(kdjIndicator)
-    console.log('[KDJ] KDJ indicator registered (60,20,5) at runtime')
+    console.log('[KDJ] KDJ indicator registered (9,3,3) at runtime')
     return true
   } catch (error) {
     console.error('[KDJ] Failed to register KDJ indicator:', error)

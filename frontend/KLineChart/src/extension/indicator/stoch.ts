@@ -29,7 +29,7 @@ interface Kdj {
  * 使用TradingView的计算逻辑
  * 参考：https://www.tradingview.com/support/solutions/43000521824-stochastic-oscillator/
  *
- * TradingView的KDJ计算逻辑（参数60,20,5）：
+ * TradingView的KDJ计算逻辑（参数9,3,3）：
  * 1. 计算原始%K（RSV）：RSV = 100 * (Close - LowestLow) / (HighestHigh - LowestLow)
  * 2. 第一次平滑得到K值：使用SMA平滑RSV（周期为smooth_k）
  * 3. 第二次平滑得到D值：使用SMA平滑K值（周期为smooth_d）
@@ -38,7 +38,7 @@ interface Kdj {
 const stoch: IndicatorTemplate<Kdj, number> = {
   name: 'KDJ',
   shortName: 'KDJ',
-  calcParams: [60, 20, 5],
+  calcParams: [9, 3, 3],
   figures: [
     { key: 'k', title: 'K: ', type: 'line' },
     { key: 'd', title: 'D: ', type: 'line' },
@@ -46,9 +46,9 @@ const stoch: IndicatorTemplate<Kdj, number> = {
   ],
   calc: (dataList, indicator) => {
     const params = indicator.calcParams
-    const rsvPeriod = params[0] // RSV计算周期（60）
-    const smoothK = params[1] // K值平滑周期（20）
-    const smoothD = params[2] // D值平滑周期（5）
+    const rsvPeriod = params[0] // RSV计算周期（9）
+    const smoothK = params[1] // K值平滑周期（3）
+    const smoothD = params[2] // D值平滑周期（3）
 
     const result: Kdj[] = []
     // 存储原始%K（RSV）值

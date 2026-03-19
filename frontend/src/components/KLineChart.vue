@@ -272,7 +272,7 @@ const initChart = async () => {
       console.error('[KLineChart] Failed to register MACD indicator')
     }
 
-    // 创建KDJ指标（使用自定义版本：60,20,5）
+    // 创建KDJ指标（使用自定义版本：9,3,3）
     // 直接使用运行时注册方式，确保使用自定义版本
     if (registerKDJIndicator(klinecharts)) {
       const kdjIndicatorId = chartInstance.value.createIndicator('KDJ', false)
