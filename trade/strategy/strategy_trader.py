@@ -488,7 +488,7 @@ class StrategyTrader(Trader):
                             signals = [(d.get('signal') if isinstance(d, dict) else None) for d in dec_list]
                         except Exception:
                             signals = []
-                        logger.info(
+                        logger.warning(
                             f"[StrategyTrader] [Model {effective_model_id}] [买入策略筛选] 跳过 {sym_upper}: "
                             f"无有效买入信号（valid={sorted(list(valid_signals))}），策略返回signals={signals}"
                         )
@@ -511,14 +511,14 @@ class StrategyTrader(Trader):
                                 price_val = payload.get('price')
                         except Exception:
                             price_val = None
-                        logger.info(
+                        logger.warning(
                             f"[StrategyTrader] [Model {effective_model_id}] [买入策略筛选] 跳过 {sym_upper}: "
                             f"有效信号数={len(valid_dec_list)} 但所需保证金估算为0（price可能缺失/无效）。"
                             f" market_price={price_val}, decisions={[(d.get('signal'), d.get('quantity'), d.get('leverage')) for d in valid_dec_list]}"
                         )
                         continue
                     if available_before - spent_this_strategy < total_required_capital:
-                        logger.info(
+                        logger.warning(
                             f"[StrategyTrader] [Model {effective_model_id}] [买入策略筛选] 跳过 {sym_upper}: "
                             f"余额不足。available_before={available_before:.8f}, spent_this_strategy={spent_this_strategy:.8f}, "
                             f"available_left={available_before - spent_this_strategy:.8f}, required={total_required_capital:.8f}, "
@@ -534,11 +534,11 @@ class StrategyTrader(Trader):
                     final_decisions[sym_upper] = valid_dec_list
                     selected_symbols_this_strategy.append(sym_upper)
                     spent_this_strategy += total_required_capital
-                    logger.info(
-                        f"[StrategyTrader] [Model {effective_model_id}] [买入策略筛选] 采纳 {sym_upper}: "
-                        f"required={total_required_capital:.8f}, spent_this_strategy={spent_this_strategy:.8f}, "
-                        f"available_left={available_before - spent_this_strategy:.8f}"
-                    )
+                        logger.warning(
+                            f"[StrategyTrader] [Model {effective_model_id}] [买入策略筛选] 采纳 {sym_upper}: "
+                            f"required={total_required_capital:.8f}, spent_this_strategy={spent_this_strategy:.8f}, "
+                            f"available_left={available_before - spent_this_strategy:.8f}"
+                        )
 
                 # 若本策略命中，则扣除 candidates/market_state，并预扣余额（供后续策略使用）
                 if selected_symbols_this_strategy:
@@ -842,7 +842,7 @@ class StrategyTrader(Trader):
                             signals = [(d.get('signal') if isinstance(d, dict) else None) for d in dec_list]
                         except Exception:
                             signals = []
-                        logger.info(
+                        logger.warning(
                             f"[StrategyTrader] [Model {effective_model_id}] [卖出策略筛选] 跳过 {sym_upper}: "
                             f"无有效卖出信号（valid={sorted(list(valid_signals))}），策略返回signals={signals}"
                         )
@@ -850,7 +850,7 @@ class StrategyTrader(Trader):
 
                     final_decisions[sym_upper] = valid_dec_list
                     selected_symbols_this_strategy.append(sym_upper)
-                    logger.info(
+                    logger.warning(
                         f"[StrategyTrader] [Model {effective_model_id}] [卖出策略筛选] 采纳 {sym_upper}: "
                         f"decisions={[(d.get('signal'), d.get('quantity'), d.get('price'), d.get('stop_price')) for d in valid_dec_list]}"
                     )
