@@ -534,11 +534,11 @@ class StrategyTrader(Trader):
                     final_decisions[sym_upper] = valid_dec_list
                     selected_symbols_this_strategy.append(sym_upper)
                     spent_this_strategy += total_required_capital
-                        logger.warning(
-                            f"[StrategyTrader] [Model {effective_model_id}] [买入策略筛选] 采纳 {sym_upper}: "
-                            f"required={total_required_capital:.8f}, spent_this_strategy={spent_this_strategy:.8f}, "
-                            f"available_left={available_before - spent_this_strategy:.8f}"
-                        )
+                    logger.warning(
+                        f"[StrategyTrader] [Model {effective_model_id}] [买入策略筛选] 采纳 {sym_upper}: "
+                        f"required={total_required_capital:.8f}, spent_this_strategy={spent_this_strategy:.8f}, "
+                        f"available_left={available_before - spent_this_strategy:.8f}"
+                    )
 
                 # 若本策略命中，则扣除 candidates/market_state，并预扣余额（供后续策略使用）
                 if selected_symbols_this_strategy:
