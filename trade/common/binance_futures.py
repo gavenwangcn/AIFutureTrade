@@ -1600,9 +1600,14 @@ class BinanceFuturesOrderClient(_BinanceFuturesBase):
                 
                 # 构建测试参数，仅包含 test_order SDK 支持的参数
                 # 当 quantity 为 0 时使用 100 作为测试默认值，避免 SDK 拒绝无效数量
-                qty = order_params.get("quantity") or 100
+                # quantity 可能为 str（_build_order_params 对非整数会格式化为字符串），须先转为数值再比较
+                qty_raw = order_params.get("quantity")
+                try:
+                    qty = float(qty_raw) if qty_raw is not None else 100.0
+                except (TypeError, ValueError):
+                    qty = 100.0
                 if qty <= 0:
-                    qty = 100
+                    qty = 100.0
                 test_params = {
                     "symbol": order_params.get("symbol"),
                     "side": test_side,
@@ -2039,8 +2044,13 @@ class BinanceFuturesOrderClient(_BinanceFuturesBase):
         
         # 合并 kwargs，但禁止用 0 覆盖已设置的有效 quantity（避免 quantity 被错误截断后写回）
         for k, v in kwargs.items():
-            if k == "quantity" and v == 0 and order_params.get("quantity", 0) > 0:
-                continue
+            if k == "quantity" and v == 0:
+                try:
+                    cur_q = float(order_params.get("quantity") or 0)
+                except (TypeError, ValueError):
+                    cur_q = 0.0
+                if cur_q > 0:
+                    continue
             order_params[k] = v
         return order_params
     
