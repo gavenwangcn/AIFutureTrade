@@ -854,6 +854,7 @@ BINANCE_BASE_URL=https://fapi.binance.com   # Futures API endpoint
 # ============================================
 BACKEND_PORT=5002                   # Backend API port
 BINANCE_SERVICE_PORT=5004          # Binance service port
+TRADE_MCP_PORT=8099                # trade-mcp (Spring AI MCP Server) port
 ASYNC_SERVICE_PORT=5003            # Async service port
 TRADE_PORT=5000                    # Trade service port
 FRONTEND_PORT=3000                 # Frontend port

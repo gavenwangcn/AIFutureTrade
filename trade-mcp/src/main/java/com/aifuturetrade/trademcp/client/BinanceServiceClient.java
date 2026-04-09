@@ -1,6 +1,6 @@
 package com.aifuturetrade.trademcp.client;
 
-import com.aifuturetrade.trademcp.config.DownstreamProperties;
+import com.aifuturetrade.trademcp.config.BinanceServiceUriSelector;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
@@ -12,21 +12,24 @@ import java.util.Map;
 @Component
 public class BinanceServiceClient {
 
-    private final RestClient restClient;
-    private final DownstreamProperties props;
+    /** 与产品约定：未传 limit 时默认拉取 499 根 K 线 */
+    public static final int DEFAULT_KLINE_LIMIT = 499;
 
-    public BinanceServiceClient(RestClient restClient, DownstreamProperties props) {
+    private final RestClient restClient;
+    private final BinanceServiceUriSelector binanceUris;
+
+    public BinanceServiceClient(RestClient restClient, BinanceServiceUriSelector binanceUris) {
         this.restClient = restClient;
-        this.props = props;
+        this.binanceUris = binanceUris;
     }
 
-    private String baseUrl() {
-        return props.getBinanceService().getBaseUrl();
+    private String nextBinanceBaseUrl() {
+        return binanceUris.nextBaseUrl();
     }
 
     public Map<String, Object> symbolPrices(List<String> symbols) {
         return restClient.post()
-                .uri(baseUrl() + "/api/market-data/symbol-prices")
+                .uri(nextBinanceBaseUrl() + "/api/market-data/symbol-prices")
                 .contentType(MediaType.APPLICATION_JSON)
                 .body(symbols)
                 .retrieve()
@@ -34,10 +37,11 @@ public class BinanceServiceClient {
     }
 
     public Map<String, Object> klines(String symbol, String interval, Integer limit, Long startTime, Long endTime) {
-        String uri = UriComponentsBuilder.fromHttpUrl(baseUrl() + "/api/market-data/klines")
+        int effectiveLimit = limit != null ? limit : DEFAULT_KLINE_LIMIT;
+        String uri = UriComponentsBuilder.fromHttpUrl(nextBinanceBaseUrl() + "/api/market-data/klines")
                 .queryParam("symbol", symbol)
                 .queryParam("interval", interval)
-                .queryParamIfPresent("limit", java.util.Optional.ofNullable(limit))
+                .queryParam("limit", effectiveLimit)
                 .queryParamIfPresent("startTime", java.util.Optional.ofNullable(startTime))
                 .queryParamIfPresent("endTime", java.util.Optional.ofNullable(endTime))
                 .toUriString();

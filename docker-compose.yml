@@ -12,7 +12,7 @@
 # ==============================================================================
 # 使用说明：
 # 1. 启动MySQL服务：docker-compose -f docker-compose-mysql.yml up -d（必须先启动）
-# 2. 默认启动：docker-compose up -d（启动backend、binance-service、trade、frontend、async-service服务）
+# 2. 默认启动：docker-compose up -d（启动 backend、binance-service、trade-mcp、trade、frontend、async-service 等）
 # ==============================================================================
 # 注意：
 # - MySQL服务已拆分到 docker-compose-mysql.yml，需要先启动
@@ -93,6 +93,33 @@ services:
       - aifuturetrade-network
     # 注意：MySQL服务在docker-compose-mysql.yml中，需要先启动
     # 如果MySQL服务未启动，请先运行：docker-compose -f docker-compose-mysql.yml up -d
+
+  # ============================================================================
+  # trade-mcp（Spring AI MCP Server：行情走 binance-service，账号/订单走 backend）
+  # ============================================================================
+  trade-mcp:
+    build:
+      context: ./trade-mcp
+      dockerfile: Dockerfile
+    container_name: ${TRADE_MCP_CONTAINER_NAME:-aifuturetrade-trade-mcp}
+    ports:
+      - "${TRADE_MCP_PORT:-8099}:8099"
+    environment:
+      # 与镜像内默认一致；可被宿主机 .env 覆盖
+      SERVER_PORT: "${TRADE_MCP_SERVER_PORT:-8099}"
+      # Spring：downstream.backend.base-url
+      DOWNSTREAM_BACKEND_BASEURL: "${DOWNSTREAM_BACKEND_BASEURL:-http://backend:5002}"
+      # 与 trade 相同格式；多实例时在 .env 中覆盖 BINANCE_SERVICE_LIST
+      BINANCE_SERVICE_LIST: '${BINANCE_SERVICE_LIST:-[{"base_url":"http://binance-service:5004","timeout":30}]}'
+      JAVA_OPTS: "${TRADE_MCP_JAVA_OPTS:--Xms256m -Xmx768m -Dserver.port=8099 -Dfile.encoding=UTF-8 --add-opens java.base/java.lang.invoke=ALL-UNNAMED}"
+    depends_on:
+      backend:
+        condition: service_started
+      binance-service:
+        condition: service_started
+    restart: unless-stopped
+    networks:
+      - aifuturetrade-network
 
   # ============================================================================
   # Trade Monitor服务（Java Spring Boot 监控告警服务）

@@ -15,7 +15,22 @@ spring:
 
 downstream:
   backend:
+    # Java backend（/api/mcp/binance-futures/*，需 modelId）
     base-url: http://localhost:8080
   binance-service:
-    base-url: http://localhost:8081
+    # 行情/K 线：与 trade 服务一致，可配置多台 binance-service 轮询
+    # 单地址：
+    base-url: http://localhost:5004
+    # 多地址（设置后优先于 base-url，与 BINANCE_SERVICE_LIST 二选一即可；未设则只用 base-url）
+    # base-urls:
+    #   - http://host-a:5004
+    #   - http://host-b:5004
+    # 或使用环境变量 BINANCE_SERVICE_LIST（JSON，与 trade/common/config.py 相同），优先级最高
+
+# 运行时覆盖示例：
+# DOWNSTREAM_BACKEND_BASEURL=http://backend:5002
+# DOWNSTREAM_BINANCESERVICE_BASEURLS_0=http://bs1:5004
+# DOWNSTREAM_BINANCESERVICE_BASEURLS_1=http://bs2:5004
+# 或与 trade 一致：
+# BINANCE_SERVICE_LIST=[{"base_url":"http://bs1:5004","timeout":30},{"base_url":"http://bs2:5004","timeout":30}]
 
