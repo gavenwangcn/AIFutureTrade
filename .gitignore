@@ -104,6 +104,9 @@ temp/
 .cursor/
 debug.log
 
+# Git worktrees (local isolated workspaces)
+.worktrees/
+
 # 文档构建
 docs/.vitepress/cache/
 docs/node_modules/
