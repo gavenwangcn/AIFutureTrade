@@ -66,5 +66,46 @@ public interface MarketTickerMapper extends BaseMapper<MarketTickerDO> {
             ") t2 ON t1.`symbol` = t2.`symbol` AND t1.`event_time` = t2.max_event_time" +
             "</script>")
     List<Map<String, Object>> selectTickersBySymbols(@Param("symbols") List<String> symbols);
+
+    /**
+     * 每个 symbol 最新一条（按 MAX(event_time)），分页；symbols 为空则全市场
+     */
+    @Select("<script>" +
+            "SELECT t1.* FROM `24_market_tickers` t1 INNER JOIN (" +
+            "  SELECT `symbol`, MAX(`event_time`) AS mt FROM `24_market_tickers` " +
+            "  <where>" +
+            "    <if test=\"symbols != null and symbols.size() &gt; 0\">" +
+            "      `symbol` IN " +
+            "      <foreach collection=\"symbols\" item=\"s\" open=\"(\" separator=\",\" close=\")\">#{s}</foreach>" +
+            "    </if>" +
+            "  </where>" +
+            "  GROUP BY `symbol`" +
+            ") t2 ON t1.`symbol` = t2.`symbol` AND t1.`event_time` = t2.`mt` " +
+            "ORDER BY t1.`symbol` ASC LIMIT #{size} OFFSET #{offset}" +
+            "</script>")
+    List<MarketTickerDO> selectLatestPerSymbolPage(
+            @Param("symbols") List<String> symbols,
+            @Param("offset") long offset,
+            @Param("size") int size);
+
+    @Select("<script>" +
+            "SELECT COUNT(*) FROM (" +
+            "  SELECT `symbol` FROM `24_market_tickers` " +
+            "  <where>" +
+            "    <if test=\"symbols != null and symbols.size() &gt; 0\">" +
+            "      `symbol` IN " +
+            "      <foreach collection=\"symbols\" item=\"s\" open=\"(\" separator=\",\" close=\")\">#{s}</foreach>" +
+            "    </if>" +
+            "  </where>" +
+            "  GROUP BY `symbol`" +
+            ") x" +
+            "</script>")
+    Long countLatestPerSymbolGroups(@Param("symbols") List<String> symbols);
+
+    @Select("SELECT DISTINCT `symbol` FROM `24_market_tickers` ORDER BY `symbol` ASC")
+    List<String> selectDistinctSymbols();
+
+    @Select("SELECT * FROM `24_market_tickers` WHERE `symbol` = #{symbol} ORDER BY `event_time` DESC LIMIT 1")
+    MarketTickerDO selectLatestRowBySymbol(@Param("symbol") String symbol);
 }
 
