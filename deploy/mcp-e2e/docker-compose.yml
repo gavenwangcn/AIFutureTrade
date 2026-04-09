@@ -1,13 +1,11 @@
-# MCP 端到端探活（Ubuntu 24 推荐）
+# MCP 端到端（仅协议访问 trade-mcp）
 #
-# 用法：
-#   cd deploy/mcp-e2e
-#   cp env.example .env
-#   # 按需编辑 .env（BACKEND_BASE_URL、BINANCE_SERVICE_LIST）
-#   docker compose --profile mcp-e2e up --build mcp-e2e
+# 宿主机须已启动 trade-mcp（默认 8099）。在 Linux 上若容器访问不到 host 的 8099，可改用：
+#   export TRADE_MCP_BASE_URL=http://172.17.0.1:8099
+# 或使用 network_mode: host（仅 Linux）
 #
-# 仅运行一次并退出：
-#   docker compose --profile mcp-e2e run --rm mcp-e2e
+#   docker compose --profile mcp-e2e build
+#   docker compose --profile mcp-e2e run --rm -e TRADE_MCP_BASE_URL=http://host.docker.internal:8099 mcp-e2e
 
 services:
   mcp-e2e:
@@ -17,9 +15,7 @@ services:
     profiles:
       - mcp-e2e
     environment:
-      BACKEND_BASE_URL: ${BACKEND_BASE_URL:-http://154.89.148.172:5002}
-      # 与 trade/common/config.py 中 BINANCE_SERVICE_LIST 保持一致（单行 JSON）
-      BINANCE_SERVICE_LIST: ${BINANCE_SERVICE_LIST}
-      TRADE_MCP_BASE_URL: ${TRADE_MCP_BASE_URL:-}
-      E2E_HTTP_TIMEOUT_SEC: ${E2E_HTTP_TIMEOUT_SEC:-30}
-      E2E_SKIP_BINANCE: ${E2E_SKIP_BINANCE:-0}
+      TRADE_MCP_BASE_URL: ${TRADE_MCP_BASE_URL:-http://host.docker.internal:8099}
+      MCP_SSE_PATH: ${MCP_SSE_PATH:-/sse}
+      E2E_MCP_TIMEOUT: ${E2E_MCP_TIMEOUT:-120}
+      E2E_SKIP_MARKET: ${E2E_SKIP_MARKET:-0}

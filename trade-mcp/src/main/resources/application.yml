@@ -12,6 +12,9 @@ spring:
           enabled: true
         # WebMVC transport: defaults to SSE if protocol not specified
         protocol: SSE
+        # 与 MCP Python SDK（mcp.client.sse）及 deploy/mcp-e2e/mcp_e2e.py 默认路径一致
+        sse-endpoint: /sse
+        sse-message-endpoint: /mcp/message
 
 downstream:
   backend:

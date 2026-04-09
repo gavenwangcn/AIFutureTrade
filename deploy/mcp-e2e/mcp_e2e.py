@@ -1,30 +1,30 @@
 #!/usr/bin/env python3
 """
-MCP 相关下游端到端探活：backend（MCP market-tickers）+ binance-service（K 线）。
-与 trade-mcp 运行时依赖一致；Binance 地址应与 trade/common/config.py 中 BINANCE_SERVICE_LIST 对齐。
+trade-mcp 端到端测试：仅通过 MCP 协议访问本服务（不直接请求 backend / binance-service）。
+
+流程：
+  1) SSE 连接 {TRADE_MCP_BASE_URL}{MCP_SSE_PATH}（与 Spring AI 默认 /sse 一致）
+  2) ClientSession.initialize → list_tools（校验工具已注册）
+  3) tools/call：至少调用 2 个工具，覆盖「经 backend」与「经 binance-service」两条链路
+
+依赖：pip install -r requirements-e2e.txt（需要 mcp 官方 Python SDK）
 
 环境变量：
-  BACKEND_BASE_URL       Java backend 根地址，默认 http://154.89.148.172:5002
-  BINANCE_SERVICE_LIST   JSON 数组，与 config.py / Docker 中格式相同（含 base_url）
-  TRADE_MCP_BASE_URL     可选；若设置则对 trade-mcp 做简单 HTTP 可达性检查
-  E2E_HTTP_TIMEOUT_SEC   单次请求超时秒数，默认 30
-  E2E_SKIP_BINANCE       若为 1/true 则跳过 binance-service 检查
+  TRADE_MCP_BASE_URL   trade-mcp 根 URL，默认 http://127.0.0.1:8099
+  MCP_SSE_PATH         SSE 路径，默认 /sse（与 spring.ai.mcp.server.sse-endpoint 一致）
+  E2E_MCP_TIMEOUT      HTTP/SSE 超时（秒），默认 120
+  E2E_SKIP_MARKET      若为 1：跳过 trade.market.symbol_prices（仅测库表类 tool）
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import os
-import ssl
 import sys
-import urllib.error
-import urllib.request
-from typing import Any
 
-# 与 trade/common/config.py 中默认 BINANCE_SERVICE_LIST 保持一致（环境变量未设置时使用）
-_DEFAULT_BINANCE_SERVICE_LIST = (
-    '[{"base_url":"http://185.242.232.23:5004","timeout":30},'
-    '{"base_url":"http://185.242.232.42:5004","timeout":30}]'
-)
+# --- 与 trade-mcp 中 @McpTool name 一致 ---
+TOOL_TICKERS_ALL_SYMBOLS = "trade.market_tickers.all_symbols"
+TOOL_MARKET_SYMBOL_PRICES = "trade.market.symbol_prices"
 
 
 def _env_bool(name: str, default: bool = False) -> bool:
@@ -34,120 +34,103 @@ def _env_bool(name: str, default: bool = False) -> bool:
     return v in {"1", "true", "yes", "y", "on"}
 
 
-def _http_get_json(url: str, timeout: float) -> tuple[int, Any]:
-    ctx = ssl.create_default_context()
-    req = urllib.request.Request(url, method="GET", headers={"Accept": "application/json"})
+def _result_summary(result) -> str:
+    """便于失败时打印。"""
     try:
-        with urllib.request.urlopen(req, timeout=timeout, context=ctx) as resp:
-            body = resp.read().decode("utf-8", errors="replace")
-            code = resp.getcode()
-    except urllib.error.HTTPError as e:
-        body = e.read().decode("utf-8", errors="replace")
-        code = e.code
-    try:
-        parsed = json.loads(body) if body.strip() else None
-    except json.JSONDecodeError:
-        parsed = body
-    return code, parsed
+        if result.structuredContent is not None:
+            return json.dumps(result.structuredContent, ensure_ascii=False)[:800]
+    except Exception:
+        pass
+    parts = []
+    for block in result.content or []:
+        if getattr(block, "text", None):
+            parts.append(block.text[:400])
+    return " | ".join(parts) if parts else repr(result)
 
 
-def _http_get_code_only(url: str, timeout: float) -> int:
-    ctx = ssl.create_default_context()
-    req = urllib.request.Request(url, method="GET")
-    try:
-        with urllib.request.urlopen(req, timeout=timeout, context=ctx) as resp:
-            return resp.getcode()
-    except urllib.error.HTTPError as e:
-        return e.code
-    except OSError:
-        return 0
+def _assert_tool_success(result, tool_name: str) -> None:
+    from mcp.types import CallToolResult
 
-
-def _trim_base(url: str) -> str:
-    u = url.strip().rstrip("/")
-    return u
-
-
-def main() -> int:
-    timeout = float(os.environ.get("E2E_HTTP_TIMEOUT_SEC", "30"))
-    backend = _trim_base(os.environ.get("BACKEND_BASE_URL", "http://154.89.148.172:5002"))
-    raw_list = os.environ.get("BINANCE_SERVICE_LIST", "").strip() or _DEFAULT_BINANCE_SERVICE_LIST
-    skip_binance = _env_bool("E2E_SKIP_BINANCE", False)
-    mcp_url = os.environ.get("TRADE_MCP_BASE_URL", "").strip()
-
-    errors: list[str] = []
-
-    # --- Backend: MCP market-tickers（与 trade-mcp BackendClient 一致）---
-    for path, name in (
-        ("/api/mcp/market-tickers/symbols", "market-tickers symbols"),
-        ("/api/mcp/market-tickers/snapshot?page=1&size=2", "market-tickers snapshot"),
-    ):
-        url = backend + path
-        print(f"[check] backend {name}: GET {url}")
-        code, data = _http_get_json(url, timeout)
-        if code != 200:
-            errors.append(f"backend {name}: HTTP {code}")
-            continue
-        if isinstance(data, dict) and data.get("success") is True:
-            print(f"  OK success=true")
-        else:
-            snippet = repr(data)[:500]
-            errors.append(f"backend {name}: unexpected body or success!=true: {snippet}")
-
-    if skip_binance:
-        print("[skip] E2E_SKIP_BINANCE: binance-service checks skipped")
-    else:
-        if not raw_list:
-            errors.append("BINANCE_SERVICE_LIST 未设置或为空（应对齐 trade/common/config.py）")
-        else:
+    if not isinstance(result, CallToolResult):
+        raise AssertionError(f"{tool_name}: 返回类型异常: {type(result)}")
+    if result.isError:
+        raise AssertionError(f"{tool_name}: isError=true，{_result_summary(result)}")
+    # Java Map 常出现在 structuredContent；部分实现为 JSON 文本
+    sc = result.structuredContent
+    if isinstance(sc, dict) and "success" in sc and sc["success"] is not True:
+        raise AssertionError(f"{tool_name}: success!=true，{_result_summary(result)}")
+    for block in result.content or []:
+        if getattr(block, "type", "") == "text" and getattr(block, "text", ""):
             try:
-                services = json.loads(raw_list)
-            except json.JSONDecodeError as e:
-                errors.append(f"BINANCE_SERVICE_LIST JSON 无效: {e}")
-                services = []
-            if isinstance(services, list):
-                for i, item in enumerate(services):
-                    if not isinstance(item, dict):
-                        errors.append(f"BINANCE_SERVICE_LIST[{i}] 不是对象")
-                        continue
-                    base = item.get("base_url") or item.get("baseUrl")
-                    if not base or not str(base).strip():
-                        errors.append(f"BINANCE_SERVICE_LIST[{i}] 缺少 base_url")
-                        continue
-                    b = _trim_base(str(base))
-                    kline_url = (
-                        f"{b}/api/market-data/klines?"
-                        "symbol=BTCUSDT&interval=1m&limit=1"
-                    )
-                    print(f"[check] binance-service[{i}] klines: GET {kline_url}")
-                    code, data = _http_get_json(kline_url, timeout)
-                    if code != 200:
-                        errors.append(f"binance-service[{i}] klines: HTTP {code}")
-                        continue
-                    if isinstance(data, dict) and data.get("success") is True:
-                        print(f"  OK success=true")
-                    else:
-                        snippet = repr(data)[:500]
-                        errors.append(f"binance-service[{i}] klines: unexpected body: {snippet}")
+                j = json.loads(block.text)
+                if isinstance(j, dict) and j.get("success") is False:
+                    raise AssertionError(f"{tool_name}: {block.text[:500]}")
+            except json.JSONDecodeError:
+                pass
 
-    if mcp_url:
-        u = _trim_base(mcp_url)
-        print(f"[check] trade-mcp reachability: GET {u}/")
-        code = _http_get_code_only(f"{u}/", timeout)
-        if code == 0:
-            errors.append(f"trade-mcp {u}: 无法连接")
-        else:
-            print(f"  HTTP {code} (任意响应即视为进程可达)")
 
-    if errors:
-        print("\n--- FAILED ---", file=sys.stderr)
-        for e in errors:
-            print(f"  - {e}", file=sys.stderr)
-        return 1
+async def _run() -> None:
+    try:
+        from mcp import ClientSession
+        from mcp.client.sse import sse_client
+    except ImportError as e:
+        print(
+            "缺少依赖：请执行  pip install -r requirements-e2e.txt  （需要 mcp 包）",
+            file=sys.stderr,
+        )
+        raise SystemExit(2) from e
 
-    print("\n--- ALL CHECKS PASSED ---")
-    return 0
+    base = os.environ.get("TRADE_MCP_BASE_URL", "http://127.0.0.1:8099").rstrip("/")
+    sse_path = os.environ.get("MCP_SSE_PATH", "/sse")
+    if not sse_path.startswith("/"):
+        sse_path = "/" + sse_path
+    sse_url = base + sse_path
+    timeout = float(os.environ.get("E2E_MCP_TIMEOUT", "120"))
+    skip_market = _env_bool("E2E_SKIP_MARKET", False)
+
+    print(f"[e2e] MCP SSE URL: {sse_url}")
+    print(f"[e2e] timeout={timeout}s skip_market_prices={skip_market}")
+
+    async with sse_client(sse_url, timeout=timeout, sse_read_timeout=timeout) as (
+        read_stream,
+        write_stream,
+    ):
+        async with ClientSession(read_stream, write_stream) as session:
+            await session.initialize()
+
+            listed = await session.list_tools()
+            names = {t.name for t in listed.tools}
+            print(f"[e2e] list_tools: {len(names)} tools")
+
+            for need in (TOOL_TICKERS_ALL_SYMBOLS, TOOL_MARKET_SYMBOL_PRICES):
+                if need not in names and not (need == TOOL_MARKET_SYMBOL_PRICES and skip_market):
+                    print(f"[e2e] ERROR: 缺少工具 {need}", file=sys.stderr)
+                    raise SystemExit(1)
+
+            r1 = await session.call_tool(TOOL_TICKERS_ALL_SYMBOLS, arguments={})
+            _assert_tool_success(r1, TOOL_TICKERS_ALL_SYMBOLS)
+            print(f"[e2e] call_tool {TOOL_TICKERS_ALL_SYMBOLS}: OK")
+
+            if not skip_market:
+                r2 = await session.call_tool(
+                    TOOL_MARKET_SYMBOL_PRICES,
+                    arguments={"symbols": ["BTCUSDT"]},
+                )
+                _assert_tool_success(r2, TOOL_MARKET_SYMBOL_PRICES)
+                print(f"[e2e] call_tool {TOOL_MARKET_SYMBOL_PRICES}: OK")
+
+    print("[e2e] --- MCP END-TO-END PASSED ---")
+
+
+def main() -> None:
+    try:
+        asyncio.run(_run())
+    except SystemExit:
+        raise
+    except Exception as e:
+        print(f"[e2e] FAILED: {e}", file=sys.stderr)
+        raise SystemExit(1) from e
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    main()

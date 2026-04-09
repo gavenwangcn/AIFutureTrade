@@ -1,0 +1,2 @@
+# MCP 端到端：通过官方 Python SDK 连接 trade-mcp（SSE）
+mcp>=1.8.0

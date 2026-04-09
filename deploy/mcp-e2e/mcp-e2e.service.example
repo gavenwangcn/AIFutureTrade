@@ -1,11 +1,11 @@
-# 复制到 /etc/systemd/system/mcp-e2e.service 后：
-#   sudo systemctl daemon-reload
-#   sudo systemctl enable --now mcp-e2e.timer   # 若使用下方 timer 示例
+# 示例：在测试机上对已部署的 trade-mcp 做 MCP 协议探活
+# 依赖：/opt/AIFutureTrade/deploy/mcp-e2e 下已 pip install -r requirements-e2e.txt
 #
-# 说明：仅示例；环境文件请放在 /etc/mcp-e2e.env（600 权限），勿提交密钥。
+# /etc/mcp-e2e.env 示例：
+#   TRADE_MCP_BASE_URL=http://127.0.0.1:8099
 
 [Unit]
-Description=AIFutureTrade MCP downstream E2E probe (backend + binance-service)
+Description=AIFutureTrade trade-mcp MCP (SSE) end-to-end probe
 After=network-online.target
 
 [Service]
