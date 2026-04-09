@@ -14,6 +14,10 @@ import com.binance.connector.client.derivatives_trading_usds_futures.rest.model.
 import com.binance.connector.client.derivatives_trading_usds_futures.rest.model.SymbolOrderBookTickerResponse1;
 import com.binance.connector.client.derivatives_trading_usds_futures.rest.model.SymbolOrderBookTickerResponse2;
 import com.binance.connector.client.derivatives_trading_usds_futures.rest.model.SymbolOrderBookTickerResponse2Inner;
+import com.binance.connector.client.derivatives_trading_usds_futures.rest.model.AllOrdersResponseInner;
+import com.binance.connector.client.derivatives_trading_usds_futures.rest.model.CancelOrderResponse;
+import com.binance.connector.client.derivatives_trading_usds_futures.rest.model.CurrentAllOpenOrdersResponse;
+import com.binance.connector.client.derivatives_trading_usds_futures.rest.model.QueryOrderResponse;
 import lombok.extern.slf4j.Slf4j;
 
 import java.util.ArrayList;
@@ -295,19 +299,28 @@ public class BinanceFuturesOrderClient extends BinanceFuturesBase {
                 Object sideObj = orderParams.get("side");
                 String sideStr = String.valueOf(sideObj).toUpperCase();
                 testParams.put("side", sideStr);
-                
-                testParams.put("type", "MARKET"); // 测试订单统一使用MARKET类型
-                
+
+                String reqType = orderParams.get("type") != null
+                        ? String.valueOf(orderParams.get("type")).toUpperCase()
+                        : "MARKET";
+                if ("LIMIT".equals(reqType) && orderParams.get("price") != null) {
+                    testParams.put("type", "LIMIT");
+                    testParams.put("price", orderParams.get("price"));
+                    testParams.put("timeInForce", orderParams.getOrDefault("timeInForce", "GTC"));
+                } else {
+                    testParams.put("type", "MARKET");
+                }
+
                 if (orderParams.containsKey("quantity")) {
                     testParams.put("quantity", orderParams.get("quantity"));
                 } else {
                     testParams.put("quantity", 100); // 默认数量
                 }
-                
+
                 if (orderParams.containsKey("positionSide")) {
                     testParams.put("positionSide", orderParams.get("positionSide"));
                 }
-                
+
                 // 调用测试订单接口 - 构建Request对象
                 TestOrderRequest testRequest = new TestOrderRequest();
                 testRequest.setSymbol((String) testParams.get("symbol"));
@@ -319,6 +332,11 @@ public class BinanceFuturesOrderClient extends BinanceFuturesBase {
                 testRequest.setType((String) testParams.get("type"));
                 if (testParams.get("quantity") != null) {
                     testRequest.setQuantity(((Number) testParams.get("quantity")).doubleValue());
+                }
+                if ("LIMIT".equals(testParams.get("type")) && testParams.get("price") != null) {
+                    testRequest.setPrice(((Number) testParams.get("price")).doubleValue());
+                    String tif = String.valueOf(testParams.get("timeInForce"));
+                    testRequest.setTimeInForce(TimeInForce.fromValue(tif.toUpperCase()));
                 }
                 if (testParams.get("positionSide") != null) {
                     String positionSideStr = (String) testParams.get("positionSide");
@@ -477,7 +495,36 @@ public class BinanceFuturesOrderClient extends BinanceFuturesBase {
             throw exc;
         }
     }
-    
+
+    /**
+     * 限价单（LIMIT），需指定委托价 price。
+     *
+     * <p>参考 API: POST /fapi/v1/order（type=LIMIT，默认 timeInForce=GTC）
+     */
+    public Map<String, Object> limitTrade(String symbol, String side, Double quantity, Double price,
+                                          String positionSide, boolean testMode) {
+        validateQuantity(quantity);
+        if (price == null || price <= 0) {
+            throw new IllegalArgumentException("LIMIT 订单必须提供大于 0 的 price，当前值: " + price);
+        }
+
+        log.info("[Binance Futures] 限价单，交易对: {}, 方向: {}, 数量: {}, 价格: {}, 持仓方向: {}",
+                symbol, side, quantity, price, positionSide);
+
+        try {
+            String formattedSymbol = formatSymbol(symbol);
+            String validatedPositionSide = validatePositionSide(positionSide);
+
+            Map<String, Object> orderParams = buildOrderParams(
+                    formattedSymbol, side, "LIMIT", quantity, price, null, validatedPositionSide, false);
+
+            return executeOrder(orderParams, testMode);
+        } catch (Exception exc) {
+            log.error("[Binance Futures] 限价单失败: {}", exc.getMessage(), exc);
+            throw exc;
+        }
+    }
+
     /**
      * 止损交易 - 使用STOP或STOP_MARKET订单类型
      * 
@@ -714,6 +761,173 @@ public class BinanceFuturesOrderClient extends BinanceFuturesBase {
         } catch (Exception exc) {
             log.error("[Binance Futures] 取消所有条件单失败: {}", exc.getMessage(), exc);
             throw new RuntimeException("取消条件单失败: " + exc.getMessage(), exc);
+        }
+    }
+
+    /**
+     * 查询订单（USER_DATA）
+     * 参考 API: GET /fapi/v1/order
+     *
+     * @param orderId           与 origClientOrderId 二选一
+     * @param origClientOrderId 与 orderId 二选一
+     */
+    public Map<String, Object> queryOrder(String symbol, Long orderId, String origClientOrderId, Long recvWindow) {
+        try {
+            if (symbol == null || symbol.isEmpty()) {
+                throw new IllegalArgumentException("交易对不能为空");
+            }
+            if (orderId == null && (origClientOrderId == null || origClientOrderId.isBlank())) {
+                throw new IllegalArgumentException("orderId 与 origClientOrderId 至少填一个");
+            }
+            String formattedSymbol = formatSymbol(symbol);
+            String oc = (origClientOrderId != null && !origClientOrderId.isBlank()) ? origClientOrderId : null;
+            log.info("[Binance Futures] 查询订单 symbol={} orderId={} origClientOrderId={}", formattedSymbol, orderId, oc);
+            ApiResponse<QueryOrderResponse> response = restApi.queryOrder(formattedSymbol, orderId, oc, recvWindow);
+            QueryOrderResponse data = response.getData();
+            if (data == null) {
+                throw new RuntimeException("API调用返回null");
+            }
+            return queryOrderResponseToMap(data);
+        } catch (IllegalArgumentException e) {
+            throw e;
+        } catch (Exception e) {
+            log.error("[Binance Futures] 查询订单失败: {}", e.getMessage(), e);
+            throw new RuntimeException("查询订单失败: " + e.getMessage(), e);
+        }
+    }
+
+    /**
+     * 撤销订单（TRADE）
+     * 参考 API: DELETE /fapi/v1/order
+     */
+    public Map<String, Object> cancelOrder(String symbol, Long orderId, String origClientOrderId, Long recvWindow) {
+        try {
+            if (symbol == null || symbol.isEmpty()) {
+                throw new IllegalArgumentException("交易对不能为空");
+            }
+            if (orderId == null && (origClientOrderId == null || origClientOrderId.isBlank())) {
+                throw new IllegalArgumentException("orderId 与 origClientOrderId 至少填一个");
+            }
+            String formattedSymbol = formatSymbol(symbol);
+            String oc = (origClientOrderId != null && !origClientOrderId.isBlank()) ? origClientOrderId : null;
+            log.info("[Binance Futures] 撤销订单 symbol={} orderId={} origClientOrderId={}", formattedSymbol, orderId, oc);
+            ApiResponse<CancelOrderResponse> response = restApi.cancelOrder(formattedSymbol, orderId, oc, recvWindow);
+            CancelOrderResponse data = response.getData();
+            if (data == null) {
+                throw new RuntimeException("API调用返回null");
+            }
+            return cancelOrderResponseToMap(data);
+        } catch (IllegalArgumentException e) {
+            throw e;
+        } catch (Exception e) {
+            log.error("[Binance Futures] 撤销订单失败: {}", e.getMessage(), e);
+            throw new RuntimeException("撤销订单失败: " + e.getMessage(), e);
+        }
+    }
+
+    /**
+     * 当前所有挂单（USER_DATA）。symbol 为空则查询全部交易对。
+     * 参考 API: GET /fapi/v1/openOrders
+     */
+    public List<Map<String, Object>> currentAllOpenOrders(String symbol, Long recvWindow) {
+        try {
+            String formattedSymbol = null;
+            if (symbol != null && !symbol.isBlank()) {
+                formattedSymbol = formatSymbol(symbol);
+            }
+            log.info("[Binance Futures] 查询当前挂单 symbol={}", formattedSymbol == null ? "(ALL)" : formattedSymbol);
+            ApiResponse<CurrentAllOpenOrdersResponse> response = restApi.currentAllOpenOrders(formattedSymbol, recvWindow);
+            CurrentAllOpenOrdersResponse data = response.getData();
+            if (data == null || data.isEmpty()) {
+                return new ArrayList<>();
+            }
+            List<Map<String, Object>> out = new ArrayList<>();
+            for (AllOrdersResponseInner o : data) {
+                out.add(openOrderInnerToMap(o));
+            }
+            log.info("[Binance Futures] 当前挂单 {} 条", out.size());
+            return out;
+        } catch (Exception e) {
+            log.error("[Binance Futures] 查询当前挂单失败: {}", e.getMessage(), e);
+            throw new RuntimeException("查询当前挂单失败: " + e.getMessage(), e);
+        }
+    }
+
+    private static Map<String, Object> queryOrderResponseToMap(QueryOrderResponse r) {
+        Map<String, Object> m = new HashMap<>();
+        putIfNotNull(m, "orderId", r.getOrderId());
+        putIfNotNull(m, "symbol", r.getSymbol());
+        putIfNotNull(m, "status", r.getStatus());
+        putIfNotNull(m, "clientOrderId", r.getClientOrderId());
+        putIfNotNull(m, "price", r.getPrice());
+        putIfNotNull(m, "avgPrice", r.getAvgPrice());
+        putIfNotNull(m, "origQty", r.getOrigQty());
+        putIfNotNull(m, "executedQty", r.getExecutedQty());
+        putIfNotNull(m, "cumQuote", r.getCumQuote());
+        putIfNotNull(m, "type", r.getType());
+        putIfNotNull(m, "origType", r.getOrigType());
+        putIfNotNull(m, "side", r.getSide());
+        putIfNotNull(m, "positionSide", r.getPositionSide());
+        putIfNotNull(m, "stopPrice", r.getStopPrice());
+        putIfNotNull(m, "timeInForce", r.getTimeInForce());
+        putIfNotNull(m, "reduceOnly", r.getReduceOnly());
+        putIfNotNull(m, "closePosition", r.getClosePosition());
+        putIfNotNull(m, "time", r.getTime());
+        putIfNotNull(m, "updateTime", r.getUpdateTime());
+        putIfNotNull(m, "workingType", r.getWorkingType());
+        return m;
+    }
+
+    private static Map<String, Object> cancelOrderResponseToMap(CancelOrderResponse r) {
+        Map<String, Object> m = new HashMap<>();
+        putIfNotNull(m, "orderId", r.getOrderId());
+        putIfNotNull(m, "symbol", r.getSymbol());
+        putIfNotNull(m, "status", r.getStatus());
+        putIfNotNull(m, "clientOrderId", r.getClientOrderId());
+        putIfNotNull(m, "price", r.getPrice());
+        putIfNotNull(m, "origQty", r.getOrigQty());
+        putIfNotNull(m, "executedQty", r.getExecutedQty());
+        putIfNotNull(m, "cumQuote", r.getCumQuote());
+        putIfNotNull(m, "type", r.getType());
+        putIfNotNull(m, "origType", r.getOrigType());
+        putIfNotNull(m, "side", r.getSide());
+        putIfNotNull(m, "positionSide", r.getPositionSide());
+        putIfNotNull(m, "stopPrice", r.getStopPrice());
+        putIfNotNull(m, "timeInForce", r.getTimeInForce());
+        putIfNotNull(m, "reduceOnly", r.getReduceOnly());
+        putIfNotNull(m, "closePosition", r.getClosePosition());
+        putIfNotNull(m, "updateTime", r.getUpdateTime());
+        return m;
+    }
+
+    private static Map<String, Object> openOrderInnerToMap(AllOrdersResponseInner r) {
+        Map<String, Object> m = new HashMap<>();
+        putIfNotNull(m, "orderId", r.getOrderId());
+        putIfNotNull(m, "symbol", r.getSymbol());
+        putIfNotNull(m, "status", r.getStatus());
+        putIfNotNull(m, "clientOrderId", r.getClientOrderId());
+        putIfNotNull(m, "price", r.getPrice());
+        putIfNotNull(m, "avgPrice", r.getAvgPrice());
+        putIfNotNull(m, "origQty", r.getOrigQty());
+        putIfNotNull(m, "executedQty", r.getExecutedQty());
+        putIfNotNull(m, "cumQuote", r.getCumQuote());
+        putIfNotNull(m, "type", r.getType());
+        putIfNotNull(m, "origType", r.getOrigType());
+        putIfNotNull(m, "side", r.getSide());
+        putIfNotNull(m, "positionSide", r.getPositionSide());
+        putIfNotNull(m, "stopPrice", r.getStopPrice());
+        putIfNotNull(m, "timeInForce", r.getTimeInForce());
+        putIfNotNull(m, "reduceOnly", r.getReduceOnly());
+        putIfNotNull(m, "closePosition", r.getClosePosition());
+        putIfNotNull(m, "time", r.getTime());
+        putIfNotNull(m, "updateTime", r.getUpdateTime());
+        putIfNotNull(m, "workingType", r.getWorkingType());
+        return m;
+    }
+
+    private static void putIfNotNull(Map<String, Object> m, String key, Object value) {
+        if (value != null) {
+            m.put(key, value);
         }
     }
 }

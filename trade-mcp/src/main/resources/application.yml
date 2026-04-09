@@ -1,0 +1,21 @@
+server:
+  port: 8099
+
+spring:
+  application:
+    name: trade-mcp
+  ai:
+    mcp:
+      server:
+        type: SYNC
+        annotation-scanner:
+          enabled: true
+        # WebMVC transport: defaults to SSE if protocol not specified
+        protocol: SSE
+
+downstream:
+  backend:
+    base-url: http://localhost:8080
+  binance-service:
+    base-url: http://localhost:8081
+
