@@ -1,0 +1,18 @@
+# 复制到 /etc/systemd/system/mcp-e2e.service 后：
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now mcp-e2e.timer   # 若使用下方 timer 示例
+#
+# 说明：仅示例；环境文件请放在 /etc/mcp-e2e.env（600 权限），勿提交密钥。
+
+[Unit]
+Description=AIFutureTrade MCP downstream E2E probe (backend + binance-service)
+After=network-online.target
+
+[Service]
+Type=oneshot
+EnvironmentFile=-/etc/mcp-e2e.env
+ExecStart=/usr/bin/python3 /opt/AIFutureTrade/deploy/mcp-e2e/mcp_e2e.py
+WorkingDirectory=/opt/AIFutureTrade/deploy/mcp-e2e
+
+[Install]
+WantedBy=multi-user.target

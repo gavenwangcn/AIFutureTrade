@@ -1,0 +1,12 @@
+# 每 5 分钟执行一次探活（配合 mcp-e2e.service）
+
+[Unit]
+Description=Run MCP E2E probe every 5 minutes
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=5min
+Unit=mcp-e2e.service
+
+[Install]
+WantedBy=timers.target

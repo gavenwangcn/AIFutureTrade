@@ -1,0 +1,25 @@
+# MCP 端到端探活（Ubuntu 24 推荐）
+#
+# 用法：
+#   cd deploy/mcp-e2e
+#   cp env.example .env
+#   # 按需编辑 .env（BACKEND_BASE_URL、BINANCE_SERVICE_LIST）
+#   docker compose --profile mcp-e2e up --build mcp-e2e
+#
+# 仅运行一次并退出：
+#   docker compose --profile mcp-e2e run --rm mcp-e2e
+
+services:
+  mcp-e2e:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    profiles:
+      - mcp-e2e
+    environment:
+      BACKEND_BASE_URL: ${BACKEND_BASE_URL:-http://154.89.148.172:5002}
+      # 与 trade/common/config.py 中 BINANCE_SERVICE_LIST 保持一致（单行 JSON）
+      BINANCE_SERVICE_LIST: ${BINANCE_SERVICE_LIST}
+      TRADE_MCP_BASE_URL: ${TRADE_MCP_BASE_URL:-}
+      E2E_HTTP_TIMEOUT_SEC: ${E2E_HTTP_TIMEOUT_SEC:-30}
+      E2E_SKIP_BINANCE: ${E2E_SKIP_BINANCE:-0}
