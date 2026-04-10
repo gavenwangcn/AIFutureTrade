@@ -41,9 +41,8 @@ public class MarketTools {
     @McpTool(
             name = "trade.market.klines_with_indicators",
             description = "查询K线并附加技术指标(MA/EMA/RSI/MACD/KDJ/ATR/ADX/VOL等)。"
-                    + "data 按时间从旧到新排列；每根K线仅能用其左侧已返回的历史计算指标。"
-                    + "无法计算的指标字段不返回（无 null 占位）；序列前部可返回字段较少，越往后越完整。"
-                    + "若要看满指标请取数组末尾K线或增大 limit(建议≥100)。")
+                    + "data 按时间从旧到新；若某根K线存在任一指标无法给出有效值，则整根不返回（不删字段只删行）。"
+                    + "通常从第99根起才可能全部齐全，故 data 条数可能小于请求的 limit；需更长历史请增大 limit。")
     public Map<String, Object> klinesWithIndicators(
             @McpToolParam(description = "交易对", required = true) String symbol,
             @McpToolParam(description = "周期，如 1m/5m/15m/1h/4h/1d 等", required = true) String interval,

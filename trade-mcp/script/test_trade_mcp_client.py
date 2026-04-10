@@ -249,12 +249,12 @@ def _print_klines_indicators_warmup_hint(payload: dict[str, Any], tool_name: str
     n0, t0 = _indicator_leaf_stats(ind0) if isinstance(ind0, dict) else (0, 0)
     n1, t1 = _indicator_leaf_stats(ind1) if isinstance(ind1, dict) else (0, 0)
     print("[trade-mcp-test] ---------- 指标字段多少说明（首根 vs 末根）----------")
-    print("  逻辑：data 按时间从旧到新；每根 K 线只能用「已返回的左侧历史」算指标；")
-    print("  无法算的指标不返回字段（无 null 占位）。序列前部字段少，末根通常最完整（与 Python market_data 一致）。")
+    print("  逻辑：data 按时间从旧到新；任一叶指标缺失则整根 K 线不返回，故首根起即指标齐全。")
+    print("  data 条数可能小于请求的 limit（预热段被整根省略）；与 Python market_data 一致。")
     print(f"  本响应共 {len(data)} 根 K 线。")
     print(
-        f"  首根(最旧) indicators 非空叶子 {n0}/{t0} ；"
-        f"末根(最新) indicators 非空叶子 {n1}/{t1}  （末根应明显大于首根）"
+        f"  首根(返回中最旧) indicators 非空叶子 {n0}/{t0} ；"
+        f"末根(最新) {n1}/{t1}  （整根省略不完整 K 线后，首尾通常均为满指标）"
     )
     print("[trade-mcp-test] ---------- 说明结束 ----------\n")
     _print_latest_klines_preview(data, tool_name)

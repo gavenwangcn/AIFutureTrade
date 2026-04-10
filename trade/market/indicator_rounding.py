@@ -9,6 +9,17 @@ from typing import Any, Optional
 import numpy as np
 
 
+def nested_dict_has_none(obj: Any) -> bool:
+    """若嵌套 dict 中任一叶为 None，返回 True（用于判断整根 K 线是否应丢弃）。"""
+    if obj is None:
+        return True
+    if isinstance(obj, dict):
+        return any(
+            v is None or (isinstance(v, dict) and nested_dict_has_none(v)) for v in obj.values()
+        )
+    return False
+
+
 def compact_indicator_tree(obj: Any) -> Any:
     """
     去掉指标树中的 None 与空 dict，便于接口只返回有值的字段。

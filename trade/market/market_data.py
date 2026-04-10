@@ -28,13 +28,17 @@ import pandas as pd
 import numpy as np
 import talib
 from trade.market.market_index import MarketIndexCalculator
-from trade.market.indicator_rounding import compact_indicator_tree, round_indicator_4
+from trade.market.indicator_rounding import nested_dict_has_none, round_indicator_4
 
 from trade.common.binance_futures import BinanceFuturesClient
 from trade.common.database.database_market_tickers import MarketTickersDatabase
 from trade.common.database.database_futures import FuturesDatabase
 
 logger = logging.getLogger(__name__)
+
+# 与 trade-mcp KlineIndicatorCalculator 一致：少于此根数则不做指标计算（整段丢弃）
+_KLINES_FULL_INDICATORS_MIN_BARS = 99
+_KLINES_FULL_INDICATORS_MIN_INDEX = 98
 
 
 def _calculate_rsi_tradingview(close_array: np.ndarray, period: int) -> np.ndarray:
@@ -976,15 +980,21 @@ class MarketDataFetcher:
             interval: 时间周期
 
         Returns:
-            包含指标数据的K线列表。无法计算的指标不计算、不输出字段（JSON 无 null 占位）。
+            仅包含「全部指标均有有效值」的 K 线；任一叶指标为空则整根不加入列表。
+            根数 < 99 时不做 talib/指标计算直接返回 []；根数足够时仍对整段序列算滚动指标（数学必需），
+            仅在下标 ≥98 上组装输出以省无效行上的字典构建。
         """
         if not klines or len(klines) == 0:
             logger.warning(f'[Indicators] No klines data for {symbol} {interval}')
             return []
-        
-        # 如果K线不足100根，记录警告但继续计算（能算多少算多少）
-        if len(klines) < 100:
-            logger.debug(f'[Indicators] Insufficient klines for {symbol} {interval}: {len(klines)} < 100, will calculate partial indicators')
+
+        n = len(klines)
+        if n < _KLINES_FULL_INDICATORS_MIN_BARS:
+            logger.debug(
+                f'[Indicators] Skip indicator calc for {symbol} {interval}: '
+                f'{n} < {_KLINES_FULL_INDICATORS_MIN_BARS} (need full MA99/EMA99 window)'
+            )
+            return []
 
         try:
             # 提取OHLCV数据为numpy数组
@@ -993,13 +1003,11 @@ class MarketDataFetcher:
             closes = np.array([k['close'] for k in klines], dtype=np.float64)
             volumes = np.array([k['volume'] for k in klines], dtype=np.float64)
 
-            n = len(klines)
-
-            # 按序列长度跳过无法产生有效输出的指标整段计算，与 trade-mcp KlineIndicatorCalculator 一致
-            ma5 = talib.SMA(closes, timeperiod=5) if n >= 5 else None
-            ma20 = talib.SMA(closes, timeperiod=20) if n >= 20 else None
-            ma60 = talib.SMA(closes, timeperiod=60) if n >= 60 else None
-            ma99 = talib.SMA(closes, timeperiod=99) if n >= 99 else None
+            # n ≥ _KLINES_FULL_INDICATORS_MIN_BARS：与 Java 一致，只对下标 _KLINES_FULL_INDICATORS_MIN_INDEX..n-1 组装输出
+            ma5 = talib.SMA(closes, timeperiod=5)
+            ma20 = talib.SMA(closes, timeperiod=20)
+            ma60 = talib.SMA(closes, timeperiod=60)
+            ma99 = talib.SMA(closes, timeperiod=99)
 
             # EMA指标（与前端K线一致的初始化逻辑）
             # EMA(t) = Close(t) * α + EMA(t-1) * (1 - α), α = 2 / (N + 1)
@@ -1027,16 +1035,16 @@ class MarketDataFetcher:
                         ema_arr[i] = close * alpha + ema_arr[i - 1] * (1 - alpha)
                 return ema_arr
 
-            ema5 = _ema_frontend(closes, 5) if n >= 5 else None
-            ema20 = _ema_frontend(closes, 20) if n >= 20 else None
-            ema30 = _ema_frontend(closes, 30) if n >= 30 else None
-            ema60 = _ema_frontend(closes, 60) if n >= 60 else None
-            ema99 = _ema_frontend(closes, 99) if n >= 99 else None
+            ema5 = _ema_frontend(closes, 5)
+            ema20 = _ema_frontend(closes, 20)
+            ema30 = _ema_frontend(closes, 30)
+            ema60 = _ema_frontend(closes, 60)
+            ema99 = _ema_frontend(closes, 99)
 
             # RSI指标（使用Wilder's Smoothing方法）
-            rsi6 = _calculate_rsi_tradingview(closes, period=6) if n >= 7 else None
-            rsi9 = _calculate_rsi_tradingview(closes, period=9) if n >= 10 else None
-            rsi14 = _calculate_rsi_tradingview(closes, period=14) if n >= 15 else None
+            rsi6 = _calculate_rsi_tradingview(closes, period=6)
+            rsi9 = _calculate_rsi_tradingview(closes, period=9)
+            rsi14 = _calculate_rsi_tradingview(closes, period=14)
 
             # MACD指标（与前端K线一致的计算逻辑）
             # DIF/DEA 与前端算法一致，柱值 = (DIF - DEA) * 2
@@ -1081,48 +1089,39 @@ class MarketDataFetcher:
 
                 return dif_arr, dea_arr, bar_arr
 
-            if n >= 26:
-                macd_dif, macd_dea, macd_bar = _macd_frontend(closes, fast=12, slow=26, signal=9)
-            else:
-                macd_dif = macd_dea = macd_bar = None
+            macd_dif, macd_dea, macd_bar = _macd_frontend(closes, fast=12, slow=26, signal=9)
 
             # KDJ指标（使用TradingView计算逻辑，参数9,3,3）
             kdj_k_period = 9
             kdj_smooth_k = 3
             kdj_smooth_d = 3
-            # KDJ(9,3,3) 的最早可用索引（与 Java KDJ_READY_INDEX 一致）
-            kdj_ready_index = (kdj_k_period - 1) + (kdj_smooth_k - 1) + (kdj_smooth_d - 1)
-            if n >= kdj_ready_index + 1:
-                kdj_k, kdj_d, kdj_j = self._calculate_kdj_tradingview(
-                    highs, lows, closes,
-                    k_period=kdj_k_period,
-                    smooth_k=kdj_smooth_k,
-                    smooth_d=kdj_smooth_d
-                )
-            else:
-                kdj_k = kdj_d = kdj_j = None
+            kdj_k, kdj_d, kdj_j = self._calculate_kdj_tradingview(
+                highs, lows, closes,
+                k_period=kdj_k_period,
+                smooth_k=kdj_smooth_k,
+                smooth_d=kdj_smooth_d
+            )
 
             # ATR指标（使用Wilder's Smoothing方法）
-            atr7 = self._calculate_atr_tradingview(highs, lows, closes, period=7) if n >= 7 else None
-            atr14 = self._calculate_atr_tradingview(highs, lows, closes, period=14) if n >= 14 else None
-            atr21 = self._calculate_atr_tradingview(highs, lows, closes, period=21) if n >= 21 else None
+            atr7 = self._calculate_atr_tradingview(highs, lows, closes, period=7)
+            atr14 = self._calculate_atr_tradingview(highs, lows, closes, period=14)
+            atr21 = self._calculate_atr_tradingview(highs, lows, closes, period=21)
 
             # ADX指标（基于该symbol的K线数据）
-            adx14 = plus_di14 = minus_di14 = None
-            if n >= 14:
-                calculator = MarketIndexCalculator(atr_period=14, adx_period=14)
-                adx_result = calculator.compute_adx(highs, lows, closes)
-                if adx_result:
-                    adx14, plus_di14, minus_di14 = adx_result
+            calculator = MarketIndexCalculator(atr_period=14, adx_period=14)
+            adx_result = calculator.compute_adx(highs, lows, closes)
+            if adx_result:
+                adx14, plus_di14, minus_di14 = adx_result
+            else:
+                adx14 = plus_di14 = minus_di14 = None
 
             # VOL均量线
-            mavol5 = talib.SMA(volumes, timeperiod=5) if n >= 5 else None
-            mavol10 = talib.SMA(volumes, timeperiod=10) if n >= 10 else None
-            mavol60 = talib.SMA(volumes, timeperiod=60) if n >= 60 else None
+            mavol5 = talib.SMA(volumes, timeperiod=5)
+            mavol10 = talib.SMA(volumes, timeperiod=10)
+            mavol60 = talib.SMA(volumes, timeperiod=60)
 
-            # 为每根K线添加指标数据（返回所有K线，不足历史数据的K线指标部分为空）
             result_klines = []
-            for i in range(len(klines)):
+            for i in range(_KLINES_FULL_INDICATORS_MIN_INDEX, n):
                 kline = klines[i].copy()
 
                 # 构建指标字典，根据K线索引判断哪些指标可以计算
@@ -1140,63 +1139,65 @@ class MarketDataFetcher:
                 except (TypeError, ValueError):
                     _tb_f = 0.0
 
+                # 循环下标已 ≥ _KLINES_FULL_INDICATORS_MIN_INDEX，仅防脏数据 NaN
                 indicators = {
                     'ma': {
-                        'ma5': round_indicator_4(float(ma5[i])) if ma5 is not None and i >= 4 and not np.isnan(ma5[i]) else None,
-                        'ma20': round_indicator_4(float(ma20[i])) if ma20 is not None and i >= 19 and not np.isnan(ma20[i]) else None,
-                        'ma60': round_indicator_4(float(ma60[i])) if ma60 is not None and i >= 59 and not np.isnan(ma60[i]) else None,
-                        'ma99': round_indicator_4(float(ma99[i])) if ma99 is not None and i >= 98 and not np.isnan(ma99[i]) else None
+                        'ma5': round_indicator_4(float(ma5[i])) if not np.isnan(ma5[i]) else None,
+                        'ma20': round_indicator_4(float(ma20[i])) if not np.isnan(ma20[i]) else None,
+                        'ma60': round_indicator_4(float(ma60[i])) if not np.isnan(ma60[i]) else None,
+                        'ma99': round_indicator_4(float(ma99[i])) if not np.isnan(ma99[i]) else None
                     },
                     'ema': {
-                        'ema5': round_indicator_4(float(ema5[i])) if ema5 is not None and i >= 4 and not np.isnan(ema5[i]) else None,
-                        'ema20': round_indicator_4(float(ema20[i])) if ema20 is not None and i >= 19 and not np.isnan(ema20[i]) else None,
-                        'ema30': round_indicator_4(float(ema30[i])) if ema30 is not None and i >= 29 and not np.isnan(ema30[i]) else None,
-                        'ema60': round_indicator_4(float(ema60[i])) if ema60 is not None and i >= 59 and not np.isnan(ema60[i]) else None,
-                        'ema99': round_indicator_4(float(ema99[i])) if ema99 is not None and i >= 98 and not np.isnan(ema99[i]) else None
+                        'ema5': round_indicator_4(float(ema5[i])) if not np.isnan(ema5[i]) else None,
+                        'ema20': round_indicator_4(float(ema20[i])) if not np.isnan(ema20[i]) else None,
+                        'ema30': round_indicator_4(float(ema30[i])) if not np.isnan(ema30[i]) else None,
+                        'ema60': round_indicator_4(float(ema60[i])) if not np.isnan(ema60[i]) else None,
+                        'ema99': round_indicator_4(float(ema99[i])) if not np.isnan(ema99[i]) else None
                     },
                     'rsi': {
-                        'rsi6': round_indicator_4(float(rsi6[i])) if rsi6 is not None and i >= 6 and not np.isnan(rsi6[i]) else None,
-                        'rsi9': round_indicator_4(float(rsi9[i])) if rsi9 is not None and i >= 9 and not np.isnan(rsi9[i]) else None,
-                        'rsi14': round_indicator_4(float(rsi14[i])) if rsi14 is not None and i >= 14 and not np.isnan(rsi14[i]) else None
+                        'rsi6': round_indicator_4(float(rsi6[i])) if not np.isnan(rsi6[i]) else None,
+                        'rsi9': round_indicator_4(float(rsi9[i])) if not np.isnan(rsi9[i]) else None,
+                        'rsi14': round_indicator_4(float(rsi14[i])) if not np.isnan(rsi14[i]) else None
                     },
                     'macd': {
-                        'dif': round_indicator_4(float(macd_dif[i])) if macd_dif is not None and i >= 25 and not np.isnan(macd_dif[i]) else None,
-                        'dea': round_indicator_4(float(macd_dea[i])) if macd_dea is not None and i >= 25 and not np.isnan(macd_dea[i]) else None,
-                        'bar': round_indicator_4(float(macd_bar[i])) if macd_bar is not None and i >= 25 and not np.isnan(macd_bar[i]) else None
+                        'dif': round_indicator_4(float(macd_dif[i])) if not np.isnan(macd_dif[i]) else None,
+                        'dea': round_indicator_4(float(macd_dea[i])) if not np.isnan(macd_dea[i]) else None,
+                        'bar': round_indicator_4(float(macd_bar[i])) if not np.isnan(macd_bar[i]) else None
                     },
                     'kdj': {
-                        'k': round_indicator_4(float(kdj_k[i])) if kdj_k is not None and i >= kdj_ready_index and not np.isnan(kdj_k[i]) else None,
-                        'd': round_indicator_4(float(kdj_d[i])) if kdj_d is not None and i >= kdj_ready_index and not np.isnan(kdj_d[i]) else None,
-                        'j': round_indicator_4(float(kdj_j[i])) if kdj_j is not None and i >= kdj_ready_index and not np.isnan(kdj_j[i]) else None
+                        'k': round_indicator_4(float(kdj_k[i])) if not np.isnan(kdj_k[i]) else None,
+                        'd': round_indicator_4(float(kdj_d[i])) if not np.isnan(kdj_d[i]) else None,
+                        'j': round_indicator_4(float(kdj_j[i])) if not np.isnan(kdj_j[i]) else None
                     },
                     'atr': {
-                        'atr7': round_indicator_4(float(atr7[i])) if atr7 is not None and i >= 6 and not np.isnan(atr7[i]) else None,
-                        'atr14': round_indicator_4(float(atr14[i])) if atr14 is not None and i >= 13 and not np.isnan(atr14[i]) else None,
-                        'atr21': round_indicator_4(float(atr21[i])) if atr21 is not None and i >= 20 and not np.isnan(atr21[i]) else None
+                        'atr7': round_indicator_4(float(atr7[i])) if not np.isnan(atr7[i]) else None,
+                        'atr14': round_indicator_4(float(atr14[i])) if not np.isnan(atr14[i]) else None,
+                        'atr21': round_indicator_4(float(atr21[i])) if not np.isnan(atr21[i]) else None
                     },
                     'adx': {
-                        'adx14': round_indicator_4(float(adx14[i])) if adx14 is not None and i >= 13 and not np.isnan(adx14[i]) else None,
-                        '+di14': round_indicator_4(float(plus_di14[i])) if plus_di14 is not None and i >= 13 and not np.isnan(plus_di14[i]) else None,
-                        '-di14': round_indicator_4(float(minus_di14[i])) if minus_di14 is not None and i >= 13 and not np.isnan(minus_di14[i]) else None
+                        'adx14': round_indicator_4(float(adx14[i])) if adx14 is not None and not np.isnan(adx14[i]) else None,
+                        '+di14': round_indicator_4(float(plus_di14[i])) if plus_di14 is not None and not np.isnan(plus_di14[i]) else None,
+                        '-di14': round_indicator_4(float(minus_di14[i])) if minus_di14 is not None and not np.isnan(minus_di14[i]) else None
                     },
                     'vol': {
                         'vol': round_indicator_4(float(volumes[i])),
                         'buy_vol': round_indicator_4(_tb_f),
                         'sell_vol': round_indicator_4(float(volumes[i]) - _tb_f),
-                        'mavol5': round_indicator_4(float(mavol5[i])) if mavol5 is not None and i >= 4 and not np.isnan(mavol5[i]) else None,
-                        'mavol10': round_indicator_4(float(mavol10[i])) if mavol10 is not None and i >= 9 and not np.isnan(mavol10[i]) else None,
-                        'mavol60': round_indicator_4(float(mavol60[i])) if mavol60 is not None and i >= 59 and not np.isnan(mavol60[i]) else None
+                        'mavol5': round_indicator_4(float(mavol5[i])) if not np.isnan(mavol5[i]) else None,
+                        'mavol10': round_indicator_4(float(mavol10[i])) if not np.isnan(mavol10[i]) else None,
+                        'mavol60': round_indicator_4(float(mavol60[i])) if not np.isnan(mavol60[i]) else None
                     }
                 }
 
-                indicators = compact_indicator_tree(indicators)
-                if indicators:
-                    kline['indicators'] = indicators
+                if nested_dict_has_none(indicators):
+                    continue
+                kline['indicators'] = indicators
                 result_klines.append(kline)
 
-            # 统计有多少K线有完整指标（MA99需要99根历史数据）
-            full_indicators_count = max(0, len(klines) - 98) if len(klines) >= 99 else 0
-            logger.debug(f'[Indicators] Calculated indicators for {symbol} {interval}: {len(result_klines)} total klines, {full_indicators_count} klines with full indicators (MA99/EMA99)')
+            logger.debug(
+                f'[Indicators] {symbol} {interval}: 输入 {len(klines)} 根, '
+                f'全部指标齐全保留 {len(result_klines)} 根'
+            )
             return result_klines
 
         except Exception as e:
@@ -1415,15 +1416,16 @@ class MarketDataFetcher:
                 except (ValueError, TypeError, KeyError, IndexError):
                     continue
 
-            # 如果K线不足100根，记录警告但继续处理（能算多少算多少）
-            if len(all_klines_parsed) < 100:
-                logger.debug(f'[MarketData] Insufficient klines for {symbol} {interval}: {len(all_klines_parsed)} < 100, will calculate partial indicators')
+            if len(all_klines_parsed) < _KLINES_FULL_INDICATORS_MIN_BARS:
+                logger.debug(
+                    f'[MarketData] Klines {len(all_klines_parsed)} < {_KLINES_FULL_INDICATORS_MIN_BARS} for '
+                    f'{symbol} {interval}: indicator calc skipped until enough history'
+                )
 
-            # 计算所有K线的技术指标（即使不足100根也会返回所有K线，部分指标为空）
+            # 仅当根数 ≥99 时有指标；否则 _calculate_indicators_for_klines 返回 []
             klines_with_indicators = self._calculate_indicators_for_klines(all_klines_parsed, symbol, interval)
 
-            # 确保返回return_count数量的K线（如果不足则返回所有可用的K线）
-            # 即使某些指标为空，也要返回指定数量的K线
+            # 在「全部指标齐全」的 K 线中取最后 return_count 根
             if len(klines_with_indicators) == 0:
                 logger.warning(f'[MarketData] No klines with indicators for {symbol} {interval}')
                 return {}
