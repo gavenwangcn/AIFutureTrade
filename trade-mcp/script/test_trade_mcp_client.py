@@ -143,7 +143,7 @@ def _tool_input_schema_as_dict(tool) -> dict:
 
 
 def _indicator_leaf_stats(ind: Any) -> tuple[int, int]:
-    """统计 indicators 子树下：叶子节点总数与非 null 数。"""
+    """统计 indicators 子树下：叶子节点总数与非 null 数（服务端已省略 null 键，总数即已返回字段数）。"""
 
     non_null = 0
     total = 0
@@ -214,7 +214,7 @@ def _print_latest_klines_preview(data: list[Any], tool_name: str) -> None:
     slice_ = data[-n_show:]
     print("[trade-mcp-test] ---------- 最新 K 线窗口（时间上为最近几根）----------")
     print("  说明：data 按时间从旧到新 → data[0] 最旧，data[-1] 最新。")
-    print("  「指标大量为 null」主要出现在序列前部（最旧），不是最新几根。")
+    print("  序列前部（最旧）可返回的指标字段较少，不是最新几根。")
     print(f"  下面展示末尾 {len(slice_)} 根（索引 {total - len(slice_)} … {total - 1}），即最新 {len(slice_)} 根：")
     for j, row in enumerate(slice_):
         idx = total - len(slice_) + j
@@ -236,7 +236,7 @@ def _print_latest_klines_preview(data: list[Any], tool_name: str) -> None:
 
 
 def _print_klines_indicators_warmup_hint(payload: dict[str, Any], tool_name: str) -> None:
-    """说明 klines_with_indicators 前段 null 为预期，并对比首尾根指标填充度。"""
+    """说明 klines_with_indicators 前段指标字段较少为预期，并对比首尾根填充度。"""
     if "klines_with_indicators" not in tool_name:
         return
     data = payload.get("data")
@@ -248,9 +248,9 @@ def _print_klines_indicators_warmup_hint(payload: dict[str, Any], tool_name: str
     ind1 = last.get("indicators")
     n0, t0 = _indicator_leaf_stats(ind0) if isinstance(ind0, dict) else (0, 0)
     n1, t1 = _indicator_leaf_stats(ind1) if isinstance(ind1, dict) else (0, 0)
-    print("[trade-mcp-test] ---------- 指标 null 说明（首根 vs 末根）----------")
-    print("  逻辑：data 按时间从旧到新；每根 K 线只能用「已返回的左侧历史」算指标，")
-    print("  故序列前部 MA/RSI/MACD 等常为 null，末部才接近全满（与 Python market_data 一致）。")
+    print("[trade-mcp-test] ---------- 指标字段多少说明（首根 vs 末根）----------")
+    print("  逻辑：data 按时间从旧到新；每根 K 线只能用「已返回的左侧历史」算指标；")
+    print("  无法算的指标不返回字段（无 null 占位）。序列前部字段少，末根通常最完整（与 Python market_data 一致）。")
     print(f"  本响应共 {len(data)} 根 K 线。")
     print(
         f"  首根(最旧) indicators 非空叶子 {n0}/{t0} ；"

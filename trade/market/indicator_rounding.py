@@ -9,6 +9,25 @@ from typing import Any, Optional
 import numpy as np
 
 
+def compact_indicator_tree(obj: Any) -> Any:
+    """
+    去掉指标树中的 None 与空 dict，便于接口只返回有值的字段。
+    """
+    if isinstance(obj, dict):
+        out: dict[str, Any] = {}
+        for k, v in obj.items():
+            if v is None:
+                continue
+            if isinstance(v, dict):
+                sub = compact_indicator_tree(v)
+                if sub:
+                    out[k] = sub
+            else:
+                out[k] = v
+        return out
+    return obj
+
+
 def round_indicator_4(value: Any) -> Optional[float]:
     """
     将指标数值量化为最多 4 位小数；无法转换或非有限数时返回 None。

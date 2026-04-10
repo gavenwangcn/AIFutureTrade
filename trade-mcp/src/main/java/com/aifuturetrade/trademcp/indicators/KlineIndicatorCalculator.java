@@ -12,7 +12,7 @@ import java.util.Map;
  * 与 {@code trade/market/market_data.py} 中 {@code _calculate_indicators_for_klines} 对齐的 K 线指标计算。
  * <p>
  * 返回的 K 线序列按时间从旧到新排列时，索引 {@code i} 处只能使用 {@code [0,i]} 的历史；
- * MA99、RSI14 等需要足够根数后才有值，故序列前段多数字段为 {@code null} 属预期，非计算错误。
+ * 无法在当前窗口内计算的指标不计算（按序列长度跳过整类计算以省 CPU），且不输出空字段（JSON 中省略 null）。
  * </p>
  * <p>
  * 写入每根 K 线 {@code indicators} 的数值统一保留至多小数点后 4 位（HALF_UP）。
@@ -53,40 +53,45 @@ public final class KlineIndicatorCalculator {
             takerBuy[i] = num(tb);
         }
 
-        double[] ma5 = sma(closes, 5);
-        double[] ma20 = sma(closes, 20);
-        double[] ma60 = sma(closes, 60);
-        double[] ma99 = sma(closes, 99);
+        double[] ma5 = n >= 5 ? sma(closes, 5) : null;
+        double[] ma20 = n >= 20 ? sma(closes, 20) : null;
+        double[] ma60 = n >= 60 ? sma(closes, 60) : null;
+        double[] ma99 = n >= 99 ? sma(closes, 99) : null;
 
-        double[] ema5 = emaFrontend(closes, 5);
-        double[] ema20 = emaFrontend(closes, 20);
-        double[] ema30 = emaFrontend(closes, 30);
-        double[] ema60 = emaFrontend(closes, 60);
-        double[] ema99 = emaFrontend(closes, 99);
+        double[] ema5 = n >= 5 ? emaFrontend(closes, 5) : null;
+        double[] ema20 = n >= 20 ? emaFrontend(closes, 20) : null;
+        double[] ema30 = n >= 30 ? emaFrontend(closes, 30) : null;
+        double[] ema60 = n >= 60 ? emaFrontend(closes, 60) : null;
+        double[] ema99 = n >= 99 ? emaFrontend(closes, 99) : null;
 
-        double[] rsi6 = rsiTradingView(closes, 6);
-        double[] rsi9 = rsiTradingView(closes, 9);
-        double[] rsi14 = rsiTradingView(closes, 14);
+        double[] rsi6 = n >= 7 ? rsiTradingView(closes, 6) : null;
+        double[] rsi9 = n >= 10 ? rsiTradingView(closes, 9) : null;
+        double[] rsi14 = n >= 15 ? rsiTradingView(closes, 14) : null;
 
-        Macd macd = macdFrontend(closes, 12, 26, 9);
+        Macd macd = n >= 26 ? macdFrontend(closes, 12, 26, 9) : null;
 
-        double[][] kdj = kdjTradingView(highs, lows, closes, KDJ_K_PERIOD, KDJ_SMOOTH_K, KDJ_SMOOTH_D);
-        double[] kdjK = kdj[0];
-        double[] kdjD = kdj[1];
-        double[] kdjJ = kdj[2];
+        double[] kdjK = null;
+        double[] kdjD = null;
+        double[] kdjJ = null;
+        if (n >= KDJ_READY_INDEX + 1) {
+            double[][] kdj = kdjTradingView(highs, lows, closes, KDJ_K_PERIOD, KDJ_SMOOTH_K, KDJ_SMOOTH_D);
+            kdjK = kdj[0];
+            kdjD = kdj[1];
+            kdjJ = kdj[2];
+        }
 
-        double[] atr7 = atrTradingView(highs, lows, closes, 7);
-        double[] atr14 = atrTradingView(highs, lows, closes, 14);
-        double[] atr21 = atrTradingView(highs, lows, closes, 21);
+        double[] atr7 = n >= 7 ? atrTradingView(highs, lows, closes, 7) : null;
+        double[] atr14 = n >= 14 ? atrTradingView(highs, lows, closes, 14) : null;
+        double[] atr21 = n >= 21 ? atrTradingView(highs, lows, closes, 21) : null;
 
-        AdxResult adx = computeAdx(highs, lows, closes, 14);
-        double[] adx14 = adx != null ? adx.adx : zeros(n);
-        double[] plusDi14 = adx != null ? adx.plusDi : zeros(n);
-        double[] minusDi14 = adx != null ? adx.minusDi : zeros(n);
+        AdxResult adx = n >= 14 ? computeAdx(highs, lows, closes, 14) : null;
+        double[] adx14 = adx != null ? adx.adx : null;
+        double[] plusDi14 = adx != null ? adx.plusDi : null;
+        double[] minusDi14 = adx != null ? adx.minusDi : null;
 
-        double[] mavol5 = sma(volumes, 5);
-        double[] mavol10 = sma(volumes, 10);
-        double[] mavol60 = sma(volumes, 60);
+        double[] mavol5 = n >= 5 ? sma(volumes, 5) : null;
+        double[] mavol10 = n >= 10 ? sma(volumes, 10) : null;
+        double[] mavol60 = n >= 60 ? sma(volumes, 60) : null;
 
         List<Map<String, Object>> out = new ArrayList<>(n);
         for (int i = 0; i < n; i++) {
@@ -120,7 +125,9 @@ public final class KlineIndicatorCalculator {
                     mavol5,
                     mavol10,
                     mavol60);
-            row.put("indicators", indicators);
+            if (!indicators.isEmpty()) {
+                row.put("indicators", indicators);
+            }
             out.add(row);
         }
         return out;
@@ -158,65 +165,92 @@ public final class KlineIndicatorCalculator {
         double vol = volumes[i];
         double buyV = takerBuy[i];
         Map<String, Object> ma = new LinkedHashMap<>();
-        ma.put("ma5", i >= 4 && !nan(ma5[i]) ? roundIndicator(ma5[i]) : null);
-        ma.put("ma20", i >= 19 && !nan(ma20[i]) ? roundIndicator(ma20[i]) : null);
-        ma.put("ma60", i >= 59 && !nan(ma60[i]) ? roundIndicator(ma60[i]) : null);
-        ma.put("ma99", i >= 98 && !nan(ma99[i]) ? roundIndicator(ma99[i]) : null);
+        putMaIf(ma, "ma5", ma5, i, 4);
+        putMaIf(ma, "ma20", ma20, i, 19);
+        putMaIf(ma, "ma60", ma60, i, 59);
+        putMaIf(ma, "ma99", ma99, i, 98);
 
         Map<String, Object> ema = new LinkedHashMap<>();
-        ema.put("ema5", i >= 4 && !nan(ema5[i]) ? roundIndicator(ema5[i]) : null);
-        ema.put("ema20", i >= 19 && !nan(ema20[i]) ? roundIndicator(ema20[i]) : null);
-        ema.put("ema30", i >= 29 && !nan(ema30[i]) ? roundIndicator(ema30[i]) : null);
-        ema.put("ema60", i >= 59 && !nan(ema60[i]) ? roundIndicator(ema60[i]) : null);
-        ema.put("ema99", i >= 98 && !nan(ema99[i]) ? roundIndicator(ema99[i]) : null);
+        putMaIf(ema, "ema5", ema5, i, 4);
+        putMaIf(ema, "ema20", ema20, i, 19);
+        putMaIf(ema, "ema30", ema30, i, 29);
+        putMaIf(ema, "ema60", ema60, i, 59);
+        putMaIf(ema, "ema99", ema99, i, 98);
 
         Map<String, Object> rsi = new LinkedHashMap<>();
-        rsi.put("rsi6", i >= 6 && !nan(rsi6[i]) ? roundIndicator(rsi6[i]) : null);
-        rsi.put("rsi9", i >= 9 && !nan(rsi9[i]) ? roundIndicator(rsi9[i]) : null);
-        rsi.put("rsi14", i >= 14 && !nan(rsi14[i]) ? roundIndicator(rsi14[i]) : null);
+        putMaIf(rsi, "rsi6", rsi6, i, 6);
+        putMaIf(rsi, "rsi9", rsi9, i, 9);
+        putMaIf(rsi, "rsi14", rsi14, i, 14);
 
         Map<String, Object> macdMap = new LinkedHashMap<>();
-        macdMap.put("dif", i >= 25 && !nan(macd.dif[i]) ? roundIndicator(macd.dif[i]) : null);
-        macdMap.put("dea", i >= 25 && !nan(macd.dea[i]) ? roundIndicator(macd.dea[i]) : null);
-        macdMap.put("bar", i >= 25 && !nan(macd.bar[i]) ? roundIndicator(macd.bar[i]) : null);
+        if (macd != null) {
+            putMaIf(macdMap, "dif", macd.dif, i, 25);
+            putMaIf(macdMap, "dea", macd.dea, i, 25);
+            putMaIf(macdMap, "bar", macd.bar, i, 25);
+        }
 
         Map<String, Object> kdj = new LinkedHashMap<>();
-        kdj.put("k", i >= KDJ_READY_INDEX && !nan(kdjK[i]) ? roundIndicator(kdjK[i]) : null);
-        kdj.put("d", i >= KDJ_READY_INDEX && !nan(kdjD[i]) ? roundIndicator(kdjD[i]) : null);
-        kdj.put("j", i >= KDJ_READY_INDEX && !nan(kdjJ[i]) ? roundIndicator(kdjJ[i]) : null);
+        putMaIf(kdj, "k", kdjK, i, KDJ_READY_INDEX);
+        putMaIf(kdj, "d", kdjD, i, KDJ_READY_INDEX);
+        putMaIf(kdj, "j", kdjJ, i, KDJ_READY_INDEX);
 
         Map<String, Object> atr = new LinkedHashMap<>();
-        atr.put("atr7", i >= 6 && !nan(atr7[i]) ? roundIndicator(atr7[i]) : null);
-        atr.put("atr14", i >= 13 && !nan(atr14[i]) ? roundIndicator(atr14[i]) : null);
-        atr.put("atr21", i >= 20 && !nan(atr21[i]) ? roundIndicator(atr21[i]) : null);
+        putMaIf(atr, "atr7", atr7, i, 6);
+        putMaIf(atr, "atr14", atr14, i, 13);
+        putMaIf(atr, "atr21", atr21, i, 20);
 
         Map<String, Object> adx = new LinkedHashMap<>();
-        adx.put("adx14", i >= 13 && !nan(adx14[i]) ? roundIndicator(adx14[i]) : null);
-        adx.put("+di14", i >= 13 && !nan(plusDi14[i]) ? roundIndicator(plusDi14[i]) : null);
-        adx.put("-di14", i >= 13 && !nan(minusDi14[i]) ? roundIndicator(minusDi14[i]) : null);
+        putMaIf(adx, "adx14", adx14, i, 13);
+        putMaIf(adx, "+di14", plusDi14, i, 13);
+        putMaIf(adx, "-di14", minusDi14, i, 13);
 
         Map<String, Object> volMap = new LinkedHashMap<>();
-        volMap.put("vol", !nan(vol) ? roundIndicator(vol) : null);
-        volMap.put("buy_vol", !nan(buyV) ? roundIndicator(buyV) : null);
-        volMap.put("sell_vol", !nan(vol) && !nan(buyV) ? roundIndicator(vol - buyV) : null);
-        volMap.put("mavol5", i >= 4 && !nan(mavol5[i]) ? roundIndicator(mavol5[i]) : null);
-        volMap.put("mavol10", i >= 9 && !nan(mavol10[i]) ? roundIndicator(mavol10[i]) : null);
-        volMap.put("mavol60", i >= 59 && !nan(mavol60[i]) ? roundIndicator(mavol60[i]) : null);
+        putVolIf(volMap, "vol", vol);
+        putVolIf(volMap, "buy_vol", buyV);
+        if (!nan(vol) && !nan(buyV)) {
+            volMap.put("sell_vol", roundIndicator(vol - buyV));
+        }
+        putMaIf(volMap, "mavol5", mavol5, i, 4);
+        putMaIf(volMap, "mavol10", mavol10, i, 9);
+        putMaIf(volMap, "mavol60", mavol60, i, 59);
 
         Map<String, Object> root = new LinkedHashMap<>();
-        root.put("ma", ma);
-        root.put("ema", ema);
-        root.put("rsi", rsi);
-        root.put("macd", macdMap);
-        root.put("kdj", kdj);
-        root.put("atr", atr);
-        root.put("adx", adx);
-        root.put("vol", volMap);
+        putGroupIf(root, "ma", ma);
+        putGroupIf(root, "ema", ema);
+        putGroupIf(root, "rsi", rsi);
+        putGroupIf(root, "macd", macdMap);
+        putGroupIf(root, "kdj", kdj);
+        putGroupIf(root, "atr", atr);
+        putGroupIf(root, "adx", adx);
+        putGroupIf(root, "vol", volMap);
         return root;
     }
 
-    private static double[] zeros(int n) {
-        return new double[n];
+    /** 满足最小根数且数组元素有效时写入四舍五入后的指标值 */
+    private static void putMaIf(Map<String, Object> dest, String key, double[] arr, int i, int minIndexInclusive) {
+        if (arr == null || i < minIndexInclusive || nan(arr[i])) {
+            return;
+        }
+        Double v = roundIndicator(arr[i]);
+        if (v != null) {
+            dest.put(key, v);
+        }
+    }
+
+    private static void putVolIf(Map<String, Object> dest, String key, double v) {
+        if (nan(v)) {
+            return;
+        }
+        Double r = roundIndicator(v);
+        if (r != null) {
+            dest.put(key, r);
+        }
+    }
+
+    private static void putGroupIf(Map<String, Object> root, String name, Map<String, Object> group) {
+        if (!group.isEmpty()) {
+            root.put(name, group);
+        }
     }
 
     private static boolean nan(double v) {
