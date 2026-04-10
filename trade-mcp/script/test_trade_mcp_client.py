@@ -20,8 +20,8 @@
   E2E_SKIP_MARKET      若为 1：与 mcp_e2e 语义一致时可用于跳过行情类（本脚本在 --full 下可选用另一组工具）
   SCRIPT_PRINT_MAX_CHARS  打印返回 JSON/文本时的最大字符数，默认 6000；设为 0 表示不截断。
                             K 线大数组时控制台会只显示前几根+「截断」，实际根数以「返回 K 线根数」与摘要为准。
-  SCRIPT_LATEST_KLINES      打印 data 末尾「最新 N 根」K 线及 indicators（默认 5）；设为 0 关闭。
-  SCRIPT_LATEST_PREVIEW_CHARS  每根「最新 K 线」详情的最大字符数，默认 8000。
+  SCRIPT_LATEST_KLINES      打印 data「前 N 根 + 后 N 根」K 线及 indicators（默认各 5）；设为 0 关闭。
+  SCRIPT_LATEST_PREVIEW_CHARS  每根 K 线详情的最大字符数，默认 8000。
 
 自定义工具调用：
   python test_trade_mcp_client.py --tool trade.market.klines --args "{\"symbol\":\"BTCUSDT\",\"interval\":\"1m\",\"limit\":5}"
@@ -199,25 +199,21 @@ def _env_int(name: str, default: int) -> int:
         return default
 
 
-def _print_latest_klines_preview(data: list[Any], tool_name: str) -> None:
-    """打印 data 末尾最新若干根 K 线（含 indicators），便于核对最新行情指标是否正常。"""
-    n_show = _env_int("SCRIPT_LATEST_KLINES", 5)
-    if n_show <= 0:
-        return
-    if not isinstance(data, list) or len(data) == 0:
-        return
-    per_max = _env_int("SCRIPT_LATEST_PREVIEW_CHARS", 8000)
-    if per_max <= 0:
-        per_max = 8000
-
+def _print_klines_slice(
+    data: list[Any],
+    *,
+    start_idx: int,
+    end_idx_exclusive: int,
+    title: str,
+    per_max: int,
+) -> None:
+    """打印 data[start_idx:end_idx_exclusive]，索引区间为闭开。"""
+    print(f"[trade-mcp-test] ---------- {title} ----------")
     total = len(data)
-    slice_ = data[-n_show:]
-    print("[trade-mcp-test] ---------- 最新 K 线窗口（时间上为最近几根）----------")
-    print("  说明：data 按时间从旧到新 → data[0] 最旧，data[-1] 最新。")
-    print("  序列前部（最旧）可返回的指标字段较少，不是最新几根。")
-    print(f"  下面展示末尾 {len(slice_)} 根（索引 {total - len(slice_)} … {total - 1}），即最新 {len(slice_)} 根：")
-    for j, row in enumerate(slice_):
-        idx = total - len(slice_) + j
+    for idx in range(start_idx, end_idx_exclusive):
+        if idx < 0 or idx >= total:
+            continue
+        row = data[idx]
         if not isinstance(row, dict):
             print(f"  [{idx}] (非 object，略) {row!r}")
             continue
@@ -232,32 +228,90 @@ def _print_latest_klines_preview(data: list[Any], tool_name: str) -> None:
         if len(snippet) > per_max:
             snippet = snippet[: per_max - 30] + "\n... [per-bar truncated, 调大 SCRIPT_LATEST_PREVIEW_CHARS] ..."
         print(snippet)
-    print("[trade-mcp-test] ---------- 最新 K 线窗口结束 ----------\n")
+
+
+def _print_head_tail_klines_preview(data: list[Any], _tool_name: str) -> None:
+    """打印 data 前 N 根与后 N 根（默认各 5），便于对照最旧/最新行情。"""
+    n_show = _env_int("SCRIPT_LATEST_KLINES", 5)
+    if n_show <= 0:
+        return
+    if not isinstance(data, list) or len(data) == 0:
+        return
+    per_max = _env_int("SCRIPT_LATEST_PREVIEW_CHARS", 8000)
+    if per_max <= 0:
+        per_max = 8000
+
+    total = len(data)
+    print("[trade-mcp-test] ---------- data 前/后 K 线预览 ----------")
+    print("  说明：data 按时间从旧到新 → data[0] 最旧，data[-1] 最新。")
+
+    if total <= n_show:
+        print(f"  共 {total} 条（≤ 前/后各 {n_show} 条），下列即全部：")
+        _print_klines_slice(
+            data,
+            start_idx=0,
+            end_idx_exclusive=total,
+            title=f"全部 {total} 条",
+            per_max=per_max,
+        )
+        print("[trade-mcp-test] ---------- 前/后预览结束 ----------\n")
+        return
+
+    head_end = min(n_show, total)
+    tail_start = max(0, total - n_show)
+    overlap = tail_start < head_end
+    if overlap:
+        print(
+            f"  前 {n_show} 条：索引 0 … {head_end - 1}；"
+            f"后 {n_show} 条：索引 {tail_start} … {total - 1}（与「前」区间重叠）。"
+        )
+    else:
+        print(
+            f"  前 {n_show} 条：索引 0 … {head_end - 1}；"
+            f"后 {n_show} 条：索引 {tail_start} … {total - 1}。"
+        )
+
+    _print_klines_slice(
+        data,
+        start_idx=0,
+        end_idx_exclusive=head_end,
+        title=f"前 {head_end} 条（最旧一侧）",
+        per_max=per_max,
+    )
+    _print_klines_slice(
+        data,
+        start_idx=tail_start,
+        end_idx_exclusive=total,
+        title=f"后 {total - tail_start} 条（最新一侧）",
+        per_max=per_max,
+    )
+    print("[trade-mcp-test] ---------- 前/后预览结束 ----------\n")
 
 
 def _print_klines_indicators_warmup_hint(payload: dict[str, Any], tool_name: str) -> None:
-    """说明 klines_with_indicators 前段指标字段较少为预期，并对比首尾根填充度。"""
-    if "klines_with_indicators" not in tool_name:
+    """K 线类 tool：打印说明（仅 klines_with_indicators）+ 前/后各 N 条预览。"""
+    if "trade.market.klines" not in tool_name:
         return
     data = payload.get("data")
     if not isinstance(data, list) or len(data) == 0:
         return
-    first = data[0] if isinstance(data[0], dict) else {}
-    last = data[-1] if isinstance(data[-1], dict) else {}
-    ind0 = first.get("indicators")
-    ind1 = last.get("indicators")
-    n0, t0 = _indicator_leaf_stats(ind0) if isinstance(ind0, dict) else (0, 0)
-    n1, t1 = _indicator_leaf_stats(ind1) if isinstance(ind1, dict) else (0, 0)
-    print("[trade-mcp-test] ---------- 指标字段多少说明（首根 vs 末根）----------")
-    print("  逻辑：data 按时间从旧到新；任一叶指标缺失则整根 K 线不返回，故首根起即指标齐全。")
-    print("  data 条数可能小于请求的 limit（预热段被整根省略）；与 Python market_data 一致。")
-    print(f"  本响应共 {len(data)} 根 K 线。")
-    print(
-        f"  首根(返回中最旧) indicators 非空叶子 {n0}/{t0} ；"
-        f"末根(最新) {n1}/{t1}  （整根省略不完整 K 线后，首尾通常均为满指标）"
-    )
-    print("[trade-mcp-test] ---------- 说明结束 ----------\n")
-    _print_latest_klines_preview(data, tool_name)
+    if "klines_with_indicators" in tool_name:
+        first = data[0] if isinstance(data[0], dict) else {}
+        last = data[-1] if isinstance(data[-1], dict) else {}
+        ind0 = first.get("indicators")
+        ind1 = last.get("indicators")
+        n0, t0 = _indicator_leaf_stats(ind0) if isinstance(ind0, dict) else (0, 0)
+        n1, t1 = _indicator_leaf_stats(ind1) if isinstance(ind1, dict) else (0, 0)
+        print("[trade-mcp-test] ---------- 指标字段多少说明（首根 vs 末根）----------")
+        print("  逻辑：data 按时间从旧到新；任一叶指标缺失则整根 K 线不返回，故首根起即指标齐全。")
+        print("  data 条数可能小于请求的 limit（预热段被整根省略）；与 Python market_data 一致。")
+        print(f"  本响应共 {len(data)} 根 K 线。")
+        print(
+            f"  首根(返回中最旧) indicators 非空叶子 {n0}/{t0} ；"
+            f"末根(最新) {n1}/{t1}  （整根省略不完整 K 线后，首尾通常均为满指标）"
+        )
+        print("[trade-mcp-test] ---------- 说明结束 ----------\n")
+    _print_head_tail_klines_preview(data, tool_name)
 
 
 def _print_tool_invocation(tool_name: str, arguments: dict[str, Any]) -> None:
