@@ -15,7 +15,7 @@
 环境变量（与 deploy/mcp-e2e/mcp_e2e.py 对齐）：
   TRADE_MCP_BASE_URL   默认 http://127.0.0.1:8099
   MCP_SSE_PATH         默认 /sse
-  E2E_MCP_TIMEOUT      秒，默认 120
+  E2E_MCP_TIMEOUT      HTTP/SSE 超时（秒），默认 300；拉大量 K 线+指标时若报错可再加大
   SCRIPT_LIST_ONLY     若为 1：只做 initialize + list_tools
   E2E_SKIP_MARKET      若为 1：与 mcp_e2e 语义一致时可用于跳过行情类（本脚本在 --full 下可选用另一组工具）
   SCRIPT_PRINT_MAX_CHARS  打印返回 JSON/文本时的最大字符数，默认 6000；设为 0 表示不截断。
@@ -40,10 +40,15 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import builtins
 import json
 import os
 import sys
+import traceback
 from typing import Any
+
+# Python 3.11+ 的 ExceptionGroup（TaskGroup 失败时常包装在此类中）
+_BaseExceptionGroup = getattr(builtins, "BaseExceptionGroup", None)
 
 TOOL_KLINES = "trade.market.klines"
 TOOL_KLINES_WITH_INDICATORS = "trade.market.klines_with_indicators"
@@ -56,6 +61,19 @@ DEFAULT_KLINE_ARGS: dict[str, Any] = {
     "interval": "1m",
     "limit": 3,
 }
+
+
+def _print_exception_details(exc: BaseException) -> None:
+    """展开 TaskGroup/ExceptionGroup 的嵌套子异常（否则只显示一句 unhandled errors in a TaskGroup）。"""
+    print("[trade-mcp-test] ----- 完整异常（含子异常）-----", file=sys.stderr)
+    if _BaseExceptionGroup is not None and isinstance(exc, _BaseExceptionGroup):
+        traceback.print_exception(exc, file=sys.stderr)
+        for i, sub in enumerate(exc.exceptions):
+            print(f"[trade-mcp-test] ----- 子异常 [{i}] {type(sub).__name__} -----", file=sys.stderr)
+            traceback.print_exception(type(sub), sub, sub.__traceback__, chain=True, file=sys.stderr)
+    else:
+        traceback.print_exception(type(exc), exc, exc.__traceback__, chain=True, file=sys.stderr)
+    print("[trade-mcp-test] ----- 以上 -----", file=sys.stderr)
 
 
 def _env_bool(name: str, default: bool = False) -> bool:
@@ -455,7 +473,7 @@ async def _run(
     if not sse_path.startswith("/"):
         sse_path = "/" + sse_path
     sse_url = base + sse_path
-    timeout = float(os.environ.get("E2E_MCP_TIMEOUT", "120"))
+    timeout = float(os.environ.get("E2E_MCP_TIMEOUT", "300"))
 
     print(f"[trade-mcp-test] SSE URL: {sse_url}")
     print(
@@ -657,6 +675,11 @@ def main() -> None:
         raise
     except Exception as e:
         print(f"[trade-mcp-test] FAILED: {e}", file=sys.stderr)
+        _print_exception_details(e)
+        print(
+            "[trade-mcp-test] 提示: 大量 K 线+指标若超时/读失败，可加大 E2E_MCP_TIMEOUT 或减小 limit。",
+            file=sys.stderr,
+        )
         raise SystemExit(1) from e
 
 
