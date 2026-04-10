@@ -1,7 +1,7 @@
 {
   "mcpServers": {
     "tradeMcp": {
-      "url": "http://127.0.0.1:8099/sse",
+      "url": "http://154.89.148.172:8099/sse",
       "auth": "none"
     }
   }

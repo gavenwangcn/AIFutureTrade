@@ -2,7 +2,11 @@
 
 三类工具均通过 **trade-mcp → backend** 调用币安期货相关接口，**必须提供 `modelId`**（业务侧模型/账户路由标识）。
 
+**参数名 / 必填**：见 **[tools-params.md](tools-params.md)** 中 `trade.account.*` 表。
+
 **调用前**：`mcporter list tradeMcp --schema --json` 核对参数名。
+
+**mcporter 写法**：工具名含多个 `.`，请使用 **`--server tradeMcp --tool 'trade.account.xxx'`**，勿使用 `tradeMcp.trade.account.xxx` 连写（易被错误解析）。参数：`modelId=...`。
 
 ---
 
@@ -29,7 +33,8 @@
 **mcporter 示例**：
 
 ```bash
-mcporter --config ./mcporter-trade-mcp.json call tradeMcp.trade.account.account_info \
+mcporter --config ./mcporter-trade-mcp.json --log-level error call \
+  --server tradeMcp --tool 'trade.account.account_info' \
   modelId=YOUR_MODEL_ID --output json
 ```
 
@@ -52,7 +57,8 @@ mcporter --config ./mcporter-trade-mcp.json call tradeMcp.trade.account.account_
 **mcporter 示例**：
 
 ```bash
-mcporter --config ./mcporter-trade-mcp.json call tradeMcp.trade.account.balance \
+mcporter --config ./mcporter-trade-mcp.json --log-level error call \
+  --server tradeMcp --tool 'trade.account.balance' \
   modelId=YOUR_MODEL_ID --output json
 ```
 
@@ -78,7 +84,8 @@ mcporter --config ./mcporter-trade-mcp.json call tradeMcp.trade.account.balance 
 **mcporter 示例**：
 
 ```bash
-mcporter --config ./mcporter-trade-mcp.json call tradeMcp.trade.account.positions \
+mcporter --config ./mcporter-trade-mcp.json --log-level error call \
+  --server tradeMcp --tool 'trade.account.positions' \
   modelId=YOUR_MODEL_ID --output json
 ```
 

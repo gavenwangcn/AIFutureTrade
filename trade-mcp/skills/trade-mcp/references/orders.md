@@ -2,7 +2,11 @@
 
 所有工具 **必须传 `modelId`**；请求经 **trade-mcp → backend** 落库或转发币安期货下单接口。
 
+**参数名 / 必填 / 二选一规则**：见 **[tools-params.md](tools-params.md)** 中 `trade.order.*` 表。
+
 **高风险**：`trade.order.create`、`trade.order.sell_position` 会产生 **真实委托或平仓**。模型应在用户明确授权后调用，并校验 **symbol、数量、方向、类型**。
+
+**mcporter 写法**：使用 **`--server tradeMcp --tool 'trade.order.xxx'`** 传入完整 MCP 工具名，勿使用 `tradeMcp.trade.order.xxx` 连写。
 
 ---
 
@@ -34,7 +38,8 @@
 **mcporter 示例（市价买单）**：
 
 ```bash
-mcporter --config ./mcporter-trade-mcp.json call tradeMcp.trade.order.create \
+mcporter --config ./mcporter-trade-mcp.json --log-level error call \
+  --server tradeMcp --tool 'trade.order.create' \
   modelId=YOUR_MODEL_ID symbol=BTCUSDT side=BUY type=MARKET quantity=0.001 --output json
 ```
 
@@ -69,7 +74,8 @@ mcporter --config ./mcporter-trade-mcp.json call tradeMcp.trade.order.create \
 **示例**：
 
 ```bash
-mcporter --config ./mcporter-trade-mcp.json call tradeMcp.trade.order.cancel \
+mcporter --config ./mcporter-trade-mcp.json --log-level error call \
+  --server tradeMcp --tool 'trade.order.cancel' \
   modelId=YOUR_MODEL_ID symbol=BTCUSDT orderId=123456789 --output json
 ```
 
@@ -117,7 +123,8 @@ mcporter --config ./mcporter-trade-mcp.json call tradeMcp.trade.order.cancel \
 **示例**：
 
 ```bash
-mcporter --config ./mcporter-trade-mcp.json call tradeMcp.trade.order.sell_position \
+mcporter --config ./mcporter-trade-mcp.json --log-level error call \
+  --server tradeMcp --tool 'trade.order.sell_position' \
   modelId=YOUR_MODEL_ID symbol=BTCUSDT --output json
 ```
 

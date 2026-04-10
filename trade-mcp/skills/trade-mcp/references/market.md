@@ -7,6 +7,25 @@
 
 **快速跳转（SQL 查库表）**：[§10 `trade.market_tickers.sql`](#10-trademarket_tickerssql) — 可查字段、`WHERE` 写法、`params` 与 `?` 绑定、服务端白名单。
 
+**全工具参数名 / 必填 / 类型一览**：[tools-params.md](tools-params.md)（与本文件互补：此处偏业务语义，速查表偏键名与类型）。
+
+**复杂查询脚本落盘**：若 Agent 生成可执行脚本以编排本文件中的工具（尤其多步 **`trade.market_tickers.sql`**），须放在 **当前工作区 `trade/`** 目录（无则新建），见 **`../SKILL.md`**。
+
+---
+
+## mcporter 调用约定（本 reference 统一写法）
+
+trade-mcp 注册的 MCP 工具名均含多个 **`.`**（如 `trade.market.klines`、`trade.market_tickers.rows`）。**不要**使用 `tradeMcp.trade.market_tickers.rows` 这种连写（易被解析成错误工具名 `trade`）。请统一使用：
+
+```bash
+mcporter --config ./mcporter-trade-mcp.json --log-level error call \
+  --server tradeMcp --tool '<完整工具名>' \
+  <参数键值对...> --output json
+```
+
+- **参数**：`key=value`；数组可用 `symbols='["A","B"]'`；也可用 **`--args '{"page":1,"size":50}'`**（键与 schema 一致）。
+- **分页**：`trade.market_tickers.rows` 使用 **`page`**（从 1）、**`size`**（≤500）；需要总条数时用 **`trade.market_tickers.rows_count`**（筛选条件与 `rows` 对齐，**不要**传 `page`/`size`/`orderBy`）。
+
 ---
 
 ## 通用返回字段
@@ -34,7 +53,8 @@
 **mcporter 示例**（参数名以 schema 为准）：
 
 ```bash
-mcporter --config ./mcporter-trade-mcp.json call tradeMcp.trade.market.symbol_prices \
+mcporter --config ./mcporter-trade-mcp.json --log-level error call \
+  --server tradeMcp --tool 'trade.market.symbol_prices' \
   symbols='["BTCUSDT","ETHUSDT"]' --output json
 ```
 
@@ -57,7 +77,8 @@ mcporter --config ./mcporter-trade-mcp.json call tradeMcp.trade.market.symbol_pr
 **mcporter 示例**：
 
 ```bash
-mcporter --config ./mcporter-trade-mcp.json call tradeMcp.trade.market.klines \
+mcporter --config ./mcporter-trade-mcp.json --log-level error call \
+  --server tradeMcp --tool 'trade.market.klines' \
   symbol=BTCUSDT interval=5m limit=100 --output json
 ```
 
@@ -107,6 +128,14 @@ mcporter --config ./mcporter-trade-mcp.json call tradeMcp.trade.market.klines \
 
 数值一般为 **最多 4 位小数**。
 
+**mcporter 示例**：
+
+```bash
+mcporter --config ./mcporter-trade-mcp.json --log-level error call \
+  --server tradeMcp --tool 'trade.market.klines_with_indicators' \
+  symbol=BTCUSDT interval=5m limit=120 --output json
+```
+
 ---
 
 ## 4. `trade.market_tickers.rows`
@@ -127,6 +156,30 @@ mcporter --config ./mcporter-trade-mcp.json call tradeMcp.trade.market.klines \
 | `orderBy` | 否 | string | 排序列：`id`/`event_time`/`symbol`/`last_price`/`quote_volume`/`price_change_percent`/`base_volume`/`ingestion_time` |
 | `orderAsc` | 否 | boolean | 是否升序，默认 **false**（降序） |
 
+**mcporter 分页示例**（第 1 页、每页 50、按成交额降序）：
+
+```bash
+mcporter --config ./mcporter-trade-mcp.json --log-level error call \
+  --server tradeMcp --tool 'trade.market_tickers.rows' \
+  page=1 size=50 orderBy=quote_volume orderAsc=false --output json
+```
+
+**先查总条数**（与 `rows` 使用相同筛选参数；**不要**带 `page` / `size` / `orderBy`）：
+
+```bash
+mcporter --config ./mcporter-trade-mcp.json --log-level error call \
+  --server tradeMcp --tool 'trade.market_tickers.rows_count' \
+  minQuoteVolume=1000000 --output json
+```
+
+**伪函数形式**（与 `mcporter list tradeMcp` 中签名一致即可）：
+
+```bash
+mcporter --config ./mcporter-trade-mcp.json call \
+  --server tradeMcp 'trade.market_tickers.rows(page: 1, size: 20, orderBy: "quote_volume", orderAsc: false)' \
+  --output json
+```
+
 ---
 
 ## 5. `trade.market_tickers.rows_count`
@@ -143,6 +196,14 @@ mcporter --config ./mcporter-trade-mcp.json call tradeMcp.trade.market.klines \
 |------|------|------|------|
 | `page` / `size` | 否 | int | 分页 |
 | `symbols` / `symbolsCsv` | 否 | 限定交易对；不传可查全市场（视后端策略） |
+
+**mcporter 示例**（每 symbol 一条最新记录，分页）：
+
+```bash
+mcporter --config ./mcporter-trade-mcp.json --log-level error call \
+  --server tradeMcp --tool 'trade.market_tickers.snapshot' \
+  page=1 size=100 --output json
+```
 
 ---
 
@@ -255,23 +316,42 @@ mcporter --config ./mcporter-trade-mcp.json call tradeMcp.trade.market.klines \
 
 ### 10.6 mcporter 示例
 
-**单占位符**：
+**首选：`--args` 整段 JSON**（避免 shell 对反引号、引号、`?` 的转义问题；**技能强制建议 Agent/OpenClaw 用此方式**）：
 
 ```bash
-mcporter --config ./mcporter-trade-mcp.json call tradeMcp.trade.market_tickers.sql \
+mcporter --config ./mcporter-trade-mcp.json --log-level error call \
+  --server tradeMcp --tool 'trade.market_tickers.sql' \
+  --args '{"sql":"SELECT * FROM `24_market_tickers` LIMIT 1"}' --output json
+```
+
+**带占位符**（`params` 与 SQL 中 `?` 从左到右一致）：
+
+```bash
+mcporter --config ./mcporter-trade-mcp.json --log-level error call \
+  --server tradeMcp --tool 'trade.market_tickers.sql' \
+  --args '{"sql":"SELECT symbol,last_price FROM `24_market_tickers` WHERE symbol=? LIMIT 20","params":["BTCUSDT"]}' \
+  --output json
+```
+
+**备选：行内 `sql=` / `params=`**（需按当前 shell 正确转义反引号；易错，仅人工调试可用）：
+
+```bash
+mcporter --config ./mcporter-trade-mcp.json --log-level error call \
+  --server tradeMcp --tool 'trade.market_tickers.sql' \
   sql="SELECT symbol,last_price,quote_volume,price_change_percent,event_time FROM \`24_market_tickers\` WHERE symbol=? ORDER BY event_time DESC LIMIT 20" \
   params='["BTCUSDT"]' --output json
 ```
 
-**多占位符**（注意顺序与 `WHERE` 中 `?` 一致）：
+**多占位符**（`WHERE` 中 `?` 顺序与 `params` 一致）：
 
 ```bash
-mcporter --config ./mcporter-trade-mcp.json call tradeMcp.trade.market_tickers.sql \
+mcporter --config ./mcporter-trade-mcp.json --log-level error call \
+  --server tradeMcp --tool 'trade.market_tickers.sql' \
   sql="SELECT symbol,last_price,quote_volume FROM \`24_market_tickers\` WHERE symbol=? AND quote_volume>? ORDER BY quote_volume DESC LIMIT ?" \
   params='["BTCUSDT",1000000,10]' --output json
 ```
 
-（外层引号与转义以当前 shell 为准；若调用失败，改用 JSON 文件或 mcporter 文档中的 function-call 形式。）
+（亦可用 **`--args`** 把 `sql`+`params` 合并为一条 JSON，见上。）
 
 ---
 
