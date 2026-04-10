@@ -19,7 +19,7 @@
   SCRIPT_LIST_ONLY     若为 1：只做 initialize + list_tools
   E2E_SKIP_MARKET      若为 1：与 mcp_e2e 语义一致时可用于跳过行情类（本脚本在 --full 下可选用另一组工具）
   SCRIPT_PRINT_MAX_CHARS  打印返回 JSON/文本时的最大字符数，默认 6000；设为 0 表示不截断。
-                            K 线大数组时控制台会只显示前几根+「截断」，实际 data 条数请看摘要里的「data 数组条数」。
+                            K 线大数组时控制台会只显示前几根+「截断」，实际根数以「返回 K 线根数」与摘要为准。
   SCRIPT_LATEST_KLINES      打印 data 末尾「最新 N 根」K 线及 indicators（默认 5）；设为 0 关闭。
   SCRIPT_LATEST_PREVIEW_CHARS  每根「最新 K 线」详情的最大字符数，默认 8000。
 
@@ -268,6 +268,32 @@ def _print_tool_invocation(tool_name: str, arguments: dict[str, Any]) -> None:
     print("[trade-mcp-test] ---------- 请求已发出，等待返回 ----------\n")
 
 
+def _kline_bar_count_from_call_tool_result(result: Any) -> int | None:
+    """从 CallToolResult 的 structuredContent 或 content 文本 JSON 中解析 data 数组长度（K 线根数）。"""
+    from mcp.types import CallToolResult
+
+    if not isinstance(result, CallToolResult):
+        return None
+    sc = result.structuredContent
+    if isinstance(sc, dict):
+        data = sc.get("data")
+        if isinstance(data, list):
+            return len(data)
+    for block in result.content or []:
+        text = getattr(block, "text", None)
+        if not text:
+            continue
+        try:
+            j = json.loads(text)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(j, dict):
+            data = j.get("data")
+            if isinstance(data, list):
+                return len(data)
+    return None
+
+
 def _print_tool_return_data(tool_name: str, result) -> None:
     """优先打印工具业务返回数据（structuredContent + content 文本，可读 JSON）。"""
     from mcp.types import CallToolResult
@@ -275,6 +301,9 @@ def _print_tool_return_data(tool_name: str, result) -> None:
     mc = _print_max_chars()
     print("[trade-mcp-test] ========== 工具返回数据（业务载荷）==========")
     print(f"  tool: {tool_name}")
+    kline_n = _kline_bar_count_from_call_tool_result(result)
+    if kline_n is not None:
+        print(f"  返回 K 线根数: {kline_n}")
     if not isinstance(result, CallToolResult):
         print(f"  异常: 返回不是 CallToolResult，而是 {type(result).__name__}")
         print(f"  raw: {repr(result)[:2000]}")
