@@ -140,7 +140,12 @@ public class McpMarketTickersController {
     }
 
     @PostMapping("/sql")
-    @Operation(summary = "受控 SELECT（必须包含 24_market_tickers）")
+    @Operation(
+            summary = "受控 SELECT（必须包含 24_market_tickers）",
+            description = "表列与实体 MarketTickerDO 一致（蛇形列名）：id, event_time, symbol, price_change, "
+                    + "price_change_percent, side, change_percent_text, average_price, last_price, last_trade_volume, "
+                    + "open_price, high_price, low_price, base_volume, quote_volume, stats_open_time, stats_close_time, "
+                    + "first_trade_id, last_trade_id, trade_count, ingestion_time, update_price_date")
     public ResponseEntity<Map<String, Object>> sql(@RequestBody McpMarketTickerSqlRequest req) {
         if (req == null) {
             Map<String, Object> bad = new HashMap<>();

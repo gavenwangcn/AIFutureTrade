@@ -10,10 +10,46 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * 库表 24_market_tickers 市场数据（经 backend 读 MySQL，不需要 modelId）
+ * 库表 24_market_tickers 市场数据（经 backend 读 MySQL，不需要 modelId）。
+ * 列定义与 backend {@code MarketTickerDO} / 表结构一致，SQL 中请使用下划线列名。
  */
 @Component
 public class MarketTickersTools {
+
+    /**
+     * MCP 工具长描述：供模型理解受控 SQL 与表字段（与 {@code 24_market_tickers} 实际列一致）。
+     */
+    private static final String MARKET_TICKERS_SQL_TOOL_DESCRIPTION =
+            "受控只读 SELECT：SQL 必须包含表名 24_market_tickers（建议反引号 `24_market_tickers`）；仅允许 SELECT，禁止写操作；"
+                    + "params 与 SQL 中 ? 占位符从左到右一一对应。"
+                    + " 表字段（MySQL 列名均为 snake_case）："
+                    + "id BIGINT 主键自增；"
+                    + "event_time DATETIME 行情事件时间；"
+                    + "symbol VARCHAR 交易对如 BTCUSDT；"
+                    + "price_change DOUBLE 价格变动；"
+                    + "price_change_percent DOUBLE 24h 涨跌幅（比例或百分数依库内约定，可与 change_percent_text 对照）；"
+                    + "side VARCHAR 方向 LONG/SHORT；"
+                    + "change_percent_text VARCHAR 涨跌幅展示文本；"
+                    + "average_price DOUBLE 均价；"
+                    + "last_price DOUBLE 最新价；"
+                    + "last_trade_volume DOUBLE 最后一笔成交量；"
+                    + "open_price/high_price/low_price DOUBLE 开高低；"
+                    + "base_volume DOUBLE 基础资产成交量；"
+                    + "quote_volume DOUBLE 计价成交额（如 USDT）；"
+                    + "stats_open_time/stats_close_time DATETIME 24h 统计窗口起止；"
+                    + "first_trade_id/last_trade_id BIGINT 首末成交 ID；"
+                    + "trade_count BIGINT 成交笔数；"
+                    + "ingestion_time DATETIME 数据写入库时间；"
+                    + "update_price_date DATETIME 价格更新日期。"
+                    + " 示例：SELECT symbol,last_price,quote_volume,price_change_percent,event_time FROM `24_market_tickers` "
+                    + "WHERE symbol=? ORDER BY event_time DESC LIMIT 20";
+
+    private static final String MARKET_TICKERS_SQL_PARAM_SQL =
+            "只读 SELECT 字符串，必须出现 24_market_tickers；用 ? 占位参数（防注入），例如："
+                    + "SELECT * FROM `24_market_tickers` WHERE symbol=? AND last_price>? LIMIT 50";
+
+    private static final String MARKET_TICKERS_SQL_PARAM_PARAMS =
+            "与 SQL 中 ? 从左到右顺序一致的参数列表，如 [\"BTCUSDT\", 50000.0]；无占位符时可省略或传空数组";
 
     private final BackendClient backendClient;
 
@@ -91,10 +127,10 @@ public class MarketTickersTools {
         return backendClient.marketTickersLatest(symbol);
     }
 
-    @McpTool(name = "trade.market_tickers.sql", description = "受控 SELECT：SQL 必须包含表名 24_market_tickers，仅允许只读查询；params 与 ? 占位符顺序一致")
+    @McpTool(name = "trade.market_tickers.sql", description = MARKET_TICKERS_SQL_TOOL_DESCRIPTION)
     public Map<String, Object> sql(
-            @McpToolParam(description = "SELECT 语句，使用 ? 传参", required = true) String sql,
-            @McpToolParam(description = "与 ? 顺序一致的参数列表", required = false) List<Object> params) {
+            @McpToolParam(description = MARKET_TICKERS_SQL_PARAM_SQL, required = true) String sql,
+            @McpToolParam(description = MARKET_TICKERS_SQL_PARAM_PARAMS, required = false) List<Object> params) {
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("sql", sql);
         body.put("params", params == null ? List.of() : params);
