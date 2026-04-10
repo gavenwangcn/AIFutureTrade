@@ -71,7 +71,7 @@ public class BackendClient {
     }
 
     public Map<String, Object> orderGet(String modelId, String symbol, Long orderId, String origClientOrderId) {
-        UriComponentsBuilder b = UriComponentsBuilder.fromHttpUrl(baseUrl() + "/api/mcp/binance-futures/order/get")
+        UriComponentsBuilder b = UriComponentsBuilder.fromUriString(baseUrl() + "/api/mcp/binance-futures/order/get")
                 .queryParam("modelId", modelId)
                 .queryParam("symbol", symbol);
         if (orderId != null) {
@@ -87,7 +87,7 @@ public class BackendClient {
     }
 
     public Map<String, Object> openOrders(String modelId, String symbol) {
-        UriComponentsBuilder b = UriComponentsBuilder.fromHttpUrl(baseUrl() + "/api/mcp/binance-futures/order/open-orders")
+        UriComponentsBuilder b = UriComponentsBuilder.fromUriString(baseUrl() + "/api/mcp/binance-futures/order/open-orders")
                 .queryParam("modelId", modelId);
         if (symbol != null && !symbol.isEmpty()) {
             b.queryParam("symbol", symbol);
@@ -114,7 +114,7 @@ public class BackendClient {
             Double maxQuoteVolume,
             String orderBy,
             Boolean orderAsc) {
-        UriComponentsBuilder b = UriComponentsBuilder.fromHttpUrl(baseUrl() + "/api/mcp/market-tickers/rows");
+        UriComponentsBuilder b = UriComponentsBuilder.fromUriString(baseUrl() + "/api/mcp/market-tickers/rows");
         if (page != null) {
             b.queryParam("page", page);
         }
@@ -175,7 +175,7 @@ public class BackendClient {
             Double maxPriceChangePercent,
             Double minQuoteVolume,
             Double maxQuoteVolume) {
-        UriComponentsBuilder b = UriComponentsBuilder.fromHttpUrl(baseUrl() + "/api/mcp/market-tickers/rows/count");
+        UriComponentsBuilder b = UriComponentsBuilder.fromUriString(baseUrl() + "/api/mcp/market-tickers/rows/count");
         if (symbol != null && !symbol.isEmpty()) {
             b.queryParam("symbol", symbol);
         }
@@ -214,7 +214,7 @@ public class BackendClient {
     }
 
     public Map<String, Object> marketTickersSnapshot(Integer page, Integer size, List<String> symbols, String symbolsCsv) {
-        UriComponentsBuilder b = UriComponentsBuilder.fromHttpUrl(baseUrl() + "/api/mcp/market-tickers/snapshot");
+        UriComponentsBuilder b = UriComponentsBuilder.fromUriString(baseUrl() + "/api/mcp/market-tickers/snapshot");
         if (page != null) {
             b.queryParam("page", page);
         }
@@ -235,7 +235,7 @@ public class BackendClient {
     }
 
     public Map<String, Object> marketTickersSnapshotCount(List<String> symbols, String symbolsCsv) {
-        UriComponentsBuilder b = UriComponentsBuilder.fromHttpUrl(baseUrl() + "/api/mcp/market-tickers/snapshot/count");
+        UriComponentsBuilder b = UriComponentsBuilder.fromUriString(baseUrl() + "/api/mcp/market-tickers/snapshot/count");
         if (symbols != null) {
             for (String s : symbols) {
                 if (s != null && !s.isEmpty()) {
