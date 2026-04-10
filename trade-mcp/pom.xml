@@ -14,12 +14,10 @@
 
     <properties>
         <java.version>17</java.version>
-        <!-- 与 spring-ai-starter-mcp-server-webmvc 1.1.x 对齐：该 starter POM 固定引用 Spring Boot 3.5.11 -->
-        <spring-boot.version>3.5.11</spring-boot.version>
-        <!-- Spring AI 1.1.x（推荐线）：MCP Server 稳定；≥1.1.2 可避免 1.1.1 的 Kotlin 兼容问题 -->
-        <spring-ai.version>1.1.4</spring-ai.version>
-        <!-- MCP Java SDK：0.18.x 起支持协议 2025-11-25（见 java-sdk Release）；由 mcp-bom 统一对齐 Spring AI 传递依赖 -->
-        <mcp.sdk.bom.version>0.18.1</mcp.sdk.bom.version>
+        <!-- Spring AI 2.0.x：与 spring-ai-starter-mcp-server-webmvc 对齐（示例 2.0.0-M4 使用 Spring Boot 4.1.0-M2） -->
+        <spring-boot.version>4.1.0-M2</spring-boot.version>
+        <!-- MCP Java SDK 由 spring-ai-bom 对齐（如 io.modelcontextprotocol.sdk:mcp 1.1.x） -->
+        <spring-ai.version>2.0.0-M4</spring-ai.version>
         <lombok.version>1.18.30</lombok.version>
         <junit.version>5.10.1</junit.version>
         <maven.compiler.source>17</maven.compiler.source>
@@ -40,14 +38,6 @@
                 <groupId>org.springframework.ai</groupId>
                 <artifactId>spring-ai-bom</artifactId>
                 <version>${spring-ai.version}</version>
-                <type>pom</type>
-                <scope>import</scope>
-            </dependency>
-            <!-- 覆盖 Spring AI 1.1.4 默认的 mcp 0.17.x，升级到支持 2025-11-25 的 SDK -->
-            <dependency>
-                <groupId>io.modelcontextprotocol.sdk</groupId>
-                <artifactId>mcp-bom</artifactId>
-                <version>${mcp.sdk.bom.version}</version>
                 <type>pom</type>
                 <scope>import</scope>
             </dependency>

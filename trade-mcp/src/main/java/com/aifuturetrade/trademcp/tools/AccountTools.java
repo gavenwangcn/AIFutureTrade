@@ -4,8 +4,8 @@ import com.aifuturetrade.trademcp.client.BackendClient;
 import org.springframework.stereotype.Component;
 
 // Spring AI MCP annotations
-import org.springaicommunity.mcp.annotation.McpTool;
-import org.springaicommunity.mcp.annotation.McpToolParam;
+import org.springframework.ai.mcp.annotation.McpTool;
+import org.springframework.ai.mcp.annotation.McpToolParam;
 
 import java.util.Map;
 
