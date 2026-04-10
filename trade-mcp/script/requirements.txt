@@ -1,0 +1,2 @@
+# MCP 官方 Python SDK：SSE 连接 trade-mcp（与 application.yml 中 protocol: SSE、sse-endpoint: /sse 一致）
+mcp>=1.8.0
