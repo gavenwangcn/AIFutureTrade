@@ -1,6 +1,11 @@
 server:
   port: 8099
 
+# MCP HTTP 请求日志（方法、URI、客户端 IP、状态码、耗时）；经 Filter 打印，见 McpHttpRequestLoggingFilter
+trade-mcp:
+  request-log:
+    enabled: true
+
 spring:
   application:
     name: trade-mcp
