@@ -28,6 +28,7 @@ import pandas as pd
 import numpy as np
 import talib
 from trade.market.market_index import MarketIndexCalculator
+from trade.market.indicator_rounding import round_indicator_4
 
 from trade.common.binance_futures import BinanceFuturesClient
 from trade.common.database.database_market_tickers import MarketTickersDatabase
@@ -780,7 +781,7 @@ class MarketDataFetcher:
                             if ma_result is not None and len(ma_result) > 0:
                                 last_value = ma_result[-1]
                                 if not np.isnan(last_value) and not np.isinf(last_value):
-                                    ma_values[f'ma{length}'] = float(last_value)
+                                    ma_values[f'ma{length}'] = round_indicator_4(float(last_value))
                                 else:
                                     ma_values[f'ma{length}'] = 0.0
                             else:
@@ -811,25 +812,25 @@ class MarketDataFetcher:
                             # DIF = MACD线
                             dif_value = macd_result[-1]
                             if not np.isnan(dif_value) and not np.isinf(dif_value):
-                                macd['dif'] = float(dif_value)
+                                macd['dif'] = round_indicator_4(float(dif_value))
                             
                             # DEA = Signal线
                             if signal_result is not None and len(signal_result) > 0:
                                 dea_value = signal_result[-1]
                                 if not np.isnan(dea_value) and not np.isinf(dea_value):
-                                    macd['dea'] = float(dea_value)
+                                    macd['dea'] = round_indicator_4(float(dea_value))
                             
                             # BAR = Histogram = DIF - DEA
                             if histogram_result is not None and len(histogram_result) > 0:
                                 bar_value = histogram_result[-1]
                                 if not np.isnan(bar_value) and not np.isinf(bar_value):
-                                    macd['bar'] = float(bar_value)
+                                    macd['bar'] = round_indicator_4(float(bar_value))
                                 else:
                                     # 如果histogram为NaN，手动计算：BAR = DIF - DEA
-                                    macd['bar'] = macd['dif'] - macd['dea']
+                                    macd['bar'] = round_indicator_4(macd['dif'] - macd['dea'])
                             else:
                                 # 如果没有histogram，手动计算
-                                macd['bar'] = macd['dif'] - macd['dea']
+                                macd['bar'] = round_indicator_4(macd['dif'] - macd['dea'])
                     except Exception as e:
                         logger.warning(f'[MACD] 无法计算MACD: {e}')
                 else:
@@ -844,7 +845,7 @@ class MarketDataFetcher:
                         if rsi6_result is not None and len(rsi6_result) > 0:
                             rsi6_value = rsi6_result[-1]
                             if not np.isnan(rsi6_value) and not np.isinf(rsi6_value):
-                                rsi['rsi6'] = float(rsi6_value)
+                                rsi['rsi6'] = round_indicator_4(float(rsi6_value))
                     except Exception as e:
                         logger.warning(f'[RSI] 无法计算RSI6: {e}')
                 
@@ -855,14 +856,14 @@ class MarketDataFetcher:
                         if rsi9_result is not None and len(rsi9_result) > 0:
                             rsi9_value = rsi9_result[-1]
                             if not np.isnan(rsi9_value) and not np.isinf(rsi9_value):
-                                rsi['rsi9'] = float(rsi9_value)
+                                rsi['rsi9'] = round_indicator_4(float(rsi9_value))
                     except Exception as e:
                         logger.warning(f'[RSI] 无法计算RSI9: {e}')
                 
                 # 计算VOL指标（成交量）和均量线（MAVOL）使用pandas-ta
                 vol_data = {}
                 # VOL：最新一根K线的成交量
-                vol_data['vol'] = volumes[-1] if volumes else 0.0
+                vol_data['vol'] = round_indicator_4(volumes[-1]) if volumes else 0.0
                 
                 # 获取最新K线的买入成交量和卖出成交量
                 # 从klines中提取买入成交量数据
@@ -884,19 +885,22 @@ class MarketDataFetcher:
                 
                 # 计算最新K线的买入量和卖出量
                 if buy_volumes:
-                    vol_data['buy_vol'] = buy_volumes[-1]
-                    vol_data['sell_vol'] = volumes[-1] - buy_volumes[-1] if volumes else 0
+                    vol_data['buy_vol'] = round_indicator_4(buy_volumes[-1])
+                    vol_data['sell_vol'] = round_indicator_4(volumes[-1] - buy_volumes[-1]) if volumes else 0.0
                 else:
-                    vol_data['buy_vol'] = 0
-                    vol_data['sell_vol'] = 0
+                    vol_data['buy_vol'] = 0.0
+                    vol_data['sell_vol'] = 0.0
                 
                 # 计算均量线（MAVOL）- 使用pandas的rolling方法直接计算，更可靠
+                df = pd.DataFrame({'volume': volumes})
                 for length in mavol_lengths:
                     if len(volumes) >= length:
                         try:
                             # 直接使用pandas的rolling方法计算volume的移动平均
                             mavol_value = df['volume'].rolling(window=length, min_periods=length).mean().iloc[-1]
-                            vol_data[f'mavol{length}'] = float(mavol_value) if pd.notna(mavol_value) else 0.0
+                            vol_data[f'mavol{length}'] = (
+                                round_indicator_4(float(mavol_value)) if pd.notna(mavol_value) else 0.0
+                            )
                         except Exception as e:
                             vol_data[f'mavol{length}'] = 0.0
                             logger.warning(
@@ -905,7 +909,7 @@ class MarketDataFetcher:
                     else:
                         # 数据不足：使用所有可用数据的平均值
                         if len(volumes) > 0:
-                            vol_data[f'mavol{length}'] = sum(volumes) / len(volumes)
+                            vol_data[f'mavol{length}'] = round_indicator_4(sum(volumes) / len(volumes))
                             logger.warning(
                                 f'[VOL] 数据不足: MAVOL{length}需要{length}个数据点，实际只有{len(volumes)}个，使用所有可用数据计算'
                             )
@@ -1123,52 +1127,58 @@ class MarketDataFetcher:
                 # MACD: 需要26根历史数据
                 # KDJ(9,3,3): 需要13根历史数据
                 
+                _tb_raw = klines[i].get('taker_buy_base_volume', 0)
+                try:
+                    _tb_f = float(_tb_raw) if _tb_raw is not None else 0.0
+                except (TypeError, ValueError):
+                    _tb_f = 0.0
+
                 indicators = {
                     'ma': {
-                        'ma5': float(ma5[i]) if i >= 4 and not np.isnan(ma5[i]) else None,
-                        'ma20': float(ma20[i]) if i >= 19 and not np.isnan(ma20[i]) else None,
-                        'ma60': float(ma60[i]) if i >= 59 and not np.isnan(ma60[i]) else None,
-                        'ma99': float(ma99[i]) if i >= 98 and not np.isnan(ma99[i]) else None
+                        'ma5': round_indicator_4(float(ma5[i])) if i >= 4 and not np.isnan(ma5[i]) else None,
+                        'ma20': round_indicator_4(float(ma20[i])) if i >= 19 and not np.isnan(ma20[i]) else None,
+                        'ma60': round_indicator_4(float(ma60[i])) if i >= 59 and not np.isnan(ma60[i]) else None,
+                        'ma99': round_indicator_4(float(ma99[i])) if i >= 98 and not np.isnan(ma99[i]) else None
                     },
                     'ema': {
-                        'ema5': float(ema5[i]) if i >= 4 and not np.isnan(ema5[i]) else None,
-                        'ema20': float(ema20[i]) if i >= 19 and not np.isnan(ema20[i]) else None,
-                        'ema30': float(ema30[i]) if i >= 29 and not np.isnan(ema30[i]) else None,
-                        'ema60': float(ema60[i]) if i >= 59 and not np.isnan(ema60[i]) else None,
-                        'ema99': float(ema99[i]) if i >= 98 and not np.isnan(ema99[i]) else None
+                        'ema5': round_indicator_4(float(ema5[i])) if i >= 4 and not np.isnan(ema5[i]) else None,
+                        'ema20': round_indicator_4(float(ema20[i])) if i >= 19 and not np.isnan(ema20[i]) else None,
+                        'ema30': round_indicator_4(float(ema30[i])) if i >= 29 and not np.isnan(ema30[i]) else None,
+                        'ema60': round_indicator_4(float(ema60[i])) if i >= 59 and not np.isnan(ema60[i]) else None,
+                        'ema99': round_indicator_4(float(ema99[i])) if i >= 98 and not np.isnan(ema99[i]) else None
                     },
                     'rsi': {
-                        'rsi6': float(rsi6[i]) if i >= 6 and not np.isnan(rsi6[i]) else None,
-                        'rsi9': float(rsi9[i]) if i >= 9 and not np.isnan(rsi9[i]) else None,
-                        'rsi14': float(rsi14[i]) if i >= 14 and not np.isnan(rsi14[i]) else None
+                        'rsi6': round_indicator_4(float(rsi6[i])) if i >= 6 and not np.isnan(rsi6[i]) else None,
+                        'rsi9': round_indicator_4(float(rsi9[i])) if i >= 9 and not np.isnan(rsi9[i]) else None,
+                        'rsi14': round_indicator_4(float(rsi14[i])) if i >= 14 and not np.isnan(rsi14[i]) else None
                     },
                     'macd': {
-                        'dif': float(macd_dif[i]) if i >= 25 and not np.isnan(macd_dif[i]) else None,
-                        'dea': float(macd_dea[i]) if i >= 25 and not np.isnan(macd_dea[i]) else None,
-                        'bar': float(macd_bar[i]) if i >= 25 and not np.isnan(macd_bar[i]) else None
+                        'dif': round_indicator_4(float(macd_dif[i])) if i >= 25 and not np.isnan(macd_dif[i]) else None,
+                        'dea': round_indicator_4(float(macd_dea[i])) if i >= 25 and not np.isnan(macd_dea[i]) else None,
+                        'bar': round_indicator_4(float(macd_bar[i])) if i >= 25 and not np.isnan(macd_bar[i]) else None
                     },
                     'kdj': {
-                        'k': float(kdj_k[i]) if i >= kdj_ready_index and not np.isnan(kdj_k[i]) else None,
-                        'd': float(kdj_d[i]) if i >= kdj_ready_index and not np.isnan(kdj_d[i]) else None,
-                        'j': float(kdj_j[i]) if i >= kdj_ready_index and not np.isnan(kdj_j[i]) else None
+                        'k': round_indicator_4(float(kdj_k[i])) if i >= kdj_ready_index and not np.isnan(kdj_k[i]) else None,
+                        'd': round_indicator_4(float(kdj_d[i])) if i >= kdj_ready_index and not np.isnan(kdj_d[i]) else None,
+                        'j': round_indicator_4(float(kdj_j[i])) if i >= kdj_ready_index and not np.isnan(kdj_j[i]) else None
                     },
                     'atr': {
-                        'atr7': float(atr7[i]) if i >= 6 and not np.isnan(atr7[i]) else None,
-                        'atr14': float(atr14[i]) if i >= 13 and not np.isnan(atr14[i]) else None,
-                        'atr21': float(atr21[i]) if i >= 20 and not np.isnan(atr21[i]) else None
+                        'atr7': round_indicator_4(float(atr7[i])) if i >= 6 and not np.isnan(atr7[i]) else None,
+                        'atr14': round_indicator_4(float(atr14[i])) if i >= 13 and not np.isnan(atr14[i]) else None,
+                        'atr21': round_indicator_4(float(atr21[i])) if i >= 20 and not np.isnan(atr21[i]) else None
                     },
                     'adx': {
-                        'adx14': float(adx14[i]) if i >= 13 and not np.isnan(adx14[i]) else None,
-                        '+di14': float(plus_di14[i]) if i >= 13 and not np.isnan(plus_di14[i]) else None,
-                        '-di14': float(minus_di14[i]) if i >= 13 and not np.isnan(minus_di14[i]) else None
+                        'adx14': round_indicator_4(float(adx14[i])) if i >= 13 and not np.isnan(adx14[i]) else None,
+                        '+di14': round_indicator_4(float(plus_di14[i])) if i >= 13 and not np.isnan(plus_di14[i]) else None,
+                        '-di14': round_indicator_4(float(minus_di14[i])) if i >= 13 and not np.isnan(minus_di14[i]) else None
                     },
                     'vol': {
-                        'vol': float(volumes[i]),
-                        'buy_vol': float(klines[i].get('taker_buy_base_volume', 0)),
-                        'sell_vol': float(volumes[i] - klines[i].get('taker_buy_base_volume', 0)),
-                        'mavol5': float(mavol5[i]) if i >= 4 and not np.isnan(mavol5[i]) else None,
-                        'mavol10': float(mavol10[i]) if i >= 9 and not np.isnan(mavol10[i]) else None,
-                        'mavol60': float(mavol60[i]) if i >= 59 and not np.isnan(mavol60[i]) else None
+                        'vol': round_indicator_4(float(volumes[i])),
+                        'buy_vol': round_indicator_4(_tb_f),
+                        'sell_vol': round_indicator_4(float(volumes[i]) - _tb_f),
+                        'mavol5': round_indicator_4(float(mavol5[i])) if i >= 4 and not np.isnan(mavol5[i]) else None,
+                        'mavol10': round_indicator_4(float(mavol10[i])) if i >= 9 and not np.isnan(mavol10[i]) else None,
+                        'mavol60': round_indicator_4(float(mavol60[i])) if i >= 59 and not np.isnan(mavol60[i]) else None
                     }
                 }
 

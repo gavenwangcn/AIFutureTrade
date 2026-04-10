@@ -54,6 +54,7 @@ from trade.trading.market_data_manager import MarketDataManager
 from trade.trading.batch_decision_processor import BatchDecisionProcessor
 from trade.market import calculate_market_indicators
 from trade.market.market_index import MarketIndexCalculator
+from trade.market.indicator_rounding import round_indicator_4
 import numpy as np
 
 logger = logging.getLogger(__name__)
@@ -1462,7 +1463,7 @@ class TradingEngine:
 
                             # 添加adx字段到indicators中
                             if i < len(adx_array) and not np.isnan(adx_array[i]):
-                                adx_value = float(adx_array[i])
+                                adx_value = round_indicator_4(float(adx_array[i]))
                             else:
                                 adx_value = None
 

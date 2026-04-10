@@ -1,5 +1,7 @@
 package com.aifuturetrade.trademcp.indicators;
 
+import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.LinkedHashMap;
@@ -11,6 +13,9 @@ import java.util.Map;
  * <p>
  * 返回的 K 线序列按时间从旧到新排列时，索引 {@code i} 处只能使用 {@code [0,i]} 的历史；
  * MA99、RSI14 等需要足够根数后才有值，故序列前段多数字段为 {@code null} 属预期，非计算错误。
+ * </p>
+ * <p>
+ * 写入每根 K 线 {@code indicators} 的数值统一保留至多小数点后 4 位（HALF_UP）。
  * </p>
  */
 public final class KlineIndicatorCalculator {
@@ -153,50 +158,50 @@ public final class KlineIndicatorCalculator {
         double vol = volumes[i];
         double buyV = takerBuy[i];
         Map<String, Object> ma = new LinkedHashMap<>();
-        ma.put("ma5", i >= 4 && !nan(ma5[i]) ? ma5[i] : null);
-        ma.put("ma20", i >= 19 && !nan(ma20[i]) ? ma20[i] : null);
-        ma.put("ma60", i >= 59 && !nan(ma60[i]) ? ma60[i] : null);
-        ma.put("ma99", i >= 98 && !nan(ma99[i]) ? ma99[i] : null);
+        ma.put("ma5", i >= 4 && !nan(ma5[i]) ? roundIndicator(ma5[i]) : null);
+        ma.put("ma20", i >= 19 && !nan(ma20[i]) ? roundIndicator(ma20[i]) : null);
+        ma.put("ma60", i >= 59 && !nan(ma60[i]) ? roundIndicator(ma60[i]) : null);
+        ma.put("ma99", i >= 98 && !nan(ma99[i]) ? roundIndicator(ma99[i]) : null);
 
         Map<String, Object> ema = new LinkedHashMap<>();
-        ema.put("ema5", i >= 4 && !nan(ema5[i]) ? ema5[i] : null);
-        ema.put("ema20", i >= 19 && !nan(ema20[i]) ? ema20[i] : null);
-        ema.put("ema30", i >= 29 && !nan(ema30[i]) ? ema30[i] : null);
-        ema.put("ema60", i >= 59 && !nan(ema60[i]) ? ema60[i] : null);
-        ema.put("ema99", i >= 98 && !nan(ema99[i]) ? ema99[i] : null);
+        ema.put("ema5", i >= 4 && !nan(ema5[i]) ? roundIndicator(ema5[i]) : null);
+        ema.put("ema20", i >= 19 && !nan(ema20[i]) ? roundIndicator(ema20[i]) : null);
+        ema.put("ema30", i >= 29 && !nan(ema30[i]) ? roundIndicator(ema30[i]) : null);
+        ema.put("ema60", i >= 59 && !nan(ema60[i]) ? roundIndicator(ema60[i]) : null);
+        ema.put("ema99", i >= 98 && !nan(ema99[i]) ? roundIndicator(ema99[i]) : null);
 
         Map<String, Object> rsi = new LinkedHashMap<>();
-        rsi.put("rsi6", i >= 6 && !nan(rsi6[i]) ? rsi6[i] : null);
-        rsi.put("rsi9", i >= 9 && !nan(rsi9[i]) ? rsi9[i] : null);
-        rsi.put("rsi14", i >= 14 && !nan(rsi14[i]) ? rsi14[i] : null);
+        rsi.put("rsi6", i >= 6 && !nan(rsi6[i]) ? roundIndicator(rsi6[i]) : null);
+        rsi.put("rsi9", i >= 9 && !nan(rsi9[i]) ? roundIndicator(rsi9[i]) : null);
+        rsi.put("rsi14", i >= 14 && !nan(rsi14[i]) ? roundIndicator(rsi14[i]) : null);
 
         Map<String, Object> macdMap = new LinkedHashMap<>();
-        macdMap.put("dif", i >= 25 && !nan(macd.dif[i]) ? macd.dif[i] : null);
-        macdMap.put("dea", i >= 25 && !nan(macd.dea[i]) ? macd.dea[i] : null);
-        macdMap.put("bar", i >= 25 && !nan(macd.bar[i]) ? macd.bar[i] : null);
+        macdMap.put("dif", i >= 25 && !nan(macd.dif[i]) ? roundIndicator(macd.dif[i]) : null);
+        macdMap.put("dea", i >= 25 && !nan(macd.dea[i]) ? roundIndicator(macd.dea[i]) : null);
+        macdMap.put("bar", i >= 25 && !nan(macd.bar[i]) ? roundIndicator(macd.bar[i]) : null);
 
         Map<String, Object> kdj = new LinkedHashMap<>();
-        kdj.put("k", i >= KDJ_READY_INDEX && !nan(kdjK[i]) ? kdjK[i] : null);
-        kdj.put("d", i >= KDJ_READY_INDEX && !nan(kdjD[i]) ? kdjD[i] : null);
-        kdj.put("j", i >= KDJ_READY_INDEX && !nan(kdjJ[i]) ? kdjJ[i] : null);
+        kdj.put("k", i >= KDJ_READY_INDEX && !nan(kdjK[i]) ? roundIndicator(kdjK[i]) : null);
+        kdj.put("d", i >= KDJ_READY_INDEX && !nan(kdjD[i]) ? roundIndicator(kdjD[i]) : null);
+        kdj.put("j", i >= KDJ_READY_INDEX && !nan(kdjJ[i]) ? roundIndicator(kdjJ[i]) : null);
 
         Map<String, Object> atr = new LinkedHashMap<>();
-        atr.put("atr7", i >= 6 && !nan(atr7[i]) ? atr7[i] : null);
-        atr.put("atr14", i >= 13 && !nan(atr14[i]) ? atr14[i] : null);
-        atr.put("atr21", i >= 20 && !nan(atr21[i]) ? atr21[i] : null);
+        atr.put("atr7", i >= 6 && !nan(atr7[i]) ? roundIndicator(atr7[i]) : null);
+        atr.put("atr14", i >= 13 && !nan(atr14[i]) ? roundIndicator(atr14[i]) : null);
+        atr.put("atr21", i >= 20 && !nan(atr21[i]) ? roundIndicator(atr21[i]) : null);
 
         Map<String, Object> adx = new LinkedHashMap<>();
-        adx.put("adx14", i >= 13 && !nan(adx14[i]) ? adx14[i] : null);
-        adx.put("+di14", i >= 13 && !nan(plusDi14[i]) ? plusDi14[i] : null);
-        adx.put("-di14", i >= 13 && !nan(minusDi14[i]) ? minusDi14[i] : null);
+        adx.put("adx14", i >= 13 && !nan(adx14[i]) ? roundIndicator(adx14[i]) : null);
+        adx.put("+di14", i >= 13 && !nan(plusDi14[i]) ? roundIndicator(plusDi14[i]) : null);
+        adx.put("-di14", i >= 13 && !nan(minusDi14[i]) ? roundIndicator(minusDi14[i]) : null);
 
         Map<String, Object> volMap = new LinkedHashMap<>();
-        volMap.put("vol", vol);
-        volMap.put("buy_vol", buyV);
-        volMap.put("sell_vol", vol - buyV);
-        volMap.put("mavol5", i >= 4 && !nan(mavol5[i]) ? mavol5[i] : null);
-        volMap.put("mavol10", i >= 9 && !nan(mavol10[i]) ? mavol10[i] : null);
-        volMap.put("mavol60", i >= 59 && !nan(mavol60[i]) ? mavol60[i] : null);
+        volMap.put("vol", !nan(vol) ? roundIndicator(vol) : null);
+        volMap.put("buy_vol", !nan(buyV) ? roundIndicator(buyV) : null);
+        volMap.put("sell_vol", !nan(vol) && !nan(buyV) ? roundIndicator(vol - buyV) : null);
+        volMap.put("mavol5", i >= 4 && !nan(mavol5[i]) ? roundIndicator(mavol5[i]) : null);
+        volMap.put("mavol10", i >= 9 && !nan(mavol10[i]) ? roundIndicator(mavol10[i]) : null);
+        volMap.put("mavol60", i >= 59 && !nan(mavol60[i]) ? roundIndicator(mavol60[i]) : null);
 
         Map<String, Object> root = new LinkedHashMap<>();
         root.put("ma", ma);
@@ -216,6 +221,14 @@ public final class KlineIndicatorCalculator {
 
     private static boolean nan(double v) {
         return Double.isNaN(v);
+    }
+
+    /** 指标对外输出：最多保留小数点后 4 位（HALF_UP） */
+    private static Double roundIndicator(double v) {
+        if (Double.isNaN(v) || Double.isInfinite(v)) {
+            return null;
+        }
+        return BigDecimal.valueOf(v).setScale(4, RoundingMode.HALF_UP).doubleValue();
     }
 
     static double num(Object o) {

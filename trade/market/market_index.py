@@ -20,6 +20,8 @@ import numpy as np
 from typing import Dict, List, Optional, Tuple
 import talib
 
+from trade.market.indicator_rounding import round_indicator_4
+
 logger = logging.getLogger(__name__)
 
 
@@ -250,9 +252,9 @@ class MarketIndexCalculator:
                 vol_state = '高波动'
 
             result = {
-                'market_atr_pct_mean': market_atr_pct_mean,
-                'market_atr_pct_median': market_atr_pct_median,
-                'high_vol_ratio': high_vol_ratio,
+                'market_atr_pct_mean': round_indicator_4(market_atr_pct_mean),
+                'market_atr_pct_median': round_indicator_4(market_atr_pct_median),
+                'high_vol_ratio': round_indicator_4(high_vol_ratio),
                 'vol_state': vol_state,
                 'valid_symbols_count': len(valid_symbols)
             }
@@ -340,9 +342,9 @@ class MarketIndexCalculator:
                 trend_state = '强趋势'
 
             result = {
-                'market_adx_mean': market_adx_mean,
-                'market_adx_median': market_adx_median,
-                'strong_trend_ratio': strong_trend_ratio,
+                'market_adx_mean': round_indicator_4(market_adx_mean),
+                'market_adx_median': round_indicator_4(market_adx_median),
+                'strong_trend_ratio': round_indicator_4(strong_trend_ratio),
                 'trend_state': trend_state,
                 'valid_symbols_count': len(valid_symbols)
             }
