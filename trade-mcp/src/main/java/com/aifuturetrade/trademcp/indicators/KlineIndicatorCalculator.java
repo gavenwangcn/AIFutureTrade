@@ -8,6 +8,10 @@ import java.util.Map;
 
 /**
  * 与 {@code trade/market/market_data.py} 中 {@code _calculate_indicators_for_klines} 对齐的 K 线指标计算。
+ * <p>
+ * 返回的 K 线序列按时间从旧到新排列时，索引 {@code i} 处只能使用 {@code [0,i]} 的历史；
+ * MA99、RSI14 等需要足够根数后才有值，故序列前段多数字段为 {@code null} 属预期，非计算错误。
+ * </p>
  */
 public final class KlineIndicatorCalculator {
 

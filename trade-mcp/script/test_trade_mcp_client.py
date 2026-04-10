@@ -18,7 +18,10 @@
   E2E_MCP_TIMEOUT      秒，默认 120
   SCRIPT_LIST_ONLY     若为 1：只做 initialize + list_tools
   E2E_SKIP_MARKET      若为 1：与 mcp_e2e 语义一致时可用于跳过行情类（本脚本在 --full 下可选用另一组工具）
-  SCRIPT_PRINT_MAX_CHARS  打印返回 JSON/文本时的最大字符数，默认 6000；设为 0 表示不截断
+  SCRIPT_PRINT_MAX_CHARS  打印返回 JSON/文本时的最大字符数，默认 6000；设为 0 表示不截断。
+                            K 线大数组时控制台会只显示前几根+「截断」，实际 data 条数请看摘要里的「data 数组条数」。
+  SCRIPT_LATEST_KLINES      打印 data 末尾「最新 N 根」K 线及 indicators（默认 5）；设为 0 关闭。
+  SCRIPT_LATEST_PREVIEW_CHARS  每根「最新 K 线」详情的最大字符数，默认 8000。
 
 自定义工具调用：
   python test_trade_mcp_client.py --tool trade.market.klines --args "{\"symbol\":\"BTCUSDT\",\"interval\":\"1m\",\"limit\":5}"
@@ -26,6 +29,12 @@
   # PowerShell 可用单引号包一层 JSON，避免转义引号：
   # python test_trade_mcp_client.py --tool trade.market.klines --args '{"symbol":"BTCUSDT","interval":"1m","limit":5}'
   # 环境变量：SCRIPT_MCP_TOOL、SCRIPT_MCP_ARGS（未传命令行 --args 时生效）
+
+默认探测预设（无 --tool / 无 --full 时）：
+  python test_trade_mcp_client.py
+  python test_trade_mcp_client.py --preset klines
+  python test_trade_mcp_client.py --preset klines_indicators   # trade.market.klines_with_indicators
+  # 环境变量 SCRIPT_PRESET=klines_indicators 与 --preset 等价（命令行优先）
 """
 from __future__ import annotations
 
@@ -37,8 +46,16 @@ import sys
 from typing import Any
 
 TOOL_KLINES = "trade.market.klines"
+TOOL_KLINES_WITH_INDICATORS = "trade.market.klines_with_indicators"
 TOOL_SYMBOL_PRICES = "trade.market.symbol_prices"
 TOOL_TICKERS_ALL = "trade.market_tickers.all_symbols"
+
+# 默认探测用的 K 线参数（klines / klines_with_indicators 入参一致）
+DEFAULT_KLINE_ARGS: dict[str, Any] = {
+    "symbol": "BTCUSDT",
+    "interval": "1m",
+    "limit": 3,
+}
 
 
 def _env_bool(name: str, default: bool = False) -> bool:
@@ -107,6 +124,124 @@ def _tool_input_schema_as_dict(tool) -> dict:
     return {}
 
 
+def _indicator_leaf_stats(ind: Any) -> tuple[int, int]:
+    """统计 indicators 子树下：叶子节点总数与非 null 数。"""
+
+    non_null = 0
+    total = 0
+
+    def walk(x: Any) -> None:
+        nonlocal non_null, total
+        if isinstance(x, dict):
+            for v in x.values():
+                walk(v)
+        elif isinstance(x, list):
+            for v in x:
+                walk(v)
+        else:
+            total += 1
+            if x is not None:
+                non_null += 1
+
+    walk(ind)
+    return non_null, total
+
+
+def _print_large_json_summary_before_pretty(
+    payload: dict[str, Any], *, raw_text_len: int, source: str
+) -> None:
+    """在打印可能被截断的 Pretty JSON 之前，说明真实 K 线条数与截断行为，避免误认为只返回 1 根。"""
+    mc = _print_max_chars()
+    data = payload.get("data")
+    n = len(data) if isinstance(data, list) else None
+    print(f"  >>> 响应摘要（{source}，先于下方可能被截断的正文）")
+    print(f"      success: {payload.get('success')}")
+    if n is not None:
+        print(
+            f"      data 数组条数: {n}  （K 线根数；应与请求 limit 或上游实际条数一致）"
+        )
+    print(f"      原始 JSON 文本长度: {raw_text_len} 字符")
+    if mc == 0:
+        print("      SCRIPT_PRINT_MAX_CHARS=0，下方为全文（可能极长）")
+    else:
+        print(
+            f"      下方 Pretty 打印默认最多 {mc} 字符，超出会显示 [truncated]，"
+            "并非服务端只返回一根 K 线。"
+        )
+        print("      查看完整 JSON: export SCRIPT_PRINT_MAX_CHARS=0 或重定向到文件自行解析。")
+
+
+def _env_int(name: str, default: int) -> int:
+    raw = os.environ.get(name, "").strip()
+    if not raw:
+        return default
+    try:
+        return int(raw)
+    except ValueError:
+        return default
+
+
+def _print_latest_klines_preview(data: list[Any], tool_name: str) -> None:
+    """打印 data 末尾最新若干根 K 线（含 indicators），便于核对最新行情指标是否正常。"""
+    n_show = _env_int("SCRIPT_LATEST_KLINES", 5)
+    if n_show <= 0:
+        return
+    if not isinstance(data, list) or len(data) == 0:
+        return
+    per_max = _env_int("SCRIPT_LATEST_PREVIEW_CHARS", 8000)
+    if per_max <= 0:
+        per_max = 8000
+
+    total = len(data)
+    slice_ = data[-n_show:]
+    print("[trade-mcp-test] ---------- 最新 K 线窗口（时间上为最近几根）----------")
+    print("  说明：data 按时间从旧到新 → data[0] 最旧，data[-1] 最新。")
+    print("  「指标大量为 null」主要出现在序列前部（最旧），不是最新几根。")
+    print(f"  下面展示末尾 {len(slice_)} 根（索引 {total - len(slice_)} … {total - 1}），即最新 {len(slice_)} 根：")
+    for j, row in enumerate(slice_):
+        idx = total - len(slice_) + j
+        if not isinstance(row, dict):
+            print(f"  [{idx}] (非 object，略) {row!r}")
+            continue
+        t_s = row.get("open_time_dt_str") or row.get("open_time")
+        cl = row.get("close")
+        ind = row.get("indicators")
+        nn, tt = _indicator_leaf_stats(ind) if isinstance(ind, dict) else (0, 0)
+        print(
+            f"  --- [{idx}] open={t_s!r} close={cl!r}  indicators 非空叶子 {nn}/{tt} ---"
+        )
+        snippet = json.dumps(row, ensure_ascii=False, indent=2, default=str)
+        if len(snippet) > per_max:
+            snippet = snippet[: per_max - 30] + "\n... [per-bar truncated, 调大 SCRIPT_LATEST_PREVIEW_CHARS] ..."
+        print(snippet)
+    print("[trade-mcp-test] ---------- 最新 K 线窗口结束 ----------\n")
+
+
+def _print_klines_indicators_warmup_hint(payload: dict[str, Any], tool_name: str) -> None:
+    """说明 klines_with_indicators 前段 null 为预期，并对比首尾根指标填充度。"""
+    if "klines_with_indicators" not in tool_name:
+        return
+    data = payload.get("data")
+    if not isinstance(data, list) or len(data) == 0:
+        return
+    first = data[0] if isinstance(data[0], dict) else {}
+    last = data[-1] if isinstance(data[-1], dict) else {}
+    ind0 = first.get("indicators")
+    ind1 = last.get("indicators")
+    n0, t0 = _indicator_leaf_stats(ind0) if isinstance(ind0, dict) else (0, 0)
+    n1, t1 = _indicator_leaf_stats(ind1) if isinstance(ind1, dict) else (0, 0)
+    print("[trade-mcp-test] ---------- 指标 null 说明（首根 vs 末根）----------")
+    print("  逻辑：data 按时间从旧到新；每根 K 线只能用「已返回的左侧历史」算指标，")
+    print("  故序列前部 MA/RSI/MACD 等常为 null，末部才接近全满（与 Python market_data 一致）。")
+    print(f"  本响应共 {len(data)} 根 K 线。")
+    print(
+        f"  首根(最旧) indicators 非空叶子 {n0}/{t0} ；"
+        f"末根(最新) indicators 非空叶子 {n1}/{t1}  （末根应明显大于首根）"
+    )
+    print("[trade-mcp-test] ---------- 说明结束 ----------\n")
+    _print_latest_klines_preview(data, tool_name)
+
+
 def _print_tool_invocation(tool_name: str, arguments: dict[str, Any]) -> None:
     """调用前打印：正在执行的 tool 与入参。"""
     print("[trade-mcp-test] ---------- 执行 tools/call ----------")
@@ -135,8 +270,17 @@ def _print_tool_return_data(tool_name: str, result) -> None:
     if sc is not None:
         print("  --- structuredContent（业务数据，优先阅读）---")
         try:
-            dumped = json.dumps(sc, ensure_ascii=False, indent=2, default=str)
-            print(_truncate(dumped, mc))
+            if isinstance(sc, dict):
+                dumped_raw = json.dumps(sc, ensure_ascii=False, default=str)
+                _print_large_json_summary_before_pretty(
+                    sc, raw_text_len=len(dumped_raw), source="structuredContent"
+                )
+                dumped = json.dumps(sc, ensure_ascii=False, indent=2, default=str)
+                print(_truncate(dumped, mc))
+                _print_klines_indicators_warmup_hint(sc, tool_name)
+            else:
+                dumped = json.dumps(sc, ensure_ascii=False, indent=2, default=str)
+                print(_truncate(dumped, mc))
         except Exception as e:
             print(f"  JSON 序列化失败: {e}")
             print(f"  raw: {sc!r}")
@@ -152,8 +296,14 @@ def _print_tool_return_data(tool_name: str, result) -> None:
             print(f"  --- content 文本块 [{i}] type={bt!r}（len={len(text)}）---")
             try:
                 j = json.loads(text)
+                if isinstance(j, dict):
+                    _print_large_json_summary_before_pretty(
+                        j, raw_text_len=len(text), source="content 文本块"
+                    )
                 out = json.dumps(j, ensure_ascii=False, indent=2, default=str)
                 print(_truncate(out, mc))
+                if isinstance(j, dict):
+                    _print_klines_indicators_warmup_hint(j, tool_name)
             except json.JSONDecodeError:
                 print(_truncate(text, mc))
 
@@ -288,6 +438,7 @@ async def _run(
     full_e2e: bool,
     custom_tool: str | None,
     custom_arguments: dict[str, Any],
+    preset: str,
 ) -> None:
     try:
         from mcp import ClientSession
@@ -309,7 +460,7 @@ async def _run(
     print(f"[trade-mcp-test] SSE URL: {sse_url}")
     print(
         f"[trade-mcp-test] timeout={timeout}s list_only={list_only} full_e2e={full_e2e} "
-        f"custom_tool={custom_tool!r}"
+        f"custom_tool={custom_tool!r} preset={preset!r}"
     )
 
     async with sse_client(sse_url, timeout=timeout, sse_read_timeout=timeout) as (
@@ -391,20 +542,26 @@ async def _run(
                 print("[trade-mcp-test] --- PASSED (full e2e, same as deploy/mcp-e2e) ---")
                 return
 
-            # 默认：仅调用 K 线（依赖 binance-service）
-            if TOOL_KLINES not in names:
-                print(f"[trade-mcp-test] ERROR: 缺少工具 {TOOL_KLINES}", file=sys.stderr)
+            # 默认：K 线 或 K 线+指标（依赖 binance-service；参数与 Java MarketTools 一致）
+            if preset == "klines_indicators":
+                default_tool = TOOL_KLINES_WITH_INDICATORS
+                default_label = "K线+技术指标"
+            else:
+                default_tool = TOOL_KLINES
+                default_label = "K线"
+            if default_tool not in names:
+                print(
+                    f"[trade-mcp-test] ERROR: 缺少工具 {default_tool}（预设 {preset!r}）",
+                    file=sys.stderr,
+                )
                 raise SystemExit(1)
-            klines_args = {
-                "symbol": "BTCUSDT",
-                "interval": "1m",
-                "limit": 3,
-            }
-            _print_tool_invocation(TOOL_KLINES, klines_args)
-            rk = await session.call_tool(TOOL_KLINES, arguments=klines_args)
-            _assert_tool_success(rk, TOOL_KLINES)
-            print(f"[trade-mcp-test] call_tool {TOOL_KLINES}: OK")
-            _print_mcp_call_result(TOOL_KLINES, rk)
+            klines_args = dict(DEFAULT_KLINE_ARGS)
+            print(f"[trade-mcp-test] 默认探测：{default_label} ({default_tool})")
+            _print_tool_invocation(default_tool, klines_args)
+            rk = await session.call_tool(default_tool, arguments=klines_args)
+            _assert_tool_success(rk, default_tool)
+            print(f"[trade-mcp-test] call_tool {default_tool}: OK")
+            _print_mcp_call_result(default_tool, rk)
 
     print("[trade-mcp-test] --- PASSED ---")
 
@@ -439,6 +596,13 @@ def main() -> None:
         default=None,
         help="从 UTF-8 文件读取 JSON 对象作为 arguments（优先于 --args）",
     )
+    p.add_argument(
+        "--preset",
+        choices=("klines", "klines_indicators"),
+        default=None,
+        help="未指定 --tool 且未使用 --full 时：默认调用的探测工具。"
+        " klines=trade.market.klines；klines_indicators=trade.market.klines_with_indicators（K线+指标）",
+    )
     args = p.parse_args()
     list_only = args.list_only or _env_bool("SCRIPT_LIST_ONLY", False)
 
@@ -465,6 +629,19 @@ def main() -> None:
             "[trade-mcp-test] WARN: 已指定 --tool，将忽略 --full，仅调用自定义工具",
             file=sys.stderr,
         )
+    if custom_tool and (args.preset is not None or os.environ.get("SCRIPT_PRESET")):
+        print(
+            "[trade-mcp-test] WARN: 已指定 --tool，将忽略 --preset / SCRIPT_PRESET",
+            file=sys.stderr,
+        )
+
+    preset = args.preset
+    if preset is None:
+        env_p = (os.environ.get("SCRIPT_PRESET") or "").strip().lower()
+        if env_p in {"klines", "klines_indicators"}:
+            preset = env_p
+    if preset is None:
+        preset = "klines"
 
     try:
         asyncio.run(
@@ -473,6 +650,7 @@ def main() -> None:
                 full_e2e=args.full,
                 custom_tool=custom_tool,
                 custom_arguments=custom_arguments,
+                preset=preset,
             )
         )
     except SystemExit:
