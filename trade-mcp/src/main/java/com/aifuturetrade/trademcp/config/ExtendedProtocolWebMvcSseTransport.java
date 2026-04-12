@@ -2,6 +2,7 @@ package com.aifuturetrade.trademcp.config;
 
 import io.modelcontextprotocol.spec.McpServerSession;
 import io.modelcontextprotocol.spec.McpServerTransportProvider;
+import io.modelcontextprotocol.spec.ProtocolVersions;
 import org.springframework.ai.mcp.server.webmvc.transport.WebMvcSseServerTransportProvider;
 import reactor.core.publisher.Mono;
 
@@ -15,6 +16,17 @@ import java.util.List;
  * 导致客户端请求 2025-11-25 时出现 WARN；本类在不复制 WebMVC 实现的前提下修正协商列表。
  */
 public final class ExtendedProtocolWebMvcSseTransport implements McpServerTransportProvider {
+
+    private static final List<String> DEFAULT_PROTOCOL_VERSIONS = List.of(
+            ProtocolVersions.MCP_2024_11_05,
+            ProtocolVersions.MCP_2025_03_26,
+            ProtocolVersions.MCP_2025_06_18,
+            ProtocolVersions.MCP_2025_11_25);
+
+    /** 与 MCP SDK {@link ProtocolVersions} 一致的协商列表（不可变）。 */
+    public static List<String> defaultProtocolVersions() {
+        return DEFAULT_PROTOCOL_VERSIONS;
+    }
 
     private final WebMvcSseServerTransportProvider delegate;
     private final List<String> protocolVersions;
@@ -30,8 +42,7 @@ public final class ExtendedProtocolWebMvcSseTransport implements McpServerTransp
     }
 
     @Override
-    @SuppressWarnings("rawtypes")
-    public List protocolVersions() {
+    public List<String> protocolVersions() {
         return protocolVersions;
     }
 
@@ -41,14 +52,12 @@ public final class ExtendedProtocolWebMvcSseTransport implements McpServerTransp
     }
 
     @Override
-    @SuppressWarnings("rawtypes")
-    public Mono notifyClients(String method, Object params) {
+    public Mono<Void> notifyClients(String method, Object params) {
         return delegate.notifyClients(method, params);
     }
 
     @Override
-    @SuppressWarnings("rawtypes")
-    public Mono notifyClient(String sessionId, String method, Object params) {
+    public Mono<Void> notifyClient(String sessionId, String method, Object params) {
         return delegate.notifyClient(sessionId, method, params);
     }
 
@@ -58,8 +67,7 @@ public final class ExtendedProtocolWebMvcSseTransport implements McpServerTransp
     }
 
     @Override
-    @SuppressWarnings("rawtypes")
-    public Mono closeGracefully() {
+    public Mono<Void> closeGracefully() {
         return delegate.closeGracefully();
     }
 }

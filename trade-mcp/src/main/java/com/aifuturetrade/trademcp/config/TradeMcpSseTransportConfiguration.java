@@ -1,21 +1,18 @@
 package com.aifuturetrade.trademcp.config;
 
 import io.modelcontextprotocol.json.jackson3.JacksonMcpJsonMapper;
-import io.modelcontextprotocol.spec.ProtocolVersions;
 import org.springframework.ai.mcp.server.common.autoconfigure.McpServerAutoConfiguration;
 import org.springframework.ai.mcp.server.common.autoconfigure.properties.McpServerSseProperties;
 import org.springframework.ai.mcp.server.webmvc.transport.WebMvcSseServerTransportProvider;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.autoconfigure.AutoConfigureBefore;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Primary;
 import tools.jackson.databind.json.JsonMapper;
-import org.springframework.web.servlet.function.RouterFunction;
-
-import java.util.List;
 
 /**
  * 使用 Spring AI 默认的 {@link WebMvcSseServerTransportProvider#builder()} 构建底层传输，
@@ -23,10 +20,17 @@ import java.util.List;
  * <p>
  * 需关闭 {@link org.springframework.ai.mcp.server.webmvc.autoconfigure.McpServerSseWebMvcAutoConfiguration}，
  * 避免重复注册（见 {@code application.yml} {@code spring.autoconfigure.exclude}）。
+ * <p>
+ * 仅在 {@code spring.ai.mcp.server.protocol=SSE}（或未配置且使用默认 SSE）时生效，避免 STDIO 等模式下误注册 WebMvc SSE。
  */
 @Configuration(proxyBeanMethods = false)
 @AutoConfigureBefore(McpServerAutoConfiguration.class)
 @ConditionalOnClass(WebMvcSseServerTransportProvider.class)
+@ConditionalOnProperty(
+        prefix = "spring.ai.mcp.server",
+        name = "protocol",
+        havingValue = "SSE",
+        matchIfMissing = true)
 @EnableConfigurationProperties(McpServerSseProperties.class)
 public class TradeMcpSseTransportConfiguration {
 
@@ -42,16 +46,12 @@ public class TradeMcpSseTransportConfiguration {
                 .messageEndpoint(serverProperties.getSseMessageEndpoint())
                 .keepAliveInterval(serverProperties.getKeepAliveInterval())
                 .build();
-        List<String> protocols = List.of(
-                ProtocolVersions.MCP_2024_11_05,
-                ProtocolVersions.MCP_2025_03_26,
-                ProtocolVersions.MCP_2025_06_18,
-                ProtocolVersions.MCP_2025_11_25);
-        return new ExtendedProtocolWebMvcSseTransport(inner, protocols);
+        return new ExtendedProtocolWebMvcSseTransport(inner, ExtendedProtocolWebMvcSseTransport.defaultProtocolVersions());
     }
 
     @Bean
-    public RouterFunction<?> webMvcSseServerRouterFunction(ExtendedProtocolWebMvcSseTransport transport) {
+    public org.springframework.web.servlet.function.RouterFunction<?> webMvcSseServerRouterFunction(
+            ExtendedProtocolWebMvcSseTransport transport) {
         return transport.webMvcDelegate().getRouterFunction();
     }
 }
