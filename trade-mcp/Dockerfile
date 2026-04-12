@@ -17,7 +17,7 @@ WORKDIR /app
 COPY pom.xml .
 
 # 第二步：下载依赖到本地缓存（利用 Docker 层缓存）
-# -U：避免本地/镜像曾缓存「artifact 不存在」；spring-boot 4.1.0-M2 仅从 repo.spring.io/milestone 解析（见 pom.xml）
+# -U：避免本地/镜像曾缓存失败的解析结果
 RUN mvn -U dependency:go-offline -B -DskipTests || \
     (echo "Warning: dependency:go-offline failed, trying dependency:resolve" && \
      mvn -U dependency:resolve -B -DskipTests)
