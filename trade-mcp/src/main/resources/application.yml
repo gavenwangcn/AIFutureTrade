@@ -12,6 +12,10 @@ trade-mcp:
 spring:
   application:
     name: trade-mcp
+  autoconfigure:
+    # 避免与 TradeMcpSseTransportConfiguration 重复注册 WebMvc SSE Transport（后者扩展 protocolVersions 含 2025-11-25）
+    exclude:
+      - org.springframework.ai.mcp.server.webmvc.autoconfigure.McpServerSseWebMvcAutoConfiguration
   ai:
     mcp:
       server:
