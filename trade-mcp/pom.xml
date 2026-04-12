@@ -54,6 +54,18 @@
 
     <!-- Maven仓库配置 -->
     <repositories>
+        <!-- Spring Boot 4.x / Spring AI 2.x 里程碑依赖不在 Maven Central，必须从 Spring 官方里程碑库解析 -->
+        <repository>
+            <id>spring-milestones</id>
+            <name>Spring Milestones</name>
+            <url>https://repo.spring.io/milestone</url>
+            <releases>
+                <enabled>true</enabled>
+            </releases>
+            <snapshots>
+                <enabled>false</enabled>
+            </snapshots>
+        </repository>
         <!-- 阿里云Maven仓库（主要） -->
         <repository>
             <id>aliyunmaven</id>
@@ -84,6 +96,17 @@
     </repositories>
 
     <pluginRepositories>
+        <pluginRepository>
+            <id>spring-milestones</id>
+            <name>Spring Milestones</name>
+            <url>https://repo.spring.io/milestone</url>
+            <releases>
+                <enabled>true</enabled>
+            </releases>
+            <snapshots>
+                <enabled>false</enabled>
+            </snapshots>
+        </pluginRepository>
         <!-- 阿里云Maven仓库（主要） -->
         <pluginRepository>
             <id>aliyunmaven</id>
