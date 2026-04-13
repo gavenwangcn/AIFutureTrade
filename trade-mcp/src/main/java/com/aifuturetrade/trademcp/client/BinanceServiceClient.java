@@ -1,11 +1,10 @@
 package com.aifuturetrade.trademcp.client;
 
 import com.aifuturetrade.trademcp.config.BinanceServiceUriSelector;
-import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
-import org.springframework.web.client.RestClient;
 import org.springframework.web.util.UriComponentsBuilder;
 
+import java.net.URI;
 import java.util.List;
 import java.util.Map;
 
@@ -15,11 +14,11 @@ public class BinanceServiceClient {
     /** 与产品约定：未传 limit 时默认拉取 499 根 K 线 */
     public static final int DEFAULT_KLINE_LIMIT = 499;
 
-    private final RestClient restClient;
+    private final DownstreamJsonExchange json;
     private final BinanceServiceUriSelector binanceUris;
 
-    public BinanceServiceClient(RestClient restClient, BinanceServiceUriSelector binanceUris) {
-        this.restClient = restClient;
+    public BinanceServiceClient(DownstreamJsonExchange json, BinanceServiceUriSelector binanceUris) {
+        this.json = json;
         this.binanceUris = binanceUris;
     }
 
@@ -28,12 +27,7 @@ public class BinanceServiceClient {
     }
 
     public Map<String, Object> symbolPrices(List<String> symbols) {
-        return restClient.post()
-                .uri(nextBinanceBaseUrl() + "/api/market-data/symbol-prices")
-                .contentType(MediaType.APPLICATION_JSON)
-                .body(symbols)
-                .retrieve()
-                .body(Map.class);
+        return json.postJson(URI.create(nextBinanceBaseUrl() + "/api/market-data/symbol-prices"), symbols);
     }
 
     public Map<String, Object> klines(String symbol, String interval, Integer limit, Long startTime, Long endTime) {
@@ -45,10 +39,6 @@ public class BinanceServiceClient {
                 .queryParamIfPresent("startTime", java.util.Optional.ofNullable(startTime))
                 .queryParamIfPresent("endTime", java.util.Optional.ofNullable(endTime))
                 .toUriString();
-        return restClient.get()
-                .uri(uri)
-                .retrieve()
-                .body(Map.class);
+        return json.get(URI.create(uri));
     }
 }
-

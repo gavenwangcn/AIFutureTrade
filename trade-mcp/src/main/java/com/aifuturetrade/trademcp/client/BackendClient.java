@@ -1,22 +1,21 @@
 package com.aifuturetrade.trademcp.client;
 
 import com.aifuturetrade.trademcp.config.DownstreamProperties;
-import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
-import org.springframework.web.client.RestClient;
 import org.springframework.web.util.UriComponentsBuilder;
 
+import java.net.URI;
 import java.util.List;
 import java.util.Map;
 
 @Component
 public class BackendClient {
 
-    private final RestClient restClient;
+    private final DownstreamJsonExchange json;
     private final DownstreamProperties props;
 
-    public BackendClient(RestClient restClient, DownstreamProperties props) {
-        this.restClient = restClient;
+    public BackendClient(DownstreamJsonExchange json, DownstreamProperties props) {
+        this.json = json;
         this.props = props;
     }
 
@@ -25,49 +24,27 @@ public class BackendClient {
     }
 
     public Map<String, Object> accountInfo(String modelId) {
-        return restClient.get()
-                .uri(baseUrl() + "/api/mcp/binance-futures/account/account-info?modelId={modelId}", modelId)
-                .retrieve()
-                .body(Map.class);
+        return json.get(baseUrl() + "/api/mcp/binance-futures/account/account-info?modelId={modelId}", modelId);
     }
 
     public Map<String, Object> balance(String modelId) {
-        return restClient.get()
-                .uri(baseUrl() + "/api/mcp/binance-futures/account/balance?modelId={modelId}", modelId)
-                .retrieve()
-                .body(Map.class);
+        return json.get(baseUrl() + "/api/mcp/binance-futures/account/balance?modelId={modelId}", modelId);
     }
 
     public Map<String, Object> positions(String modelId) {
-        return restClient.get()
-                .uri(baseUrl() + "/api/mcp/binance-futures/account/positions?modelId={modelId}", modelId)
-                .retrieve()
-                .body(Map.class);
+        return json.get(baseUrl() + "/api/mcp/binance-futures/account/positions?modelId={modelId}", modelId);
     }
 
     public Map<String, Object> sellPosition(String modelId, String symbol) {
-        return restClient.post()
-                .uri(baseUrl() + "/api/mcp/binance-futures/order/sell-position?modelId={modelId}&symbol={symbol}", modelId, symbol)
-                .retrieve()
-                .body(Map.class);
+        return json.postJson(baseUrl() + "/api/mcp/binance-futures/order/sell-position?modelId={modelId}&symbol={symbol}", Map.of(), modelId, symbol);
     }
 
     public Map<String, Object> orderCreate(String modelId, Map<String, Object> body) {
-        return restClient.post()
-                .uri(baseUrl() + "/api/mcp/binance-futures/order/create?modelId={modelId}", modelId)
-                .contentType(MediaType.APPLICATION_JSON)
-                .body(body)
-                .retrieve()
-                .body(Map.class);
+        return json.postJson(baseUrl() + "/api/mcp/binance-futures/order/create?modelId={modelId}", body, modelId);
     }
 
     public Map<String, Object> orderCancel(String modelId, Map<String, Object> body) {
-        return restClient.post()
-                .uri(baseUrl() + "/api/mcp/binance-futures/order/cancel?modelId={modelId}", modelId)
-                .contentType(MediaType.APPLICATION_JSON)
-                .body(body)
-                .retrieve()
-                .body(Map.class);
+        return json.postJson(baseUrl() + "/api/mcp/binance-futures/order/cancel?modelId={modelId}", body, modelId);
     }
 
     public Map<String, Object> orderGet(String modelId, String symbol, Long orderId, String origClientOrderId) {
@@ -80,10 +57,7 @@ public class BackendClient {
         if (origClientOrderId != null && !origClientOrderId.isEmpty()) {
             b.queryParam("origClientOrderId", origClientOrderId);
         }
-        return restClient.get()
-                .uri(b.toUriString())
-                .retrieve()
-                .body(Map.class);
+        return json.get(URI.create(b.toUriString()));
     }
 
     public Map<String, Object> openOrders(String modelId, String symbol) {
@@ -92,10 +66,7 @@ public class BackendClient {
         if (symbol != null && !symbol.isEmpty()) {
             b.queryParam("symbol", symbol);
         }
-        return restClient.get()
-                .uri(b.toUriString())
-                .retrieve()
-                .body(Map.class);
+        return json.get(URI.create(b.toUriString()));
     }
 
     /** 24_market_tickers：分页原始行 */
@@ -161,7 +132,7 @@ public class BackendClient {
         if (orderAsc != null) {
             b.queryParam("orderAsc", orderAsc);
         }
-        return restClient.get().uri(b.toUriString()).retrieve().body(Map.class);
+        return json.get(URI.create(b.toUriString()));
     }
 
     public Map<String, Object> marketTickersRowsCount(
@@ -210,7 +181,7 @@ public class BackendClient {
         if (maxQuoteVolume != null) {
             b.queryParam("maxQuoteVolume", maxQuoteVolume);
         }
-        return restClient.get().uri(b.toUriString()).retrieve().body(Map.class);
+        return json.get(URI.create(b.toUriString()));
     }
 
     public Map<String, Object> marketTickersSnapshot(Integer page, Integer size, List<String> symbols, String symbolsCsv) {
@@ -231,7 +202,7 @@ public class BackendClient {
         if (symbolsCsv != null && !symbolsCsv.isEmpty()) {
             b.queryParam("symbolsCsv", symbolsCsv);
         }
-        return restClient.get().uri(b.toUriString()).retrieve().body(Map.class);
+        return json.get(URI.create(b.toUriString()));
     }
 
     public Map<String, Object> marketTickersSnapshotCount(List<String> symbols, String symbolsCsv) {
@@ -246,30 +217,18 @@ public class BackendClient {
         if (symbolsCsv != null && !symbolsCsv.isEmpty()) {
             b.queryParam("symbolsCsv", symbolsCsv);
         }
-        return restClient.get().uri(b.toUriString()).retrieve().body(Map.class);
+        return json.get(URI.create(b.toUriString()));
     }
 
     public Map<String, Object> marketTickersAllSymbols() {
-        return restClient.get()
-                .uri(baseUrl() + "/api/mcp/market-tickers/symbols")
-                .retrieve()
-                .body(Map.class);
+        return json.get(baseUrl() + "/api/mcp/market-tickers/symbols");
     }
 
     public Map<String, Object> marketTickersLatest(String symbol) {
-        return restClient.get()
-                .uri(baseUrl() + "/api/mcp/market-tickers/latest?symbol={symbol}", symbol)
-                .retrieve()
-                .body(Map.class);
+        return json.get(baseUrl() + "/api/mcp/market-tickers/latest?symbol={symbol}", symbol);
     }
 
     public Map<String, Object> marketTickersSql(Map<String, Object> body) {
-        return restClient.post()
-                .uri(baseUrl() + "/api/mcp/market-tickers/sql")
-                .contentType(MediaType.APPLICATION_JSON)
-                .body(body)
-                .retrieve()
-                .body(Map.class);
+        return json.postJson(URI.create(baseUrl() + "/api/mcp/market-tickers/sql"), body);
     }
 }
-

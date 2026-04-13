@@ -8,8 +8,42 @@ import java.util.List;
 @ConfigurationProperties(prefix = "downstream")
 public class DownstreamProperties {
 
+    /** 连接 / 读取超时：避免下游无响应时 MCP 长时间阻塞 */
+    private Http http = new Http();
+
     private Service backend = new Service();
     private BinanceServiceConfig binanceService = new BinanceServiceConfig();
+
+    public Http getHttp() {
+        return http;
+    }
+
+    public void setHttp(Http http) {
+        this.http = http;
+    }
+
+    public static class Http {
+        /** 建立 TCP 连接超时（毫秒） */
+        private int connectTimeoutMs = 10_000;
+        /** 等待响应体（毫秒） */
+        private int readTimeoutMs = 60_000;
+
+        public int getConnectTimeoutMs() {
+            return connectTimeoutMs;
+        }
+
+        public void setConnectTimeoutMs(int connectTimeoutMs) {
+            this.connectTimeoutMs = connectTimeoutMs;
+        }
+
+        public int getReadTimeoutMs() {
+            return readTimeoutMs;
+        }
+
+        public void setReadTimeoutMs(int readTimeoutMs) {
+            this.readTimeoutMs = readTimeoutMs;
+        }
+    }
 
     public Service getBackend() {
         return backend;
