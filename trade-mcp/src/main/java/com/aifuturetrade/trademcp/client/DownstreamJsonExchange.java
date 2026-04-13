@@ -1,7 +1,11 @@
 package com.aifuturetrade.trademcp.client;
 
-import com.fasterxml.jackson.core.type.TypeReference;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import java.io.IOException;
+import java.net.URI;
+import java.nio.charset.StandardCharsets;
+import java.util.LinkedHashMap;
+import java.util.Map;
+
 import org.springframework.http.HttpStatusCode;
 import org.springframework.http.MediaType;
 import org.springframework.http.client.ClientHttpResponse;
@@ -9,12 +13,8 @@ import org.springframework.stereotype.Component;
 import org.springframework.util.StreamUtils;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
-
-import java.io.IOException;
-import java.net.URI;
-import java.nio.charset.StandardCharsets;
-import java.util.LinkedHashMap;
-import java.util.Map;
+import tools.jackson.core.type.TypeReference;
+import tools.jackson.databind.json.JsonMapper;
 
 /**
  * 将下游 HTTP 响应统一解析为 {@code Map<String, Object>}：
@@ -28,14 +28,13 @@ import java.util.Map;
 @Component
 public class DownstreamJsonExchange {
 
+    private static final JsonMapper JSON = JsonMapper.builder().build();
     private static final TypeReference<Map<String, Object>> MAP_TYPE = new TypeReference<>() {};
 
     private final RestClient restClient;
-    private final ObjectMapper objectMapper;
 
-    public DownstreamJsonExchange(RestClient restClient, ObjectMapper objectMapper) {
+    public DownstreamJsonExchange(RestClient restClient) {
         this.restClient = restClient;
-        this.objectMapper = objectMapper;
     }
 
     public Map<String, Object> get(String uriTemplate, Object... uriVariables) {
@@ -87,7 +86,7 @@ public class DownstreamJsonExchange {
                 return new LinkedHashMap<>();
             }
             try {
-                return objectMapper.readValue(bodyText, MAP_TYPE);
+                return JSON.readValue(bodyText, MAP_TYPE);
             } catch (Exception e) {
                 Map<String, Object> wrap = new LinkedHashMap<>();
                 wrap.put("success", true);
@@ -102,7 +101,7 @@ public class DownstreamJsonExchange {
     private Map<String, Object> errorStatusToMap(HttpStatusCode status, String bodyText) {
         if (bodyText != null && !bodyText.isBlank()) {
             try {
-                Map<String, Object> parsed = objectMapper.readValue(bodyText, MAP_TYPE);
+                Map<String, Object> parsed = JSON.readValue(bodyText, MAP_TYPE);
                 Map<String, Object> out = new LinkedHashMap<>(parsed);
                 out.putIfAbsent("httpStatus", status.value());
                 if (Boolean.TRUE.equals(out.get("success"))) {
