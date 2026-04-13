@@ -1,8 +1,11 @@
 # ============ 交易服务Dockerfile ============
 # Python Flask交易服务
 # 注意：此Dockerfile位于trade目录，build context为项目根目录
+#
+# Override base image if docker.io is unreachable: build-arg PYTHON_IMAGE=...
 
-FROM python:3.10-slim
+ARG PYTHON_IMAGE=python:3.11-slim
+FROM ${PYTHON_IMAGE}
 
 WORKDIR /app
 

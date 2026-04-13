@@ -132,24 +132,51 @@ sudo journalctl -u docker
 sudo systemctl restart docker
 ```
 
-### 问题3: 无法连接到 Docker Hub
+### 问题3: 无法连接到 Docker Hub / `pull access denied` / `insufficient_scope`
 
-**解决方法**:
+典型日志：`failed to resolve source metadata for docker.io/library/...`、`authorization failed`、`insufficient_scope`。常见原因：**匿名拉取被限流**、**访问 docker.io 不稳定（含国内机房）**、**镜像加速源失效或未配置**。
+
+**优先尝试（任选其一或组合）**：
+
+1. **登录 Docker Hub（提高匿名拉取额度）**
+   ```bash
+   docker login docker.io
+   # 无账号可注册 https://hub.docker.com/ 后使用 Personal Access Token 作为密码
+   ```
+
+2. **配置 registry 镜像（中国大陆服务器强烈建议）**  
+   公开镜像地址会变更，请以当前可用源为准（如云厂商「容器镜像服务」文档）。示例结构：
+   ```bash
+   sudo mkdir -p /etc/docker
+   sudo tee /etc/docker/daemon.json <<-'EOF'
+   {
+     "registry-mirrors": [
+       "https://<你的加速器地址>"
+     ]
+   }
+   EOF
+   sudo systemctl daemon-reload
+   sudo systemctl restart docker
+   ```
+   配置后执行：`docker pull hello-world` 验证。
+
+3. **用环境变量换基础镜像（不改 Dockerfile）**  
+   仓库根目录 `.env` 或 shell 中设置（示例域名需换成你环境可用的镜像站）：
+   ```bash
+   export NODE_IMAGE=docker.m.daocloud.io/library/node:22-bookworm-slim
+   export NGINX_IMAGE=docker.m.daocloud.io/library/nginx:alpine
+   export PYTHON_IMAGE=docker.m.daocloud.io/library/python:3.11-slim
+   docker compose build frontend trade
+   ```
+   `docker-compose.yml` 已将 **`NODE_IMAGE` / `NGINX_IMAGE`** 传给 `frontend`，**`PYTHON_IMAGE`** 传给 **`trade`**（默认 `python:3.11-slim`）。其余服务仍依赖 `maven:`、`eclipse-temurin:` 等，需 **daemon 级镜像加速** 或 **能访问 docker.io**。
+
+4. **BuildKit 拉取 `docker/dockerfile:1` 失败**（如 `trade-monitor` 构建）  
+   与拉取普通基础镜像相同：配置镜像加速或 `docker login` 后重试；或确保 `DOCKER_BUILDKIT=1` 且网络可访问 docker.io。
+
+**网络自检**：
 ```bash
-# 检查网络连接
-ping registry-1.docker.io
-
-# 配置 Docker 镜像加速器（中国用户）
-sudo mkdir -p /etc/docker
-sudo tee /etc/docker/daemon.json <<-'EOF'
-{
-  "registry-mirrors": [
-    "https://docker.mirrors.ustc.edu.cn",
-    "https://hub-mirror.c.163.com"
-  ]
-}
-EOF
-sudo systemctl restart docker
+ping -c 2 registry-1.docker.io
+curl -sI https://registry-1.docker.io/v2/
 ```
 
 ### 问题4: 系统版本不匹配

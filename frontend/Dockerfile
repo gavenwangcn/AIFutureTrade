@@ -1,16 +1,21 @@
 # ==============================================================================
-# 前端服务 Dockerfile
+# Frontend Dockerfile
 # ==============================================================================
-# 用途：在同一个Docker容器中构建 KLineChart 10.0.0 基础库和前端应用
-# 构建上下文：项目根目录
-# 要求：使用各自的依赖管理，不使用已有的node_modules
-# ==============================================================================
-
-# ==============================================================================
-# 阶段1：构建 KLineChart 10.0.0 基础库
+# Build KLineChart 10.0.0 and the Vite app in one image.
+# Context: repository root.
+#
+# If pulls from docker.io fail (e.g. insufficient_scope / China network), set base
+# images via build args or in docker-compose.yml / .env — see scripts/README-docker-install.md
 # ==============================================================================
 
-FROM node:22-slim AS klinecharts-builder
+ARG NODE_IMAGE=node:22-bookworm-slim
+ARG NGINX_IMAGE=nginx:alpine
+
+# ==============================================================================
+# Stage 1: build KLineChart 10.0.0
+# ==============================================================================
+
+FROM ${NODE_IMAGE} AS klinecharts-builder
 WORKDIR /app
 
 # 安装系统依赖
@@ -75,7 +80,7 @@ RUN if [ ! -d dist ] || [ ! -f dist/umd/klinecharts.min.js ]; then \
 # 阶段2：构建前端应用
 # ==============================================================================
 
-FROM node:22-slim AS frontend-builder
+FROM ${NODE_IMAGE} AS frontend-builder
 WORKDIR /app/frontend
 
 # 安装系统依赖
@@ -125,7 +130,7 @@ RUN if [ ! -d dist ]; then \
 # 阶段3：准备运行环境（使用 Nginx 高性能服务器）
 # ==============================================================================
 
-FROM nginx:alpine AS runtime
+FROM ${NGINX_IMAGE} AS runtime
 
 # 从frontend-builder阶段复制构建产物
 COPY --from=frontend-builder /app/frontend/dist/ /app/dist/
