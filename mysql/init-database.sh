@@ -63,9 +63,16 @@ GRANT ALL PRIVILEGES ON aifuturetrade.* TO 'aifuturetrade'@'127.0.0.1';
 FLUSH PRIVILEGES;
 
 -- ==============================================================================
+-- 时区：上海（UTC+8），与 my.cnf default-time-zone 及 JDBC serverTimezone=Asia/Shanghai 一致
+-- ==============================================================================
+SET GLOBAL time_zone = '+08:00';
+SET SESSION time_zone = '+08:00';
+
+-- ==============================================================================
 -- 验证配置
 -- ==============================================================================
 SELECT user, host, plugin FROM mysql.user WHERE user IN ('root', 'aifuturetrade') ORDER BY user, host;
+SELECT @@GLOBAL.time_zone AS global_time_zone, @@SESSION.time_zone AS session_time_zone;
 EOF
 
 if [ $? -eq 0 ]; then

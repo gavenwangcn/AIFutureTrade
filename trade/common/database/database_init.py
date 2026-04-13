@@ -9,6 +9,9 @@ Main functions:
     - Market data table initialization: market_tickers, etc.
 - Unified initialization interface: init_database_tables() and init_market_tables()
 - Table name definitions: table name constants for all business tables
+
+Time zone: DDL uses CURRENT_TIMESTAMP for defaults; these follow the MySQL session time zone.
+Connections set time_zone to +08:00 (Asia/Shanghai) in database_basic.create_pooled_db; MySQL server should use the same (see mysql/my.cnf).
 """
 
 import logging

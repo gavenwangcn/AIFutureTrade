@@ -47,6 +47,7 @@ services:
       #   - <服务器IP>:32123
       - "0.0.0.0:32123:3306"
     environment:
+      - TZ=Asia/Shanghai
       - MYSQL_ROOT_PASSWORD=aifuturetrade_root123
       - MYSQL_DATABASE=aifuturetrade
       - MYSQL_USER=aifuturetrade

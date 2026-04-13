@@ -84,7 +84,8 @@ def create_pooled_db(
             database=database,
             charset=charset,
             cursorclass=cursors.DictCursor,
-            autocommit=False
+            autocommit=False,
+            init_command="SET time_zone = '+08:00'",
         )
     
     return PooledDB(
@@ -95,7 +96,7 @@ def create_pooled_db(
         maxcached=maxconnections,  # Maximum number of cached connections
         blocking=blocking,
         maxusage=None,  # Maximum usage count per connection, None means unlimited
-        setsession=None,  # SQL statement list for session setup
+        setsession=['SET time_zone = "+08:00"'],  # 上海时区，与 MySQL 服务端及 JDBC 一致
         reset=True,  # Reset connection when returned
         failures=None,  # Number of retry attempts on failure
         ping=1,  # Ping database when acquiring connection (1=ping on every acquisition)
