@@ -45,7 +45,7 @@ def _parse_args() -> StrategyConfig:
 
 def _extract_latest_rsi14(payload: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     """
-    Best-effort extractor for trade.market.klines_with_indicators responses.
+    Best-effort extractor for trade_market_klines_with_indicators responses.
     We intentionally keep parsing forgiving since backend fields can evolve.
     """
     data = payload.get("data")

@@ -18,19 +18,19 @@ public class AccountTools {
         this.backendClient = backendClient;
     }
 
-    @McpTool(name = "trade.account.balance", description = "期货账户余额（必须传modelId；调用backend controller）")
+    @McpTool(name = "trade_account_balance", description = "期货账户余额（必须传modelId；调用backend controller）")
     public Map<String, Object> balance(
             @McpToolParam(description = "模型ID", required = true) String modelId) {
         return backendClient.balance(modelId);
     }
 
-    @McpTool(name = "trade.account.positions", description = "期货账户持仓（必须传modelId；调用backend controller）")
+    @McpTool(name = "trade_account_positions", description = "期货账户持仓（必须传modelId；调用backend controller）")
     public Map<String, Object> positions(
             @McpToolParam(description = "模型ID", required = true) String modelId) {
         return backendClient.positions(modelId);
     }
 
-    @McpTool(name = "trade.account.account_info", description = "期货账户信息（必须传modelId；调用backend controller）")
+    @McpTool(name = "trade_account_account_info", description = "期货账户信息（必须传modelId；调用backend controller）")
     public Map<String, Object> accountInfo(
             @McpToolParam(description = "模型ID", required = true) String modelId) {
         return backendClient.accountInfo(modelId);

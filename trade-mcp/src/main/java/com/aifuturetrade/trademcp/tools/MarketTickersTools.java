@@ -57,7 +57,7 @@ public class MarketTickersTools {
         this.backendClient = backendClient;
     }
 
-    @McpTool(name = "trade.market_tickers.rows", description = "分页查询 24_market_tickers 原始行，支持单/多 symbol、side、价格与涨跌幅与成交额区间、排序")
+    @McpTool(name = "trade_market_tickers_rows", description = "分页查询 24_market_tickers 原始行，支持单/多 symbol、side、价格与涨跌幅与成交额区间、排序")
     public Map<String, Object> rows(
             @McpToolParam(description = "页码，从 1 开始", required = false) Integer page,
             @McpToolParam(description = "每页条数，最大 500", required = false) Integer size,
@@ -81,7 +81,7 @@ public class MarketTickersTools {
                 orderBy, orderAsc);
     }
 
-    @McpTool(name = "trade.market_tickers.rows_count", description = "与 rows 相同筛选条件下的总行数")
+    @McpTool(name = "trade_market_tickers_rows_count", description = "与 rows 相同筛选条件下的总行数")
     public Map<String, Object> rowsCount(
             @McpToolParam(description = "单个交易对", required = false) String symbol,
             @McpToolParam(description = "多个交易对", required = false) List<String> symbols,
@@ -100,7 +100,7 @@ public class MarketTickersTools {
                 minQuoteVolume, maxQuoteVolume);
     }
 
-    @McpTool(name = "trade.market_tickers.snapshot", description = "每个 symbol 仅最新一条（按 event_time），分页；可限定 symbols 或查全市场")
+    @McpTool(name = "trade_market_tickers_snapshot", description = "每个 symbol 仅最新一条（按 event_time），分页；可限定 symbols 或查全市场")
     public Map<String, Object> snapshot(
             @McpToolParam(description = "页码", required = false) Integer page,
             @McpToolParam(description = "每页条数", required = false) Integer size,
@@ -109,25 +109,25 @@ public class MarketTickersTools {
         return backendClient.marketTickersSnapshot(page, size, symbols, symbolsCsv);
     }
 
-    @McpTool(name = "trade.market_tickers.snapshot_count", description = "snapshot 模式下的 symbol 分组总数")
+    @McpTool(name = "trade_market_tickers_snapshot_count", description = "snapshot 模式下的 symbol 分组总数")
     public Map<String, Object> snapshotCount(
             @McpToolParam(description = "限定交易对列表", required = false) List<String> symbols,
             @McpToolParam(description = "逗号分隔交易对", required = false) String symbolsCsv) {
         return backendClient.marketTickersSnapshotCount(symbols, symbolsCsv);
     }
 
-    @McpTool(name = "trade.market_tickers.all_symbols", description = "库中全部 distinct 交易对列表")
+    @McpTool(name = "trade_market_tickers_all_symbols", description = "库中全部 distinct 交易对列表")
     public Map<String, Object> allSymbols() {
         return backendClient.marketTickersAllSymbols();
     }
 
-    @McpTool(name = "trade.market_tickers.latest", description = "单个交易对在库中的最新一条 ticker 行")
+    @McpTool(name = "trade_market_tickers_latest", description = "单个交易对在库中的最新一条 ticker 行")
     public Map<String, Object> latest(
             @McpToolParam(description = "交易对，如 BTCUSDT", required = true) String symbol) {
         return backendClient.marketTickersLatest(symbol);
     }
 
-    @McpTool(name = "trade.market_tickers.sql", description = MARKET_TICKERS_SQL_TOOL_DESCRIPTION)
+    @McpTool(name = "trade_market_tickers_sql", description = MARKET_TICKERS_SQL_TOOL_DESCRIPTION)
     public Map<String, Object> sql(
             @McpToolParam(description = MARKET_TICKERS_SQL_PARAM_SQL, required = true) String sql,
             @McpToolParam(description = MARKET_TICKERS_SQL_PARAM_PARAMS, required = false) List<Object> params) {

@@ -18,14 +18,14 @@ public class OrderTools {
         this.backendClient = backendClient;
     }
 
-    @McpTool(name = "trade.order.sell_position", description = "一键平仓（必须传modelId；调用backend controller，落库）")
+    @McpTool(name = "trade_order_sell_position", description = "一键平仓（必须传modelId；调用backend controller，落库）")
     public Map<String, Object> sellPosition(
             @McpToolParam(description = "模型ID", required = true) String modelId,
             @McpToolParam(description = "交易对，如BTCUSDT或BTC", required = true) String symbol) {
         return backendClient.sellPosition(modelId, symbol);
     }
 
-    @McpTool(name = "trade.order.create", description = "创建订单（必须传modelId；调用backend controller，落库）")
+    @McpTool(name = "trade_order_create", description = "创建订单（必须传modelId；调用backend controller，落库）")
     public Map<String, Object> create(
             @McpToolParam(description = "模型ID", required = true) String modelId,
             @McpToolParam(description = "交易对", required = true) String symbol,
@@ -47,7 +47,7 @@ public class OrderTools {
         return backendClient.orderCreate(modelId, body);
     }
 
-    @McpTool(name = "trade.order.cancel", description = "撤销订单（必须传modelId；调用backend controller）")
+    @McpTool(name = "trade_order_cancel", description = "撤销订单（必须传modelId；调用backend controller）")
     public Map<String, Object> cancel(
             @McpToolParam(description = "模型ID", required = true) String modelId,
             @McpToolParam(description = "交易对", required = true) String symbol,
@@ -61,7 +61,7 @@ public class OrderTools {
         return backendClient.orderCancel(modelId, body);
     }
 
-    @McpTool(name = "trade.order.get", description = "查询订单（必须传modelId；调用backend controller）")
+    @McpTool(name = "trade_order_get", description = "查询订单（必须传modelId；调用backend controller）")
     public Map<String, Object> get(
             @McpToolParam(description = "模型ID", required = true) String modelId,
             @McpToolParam(description = "交易对", required = true) String symbol,
@@ -71,7 +71,7 @@ public class OrderTools {
         return backendClient.orderGet(modelId, symbol, orderId, origClientOrderId);
     }
 
-    @McpTool(name = "trade.order.open_orders", description = "查询当前挂单（必须传modelId；调用backend controller）")
+    @McpTool(name = "trade_order_open_orders", description = "查询当前挂单（必须传modelId；调用backend controller）")
     public Map<String, Object> openOrders(
             @McpToolParam(description = "模型ID", required = true) String modelId,
             @McpToolParam(description = "交易对（可选）", required = false) String symbol

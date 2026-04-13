@@ -88,9 +88,9 @@ class TradeMcpClient:
     async def klines_with_indicators(
         self, *, symbol: str, interval: str, limit: int = 200
     ) -> Dict[str, Any]:
-        # trade-mcp tool name per skill: trade.market.klines_with_indicators
+        # trade-mcp tool name per skill: trade_market_klines_with_indicators
         return await self.call(
-            "trade.market.klines_with_indicators",
+            "trade_market_klines_with_indicators",
             {"symbol": symbol, "interval": interval, "limit": limit},
         )
 

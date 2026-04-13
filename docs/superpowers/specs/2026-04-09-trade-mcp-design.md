@@ -34,13 +34,13 @@
 ### 3.2 数据流（核心链路）
 
 1) **账号/交易（带 modelId）**  
-`Agent -> MCP(tool: trade.account.* / trade.order.*) -> trade-mcp -> backend Controller -> backend Service -> (SDK/DB/原有逻辑) -> backend Controller -> trade-mcp -> Agent`
+`Agent -> MCP(tool: trade_account_* / trade_order_*) -> trade-mcp -> backend Controller -> backend Service -> (SDK/DB/原有逻辑) -> backend Controller -> trade-mcp -> Agent`
 
 2) **市场数据（不带 modelId）**  
-`Agent -> MCP(tool: trade.market.*) -> trade-mcp -> binance-service Controller -> binance-service Service -> Binance -> Controller -> trade-mcp`
+`Agent -> MCP(tool: trade_market_*) -> trade-mcp -> binance-service Controller -> binance-service Service -> Binance -> Controller -> trade-mcp`
 
 3) **K 线 + 指标（不带 modelId）**  
-`Agent -> MCP(tool: trade.market.klines_with_indicators) -> trade-mcp -> binance-service /klines -> trade-mcp(计算指标并封装) -> Agent`
+`Agent -> MCP(tool: trade_market_klines_with_indicators) -> trade-mcp -> binance-service /klines -> trade-mcp(计算指标并封装) -> Agent`
 
 ## 4. 下游 REST 契约（现状与补齐）
 
@@ -97,38 +97,38 @@
 
 ## 5. trade-mcp：MCP Tools 设计（方案 A：细粒度）
 
-命名空间：统一以 `trade.*` 开头，按领域拆分为 `trade.account.*`、`trade.order.*`、`trade.market.*`。
+命名空间：统一以 `trade.*` 开头，按领域拆分为 `trade_account_*`、`trade_order_*`、`trade_market_*`。
 
 ### 5.1 Tools 清单（建议）
 
 账号类（都必须带 `modelId`）
 
-- `trade.account.balance(modelId)`
-- `trade.account.positions(modelId)`
-- `trade.account.account_info(modelId)`
+- `trade_account_balance(modelId)`
+- `trade_account_positions(modelId)`
+- `trade_account_account_info(modelId)`
 
 交易类（都必须带 `modelId`）
 
-- `trade.order.create(modelId, symbol, side, type, quantity, price?, timeInForce?, reduceOnly?, clientOrderId?, stopPrice?, workingType?, positionSide?, recvWindow?)`
-- `trade.order.cancel(modelId, symbol, orderId?, origClientOrderId?)`
-- `trade.order.get(modelId, symbol, orderId?, origClientOrderId?)`
-- `trade.order.open_orders(modelId, symbol?)`
-- `trade.order.sell_position(modelId, symbol)`（对齐现有一键平仓能力）
+- `trade_order_create(modelId, symbol, side, type, quantity, price?, timeInForce?, reduceOnly?, clientOrderId?, stopPrice?, workingType?, positionSide?, recvWindow?)`
+- `trade_order_cancel(modelId, symbol, orderId?, origClientOrderId?)`
+- `trade_order_get(modelId, symbol, orderId?, origClientOrderId?)`
+- `trade_order_open_orders(modelId, symbol?)`
+- `trade_order_sell_position(modelId, symbol)`（对齐现有一键平仓能力）
 
 市场数据类（不带 `modelId`）
 
-- `trade.market.symbol_prices(symbols[])`
-- `trade.market.klines(symbol, interval, limit?, startTime?, endTime?)`
-- `trade.market.klines_with_indicators(symbol, interval, limit?, startTime?, endTime?)`
+- `trade_market_symbol_prices(symbols[])`
+- `trade_market_klines(symbol, interval, limit?, startTime?, endTime?)`
+- `trade_market_klines_with_indicators(symbol, interval, limit?, startTime?, endTime?)`
 
 ### 5.2 Tools → 下游 REST 映射
 
-- `trade.market.symbol_prices` → `binance-service` `POST /api/market-data/symbol-prices`
-- `trade.market.klines` → `binance-service` `GET /api/market-data/klines`
-- `trade.market.klines_with_indicators` → 先调用 `binance-service /klines`，再由 `trade-mcp` 在内存计算指标并返回
+- `trade_market_symbol_prices` → `binance-service` `POST /api/market-data/symbol-prices`
+- `trade_market_klines` → `binance-service` `GET /api/market-data/klines`
+- `trade_market_klines_with_indicators` → 先调用 `binance-service /klines`，再由 `trade-mcp` 在内存计算指标并返回
 
-- `trade.account.*` → `backend` 新增 `/api/mcp/binance-futures/account/*`
-- `trade.order.*` → `backend` 新增 `/api/mcp/binance-futures/order/*`
+- `trade_account_*` → `backend` 新增 `/api/mcp/binance-futures/account/*`
+- `trade_order_*` → `backend` 新增 `/api/mcp/binance-futures/order/*`
 
 ## 6. K 线与指标：返回结构与对齐规则
 
@@ -145,7 +145,7 @@
 
 ### 6.2 指标封装（输出）
 
-`trade.market.klines_with_indicators` 返回每根 K 线附带：
+`trade_market_klines_with_indicators` 返回每根 K 线附带：
 
 ```json
 {
@@ -227,7 +227,7 @@
 
 第一阶段（MVP）：
 
-- `trade-mcp`：实现 `trade.market.symbol_prices`、`trade.market.klines_with_indicators`
+- `trade-mcp`：实现 `trade_market_symbol_prices`、`trade_market_klines_with_indicators`
 - `backend`：新增 `account.balance/positions/account_info` 与 `order.create/cancel/get/open_orders/sell_position` 的 Controller + Service（先覆盖最常用）
 - `binance-service`：复用现有市场接口；若字段不够则补齐
 

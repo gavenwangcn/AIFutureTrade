@@ -1,26 +1,25 @@
-# trade-buy · references：BUILD market（只在写脚本选工具/字段时打开）
+# trade-buy · references: BUILD market (open when choosing tools/fields)
 
-本文件用于 **BUILD 阶段**：写盯盘脚本时选择 trade-mcp 的行情/指标工具与理解返回结构。
-本文件只放 **trade-buy 用到的最小行情能力**，完整细则请按需查看 `skills/trade-mcp/references/market.md`。
+Use during **BUILD**: pick trade-mcp market/indicator tools and understand responses when writing the watch script.
+This file lists the **minimum market surface for trade-buy**; full details live in `skills/trade-mcp/references/market.md` as needed.
 
-## 优先用：`trade.market.klines_with_indicators`
+## Prefer: `trade_market_klines_with_indicators`
 
-用途：一次调用拿到 K 线 + RSI 等指标，减少你在脚本里重复实现指标计算。
+Purpose: one call returns K-lines + RSI and other indicators so you do not reimplement indicators in script.
 
-- **工具名**：`trade.market.klines_with_indicators`
-- **典型参数**：`symbol`（如 `ETHUSDT`）、`interval`（如 `5m`）、`limit`（建议 ≥ 150，保证 RSI/EMA 等指标齐全）
-- **返回要点**：
-  - `data` 按时间从旧到新
-  - 若某根任一指标无法给有效值，该根会被整体省略（不是删字段）
-  - RSI 常见键：`indicators.rsi.rsi14`（具体以实际响应为准）
+- **Tool name**: `trade_market_klines_with_indicators`
+- **Typical args**: `symbol` (e.g. `ETHUSDT`), `interval` (e.g. `5m`), `limit` (suggest ≥ 150 so RSI/EMA stabilize)
+- **Response notes**:
+  - `data` is oldest → newest
+  - If any indicator is invalid on a bar, the **whole bar is omitted** (not field-stripped)
+  - RSI often at `indicators.rsi.rsi14` (verify in live responses)
 
-当你需要更轻量的 OHLCV，可用 `trade.market.klines`，但 RSI 需脚本自己算。
+For lighter OHLCV only, use `trade_market_klines` and compute RSI yourself.
 
-## 懒加载：查看完整字段/示例
+## Lazy load: full fields / examples
 
-当你需要更精确字段列表、limit 行为、示例返回结构时，再去读：
+When you need exact fields, `limit` behavior, or sample shapes, read:
 
-- `skills/trade-mcp/references/market.md` 中：
-  - `trade.market.klines`
-  - `trade.market.klines_with_indicators`
-
+- `skills/trade-mcp/references/market.md` sections for:
+  - `trade_market_klines`
+  - `trade_market_klines_with_indicators`

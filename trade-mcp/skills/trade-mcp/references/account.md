@@ -1,112 +1,112 @@
-# References · 账户信息（trade.account.*）
+# References · Account (`trade_account_*`)
 
-三类工具均通过 **trade-mcp → backend** 调用币安期货相关接口，**必须提供 `modelId`**（业务侧模型/账户路由标识）。
+All three tools call Binance Futures-related APIs via **trade-mcp → backend**. **`modelId` is required** (business routing id for model/account).
 
-**参数名 / 必填**：见 **[tools-params.md](tools-params.md)** 中 `trade.account.*` 表。
+**Param names / required fields**: see the **`trade_account_*`** table in **[tools-params.md](tools-params.md)**.
 
-**调用前**：`mcporter list tradeMcp --schema --json` 核对参数名。
+**Before calling**: `mcporter list tradeMcp --schema --json` to verify param names.
 
-**mcporter 写法**：工具名含多个 `.`，请使用 **`--server tradeMcp --tool 'trade.account.xxx'`**，勿使用 `tradeMcp.trade.account.xxx` 连写（易被错误解析）。参数：`modelId=...`。
-
----
-
-## 通用返回字段
-
-| 字段 | 说明 |
-|------|------|
-| `success` | 是否成功 |
-| `data` | 账户相关对象或列表 |
-| `error` / `message` | 失败信息 |
-
-下游 **backend** 路径（实现参考）：`/api/mcp/binance-futures/account/*`。
+**mcporter**: use **`--server tradeMcp --tool 'trade_account_…'`** (full names in this file or `list --schema`). Do not omit **`--tool`** or pass server+tool as bare positionals after `call`. Params: `modelId=...`.
 
 ---
 
-## 1. `trade.account.account_info`
+## Common response fields
 
-**作用**：查询期货 **账户信息**（与 model 绑定）。
+| Field | Meaning |
+|-------|---------|
+| `success` | Whether the call succeeded |
+| `data` | Account object or list |
+| `error` / `message` | Failure text |
 
-| 参数 | 必填 | 类型 | 说明 |
-|------|------|------|------|
-| `modelId` | 是 | string | 模型 ID |
+Downstream **backend** paths (implementation reference): `/api/mcp/binance-futures/account/*`.
 
-**mcporter 示例**：
+---
+
+## 1. `trade_account_account_info`
+
+**Purpose**: futures **account info** (bound to the model).
+
+| Param | Required | Type | Notes |
+|-------|----------|------|-------|
+| `modelId` | yes | string | Model id |
+
+**mcporter example**:
 
 ```bash
 mcporter --config ./mcporter-trade-mcp.json --log-level error call \
-  --server tradeMcp --tool 'trade.account.account_info' \
+  --server tradeMcp --tool 'trade_account_account_info' \
   modelId=YOUR_MODEL_ID --output json
 ```
 
-**`data`（典型，以实际 API 为准）**：可能包含 **账户权限、手续费档位、多资产模式** 等币安期货账户维度字段；具体键名以后端返回 JSON 为准。处理建议：
+**`data` (typical; trust live API)**: may include permissions, commission tier, multi-asset mode, etc. Handling:
 
-- 先判断 `success === true`；
-- 将 `data` 作为 **不透明对象** 展示或按需取键；
-- 若需稳定字段列表，请在 backend OpenAPI / 控制器文档中核对。
+- Check `success === true` first;
+- Treat `data` as an **opaque object** or pick keys as needed;
+- For a stable field list, check backend OpenAPI / controller docs.
 
 ---
 
-## 2. `trade.account.balance`
+## 2. `trade_account_balance`
 
-**作用**：查询期货 **余额**（全仓/逐仓、各资产等由后端映射）。
+**Purpose**: futures **balances** (cross/isolated mapping is backend-specific).
 
-| 参数 | 必填 | 类型 | 说明 |
-|------|------|------|------|
-| `modelId` | 是 | string | 模型 ID |
+| Param | Required | Type | Notes |
+|-------|----------|------|-------|
+| `modelId` | yes | string | Model id |
 
-**mcporter 示例**：
+**mcporter example**:
 
 ```bash
 mcporter --config ./mcporter-trade-mcp.json --log-level error call \
-  --server tradeMcp --tool 'trade.account.balance' \
+  --server tradeMcp --tool 'trade_account_balance' \
   modelId=YOUR_MODEL_ID --output json
 ```
 
-**`data`（常见语义，非强制键名）**：
+**`data` (semantic; keys not guaranteed)**:
 
-| 可能字段 | 说明 |
-|----------|------|
-| 资产列表 / `assets` | 各币种余额、可用、钱包余额等 |
-| 汇总字段 | 如总权益、未实现盈亏（以后端为准） |
+| Possible field | Meaning |
+|----------------|---------|
+| Asset list / `assets` | Per-asset balance, available, wallet balance, etc. |
+| Summary fields | Total equity, unrealized PnL (backend-dependent) |
 
-**注意**：字段名与 Binance 官方 REST 字段可能经过 **backend 转义或裁剪**，以 **单次响应 JSON** 为准。
+**Note**: names may differ from raw Binance REST after **backend** mapping; trust each **response JSON**.
 
 ---
 
-## 3. `trade.account.positions`
+## 3. `trade_account_positions`
 
-**作用**：查询期货 **持仓**。
+**Purpose**: futures **positions**.
 
-| 参数 | 必填 | 类型 | 说明 |
-|------|------|------|------|
-| `modelId` | 是 | string | 模型 ID |
+| Param | Required | Type | Notes |
+|-------|----------|------|-------|
+| `modelId` | yes | string | Model id |
 
-**mcporter 示例**：
+**mcporter example**:
 
 ```bash
 mcporter --config ./mcporter-trade-mcp.json --log-level error call \
-  --server tradeMcp --tool 'trade.account.positions' \
+  --server tradeMcp --tool 'trade_account_positions' \
   modelId=YOUR_MODEL_ID --output json
 ```
 
-**`data`（常见为数组时）单条持仓可能含**：
+**`data` (when a list)**: each position may include:
 
-| 常见语义字段 | 说明 |
-|--------------|------|
-| `symbol` | 交易对 |
-| `positionSide` / `side` | 多空方向（LONG/SHORT 或 BUY/SELL，依实现） |
-| `positionAmt` / 数量类 | 持仓数量（正负表示方向） |
-| `entryPrice` | 开仓均价 |
-| `unRealizedProfit` | 未实现盈亏 |
-| `leverage` | 杠杆 |
-| `liquidationPrice` | 强平价（若有） |
+| Typical field | Meaning |
+|---------------|---------|
+| `symbol` | Symbol |
+| `positionSide` / `side` | Long/short (LONG/SHORT or BUY/SELL per impl) |
+| `positionAmt` / qty fields | Size (sign may encode side) |
+| `entryPrice` | Entry price |
+| `unRealizedProfit` | Unrealized PnL |
+| `leverage` | Leverage |
+| `liquidationPrice` | Liquidation price (if present) |
 
-实际键名以 **返回 JSON** 为准。
+Actual keys: **returned JSON**.
 
 ---
 
-## 错误与重试
+## Errors and retries
 
-- **`modelId` 无效或缺失**：通常 `success: false`，`error` 含说明。
-- **下游 backend 不可达**：连接错误，检查 trade-mcp 配置的 `downstream.backend.base-url` 与网络。
-- **频率限制**：遵守 Binance 与内部网关规则；失败时退避重试。
+- **Invalid or missing `modelId`**: often `success: false` with `error` text.
+- **Backend unreachable**: connection errors — check trade-mcp `downstream.backend.base-url` and network.
+- **Rate limits**: follow Binance and internal gateway rules; backoff and retry on failure.

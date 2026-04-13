@@ -21,13 +21,13 @@ public class MarketTools {
         this.binanceServiceClient = binanceServiceClient;
     }
 
-    @McpTool(name = "trade.market.symbol_prices", description = "批量查询symbol实时价格")
+    @McpTool(name = "trade_market_symbol_prices", description = "批量查询symbol实时价格")
     public Map<String, Object> symbolPrices(
             @McpToolParam(description = "交易对列表，如 [\"BTCUSDT\",\"ETHUSDT\"]", required = true) List<String> symbols) {
         return binanceServiceClient.symbolPrices(symbols);
     }
 
-    @McpTool(name = "trade.market.klines", description = "查询K线（不需要modelId；调用binance-service controller）")
+    @McpTool(name = "trade_market_klines", description = "查询K线（不需要modelId；调用binance-service controller）")
     public Map<String, Object> klines(
             @McpToolParam(description = "交易对", required = true) String symbol,
             @McpToolParam(description = "周期，如 1m/5m/15m/1h/4h/1d 等", required = true) String interval,
@@ -39,7 +39,7 @@ public class MarketTools {
     }
 
     @McpTool(
-            name = "trade.market.klines_with_indicators",
+            name = "trade_market_klines_with_indicators",
             description = "查询K线并附加技术指标(MA/EMA/RSI/MACD/KDJ/ATR/ADX/VOL等)。"
                     + "data 按时间从旧到新；若某根K线存在任一指标无法给出有效值，则整根不返回（不删字段只删行）。"
                     + "通常从第99根起才可能全部齐全，故 data 条数可能小于请求的 limit；需更长历史请增大 limit。")

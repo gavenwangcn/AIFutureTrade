@@ -24,16 +24,16 @@
   SCRIPT_LATEST_PREVIEW_CHARS  每根 K 线详情的最大字符数，默认 8000。
 
 自定义工具调用：
-  python test_trade_mcp_client.py --tool trade.market.klines --args "{\"symbol\":\"BTCUSDT\",\"interval\":\"1m\",\"limit\":5}"
-  python test_trade_mcp_client.py --tool trade.market.symbol_prices --args-file payload.json
+  python test_trade_mcp_client.py --tool trade_market_klines --args "{\"symbol\":\"BTCUSDT\",\"interval\":\"1m\",\"limit\":5}"
+  python test_trade_mcp_client.py --tool trade_market_symbol_prices --args-file payload.json
   # PowerShell 可用单引号包一层 JSON，避免转义引号：
-  # python test_trade_mcp_client.py --tool trade.market.klines --args '{"symbol":"BTCUSDT","interval":"1m","limit":5}'
+  # python test_trade_mcp_client.py --tool trade_market_klines --args '{"symbol":"BTCUSDT","interval":"1m","limit":5}'
   # 环境变量：SCRIPT_MCP_TOOL、SCRIPT_MCP_ARGS（未传命令行 --args 时生效）
 
 默认探测预设（无 --tool / 无 --full 时）：
   python test_trade_mcp_client.py
   python test_trade_mcp_client.py --preset klines
-  python test_trade_mcp_client.py --preset klines_indicators   # trade.market.klines_with_indicators
+  python test_trade_mcp_client.py --preset klines_indicators   # trade_market_klines_with_indicators
   # 环境变量 SCRIPT_PRESET=klines_indicators 与 --preset 等价（命令行优先）
 """
 from __future__ import annotations
@@ -50,10 +50,10 @@ from typing import Any
 # Python 3.11+ 的 ExceptionGroup（TaskGroup 失败时常包装在此类中）
 _BaseExceptionGroup = getattr(builtins, "BaseExceptionGroup", None)
 
-TOOL_KLINES = "trade.market.klines"
-TOOL_KLINES_WITH_INDICATORS = "trade.market.klines_with_indicators"
-TOOL_SYMBOL_PRICES = "trade.market.symbol_prices"
-TOOL_TICKERS_ALL = "trade.market_tickers.all_symbols"
+TOOL_KLINES = "trade_market_klines"
+TOOL_KLINES_WITH_INDICATORS = "trade_market_klines_with_indicators"
+TOOL_SYMBOL_PRICES = "trade_market_symbol_prices"
+TOOL_TICKERS_ALL = "trade_market_tickers_all_symbols"
 
 # 默认探测用的 K 线参数（klines / klines_with_indicators 入参一致）
 DEFAULT_KLINE_ARGS: dict[str, Any] = {
@@ -290,7 +290,7 @@ def _print_head_tail_klines_preview(data: list[Any], _tool_name: str) -> None:
 
 def _print_klines_indicators_warmup_hint(payload: dict[str, Any], tool_name: str) -> None:
     """K 线类 tool：打印说明（仅 klines_with_indicators）+ 前/后各 N 条预览。"""
-    if "trade.market.klines" not in tool_name:
+    if "trade_market_klines" not in tool_name:
         return
     data = payload.get("data")
     if not isinstance(data, list) or len(data) == 0:
@@ -702,7 +702,7 @@ def main() -> None:
         choices=("klines", "klines_indicators"),
         default=None,
         help="未指定 --tool 且未使用 --full 时：默认调用的探测工具。"
-        " klines=trade.market.klines；klines_indicators=trade.market.klines_with_indicators（K线+指标）",
+        " klines=trade_market_klines；klines_indicators=trade_market_klines_with_indicators（K线+指标）",
     )
     args = p.parse_args()
     list_only = args.list_only or _env_bool("SCRIPT_LIST_ONLY", False)
