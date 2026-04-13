@@ -144,14 +144,18 @@ sudo systemctl restart docker
    # 无账号可注册 https://hub.docker.com/ 后使用 Personal Access Token 作为密码
    ```
 
-2. **配置 registry 镜像（中国大陆服务器强烈建议）**  
-   公开镜像地址会变更，请以当前可用源为准（如云厂商「容器镜像服务」文档）。示例结构：
+2. **配置 registry 镜像 + ACR 登录（中国大陆服务器强烈建议）**  
+   在仓库根目录 `.env` 中设置 `ALIYUN_CR_REGISTRY`、`DOCKER_REGISTRY_USERNAME`、`DOCKER_REGISTRY_PASSWORD`（可参考 `scripts/env.docker-registry.example`），然后在项目根目录执行：
+   ```bash
+   bash scripts/docker-registry-setup.sh
+   ```
+   脚本会写入 `daemon.json`、重启 Docker，并对 `ALIYUN_CR_REGISTRY` 执行 `docker login`（`sudo` 时登录到原用户目录下的 `~/.docker/`）。若仅想手写 `daemon.json`，手动示例：
    ```bash
    sudo mkdir -p /etc/docker
    sudo tee /etc/docker/daemon.json <<-'EOF'
    {
      "registry-mirrors": [
-       "https://<你的加速器地址>"
+       "https://crpi-hm3rgmmxwhz6m92m.cn-hongkong.personal.cr.aliyuncs.com"
      ]
    }
    EOF
@@ -161,11 +165,11 @@ sudo systemctl restart docker
    配置后执行：`docker pull hello-world` 验证。
 
 3. **用环境变量换基础镜像（不改 Dockerfile）**  
-   仓库根目录 `.env` 或 shell 中设置（示例域名需换成你环境可用的镜像站）：
+   仓库根目录 `.env` 或 shell 中设置（与上方 `registry-mirrors` 同一实例时，可使用同域名的 `library/` 前缀镜像）：
    ```bash
-   export NODE_IMAGE=docker.m.daocloud.io/library/node:22-bookworm-slim
-   export NGINX_IMAGE=docker.m.daocloud.io/library/nginx:alpine
-   export PYTHON_IMAGE=docker.m.daocloud.io/library/python:3.11-slim
+   export NODE_IMAGE=crpi-hm3rgmmxwhz6m92m.cn-hongkong.personal.cr.aliyuncs.com/library/node:22-bookworm-slim
+   export NGINX_IMAGE=crpi-hm3rgmmxwhz6m92m.cn-hongkong.personal.cr.aliyuncs.com/library/nginx:alpine
+   export PYTHON_IMAGE=crpi-hm3rgmmxwhz6m92m.cn-hongkong.personal.cr.aliyuncs.com/library/python:3.11-slim
    docker compose build frontend trade
    ```
    `docker-compose.yml` 已将 **`NODE_IMAGE` / `NGINX_IMAGE`** 传给 `frontend`，**`PYTHON_IMAGE`** 传给 **`trade`**（默认 `python:3.11-slim`）。其余服务仍依赖 `maven:`、`eclipse-temurin:` 等，需 **daemon 级镜像加速** 或 **能访问 docker.io**。

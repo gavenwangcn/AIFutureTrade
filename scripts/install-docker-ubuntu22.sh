@@ -193,7 +193,10 @@ configure_docker() {
     "max-size": "10m",
     "max-file": "3"
   },
-  "storage-driver": "overlay2"
+  "storage-driver": "overlay2",
+  "registry-mirrors": [
+    "https://crpi-hm3rgmmxwhz6m92m.cn-hongkong.personal.cr.aliyuncs.com"
+  ]
 }
 EOF
         log_info "Docker daemon 配置文件已创建"
@@ -201,6 +204,8 @@ EOF
     
     # 重启 Docker 服务以应用配置
     systemctl restart docker
+
+    log_info "若已克隆本项目并配置根目录 .env（ALIYUN_CR_REGISTRY / DOCKER_REGISTRY_*），可执行 bash scripts/docker-registry-setup.sh 完成镜像加速与 ACR 登录"
 }
 
 # 将当前用户添加到 docker 组
