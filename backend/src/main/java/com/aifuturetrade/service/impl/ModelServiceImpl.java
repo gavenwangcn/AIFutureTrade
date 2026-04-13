@@ -84,7 +84,7 @@ public class ModelServiceImpl implements ModelService {
     @Value("${docker.image.sell:aifuturetrade-model-sell}")
     private String modelSellImageName;
     
-    @Value("${mysql.host:154.89.148.172}")
+    @Value("${mysql.host:156.254.6.224}")
     private String mysqlHost;
     
     @Value("${mysql.port:32123}")

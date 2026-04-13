@@ -7,7 +7,7 @@ echo "=========================================="
 echo ""
 
 # 从环境变量或配置文件读取数据库连接信息
-MYSQL_HOST=${MYSQL_HOST:-154.89.148.172}
+MYSQL_HOST=${MYSQL_HOST:-156.254.6.224}
 MYSQL_PORT=${MYSQL_PORT:-32123}
 MYSQL_USER=${MYSQL_USER:-aifuturetrade}
 MYSQL_PASSWORD=${MYSQL_PASSWORD:-aifuturetrade123}

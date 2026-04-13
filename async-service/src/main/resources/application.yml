@@ -12,7 +12,7 @@ spring:
   # 数据库配置（可通过环境变量覆盖）
   # 注意：serverTimezone设置为Asia/Shanghai（UTC+8），确保所有时间字段都使用UTC+8时区
   datasource:
-    url: ${SPRING_DATASOURCE_URL:jdbc:mysql://154.89.148.172:32123/aifuturetrade?useSSL=false&serverTimezone=Asia/Shanghai&characterEncoding=utf8}
+    url: ${SPRING_DATASOURCE_URL:jdbc:mysql://156.254.6.224:32123/aifuturetrade?useSSL=false&serverTimezone=Asia/Shanghai&characterEncoding=utf8}
     username: ${SPRING_DATASOURCE_USERNAME:aifuturetrade}
     password: ${SPRING_DATASOURCE_PASSWORD:aifuturetrade123}
     driver-class-name: com.mysql.cj.jdbc.Driver
@@ -195,7 +195,7 @@ async:
 
 # Trade Monitor配置
 trade-monitor:
-  base-url: ${TRADE_MONITOR_URL:http://154.89.148.172:5005}
+  base-url: ${TRADE_MONITOR_URL:http://156.254.6.224:5005}
 
 # 交易配置
 trade:

@@ -40,7 +40,7 @@ services:
       # 服务器端口配置
       - SERVER_PORT=${SERVER_PORT:-5002}
       # MySQL配置
-      - SPRING_DATASOURCE_URL=jdbc:mysql://${MYSQL_HOST:-154.89.148.172}:${MYSQL_PORT:-32123}/${MYSQL_DATABASE:-aifuturetrade}?useSSL=false&serverTimezone=Asia/Shanghai&characterEncoding=utf8
+      - SPRING_DATASOURCE_URL=jdbc:mysql://${MYSQL_HOST:-156.254.6.224}:${MYSQL_PORT:-32123}/${MYSQL_DATABASE:-aifuturetrade}?useSSL=false&serverTimezone=Asia/Shanghai&characterEncoding=utf8
       - SPRING_DATASOURCE_USERNAME=${MYSQL_USER:-aifuturetrade}
       - SPRING_DATASOURCE_PASSWORD=${MYSQL_PASSWORD:-aifuturetrade123}
       # Binance配置
@@ -76,7 +76,7 @@ services:
       # 服务器端口配置
       - SERVER_PORT=${BINANCE_SERVICE_PORT:-5004}
       # MySQL配置
-      - SPRING_DATASOURCE_URL=jdbc:mysql://${MYSQL_HOST:-154.89.148.172}:${MYSQL_PORT:-32123}/${MYSQL_DATABASE:-aifuturetrade}?useSSL=false&serverTimezone=Asia/Shanghai&characterEncoding=utf8
+      - SPRING_DATASOURCE_URL=jdbc:mysql://${MYSQL_HOST:-156.254.6.224}:${MYSQL_PORT:-32123}/${MYSQL_DATABASE:-aifuturetrade}?useSSL=false&serverTimezone=Asia/Shanghai&characterEncoding=utf8
       - SPRING_DATASOURCE_USERNAME=${MYSQL_USER:-aifuturetrade}
       - SPRING_DATASOURCE_PASSWORD=${MYSQL_PASSWORD:-aifuturetrade123}
       # Binance配置
@@ -140,7 +140,7 @@ services:
       # 服务器端口配置
       - SERVER_PORT=${TRADE_MONITOR_PORT:-5005}
       # MySQL配置
-      - MYSQL_HOST=${MYSQL_HOST:-154.89.148.172}
+      - MYSQL_HOST=${MYSQL_HOST:-156.254.6.224}
       - MYSQL_PORT=${MYSQL_PORT:-32123}
       - MYSQL_USER=${MYSQL_USER:-aifuturetrade}
       - MYSQL_PASSWORD=${MYSQL_PASSWORD:-aifuturetrade123}
@@ -173,7 +173,7 @@ services:
       # 服务器端口配置
       - SERVER_PORT=${ASYNC_SERVICE_PORT:-5003}
       # MySQL配置
-      - SPRING_DATASOURCE_URL=jdbc:mysql://${MYSQL_HOST:-154.89.148.172}:${MYSQL_PORT:-32123}/${MYSQL_DATABASE:-aifuturetrade}?useSSL=false&serverTimezone=Asia/Shanghai&characterEncoding=utf8
+      - SPRING_DATASOURCE_URL=jdbc:mysql://${MYSQL_HOST:-156.254.6.224}:${MYSQL_PORT:-32123}/${MYSQL_DATABASE:-aifuturetrade}?useSSL=false&serverTimezone=Asia/Shanghai&characterEncoding=utf8
       - SPRING_DATASOURCE_USERNAME=${MYSQL_USER:-aifuturetrade}
       - SPRING_DATASOURCE_PASSWORD=${MYSQL_PASSWORD:-aifuturetrade123}
       # Binance配置
@@ -225,7 +225,7 @@ services:
       - GUNICORN_KEEPALIVE=${GUNICORN_KEEPALIVE:-5}
       - GUNICORN_MAX_REQUESTS=${GUNICORN_MAX_REQUESTS:-1000}
       # MySQL配置
-      - MYSQL_HOST=${MYSQL_HOST:-154.89.148.172}
+      - MYSQL_HOST=${MYSQL_HOST:-156.254.6.224}
       - MYSQL_PORT=${MYSQL_PORT:-32123}
       - MYSQL_USER=${MYSQL_USER:-aifuturetrade}
       - MYSQL_PASSWORD=${MYSQL_PASSWORD:-aifuturetrade123}
@@ -264,7 +264,7 @@ services:
       # MODEL_ID 由 Java Backend 在创建容器时动态设置
       - MODEL_ID=${MODEL_ID:-1}
       # MySQL配置
-      - MYSQL_HOST=${MYSQL_HOST:-154.89.148.172}
+      - MYSQL_HOST=${MYSQL_HOST:-156.254.6.224}
       - MYSQL_PORT=${MYSQL_PORT:-32123}
       - MYSQL_USER=${MYSQL_USER:-aifuturetrade}
       - MYSQL_PASSWORD=${MYSQL_PASSWORD:-aifuturetrade123}
@@ -304,7 +304,7 @@ services:
       # MODEL_ID 由 Java Backend 在创建容器时动态设置
       - MODEL_ID=${MODEL_ID:-1}
       # MySQL配置
-      - MYSQL_HOST=${MYSQL_HOST:-154.89.148.172}
+      - MYSQL_HOST=${MYSQL_HOST:-156.254.6.224}
       - MYSQL_PORT=${MYSQL_PORT:-32123}
       - MYSQL_USER=${MYSQL_USER:-aifuturetrade}
       - MYSQL_PASSWORD=${MYSQL_PASSWORD:-aifuturetrade123}

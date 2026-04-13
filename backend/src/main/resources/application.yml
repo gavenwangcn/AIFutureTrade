@@ -13,7 +13,7 @@ spring:
   
   # 数据库配置（可通过环境变量覆盖）
   datasource:
-    url: ${SPRING_DATASOURCE_URL:jdbc:mysql://154.89.148.172:32123/aifuturetrade?useSSL=false&serverTimezone=Asia/Shanghai&characterEncoding=utf8}
+    url: ${SPRING_DATASOURCE_URL:jdbc:mysql://156.254.6.224:32123/aifuturetrade?useSSL=false&serverTimezone=Asia/Shanghai&characterEncoding=utf8}
     username: ${SPRING_DATASOURCE_USERNAME:aifuturetrade}
     password: ${SPRING_DATASOURCE_PASSWORD:aifuturetrade123}
     driver-class-name: com.mysql.cj.jdbc.Driver
@@ -177,7 +177,7 @@ socketio:
 
 # Trade服务配置（可通过环境变量覆盖）
 trade:
-  base-url: ${TRADE_SERVICE_URL:http://154.89.148.172:5000}  # Trade服务基础URL，默认 http://trade:5000
+  base-url: ${TRADE_SERVICE_URL:http://156.254.6.224:5000}  # Trade服务基础URL，默认 http://trade:5000
   connect-timeout: 10000  # 连接超时时间（毫秒）
   read-timeout: 30000  # 读取超时时间（毫秒）
   retries: 3  # 重试次数
@@ -217,7 +217,7 @@ docker:
 
 # MySQL配置（用于传递给模型容器）
 mysql:
-  host: ${MYSQL_HOST:154.89.148.172}  # 默认数据库地址：154.89.148.172
+  host: ${MYSQL_HOST:156.254.6.224}  # 默认数据库地址：156.254.6.224
   port: ${MYSQL_PORT:32123}
   user: ${MYSQL_USER:aifuturetrade}
   password: ${MYSQL_PASSWORD:aifuturetrade123}

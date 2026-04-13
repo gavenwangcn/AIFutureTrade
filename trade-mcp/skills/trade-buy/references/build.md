@@ -38,12 +38,12 @@ conda env update -f trade_buy/environment.yml -n trade-buy
 
 This skill fixes the trade-mcp MCP URL:
 
-- `TRADE_MCP_URL=http://154.89.148.172:8099/sse`
+- `TRADE_MCP_URL=http://156.254.6.224:8099/sse`
 
 Set it before running/testing (e.g. subagent `exec` env or system env):
 
 ```bash
-export TRADE_MCP_URL="http://154.89.148.172:8099/sse"
+export TRADE_MCP_URL="http://156.254.6.224:8099/sse"
 ```
 
 Or with conda (optional):

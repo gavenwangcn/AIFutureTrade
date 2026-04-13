@@ -11,7 +11,7 @@ spring:
   application:
     name: trade-monitor
   datasource:
-    url: jdbc:mysql://${MYSQL_HOST:154.89.148.172}:${MYSQL_PORT:32123}/${MYSQL_DATABASE:aifuturetrade}?useUnicode=true&characterEncoding=utf8&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true
+    url: jdbc:mysql://${MYSQL_HOST:156.254.6.224}:${MYSQL_PORT:32123}/${MYSQL_DATABASE:aifuturetrade}?useUnicode=true&characterEncoding=utf8&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true
     username: ${MYSQL_USER:aifuturetrade}
     password: ${MYSQL_PASSWORD:aifuturetrade123}
     driver-class-name: com.mysql.cj.jdbc.Driver

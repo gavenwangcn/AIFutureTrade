@@ -34,8 +34,8 @@ downstream:
     connect-timeout-ms: 10000
     read-timeout-ms: 60000
   backend:
-    # Java backend（/api/mcp/*）；与生产/测试机一致：154.89.148.172，API 端口见项目 docker-compose BACKEND_PORT（默认 5002）
-    base-url: http://154.89.148.172:5002
+    # Java backend（/api/mcp/*）；与生产/测试机一致：156.254.6.224，API 端口见项目 docker-compose BACKEND_PORT（默认 5002）
+    base-url: http://156.254.6.224:5002
   binance-service:
     # 行情/K 线：与 trade/common/config.py 中 BINANCE_SERVICE_LIST 默认实例一致，多地址轮询
     base-urls:
@@ -45,7 +45,7 @@ downstream:
     # base-url: http://185.242.232.23:5004
 
 # 运行时覆盖（优先级：BINANCE_SERVICE_LIST > downstream.binance-service.base-urls）
-# DOWNSTREAM_BACKEND_BASEURL=http://154.89.148.172:5002
+# DOWNSTREAM_BACKEND_BASEURL=http://156.254.6.224:5002
 # DOWNSTREAM_BINANCESERVICE_BASEURLS_0=http://185.242.232.23:5004
 # DOWNSTREAM_BINANCESERVICE_BASEURLS_1=http://185.242.232.42:5004
 # 或与 trade 完全一致：
