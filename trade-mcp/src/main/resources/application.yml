@@ -1,14 +1,21 @@
 server:
   port: 8099
 
-# MCP HTTP 请求日志（方法、URI、客户端 IP、状态码、耗时）；经 Filter 打印，见 McpHttpRequestLoggingFilter
+# MCP HTTP 请求日志（方法、URI、客户端 IP、状态码、耗时）；见 McpHttpRequestLoggingFilter
+# MCP 工具名日志：在 @McpTool 方法执行前打印 tool=trade.market.klines 等，见 McpToolExecutionLoggingAspect（不依赖解析 /mcp/message 请求体）
 trade-mcp:
   request-log:
+    enabled: true
+  tool-invocation-log:
     enabled: true
 
 spring:
   application:
     name: trade-mcp
+  autoconfigure:
+    # 避免与 TradeMcpSseTransportConfiguration 重复注册 WebMvc SSE Transport（后者扩展 protocolVersions 含 2025-11-25）
+    exclude:
+      - org.springframework.ai.mcp.server.webmvc.autoconfigure.McpServerSseWebMvcAutoConfiguration
   ai:
     mcp:
       server:

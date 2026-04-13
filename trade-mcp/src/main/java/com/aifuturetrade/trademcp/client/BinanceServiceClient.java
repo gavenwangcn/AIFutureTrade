@@ -38,7 +38,7 @@ public class BinanceServiceClient {
 
     public Map<String, Object> klines(String symbol, String interval, Integer limit, Long startTime, Long endTime) {
         int effectiveLimit = limit != null ? limit : DEFAULT_KLINE_LIMIT;
-        String uri = UriComponentsBuilder.fromHttpUrl(nextBinanceBaseUrl() + "/api/market-data/klines")
+        String uri = UriComponentsBuilder.fromUriString(nextBinanceBaseUrl() + "/api/market-data/klines")
                 .queryParam("symbol", symbol)
                 .queryParam("interval", interval)
                 .queryParam("limit", effectiveLimit)
