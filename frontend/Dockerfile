@@ -18,14 +18,19 @@ ARG NGINX_IMAGE=nginx:alpine
 FROM ${NODE_IMAGE} AS klinecharts-builder
 WORKDIR /app
 
+ARG NPM_REGISTRY=https://registry.npmmirror.com
+ENV NPM_CONFIG_REGISTRY=${NPM_REGISTRY}
+
 # 安装系统依赖
 RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
-# 安装 pnpm（KLineChart 使用 pnpm 作为包管理器）
-RUN npm install -g pnpm@10.4.1
+# 安装 pnpm（KLineChart 使用 pnpm 作为包管理器）；国内网络建议走 npmmirror
+RUN npm install -g pnpm@10.4.1 && \
+    npm config set registry "${NPM_REGISTRY}" --global && \
+    pnpm config set registry "${NPM_REGISTRY}"
 
 # 复制 KLineChart 的依赖文件和源代码
 COPY frontend/KLineChart/package.json frontend/KLineChart/pnpm-lock.yaml* ./KLineChart/
@@ -40,9 +45,9 @@ WORKDIR /app/KLineChart
 # 安装 KLineChart 依赖（优先使用 pnpm，如果失败则使用 npm）
 # 注意：跳过 prepare 脚本（husky 在 Docker 构建中不需要）
 RUN if [ -f pnpm-lock.yaml ]; then \
-        pnpm install --no-frozen-lockfile --ignore-scripts || npm install --no-fund --no-audit --ignore-scripts; \
+        pnpm install --no-frozen-lockfile --ignore-scripts || npm install --no-fund --no-audit --ignore-scripts --fetch-retries=5 --fetch-retry-mintimeout=20000 --fetch-retry-maxtimeout=120000; \
     else \
-        npm install --no-fund --no-audit --ignore-scripts; \
+        npm install --no-fund --no-audit --ignore-scripts --fetch-retries=5 --fetch-retry-mintimeout=20000 --fetch-retry-maxtimeout=120000; \
     fi
 
 # 验证indicators目录存在且包含ATR指标
@@ -83,6 +88,9 @@ RUN if [ ! -d dist ] || [ ! -f dist/umd/klinecharts.min.js ]; then \
 FROM ${NODE_IMAGE} AS frontend-builder
 WORKDIR /app/frontend
 
+ARG NPM_REGISTRY=https://registry.npmmirror.com
+ENV NPM_CONFIG_REGISTRY=${NPM_REGISTRY}
+
 # 安装系统依赖
 RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
@@ -103,7 +111,7 @@ RUN mkdir -p public/klinecharts
 COPY --from=klinecharts-builder /app/KLineChart/dist/umd/klinecharts.min.js ./public/klinecharts/klinecharts.min.js
 
 # 安装frontend依赖（使用package.json安装，适应跨平台构建）
-RUN npm install --no-fund --no-audit
+RUN npm install --no-fund --no-audit --fetch-retries=5 --fetch-retry-mintimeout=20000 --fetch-retry-maxtimeout=120000
 
 # 验证所有必需文件是否存在
 RUN if [ ! -f public/klinecharts/klinecharts.min.js ]; then \
