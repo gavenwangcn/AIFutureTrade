@@ -7,7 +7,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.boot.test.mock.mockito.MockBean;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -33,10 +33,10 @@ class AllMcpToolsSmokeTest {
 
     private static final String MODEL_ID = "1";
 
-    @MockBean
+    @MockitoBean
     private BackendClient backendClient;
 
-    @MockBean
+    @MockitoBean
     private BinanceServiceClient binanceServiceClient;
 
     @Autowired
