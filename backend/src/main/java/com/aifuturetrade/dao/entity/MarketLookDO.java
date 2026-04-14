@@ -12,56 +12,45 @@ import java.io.Serializable;
 import java.time.LocalDateTime;
 
 /**
- * 数据对象：策略
- * 对应表名：strategys
+ * 实时盯盘任务表 market_look
  */
 @Data
 @EqualsAndHashCode(callSuper = false)
 @Accessors(chain = true)
-@TableName("strategys")
-public class StrategyDO implements Serializable {
+@TableName("market_look")
+public class MarketLookDO implements Serializable {
 
     private static final long serialVersionUID = 1L;
 
-    /**
-     * 主键ID
-     */
+    public static final String STATUS_RUNNING = "RUNNING";
+    public static final String STATUS_ENDED = "ENDED";
+
     @TableId(value = "id", type = IdType.ASSIGN_UUID)
     private String id;
 
-    /**
-     * 策略名称
-     */
-    private String name;
+    private String symbol;
 
-    /**
-     * 策略类型（buy-买，sell-卖，look-盯盘）
-     */
-    private String type;
+    @TableField("strategy_id")
+    private String strategyId;
 
-    /**
-     * 策略内容
-     */
-    @TableField("strategy_context")
-    private String strategyContext;
+    @TableField("strategy_name")
+    private String strategyName;
 
-    /**
-     * 策略代码
-     */
-    @TableField("strategy_code")
-    private String strategyCode;
+    @TableField("execution_status")
+    private String executionStatus;
 
-    /**
-     * 创建时间
-     */
+    @TableField("signal_result")
+    private String signalResult;
+
+    @TableField("started_at")
+    private LocalDateTime startedAt;
+
+    @TableField("ended_at")
+    private LocalDateTime endedAt;
+
     @TableField("created_at")
     private LocalDateTime createdAt;
 
-    /**
-     * 更新时间
-     */
     @TableField("updated_at")
     private LocalDateTime updatedAt;
-
 }
-

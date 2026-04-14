@@ -88,8 +88,8 @@ if [ "$USE_UP_SCRIPT" = true ]; then
     fi
 else
     # 使用标准命令，但添加 --scale 参数确保 model-buy 和 model-sell 不启动
-    log "执行: $DOCKER_COMPOSE_CMD up -d --scale model-buy=0 --scale model-sell=0"
-    if $DOCKER_COMPOSE_CMD up -d --scale model-buy=0 --scale model-sell=0 >> "$LOG_FILE" 2>&1; then
+    log "执行: $DOCKER_COMPOSE_CMD up -d --scale model-buy=0 --scale model-sell=0 --scale model-look=0"
+    if $DOCKER_COMPOSE_CMD up -d --scale model-buy=0 --scale model-sell=0 --scale model-look=0 >> "$LOG_FILE" 2>&1; then
         log "✓ 服务已重新启动"
     else
         error_exit "启动服务失败"

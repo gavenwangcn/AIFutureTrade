@@ -26,5 +26,15 @@ public interface StrategyCodeTesterService {
      * @throws RuntimeException 如果测试失败，抛出异常，包含错误信息
      */
     boolean validateStrategyCode(String strategyCode, String strategyType, String strategyName);
+
+    /**
+     * 测试盯盘策略代码（需真实合约符号，调用 Trade 服务 validate-look-code）
+     */
+    Map<String, Object> testLookStrategyCode(String strategyCode, String strategyName, String symbol);
+
+    /**
+     * 校验盯盘策略代码是否通过测试
+     */
+    boolean validateLookStrategyCode(String strategyCode, String strategyName, String symbol);
 }
 

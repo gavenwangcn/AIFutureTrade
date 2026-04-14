@@ -50,11 +50,18 @@ public class AlertServiceImpl implements AlertService {
 
             alertRecordMapper.insert(alertRecord);
 
+            // 落库后写入告警记录主键，便于在消息正文与库表中按 ID 关联查询
+            Long alertId = alertRecord.getId();
+            String messageWithId = request.getMessage()
+                    + "\n\n告警记录ID: " + alertId + "（trade-monitor.alert_records）";
+            alertRecord.setMessage(messageWithId);
+            alertRecordMapper.updateById(alertRecord);
+
             // 发送微信通知
             boolean wechatSuccess = weChatNotificationService.sendAlert(
                     request.getEventType(),
                     request.getTitle(),
-                    request.getMessage()
+                    messageWithId
             );
 
             if (wechatSuccess) {

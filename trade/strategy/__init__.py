@@ -24,6 +24,9 @@ from trade.strategy.strategy_code_tester_buy import StrategyCodeTesterBuy, valid
 from trade.strategy.strategy_template_sell import StrategyBaseSell
 from trade.strategy.strategy_code_tester_sell import StrategyCodeTesterSell, validate_strategy_code as validate_sell_strategy_code, validate_strategy_code_with_report as validate_sell_strategy_code_with_report
 
+from trade.strategy.strategy_template_look import StrategyBaseLook
+from trade.strategy.strategy_code_tester_look import StrategyCodeTesterLook, validate_look_strategy_code, validate_look_strategy_code_with_report
+
 __all__ = [
     # 核心模块
     'StrategyCodeExecutor',
@@ -38,5 +41,9 @@ __all__ = [
     'StrategyCodeTesterSell',
     'validate_sell_strategy_code',
     'validate_sell_strategy_code_with_report',
+    'StrategyBaseLook',
+    'StrategyCodeTesterLook',
+    'validate_look_strategy_code',
+    'validate_look_strategy_code_with_report',
 ]
 

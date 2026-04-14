@@ -83,7 +83,10 @@ public class ModelServiceImpl implements ModelService {
     
     @Value("${docker.image.sell:aifuturetrade-model-sell}")
     private String modelSellImageName;
-    
+
+    @Value("${docker.image.look:aifuturetrade-model-look}")
+    private String modelLookImageName;
+
     @Value("${mysql.host:156.254.6.224}")
     private String mysqlHost;
     
@@ -2151,6 +2154,75 @@ public class ModelServiceImpl implements ModelService {
             return result;
         } catch (Exception e) {
             log.error("[ModelService] 启用模型自动卖出失败: {}", e.getMessage(), e);
+            Map<String, Object> errorResult = new HashMap<>();
+            errorResult.put("success", false);
+            errorResult.put("error", e.getMessage());
+            return errorResult;
+        }
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public Map<String, Object> executeMarketLookTrading(String modelId) {
+        log.debug("[ModelService] 启动盯盘循环容器, modelId={}", modelId);
+        try {
+            ModelDTO model = getModelById(modelId);
+            if (model == null) {
+                Map<String, Object> errorResult = new HashMap<>();
+                errorResult.put("success", false);
+                errorResult.put("error", "Model not found");
+                return errorResult;
+            }
+
+            Map<String, Object> result = new HashMap<>();
+            String containerName = "look-" + modelId;
+            result.put("containerName", containerName);
+
+            if (dockerContainerService.isContainerRunning(containerName)) {
+                log.info("盯盘容器已存在且运行中: {}", containerName);
+                result.put("success", true);
+                result.put("containerStatus", "already_running");
+                result.put("message", "Market look container already running");
+                return result;
+            }
+
+            if (!dockerContainerService.removeContainer(containerName)) {
+                log.warn("删除旧盯盘容器失败，但继续创建新容器: {}", containerName);
+            }
+
+            Map<String, String> envVars = new HashMap<>();
+            envVars.put("MODEL_ID", modelId);
+            envVars.put("MYSQL_HOST", mysqlHost);
+            envVars.put("MYSQL_PORT", mysqlPort);
+            envVars.put("MYSQL_USER", mysqlUser);
+            envVars.put("MYSQL_PASSWORD", mysqlPassword);
+            envVars.put("MYSQL_DATABASE", mysqlDatabase);
+            if (binanceApiKey != null && !binanceApiKey.isEmpty()) {
+                envVars.put("BINANCE_API_KEY", binanceApiKey);
+            }
+            if (binanceApiSecret != null && !binanceApiSecret.isEmpty()) {
+                envVars.put("BINANCE_SECRET_KEY", binanceApiSecret);
+            }
+
+            log.info("=== Container Database Configuration (Market Look) ===");
+            log.info("MODEL_ID: {}", modelId);
+            log.info("MYSQL_HOST: {}", mysqlHost);
+            log.info("MYSQL_PORT: {}", mysqlPort);
+            log.info("MYSQL_USER: {}", mysqlUser);
+            log.info("MYSQL_DATABASE: {}", mysqlDatabase);
+            log.info("======================================================");
+
+            Map<String, Object> containerResult = dockerContainerService.startModelLookContainer(
+                    modelId, modelLookImageName, envVars);
+            result.putAll(containerResult);
+            if (Boolean.TRUE.equals(containerResult.get("success"))) {
+                result.put("message", "Market look container started successfully");
+            } else {
+                result.put("message", "Market look container start failed: " + containerResult.get("error"));
+            }
+            return result;
+        } catch (Exception e) {
+            log.error("[ModelService] 启动盯盘容器失败: {}", e.getMessage(), e);
             Map<String, Object> errorResult = new HashMap<>();
             errorResult.put("success", false);
             errorResult.put("error", e.getMessage());

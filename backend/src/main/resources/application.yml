@@ -214,6 +214,7 @@ docker:
   image:
     buy: ${DOCKER_IMAGE_BUY:aifuturetrade-model-buy}  # 模型买入容器镜像名称
     sell: ${DOCKER_IMAGE_SELL:aifuturetrade-model-sell}  # 模型卖出容器镜像名称
+    look: ${DOCKER_IMAGE_LOOK:aifuturetrade-model-look}  # 盯盘循环容器镜像名称
 
 # MySQL配置（用于传递给模型容器）
 mysql:

@@ -1,0 +1,54 @@
+package com.aifuturetrade.service.dto;
+
+import com.fasterxml.jackson.annotation.JsonAlias;
+import com.fasterxml.jackson.annotation.JsonProperty;
+import lombok.Data;
+
+import java.io.Serializable;
+import java.time.LocalDateTime;
+
+/**
+ * 盯盘任务 API 传输对象（字段与 DB 一致，JSON 使用 snake_case）
+ */
+@Data
+public class MarketLookDTO implements Serializable {
+
+    private static final long serialVersionUID = 1L;
+
+    private String id;
+
+    private String symbol;
+
+    @JsonProperty("strategy_id")
+    @JsonAlias({"strategyId"})
+    private String strategyId;
+
+    @JsonProperty("strategy_name")
+    @JsonAlias({"strategyName"})
+    private String strategyName;
+
+    /** RUNNING | ENDED */
+    @JsonProperty("execution_status")
+    @JsonAlias({"executionStatus"})
+    private String executionStatus;
+
+    @JsonProperty("signal_result")
+    @JsonAlias({"signalResult"})
+    private String signalResult;
+
+    @JsonProperty("started_at")
+    @JsonAlias({"startedAt"})
+    private LocalDateTime startedAt;
+
+    @JsonProperty("ended_at")
+    @JsonAlias({"endedAt"})
+    private LocalDateTime endedAt;
+
+    @JsonProperty("created_at")
+    @JsonAlias({"createdAt"})
+    private LocalDateTime createdAt;
+
+    @JsonProperty("updated_at")
+    @JsonAlias({"updatedAt"})
+    private LocalDateTime updatedAt;
+}

@@ -568,6 +568,8 @@ public class AiProviderServiceImpl implements AiProviderService {
             String templateFile;
             if ("buy".equalsIgnoreCase(strategyType)) {
                 templateFile = "prompts/strategy_buy_prompt.txt";
+            } else if ("look".equalsIgnoreCase(strategyType)) {
+                templateFile = "prompts/strategy_look_prompt.txt";
             } else {
                 templateFile = "prompts/strategy_sell_prompt.txt";
             }
@@ -598,6 +600,8 @@ public class AiProviderServiceImpl implements AiProviderService {
         String basePrompt;
         if ("buy".equalsIgnoreCase(strategyType)) {
             basePrompt = getBuyStrategyPromptTemplate();
+        } else if ("look".equalsIgnoreCase(strategyType)) {
+            basePrompt = getLookStrategyPromptTemplate();
         } else {
             basePrompt = getSellStrategyPromptTemplate();
         }
@@ -664,6 +668,20 @@ public class AiProviderServiceImpl implements AiProviderService {
                "- math: Python 数学函数库\n" +
                "- datetime: Python 日期时间库\n\n" +
                "请根据策略规则生成完整的、可执行的Python代码。代码必须可以直接运行，不需要额外的实例化代码（系统会自动实例化）。";
+    }
+
+    /**
+     * 内置盯盘策略 Prompt（资源文件缺失时使用）
+     */
+    private String getLookStrategyPromptTemplate() {
+        return "你是量化盯盘策略代码生成专家。仅使用行情数据，不涉及账户、持仓、下单。\n\n"
+                + "## 策略规则（strategy_context）：\n{strategy_context}\n\n"
+                + "必须继承 StrategyBaseLook，实现 execute_look_decision(self, symbol: str, market_state: Dict) "
+                + "返回 Dict[str, List[Dict]]。需要通知时：\n"
+                + "decisions[symbol] = [{\"signal\":\"notify\",\"symbol\":合约,\"market_date\":快照,"
+                + "\"key_date\":{...},\"price\":价格,\"justification\":\"原因\"}]\n"
+                + "无信号返回 {}。\n"
+                + "第一行必须是 from trade.strategy.strategy_template_look import StrategyBaseLook\n";
     }
 
     /**

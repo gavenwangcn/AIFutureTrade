@@ -77,10 +77,19 @@ public class AiProviderController {
             return new ResponseEntity<>(error, HttpStatus.BAD_REQUEST);
         }
 
-        if (!strategyType.equals("buy") && !strategyType.equals("sell")) {
+        if (!strategyType.equals("buy") && !strategyType.equals("sell") && !strategyType.equals("look")) {
             Map<String, Object> error = new HashMap<>();
-            error.put("error", "strategyType must be 'buy' or 'sell'");
+            error.put("error", "strategyType must be 'buy', 'sell', or 'look'");
             return new ResponseEntity<>(error, HttpStatus.BAD_REQUEST);
+        }
+
+        if ("look".equals(strategyType)) {
+            String symbol = request.get("symbol");
+            if (symbol == null || symbol.trim().isEmpty()) {
+                Map<String, Object> error = new HashMap<>();
+                error.put("error", "symbol is required when strategyType is 'look'");
+                return new ResponseEntity<>(error, HttpStatus.BAD_REQUEST);
+            }
         }
 
         try {
@@ -92,11 +101,21 @@ public class AiProviderController {
             // 自动测试生成的策略代码
             String strategyName = request.get("strategyName");
             if (strategyName == null || strategyName.trim().isEmpty()) {
-                strategyName = "新" + ("buy".equals(strategyType) ? "买入" : "卖出") + "策略";
+                if ("look".equals(strategyType)) {
+                    strategyName = "新盯盘策略";
+                } else {
+                    strategyName = "新" + ("buy".equals(strategyType) ? "买入" : "卖出") + "策略";
+                }
             }
 
-            Map<String, Object> testResult = strategyCodeTesterService.testStrategyCode(
-                    strategyCode, strategyType, strategyName);
+            Map<String, Object> testResult;
+            if ("look".equals(strategyType)) {
+                testResult = strategyCodeTesterService.testLookStrategyCode(
+                        strategyCode, strategyName, request.get("symbol").trim());
+            } else {
+                testResult = strategyCodeTesterService.testStrategyCode(
+                        strategyCode, strategyType, strategyName);
+            }
 
             boolean testPassed = (Boolean) testResult.get("passed");
             log.info("[生成策略代码] 策略代码测试完成: testPassed={}", testPassed);

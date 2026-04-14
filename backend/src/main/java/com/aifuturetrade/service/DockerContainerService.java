@@ -39,7 +39,13 @@ public interface DockerContainerService {
      * @return 启动结果，包含success、containerName、message等字段
      */
     Map<String, Object> startModelSellContainer(String modelId, String imageName, Map<String, String> envVars);
-    
+
+    /**
+     * 启动盯盘循环容器（start_market_look）
+     * 容器名固定为 look-{modelId}
+     */
+    Map<String, Object> startModelLookContainer(String modelId, String imageName, Map<String, String> envVars);
+
     /**
      * 停止容器
      * @param containerName 容器名称

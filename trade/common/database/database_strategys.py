@@ -278,3 +278,40 @@ class StrategysDatabase:
             logger.error(f"[Strategys] Failed to get model strategies by int ID: {e}")
             return []
 
+    def get_strategy_by_id(self, strategy_id: str) -> Optional[Dict]:
+        """
+        Fetch a single strategy row from strategys by primary key.
+
+        Args:
+            strategy_id: strategys.id (UUID string)
+
+        Returns:
+            Dict with id, name, type, strategy_code, strategy_context or None
+        """
+        if not strategy_id:
+            return None
+        try:
+            sql = f"""
+                SELECT id, name, type, strategy_code, strategy_context, created_at, updated_at
+                FROM {self.strategys_table}
+                WHERE id = %s
+                LIMIT 1
+            """
+            rows = self.query(sql, (strategy_id,), as_dict=True)
+            if not rows:
+                return None
+            row = rows[0]
+            return {
+                'id': row.get('id'),
+                'strategy_name': row.get('name'),
+                'name': row.get('name'),
+                'type': row.get('type'),
+                'strategy_code': row.get('strategy_code'),
+                'strategy_context': row.get('strategy_context'),
+                'created_at': row.get('created_at'),
+                'updated_at': row.get('updated_at'),
+            }
+        except Exception as e:
+            logger.error(f"[Strategys] get_strategy_by_id failed: {e}")
+            return None
+

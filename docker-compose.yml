@@ -318,6 +318,30 @@ services:
       - aifuturetrade-network
 
   # ============================================================================
+  # 盯盘循环服务镜像（仅构建，由 Java 动态创建容器 look-{modelId}）
+  # ============================================================================
+  model-look:
+    build:
+      context: .
+      dockerfile: trade/Dockerfile
+      args:
+        PYTHON_IMAGE: ${PYTHON_IMAGE:-python:3.11-slim}
+        PIP_INDEX_URL: ${PIP_INDEX_URL:-https://pypi.tuna.tsinghua.edu.cn/simple}
+    image: aifuturetrade-model-look:latest
+    environment:
+      - MODEL_ID=${MODEL_ID:-1}
+      - MYSQL_HOST=${MYSQL_HOST:-156.254.6.224}
+      - MYSQL_PORT=${MYSQL_PORT:-32123}
+      - MYSQL_USER=${MYSQL_USER:-aifuturetrade}
+      - MYSQL_PASSWORD=${MYSQL_PASSWORD:-aifuturetrade123}
+      - MYSQL_DATABASE=${MYSQL_DATABASE:-aifuturetrade}
+      - BINANCE_API_KEY=${BINANCE_API_KEY}
+      - BINANCE_SECRET_KEY=${BINANCE_API_SECRET}
+    command: ["python", "-m", "trade.start.start_market_look"]
+    networks:
+      - aifuturetrade-network
+
+  # ============================================================================
   # 前端服务（Vue 3 + KLineChart 10.0.0）
   # ============================================================================
   # 注意：此服务会在构建时先构建 KLineChart 10.0.0 基础库，然后构建前端应用

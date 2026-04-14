@@ -45,6 +45,8 @@ MARKET_TICKER_TABLE = "24_market_tickers"
 ALGO_ORDER_TABLE = "algo_order"
 WECHAT_GROUPS_TABLE = "wechat_groups"
 ALERT_RECORDS_TABLE = "alert_records"
+MARKET_LOOK_TABLE = "market_look"
+TRADE_NOTIFY_TABLE = "trade_notify"
 
 
 class DatabaseInitializer:
@@ -587,6 +589,53 @@ class DatabaseInitializer:
         self.command(ddl)
         logger.debug(f"[DatabaseInit] Ensured table {table_name} exists")
 
+    def ensure_market_look_table(self, table_name: str = "market_look"):
+        """Create market_look table if not exists (实时盯盘任务)"""
+        ddl = f"""
+        CREATE TABLE IF NOT EXISTS `{table_name}` (
+            `id` VARCHAR(36) PRIMARY KEY,
+            `symbol` VARCHAR(50) NOT NULL COMMENT '合约基础符号或完整合约名，如 BTC 或 BTCUSDT',
+            `strategy_id` VARCHAR(36) NOT NULL COMMENT 'strategys.id，type=look',
+            `strategy_name` VARCHAR(200) DEFAULT NULL COMMENT '策略名称冗余',
+            `execution_status` VARCHAR(20) NOT NULL DEFAULT 'RUNNING' COMMENT 'RUNNING=执行中, ENDED=已结束',
+            `signal_result` TEXT COMMENT '最近一次信号/执行结果描述或JSON',
+            `started_at` DATETIME DEFAULT NULL COMMENT '执行开始时间',
+            `ended_at` DATETIME DEFAULT NULL COMMENT '执行结束时间',
+            `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP,
+            `updated_at` DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            INDEX `idx_execution_status` (`execution_status`),
+            INDEX `idx_strategy_id` (`strategy_id`),
+            INDEX `idx_symbol` (`symbol`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='实时盯盘任务表'
+        """
+        self.command(ddl)
+        logger.debug(f"[DatabaseInit] Ensured table {table_name} exists")
+
+    def ensure_trade_notify_table(self, table_name: str = "trade_notify"):
+        """交易通知表：盯盘等交易侧通知落库，独立于 alert_records / trade-monitor 告警"""
+        ddl = f"""
+        CREATE TABLE IF NOT EXISTS `{table_name}` (
+            `id` BIGINT NOT NULL AUTO_INCREMENT COMMENT '主键',
+            `notify_type` VARCHAR(50) NOT NULL DEFAULT 'LOOK' COMMENT 'LOOK=盯盘，可扩展',
+            `market_look_id` VARCHAR(36) DEFAULT NULL COMMENT '关联 market_look.id',
+            `strategy_id` VARCHAR(36) NOT NULL COMMENT 'strategys.id',
+            `strategy_name` VARCHAR(200) DEFAULT NULL,
+            `symbol` VARCHAR(50) NOT NULL COMMENT '基础符号如 BTC',
+            `title` VARCHAR(500) NOT NULL,
+            `message` TEXT NOT NULL COMMENT '正文，落库后可追加本表 id 行',
+            `extra_json` JSON DEFAULT NULL COMMENT 'decision、行情快照等',
+            `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (`id`),
+            KEY `idx_market_look` (`market_look_id`),
+            KEY `idx_strategy` (`strategy_id`),
+            KEY `idx_symbol` (`symbol`),
+            KEY `idx_notify_type` (`notify_type`),
+            KEY `idx_created` (`created_at`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='交易通知表'
+        """
+        self.command(ddl)
+        logger.debug(f"[DatabaseInit] Ensured table {table_name} exists")
+
     # ============ Market Data Table Initialization Methods ============
     
     def ensure_market_ticker_table(self, table_name: str = "24_market_tickers"):
@@ -706,6 +755,12 @@ def init_database_tables(command_func: Callable[[str], Any], table_names: dict, 
     # Alert records table (alert history records)
     initializer.ensure_alert_records_table(table_names.get('alert_records_table', 'alert_records'))
 
+    # Market look (盯盘任务)
+    initializer.ensure_market_look_table(table_names.get('market_look_table', 'market_look'))
+
+    # 交易通知（独立于告警表 alert_records）
+    initializer.ensure_trade_notify_table(table_names.get('trade_notify_table', 'trade_notify'))
+
     logger.info("[DatabaseInit] MySQL business tables initialized")
 
 
@@ -762,6 +817,8 @@ def init_all_database_tables(command_func: Callable[[str, tuple], Any], query_fu
         'algo_order_table': ALGO_ORDER_TABLE,
         'wechat_groups_table': WECHAT_GROUPS_TABLE,
         'alert_records_table': ALERT_RECORDS_TABLE,
+        'market_look_table': MARKET_LOOK_TABLE,
+        'trade_notify_table': TRADE_NOTIFY_TABLE,
     }
     
     # Initialize business tables (migration will be handled inside, query_func is optional)

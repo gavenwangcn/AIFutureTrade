@@ -573,6 +573,16 @@ public class ModelController {
     }
 
     /**
+     * 启动盯盘循环服务容器（容器名 look-{modelId}，入口 start_market_look）
+     */
+    @PostMapping("/{modelId}/execute-market-look")
+    @Operation(summary = "启动盯盘循环（Docker 容器 look-{modelId}）")
+    public ResponseEntity<Map<String, Object>> executeMarketLookTrading(@PathVariable(value = "modelId") String modelId) {
+        Map<String, Object> result = modelService.executeMarketLookTrading(modelId);
+        return new ResponseEntity<>(result, HttpStatus.OK);
+    }
+
+    /**
      * 禁用模型的自动买入功能
      * @param modelId 模型ID
      * @return 更新后的自动买入状态

@@ -422,6 +422,54 @@ def validate_strategy_code():
         }
         return jsonify(error_result), 500
 
+
+@app.route('/api/strategy/validate-look-code', methods=['POST'])
+def validate_look_strategy_code():
+    """
+    验证盯盘策略代码（真实行情，需传 symbol）。
+    请求体: strategy_code, symbol, strategy_name(可选), model_id(可选，覆盖 LOOK_VALIDATE_MODEL_ID)
+    """
+    client_ip = request.remote_addr
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({'error': '请求体不能为空', 'passed': False}), 400
+        strategy_code = data.get('strategy_code')
+        symbol = data.get('symbol') or data.get('contract_symbol')
+        strategy_name = data.get('strategy_name', '盯盘策略')
+        model_id = data.get('model_id')
+        if not strategy_code:
+            return jsonify({'error': 'strategy_code 不能为空', 'passed': False}), 400
+        if not symbol:
+            return jsonify({'error': 'symbol 不能为空', 'passed': False}), 400
+
+        from trade.strategy.strategy_code_tester_look import StrategyCodeTesterLook
+
+        mid = None
+        if model_id is not None:
+            try:
+                mid = int(model_id)
+            except (TypeError, ValueError):
+                mid = None
+        tester = StrategyCodeTesterLook(model_id=mid)
+        result = tester.test_strategy_code(strategy_code, strategy_name, symbol=symbol)
+        logger.info(
+            "[API] validate-look-code done passed=%s symbol=%s client_ip=%s",
+            result.get('passed'),
+            symbol,
+            client_ip,
+        )
+        return jsonify(result)
+    except Exception as e:
+        logger.error("[API] validate-look-code error: %s", e, exc_info=True)
+        return jsonify({
+            'passed': False,
+            'errors': [f'测试执行异常: {str(e)}'],
+            'warnings': [],
+            'test_results': {},
+        }), 500
+
+
 @app.route('/api/market/klines', methods=['GET'])
 def get_market_klines():
     """

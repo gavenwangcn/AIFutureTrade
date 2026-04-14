@@ -147,6 +147,59 @@ public class StrategyCodeTesterServiceImpl implements StrategyCodeTesterService 
         
         return true;
     }
-    
+
+    @Override
+    public Map<String, Object> testLookStrategyCode(String strategyCode, String strategyName, String symbol) {
+        try {
+            String url = tradeConfig.getBaseUrl() + "/api/strategy/validate-look-code";
+            log.info("[StrategyCodeTester] 验证盯盘策略 - URL: {}, symbol: {}", url, symbol);
+
+            Map<String, Object> requestBody = new HashMap<>();
+            requestBody.put("strategy_code", strategyCode);
+            requestBody.put("strategy_name", strategyName != null ? strategyName : "盯盘策略");
+            requestBody.put("symbol", symbol);
+
+            HttpHeaders headers = new HttpHeaders();
+            headers.setContentType(MediaType.APPLICATION_JSON);
+            String requestBodyJson = objectMapper.writeValueAsString(requestBody);
+            HttpEntity<String> entity = new HttpEntity<>(requestBodyJson, headers);
+
+            ResponseEntity<String> response = restTemplate.exchange(
+                    url,
+                    HttpMethod.POST,
+                    entity,
+                    String.class
+            );
+
+            if (response.getStatusCode().is2xxSuccessful() && response.getBody() != null) {
+                return objectMapper.readValue(
+                        response.getBody(),
+                        new TypeReference<Map<String, Object>>() {}
+                );
+            }
+            log.error("Trade validate-look-code HTTP {}", response.getStatusCode());
+            return createErrorResult("Trade服务返回错误: " + response.getStatusCode());
+        } catch (Exception e) {
+            log.error("testLookStrategyCode failed: {}", e.getMessage(), e);
+            return createErrorResult("调用盯盘验证接口失败: " + e.getMessage());
+        }
+    }
+
+    @Override
+    public boolean validateLookStrategyCode(String strategyCode, String strategyName, String symbol) {
+        Map<String, Object> testResult = testLookStrategyCode(strategyCode, strategyName, symbol);
+        Boolean passed = (Boolean) testResult.get("passed");
+        if (passed == null || !passed) {
+            @SuppressWarnings("unchecked")
+            java.util.List<String> errors = (java.util.List<String>) testResult.get("errors");
+            String errorMessage = "盯盘策略代码验证失败";
+            if (errors != null && !errors.isEmpty()) {
+                errorMessage += ": " + String.join("; ", errors);
+            }
+            throw new RuntimeException(errorMessage);
+        }
+        return true;
+    }
+
 }
 

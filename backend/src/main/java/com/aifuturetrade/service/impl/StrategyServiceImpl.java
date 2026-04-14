@@ -128,12 +128,23 @@ public class StrategyServiceImpl implements StrategyService {
             }
             
             try {
-                // 验证策略代码
-                strategyCodeTesterService.validateStrategyCode(
-                    strategyDO.getStrategyCode(), 
-                    strategyType, 
-                    strategyName
-                );
+                if ("look".equalsIgnoreCase(strategyType)) {
+                    String sym = strategyDTO.getValidateSymbol();
+                    if (sym == null || sym.trim().isEmpty()) {
+                        throw new IllegalArgumentException("盯盘策略必须提供 validate_symbol 用于行情验证");
+                    }
+                    strategyCodeTesterService.validateLookStrategyCode(
+                            strategyDO.getStrategyCode(),
+                            strategyName,
+                            sym.trim()
+                    );
+                } else {
+                    strategyCodeTesterService.validateStrategyCode(
+                        strategyDO.getStrategyCode(), 
+                        strategyType, 
+                        strategyName
+                    );
+                }
                 log.info("策略代码验证通过: {}", strategyName);
             } catch (Exception e) {
                 log.error("策略代码验证失败: {}, 错误: {}", strategyName, e.getMessage());
@@ -170,12 +181,23 @@ public class StrategyServiceImpl implements StrategyService {
             }
             
             try {
-                // 验证策略代码
-                strategyCodeTesterService.validateStrategyCode(
-                    strategyDO.getStrategyCode(), 
-                    strategyType, 
-                    strategyName
-                );
+                if ("look".equalsIgnoreCase(strategyType)) {
+                    String sym = strategyDTO.getValidateSymbol();
+                    if (sym == null || sym.trim().isEmpty()) {
+                        throw new IllegalArgumentException("盯盘策略必须提供 validate_symbol 用于行情验证");
+                    }
+                    strategyCodeTesterService.validateLookStrategyCode(
+                            strategyDO.getStrategyCode(),
+                            strategyName,
+                            sym.trim()
+                    );
+                } else {
+                    strategyCodeTesterService.validateStrategyCode(
+                        strategyDO.getStrategyCode(), 
+                        strategyType, 
+                        strategyName
+                    );
+                }
                 log.info("策略代码验证通过: {}", strategyName);
             } catch (Exception e) {
                 log.error("策略代码验证失败: {}, 错误: {}", strategyName, e.getMessage());

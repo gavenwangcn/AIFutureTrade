@@ -86,6 +86,11 @@ export const modelApi = {
   executeSell: (modelId) => apiPost(`/api/models/${modelId}/execute-sell`),
 
   /**
+   * 启动盯盘循环（Docker 容器 look-{modelId}，start_market_look）
+   */
+  executeMarketLook: (modelId) => apiPost(`/api/models/${modelId}/execute-market-look`),
+
+  /**
    * 禁用自动买入
    */
   disableBuy: (modelId) => apiPost(`/api/models/${modelId}/disable-buy`),

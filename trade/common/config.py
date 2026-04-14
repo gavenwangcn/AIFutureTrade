@@ -118,5 +118,12 @@ BINANCE_SERVICE_DEFAULT_TIMEOUT = 30
 # Log level: DEBUG, INFO, WARNING, ERROR, CRITICAL
 # Default level is INFO
 LOG_LEVEL = 'INFO'  # Optional values: DEBUG, INFO, WARNING, ERROR, CRITICAL
+
+# ============ Trade Monitor (告警 / 企微) ============
+# trade-monitor 服务，用于写入 alert_records 并推送企微（见 /api/events/notify）
+TRADE_MONITOR_BASE_URL = os.getenv('TRADE_MONITOR_BASE_URL', 'http://127.0.0.1:5005')
+
+# ============ Market look loop ============
+MARKET_LOOK_POLL_INTERVAL_SECONDS = int(os.getenv('MARKET_LOOK_POLL_INTERVAL_SECONDS', '60'))
 LOG_FORMAT = '%(asctime)s - %(name)s - %(levelname)s - %(message)s'  # Log format
 LOG_DATE_FORMAT = '%Y-%m-%d %H:%M:%S'  # Log date format

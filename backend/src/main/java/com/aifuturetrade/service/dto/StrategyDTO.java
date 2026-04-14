@@ -27,9 +27,16 @@ public class StrategyDTO implements Serializable {
     private String name;
 
     /**
-     * 策略类型（buy-买，sell-卖）
+     * 策略类型（buy-买，sell-卖，look-盯盘）
      */
     private String type;
+
+    /**
+     * 盯盘策略校验/测试用合约符号（如 BTC 或 BTCUSDT），仅 type=look 时使用
+     */
+    @JsonProperty("validate_symbol")
+    @JsonAlias({"validateSymbol"})
+    private String validateSymbol;
 
     /**
      * 策略内容

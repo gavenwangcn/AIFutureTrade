@@ -221,7 +221,8 @@ class StrategyCodeExecutor:
         account_info: Optional[Dict] = None,
         market_state: Optional[Dict] = None,
         decision_type: str = 'buy',
-        conditional_orders: Optional[Dict[str, List[Dict]]] = None
+        conditional_orders: Optional[Dict[str, List[Dict]]] = None,
+        look_symbol: Optional[str] = None,
     ) -> Optional[Dict]:
         """
         执行策略代码
@@ -236,8 +237,9 @@ class StrategyCodeExecutor:
             portfolio: 持仓组合信息
             account_info: 账户信息
             market_state: 市场状态字典，key为交易对符号，value包含价格、技术指标等
-            decision_type: 决策类型，'buy' 或 'sell'
+            decision_type: 决策类型，'buy' / 'sell' / 'look'
             conditional_orders: 条件单信息字典（可选），按symbol分组的条件单列表
+            look_symbol: 盯盘决策使用的合约基础符号（decision_type=look 时必填）
 
         Returns:
             Optional[Dict]: 策略代码返回的决策结果，格式为：
@@ -273,9 +275,13 @@ class StrategyCodeExecutor:
                 execution_context['StrategyBaseSell'] = StrategyBaseSell
                 StrategyBase = StrategyBaseSell
                 base_class_name = 'StrategyBaseSell'
+            elif decision_type == 'look':
+                from trade.strategy.strategy_template_look import StrategyBaseLook
+                execution_context['StrategyBaseLook'] = StrategyBaseLook
+                StrategyBase = StrategyBaseLook
+                base_class_name = 'StrategyBaseLook'
             else:
-                # 未知的决策类型，抛出错误
-                raise ValueError(f"不支持的决策类型: {decision_type}，仅支持 'buy' 或 'sell'")
+                raise ValueError(f"不支持的决策类型: {decision_type}，仅支持 'buy'、'sell'、'look'")
 
             execution_context['StrategyBase'] = StrategyBase
             execution_context['ABC'] = ABC
@@ -355,6 +361,14 @@ class StrategyCodeExecutor:
                     account_info=account_info or {},
                     conditional_orders=co
                 )
+            elif decision_type == 'look':
+                sym = (look_symbol or "").strip().upper()
+                if not sym:
+                    raise ValueError("decision_type=look 时必须提供 look_symbol")
+                decisions = strategy_instance.execute_look_decision(
+                    symbol=sym,
+                    market_state=market_state or {},
+                )
             else:
                 raise ValueError(f"未知的决策类型: {decision_type}")
             
@@ -364,6 +378,18 @@ class StrategyCodeExecutor:
             
             if not isinstance(decisions, dict):
                 raise ValueError(f"策略方法返回结果格式不正确，期望 dict，实际 {type(decisions)}")
+
+            # 盯盘：允许单条 dict，归一化为 List[Dict]
+            if decision_type == 'look' and isinstance(decisions, dict):
+                normalized_look: Dict[str, List] = {}
+                for k, v in decisions.items():
+                    if isinstance(v, dict):
+                        normalized_look[k] = [v]
+                    elif isinstance(v, list):
+                        normalized_look[k] = v
+                    else:
+                        normalized_look[k] = []
+                decisions = normalized_look
             
             # 策略只返回 Dict[symbol, List[decision]]，总条数 = sum(len(v) for v in decisions.values())
             _total_count = sum(len(v) if isinstance(v, list) else 0 for v in (decisions or {}).values())

@@ -39,7 +39,10 @@ public class DockerContainerServiceImpl implements DockerContainerService {
     
     @Value("${docker.image.sell:aifuturetrade-model-sell}")
     private String defaultSellImageName;
-    
+
+    @Value("${docker.image.look:aifuturetrade-model-look}")
+    private String defaultLookImageName;
+
     private DockerClient dockerClient;
     
     @PostConstruct
@@ -245,7 +248,13 @@ public class DockerContainerServiceImpl implements DockerContainerService {
         String containerName = "sell-" + modelId;
         return startModelContainer(containerName, imageName != null ? imageName : defaultSellImageName, envVars);
     }
-    
+
+    @Override
+    public Map<String, Object> startModelLookContainer(String modelId, String imageName, Map<String, String> envVars) {
+        String containerName = "look-" + modelId;
+        return startModelContainer(containerName, imageName != null ? imageName : defaultLookImageName, envVars);
+    }
+
     private Map<String, Object> startModelContainer(String containerName, String imageName, Map<String, String> envVars) {
         Map<String, Object> result = new HashMap<>();
         
@@ -280,6 +289,7 @@ public class DockerContainerServiceImpl implements DockerContainerService {
             // 根据容器名称确定启动命令
             // buy-{modelId} 使用 model_start_buy.py
             // sell-{modelId} 使用 model_start_sell.py
+            // look-{modelId} 使用 start_market_look 盯盘轮询
             String[] cmd = null;
             if (containerName.startsWith("buy-")) {
                 cmd = new String[]{"python", "-m", "trade.start.model_start_buy"};
@@ -287,6 +297,9 @@ public class DockerContainerServiceImpl implements DockerContainerService {
             } else if (containerName.startsWith("sell-")) {
                 cmd = new String[]{"python", "-m", "trade.start.model_start_sell"};
                 log.info("设置容器启动命令为: python -m trade.start.model_start_sell");
+            } else if (containerName.startsWith("look-")) {
+                cmd = new String[]{"python", "-m", "trade.start.start_market_look"};
+                log.info("设置容器启动命令为: python -m trade.start.start_market_look");
             }
             
             // 创建容器配置（使用 HostConfig 替代已弃用的方法）

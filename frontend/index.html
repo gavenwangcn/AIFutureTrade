@@ -7,13 +7,6 @@
     <link rel="icon" type="image/svg+xml" href="/favicon.svg">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.0/font/bootstrap-icons.css">
     <link rel="stylesheet" href="/style.css">
-    <style>
-        /* 通过 body 的 data 标记统一控制 PageAgent 可见性 */
-        body[data-page-agent-hidden="true"] ._wrapper_gtdpc_1,
-        body[data-page-agent-hidden="true"] ._wrapper_1ooyb_1 {
-            display: none !important;
-        }
-    </style>
 </head>
 <body>
     <div id="app"></div>
@@ -21,64 +14,7 @@
     <!-- 引入 KLineChart 10.0.0（UMD 版本） -->
     <!-- 文件由 Dockerfile 构建时从 KLineChart/dist/umd/ 复制到 public/klinecharts/ -->
     <script src="/klinecharts/klinecharts.min.js"></script>
-
-    <!-- PageAgent 一行集成，使用官方 Demo LLM（技术评估用途） -->
-    <!-- 参考：https://github.com/alibaba/page-agent 和文档 https://alibaba.github.io/page-agent/docs/introduction/overview/ -->
-    <script src="https://registry.npmmirror.com/page-agent/1.5.7/files/dist/iife/page-agent.demo.js" crossorigin="true"></script>
-
-    <!-- 自定义 PageAgent 文案和入口样式：英文改为中文 + 机器人风格 -->
-    <script>
-        (function customizePageAgentUI() {
-            function applyCustomizations() {
-                // 修改状态栏文字，例如 "Ready" -> "🤖 智能助手已就绪"
-                const statusNodes = Array.from(document.querySelectorAll('div'))
-                    .filter(el => el.textContent === 'Ready');
-                statusNodes.forEach(el => {
-                    el.textContent = '🤖 智能助手已就绪';
-                });
-
-                // 将顶部提示 "Waiting for task to start..." 翻译成中文
-                const waitingNodes = Array.from(document.querySelectorAll('div, span'))
-                    .filter(el => el.textContent === 'Waiting for task to start...');
-                waitingNodes.forEach(el => {
-                    el.textContent = '等待任务开始执行…';
-                });
-
-                // 修改输入框 placeholder，例如英文改成中文提示
-                const inputs = document.querySelectorAll('input[placeholder], textarea[placeholder]');
-                inputs.forEach(input => {
-                    const ph = input.getAttribute('placeholder') || '';
-                    if (ph.includes('Enter new task')) {
-                        input.setAttribute('placeholder', '输入新的任务，用中文详细描述步骤，按 Enter 开始执行');
-                    }
-                });
-
-                // 通过 data 标记避免重复执行
-                if (statusNodes.length > 0) {
-                    document.body.dataset.pageAgentCustomized = 'true';
-                }
-            }
-
-            // 使用 MutationObserver 监控 PageAgent DOM 注入完成
-            const observer = new MutationObserver(() => {
-                if (document.body.dataset.pageAgentCustomized === 'true') return;
-                applyCustomizations();
-            });
-
-            if (document.body) {
-                observer.observe(document.body, { childList: true, subtree: true });
-                // 初始尝试一次，防止脚本加载较慢/较快造成的遗漏
-                applyCustomizations();
-            } else {
-                window.addEventListener('DOMContentLoaded', () => {
-                    observer.observe(document.body, { childList: true, subtree: true });
-                    applyCustomizations();
-                });
-            }
-        })();
-    </script>
     
     <script type="module" src="/src/main.js"></script>
 </body>
 </html>
-
