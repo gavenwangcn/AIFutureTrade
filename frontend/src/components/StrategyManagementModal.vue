@@ -26,6 +26,7 @@
               <option value="">全部</option>
               <option value="buy">买</option>
               <option value="sell">卖</option>
+              <option value="look">盯盘</option>
             </select>
           </div>
           <div class="form-group">
@@ -63,6 +64,7 @@
               <tr>
                 <th>策略名称</th>
                 <th>策略类型</th>
+                <th>校验合约</th>
                 <th>策略内容</th>
                 <th>策略代码</th>
                 <th>创建时间</th>
@@ -73,9 +75,14 @@
               <tr v-for="strategy in strategies" :key="strategy.id">
                 <td><strong>{{ strategy.name }}</strong></td>
                 <td>
-                  <span :class="['badge', strategy.type === 'buy' ? 'badge-long' : 'badge-short']">
-                    {{ strategy.type === 'buy' ? '买' : '卖' }}
+                  <span :class="['badge', strategyTypeBadgeClass(strategy.type)]">
+                    {{ strategyTypeLabel(strategy.type) }}
                   </span>
+                </td>
+                <td class="text-truncate" :title="strategy.validate_symbol || strategy.validateSymbol">
+                  {{ (strategy.type === 'look' && (strategy.validate_symbol || strategy.validateSymbol))
+                    ? (strategy.validate_symbol || strategy.validateSymbol)
+                    : '—' }}
                 </td>
                 <td class="text-truncate" :title="strategy.strategy_context">
                   {{ truncateText(strategy.strategy_context, 50) }}
@@ -97,7 +104,7 @@
                 </td>
               </tr>
               <tr v-if="strategies.length === 0">
-                <td colspan="6" class="empty-state">暂无策略数据</td>
+                <td colspan="7" class="empty-state">暂无策略数据</td>
               </tr>
             </tbody>
           </table>
@@ -155,7 +162,18 @@
               <option value="">请选择</option>
               <option value="buy">买</option>
               <option value="sell">卖</option>
+              <option value="look">盯盘</option>
             </select>
+          </div>
+          <div v-if="strategyForm.type === 'look'" class="form-group">
+            <label>合约 symbol <span class="required">*</span></label>
+            <input
+              v-model="strategyForm.validate_symbol"
+              type="text"
+              class="form-input"
+              placeholder="如 BTC、BTCUSDT，用于生成代码后的行情校验与测试"
+            />
+            <small class="form-hint">盯盘策略必须使用独立 prompt 与 Trade 侧 validate-look-code 测试，symbol 将随请求传入。</small>
           </div>
           <div class="form-group">
             <label>策略内容</label>
@@ -180,7 +198,7 @@
                 type="button" 
                 class="btn-secondary btn-fetch-code" 
                 @click="handleFetchStrategyCode" 
-                :disabled="fetchingCode || !strategyForm.type || !strategyForm.strategy_context"
+                :disabled="fetchingCode || !strategyForm.type || !strategyForm.strategy_context || (strategyForm.type === 'look' && !String(strategyForm.validate_symbol || '').trim())"
               >
                 <i :class="['bi', fetchingCode ? 'bi-arrow-clockwise spin' : 'bi-arrow-clockwise']"></i>
                 {{ fetchingCode ? '生成中...' : '获取代码' }}
@@ -396,9 +414,24 @@ const editingStrategy = ref(null)
 const strategyForm = ref({
   name: '',
   type: '',
+  validate_symbol: '',
   strategy_context: '',
   strategy_code: ''
 })
+
+function strategyTypeLabel(type) {
+  if (type === 'buy') return '买'
+  if (type === 'sell') return '卖'
+  if (type === 'look') return '盯盘'
+  return type || '—'
+}
+
+function strategyTypeBadgeClass(type) {
+  if (type === 'buy') return 'badge-long'
+  if (type === 'sell') return 'badge-short'
+  if (type === 'look') return 'badge-look'
+  return ''
+}
 const formError = ref('')
 const saving = ref(false)
 
@@ -491,6 +524,7 @@ const handleAddStrategy = () => {
   strategyForm.value = {
     name: '',
     type: '',
+    validate_symbol: '',
     strategy_context: '',
     strategy_code: ''
   }
@@ -504,6 +538,7 @@ const handleEdit = (strategy) => {
   strategyForm.value = {
     name: strategy.name || '',
     type: strategy.type || '',
+    validate_symbol: strategy.validate_symbol || strategy.validateSymbol || '',
     strategy_context: strategy.strategy_context || '',
     strategy_code: strategy.strategy_code || ''
   }
@@ -543,26 +578,32 @@ const handleSaveStrategy = async () => {
     formError.value = '请选择策略类型'
     return
   }
+
+  if (strategyForm.value.type === 'look') {
+    const sym = (strategyForm.value.validate_symbol || '').trim()
+    if (!sym) {
+      formError.value = '盯盘策略必须填写合约 symbol'
+      return
+    }
+  }
   
   saving.value = true
   try {
+    const symTrim = (strategyForm.value.validate_symbol || '').trim()
+    const payloadBase = {
+      name: strategyForm.value.name.trim(),
+      type: strategyForm.value.type,
+      strategyContext: strategyForm.value.strategy_context || null,
+      strategyCode: strategyForm.value.strategy_code || null,
+      validateSymbol: strategyForm.value.type === 'look' ? symTrim : null
+    }
     if (editingStrategy.value) {
       // 更新
-      await strategyApi.update(editingStrategy.value.id, {
-        name: strategyForm.value.name.trim(),
-        type: strategyForm.value.type,
-        strategyContext: strategyForm.value.strategy_context || null,
-        strategyCode: strategyForm.value.strategy_code || null
-      })
+      await strategyApi.update(editingStrategy.value.id, payloadBase)
       alert('更新成功')
     } else {
       // 新增
-      await strategyApi.create({
-        name: strategyForm.value.name.trim(),
-        type: strategyForm.value.type,
-        strategyContext: strategyForm.value.strategy_context || null,
-        strategyCode: strategyForm.value.strategy_code || null
-      })
+      await strategyApi.create(payloadBase)
       alert('添加成功')
     }
     closeStrategyForm()
@@ -708,6 +749,14 @@ const handleFetchStrategyCode = async () => {
     alert('请先输入策略内容')
     return
   }
+
+  if (strategyForm.value.type === 'look') {
+    const sym = (strategyForm.value.validate_symbol || '').trim()
+    if (!sym) {
+      alert('盯盘策略请先填写合约 symbol，用于生成后的行情测试')
+      return
+    }
+  }
   
   // 获取策略提供方设置
   let providerId, modelName
@@ -766,12 +815,17 @@ const handleFetchStrategyCode = async () => {
   
   fetchingCode.value = true
   try {
-    const result = await aiProviderApi.generateStrategyCode({
+    const genBody = {
       providerId: providerId,
       modelName: modelName,
       strategyContext: strategyForm.value.strategy_context,
-      strategyType: strategyForm.value.type
-    })
+      strategyType: strategyForm.value.type,
+      strategyName: strategyForm.value.name.trim() || undefined
+    }
+    if (strategyForm.value.type === 'look') {
+      genBody.symbol = (strategyForm.value.validate_symbol || '').trim()
+    }
+    const result = await aiProviderApi.generateStrategyCode(genBody)
     
     if (result.strategyCode) {
       strategyForm.value.strategy_code = result.strategyCode

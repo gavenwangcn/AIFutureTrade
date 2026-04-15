@@ -40,6 +40,12 @@ public class StrategyDO implements Serializable {
     private String type;
 
     /**
+     * 盯盘策略校验/测试用合约符号（如 BTC、BTCUSDT），仅 type=look 时使用
+     */
+    @TableField("validate_symbol")
+    private String validateSymbol;
+
+    /**
      * 策略内容
      */
     @TableField("strategy_context")

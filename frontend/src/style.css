@@ -2014,6 +2014,11 @@ body {
     color: #00b42a;
 }
 
+.badge-look {
+    background: #eef3ff;
+    color: #3370ff;
+}
+
 .badge-buy {
     background: #e8f7ff;
     color: #0fc6c2;

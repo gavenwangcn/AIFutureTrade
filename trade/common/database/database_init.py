@@ -436,7 +436,8 @@ class DatabaseInitializer:
         CREATE TABLE IF NOT EXISTS `{table_name}` (
             `id` VARCHAR(36) PRIMARY KEY,
             `name` VARCHAR(200) NOT NULL,
-            `type` VARCHAR(10) DEFAULT 'buy' COMMENT 'Strategy type: buy-buy, sell-sell',
+            `type` VARCHAR(10) DEFAULT 'buy' COMMENT 'Strategy type: buy, sell, look',
+            `validate_symbol` VARCHAR(64) DEFAULT NULL COMMENT '盯盘策略校验/测试用合约符号，如 BTC、BTCUSDT，仅 type=look',
             `strategy_context` TEXT,
             `strategy_code` TEXT,
             `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP,
