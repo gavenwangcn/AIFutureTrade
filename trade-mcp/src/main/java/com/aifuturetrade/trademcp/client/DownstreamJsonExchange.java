@@ -11,6 +11,8 @@ import org.springframework.http.MediaType;
 import org.springframework.http.client.ClientHttpResponse;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StreamUtils;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
 import tools.jackson.core.type.TypeReference;
@@ -27,6 +29,8 @@ import tools.jackson.databind.json.JsonMapper;
  */
 @Component
 public class DownstreamJsonExchange {
+
+    private static final Logger log = LoggerFactory.getLogger(DownstreamJsonExchange.class);
 
     private static final JsonMapper JSON = JsonMapper.builder().build();
     private static final TypeReference<Map<String, Object>> MAP_TYPE = new TypeReference<>() {};
@@ -88,9 +92,11 @@ public class DownstreamJsonExchange {
             try {
                 return JSON.readValue(bodyText, MAP_TYPE);
             } catch (Exception e) {
+                log.warn("[downstream] 2xx 响应体非 JSON 或解析失败，以原文返回并附带解析错误（供模型排查）: {}", e.toString());
                 Map<String, Object> wrap = new LinkedHashMap<>();
                 wrap.put("success", true);
                 wrap.put("data", bodyText);
+                wrap.put("jsonParseWarning", ThrowableFormatter.formatForClient(e));
                 return wrap;
             }
         }
@@ -119,8 +125,17 @@ public class DownstreamJsonExchange {
                     }
                 }
                 return out;
-            } catch (Exception ignored) {
-                // fall through
+            } catch (Exception parseEx) {
+                log.warn(
+                        "[downstream] HTTP {} 错误体 JSON 解析失败，将退回原始正文；parseError={}",
+                        status.value(),
+                        parseEx.toString());
+                Map<String, Object> err = new LinkedHashMap<>();
+                err.put("success", false);
+                err.put("httpStatus", status.value());
+                err.put("error", "HTTP " + status.value() + (bodyText != null && !bodyText.isBlank() ? ": " + bodyText : ""));
+                err.put("bodyParseError", ThrowableFormatter.formatForClient(parseEx));
+                return err;
             }
         }
         Map<String, Object> err = new LinkedHashMap<>();
@@ -131,10 +146,15 @@ public class DownstreamJsonExchange {
     }
 
     private Map<String, Object> transportFailure(Throwable e) {
+        log.warn("[downstream] 连接下游失败: {}", ThrowableFormatter.formatForClient(e));
         Map<String, Object> err = new LinkedHashMap<>();
         err.put("success", false);
-        err.put("error", e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName());
-        err.put("errorType", e.getClass().getSimpleName());
+        err.put("error", ThrowableFormatter.formatForClient(e));
+        err.put("errorType", e.getClass().getName());
+        Throwable root = ThrowableFormatter.getRootCause(e);
+        if (root != null && root != e) {
+            err.put("rootCauseType", root.getClass().getName());
+        }
         return err;
     }
 }

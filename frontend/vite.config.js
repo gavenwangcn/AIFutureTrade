@@ -6,6 +6,9 @@ import { fileURLToPath } from 'url'
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
 
+/** 与 frontend/src/services/api.js 中 AI 生成策略代码等长请求一致（15 分钟），避免开发时代理先于 fetch 断开 */
+const API_LONG_TIMEOUT_MS = 900000
+
 export default defineConfig({
   plugins: [vue()],
   resolve: {
@@ -31,11 +34,15 @@ export default defineConfig({
       // trade-monitor（微信通知群等）需先于通用 /api，否则会打到 backend 5002
       '/api/wechat-groups': {
         target: 'http://localhost:5005',
-        changeOrigin: true
+        changeOrigin: true,
+        timeout: API_LONG_TIMEOUT_MS,
+        proxyTimeout: API_LONG_TIMEOUT_MS
       },
       '/api': {
         target: 'http://localhost:5002',
-        changeOrigin: true
+        changeOrigin: true,
+        timeout: API_LONG_TIMEOUT_MS,
+        proxyTimeout: API_LONG_TIMEOUT_MS
       },
       '/socket.io': {
         target: 'http://localhost:5002',

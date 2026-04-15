@@ -3,7 +3,7 @@
  * 封装所有后端 API 调用
  */
 
-import { apiGet, apiPost, apiPut, apiDelete } from '../utils/api.js'
+import { apiGet, apiPost, apiPut, apiDelete, API_TIMEOUT_STRATEGY_GENERATE_MS } from '../utils/api.js'
 
 /**
  * 模型相关 API
@@ -438,9 +438,10 @@ export const aiProviderApi = {
   fetchModels: (providerId) => apiPost('/api/ai/models', { providerId }),
 
   /**
-   * 生成策略代码（超时时间15分钟，因为后端AI生成需要较长时间）
+   * 生成策略代码（与后端 AiProvider 超时一致，约 15 分钟；开发环境需 Vite 代理 timeout 同步）
    */
-  generateStrategyCode: (data) => apiPost('/api/ai/generate-strategy-code', data, {}, 900000)
+  generateStrategyCode: (data) =>
+    apiPost('/api/ai/generate-strategy-code', data, {}, API_TIMEOUT_STRATEGY_GENERATE_MS)
 }
 
 /**

@@ -6,6 +6,10 @@
 
 **若与运行中的 MCP 描述字面值冲突，以当前工具 schema 与后端报错为准**；后端对盯盘策略通常**强制要求 `validate_symbol`** 用于行情校验。
 
+## 执行耗时（重要）
+
+**创建盯盘策略**（`trade_look_strategy_create_look`）与 **修改/重新生成策略代码**（`trade_strategy_regenerate_code`，含 buy/sell/look）会触发后端大模型生成与多轮校验，**单次工具调用可能耗时数分钟，极端约 5 分钟**。使用前请向最终用户说明需耐心等待；避免在未返回结果前重复提交相同请求（除非已明确失败或超时后再试）。
+
 ## 调用顺序（硬性）
 
 1. **`trade_look_strategy_create_look`** — 新建 `strategys`，`type` 固定为 **look**。  

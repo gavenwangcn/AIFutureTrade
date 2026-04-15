@@ -5,6 +5,9 @@
 
 import { API_BASE_URL } from '../config/api.js'
 
+/** AI 生成策略代码等长耗时接口与 Vite 代理一致（毫秒），勿短于后端 AiProvider 超时 */
+export const API_TIMEOUT_STRATEGY_GENERATE_MS = 900000
+
 /**
  * 统一的 API 请求方法
  * @param {string} endpoint - API 端点路径（如：'/api/models'）
@@ -71,14 +74,20 @@ export async function apiRequest(endpoint, options = {}, timeout = 60000) {
     // 清除超时定时器
     if (timeoutId) clearTimeout(timeoutId)
 
-    // 处理超时错误
+    // 处理超时错误（仅当前端 AbortController 触发；与「Failed to fetch」不同）
     if (error.name === 'AbortError') {
-      throw new Error(`请求超时（${timeout / 1000}秒），请稍后重试`)
+      const sec = timeout > 0 ? timeout / 1000 : 0
+      const label =
+        sec >= 120 ? `${Math.round(sec / 60)} 分钟` : sec > 0 ? `${sec} 秒` : '限制'
+      throw new Error(`请求超时（${label}），请稍后重试。生成策略代码等长任务最长约 15 分钟，请勿提前关闭页面。`)
     }
 
-    // 网络错误或其他错误
+    // 浏览器对 fetch 失败常报 TypeError: Failed to fetch：含后端未启动、CORS、以及代理/网关提前断开长连接（易与超时混淆）
     if (error instanceof TypeError && error.message.includes('fetch')) {
-      throw new Error('网络连接失败，请检查后端服务是否运行')
+      throw new Error(
+        '请求未完成（Failed to fetch）。可能是后端未运行、跨域、网络问题，或长耗时接口被开发代理/反向代理提前断开（请确认 Vite/Nginx 等与 15 分钟对齐）。' +
+          ` 原始: ${error.message}`
+      )
     }
     throw error
   }
