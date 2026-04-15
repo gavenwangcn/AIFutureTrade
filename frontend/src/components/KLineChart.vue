@@ -42,6 +42,14 @@
               >
                 ADX
               </button>
+              <button
+                type="button"
+                :class="{ 'indicator-btn': true, 'active': showKdjPane }"
+                title="KDJ（9,3,3，独立副图；默认关闭，点击显示）"
+                @click="toggleKdjPane"
+              >
+                KDJ
+              </button>
             </div>
             <div class="kline-timeframes">
               <button
@@ -60,35 +68,6 @@
         </div>
         <div class="kline-modal-body">
           <div ref="chartContainerRef" class="kline-chart-container"></div>
-          <div
-            v-if="showSuperOverlay || showAtrPane || showAdxPane"
-            class="kline-super-footer"
-          >
-            <button
-              v-if="showSuperOverlay"
-              type="button"
-              class="btn-super-close"
-              @click="closeSuperOverlay"
-            >
-              关闭 SUPER 指标
-            </button>
-            <button
-              v-if="showAtrPane"
-              type="button"
-              class="btn-super-close"
-              @click="closeAtrPane"
-            >
-              关闭 ATR 指标
-            </button>
-            <button
-              v-if="showAdxPane"
-              type="button"
-              class="btn-super-close"
-              @click="closeAdxPane"
-            >
-              关闭 ADX 指标
-            </button>
-          </div>
         </div>
       </div>
     </div>
@@ -160,6 +139,10 @@ const atrIndicatorId = ref(null)
 const showAdxPane = ref(false)
 /** @type {import('vue').Ref<string|null>} */
 const adxIndicatorId = ref(null)
+
+const showKdjPane = ref(false)
+/** @type {import('vue').Ref<string|null>} */
+const kdjIndicatorId = ref(null)
 
 // 时间周期配置
 // KLineChart 10.0.0 使用 { span: number, type: string } 格式
@@ -337,14 +320,7 @@ const initChart = async () => {
       console.error('[KLineChart] Failed to register MACD indicator')
     }
 
-    // 创建KDJ指标（使用自定义版本：9,3,3）
-    // 直接使用运行时注册方式，确保使用自定义版本
-    if (registerKDJIndicator(klinecharts)) {
-      const kdjIndicatorId = chartInstance.value.createIndicator('KDJ', false)
-      console.log('[KLineChart] KDJ indicator registered and created with id:', kdjIndicatorId)
-    } else {
-      console.error('[KLineChart] Failed to register KDJ indicator')
-    }
+    // KDJ：默认不创建，由工具栏「KDJ」按钮切换（见 toggleKdjPane）
 
     // 创建RSI指标（使用自定义版本：RSI6、RSI9）
     // 直接使用运行时注册方式，确保覆盖默认的RSI（RSI6、RSI12、RSI24），使用自定义版本
@@ -460,6 +436,38 @@ const closeAdxPane = () => {
   showAdxPane.value = false
 }
 
+const toggleKdjPane = () => {
+  if (!chartInstance.value) return
+  const klinecharts = getKLineCharts()
+  if (!showKdjPane.value) {
+    if (!registerKDJIndicator(klinecharts)) {
+      console.error('[KLineChart] Failed to register KDJ indicator')
+      return
+    }
+    try {
+      const id = chartInstance.value.createIndicator('KDJ', false)
+      kdjIndicatorId.value = id ?? null
+      showKdjPane.value = true
+    } catch (e) {
+      console.error('[KLineChart] create KDJ indicator', e)
+    }
+  } else {
+    closeKdjPane()
+  }
+}
+
+const closeKdjPane = () => {
+  if (chartInstance.value && kdjIndicatorId.value != null) {
+    try {
+      chartInstance.value.removeIndicator({ id: kdjIndicatorId.value })
+    } catch (e) {
+      console.warn('[KLineChart] remove KDJ', e)
+    }
+  }
+  kdjIndicatorId.value = null
+  showKdjPane.value = false
+}
+
 // 处理指标切换
 const handleIndicatorChange = (indicator) => {
   if (!chartInstance.value || currentIndicator.value === indicator) {
@@ -518,6 +526,7 @@ const destroyChart = () => {
   closeSuperOverlay()
   closeAtrPane()
   closeAdxPane()
+  closeKdjPane()
 
   if (chartInstance.value) {
     try {
@@ -749,31 +758,5 @@ onUnmounted(() => {
   position: relative;
   overflow: hidden;
   min-height: 0;
-}
-
-.kline-super-footer {
-  flex-shrink: 0;
-  padding: 8px 16px 12px;
-  border-top: 1px solid #eee;
-  background: #fafbfc;
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: center;
-  gap: 8px;
-}
-
-.btn-super-close {
-  padding: 6px 16px;
-  font-size: 13px;
-  border: 1px solid #cfd4dc;
-  border-radius: 6px;
-  background: #fff;
-  cursor: pointer;
-  color: #333;
-}
-
-.btn-super-close:hover {
-  border-color: #1677ff;
-  color: #1677ff;
 }
 </style>

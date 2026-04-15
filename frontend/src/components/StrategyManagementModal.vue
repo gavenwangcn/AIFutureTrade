@@ -893,12 +893,16 @@ const closeCodeModal = () => {
   viewingCode.value = ''
 }
 
-// 监听 visible 变化，加载数据
-watch(() => props.visible, (newVal) => {
-  if (newVal) {
-    loadStrategies()
-  }
-})
+// 监听 visible 变化，加载数据（immediate：与 App.vue v-if 配合时首帧即拉取列表）
+watch(
+  () => props.visible,
+  (newVal) => {
+    if (newVal) {
+      loadStrategies()
+    }
+  },
+  { immediate: true }
+)
 </script>
 
 <style scoped>

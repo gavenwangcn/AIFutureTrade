@@ -994,13 +994,15 @@
     
     
     <StrategyManagementModal
-      :visible="showStrategyManagementModal"
+      v-if="showStrategyManagementModal"
+      :visible="true"
       @update:visible="showStrategyManagementModal = $event"
       @close="showStrategyManagementModal = false"
     />
 
     <WeChatGroupManagementModal
-      :visible="showWeChatGroupManagementModal"
+      v-if="showWeChatGroupManagementModal"
+      :visible="true"
       @update:visible="showWeChatGroupManagementModal = $event"
       @close="showWeChatGroupManagementModal = false"
     />
