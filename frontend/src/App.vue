@@ -25,7 +25,7 @@
           </div>
         </div>
         <div class="header-right">
-          <div class="header-status look-logs-header-status" title="盯盘容器 look-{模型ID} 日志">
+          <div class="header-status look-logs-header-status" title="盯盘容器日志（可随时打开；连接流需要 look-{模型ID}，无模型时请先添加）">
             <span class="status-dot active"></span>
             <span class="status-text">运行中</span>
             <button
@@ -1461,12 +1461,8 @@ const {
 
 const handleOpenLookContainerLogsModal = () => {
   const mid = resolveMarketLookModelId()
-  if (!mid) {
-    alert('请先添加或选择交易模型')
-    return
-  }
   pendingLookLogsModelId.value = mid
-  lookLogsModelName.value = getModelDisplayName(mid)
+  lookLogsModelName.value = mid ? getModelDisplayName(mid) : '（未关联交易模型）'
   showLookLogsModal.value = true
 }
 

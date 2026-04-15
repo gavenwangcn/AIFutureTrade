@@ -2,7 +2,7 @@
   <div v-if="visible" class="modal show" @click.self="handleClose">
     <div class="modal-content trade-logs-modal">
       <div class="modal-header">
-        <h3>盯盘容器日志 - {{ modelName }}</h3>
+        <h3>盯盘容器日志 — {{ displayTitleName }}</h3>
         <button class="btn-close" @click="handleClose">
           <i class="bi bi-x-lg"></i>
         </button>
@@ -12,7 +12,8 @@
           <button
             v-if="!isLogConnected"
             class="btn btn-primary btn-sm"
-            :disabled="logConnecting"
+            :disabled="logConnecting || !hasConnectableModelId"
+            :title="!hasConnectableModelId ? '需要先有可用的交易模型 ID' : ''"
             @click="startLogStream"
           >
             {{ logConnecting ? '连接中...' : '开始查看日志' }}
@@ -83,7 +84,11 @@
             </button>
           </div>
         </div>
-        <span class="dialog-title">盯盘容器日志: {{ modelName }}</span>
+        <span class="dialog-title">盯盘容器日志: {{ displayTitleName }}</span>
+      </div>
+      <div v-if="!hasConnectableModelId" class="look-logs-no-model-hint">
+        当前没有可用的交易模型 ID，无法连接 <code>look-&#123;模型ID&#125;</code> 容器日志。
+        请先在左侧「交易模型」中添加模型；添加后未选中时也会自动使用列表中的第一个模型。
       </div>
       <div class="log-container">
         <div
@@ -139,6 +144,15 @@ const props = defineProps({
 
 const emit = defineEmits(['update:visible', 'close'])
 
+const hasConnectableModelId = computed(() => {
+  const id = props.modelId
+  return id != null && String(id).trim() !== ''
+})
+
+const displayTitleName = computed(() =>
+  hasConnectableModelId.value ? props.modelName || String(props.modelId) : '未关联模型'
+)
+
 // 日志相关状态
 const logSocket = ref(null)
 const logConnecting = ref(false)
@@ -174,6 +188,9 @@ const createModelLogStreamUrl = () => {
   }
   // 构建URL，包含modelId和type参数
   const modelId = props.modelId
+  if (modelId == null || String(modelId).trim() === '') {
+    return ''
+  }
   const type = 'look'
   return `${protocol}//${host}/ws/model-logs?modelId=${encodeURIComponent(modelId)}&type=${type}`
 }
@@ -287,6 +304,11 @@ const startLogStream = () => {
   logMessages.value = []
 
   const wsUrl = createModelLogStreamUrl()
+  if (!wsUrl) {
+    logConnecting.value = false
+    console.warn('[LookLogsModal] 无 modelId，无法连接 look-{模型ID} 日志流')
+    return
+  }
 
   try {
     logSocket.value = new WebSocket(wsUrl)
@@ -520,6 +542,24 @@ onBeforeUnmount(() => {
 </script>
 
 <style scoped>
+.look-logs-no-model-hint {
+  margin: 0 16px 12px;
+  padding: 10px 14px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: #856404;
+  background: #fff3cd;
+  border: 1px solid #ffc107;
+  border-radius: 6px;
+}
+
+.look-logs-no-model-hint code {
+  font-size: 12px;
+  padding: 1px 4px;
+  background: rgba(0, 0, 0, 0.06);
+  border-radius: 4px;
+}
+
 .trade-logs-modal {
   width: 88.9%;
   max-width: 1600px;
