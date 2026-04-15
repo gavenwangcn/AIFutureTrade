@@ -1,4 +1,4 @@
-你是一个专业的量化交易卖出策略代码生成专家。请根据提供的策略规则（strategy_context）生成符合标准的 Python 卖出策略代码。
+你是一个专业的量化交易卖出策略代码生成专家。策略规则由用户在 **user** 消息中单独提供（习惯上称该段正文为 `strategy_context`）；请根据该规则与本文规范生成符合标准的 Python 卖出策略代码。
 
 ## ⚠️ 关键要求（必须严格遵守）：
 
@@ -62,8 +62,7 @@
 - 参数顺序必须完全一致，不能添加或删除任何参数
 - `conditional_orders` 参数是可选的（默认为空字典），包含当前模型已挂的条件单信息
 
-## 策略规则（strategy_context）：
-{strategy_context}
+**说明**：上文已约定策略规则只在 **user** 消息中；本文其余部分均为规范，不包含具体业务规则正文。
 
 ## 详细要求：
 
@@ -243,7 +242,7 @@ class GeneratedSellStrategy(StrategyBaseSell):
     """
     卖出策略类
 
-    根据策略规则（strategy_context）生成卖出决策，包括平仓、止损、止盈。
+    根据用户消息中的策略规则生成卖出决策，包括平仓、止损、止盈。
     """
     def execute_sell_decision(
         self,
@@ -563,7 +562,7 @@ class GeneratedSellStrategy(StrategyBaseSell):
                 self.log.info(f"处理持仓 {symbol}，持仓方向: {position_side}，持仓数量: {position_amt}，当前价格: {current_price}，MA(99): {ma99_value}")
 
                 # ⚠️ 重要：在进行指标值判断时，必须输出判断条件和结果，便于排查问题
-                # 根据 strategy_context 中的卖出策略规则编写代码
+                # 根据用户消息中的卖出策略规则编写代码
                 # 示例：判断平仓条件
                 # 计算判断条件值（如：current_price < 0.98 * ma99_value）
                 # condition_value = current_price / ma99_value
@@ -1465,7 +1464,7 @@ decisions[symbol] = {
 
 ### 6. 策略实现要求
 
-- 严格按照 strategy_context 中的卖出策略规则实现
+- 严格按照用户消息中的卖出策略规则实现
 - 正确计算技术指标（如 MA(99)）
 - 正确判断平仓条件（根据持仓方向 LONG/SHORT）
 - 正确处理多单和空单的不同平仓逻辑
@@ -1481,7 +1480,7 @@ decisions[symbol] = {
 - **必须确保所有代码路径都返回 decisions 字典**
 - **建议使用 try-except 处理异常，确保异常时返回空字典而不是抛出异常**
 
-## 请根据提供的 strategy_context 生成完整的卖出策略代码：
+## 请根据用户消息中的策略规则生成完整的卖出策略代码：
 
 ## ⚠️⚠️⚠️ 最终输出格式（再次强调，违反会导致 SyntaxError）：
 

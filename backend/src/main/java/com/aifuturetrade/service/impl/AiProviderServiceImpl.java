@@ -92,11 +92,36 @@ public class AiProviderServiceImpl implements AiProviderService {
 
     @Override
     public String generateStrategyCode(String providerId, String modelName, String strategyContext, String strategyType) {
-        // 构建prompt
-        String prompt = buildStrategyPrompt(strategyContext, strategyType);
-        
-        // 调用AI API
-        return callAiApi(providerId, modelName, prompt);
+        String systemPrompt = loadStrategySystemPrompt(strategyType);
+        String userContent = buildStrategyUserContent(strategyContext);
+        return callAiApiForStrategyCode(providerId, modelName, systemPrompt, userContent);
+    }
+
+    /**
+     * 策略代码生成：资源文件中的规范作为 system，策略业务描述仅作为 user。
+     */
+    private String callAiApiForStrategyCode(String providerId, String modelName, String systemPrompt, String userContent) {
+        ProviderDTO provider = providerService.getProviderById(providerId);
+        if (provider == null) {
+            throw new IllegalArgumentException("Provider not found: " + providerId);
+        }
+        String providerType = provider.getProviderType() != null
+                ? provider.getProviderType().toLowerCase() : "openai";
+        try {
+            if (providerType.equals("anthropic")) {
+                return callAnthropicApi(provider.getApiUrl(), provider.getApiKey(), modelName, systemPrompt, userContent);
+            } else if (providerType.equals("gemini")) {
+                return callGeminiApi(provider.getApiUrl(), provider.getApiKey(), modelName, systemPrompt, userContent);
+            } else if (providerType.equals("openai") || providerType.equals("azure_openai") || providerType.equals("deepseek")) {
+                return callOpenAiCompatibleApi(provider.getApiUrl(), provider.getApiKey(), modelName, systemPrompt, userContent);
+            } else {
+                log.warn("Unknown provider type: {}, using OpenAI compatible API", providerType);
+                return callOpenAiCompatibleApi(provider.getApiUrl(), provider.getApiKey(), modelName, systemPrompt, userContent);
+            }
+        } catch (Exception e) {
+            log.error("Failed to call AI API: {}", e.getMessage(), e);
+            throw new RuntimeException("AI API call failed: " + e.getMessage(), e);
+        }
     }
 
     @Override
@@ -111,17 +136,18 @@ public class AiProviderServiceImpl implements AiProviderService {
         
         try {
             // 根据provider_type判断调用哪个API，参考Python版本的_call_llm方法逻辑
+            String legacySystem = "You are a professional cryptocurrency trading strategy code generator. Output ONLY the Python code, without any JSON wrapper, markdown code blocks, or explanations. The output must be pure Python code that can be directly executed.";
             if (providerType.equals("anthropic")) {
-                return callAnthropicApi(provider.getApiUrl(), provider.getApiKey(), modelName, prompt);
+                return callAnthropicApi(provider.getApiUrl(), provider.getApiKey(), modelName, legacySystem, prompt);
             } else if (providerType.equals("gemini")) {
-                return callGeminiApi(provider.getApiUrl(), provider.getApiKey(), modelName, prompt);
+                return callGeminiApi(provider.getApiUrl(), provider.getApiKey(), modelName, legacySystem, prompt);
             } else if (providerType.equals("openai") || providerType.equals("azure_openai") || providerType.equals("deepseek")) {
                 // OpenAI兼容API（包括openai、azure_openai、deepseek等）
-                return callOpenAiCompatibleApi(provider.getApiUrl(), provider.getApiKey(), modelName, prompt);
+                return callOpenAiCompatibleApi(provider.getApiUrl(), provider.getApiKey(), modelName, legacySystem, prompt);
             } else {
                 // 默认使用OpenAI兼容的API
                 log.warn("Unknown provider type: {}, using OpenAI compatible API", providerType);
-                return callOpenAiCompatibleApi(provider.getApiUrl(), provider.getApiKey(), modelName, prompt);
+                return callOpenAiCompatibleApi(provider.getApiUrl(), provider.getApiKey(), modelName, legacySystem, prompt);
             }
         } catch (Exception e) {
             log.error("Failed to call AI API: {}", e.getMessage(), e);
@@ -135,7 +161,7 @@ public class AiProviderServiceImpl implements AiProviderService {
      * 支持OpenAI、Azure OpenAI、DeepSeek等兼容OpenAI API格式的提供商
      * 使用HTTP客户端实现，匹配Python版本使用OpenAI SDK的逻辑
      */
-    private String callOpenAiCompatibleApi(String apiUrl, String apiKey, String modelName, String prompt) throws Exception {
+    private String callOpenAiCompatibleApi(String apiUrl, String apiKey, String modelName, String systemContent, String userContent) throws Exception {
         long startTime = System.currentTimeMillis();
         try {
             // 规范化base_url，确保以/v1结尾，参考Python版本的逻辑
@@ -164,21 +190,20 @@ public class AiProviderServiceImpl implements AiProviderService {
             
             List<Map<String, String>> messages = new ArrayList<>();
             Map<String, String> systemMessage = new HashMap<>();
-            String systemContent = "You are a professional cryptocurrency trading strategy code generator. Output ONLY the Python code, without any JSON wrapper, markdown code blocks, or explanations. The output must be pure Python code that can be directly executed.";
             systemMessage.put("role", "system");
             systemMessage.put("content", systemContent);
             messages.add(systemMessage);
             
             Map<String, String> userMessage = new HashMap<>();
             userMessage.put("role", "user");
-            userMessage.put("content", prompt);
+            userMessage.put("content", userContent);
             messages.add(userMessage);
             
             requestBody.put("messages", messages);
             
             // 估算 token 数量
             int systemTokenCount = estimateTokenCount(systemContent);
-            int promptTokenCount = estimateTokenCount(prompt);
+            int promptTokenCount = estimateTokenCount(userContent);
             int totalInputTokenCount = systemTokenCount + promptTokenCount;
             
             String requestBodyJson = objectMapper.writeValueAsString(requestBody);
@@ -279,7 +304,7 @@ public class AiProviderServiceImpl implements AiProviderService {
      * 参考Python版本的_call_anthropic_api方法
      * 使用HTTP请求直接调用Anthropic的Claude API
      */
-    private String callAnthropicApi(String apiUrl, String apiKey, String modelName, String prompt) throws Exception {
+    private String callAnthropicApi(String apiUrl, String apiKey, String modelName, String systemContent, String userContent) throws Exception {
         long startTime = System.currentTimeMillis();
         try {
             // 规范化base_url，确保以/v1结尾
@@ -296,8 +321,6 @@ public class AiProviderServiceImpl implements AiProviderService {
             log.info("[Anthropic API] 使用配置参数（从数据库settings表读取）: temperature={}, top_p={}, max_tokens={}", 
                     temperature, topP, maxTokens);
             
-            String systemContent = "You are a professional cryptocurrency trading strategy code generator. Output ONLY the Python code, without any JSON wrapper, markdown code blocks, or explanations. The output must be pure Python code that can be directly executed.";
-            
             // 构建请求体，参考Python版本的实现
             Map<String, Object> requestBody = new HashMap<>();
             requestBody.put("model", modelName);
@@ -312,13 +335,13 @@ public class AiProviderServiceImpl implements AiProviderService {
             List<Map<String, String>> messages = new ArrayList<>();
             Map<String, String> userMessage = new HashMap<>();
             userMessage.put("role", "user");
-            userMessage.put("content", prompt);
+            userMessage.put("content", userContent);
             messages.add(userMessage);
             requestBody.put("messages", messages);
             
             // 估算 token 数量
             int systemTokenCount = estimateTokenCount(systemContent);
-            int promptTokenCount = estimateTokenCount(prompt);
+            int promptTokenCount = estimateTokenCount(userContent);
             int totalInputTokenCount = systemTokenCount + promptTokenCount;
             
             String requestBodyJson = objectMapper.writeValueAsString(requestBody);
@@ -413,23 +436,29 @@ public class AiProviderServiceImpl implements AiProviderService {
      * 参考Python版本的_call_gemini_api方法
      * 使用HTTP请求直接调用Google的Gemini API
      */
-    private String callGeminiApi(String apiUrl, String apiKey, String modelName, String prompt) throws Exception {
+    private String callGeminiApi(String apiUrl, String apiKey, String modelName, String systemContent, String userContent) throws Exception {
         long startTime = System.currentTimeMillis();
         try {
             // 规范化base_url，确保以/v1结尾
             String baseUrl = normalizeApiUrl(apiUrl);
             String url = baseUrl + "/" + modelName + ":generateContent";
             
-            String systemPrefix = "You are a professional cryptocurrency trader. Output JSON format only.\n\n";
-            String fullPrompt = systemPrefix + prompt;
-            
-            // 构建请求体，参考Python版本的实现
+            // 构建请求体：systemInstruction + user 正文（与 OpenAI/Anthropic 语义一致）
             Map<String, Object> requestBody = new HashMap<>();
+            Map<String, Object> systemInstruction = new HashMap<>();
+            List<Map<String, String>> systemParts = new ArrayList<>();
+            Map<String, String> systemPart = new HashMap<>();
+            systemPart.put("text", systemContent);
+            systemParts.add(systemPart);
+            systemInstruction.put("parts", systemParts);
+            requestBody.put("systemInstruction", systemInstruction);
+
             List<Map<String, Object>> contents = new ArrayList<>();
             Map<String, Object> content = new HashMap<>();
+            content.put("role", "user");
             List<Map<String, String>> parts = new ArrayList<>();
             Map<String, String> part = new HashMap<>();
-            part.put("text", fullPrompt);
+            part.put("text", userContent);
             parts.add(part);
             content.put("parts", parts);
             contents.add(content);
@@ -459,8 +488,8 @@ public class AiProviderServiceImpl implements AiProviderService {
             requestBody.put("generationConfig", generationConfig);
             
             // 估算 token 数量
-            int systemTokenCount = estimateTokenCount(systemPrefix);
-            int promptTokenCount = estimateTokenCount(prompt);
+            int systemTokenCount = estimateTokenCount(systemContent);
+            int promptTokenCount = estimateTokenCount(userContent);
             int totalInputTokenCount = systemTokenCount + promptTokenCount;
             
             String requestBodyJson = objectMapper.writeValueAsString(requestBody);
@@ -560,52 +589,53 @@ public class AiProviderServiceImpl implements AiProviderService {
     }
 
     /**
-     * 构建策略代码生成的Prompt
+     * 从资源文件加载策略生成的 system prompt（不含业务策略正文）。
      */
-    private String buildStrategyPrompt(String strategyContext, String strategyType) {
+    private String loadStrategySystemPrompt(String strategyType) {
+        String templateFile;
+        if ("buy".equalsIgnoreCase(strategyType)) {
+            templateFile = "prompts/strategy_buy_prompt.txt";
+        } else if ("look".equalsIgnoreCase(strategyType)) {
+            templateFile = "prompts/strategy_look_prompt.txt";
+        } else {
+            templateFile = "prompts/strategy_sell_prompt.txt";
+        }
         try {
-            // 从资源文件读取prompt模板
-            String templateFile;
-            if ("buy".equalsIgnoreCase(strategyType)) {
-                templateFile = "prompts/strategy_buy_prompt.txt";
-            } else if ("look".equalsIgnoreCase(strategyType)) {
-                templateFile = "prompts/strategy_look_prompt.txt";
-            } else {
-                templateFile = "prompts/strategy_sell_prompt.txt";
-            }
-            
             java.io.InputStream inputStream = getClass().getClassLoader()
                     .getResourceAsStream(templateFile);
-            
             if (inputStream != null) {
-                String template = new String(inputStream.readAllBytes(), 
+                String template = new String(inputStream.readAllBytes(),
                         java.nio.charset.StandardCharsets.UTF_8);
                 inputStream.close();
-                return template.replace("{strategy_context}", strategyContext);
-            } else {
-                // 如果文件不存在，使用内置模板
-                log.warn("Prompt template file not found: {}, using built-in template", templateFile);
-                return getBuiltInPromptTemplate(strategyContext, strategyType);
+                return template;
             }
+            log.warn("Prompt template file not found: {}, using built-in system template", templateFile);
+            return getBuiltInSystemPromptBackup(strategyType);
         } catch (Exception e) {
-            log.error("Failed to load prompt template, using built-in template: {}", e.getMessage());
-            return getBuiltInPromptTemplate(strategyContext, strategyType);
+            log.error("Failed to load prompt template, using built-in system template: {}", e.getMessage());
+            return getBuiltInSystemPromptBackup(strategyType);
         }
     }
-    
+
     /**
-     * 获取内置的Prompt模板（备用方案）
+     * 用户消息：仅包含策略业务描述（strategy_context）。
      */
-    private String getBuiltInPromptTemplate(String strategyContext, String strategyType) {
-        String basePrompt;
+    private String buildStrategyUserContent(String strategyContext) {
+        String body = strategyContext == null ? "" : strategyContext;
+        return "## 策略规则（strategy_context）\n\n" + body;
+    }
+
+    /**
+     * 资源缺失时的 system prompt 备用（无 {strategy_context} 占位）。
+     */
+    private String getBuiltInSystemPromptBackup(String strategyType) {
         if ("buy".equalsIgnoreCase(strategyType)) {
-            basePrompt = getBuyStrategyPromptTemplate();
-        } else if ("look".equalsIgnoreCase(strategyType)) {
-            basePrompt = getLookStrategyPromptTemplate();
-        } else {
-            basePrompt = getSellStrategyPromptTemplate();
+            return getBuyStrategyPromptTemplate();
         }
-        return basePrompt.replace("{strategy_context}", strategyContext);
+        if ("look".equalsIgnoreCase(strategyType)) {
+            return getLookStrategyPromptTemplate();
+        }
+        return getSellStrategyPromptTemplate();
     }
 
     /**
@@ -615,8 +645,8 @@ public class AiProviderServiceImpl implements AiProviderService {
      */
     private String getBuyStrategyPromptTemplate() {
         // 读取完整的prompt模板（简化版，实际应该从文件读取）
-        return "你是一个专业的量化交易买入策略代码生成专家。请根据提供的策略规则（strategy_context）生成符合标准的 Python 买入策略代码。\n\n" +
-               "## 策略规则（strategy_context）：\n{strategy_context}\n\n" +
+        return "你是一个专业的量化交易买入策略代码生成专家。请根据用户消息中的策略规则（strategy_context）生成符合标准的 Python 买入策略代码。\n\n" +
+               "**说明**：策略规则正文由用户在 user 消息中单独提供。\n\n" +
                "## 重要要求：\n\n" +
                "### 1. 必须继承 StrategyBaseBuy 类\n\n" +
                "生成的代码必须是一个继承自 `StrategyBaseBuy` 的类，并实现其抽象方法：\n\n" +
@@ -675,7 +705,7 @@ public class AiProviderServiceImpl implements AiProviderService {
      */
     private String getLookStrategyPromptTemplate() {
         return "你是量化盯盘策略代码生成专家。仅使用行情数据，不涉及账户、持仓、下单。\n\n"
-                + "## 策略规则（strategy_context）：\n{strategy_context}\n\n"
+                + "**说明**：策略规则正文由用户在 user 消息中单独提供。\n\n"
                 + "必须继承 StrategyBaseLook，实现 execute_look_decision(self, symbol: str, market_state: Dict) "
                 + "返回 Dict[str, List[Dict]]。需要通知时：\n"
                 + "decisions[symbol] = [{\"signal\":\"notify\",\"symbol\":合约,\"market_date\":快照,"
@@ -691,8 +721,8 @@ public class AiProviderServiceImpl implements AiProviderService {
      */
     private String getSellStrategyPromptTemplate() {
         // 读取完整的prompt模板（简化版，实际应该从文件读取）
-        return "你是一个专业的量化交易卖出策略代码生成专家。请根据提供的策略规则（strategy_context）生成符合标准的 Python 卖出策略代码。\n\n" +
-               "## 策略规则（strategy_context）：\n{strategy_context}\n\n" +
+        return "你是一个专业的量化交易卖出策略代码生成专家。请根据用户消息中的策略规则（strategy_context）生成符合标准的 Python 卖出策略代码。\n\n" +
+               "**说明**：策略规则正文由用户在 user 消息中单独提供。\n\n" +
                "## 重要要求：\n\n" +
                "### 1. 必须继承 StrategyBaseSell 类\n\n" +
                "生成的代码必须是一个继承自 `StrategyBaseSell` 的类，并实现其抽象方法：\n\n" +

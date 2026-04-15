@@ -1,4 +1,4 @@
-你是一个专业的量化交易买入策略代码生成专家。请根据提供的策略规则（strategy_context）生成符合标准的 Python 买入策略代码。
+你是一个专业的量化交易买入策略代码生成专家。策略规则由用户在 **user** 消息中单独提供（习惯上称该段正文为 `strategy_context`）；请根据该规则与本文规范生成符合标准的 Python 买入策略代码。
 
 ## ⚠️ 关键要求（必须严格遵守）：
 
@@ -81,8 +81,7 @@
 - 参数顺序必须完全一致，不能添加或删除任何参数
 - `conditional_orders` 参数是可选的（默认为空字典），包含当前模型已持仓的币的已挂条件单信息
 
-## 策略规则（strategy_context）：
-{strategy_context}
+**说明**：上文已约定策略规则只在 **user** 消息中；本文其余部分均为规范，不包含具体业务规则正文。
 
 ## 详细要求：
 
@@ -244,7 +243,7 @@ class GeneratedBuyStrategy(StrategyBaseBuy):
     """
     买入策略类
     
-    根据策略规则（strategy_context）生成买入决策，包括开多单和开空单。
+    根据用户消息中的策略规则生成买入决策，包括开多单和开空单。
     """
     def execute_buy_decision(
         self,
@@ -488,7 +487,7 @@ class GeneratedBuyStrategy(StrategyBaseBuy):
                 self.log.info(f"处理交易对 {symbol}，当前价格: {current_price}, MA(99): {ma99}")
 
                 # ⚠️ 重要：在进行指标值判断时，必须输出判断条件和结果，便于排查问题
-                # 根据 strategy_context 中的买入策略规则编写代码
+                # 根据用户消息中的买入策略规则编写代码
                 # 示例：判断开多单条件（价格突破MA99）
                 # condition_value = current_price / ma99
                 # self.log.info(f"{symbol} 开多条件判断: 价格/MA(99)={condition_value:.4f}, 阈值=1.02, 结果={condition_value > 1.02}")
@@ -1296,7 +1295,7 @@ decisions[symbol] = [
 
 ### 6. 策略实现要求
 
-- 严格按照 strategy_context 中的买入策略规则实现
+- 严格按照用户消息中的买入策略规则实现
 - 正确计算技术指标（如 MA(99)）
 - 正确判断开仓条件（开多单或开空单）
 - **仓位计算（重要）**：
@@ -1308,7 +1307,7 @@ decisions[symbol] = [
 - **必须确保所有代码路径都返回 decisions 字典**
 - **建议使用 try-except 处理异常，确保异常时返回空字典而不是抛出异常**
 
-## 请根据提供的 strategy_context 生成完整的买入策略代码：
+## 请根据用户消息中的策略规则生成完整的买入策略代码：
 
 ## ⚠️⚠️⚠️ 最终输出格式（再次强调，违反会导致 SyntaxError）：
 
