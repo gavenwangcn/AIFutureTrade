@@ -5,6 +5,8 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.util.UriComponentsBuilder;
 
 import java.net.URI;
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Map;
 
@@ -230,5 +232,86 @@ public class BackendClient {
 
     public Map<String, Object> marketTickersSql(Map<String, Object> body) {
         return json.postJson(URI.create(baseUrl() + "/api/mcp/market-tickers/sql"), body);
+    }
+
+    // --- 盯盘 market_look + 策略 strategys（主库 backend）---
+
+    public Map<String, Object> marketLookCreate(Map<String, Object> body) {
+        return json.postJson(URI.create(baseUrl() + "/api/market-look"), body);
+    }
+
+    public Map<String, Object> strategyCreate(Map<String, Object> body) {
+        return json.postJson(URI.create(baseUrl() + "/api/strategies"), body);
+    }
+
+    public Map<String, Object> strategyGetById(String id) {
+        String enc = URLEncoder.encode(id, StandardCharsets.UTF_8);
+        return json.get(URI.create(baseUrl() + "/api/strategies/" + enc));
+    }
+
+    /**
+     * 分页查询策略；固定 type=look 时用于盯盘策略列表。返回 PageResult JSON（含 data 数组）。
+     */
+    public Map<String, Object> strategyPageByType(Integer pageNum, Integer pageSize, String name, String type) {
+        UriComponentsBuilder b = UriComponentsBuilder.fromUriString(baseUrl() + "/api/strategies/page");
+        b.queryParam("pageNum", pageNum != null && pageNum > 0 ? pageNum : 1);
+        b.queryParam("pageSize", pageSize != null && pageSize > 0 ? pageSize : 50);
+        if (name != null && !name.isEmpty()) {
+            b.queryParam("name", name);
+        }
+        if (type != null && !type.isEmpty()) {
+            b.queryParam("type", type);
+        }
+        return json.get(URI.create(b.toUriString()));
+    }
+
+    public Map<String, Object> marketLookPage(
+            Integer pageNum,
+            Integer pageSize,
+            String executionStatus,
+            String symbol,
+            String strategyId,
+            String startedAtFrom,
+            String startedAtTo,
+            String endedAtFrom,
+            String endedAtTo) {
+        UriComponentsBuilder b = UriComponentsBuilder.fromUriString(baseUrl() + "/api/market-look/page");
+        if (pageNum != null) {
+            b.queryParam("pageNum", pageNum);
+        }
+        if (pageSize != null) {
+            b.queryParam("pageSize", pageSize);
+        }
+        if (executionStatus != null && !executionStatus.isEmpty()) {
+            b.queryParam("execution_status", executionStatus);
+        }
+        if (symbol != null && !symbol.isEmpty()) {
+            b.queryParam("symbol", symbol);
+        }
+        if (strategyId != null && !strategyId.isEmpty()) {
+            b.queryParam("strategy_id", strategyId);
+        }
+        if (startedAtFrom != null && !startedAtFrom.isEmpty()) {
+            b.queryParam("started_at_from", startedAtFrom);
+        }
+        if (startedAtTo != null && !startedAtTo.isEmpty()) {
+            b.queryParam("started_at_to", startedAtTo);
+        }
+        if (endedAtFrom != null && !endedAtFrom.isEmpty()) {
+            b.queryParam("ended_at_from", endedAtFrom);
+        }
+        if (endedAtTo != null && !endedAtTo.isEmpty()) {
+            b.queryParam("ended_at_to", endedAtTo);
+        }
+        return json.get(URI.create(b.toUriString()));
+    }
+
+    public Map<String, Object> marketLookGetById(String id) {
+        String enc = URLEncoder.encode(id, StandardCharsets.UTF_8);
+        return json.get(URI.create(baseUrl() + "/api/market-look/" + enc));
+    }
+
+    public Map<String, Object> marketLookSql(Map<String, Object> body) {
+        return json.postJson(URI.create(baseUrl() + "/api/mcp/market-look/sql"), body);
     }
 }

@@ -56,7 +56,15 @@ public class MarketLookServiceImpl implements MarketLookService {
     }
 
     @Override
-    public PageResult<MarketLookDTO> page(PageRequest pageRequest, String executionStatus, String symbol, String strategyId) {
+    public PageResult<MarketLookDTO> page(
+            PageRequest pageRequest,
+            String executionStatus,
+            String symbol,
+            String strategyId,
+            LocalDateTime startedAtFrom,
+            LocalDateTime startedAtTo,
+            LocalDateTime endedAtFrom,
+            LocalDateTime endedAtTo) {
         int pageNum = pageRequest.getPageNum() != null && pageRequest.getPageNum() > 0 ? pageRequest.getPageNum() : 1;
         int pageSize = pageRequest.getPageSize() != null && pageRequest.getPageSize() > 0 ? pageRequest.getPageSize() : 10;
 
@@ -69,6 +77,18 @@ public class MarketLookServiceImpl implements MarketLookService {
         }
         if (StringUtils.hasText(strategyId) && !"undefined".equalsIgnoreCase(strategyId)) {
             q.eq(MarketLookDO::getStrategyId, strategyId.trim());
+        }
+        if (startedAtFrom != null) {
+            q.ge(MarketLookDO::getStartedAt, startedAtFrom);
+        }
+        if (startedAtTo != null) {
+            q.le(MarketLookDO::getStartedAt, startedAtTo);
+        }
+        if (endedAtFrom != null) {
+            q.ge(MarketLookDO::getEndedAt, endedAtFrom);
+        }
+        if (endedAtTo != null) {
+            q.le(MarketLookDO::getEndedAt, endedAtTo);
         }
         q.orderByDesc(MarketLookDO::getStartedAt).orderByDesc(MarketLookDO::getCreatedAt);
 

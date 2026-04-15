@@ -51,6 +51,9 @@ class AllMcpToolsSmokeTest {
     @Autowired
     private MarketTickersTools marketTickersTools;
 
+    @Autowired
+    private MarketLookTools marketLookTools;
+
     @BeforeEach
     void stubDownstream() {
         Map<String, Object> okEmptyPage = new HashMap<>();
@@ -132,6 +135,32 @@ class AllMcpToolsSmokeTest {
         lenient().when(backendClient.marketTickersLatest(anyString())).thenReturn(okLatest);
         lenient().when(backendClient.marketTickersSql(anyMap())).thenReturn(okSql);
 
+        Map<String, Object> okId = new HashMap<>();
+        okId.put("id", "00000000-0000-0000-0000-000000000001");
+        okId.put("message", "ok");
+        lenient().when(backendClient.marketLookCreate(anyMap())).thenReturn(okId);
+        lenient().when(backendClient.strategyCreate(anyMap())).thenReturn(okId);
+        lenient().when(backendClient.strategyGetById(anyString())).thenReturn(okId);
+        lenient().when(backendClient.strategyPageByType(
+                nullable(Integer.class),
+                nullable(Integer.class),
+                nullable(String.class),
+                nullable(String.class)
+        )).thenReturn(okEmptyPage);
+        lenient().when(backendClient.marketLookPage(
+                nullable(Integer.class),
+                nullable(Integer.class),
+                nullable(String.class),
+                nullable(String.class),
+                nullable(String.class),
+                nullable(String.class),
+                nullable(String.class),
+                nullable(String.class),
+                nullable(String.class)
+        )).thenReturn(okEmptyPage);
+        lenient().when(backendClient.marketLookGetById(anyString())).thenReturn(okId);
+        lenient().when(backendClient.marketLookSql(anyMap())).thenReturn(okSql);
+
         Map<String, Object> pricesOk = new HashMap<>();
         pricesOk.put("success", true);
         pricesOk.put("data", List.of(Map.of("symbol", "BTCUSDT", "price", 1.0)));
@@ -204,5 +233,18 @@ class AllMcpToolsSmokeTest {
         assertSuccessMap(marketTickersTools.sql(
                 "SELECT * FROM `24_market_tickers` WHERE symbol=? LIMIT 1",
                 List.of("BTCUSDT")));
+    }
+
+    @Test
+    void trade_look_tools() {
+        assertNotNull(marketLookTools.marketLookCreate("BTC", "sid", "摘要", null, null, null, null, null));
+        assertNotNull(marketLookTools.strategyCreateLook("测试盯盘", null, null, null));
+        assertNotNull(marketLookTools.strategyGetById("sid"));
+        assertNotNull(marketLookTools.strategySearchLook(1, 10, null));
+        assertNotNull(marketLookTools.marketLookQueryPage(1, 10, null, null, null, null, null, null, null));
+        assertNotNull(marketLookTools.marketLookGetById("mid"));
+        assertSuccessMap(marketLookTools.marketLookSql(
+                "SELECT id FROM `market_look` WHERE execution_status=? LIMIT 1",
+                List.of("RUNNING")));
     }
 }

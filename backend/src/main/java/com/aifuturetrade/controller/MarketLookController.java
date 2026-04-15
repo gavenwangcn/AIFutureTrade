@@ -43,18 +43,41 @@ public class MarketLookController {
     }
 
     @GetMapping("/page")
-    @Operation(summary = "分页查询盯盘任务")
-    public ResponseEntity<PageResult<MarketLookDTO>> page(
+    @Operation(summary = "分页查询盯盘任务", description = "可选按 execution_status、symbol、strategy_id、started_at/ended_at 时间范围筛选")
+    public ResponseEntity<?> page(
             @RequestParam(value = "pageNum", defaultValue = "1") Integer pageNum,
             @RequestParam(value = "pageSize", defaultValue = "10") Integer pageSize,
-            @Parameter(description = "RUNNING 或 ENDED")
+            @Parameter(description = "RUNNING | SENDING | ENDED")
             @RequestParam(value = "execution_status", required = false) String executionStatus,
             @RequestParam(value = "symbol", required = false) String symbol,
-            @RequestParam(value = "strategy_id", required = false) String strategyId) {
+            @RequestParam(value = "strategy_id", required = false) String strategyId,
+            @Parameter(description = "started_at 下限，ISO 或 yyyy-MM-dd HH:mm:ss")
+            @RequestParam(value = "started_at_from", required = false) String startedAtFrom,
+            @Parameter(description = "started_at 上限")
+            @RequestParam(value = "started_at_to", required = false) String startedAtTo,
+            @Parameter(description = "ended_at 下限")
+            @RequestParam(value = "ended_at_from", required = false) String endedAtFrom,
+            @Parameter(description = "ended_at 上限")
+            @RequestParam(value = "ended_at_to", required = false) String endedAtTo) {
         PageRequest pr = new PageRequest();
         pr.setPageNum(pageNum);
         pr.setPageSize(pageSize);
-        return ResponseEntity.ok(marketLookService.page(pr, executionStatus, symbol, strategyId));
+        try {
+            return ResponseEntity.ok(marketLookService.page(
+                    pr,
+                    executionStatus,
+                    symbol,
+                    strategyId,
+                    parseOptionalDateTime(startedAtFrom, "started_at_from"),
+                    parseOptionalDateTime(startedAtTo, "started_at_to"),
+                    parseOptionalDateTime(endedAtFrom, "ended_at_from"),
+                    parseOptionalDateTime(endedAtTo, "ended_at_to")));
+        } catch (IllegalArgumentException e) {
+            Map<String, Object> err = new HashMap<>();
+            err.put("success", false);
+            err.put("error", e.getMessage());
+            return ResponseEntity.badRequest().body(err);
+        }
     }
 
     @GetMapping("/{id}")
@@ -123,6 +146,17 @@ public class MarketLookController {
             err.put("success", false);
             err.put("error", e.getMessage());
             return ResponseEntity.badRequest().body(err);
+        }
+    }
+
+    private static LocalDateTime parseOptionalDateTime(String raw, String fieldName) {
+        if (raw == null || raw.isBlank()) {
+            return null;
+        }
+        try {
+            return parseEndedAt(raw);
+        } catch (IllegalArgumentException e) {
+            throw new IllegalArgumentException(fieldName + ": " + e.getMessage());
         }
     }
 

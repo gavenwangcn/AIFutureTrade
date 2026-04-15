@@ -19,7 +19,18 @@ public interface MarketLookService {
      */
     List<MarketLookDTO> listRunning();
 
-    PageResult<MarketLookDTO> page(PageRequest pageRequest, String executionStatus, String symbol, String strategyId);
+    /**
+     * 分页查询；时间范围为可选，闭区间 [from, to]（与列 started_at / ended_at 比较）。
+     */
+    PageResult<MarketLookDTO> page(
+            PageRequest pageRequest,
+            String executionStatus,
+            String symbol,
+            String strategyId,
+            LocalDateTime startedAtFrom,
+            LocalDateTime startedAtTo,
+            LocalDateTime endedAtFrom,
+            LocalDateTime endedAtTo);
 
     MarketLookDTO getById(String id);
 

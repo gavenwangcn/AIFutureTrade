@@ -18,7 +18,7 @@ These **omit explicit `--server` / `--tool`** — **do not** pass server and too
 
 ---
 
-Param names match **`trade-mcp` source** (`MarketTools` / `MarketTickersTools` / `AccountTools` / `OrderTools`) and **`mcporter list tradeMcp --schema --json`**, all **camelCase**.
+Param names match **`trade-mcp` source** (`MarketTools` / `MarketTickersTools` / `MarketLookTools` / `AccountTools` / `OrderTools`) and **`mcporter list tradeMcp --schema --json`**, all **camelCase**. 盯盘相关工具说明见 [market-look-tools.md](market-look-tools.md)。
 
 **Invocation shell** (do not skip `--server` / `--tool`; avoid ambiguous bare positionals):
 
