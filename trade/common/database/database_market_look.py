@@ -13,6 +13,7 @@ from .database_basic import create_pooled_db
 logger = logging.getLogger(__name__)
 
 EXECUTION_RUNNING = "RUNNING"
+EXECUTION_SENDING = "SENDING"
 EXECUTION_ENDED = "ENDED"
 
 # 与 Java MarketLookDO.ENDED_AT_NOT_FINISHED_PLACEHOLDER 一致，满足 ended_at NOT NULL
@@ -60,6 +61,28 @@ class MarketLookDatabase:
             cur = conn.cursor(cursors.DictCursor)
             try:
                 cur.execute(sql, (EXECUTION_RUNNING,))
+                return [dict(r) for r in cur.fetchall()]
+            finally:
+                cur.close()
+
+        return self._with_connection(_run)
+
+    def list_sending(self) -> List[Dict]:
+        """通知队列中（异步发送中）的任务，用于进程重启后恢复队列。"""
+
+        def _run(conn):
+            from pymysql import cursors
+
+            sql = f"""
+                SELECT id, symbol, strategy_id, strategy_name, execution_status, signal_result,
+                       detail_summary, started_at, ended_at, created_at, updated_at
+                FROM `{self.table}`
+                WHERE execution_status = %s
+                ORDER BY updated_at ASC
+            """
+            cur = conn.cursor(cursors.DictCursor)
+            try:
+                cur.execute(sql, (EXECUTION_SENDING,))
                 return [dict(r) for r in cur.fetchall()]
             finally:
                 cur.close()

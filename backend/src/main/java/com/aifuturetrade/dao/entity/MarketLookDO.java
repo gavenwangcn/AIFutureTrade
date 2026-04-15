@@ -23,6 +23,8 @@ public class MarketLookDO implements Serializable {
     private static final long serialVersionUID = 1L;
 
     public static final String STATUS_RUNNING = "RUNNING";
+    /** Python 盯盘进程：notify 已入队、异步推送中 */
+    public static final String STATUS_SENDING = "SENDING";
     public static final String STATUS_ENDED = "ENDED";
 
     /**

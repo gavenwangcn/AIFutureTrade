@@ -1,6 +1,6 @@
 """
 盯盘引擎：每次只针对一个 symbol 拉取实时价、多周期 K 线与指标（逻辑与 TradingEngine 中单品种分支一致），
-不通过 _build_market_state_for_candidates 批量接口。触发 notify 时写入 trade_notify 表（不使用 alert_records）。
+不通过 _build_market_state_for_candidates 批量接口。触发 notify 时：落库 SENDING、并入异步队列，由后台线程经 trade-monitor 推送后再写入 trade_notify 并置 ENDED。
 """
 
 import json
@@ -14,6 +14,7 @@ import numpy as np
 import trade.common.config as app_config
 from trade.common.database.database_market_look import (
     EXECUTION_ENDED,
+    EXECUTION_SENDING,
     MarketLookDatabase,
 )
 from trade.common.database.database_strategys import StrategysDatabase
@@ -394,64 +395,40 @@ class LookEngine:
 
         if notify_payloads:
             snap = trim_market_snapshot_for_notify(market_state, sym_key)
-
-            trade_notify_ids: List[int] = []
-            for dec in notify_payloads:
-                if dec.get("market_date") is None:
-                    dec["market_date"] = snap
-                title = f"盯盘通知 [{sym_key}] {strategy.get('strategy_name') or ''}".strip()
-                body_lines = [
-                    f"盯盘任务ID (market_look.id): {row_id}",
-                    f"策略ID (strategys.id): {strategy_id}",
-                    f"策略名称: {strategy.get('strategy_name') or ''}",
-                    f"交易对: {sym_key}",
-                    f"合约: {dec.get('symbol') or sym_key}",
-                    f"价格: {dec.get('price')}",
-                    f"说明: {dec.get('justification')}",
-                    f"market_date: {json.dumps(dec.get('market_date'), ensure_ascii=False, default=str)[:2000]}",
-                ]
-                message = "\n".join(body_lines)
-                extra = {
-                    "market_look_id": row_id,
-                    "strategy_id": strategy_id,
-                    "symbol": sym_key,
-                    "decision": dec,
-                    "market_snapshot": snap,
-                }
-                nid = self.trade_notify_db.insert_look_notify(
-                    market_look_id=str(row_id) if row_id is not None else None,
-                    strategy_id=str(strategy_id),
-                    strategy_name=strategy.get("strategy_name"),
-                    symbol=sym_key,
-                    title=title,
-                    message=message,
-                    extra=extra,
-                )
-                trade_notify_ids.append(nid)
-                summary["notify_sent"] = True
-
-            summary["trade_notify_ids"] = trade_notify_ids
-
+            queue_payload = {
+                "strategy_id": strategy_id,
+                "sym_key": sym_key,
+                "snap": snap,
+                "decisions": decisions,
+                "notify_payloads": notify_payloads,
+            }
+            stub = {
+                "ts": _utc8_now_iso(),
+                "notify": "queued",
+                "notify_queue": True,
+                "queue_payload": queue_payload,
+                "decisions": decisions,
+                "market_look_id": row_id,
+                "strategy_id": strategy_id,
+            }
             self.market_look_db.update_signal_result(
                 row_id,
-                json.dumps(
-                    {
-                        "ts": _utc8_now_iso(),
-                        "notify": True,
-                        "decisions": decisions,
-                        "snapshot_trimmed": snap,
-                        "market_look_id": row_id,
-                        "strategy_id": strategy_id,
-                        "trade_notify_ids": trade_notify_ids,
-                        "execution_ended": "notified",
-                    },
-                    ensure_ascii=False,
-                    default=str,
-                ),
+                json.dumps(stub, ensure_ascii=False, default=str),
             )
-            ended_ts = _now_shanghai_naive()
-            self.market_look_db.update_status(row_id, EXECUTION_ENDED, ended_at=ended_ts)
-            summary["execution_ended"] = "notified"
+            self.market_look_db.update_status(row_id, EXECUTION_SENDING)
+            from trade.look_notify_queue import JOB_KIND_LOOK_NOTIFY, enqueue_look_notify
+
+            enqueue_look_notify(
+                {
+                    "kind": JOB_KIND_LOOK_NOTIFY,
+                    "market_look_id": str(row_id),
+                    "queue_payload": queue_payload,
+                    "retries": 0,
+                }
+            )
+            summary["notify_sent"] = True
+            summary["notify_queued"] = True
+            summary["execution_ended"] = "queued_notify"
             return summary
 
         # 无 notify：若已超过 ended_at（上海时区），落库超时通知并结束任务（仅一次）
@@ -482,6 +459,114 @@ class LookEngine:
             self.market_look_db.update_status(row_id, EXECUTION_ENDED, ended_at=_now_shanghai_naive())
             summary["execution_ended"] = "timeout"
         return summary
+
+    def process_notify_queue_payload(self, row_id: str, queue_payload: Dict[str, Any]) -> bool:
+        """
+        异步通知线程调用：先调 trade-monitor 推送，成功后再落 trade_notify 并置 ENDED。
+        多条 notify 决策合并为一条消息，避免部分 HTTP 成功导致重试时重复推送。
+        """
+        from trade.common.trade_monitor_client import post_event_notify
+
+        base = (getattr(app_config, "TRADE_MONITOR_BASE_URL", None) or "").strip()
+        strategy_id = queue_payload.get("strategy_id")
+        strategy = self.strategys_db.get_strategy_by_id(strategy_id)
+        if not strategy:
+            logger.error("queued notify: strategy not found id=%s", strategy_id)
+            return False
+        sym_key = queue_payload.get("sym_key") or ""
+        snap = queue_payload.get("snap") or {}
+        notify_payloads = queue_payload.get("notify_payloads") or []
+        decisions = queue_payload.get("decisions") or {}
+        parts: List[str] = []
+        for dec in notify_payloads:
+            if not isinstance(dec, dict):
+                continue
+            dec_copy = dict(dec)
+            if dec_copy.get("market_date") is None:
+                dec_copy["market_date"] = snap
+            body_lines = [
+                f"盯盘任务ID (market_look.id): {row_id}",
+                f"策略ID (strategys.id): {strategy_id}",
+                f"策略名称: {strategy.get('strategy_name') or ''}",
+                f"交易对: {sym_key}",
+                f"合约: {dec_copy.get('symbol') or sym_key}",
+                f"价格: {dec_copy.get('price')}",
+                f"说明: {dec_copy.get('justification')}",
+                f"market_date: {json.dumps(dec_copy.get('market_date'), ensure_ascii=False, default=str)[:2000]}",
+            ]
+            parts.append("\n".join(body_lines))
+        if not parts:
+            logger.warning("queued notify: empty payloads market_look_id=%s", row_id)
+            return False
+
+        title = f"盯盘通知 [{sym_key}] {strategy.get('strategy_name') or ''}".strip()
+        message = "\n\n---\n\n".join(parts)
+        extra = {
+            "market_look_id": row_id,
+            "strategy_id": strategy_id,
+            "symbol": sym_key,
+            "notify_payloads": notify_payloads,
+            "market_snapshot": snap,
+            "kind": "look_notify_queued",
+        }
+        if not base:
+            logger.warning(
+                "TRADE_MONITOR_BASE_URL 未配置，跳过 HTTP 推送，仅落库 trade_notify (market_look=%s)",
+                row_id,
+            )
+            ok = True
+        else:
+            ok, _ = post_event_notify(title, message, metadata=extra)
+        if not ok:
+            return False
+
+        nid = self.trade_notify_db.insert_look_notify(
+            market_look_id=str(row_id) if row_id is not None else None,
+            strategy_id=str(strategy_id),
+            strategy_name=strategy.get("strategy_name"),
+            symbol=sym_key,
+            title=title,
+            message=message,
+            extra=extra,
+        )
+        self.market_look_db.update_signal_result(
+            row_id,
+            json.dumps(
+                {
+                    "ts": _utc8_now_iso(),
+                    "notify": True,
+                    "decisions": decisions,
+                    "snapshot_trimmed": snap,
+                    "market_look_id": row_id,
+                    "strategy_id": strategy_id,
+                    "trade_notify_ids": [nid],
+                    "execution_ended": "notified",
+                    "notify_channel": "trade_monitor",
+                },
+                ensure_ascii=False,
+                default=str,
+            ),
+        )
+        self.market_look_db.update_status(row_id, EXECUTION_ENDED, ended_at=_now_shanghai_naive())
+        return True
+
+    def abandon_notify_queue(self, row_id: str, reason: str) -> None:
+        """重试用尽：结束任务并记录原因。"""
+        self.market_look_db.update_signal_result(
+            row_id,
+            json.dumps(
+                {
+                    "ts": _utc8_now_iso(),
+                    "notify": False,
+                    "notify_queue_aborted": True,
+                    "reason": reason,
+                    "execution_ended": reason,
+                },
+                ensure_ascii=False,
+                default=str,
+            ),
+        )
+        self.market_look_db.update_status(row_id, EXECUTION_ENDED, ended_at=_now_shanghai_naive())
 
     def _emit_look_timeout_notify(
         self,

@@ -3,7 +3,7 @@
     <div class="market-look-toolbar">
       <div class="market-look-heading">
         <h3 class="market-look-title">盯盘详情</h3>
-        <span class="market-look-sub">运行中（RUNNING）</span>
+        <span class="market-look-sub">执行中（RUNNING）· 发送中（SENDING）</span>
       </div>
       <span
         class="status-indicator small"
@@ -28,6 +28,7 @@
       <table class="market-look-table">
         <thead>
           <tr>
+            <th>执行状态</th>
             <th>数据ID</th>
             <th>策略ID</th>
             <th>策略名称</th>
@@ -40,17 +41,23 @@
         </thead>
         <tbody>
           <tr v-if="loading && rows.length === 0" class="loading-row">
-            <td colspan="8" class="loading-cell">
+            <td colspan="9" class="loading-cell">
               <i class="bi bi-arrow-repeat spin"></i>
               <span>加载中…</span>
             </td>
           </tr>
           <tr
-            v-for="row in rows"
+            v-for="row in displayRows"
             :key="row.id"
             class="data-row"
             @click="openSignalModal(row)"
           >
+            <td class="cell-status">
+              <span
+                class="exec-status-pill"
+                :class="executionStatusPillClass(row)"
+              >{{ executionStatusLabel(row) }}</span>
+            </td>
             <td class="cell-mono cell-clip" :title="row.id">{{ row.id }}</td>
             <td class="cell-mono cell-clip" :title="row.strategy_id">{{ row.strategy_id || '—' }}</td>
             <td class="cell-clip" :title="row.strategy_name">{{ row.strategy_name || '—' }}</td>
@@ -68,7 +75,7 @@
             <td class="cell-detail" :title="detailSummaryRaw(row) || undefined">{{ detailSummaryDisplay(row) }}</td>
           </tr>
           <tr v-if="!loading && rows.length === 0">
-            <td colspan="8" class="empty-cell">暂无运行中的盯盘任务</td>
+            <td colspan="9" class="empty-cell">暂无执行中或发送中的盯盘任务</td>
           </tr>
         </tbody>
       </table>
@@ -151,6 +158,25 @@ const REFERENCE_MS = 24 * 60 * 60 * 1000
 
 const rows = ref([])
 const loading = ref(false)
+
+/** RUNNING 优先于 SENDING，同状态按开始时间倒序 */
+const displayRows = computed(() => {
+  const list = [...rows.value]
+  const rank = (r) => {
+    const s = String(r.execution_status ?? r.executionStatus ?? '').toUpperCase()
+    if (s === 'RUNNING') return 0
+    if (s === 'SENDING') return 1
+    return 2
+  }
+  list.sort((a, b) => {
+    const dr = rank(a) - rank(b)
+    if (dr !== 0) return dr
+    const ta = parseStartMs(a.started_at ?? a.startedAt) ?? 0
+    const tb = parseStartMs(b.started_at ?? b.startedAt) ?? 0
+    return tb - ta
+  })
+  return list
+})
 const statusType = ref('default')
 const statusText = ref('等待数据...')
 const nowTick = ref(Date.now())
@@ -215,7 +241,22 @@ function parseStartMs(startedAt) {
   return Number.isFinite(t) ? t : null
 }
 
+function executionStatusLabel(row) {
+  const s = String(row.execution_status ?? row.executionStatus ?? '').toUpperCase()
+  if (s === 'SENDING') return '发送中'
+  if (s === 'RUNNING') return '执行中'
+  return s || '—'
+}
+
+function executionStatusPillClass(row) {
+  const s = String(row.execution_status ?? row.executionStatus ?? '').toUpperCase()
+  if (s === 'SENDING') return 'exec-status-pill--sending'
+  return 'exec-status-pill--running'
+}
+
 function progressPercent(row) {
+  const st = String(row.execution_status ?? row.executionStatus ?? '').toUpperCase()
+  if (st === 'SENDING') return 100
   const start = parseStartMs(row.started_at ?? row.startedAt)
   if (start == null) return 0
   const elapsed = Math.max(0, nowTick.value - start)
@@ -225,6 +266,8 @@ function progressPercent(row) {
 const progressTitle = '相对 24h 参照窗口；下方为已执行时长'
 
 function elapsedLabel(row) {
+  const st = String(row.execution_status ?? row.executionStatus ?? '').toUpperCase()
+  if (st === 'SENDING') return '通知发送中…'
   const start = parseStartMs(row.started_at ?? row.startedAt)
   if (start == null) return '—'
   const ms = Math.max(0, nowTick.value - start)
@@ -494,6 +537,28 @@ defineExpose({ load })
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.cell-status {
+  white-space: nowrap;
+}
+
+.exec-status-pill {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.exec-status-pill--running {
+  background: rgba(51, 112, 255, 0.12);
+  color: #3370ff;
+}
+
+.exec-status-pill--sending {
+  background: rgba(245, 158, 11, 0.15);
+  color: #d97706;
 }
 
 .cell-mono {

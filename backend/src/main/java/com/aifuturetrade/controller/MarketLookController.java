@@ -37,7 +37,7 @@ public class MarketLookController {
     }
 
     @GetMapping("/status/running")
-    @Operation(summary = "执行中的盯盘任务", description = "execution_status = RUNNING（路径避免与 /{id} 冲突）")
+    @Operation(summary = "活跃盯盘任务", description = "execution_status 为 RUNNING 或 SENDING（路径避免与 /{id} 冲突）")
     public ResponseEntity<List<MarketLookDTO>> listRunning() {
         return ResponseEntity.ok(marketLookService.listRunning());
     }

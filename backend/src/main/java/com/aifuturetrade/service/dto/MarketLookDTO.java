@@ -27,7 +27,7 @@ public class MarketLookDTO implements Serializable {
     @JsonAlias({"strategyName"})
     private String strategyName;
 
-    /** RUNNING | ENDED */
+    /** RUNNING | SENDING | ENDED */
     @JsonProperty("execution_status")
     @JsonAlias({"executionStatus"})
     private String executionStatus;

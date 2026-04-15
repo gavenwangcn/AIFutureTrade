@@ -21,6 +21,7 @@ from trade.common.database.database_init import init_all_database_tables
 from trade.common.database.database_models import ModelsDatabase
 from trade.look_engine import LookEngine
 from trade.look_loop import market_look_loop
+from trade.look_notify_queue import hydrate_sending_queue, start_look_notify_worker
 from trade.market.market_data import MarketDataFetcher
 
 
@@ -72,6 +73,8 @@ def main():
 
     market_fetcher = MarketDataFetcher(db)
     look_engine = LookEngine(db=db, market_fetcher=market_fetcher, model_id=model_id_int)
+    start_look_notify_worker(look_engine)
+    hydrate_sending_queue(look_engine)
 
     try:
         market_look_loop(True, look_engine, db)

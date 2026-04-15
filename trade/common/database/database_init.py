@@ -598,7 +598,7 @@ class DatabaseInitializer:
             `symbol` VARCHAR(50) NOT NULL COMMENT '合约基础符号或完整合约名，如 BTC 或 BTCUSDT',
             `strategy_id` VARCHAR(36) NOT NULL COMMENT 'strategys.id，type=look',
             `strategy_name` VARCHAR(200) DEFAULT NULL COMMENT '策略名称冗余',
-            `execution_status` VARCHAR(20) NOT NULL DEFAULT 'RUNNING' COMMENT 'RUNNING=执行中, ENDED=已结束',
+            `execution_status` VARCHAR(20) NOT NULL DEFAULT 'RUNNING' COMMENT 'RUNNING=执行中, SENDING=通知异步发送中, ENDED=已结束',
             `signal_result` TEXT COMMENT '最近一次信号/执行结果描述或JSON',
             `detail_summary` VARCHAR(2000) DEFAULT NULL COMMENT '任务详情摘要（人工或业务填写）',
             `started_at` DATETIME NOT NULL COMMENT '执行开始时间',

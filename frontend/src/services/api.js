@@ -489,7 +489,7 @@ export const algoOrderApi = {
 export const marketLookApi = {
   /** 全部盯盘任务 */
   listAll: () => apiGet('/api/market-look'),
-  /** 仅执行中 RUNNING */
+  /** 活跃任务：RUNNING 与 SENDING（异步通知发送中） */
   listRunning: () => apiGet('/api/market-look/status/running'),
   /** 按主键 */
   getById: (id) => apiGet(`/api/market-look/${encodeURIComponent(id)}`),

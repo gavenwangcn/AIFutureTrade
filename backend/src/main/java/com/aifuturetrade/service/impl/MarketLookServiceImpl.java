@@ -17,6 +17,7 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
 import java.time.LocalDateTime;
+import java.util.Arrays;
 import java.util.List;
 import java.util.UUID;
 import java.util.stream.Collectors;
@@ -45,7 +46,9 @@ public class MarketLookServiceImpl implements MarketLookService {
     @Override
     public List<MarketLookDTO> listRunning() {
         LambdaQueryWrapper<MarketLookDO> q = new LambdaQueryWrapper<>();
-        q.eq(MarketLookDO::getExecutionStatus, MarketLookDO.STATUS_RUNNING);
+        q.in(
+                MarketLookDO::getExecutionStatus,
+                Arrays.asList(MarketLookDO.STATUS_RUNNING, MarketLookDO.STATUS_SENDING));
         q.orderByDesc(MarketLookDO::getStartedAt);
         return marketLookMapper.selectList(q).stream()
                 .map(this::toDto)

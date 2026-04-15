@@ -15,7 +15,7 @@ public interface MarketLookService {
     List<MarketLookDTO> listAll();
 
     /**
-     * 执行中的盯盘任务（execution_status = RUNNING）
+     * 活跃盯盘任务：执行中 RUNNING 与异步通知发送中 SENDING
      */
     List<MarketLookDTO> listRunning();
 
