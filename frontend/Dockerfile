@@ -97,11 +97,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
-# 复制frontend的依赖文件和源代码
-COPY frontend/package.json frontend/package-lock.json* ./
+# 复制 frontend 根目录清单与入口（单次 COPY，减少层数，降低 BuildKit finalize/snapshot 偶发失败）
+COPY frontend/package.json frontend/package-lock.json* frontend/index.html frontend/vite.config.js ./
 COPY frontend/src/ ./src/
-COPY frontend/index.html ./
-COPY frontend/vite.config.js ./
 COPY frontend/public/ ./public/
 
 # 创建 klinecharts 资源目录
