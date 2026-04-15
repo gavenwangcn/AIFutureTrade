@@ -43,7 +43,6 @@ from trade.trading.trading_utils import (
     get_side_for_sell_cycle,
     get_side_for_open,
     calculate_quantity_with_risk,
-    validate_position_for_trade,
     calculate_trade_requirements,
     calculate_pnl,
     adjust_quantity_precision_by_price,
@@ -3975,7 +3974,7 @@ class TradingEngine:
         available_cash = portfolio.get('cash', 0)
         if available_cash <= 0:
             return {'symbol': symbol, 'error': '可用现金不足，无法买入'}
-        
+
         # 【新的杠杆交易逻辑】
         # decision中的quantity是合约数量，需要根据USDT、杠杆和价格计算
         # AI模型应该返回：quantity = (USDT数量 * leverage) / symbol价格
@@ -4003,7 +4002,7 @@ class TradingEngine:
         
         # 验证需要的本金是否超过可用资金
         if required_capital_usdt > available_cash:
-            return {'symbol': symbol, 'error': f'可用资金不足，需要 {required_capital_usdt:.2f} USDT，但只有 {available_cash:.2f} USDT'} 
+            return {'symbol': symbol, 'error': f'可用资金不足，需要 {required_capital_usdt:.2f} USDT，但只有 {available_cash:.2f} USDT'}
         
         # 使用的本金USDT数量
         capital_usdt = required_capital_usdt
@@ -4376,50 +4375,58 @@ class TradingEngine:
         - trades表的side字段：sell（平多）或buy（平空）
         
         【持仓检查】
-        - 必须检查是否有对应方向的持仓
-        - 如果没有持仓，返回错误信息
+        - 是否在本地 portfolio 中有持仓仅用于盈亏估算与成交后同步；不据此拦截下单，由交易所接口返回错误并写入 trades.error
         """
         # 【根据signal自动确定position_side】不再从decision中获取position_side字段
         signal = decision.get('signal', '').lower()
         position_side, trade_signal = parse_signal_to_position_side(signal)
-        if signal not in ['sell_to_long', 'sell_to_short']:
-            logger.warning(f"[Model {self.model_id}] Invalid signal '{signal}' for _execute_sell, defaulting to LONG")
-        
-        # 使用工具函数验证持仓（包含查找和验证逻辑，避免重复查找）
-        position, error_msg = validate_position_for_trade(portfolio, symbol, position_side)
-        if error_msg:
-            return {'symbol': symbol, 'error': error_msg}
-        
+        valid_sell_signals = ('sell_to_long', 'sell_to_short')
+        if signal not in valid_sell_signals:
+            logger.warning(
+                f"[Model {self.model_id}] Invalid signal '{signal}' for _execute_sell, "
+                f"有效信号应为 {list(valid_sell_signals)}，仍按解析结果继续"
+            )
+        else:
+            logger.info(
+                f"[Model {self.model_id}] [平仓] ✓ 确认卖出类信号: {signal} -> position_side={position_side}, trade_signal={trade_signal}"
+            )
+
+        # 本地持仓（可选）：用于盈亏估算与成交后更新 DB；缺失时不拦截平仓请求
+        positions = portfolio.get('positions', []) or []
+        position = None
+        ps_u = (position_side or 'LONG').upper()
+        for p in positions:
+            if not isinstance(p, dict):
+                continue
+            if p.get('symbol') != symbol:
+                continue
+            actual_side = str(p.get('position_side') or 'LONG').upper()
+            if actual_side == ps_u:
+                position = p
+                break
+        position = position if isinstance(position, dict) else {}
+
         current_price = market_state[symbol]['price']
-        entry_price = position.get('avg_price', 0)
-        # 使用 float 保留小数持仓（如 RIVERUSDT 0.32），int() 会导致 0.32 被截断为 0
+        entry_price = float(position.get('avg_price', 0) or 0)
         position_amt = float(abs(position.get('position_amt', 0) or 0))
-        
-        if position_amt <= 0:
-            return {'symbol': symbol, 'error': '持仓数量为0，无法平仓'}
-        
-        # 【使用策略指定的数量】若未提供则默认全仓
-        # 使用向后取整（20.5->21）；若策略返回的quantity>持仓数量，则使用持仓数量
+
+        # 【数量】仅校验策略侧：有合法 quantity 或能默认到本地全仓；不将数量限制为本地持仓（由接口拒绝过量等）
         original_strategy_quantity = decision.get('quantity')
-        if original_strategy_quantity is None or (isinstance(original_strategy_quantity, (int, float)) and original_strategy_quantity <= 0):
-            strategy_quantity = position_amt
-            logger.info(f"TRADE: 策略未指定quantity，使用全仓数量 {strategy_quantity} | symbol={symbol}")
+        if original_strategy_quantity is None or (
+            isinstance(original_strategy_quantity, (int, float)) and float(original_strategy_quantity) <= 0
+        ):
+            if position_amt > 0:
+                strategy_quantity = position_amt
+                logger.info(f"TRADE: 策略未指定quantity，使用本地持仓数量 {strategy_quantity} | symbol={symbol}")
+            else:
+                return {'symbol': symbol, 'error': '策略未指定有效 quantity 且本地无持仓可参考，无法确定平仓数量'}
         else:
             strategy_quantity = adjust_quantity_precision_by_price_ceil(float(original_strategy_quantity), current_price)
             if strategy_quantity <= 0:
                 strategy_quantity = float(math.ceil(float(original_strategy_quantity)))
                 logger.warning(f"TRADE: 精度调整后数量变为0，使用向后取整原始值 {strategy_quantity} | symbol={symbol}")
-            if strategy_quantity > position_amt:
-                logger.warning(f"TRADE: 策略数量({strategy_quantity})超过持仓数量({position_amt})，使用持仓数量 | symbol={symbol}")
-                strategy_quantity = position_amt
             if strategy_quantity <= 0:
                 return {'symbol': symbol, 'error': 'Strategy quantity must be greater than 0'}
-
-        # 【最终校验】防止超出持有数量（SDK调用和交易记录前再次校验）
-        # 使用 float 避免小数持仓（如 0.32）被 int() 截断为 0
-        strategy_quantity = min(float(strategy_quantity), float(position_amt))
-        if strategy_quantity <= 0:
-            return {'symbol': symbol, 'error': '持仓数量不足，无法执行平仓/卖出'}
         
         # 使用工具函数计算盈亏（基于实际平仓数量 strategy_quantity）
         gross_pnl, trade_fee, net_pnl = calculate_pnl(
@@ -4510,6 +4517,20 @@ class TradingEngine:
                 'error': sdk_error
             }
         
+        # 本地持仓账本更新用量：优先使用 SDK 成交数量；再与本地持仓取 min，避免剩余数量为负（请求下单量本身仍可按策略原值提交）
+        qty_for_portfolio = float(strategy_quantity)
+        if trade_mode == 'real' and parsed_response and not parsed_response.get('error'):
+            cum_qty = parsed_response.get('cumQty')
+            executed_qty_fallback = parsed_response.get('executedQty', 0.0)
+            ex = cum_qty if cum_qty is not None else executed_qty_fallback
+            try:
+                if ex is not None and float(ex) > 0:
+                    qty_for_portfolio = float(ex)
+            except (TypeError, ValueError):
+                pass
+        if position_amt > 0:
+            qty_for_portfolio = min(qty_for_portfolio, float(position_amt))
+
         # 更新数据库持仓记录：全平仓则删除，部分平仓则减少持仓数量（保证金不变）
         model_mapping = self.models_db._get_model_id_mapping() if self.models_db else None
         # 部分平仓时获取原始 initial_margin，保证金保持不变
@@ -4527,35 +4548,35 @@ class TradingEngine:
                 pass
         if trade_mode == 'real' and parsed_response and not parsed_response.get('error'):
             try:
-                if strategy_quantity >= position_amt:
+                if qty_for_portfolio >= position_amt:
                     self._close_position(self.model_id, symbol=symbol, position_side=position_side)
-                    logger.info(f"TRADE: Closed position (real mode, SDK success) - Model {self.model_id} {symbol} position_side={position_side} quantity={strategy_quantity}")
+                    logger.info(f"TRADE: Closed position (real mode, SDK success) - Model {self.model_id} {symbol} position_side={position_side} quantity={qty_for_portfolio}")
                 else:
-                    remaining_amt = position_amt - strategy_quantity
+                    remaining_amt = position_amt - qty_for_portfolio
                     leverage = self._resolve_leverage(decision)
                     self._update_position(
                         self.model_id, symbol=symbol, position_amt=remaining_amt, avg_price=entry_price,
                         leverage=leverage, position_side=position_side, initial_margin=original_initial_margin,
                         unrealized_profit=0.0
                     )
-                    logger.info(f"TRADE: Partial close (real mode, SDK success) - Model {self.model_id} {symbol} position_side={position_side} closed={strategy_quantity} remaining={remaining_amt} margin_unchanged")
+                    logger.info(f"TRADE: Partial close (real mode, SDK success) - Model {self.model_id} {symbol} position_side={position_side} closed={qty_for_portfolio} remaining={remaining_amt} margin_unchanged")
             except Exception as db_err:
                 logger.error(f"TRADE: Update position failed (real mode, SDK success) model={self.model_id} future={symbol}: {db_err}")
                 raise
         elif trade_mode == 'test':
             try:
-                if strategy_quantity >= position_amt:
+                if qty_for_portfolio >= position_amt:
                     self._close_position(self.model_id, symbol=symbol, position_side=position_side)
-                    logger.info(f"TRADE: Closed position (test mode) - Model {self.model_id} {symbol} position_side={position_side} quantity={strategy_quantity}")
+                    logger.info(f"TRADE: Closed position (test mode) - Model {self.model_id} {symbol} position_side={position_side} quantity={qty_for_portfolio}")
                 else:
-                    remaining_amt = position_amt - strategy_quantity
+                    remaining_amt = position_amt - qty_for_portfolio
                     leverage = self._resolve_leverage(decision)
                     self._update_position(
                         self.model_id, symbol=symbol, position_amt=remaining_amt, avg_price=entry_price,
                         leverage=leverage, position_side=position_side, initial_margin=original_initial_margin,
                         unrealized_profit=0.0
                     )
-                    logger.info(f"TRADE: Partial close (test mode) - Model {self.model_id} {symbol} position_side={position_side} closed={strategy_quantity} remaining={remaining_amt} margin_unchanged")
+                    logger.info(f"TRADE: Partial close (test mode) - Model {self.model_id} {symbol} position_side={position_side} closed={qty_for_portfolio} remaining={remaining_amt} margin_unchanged")
             except Exception as db_err:
                 logger.error(f"TRADE: Update position failed ({trade_signal.upper()}) model={self.model_id} future={symbol}: {db_err}")
                 raise

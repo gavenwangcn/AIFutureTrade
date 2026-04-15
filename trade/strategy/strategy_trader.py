@@ -213,9 +213,7 @@ class StrategyTrader(Trader):
         # 语义要求：
         # - 按优先级逐个执行策略
         # - 一旦某个symbol在较高优先级策略中命中（产生买入决策），该symbol需要从后续策略的 candidates/market_state 中扣除
-        # - account_info.available_balance（以及portfolio.cash）需要按已命中的买入决策预扣资金，避免后续策略重复/超额决策
-        #
-        # 注意：这里是“决策生成阶段”的预扣，用于策略间约束；真实下单阶段仍以交易执行模块的风控/资金校验为准。
+        # - 不在此阶段做资金/余额预扣或拦截：策略返回有效信号后即采纳；资金是否足够由交易所接口返回，交易执行层不再重复校验余额/持仓上限（循环前置已校验）。
         #
         # 规范化 & 去重 candidates（按symbol去重，保留顺序）
         remaining_candidates: List[Dict] = []
@@ -284,82 +282,6 @@ class StrategyTrader(Trader):
         working_account_info: Dict = dict(account_info) if isinstance(account_info, dict) else {}
         working_portfolio: Dict = dict(portfolio) if isinstance(portfolio, dict) else {}
 
-        def _get_available_balance() -> float:
-            # account_info 主字段：available_balance
-            # 若缺失，fallback 到 portfolio.cash（策略模板也会使用该字段）
-            candidates_keys = [
-                ('available_balance', working_account_info),
-                ('availableBalance', working_account_info),
-                ('available_cash', working_account_info),
-                ('cash', working_portfolio),
-            ]
-            for key, obj in candidates_keys:
-                try:
-                    if isinstance(obj, dict) and obj.get(key) is not None:
-                        return float(obj.get(key))
-                except Exception:
-                    continue
-            return 0.0
-
-        def _set_available_balance(v: float) -> None:
-            # 同步写回 account_info.available_balance 与 portfolio.cash（仅工作副本）
-            try:
-                working_account_info['available_balance'] = float(v)
-            except Exception:
-                pass
-            try:
-                if 'cash' in working_portfolio:
-                    working_portfolio['cash'] = float(v)
-            except Exception:
-                pass
-
-        def _estimate_required_capital(sym_upper: str, dec: Dict, ms: Dict) -> float:
-            """
-            预估需要占用的本金（USDT），与交易执行模块一致采用：
-            required_capital_usdt = (position_amt * price) / leverage
-            
-            注意：期货 quantity 可为小数（如 0.0146 ETH），需使用 float 而非 int。
-            """
-            try:
-                qty = float(dec.get('quantity') or 0)
-                if qty <= 0:
-                    return 0.0
-            except (ValueError, TypeError):
-                return 0.0
-
-            # leverage：优先取决策字段，其次fallback为1
-            try:
-                lev = int(float(dec.get('leverage') or 0))
-                if lev <= 0:
-                    lev = 1
-            except Exception:
-                lev = 1
-
-            # price：优先从 market_state[symbol].price 取（注意 key 可能不是大写）
-            price = None
-            if isinstance(ms, dict):
-                # 先直接按大写找
-                payload = ms.get(sym_upper)
-                if payload is None:
-                    # 再遍历找 key 大小写不同的情况
-                    for k, v in ms.items():
-                        try:
-                            if str(k).upper() == sym_upper:
-                                payload = v
-                                break
-                        except Exception:
-                            continue
-                if isinstance(payload, dict):
-                    price = payload.get('price')
-            try:
-                price_f = float(price) if price is not None else 0.0
-            except Exception:
-                price_f = 0.0
-            if price_f <= 0:
-                return 0.0
-
-            return (qty * price_f) / lev
-
         final_decisions: Dict[str, List[Dict]] = {}
         used_strategy_names: List[str] = []
 
@@ -369,10 +291,6 @@ class StrategyTrader(Trader):
         for strategy in strategies:
             # 没有剩余候选时直接结束
             if not remaining_candidates or not remaining_symbol_set:
-                break
-
-            # 可用余额耗尽时，停止继续生成买入决策
-            if _get_available_balance() <= 0:
                 break
 
             strategy_name = strategy.get('strategy_name', '未知策略')
@@ -451,10 +369,8 @@ class StrategyTrader(Trader):
                     decisions_by_symbol[sym_upper] = dec_list
 
                 selected_symbols_this_strategy: List[str] = []
-                spent_this_strategy = 0.0
-                available_before = _get_available_balance()
 
-                # 按 remaining_candidates 顺序挑选（同一 symbol 可有多条决策，合并资金预估）
+                # 按 remaining_candidates 顺序挑选；仅校验信号类型与 quantity>0，不做资金/余额判断
                 for c in remaining_candidates:
                     try:
                         sym_upper = str(c.get('symbol') or c.get('contract_symbol') or '').upper()
@@ -469,78 +385,51 @@ class StrategyTrader(Trader):
                     if not dec_list:
                         continue
 
-                    # 只保留有效买入信号的决策，并汇总所需资金
                     valid_dec_list = []
-                    total_required_capital = 0.0
                     for dec in dec_list:
                         if not isinstance(dec, dict):
                             continue
                         sig = (dec.get('signal') or '').lower()
                         if sig not in valid_signals:
                             continue
+                        try:
+                            qty = float(dec.get('quantity') or 0)
+                        except (TypeError, ValueError):
+                            qty = 0.0
+                        if qty <= 0:
+                            logger.warning(
+                                f"[StrategyTrader] [Model {effective_model_id}] [买入策略筛选] 丢弃 {sym_upper} 一条决策: "
+                                f"signal={sig} 但 quantity<=0 或非法"
+                            )
+                            continue
                         valid_dec_list.append(dec)
-                        cap = _estimate_required_capital(sym_upper, dec, filtered_market_state)
-                        if cap > 0:
-                            total_required_capital += cap
                     if not valid_dec_list:
-                        # 策略返回了该symbol的决策，但全部信号都不在有效集合内
                         try:
                             signals = [(d.get('signal') if isinstance(d, dict) else None) for d in dec_list]
                         except Exception:
                             signals = []
                         logger.warning(
                             f"[StrategyTrader] [Model {effective_model_id}] [买入策略筛选] 跳过 {sym_upper}: "
-                            f"无有效买入信号（valid={sorted(list(valid_signals))}），策略返回signals={signals}"
-                        )
-                        continue
-                    if total_required_capital <= 0:
-                        # 有有效信号，但无法估算所需保证金（通常是price缺失/无效）
-                        try:
-                            # 尽量打印当前market_state里的price，便于排查
-                            price_val = None
-                            payload = filtered_market_state.get(sym_upper)
-                            if payload is None:
-                                for k, v in (filtered_market_state or {}).items():
-                                    try:
-                                        if str(k).upper() == sym_upper:
-                                            payload = v
-                                            break
-                                    except Exception:
-                                        continue
-                            if isinstance(payload, dict):
-                                price_val = payload.get('price')
-                        except Exception:
-                            price_val = None
-                        logger.warning(
-                            f"[StrategyTrader] [Model {effective_model_id}] [买入策略筛选] 跳过 {sym_upper}: "
-                            f"有效信号数={len(valid_dec_list)} 但所需保证金估算为0（price可能缺失/无效）。"
-                            f" market_price={price_val}, decisions={[(d.get('signal'), d.get('quantity'), d.get('leverage')) for d in valid_dec_list]}"
-                        )
-                        continue
-                    if available_before - spent_this_strategy < total_required_capital:
-                        logger.warning(
-                            f"[StrategyTrader] [Model {effective_model_id}] [买入策略筛选] 跳过 {sym_upper}: "
-                            f"余额不足。available_before={available_before:.8f}, spent_this_strategy={spent_this_strategy:.8f}, "
-                            f"available_left={available_before - spent_this_strategy:.8f}, required={total_required_capital:.8f}, "
-                            f"decisions={[(d.get('signal'), d.get('quantity'), d.get('leverage')) for d in valid_dec_list]}"
+                            f"无有效买入信号（valid={sorted(list(valid_signals))} 且 quantity>0），策略返回signals={signals}"
                         )
                         continue
 
                     for dec in valid_dec_list:
-                        logger.info(f"[StrategyTrader] [Model {effective_model_id}] ✓ 接受有效买入信号: {sym_upper} -> {(dec.get('signal') or '').lower()} (quantity={dec.get('quantity')}, leverage={dec.get('leverage')})")
+                        logger.info(
+                            f"[StrategyTrader] [Model {effective_model_id}] ✓ 接受有效买入信号: {sym_upper} -> "
+                            f"{(dec.get('signal') or '').lower()} (quantity={dec.get('quantity')}, leverage={dec.get('leverage')})"
+                        )
                         dec.setdefault('_strategy_name', strategy_name)
                         dec.setdefault('_strategy_type', 'buy')
 
                     final_decisions[sym_upper] = valid_dec_list
                     selected_symbols_this_strategy.append(sym_upper)
-                    spent_this_strategy += total_required_capital
-                    logger.warning(
+                    logger.info(
                         f"[StrategyTrader] [Model {effective_model_id}] [买入策略筛选] 采纳 {sym_upper}: "
-                        f"required={total_required_capital:.8f}, spent_this_strategy={spent_this_strategy:.8f}, "
-                        f"available_left={available_before - spent_this_strategy:.8f}"
+                        f"条数={len(valid_dec_list)}（不做余额预校验，由接口返回结果）"
                     )
 
-                # 若本策略命中，则扣除 candidates/market_state，并预扣余额（供后续策略使用）
+                # 若本策略命中，则扣除 candidates/market_state（供后续优先级策略）
                 if selected_symbols_this_strategy:
                     used_strategy_names.append(strategy_name)
 
@@ -549,10 +438,6 @@ class StrategyTrader(Trader):
                         c for c in remaining_candidates
                         if str(c.get('symbol') or c.get('contract_symbol') or '').upper() in remaining_symbol_set
                     ]
-
-                    # 预扣余额并写回工作副本
-                    new_available = max(0.0, available_before - spent_this_strategy)
-                    _set_available_balance(new_available)
 
             except Exception as e:
                 logger.error(f"[StrategyTrader] [Model {effective_model_id}] 执行策略 {strategy_name} 失败: {e}")
@@ -569,7 +454,6 @@ class StrategyTrader(Trader):
                     'strategies': used_strategy_names,
                     'decisions': final_decisions,
                     'remaining_candidate_count': len(remaining_candidates),
-                    'remaining_available_balance': _get_available_balance()
                 }, ensure_ascii=False, default=str),
                 'cot_trace': trace,
                 'skipped': False
