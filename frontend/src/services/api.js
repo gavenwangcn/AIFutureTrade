@@ -492,7 +492,9 @@ export const marketLookApi = {
   /** 仅执行中 RUNNING */
   listRunning: () => apiGet('/api/market-look/status/running'),
   /** 按主键 */
-  getById: (id) => apiGet(`/api/market-look/${encodeURIComponent(id)}`)
+  getById: (id) => apiGet(`/api/market-look/${encodeURIComponent(id)}`),
+  /** 创建盯盘任务（默认 RUNNING，需 type=look 策略） */
+  create: (data) => apiPost('/api/market-look', data)
 }
 
 /**

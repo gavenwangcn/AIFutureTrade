@@ -40,7 +40,8 @@ public class MarketTools {
 
     @McpTool(
             name = "trade_market_klines_with_indicators",
-            description = "查询K线并附加技术指标(MA/EMA/RSI/MACD/KDJ/ATR/ADX/VOL等)。"
+            description = "查询K线并附加技术指标(MA/EMA/RSI/MACD/KDJ/ATR/ADX/VOL/Supertrend等)。"
+                    + "Supertrend 与 TradingView ta.supertrend 对齐（默认 ATR=10、乘数=3），见每根 indicators.supertrend。"
                     + "data 按时间从旧到新；若某根K线存在任一指标无法给出有效值，则整根不返回（不删字段只删行）。"
                     + "通常从第99根起才可能全部齐全，故 data 条数可能小于请求的 limit；需更长历史请增大 limit。")
     public Map<String, Object> klinesWithIndicators(

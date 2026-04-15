@@ -18,6 +18,30 @@
               >
                 EMA
               </button>
+              <button
+                type="button"
+                :class="{ 'indicator-btn': true, 'active': showSuperOverlay }"
+                title="Supertrend（与 TradingView 一致，默认 ATR=10、乘数=3）"
+                @click="toggleSuperOverlay"
+              >
+                SUPER
+              </button>
+              <button
+                type="button"
+                :class="{ 'indicator-btn': true, 'active': showAtrPane }"
+                title="ATR（平均真实波幅，独立副图）"
+                @click="toggleAtrPane"
+              >
+                ATR
+              </button>
+              <button
+                type="button"
+                :class="{ 'indicator-btn': true, 'active': showAdxPane }"
+                title="ADX（趋向指标，独立副图）"
+                @click="toggleAdxPane"
+              >
+                ADX
+              </button>
             </div>
             <div class="kline-timeframes">
               <button
@@ -36,6 +60,35 @@
         </div>
         <div class="kline-modal-body">
           <div ref="chartContainerRef" class="kline-chart-container"></div>
+          <div
+            v-if="showSuperOverlay || showAtrPane || showAdxPane"
+            class="kline-super-footer"
+          >
+            <button
+              v-if="showSuperOverlay"
+              type="button"
+              class="btn-super-close"
+              @click="closeSuperOverlay"
+            >
+              关闭 SUPER 指标
+            </button>
+            <button
+              v-if="showAtrPane"
+              type="button"
+              class="btn-super-close"
+              @click="closeAtrPane"
+            >
+              关闭 ATR 指标
+            </button>
+            <button
+              v-if="showAdxPane"
+              type="button"
+              class="btn-super-close"
+              @click="closeAdxPane"
+            >
+              关闭 ADX 指标
+            </button>
+          </div>
         </div>
       </div>
     </div>
@@ -45,7 +98,7 @@
 <script setup>
 import { ref, watch, nextTick, onUnmounted } from 'vue'
 import { createDataLoader } from '../utils/customDatafeed.js'
-import { registerEMAIndicator, registerRSIIndicator, registerATRIndicator, registerADXIndicator, registerKDJIndicator, registerVOLIndicator, registerMACDIndicator } from '../utils/registerCustomIndicators.js'
+import { registerEMAIndicator, registerRSIIndicator, registerATRIndicator, registerADXIndicator, registerKDJIndicator, registerVOLIndicator, registerMACDIndicator, registerSUPERIndicator } from '../utils/registerCustomIndicators.js'
 
 // 获取 KLineChart 库（UMD 方式）
 const getKLineCharts = () => {
@@ -59,6 +112,7 @@ const getKLineCharts = () => {
     registerKDJIndicator(klinecharts)
     registerVOLIndicator(klinecharts)
     registerMACDIndicator(klinecharts)
+    registerSUPERIndicator(klinecharts)
     return klinecharts
   }
   throw new Error(
@@ -95,6 +149,17 @@ const title = ref(`${props.symbol} - K线图`)
 const isInitializing = ref(false) // 标记是否正在初始化
 const initTimeoutId = ref(null) // 存储初始化定时器ID
 const currentIndicator = ref('MA') // 当前显示的指标：'MA' 或 'EMA'
+const showSuperOverlay = ref(false)
+/** @type {import('vue').Ref<string|null>} */
+const superIndicatorId = ref(null)
+
+const showAtrPane = ref(false)
+/** @type {import('vue').Ref<string|null>} */
+const atrIndicatorId = ref(null)
+
+const showAdxPane = ref(false)
+/** @type {import('vue').Ref<string|null>} */
+const adxIndicatorId = ref(null)
 
 // 时间周期配置
 // KLineChart 10.0.0 使用 { span: number, type: string } 格式
@@ -289,23 +354,8 @@ const initChart = async () => {
     } else {
       console.error('[KLineChart] Failed to register custom RSI indicator')
     }
-    
-    // 创建ATR指标
-    // 直接使用运行时注册方式，确保使用自定义版本
-    if (registerATRIndicator(klinecharts)) {
-      const atrIndicatorId = chartInstance.value.createIndicator('ATR', false)
-      console.log('[KLineChart] ATR indicator registered and created with id:', atrIndicatorId)
-    } else {
-      console.error('[KLineChart] Failed to register ATR indicator')
-    }
 
-    // 创建ADX指标（放在ATR之后）
-    if (registerADXIndicator(klinecharts)) {
-      const adxIndicatorId = chartInstance.value.createIndicator('ADX', false)
-      console.log('[KLineChart] ADX indicator registered and created with id:', adxIndicatorId)
-    } else {
-      console.error('[KLineChart] Failed to register ADX indicator')
-    }
+    // ATR / ADX：与 SUPER 相同，仅点击工具栏按钮后创建（见 toggleAtrPane / toggleAdxPane）
 
     console.log('[KLineChart] Chart initialized successfully')
   } catch (error) {
@@ -315,6 +365,99 @@ const initChart = async () => {
     isInitializing.value = false
     initTimeoutId.value = null
   }
+}
+
+const toggleSuperOverlay = () => {
+  if (!chartInstance.value) return
+  const klinecharts = getKLineCharts()
+  if (!showSuperOverlay.value) {
+    registerSUPERIndicator(klinecharts)
+    try {
+      const id = chartInstance.value.createIndicator('SUPER', false, { id: 'candle_pane' })
+      superIndicatorId.value = id ?? null
+      showSuperOverlay.value = true
+    } catch (e) {
+      console.error('[KLineChart] create SUPER indicator', e)
+    }
+  } else {
+    closeSuperOverlay()
+  }
+}
+
+const closeSuperOverlay = () => {
+  if (chartInstance.value && superIndicatorId.value != null) {
+    try {
+      chartInstance.value.removeIndicator({ id: superIndicatorId.value })
+    } catch (e) {
+      console.warn('[KLineChart] remove SUPER', e)
+    }
+  }
+  superIndicatorId.value = null
+  showSuperOverlay.value = false
+}
+
+const toggleAtrPane = () => {
+  if (!chartInstance.value) return
+  const klinecharts = getKLineCharts()
+  if (!showAtrPane.value) {
+    if (!registerATRIndicator(klinecharts)) {
+      console.error('[KLineChart] Failed to register ATR indicator')
+      return
+    }
+    try {
+      const id = chartInstance.value.createIndicator('ATR', false)
+      atrIndicatorId.value = id ?? null
+      showAtrPane.value = true
+    } catch (e) {
+      console.error('[KLineChart] create ATR indicator', e)
+    }
+  } else {
+    closeAtrPane()
+  }
+}
+
+const closeAtrPane = () => {
+  if (chartInstance.value && atrIndicatorId.value != null) {
+    try {
+      chartInstance.value.removeIndicator({ id: atrIndicatorId.value })
+    } catch (e) {
+      console.warn('[KLineChart] remove ATR', e)
+    }
+  }
+  atrIndicatorId.value = null
+  showAtrPane.value = false
+}
+
+const toggleAdxPane = () => {
+  if (!chartInstance.value) return
+  const klinecharts = getKLineCharts()
+  if (!showAdxPane.value) {
+    if (!registerADXIndicator(klinecharts)) {
+      console.error('[KLineChart] Failed to register ADX indicator')
+      return
+    }
+    try {
+      const id = chartInstance.value.createIndicator('ADX', false)
+      adxIndicatorId.value = id ?? null
+      showAdxPane.value = true
+    } catch (e) {
+      console.error('[KLineChart] create ADX indicator', e)
+    }
+  } else {
+    closeAdxPane()
+  }
+}
+
+const closeAdxPane = () => {
+  if (chartInstance.value && adxIndicatorId.value != null) {
+    try {
+      chartInstance.value.removeIndicator({ id: adxIndicatorId.value })
+    } catch (e) {
+      console.warn('[KLineChart] remove ADX', e)
+    }
+  }
+  adxIndicatorId.value = null
+  showAdxPane.value = false
 }
 
 // 处理指标切换
@@ -371,6 +514,10 @@ const destroyChart = () => {
 
   // 重置初始化标志
   isInitializing.value = false
+
+  closeSuperOverlay()
+  closeAtrPane()
+  closeAdxPane()
 
   if (chartInstance.value) {
     try {
@@ -602,5 +749,31 @@ onUnmounted(() => {
   position: relative;
   overflow: hidden;
   min-height: 0;
+}
+
+.kline-super-footer {
+  flex-shrink: 0;
+  padding: 8px 16px 12px;
+  border-top: 1px solid #eee;
+  background: #fafbfc;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+}
+
+.btn-super-close {
+  padding: 6px 16px;
+  font-size: 13px;
+  border: 1px solid #cfd4dc;
+  border-radius: 6px;
+  background: #fff;
+  cursor: pointer;
+  color: #333;
+}
+
+.btn-super-close:hover {
+  border-color: #1677ff;
+  color: #1677ff;
 }
 </style>

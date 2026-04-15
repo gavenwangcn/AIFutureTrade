@@ -29,6 +29,7 @@ import numpy as np
 import talib
 from trade.market.market_index import MarketIndexCalculator
 from trade.market.indicator_rounding import nested_dict_has_none, round_indicator_4
+from trade.market.supertrend_tradingview import calculate_supertrend_tradingview
 
 from trade.common.binance_futures import BinanceFuturesClient
 from trade.common.database.database_market_tickers import MarketTickersDatabase
@@ -973,6 +974,7 @@ class MarketDataFetcher:
         - KDJ: 随机指标 (60, 20, 5) - 使用TradingView计算逻辑
         - ATR: 平均真实波幅 (7, 14, 21) - 使用Wilder's Smoothing方法
         - VOL: 成交量及均量线 (5, 10, 60)
+        - Supertrend: TradingView ta.supertrend 对齐（ATR 周期 10，乘数 3）
 
         Args:
             klines: 原始K线数据列表（可以是任意数量，不足时部分指标为空）
@@ -1106,6 +1108,13 @@ class MarketDataFetcher:
             atr7 = self._calculate_atr_tradingview(highs, lows, closes, period=7)
             atr14 = self._calculate_atr_tradingview(highs, lows, closes, period=14)
             atr21 = self._calculate_atr_tradingview(highs, lows, closes, period=21)
+            # Supertrend（TradingView）：ATR 周期 10、乘数 3
+            _st_atr_period = 10
+            _st_mult = 3.0
+            atr10_st = self._calculate_atr_tradingview(highs, lows, closes, period=_st_atr_period)
+            st_line, st_trend, st_fup, st_flw, _st_ub = calculate_supertrend_tradingview(
+                highs, lows, closes, atr10_st, multiplier=_st_mult
+            )
 
             # ADX指标（基于该symbol的K线数据）
             calculator = MarketIndexCalculator(atr_period=14, adx_period=14)
@@ -1186,7 +1195,15 @@ class MarketDataFetcher:
                         'mavol5': round_indicator_4(float(mavol5[i])) if not np.isnan(mavol5[i]) else None,
                         'mavol10': round_indicator_4(float(mavol10[i])) if not np.isnan(mavol10[i]) else None,
                         'mavol60': round_indicator_4(float(mavol60[i])) if not np.isnan(mavol60[i]) else None
-                    }
+                    },
+                    'supertrend': {
+                        'line': round_indicator_4(float(st_line[i])) if not np.isnan(st_line[i]) else None,
+                        'trend': int(st_trend[i]) if not np.isnan(st_trend[i]) else None,
+                        'upper': round_indicator_4(float(st_fup[i])) if not np.isnan(st_fup[i]) else None,
+                        'lower': round_indicator_4(float(st_flw[i])) if not np.isnan(st_flw[i]) else None,
+                        'atr_period': _st_atr_period,
+                        'multiplier': _st_mult,
+                    },
                 }
 
                 if nested_dict_has_none(indicators):

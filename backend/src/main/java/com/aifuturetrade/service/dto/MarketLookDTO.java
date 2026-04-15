@@ -46,7 +46,7 @@ public class MarketLookDTO implements Serializable {
     @JsonAlias({"startedAt"})
     private LocalDateTime startedAt;
 
-    /** 执行结束时间（必填）；RUNNING 未结束时为占位 2099-12-31T23:59:59 */
+    /** 执行结束时间（必填）；RUNNING 时为计划截止时间（盯盘引擎据此判断超时），历史数据可能仍为 2099 占位 */
     @JsonProperty("ended_at")
     @JsonAlias({"endedAt"})
     private LocalDateTime endedAt;

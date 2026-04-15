@@ -367,6 +367,8 @@ onUnmounted(() => {
   if (pollTimer) clearInterval(pollTimer)
   if (tickTimer) clearInterval(tickTimer)
 })
+
+defineExpose({ load })
 </script>
 
 <style scoped>

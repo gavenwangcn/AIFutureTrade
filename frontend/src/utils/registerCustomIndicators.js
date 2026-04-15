@@ -1,3 +1,5 @@
+import { computeSupertrendTradingView } from './supertrendTradingView.js'
+
 /**
  * 自定义指标运行时注册
  * 由于使用UMD方式加载klinecharts.min.js，需要在运行时动态注册自定义指标
@@ -29,6 +31,8 @@ const MACD_DOWN = 'rgba(45,192,142,0.7)'
 
 // EMA曲线颜色配置：EMA5、EMA20、EMA30、EMA99（已移除EMA60）
 const EMA_COLORS = ['#2196F3', '#E91E63', '#FF9800', '#9C27B0']
+
+const SUPER_LINE = '#7C4DFF'
 
 /**
  * 注册EMA指标到KLineChart
@@ -735,10 +739,58 @@ export function registerMACDIndicator(klinecharts) {
 }
 
 /**
+ * Supertrend（SUPER）：与 trade/market/supertrend_tradingview.py、KlineIndicatorCalculator 一致
+ */
+export function registerSUPERIndicator (klinecharts) {
+  if (!klinecharts || typeof klinecharts.registerIndicator !== 'function') {
+    console.error('[SUPER] klinecharts.registerIndicator is not available')
+    return false
+  }
+  try {
+    const superInd = {
+      name: 'SUPER',
+      shortName: 'SUPER',
+      series: 'price',
+      precision: 6,
+      calcParams: [10, 3],
+      figures: [
+        {
+          key: 'st',
+          title: 'Supertrend: ',
+          type: 'line',
+          styles: () => ({ color: SUPER_LINE, size: 1.5 })
+        }
+      ],
+      calc: (dataList) => {
+        if (!dataList || dataList.length === 0) return []
+        const highs = dataList.map((d) => d.high)
+        const lows = dataList.map((d) => d.low)
+        const closes = dataList.map((d) => d.close)
+        const { line } = computeSupertrendTradingView(highs, lows, closes, 10, 3)
+        return dataList.map((_, i) => {
+          const v = line[i]
+          const o = {}
+          if (v !== undefined && Number.isFinite(v)) {
+            o.st = v
+          }
+          return o
+        })
+      }
+    }
+    klinecharts.registerIndicator(superInd)
+    console.log('[SUPER] Supertrend indicator registered at runtime')
+    return true
+  } catch (error) {
+    console.error('[SUPER] Failed to register Supertrend indicator:', error)
+    return false
+  }
+}
+
+/**
  * 注册所有自定义指标
  * @param {object} klinecharts - KLineChart库对象（window.klinecharts）
  */
-export function registerAllCustomIndicators(klinecharts) {
+export function registerAllCustomIndicators (klinecharts) {
   registerEMAIndicator(klinecharts)
   registerRSIIndicator(klinecharts)
   registerATRIndicator(klinecharts)
@@ -746,4 +798,5 @@ export function registerAllCustomIndicators(klinecharts) {
   registerKDJIndicator(klinecharts)
   registerVOLIndicator(klinecharts)
   registerMACDIndicator(klinecharts)
+  registerSUPERIndicator(klinecharts)
 }

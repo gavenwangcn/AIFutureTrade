@@ -87,6 +87,9 @@ public class MarketLookServiceImpl implements MarketLookService {
         if (dto == null || !StringUtils.hasText(dto.getSymbol()) || !StringUtils.hasText(dto.getStrategyId())) {
             throw new IllegalArgumentException("symbol 与 strategy_id 不能为空");
         }
+        if (!StringUtils.hasText(dto.getDetailSummary()) || dto.getDetailSummary().trim().isEmpty()) {
+            throw new IllegalArgumentException("详情摘要 detail_summary 不能为空");
+        }
         StrategyDO strategy = strategyMapper.selectById(dto.getStrategyId());
         if (strategy == null) {
             throw new IllegalArgumentException("策略不存在: " + dto.getStrategyId());
@@ -106,14 +109,17 @@ public class MarketLookServiceImpl implements MarketLookService {
         }
         row.setExecutionStatus(status);
         row.setSignalResult(dto.getSignalResult());
-        if (dto.getDetailSummary() != null) {
-            row.setDetailSummary(dto.getDetailSummary().trim().isEmpty() ? null : dto.getDetailSummary().trim());
-        }
+        row.setDetailSummary(dto.getDetailSummary().trim());
 
         LocalDateTime now = LocalDateTime.now();
         if (MarketLookDO.STATUS_RUNNING.equals(status)) {
-            row.setStartedAt(dto.getStartedAt() != null ? dto.getStartedAt() : now);
-            row.setEndedAt(MarketLookDO.ENDED_AT_NOT_FINISHED_PLACEHOLDER);
+            LocalDateTime started = dto.getStartedAt() != null ? dto.getStartedAt() : now;
+            LocalDateTime ended = dto.getEndedAt() != null ? dto.getEndedAt() : started.plusHours(24);
+            if (!ended.isAfter(started)) {
+                throw new IllegalArgumentException("结束时间 ended_at 必须晚于开始时间 started_at");
+            }
+            row.setStartedAt(started);
+            row.setEndedAt(ended);
         } else {
             LocalDateTime started = dto.getStartedAt() != null ? dto.getStartedAt() : now;
             LocalDateTime ended = dto.getEndedAt() != null ? dto.getEndedAt() : now;

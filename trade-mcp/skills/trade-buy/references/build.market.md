@@ -12,7 +12,7 @@ Purpose: one call returns K-lines + RSI and other indicators so you do not reimp
 - **Response notes**:
   - `data` is oldest → newest
   - If any indicator is invalid on a bar, the **whole bar is omitted** (not field-stripped)
-  - RSI often at `indicators.rsi.rsi14` (verify in live responses)
+  - RSI often at `indicators.rsi.rsi14`；Supertrend（TradingView）在 `indicators.supertrend`（`line` / `trend` / `upper` / `lower`）
 
 For lighter OHLCV only, use `trade_market_klines` and compute RSI yourself.
 

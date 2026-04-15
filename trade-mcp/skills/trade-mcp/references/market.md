@@ -98,7 +98,7 @@ mcporter --config ./mcporter-trade-mcp.json --log-level error call \
 
 ## 3. `trade_market_klines_with_indicators`
 
-**Purpose**: K-lines plus **MA/EMA/RSI/MACD/KDJ/ATR/ADX/VOL** (aligned with Java `KlineIndicatorCalculator`).
+**Purpose**: K-lines plus **MA/EMA/RSI/MACD/KDJ/ATR/ADX/VOL/Supertrend** (aligned with Java `KlineIndicatorCalculator` and Python `trade/market/market_data.py`).
 
 | Param | Required | Type | Notes |
 |-------|----------|------|-------|
@@ -125,8 +125,9 @@ mcporter --config ./mcporter-trade-mcp.json --log-level error call \
 | `atr` | `atr7`,`atr14`,`atr21` | ATR |
 | `adx` | `adx14`,`+di14`,`-di14` | ADX/DMI |
 | `vol` | `vol`,`buy_vol`,`sell_vol`,`mavol5`,`mavol10`,`mavol60` | Volume stats |
+| `supertrend` | `line`,`trend` (1=bull, -1=bear),`upper`,`lower`,`atr_period` (10),`multiplier` (3) | Supertrend (TradingView `ta.supertrend`) |
 
-Values are typically **up to 4 decimal places**.
+Values are typically **up to 4 decimal places** (`trend` is integer ±1).
 
 **mcporter example**:
 

@@ -403,6 +403,10 @@ class GeneratedSellStrategy(StrategyBaseSell):
             # ⚠️⚠️⚠️ 重要：技术指标已预先计算在每根K线中
             # 每根K线包含 'indicators' 字段，包含所有预计算的技术指标
             # 无需再使用talib、numpy等库自行计算指标，直接从K线数据中读取即可
+            #
+            # Supertrend（超级趋势，TradingView：`ta.supertrend`，前端按钮「SUPER」）
+            # - 默认 ATR 周期=10、乘数=3；`indicators['supertrend']`：`line`、`trend`（1/-1）、`upper`、`lower`、`atr_period`、`multiplier`
+            # - 示例：`st = latest_kline.get('indicators', {}).get('supertrend') or {}`
 
             # 获取K线数据（优先顺序：1h > 4h > 30m > 15m）
             # ⚠️ 重要：K线数据共有8类interval：'1m', '5m', '15m', '30m', '1h', '4h', '1d', '1w'

@@ -9,7 +9,7 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * 与 {@code trade/market/market_data.py} 中 {@code _calculate_indicators_for_klines} 对齐的 K 线指标计算。
+ * 与 {@code trade/market/market_data.py} 中 {@code _calculate_indicators_for_klines} 对齐的 K 线指标计算（含 Supertrend / TradingView）。
  * <p>
  * 返回的 K 线序列按时间从旧到新排列时，索引 {@code i} 处只能使用 {@code [0,i]} 的历史。
  * 任一时间点若存在任一指标无法给出有效值，则<strong>整根 K 线不加入结果</strong>（不从单根里删除字段）。
@@ -33,6 +33,10 @@ public final class KlineIndicatorCalculator {
     private static final int FULL_BAR_MIN_INDEX = 98;
     /** 上述指标所需最少 K 线根数 */
     private static final int FULL_BAR_MIN_BARS = 99;
+
+    /** Supertrend：与 Pine ta.supertrend(3, 10) 一致 */
+    private static final int SUPERTREND_ATR_PERIOD = 10;
+    private static final double SUPERTREND_MULTIPLIER = 3.0;
 
     private KlineIndicatorCalculator() {
     }
@@ -90,6 +94,8 @@ public final class KlineIndicatorCalculator {
         double[] atr7 = atrTradingView(highs, lows, closes, 7);
         double[] atr14 = atrTradingView(highs, lows, closes, 14);
         double[] atr21 = atrTradingView(highs, lows, closes, 21);
+        double[] atr10St = atrTradingView(highs, lows, closes, SUPERTREND_ATR_PERIOD);
+        SupertrendResult supertrend = supertrendTradingView(highs, lows, closes, atr10St, SUPERTREND_MULTIPLIER);
 
         AdxResult adx = computeAdx(highs, lows, closes, 14);
         double[] adx14 = adx != null ? adx.adx : null;
@@ -130,7 +136,8 @@ public final class KlineIndicatorCalculator {
                     minusDi14,
                     mavol5,
                     mavol10,
-                    mavol60)) {
+                    mavol60,
+                    supertrend)) {
                 continue;
             }
             Map<String, Object> row = new LinkedHashMap<>(klines.get(i));
@@ -164,7 +171,8 @@ public final class KlineIndicatorCalculator {
                             minusDi14,
                             mavol5,
                             mavol10,
-                            mavol60));
+                            mavol60,
+                            supertrend));
             out.add(row);
         }
         return out;
@@ -202,7 +210,8 @@ public final class KlineIndicatorCalculator {
             double[] minusDi14,
             double[] mavol5,
             double[] mavol10,
-            double[] mavol60) {
+            double[] mavol60,
+            SupertrendResult supertrend) {
         double vol = volumes[i];
         double buyV = takerBuy[i];
         if (nan(vol) || nan(buyV)) {
@@ -241,9 +250,23 @@ public final class KlineIndicatorCalculator {
         if (!fin(adx14, i, 13) || !fin(plusDi14, i, 13) || !fin(minusDi14, i, 13)) {
             return false;
         }
+        if (!finSupertrend(supertrend, i)) {
+            return false;
+        }
         return fin(mavol5, i, 4)
                 && fin(mavol10, i, 9)
                 && fin(mavol60, i, 59);
+    }
+
+    private static boolean finSupertrend(SupertrendResult st, int i) {
+        if (st == null || st.line == null || st.trend == null || st.finalUpper == null || st.finalLower == null) {
+            return false;
+        }
+        return i < st.line.length
+                && !nan(st.line[i])
+                && !nan(st.trend[i])
+                && !nan(st.finalUpper[i])
+                && !nan(st.finalLower[i]);
     }
 
     private static boolean fin(double[] arr, int i, int minInclusive) {
@@ -279,7 +302,8 @@ public final class KlineIndicatorCalculator {
             double[] minusDi14,
             double[] mavol5,
             double[] mavol10,
-            double[] mavol60) {
+            double[] mavol60,
+            SupertrendResult supertrend) {
         double vol = volumes[i];
         double buyV = takerBuy[i];
         Map<String, Object> ma = new LinkedHashMap<>();
@@ -328,6 +352,14 @@ public final class KlineIndicatorCalculator {
         volMap.put("mavol10", roundIndicator(mavol10[i]));
         volMap.put("mavol60", roundIndicator(mavol60[i]));
 
+        Map<String, Object> stMap = new LinkedHashMap<>();
+        stMap.put("line", roundIndicator(supertrend.line[i]));
+        stMap.put("trend", supertrend.trend[i] >= 0.0 ? 1 : -1);
+        stMap.put("upper", roundIndicator(supertrend.finalUpper[i]));
+        stMap.put("lower", roundIndicator(supertrend.finalLower[i]));
+        stMap.put("atr_period", SUPERTREND_ATR_PERIOD);
+        stMap.put("multiplier", SUPERTREND_MULTIPLIER);
+
         Map<String, Object> root = new LinkedHashMap<>();
         root.put("ma", ma);
         root.put("ema", ema);
@@ -337,7 +369,89 @@ public final class KlineIndicatorCalculator {
         root.put("atr", atr);
         root.put("adx", adx);
         root.put("vol", volMap);
+        root.put("supertrend", stMap);
         return root;
+    }
+
+    private static final class SupertrendResult {
+        final double[] line;
+        final double[] trend;
+        final double[] finalUpper;
+        final double[] finalLower;
+
+        SupertrendResult(double[] line, double[] trend, double[] finalUpper, final double[] finalLower) {
+            this.line = line;
+            this.trend = trend;
+            this.finalUpper = finalUpper;
+            this.finalLower = finalLower;
+        }
+    }
+
+    /**
+     * Supertrend（TradingView），与 {@code trade/market/supertrend_tradingview.py} 一致。
+     */
+    private static SupertrendResult supertrendTradingView(
+            double[] high, double[] low, double[] close, double[] atr, double mult) {
+        int n = close.length;
+        double[] line = new double[n];
+        double[] trend = new double[n];
+        double[] finalUpper = new double[n];
+        double[] finalLower = new double[n];
+        Arrays.fill(line, Double.NaN);
+        Arrays.fill(trend, Double.NaN);
+        Arrays.fill(finalUpper, Double.NaN);
+        Arrays.fill(finalLower, Double.NaN);
+
+        for (int i = 0; i < n; i++) {
+            if (nan(atr[i])) {
+                continue;
+            }
+            double hl2 = (high[i] + low[i]) / 2.0;
+            double ub = hl2 + mult * atr[i];
+            double lb = hl2 - mult * atr[i];
+
+            if (i == 0) {
+                finalUpper[i] = ub;
+                finalLower[i] = lb;
+                trend[i] = close[i] > finalUpper[i] ? 1.0 : -1.0;
+                line[i] = trend[i] == 1.0 ? finalLower[i] : finalUpper[i];
+                continue;
+            }
+
+            double fuPrev = finalUpper[i - 1];
+            double flPrev = finalLower[i - 1];
+
+            if (!nan(lb) && !nan(flPrev)) {
+                if (lb > flPrev || close[i - 1] <= flPrev) {
+                    finalLower[i] = lb;
+                } else {
+                    finalLower[i] = flPrev;
+                }
+            } else {
+                finalLower[i] = lb;
+            }
+
+            if (!nan(ub) && !nan(fuPrev)) {
+                if (ub < fuPrev || close[i - 1] >= fuPrev) {
+                    finalUpper[i] = ub;
+                } else {
+                    finalUpper[i] = fuPrev;
+                }
+            } else {
+                finalUpper[i] = ub;
+            }
+
+            if (trend[i - 1] == 1.0 && close[i] < finalLower[i]) {
+                trend[i] = -1.0;
+            } else if (trend[i - 1] == -1.0 && close[i] > finalUpper[i]) {
+                trend[i] = 1.0;
+            } else {
+                trend[i] = trend[i - 1];
+            }
+
+            line[i] = trend[i] == 1.0 ? finalLower[i] : finalUpper[i];
+        }
+        return new SupertrendResult(line, trend, finalUpper, finalLower);
     }
 
     private static boolean nan(double v) {

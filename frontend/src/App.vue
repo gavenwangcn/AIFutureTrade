@@ -40,12 +40,21 @@
           </div>
           <button
             class="btn-secondary"
+            type="button"
+            @click="showAddMarketLookModal = true"
+            title="添加盯盘任务（market_look，执行中 RUNNING）"
+          >
+            <i class="bi bi-plus-circle"></i>
+            添加盯盘
+          </button>
+          <button
+            class="btn-icon"
+            type="button"
             @click="handleExecuteMarketLook"
             title="启动盯盘循环（Docker 固定容器 trade-look，无需交易模型）"
             :disabled="isExecutingMarketLook"
           >
             <i class="bi bi-play-fill" :class="{ spin: isExecutingMarketLook }"></i>
-            {{ isExecutingMarketLook ? '盯盘启动中...' : '执行盯盘' }}
           </button>
           <button
             class="btn-secondary"
@@ -249,7 +258,7 @@
               </div>
             </div>
           </div>
-          <MarketLookRunningPanel class="hero-look-aside" />
+          <MarketLookRunningPanel ref="marketLookPanelRef" class="hero-look-aside" />
         </section>
 
         <section class="leaderboard-section glass-panel">
@@ -1026,6 +1035,12 @@
       @refresh="handleRefresh"
     />
 
+    <AddMarketLookModal
+      :visible="showAddMarketLookModal"
+      @update:visible="showAddMarketLookModal = $event"
+      @saved="onMarketLookSaved"
+    />
+
     <ModelStrategyConfigModal
       :visible="showStrategyConfigModal"
       :modelId="pendingStrategyConfigModelId"
@@ -1302,6 +1317,7 @@ import BuyLogsModal from './components/BuyLogsModal.vue'
 import SellLogsModal from './components/SellLogsModal.vue'
 import LookLogsModal from './components/LookLogsModal.vue'
 import MarketLookRunningPanel from './components/MarketLookRunningPanel.vue'
+import AddMarketLookModal from './components/AddMarketLookModal.vue'
 import ModelAnalysisModal from './components/ModelAnalysisModal.vue'
 import { useTradingApp } from './composables/useTradingApp'
 
@@ -1457,6 +1473,13 @@ const {
   isSellingPosition,
   handleSellPosition
 } = useTradingApp()
+
+const showAddMarketLookModal = ref(false)
+const marketLookPanelRef = ref(null)
+
+function onMarketLookSaved() {
+  marketLookPanelRef.value?.load?.()
+}
 
 const TRADE_LOOK_CONTAINER_ID = 'trade-look'
 
