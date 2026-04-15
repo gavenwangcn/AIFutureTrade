@@ -2,7 +2,7 @@
   <Modal
     :visible="visible"
     title="添加盯盘"
-    width="520px"
+    width="560px"
     @update:visible="$emit('update:visible', $event)"
     @close="handleClose"
   >
@@ -23,8 +23,8 @@
       <label>详情摘要 <span class="required">*</span></label>
       <textarea
         v-model="form.detailSummary"
-        class="form-textarea"
-        rows="3"
+        class="form-textarea detail-summary-textarea"
+        rows="8"
         placeholder="任务说明或监控要点"
       />
     </div>
@@ -407,5 +407,11 @@ async function handleSave() {
   color: #a93226;
   font-size: 13px;
   margin-bottom: 12px;
+}
+
+.detail-summary-textarea {
+  min-height: 168px;
+  resize: vertical;
+  line-height: 1.5;
 }
 </style>
