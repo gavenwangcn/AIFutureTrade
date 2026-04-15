@@ -64,7 +64,6 @@ public class MarketServiceImpl implements MarketService {
             // 获取配置的合约列表
             List<com.aifuturetrade.dao.entity.FutureDO> futureConfigs = futureMapper.selectList(null);
             if (futureConfigs == null || futureConfigs.isEmpty()) {
-                log.warn("[MarketService] 未配置任何合约，返回空价格数据");
                 return new HashMap<>();
             }
 
