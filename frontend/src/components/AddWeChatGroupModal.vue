@@ -105,7 +105,8 @@
 </template>
 
 <script setup>
-import { ref, watch, computed } from 'vue'
+import { ref, watch } from 'vue'
+import { tradeMonitorUrl } from '../config/tradeMonitorApi.js'
 
 const props = defineProps({
   visible: {
@@ -192,8 +193,8 @@ async function handleSave() {
 
   try {
     const url = props.group
-      ? `http://localhost:5005/api/wechat-groups/${props.group.id}`
-      : 'http://localhost:5005/api/wechat-groups'
+      ? tradeMonitorUrl(`/api/wechat-groups/${props.group.id}`)
+      : tradeMonitorUrl('/api/wechat-groups')
 
     const method = props.group ? 'PUT' : 'POST'
 

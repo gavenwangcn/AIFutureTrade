@@ -254,6 +254,11 @@ public interface ModelService {
     Map<String, Object> executeMarketLookTrading(String modelId);
 
     /**
+     * 停止并删除盯盘容器 look-{modelId}
+     */
+    Map<String, Object> stopMarketLookTrading(String modelId);
+
+    /**
      * 禁用模型的自动买入功能
      * @param modelId 模型ID（UUID格式）
      * @return 更新后的自动买入状态

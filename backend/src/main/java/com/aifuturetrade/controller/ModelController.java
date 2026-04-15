@@ -583,6 +583,16 @@ public class ModelController {
     }
 
     /**
+     * 停止并删除盯盘容器（look-{modelId}）
+     */
+    @PostMapping("/{modelId}/stop-market-look")
+    @Operation(summary = "关闭盯盘（删除 Docker 容器 look-{modelId}）")
+    public ResponseEntity<Map<String, Object>> stopMarketLookTrading(@PathVariable(value = "modelId") String modelId) {
+        Map<String, Object> result = modelService.stopMarketLookTrading(modelId);
+        return new ResponseEntity<>(result, HttpStatus.OK);
+    }
+
+    /**
      * 禁用模型的自动买入功能
      * @param modelId 模型ID
      * @return 更新后的自动买入状态

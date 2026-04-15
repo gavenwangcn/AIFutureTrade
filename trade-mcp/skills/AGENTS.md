@@ -125,13 +125,13 @@ Whenever you invoke **any** MCP server through **mcporter**, you **must** use ex
 
 ```bash
 mcporter --config ./mcporter-trade-mcp.json --log-level error call \
-  --server tradeMcp --tool 'trade_market_klines' \
+  --server tradeMcp --tool 'trade.market.klines' \
   symbol=BTCUSDT interval=5m limit=5 --output json
 ```
 
-**Do not use:** `mcporter … call tradeMcp "trade_market_tickers_all_symbols" --output json` (server and tool passed positionally after `call` **without** `--server` / `--tool`).
+**Do not use:** `mcporter … call tradeMcp "trade.market_tickers.all_symbols" --output json` (server and tool passed positionally after `call` **without** `--server` / `--tool`).
 
-Domain-specific rules (trade-mcp tool naming, `modelId`, SQL `--args`, etc.) live in the relevant skill — for this workspace, see the **`trade-mcp`** skill (`SKILL.md`, `references/tools-params.md`).
+Domain-specific rules (dotted tool names, `modelId`, SQL `--args`, etc.) live in the relevant skill — for this workspace, see the **`trade-mcp`** skill (`SKILL.md`, `references/tools-params.md`).
 
 **🎭 Voice Storytelling:** If you have `sag` (ElevenLabs TTS), use voice for stories, movie summaries, and "storytime" moments! Way more engaging than walls of text. Surprise people with funny voices.
 

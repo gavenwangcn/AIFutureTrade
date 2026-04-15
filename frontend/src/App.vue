@@ -25,23 +25,36 @@
           </div>
         </div>
         <div class="header-right">
-          <button 
-            class="btn-icon" 
-            :class="{ refreshing: isRefreshingAll }"
-            @click="handleRefresh" 
-            title="刷新"
-            :disabled="isRefreshingAll"
-          >
-            <i class="bi bi-arrow-repeat" :class="{ spin: isRefreshingAll }"></i>
-          </button>
+          <div class="header-status look-logs-header-status" title="盯盘容器 look-{模型ID} 日志">
+            <span class="status-dot active"></span>
+            <span class="status-text">运行中</span>
+            <button
+              class="btn-icon"
+              type="button"
+              @click="handleOpenLookContainerLogsModal"
+              title="盯盘容器日志"
+              style="margin-left: 8px;"
+            >
+              <i class="bi bi-file-text"></i>
+            </button>
+          </div>
           <button
             class="btn-secondary"
             @click="handleExecuteMarketLook"
-            title="启动盯盘循环（Docker 容器 look-当前模型ID）"
-            :disabled="!currentModelId || isExecutingMarketLook"
+            title="启动盯盘循环（Docker 容器 look-当前或列表首个模型ID）"
+            :disabled="isExecutingMarketLook"
           >
-            <i class="bi bi-eye" :class="{ spin: isExecutingMarketLook }"></i>
+            <i class="bi bi-play-fill" :class="{ spin: isExecutingMarketLook }"></i>
             {{ isExecutingMarketLook ? '盯盘启动中...' : '执行盯盘' }}
+          </button>
+          <button
+            class="btn-secondary"
+            @click="handleStopMarketLook"
+            title="删除盯盘容器 look-{模型ID}"
+            :disabled="isStoppingMarketLook"
+          >
+            <i class="bi bi-stop-circle" :class="{ spin: isStoppingMarketLook }"></i>
+            {{ isStoppingMarketLook ? '关闭中...' : '关闭盯盘' }}
           </button>
           <button class="btn-icon" :class="{ active: loggerEnabled }" @click="toggleLogger" title="开启/关闭日志输出">
             <i class="bi" :class="loggerEnabled ? 'bi-play-fill' : 'bi-pause-fill'"></i>
@@ -1060,6 +1073,13 @@
       @update:visible="showSellLogsModal = $event"
       @close="showSellLogsModal = false"
     />
+    <LookLogsModal
+      :visible="showLookLogsModal"
+      :modelId="pendingLookLogsModelId"
+      :modelName="lookLogsModelName"
+      @update:visible="showLookLogsModal = $event"
+      @close="showLookLogsModal = false"
+    />
     <ModelAnalysisModal
       :visible="showAnalysisModal"
       @update:visible="showAnalysisModal = $event"
@@ -1295,6 +1315,7 @@ import ModelStrategyConfigModal from './components/ModelStrategyConfigModal.vue'
 import TradeLogsModal from './components/TradeLogsModal.vue'
 import BuyLogsModal from './components/BuyLogsModal.vue'
 import SellLogsModal from './components/SellLogsModal.vue'
+import LookLogsModal from './components/LookLogsModal.vue'
 import ModelAnalysisModal from './components/ModelAnalysisModal.vue'
 import { useTradingApp } from './composables/useTradingApp'
 
@@ -1407,11 +1428,14 @@ const {
   handleExecuteBuy,
   handleExecuteSell,
   handleExecuteMarketLook,
+  handleStopMarketLook,
+  resolveMarketLookModelId,
   handleDisableBuy,
   handleDisableSell,
   isExecutingBuy,
   isExecutingSell,
   isExecutingMarketLook,
+  isStoppingMarketLook,
   isDisablingBuy,
   isDisablingSell,
   loadGainers,
@@ -1449,6 +1473,17 @@ const {
   handleSellPosition
 } = useTradingApp()
 
+const handleOpenLookContainerLogsModal = () => {
+  const mid = resolveMarketLookModelId()
+  if (!mid) {
+    alert('请先添加或选择交易模型')
+    return
+  }
+  pendingLookLogsModelId.value = mid
+  lookLogsModelName.value = getModelDisplayName(mid)
+  showLookLogsModal.value = true
+}
+
 // 处理设置模态框关闭事件
 const handleSettingsModalClose = () => {
   showSettingsModal.value = false
@@ -1469,6 +1504,9 @@ const buyLogsModelName = ref('')
 const showSellLogsModal = ref(false)
 const pendingSellLogsModelId = ref(null)
 const sellLogsModelName = ref('')
+const showLookLogsModal = ref(false)
+const pendingLookLogsModelId = ref(null)
+const lookLogsModelName = ref('')
 const showAnalysisModal = ref(false)
 const tempLeverage = ref(10) // 临时杠杆值
 

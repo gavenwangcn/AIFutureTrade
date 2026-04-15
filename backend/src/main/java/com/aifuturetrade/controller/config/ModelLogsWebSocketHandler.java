@@ -16,8 +16,8 @@ import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * 模型日志WebSocket处理器
- * 处理前端WebSocket连接，实时推送模型容器（buy/sell）日志
- * 支持通过URL参数传递modelId和类型（buy/sell）
+ * 处理前端WebSocket连接，实时推送模型容器（buy/sell/look）日志
+ * 支持通过URL参数传递modelId和类型（buy/sell/look，look 对应盯盘容器 look-{modelId}）
  */
 @Component
 public class ModelLogsWebSocketHandler extends TextWebSocketHandler {
@@ -39,7 +39,7 @@ public class ModelLogsWebSocketHandler extends TextWebSocketHandler {
         URI uri = session.getUri();
         String query = uri != null ? uri.getQuery() : null;
         String modelId = null;
-        String type = null; // buy or sell
+        String type = null; // buy, sell, or look
         
         if (query != null) {
             String[] params = query.split("&");
@@ -65,14 +65,14 @@ public class ModelLogsWebSocketHandler extends TextWebSocketHandler {
             return;
         }
         
-        if (type == null || (!"buy".equals(type) && !"sell".equals(type))) {
-            logger.error("缺少或无效的type参数（必须是buy或sell）: {}", session.getId());
-            session.sendMessage(new TextMessage("错误: 缺少或无效的type参数（必须是buy或sell）"));
+        if (type == null || (!"buy".equals(type) && !"sell".equals(type) && !"look".equals(type))) {
+            logger.error("缺少或无效的type参数（必须是 buy、sell 或 look）: {}", session.getId());
+            session.sendMessage(new TextMessage("错误: 缺少或无效的type参数（必须是 buy、sell 或 look）"));
             session.close();
             return;
         }
         
-        // 构建容器名称：buy-{modelId} 或 sell-{modelId}
+        // 构建容器名称：buy-{modelId}、sell-{modelId} 或 look-{modelId}
         String containerName = type + "-" + modelId;
         logger.info("开始获取模型容器日志: containerName={}, modelId={}, type={}", containerName, modelId, type);
         

@@ -91,6 +91,11 @@ export const modelApi = {
   executeMarketLook: (modelId) => apiPost(`/api/models/${modelId}/execute-market-look`),
 
   /**
+   * 关闭盯盘（删除 Docker 容器 look-{modelId}）
+   */
+  stopMarketLook: (modelId) => apiPost(`/api/models/${modelId}/stop-market-look`),
+
+  /**
    * 禁用自动买入
    */
   disableBuy: (modelId) => apiPost(`/api/models/${modelId}/disable-buy`),

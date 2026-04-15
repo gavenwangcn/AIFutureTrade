@@ -28,6 +28,11 @@ export default defineConfig({
   server: {
     port: 3000,
     proxy: {
+      // trade-monitor（微信通知群等）需先于通用 /api，否则会打到 backend 5002
+      '/api/wechat-groups': {
+        target: 'http://localhost:5005',
+        changeOrigin: true
+      },
       '/api': {
         target: 'http://localhost:5002',
         changeOrigin: true

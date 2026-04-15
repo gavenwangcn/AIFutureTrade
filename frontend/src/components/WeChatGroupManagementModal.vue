@@ -189,9 +189,10 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, watch, nextTick } from 'vue'
 import Modal from './Modal.vue'
 import AddWeChatGroupModal from './AddWeChatGroupModal.vue'
+import { tradeMonitorUrl } from '../config/tradeMonitorApi.js'
 
 const props = defineProps({
   visible: {
@@ -220,11 +221,16 @@ const viewingGroup = ref(null)
 
 const totalPages = computed(() => Math.ceil(total.value / pageSize.value))
 
-onMounted(() => {
-  if (props.visible) {
-    loadWeChatGroups()
+// 打开弹窗后再请求：先让 Modal 完成一次绘制，避免点击与首帧抢主线程；并用同源相对路径走 Vite 代理，避免错误端口长时间挂起
+watch(
+  () => props.visible,
+  (open) => {
+    if (!open) return
+    nextTick(() => {
+      loadWeChatGroups()
+    })
   }
-})
+)
 
 async function loadWeChatGroups() {
   loading.value = true
@@ -242,7 +248,8 @@ async function loadWeChatGroups() {
       params.isEnabled = searchForm.value.isEnabled === 'true'
     }
 
-    const response = await fetch(`http://localhost:5005/api/wechat-groups?${new URLSearchParams(params)}`)
+    const q = new URLSearchParams(params)
+    const response = await fetch(tradeMonitorUrl(`/api/wechat-groups?${q}`))
     const data = await response.json()
 
     wechatGroups.value = data.records || []
@@ -301,7 +308,7 @@ async function handleTest(group) {
   }
 
   try {
-    const response = await fetch(`http://localhost:5005/api/wechat-groups/${group.id}/test`, {
+    const response = await fetch(tradeMonitorUrl(`/api/wechat-groups/${group.id}/test`), {
       method: 'POST'
     })
     const data = await response.json()
@@ -323,7 +330,7 @@ async function handleDelete(group) {
   }
 
   try {
-    const response = await fetch(`http://localhost:5005/api/wechat-groups/${group.id}`, {
+    const response = await fetch(tradeMonitorUrl(`/api/wechat-groups/${group.id}`), {
       method: 'DELETE'
     })
     const data = await response.json()

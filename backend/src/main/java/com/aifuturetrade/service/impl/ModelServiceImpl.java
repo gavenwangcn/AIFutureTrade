@@ -2232,6 +2232,41 @@ public class ModelServiceImpl implements ModelService {
 
     @Override
     @Transactional(rollbackFor = Exception.class)
+    public Map<String, Object> stopMarketLookTrading(String modelId) {
+        log.debug("[ModelService] 停止并删除盯盘容器, modelId={}", modelId);
+        try {
+            ModelDTO model = getModelById(modelId);
+            if (model == null) {
+                Map<String, Object> errorResult = new HashMap<>();
+                errorResult.put("success", false);
+                errorResult.put("error", "Model not found");
+                return errorResult;
+            }
+
+            String containerName = "look-" + modelId;
+            Map<String, Object> result = new HashMap<>();
+            result.put("containerName", containerName);
+
+            if (!dockerContainerService.removeContainer(containerName)) {
+                result.put("success", false);
+                result.put("error", "Failed to remove market look container");
+                return result;
+            }
+
+            result.put("success", true);
+            result.put("message", "Market look container removed");
+            return result;
+        } catch (Exception e) {
+            log.error("[ModelService] 关闭盯盘容器失败: {}", e.getMessage(), e);
+            Map<String, Object> errorResult = new HashMap<>();
+            errorResult.put("success", false);
+            errorResult.put("error", e.getMessage());
+            return errorResult;
+        }
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
     public Map<String, Object> disableBuyTrading(String modelId) {
         log.debug("[ModelService] 禁用模型自动买入, modelId={}", modelId);
         try {
