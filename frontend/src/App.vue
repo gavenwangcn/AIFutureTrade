@@ -48,13 +48,14 @@
             添加盯盘
           </button>
           <button
-            class="btn-icon"
+            class="btn-secondary"
             type="button"
             @click="handleExecuteMarketLook"
             title="启动盯盘循环（Docker 固定容器 trade-look，无需交易模型）"
             :disabled="isExecutingMarketLook"
           >
             <i class="bi bi-play-fill" :class="{ spin: isExecutingMarketLook }"></i>
+            {{ isExecutingMarketLook ? '盯盘启动中...' : '执行盯盘' }}
           </button>
           <button
             class="btn-secondary"
@@ -64,9 +65,6 @@
           >
             <i class="bi bi-stop-circle" :class="{ spin: isStoppingMarketLook }"></i>
             {{ isStoppingMarketLook ? '关闭中...' : '关闭盯盘' }}
-          </button>
-          <button class="btn-icon" :class="{ active: loggerEnabled }" @click="toggleLogger" title="开启/关闭日志输出">
-            <i class="bi" :class="loggerEnabled ? 'bi-play-fill' : 'bi-pause-fill'"></i>
           </button>
           <button 
             class="btn-secondary" 
@@ -1384,7 +1382,6 @@ const {
   loadStrategyDecisions,
   loadConversationsOrDecisions,
   settings,
-  loggerEnabled,
   showSettingsModal,
   showStrategyManagementModal,
   showFutureConfigModal,
@@ -1426,7 +1423,6 @@ const {
   openStrategyConfigModal,
   initApp,
   handleRefresh,
-  toggleLogger,
   handleExecuteBuy,
   handleExecuteSell,
   handleExecuteMarketLook,
