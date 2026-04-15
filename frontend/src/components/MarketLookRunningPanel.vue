@@ -33,12 +33,13 @@
             <th>策略名称</th>
             <th>合约</th>
             <th>开始时间</th>
+            <th>结束时间</th>
             <th>执行进度</th>
           </tr>
         </thead>
         <tbody>
           <tr v-if="loading && rows.length === 0" class="loading-row">
-            <td colspan="6" class="loading-cell">
+            <td colspan="7" class="loading-cell">
               <i class="bi bi-arrow-repeat spin"></i>
               <span>加载中…</span>
             </td>
@@ -53,7 +54,8 @@
             <td class="cell-mono cell-clip" :title="row.strategy_id">{{ row.strategy_id || '—' }}</td>
             <td class="cell-clip" :title="row.strategy_name">{{ row.strategy_name || '—' }}</td>
             <td class="cell-symbol">{{ row.symbol || '—' }}</td>
-            <td class="cell-time">{{ formatStarted(row.started_at) }}</td>
+            <td class="cell-time">{{ formatStarted(row.started_at ?? row.startedAt) }}</td>
+            <td class="cell-time">{{ formatEndedAtDisplay(row.ended_at ?? row.endedAt) }}</td>
             <td class="col-progress">
               <div class="progress-meta">
                 <span class="elapsed">{{ elapsedLabel(row) }}</span>
@@ -64,7 +66,7 @@
             </td>
           </tr>
           <tr v-if="!loading && rows.length === 0">
-            <td colspan="6" class="empty-cell">暂无运行中的盯盘任务</td>
+            <td colspan="7" class="empty-cell">暂无运行中的盯盘任务</td>
           </tr>
         </tbody>
       </table>
@@ -121,7 +123,7 @@ function parseStartMs(startedAt) {
 }
 
 function progressPercent(row) {
-  const start = parseStartMs(row.started_at)
+  const start = parseStartMs(row.started_at ?? row.startedAt)
   if (start == null) return 0
   const elapsed = Math.max(0, nowTick.value - start)
   return Math.min(100, (elapsed / REFERENCE_MS) * 100)
@@ -130,7 +132,7 @@ function progressPercent(row) {
 const progressTitle = '相对 24h 参照窗口；下方为已执行时长'
 
 function elapsedLabel(row) {
-  const start = parseStartMs(row.started_at)
+  const start = parseStartMs(row.started_at ?? row.startedAt)
   if (start == null) return '—'
   const ms = Math.max(0, nowTick.value - start)
   return formatDuration(ms)
@@ -190,6 +192,20 @@ function formatStarted(iso) {
   } catch {
     return String(iso)
   }
+}
+
+/** RUNNING 未结束时库内可能为 2099 占位 */
+function isPlaceholderEndedAt(iso) {
+  if (!iso) return true
+  const d = new Date(iso)
+  if (!Number.isFinite(d.getTime())) return false
+  return d.getFullYear() >= 2099
+}
+
+function formatEndedAtDisplay(iso) {
+  if (!iso) return '—'
+  if (isPlaceholderEndedAt(iso)) return '未结束'
+  return formatStarted(iso)
 }
 
 async function load() {
