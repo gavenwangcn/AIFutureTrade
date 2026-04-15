@@ -2,6 +2,7 @@ package com.aifuturetrade.service.impl;
 
 import com.aifuturetrade.dao.entity.StrategyDO;
 import com.aifuturetrade.dao.mapper.StrategyMapper;
+import com.aifuturetrade.service.AiProviderService;
 import com.aifuturetrade.service.StrategyService;
 import com.aifuturetrade.service.StrategyCodeTesterService;
 import com.aifuturetrade.service.dto.StrategyDTO;
@@ -17,7 +18,9 @@ import org.springframework.util.StringUtils;
 import lombok.extern.slf4j.Slf4j;
 
 import java.time.LocalDateTime;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
@@ -34,6 +37,9 @@ public class StrategyServiceImpl implements StrategyService {
     
     @Autowired
     private StrategyCodeTesterService strategyCodeTesterService;
+
+    @Autowired
+    private AiProviderService aiProviderService;
 
     @Override
     public List<StrategyDTO> getAllStrategies() {
@@ -215,6 +221,86 @@ public class StrategyServiceImpl implements StrategyService {
     public Boolean deleteStrategy(String id) {
         int result = strategyMapper.deleteById(id);
         return result > 0;
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public Map<String, Object> regenerateStrategyCode(
+            String strategyId,
+            String providerId,
+            String modelName,
+            String strategyContext,
+            String validateSymbol,
+            String strategyName,
+            Boolean persist) {
+        StrategyDTO existing = getStrategyById(strategyId);
+        if (existing == null) {
+            throw new IllegalArgumentException("策略不存在: " + strategyId);
+        }
+        String type = existing.getType();
+        if (type == null || type.trim().isEmpty()) {
+            throw new IllegalArgumentException("策略类型为空，无法重新生成");
+        }
+        String context = StringUtils.hasText(strategyContext) ? strategyContext : existing.getStrategyContext();
+        if (!StringUtils.hasText(context)) {
+            throw new IllegalArgumentException("策略内容 strategy_context 为空：请在请求中传入 strategyContext 或在库中补全");
+        }
+        String typeNorm = type.trim().toLowerCase();
+        String validateSym = null;
+        if ("look".equals(typeNorm)) {
+            validateSym = StringUtils.hasText(validateSymbol) ? validateSymbol.trim() : existing.getValidateSymbol();
+            if (!StringUtils.hasText(validateSym)) {
+                throw new IllegalArgumentException("盯盘策略须提供 validate_symbol（请求参数或库中已有）");
+            }
+        }
+
+        String generatedCode = aiProviderService.generateStrategyCode(
+                providerId, modelName, context, typeNorm);
+
+        String testName = StringUtils.hasText(strategyName) ? strategyName.trim()
+                : (StringUtils.hasText(existing.getName()) ? existing.getName() : "策略");
+
+        Map<String, Object> testResult;
+        if ("look".equals(typeNorm)) {
+            testResult = strategyCodeTesterService.testLookStrategyCode(generatedCode, testName, validateSym);
+        } else {
+            testResult = strategyCodeTesterService.testStrategyCode(generatedCode, typeNorm, testName);
+        }
+        boolean testPassed = Boolean.TRUE.equals(testResult.get("passed"));
+
+        boolean doPersist = persist == null || Boolean.TRUE.equals(persist);
+
+        Map<String, Object> response = new HashMap<>();
+        response.put("id", strategyId);
+        response.put("strategyCode", generatedCode);
+        response.put("testPassed", testPassed);
+        response.put("testResult", testResult);
+
+        if (!doPersist) {
+            response.put("persisted", false);
+            response.put("message", "已生成代码与测试结果，未写入数据库（persist=false）");
+            return response;
+        }
+
+        if (!testPassed) {
+            response.put("persisted", false);
+            response.put("message", "生成代码未通过测试，未写入数据库");
+            return response;
+        }
+
+        StrategyDTO toUpdate = new StrategyDTO();
+        BeanUtils.copyProperties(existing, toUpdate);
+        toUpdate.setStrategyCode(generatedCode);
+        if (StringUtils.hasText(strategyContext)) {
+            toUpdate.setStrategyContext(strategyContext);
+        }
+        if (StringUtils.hasText(validateSymbol)) {
+            toUpdate.setValidateSymbol(validateSymbol.trim());
+        }
+        updateStrategy(toUpdate);
+        response.put("persisted", true);
+        response.put("message", "策略代码已重新生成并通过测试，已保存");
+        return response;
     }
 
     /**

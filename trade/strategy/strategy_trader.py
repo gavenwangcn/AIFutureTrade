@@ -28,7 +28,7 @@ class StrategyTrader(StrategyBuyTrader, StrategySellTrader, StrategyLookTrader):
         trader = StrategyTrader(db=db, model_id=1)
         result = trader.make_buy_decision(candidates, portfolio, account_info, market_state)
     """
-
+    
     pass
 
 

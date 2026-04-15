@@ -9,6 +9,7 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.util.StringUtils;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -118,6 +119,59 @@ public class StrategyController {
         response.put("id", addedStrategy.getId());
         response.put("message", "Strategy added successfully");
         return new ResponseEntity<>(response, HttpStatus.CREATED);
+    }
+
+    /**
+     * 按策略 ID 使用 AI 重新生成策略代码（可选更新 strategy_context / validate_symbol），测试通过后落库。
+     */
+    @PostMapping("/{id}/regenerate-code")
+    @Operation(summary = "按策略ID重新生成策略代码")
+    public ResponseEntity<Map<String, Object>> regenerateStrategyCode(
+            @PathVariable(value = "id") String id,
+            @RequestBody Map<String, Object> body) {
+        String providerId = stringField(body, "providerId");
+        String modelName = stringField(body, "modelName");
+        if (providerId == null || modelName == null) {
+            Map<String, Object> error = new HashMap<>();
+            error.put("error", "providerId and modelName are required");
+            return new ResponseEntity<>(error, HttpStatus.BAD_REQUEST);
+        }
+        String strategyContext = stringField(body, "strategyContext", "strategy_context");
+        String validateSymbol = stringField(body, "validateSymbol", "validate_symbol");
+        String strategyName = stringField(body, "strategyName", "strategy_name");
+        Boolean persist = null;
+        if (body.containsKey("persist")) {
+            Object p = body.get("persist");
+            if (p instanceof Boolean) {
+                persist = (Boolean) p;
+            } else if (p != null) {
+                persist = Boolean.parseBoolean(p.toString());
+            }
+        }
+        try {
+            Map<String, Object> result = strategyService.regenerateStrategyCode(
+                    id, providerId, modelName, strategyContext, validateSymbol, strategyName, persist);
+            return new ResponseEntity<>(result, HttpStatus.OK);
+        } catch (IllegalArgumentException e) {
+            Map<String, Object> error = new HashMap<>();
+            error.put("error", e.getMessage());
+            return new ResponseEntity<>(error, HttpStatus.BAD_REQUEST);
+        } catch (Exception e) {
+            logger.error("regenerateStrategyCode failed: {}", e.getMessage(), e);
+            Map<String, Object> error = new HashMap<>();
+            error.put("error", "Failed to regenerate strategy code: " + e.getMessage());
+            return new ResponseEntity<>(error, HttpStatus.INTERNAL_SERVER_ERROR);
+        }
+    }
+
+    private static String stringField(Map<String, Object> body, String... keys) {
+        for (String k : keys) {
+            Object v = body.get(k);
+            if (v != null && StringUtils.hasText(v.toString())) {
+                return v.toString().trim();
+            }
+        }
+        return null;
     }
 
     /**

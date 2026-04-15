@@ -54,6 +54,9 @@ class AllMcpToolsSmokeTest {
     @Autowired
     private MarketLookTools marketLookTools;
 
+    @Autowired
+    private StrategyTools strategyTools;
+
     @BeforeEach
     void stubDownstream() {
         Map<String, Object> okEmptyPage = new HashMap<>();
@@ -140,6 +143,7 @@ class AllMcpToolsSmokeTest {
         okId.put("message", "ok");
         lenient().when(backendClient.marketLookCreate(anyMap())).thenReturn(okId);
         lenient().when(backendClient.strategyCreate(anyMap())).thenReturn(okId);
+        lenient().when(backendClient.strategyRegenerateCode(anyString(), anyMap())).thenReturn(okId);
         lenient().when(backendClient.strategyGetById(anyString())).thenReturn(okId);
         lenient().when(backendClient.strategyPageByType(
                 nullable(Integer.class),
@@ -233,6 +237,12 @@ class AllMcpToolsSmokeTest {
         assertSuccessMap(marketTickersTools.sql(
                 "SELECT * FROM `24_market_tickers` WHERE symbol=? LIMIT 1",
                 List.of("BTCUSDT")));
+    }
+
+    @Test
+    void trade_strategy_tools() {
+        assertNotNull(strategyTools.strategyRegenerateCode(
+                "00000000-0000-0000-0000-000000000099", "prov", "gpt-4o", null, null, null, false));
     }
 
     @Test

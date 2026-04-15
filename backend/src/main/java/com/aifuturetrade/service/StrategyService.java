@@ -5,6 +5,7 @@ import com.aifuturetrade.common.util.PageResult;
 import com.aifuturetrade.common.util.PageRequest;
 
 import java.util.List;
+import java.util.Map;
 
 /**
  * 业务逻辑接口：策略
@@ -69,6 +70,28 @@ public interface StrategyService {
      * @return 是否删除成功
      */
     Boolean deleteStrategy(String id);
+
+    /**
+     * 按策略 ID 使用 AI 重新生成策略代码；可选覆盖 strategy_context / validate_symbol（盯盘）。
+     * 仅当代码测试通过时写入数据库（与新建策略校验一致）。
+     *
+     * @param strategyId        策略 UUID
+     * @param providerId        AI 提供方 ID
+     * @param modelName         模型名
+     * @param strategyContext   若非空则替换后再生成；否则使用库中现有 strategy_context（须非空）
+     * @param validateSymbol    盯盘可选覆盖 validate_symbol；否则用库中值
+     * @param strategyName      测试用名称，可选
+     * @param persist           为 true（默认）且测试通过时更新库；为 false 时只返回生成结果不保存
+     * @return id、strategyCode、testPassed、testResult、persisted、message 等
+     */
+    Map<String, Object> regenerateStrategyCode(
+            String strategyId,
+            String providerId,
+            String modelName,
+            String strategyContext,
+            String validateSymbol,
+            String strategyName,
+            Boolean persist);
 
 }
 

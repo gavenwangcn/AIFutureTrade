@@ -244,6 +244,14 @@ public class BackendClient {
         return json.postJson(URI.create(baseUrl() + "/api/strategies"), body);
     }
 
+    /**
+     * 按策略 ID 调用 AI 重新生成策略代码（可选覆盖 strategy_context / validate_symbol），测试通过后落库。
+     */
+    public Map<String, Object> strategyRegenerateCode(String strategyId, Map<String, Object> body) {
+        String enc = URLEncoder.encode(strategyId, StandardCharsets.UTF_8);
+        return json.postJson(URI.create(baseUrl() + "/api/strategies/" + enc + "/regenerate-code"), body);
+    }
+
     public Map<String, Object> strategyGetById(String id) {
         String enc = URLEncoder.encode(id, StandardCharsets.UTF_8);
         return json.get(URI.create(baseUrl() + "/api/strategies/" + enc));
