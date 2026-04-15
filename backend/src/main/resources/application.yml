@@ -215,6 +215,8 @@ docker:
     buy: ${DOCKER_IMAGE_BUY:aifuturetrade-model-buy}  # 模型买入容器镜像名称
     sell: ${DOCKER_IMAGE_SELL:aifuturetrade-model-sell}  # 模型卖出容器镜像名称
     look: ${DOCKER_IMAGE_LOOK:aifuturetrade-model-look}  # 盯盘循环容器镜像名称
+  # 盯盘主循环间隔（秒），默认 60≈每 1 分钟一轮；与 trade/look_loop.py 一致，可用环境变量覆盖
+  market-look-poll-interval-seconds: ${MARKET_LOOK_POLL_INTERVAL_SECONDS:60}
 
 # MySQL配置（用于传递给模型容器）
 mysql:

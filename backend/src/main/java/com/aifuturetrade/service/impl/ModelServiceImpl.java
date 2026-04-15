@@ -92,6 +92,10 @@ public class ModelServiceImpl implements ModelService {
     @Value("${docker.image.look:aifuturetrade-model-look}")
     private String modelLookImageName;
 
+    /** 盯盘容器主循环间隔（秒），默认 60≈每 1 分钟一轮；传入 Python MARKET_LOOK_POLL_INTERVAL_SECONDS */
+    @Value("${docker.market-look-poll-interval-seconds:60}")
+    private int marketLookPollIntervalSeconds;
+
     @Value("${mysql.host:156.254.6.224}")
     private String mysqlHost;
     
@@ -2199,6 +2203,7 @@ public class ModelServiceImpl implements ModelService {
             if (binanceApiSecret != null && !binanceApiSecret.isEmpty()) {
                 envVars.put("BINANCE_SECRET_KEY", binanceApiSecret);
             }
+            envVars.put("MARKET_LOOK_POLL_INTERVAL_SECONDS", String.valueOf(marketLookPollIntervalSeconds));
 
             log.info("=== Container Database Configuration (Market Look trade-look) ===");
             log.info("MODEL_ID: {}", TRADE_LOOK_MODEL_ID_ENV);
@@ -2206,6 +2211,7 @@ public class ModelServiceImpl implements ModelService {
             log.info("MYSQL_PORT: {}", mysqlPort);
             log.info("MYSQL_USER: {}", mysqlUser);
             log.info("MYSQL_DATABASE: {}", mysqlDatabase);
+            log.info("MARKET_LOOK_POLL_INTERVAL_SECONDS: {}", marketLookPollIntervalSeconds);
             log.info("================================================================");
 
             Map<String, Object> containerResult = dockerContainerService.startNamedMarketLookContainer(
