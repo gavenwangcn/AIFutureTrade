@@ -43,9 +43,11 @@ decisions[symbol] = [{
 ```
 6. **`market_date` / `key_date`**：必须为可被 `json.dumps` 的结构（dict/list/数字/字符串）；**不要**把不可序列化对象塞进去。
 
-## ⚠️⚠️⚠️ 日志要求（与买入策略同级）
-- 每个关键分支（if/elif/else）、每次从 `market_state` 取价/取 K 线/读指标、每个 notify 条件判定，均需 **`self.log.info()`** 输出：**条件、变量值、比较结果、是否命中 notify**。
-- 数据缺失、指标为 `None`、K 线为空时，用 **`self.log.warning()`** 说明原因与跳过逻辑。
+## ⚠️⚠️⚠️ 日志要求（强制，与买入策略同级）
+- **日志输出是硬性要求，不是可选项**：生成的策略代码**必须**在 `execute_look_decision` 内大量使用 **`self.log.info` / `self.log.warning`**（必要时 **`self.log.error`**），否则视为**不合格代码**。禁止「静默执行」：除极简早退外，**不得**整段逻辑无任何日志。
+- 每个关键分支（`if` / `elif` / `else`）、每次从 `market_state` 取价/取 K 线/按时间遍历、每次读指标、每个 notify 条件判定，均需 **`self.log.info()`** 输出：**条件说明、关键变量值、比较结果、是否命中 notify**。
+- 数据缺失、指标为 `None`、K 线为空、根数不足时，**必须**用 **`self.log.warning()`** 说明原因与跳过逻辑（含涉及的 `symbol`、周期、`open_time` 如有）。
+- **异常路径**：`try/except` 中捕获异常时**必须** `self.log.error` 或 `self.log.exception` 带堆栈或错误信息，再 `return decisions`。
 
 ## ⚠️⚠️⚠️ 变量定义顺序（禁止「先引用后赋值」）
 - 凡在条件表达式中用到的变量，**必须先完成赋值**再参与判断，避免 `local variable 'xxx' referenced before assignment`。
@@ -111,8 +113,58 @@ symbol_state = {
 - `tf_data = timeframes.get('1h', {})`，`klines = tf_data.get('klines', [])`。
 - **数组为从新到旧排序时**：**索引 `-1` 表示最新一根**（与现有引擎/买入文档一致）；若 strategy_context 要求用「上一根已收盘」，需结合 `previous_close_prices` 或取倒数第二根，**必须在代码与日志中写清楚采用的是哪一根**。
 
+### 5.1）每根 K 线均带时间标识；历史区间与多根计算须在本策略内遍历查询
+- **时间字段（必读）**：每一根 K 线都有可用于标识「该根 K 所属周期时段」的字段（以实际注入为准，常见包括）：
+  - `open_time`：`int`，该根 K 线**开盘时间**的 Unix 毫秒时间戳；
+  - `open_time_dt_str`：`str`，开盘时间可读字符串（多为 `Asia/Shanghai` 语义下的 `YYYY-MM-DD HH:MM:SS`）；
+  - 可能还有 `close_time` / `close_time_dt_str` 等收线相关时间。
+- **禁止**为拿「某段历史」再去请求行情接口；**只能**使用当前已注入的 `klines`（及各周期 `timeframes`）在策略代码内部做**遍历、筛选、切片、滑动窗口**等计算后再做逻辑判断。
+- **需要「历史某段时间」或「连续多根历史 K」时**：对对应周期的 `klines` 做 `for` 循环，用 `open_time` 与目标时间窗比较，或按下标取 `klines[i]`、`klines[-20:]` 等；跨多周期时分别取各周期 `tf` 的 `klines` 再组合判断。
+
+**示例 A：按时间戳筛选「最近 24 小时内」的 1h K 线（相对最新一根的开盘时间回推）**
+```python
+tf_wrap = (st.get("indicators") or {}).get("timeframes") or {}
+klines = (tf_wrap.get("1h") or {}).get("klines") or []
+if not klines:
+    self.log.warning(f"{sym} 无 1h K 线")
+else:
+    latest_open = klines[-1].get("open_time")  # 毫秒
+    if latest_open is None:
+        self.log.warning(f"{sym} 最新 1h K 无 open_time")
+    else:
+        cutoff_ms = int(latest_open) - 24 * 60 * 60 * 1000
+        bars_in_window = [k for k in klines if k.get("open_time") is not None and int(k["open_time"]) >= cutoff_ms]
+        self.log.info(f"{sym} 24h 窗口内 1h 根数={len(bars_in_window)}")
+        # 再对 bars_in_window 做成交量求和、指标统计等
+```
+
+**示例 B：遍历多根 K，统计 RSI14 连续低于 30 的根数（单周期）**
+```python
+tf_wrap = (st.get("indicators") or {}).get("timeframes") or {}
+kl = (tf_wrap.get("15m") or {}).get("klines") or []
+if len(kl) < 5:
+    return decisions
+count_oversold = 0
+for k in kl[-30:]:  # 只看最近 30 根，避免全表扫描；按 strategy_context 调整窗口
+    ind = k.get("indicators") or {}
+    rsi14 = (ind.get("rsi") or {}).get("rsi14")
+    if rsi14 is not None and rsi14 < 30:
+        count_oversold += 1
+self.log.info(f"{sym} 近窗内 RSI<30 根数={count_oversold}, open_time[-1]={kl[-1].get('open_time_dt_str')}")
+```
+
+**示例 C：取「倒数第 5 根～倒数第 2 根」收盘价的平均值（不含当前未收盘语义时自行与 strategy_context 对齐）**
+```python
+tf_wrap = (st.get("indicators") or {}).get("timeframes") or {}
+klines = (tf_wrap.get("1h") or {}).get("klines") or []
+seg = klines[-5:-1] if len(klines) >= 5 else []
+closes = [float(x["close"]) for x in seg if x.get("close") is not None]
+avg_close = sum(closes) / len(closes) if closes else None
+self.log.info(f"{sym} 片段均价={avg_close}, 片段首根open_time={seg[0].get('open_time') if seg else None}")
+```
+
 ### 6）每根 K 线 dict 结构与预计算指标
-- 每根 K 线含 `open/high/low/close/volume` 等（具体以实际注入为准），以及 **`indicators`** 子 dict。
+- 每根 K 线含 `open/high/low/close/volume` 以及上述**时间字段**，以及 **`indicators`** 子 dict（具体以实际注入为准）。
 - **⚠️ 指标已在服务端预计算写入每根 K 线**，优先 **直接读取**，避免重复用 talib 重算（除非 strategy_context 明确要求且你已处理长度与 NaN）。
 - 从**最新一根**读取示例路径：
 ```python
@@ -277,12 +329,17 @@ def execute_look_decision(self, symbol: str, market_state: Dict) -> Dict[str, Li
 ## 异常与健壮性
 - 建议整体用 `try/except` 包裹主逻辑，**记录 error 日志**，**返回 `decisions`**（一般为 `{}`），**禁止**让未捕获异常冒泡导致整轮盯盘线程崩溃。
 
-## 详细日志记录要求（摘要）
-对每个 `symbol` 至少输出：
-- 当前价、`contract_symbol`、`quote_volume`（若规则用到）
-- 选用的周期、`klines` 根数
-- 参与判断的核心指标名与数值（含 None 情况）
-- notify 是否触发及原因（`justification` 与日志一致）
+## ⚠️⚠️⚠️ 详细日志记录要求（强制清单，生成代码必须满足）
+以下条目为**最低限度**；`strategy_context` 若要求更细粒度日志，须**叠加满足**。**遗漏任一条**即不符合盯盘策略交付标准。
+
+1. **入口**：进入 `execute_look_decision` 后**第一条有效日志**须含 **`symbol`**（大写基础符号）及「开始执行/拉取状态」语义。
+2. **行情摘要（每条 symbol 至少一次 info）**：`price`、`contract_symbol`；若规则使用 **`quote_volume` / `base_volume` / `change_24h`**，须至少打一次当前值或说明未使用。
+3. **周期与数据规模**：列出本策略**实际使用**的周期（如 `1h`、`15m`）；对每个用到的周期，**info** 该周期 **`klines` 根数**；若某周期未用，可不打或打一行说明跳过。
+4. **指标与空值**：凡参与判断的核心指标（如 `rsi14`、`ma20`、`dif/dea` 等），在判定前后须有 **info** 或 **warning** 打出**指标名与数值**；值为 **`None`** 时**必须** **warning** 并说明跳过或降级逻辑。
+5. **notify 结论（强制）**：在 **`return decisions` 之前**，**必须**有一条 **info** 明确写出：**是否触发 notify**、若触发则与即将写入的 **`justification` 语义一致**（原因简述可同句）；未触发时亦须 info 写明「本周期不触发 notify」或等价语义。
+6. **遍历/时间窗**：若使用「多根 K」「时间筛选」「滑动窗口」，须在循环前后或关键步打 **info**（含窗口大小、筛选后根数或起止 `open_time` 如有）。
+
+**自检（生成代码后 mentally 过一遍）**：全文搜索 `self.log`，确认 **info/warning/error** 调用次数充足、覆盖分支与异常，且不存在「大块逻辑零日志」。
 
 ---
 
