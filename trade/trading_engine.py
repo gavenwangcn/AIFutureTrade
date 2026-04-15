@@ -25,6 +25,11 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import trade.common.config as app_config
 from trade.ai.prompt_defaults import DEFAULT_BUY_CONSTRAINTS, DEFAULT_SELL_CONSTRAINTS, PROMPT_JSON_OUTPUT_SUFFIX
 from trade.common.binance_futures import BinanceFuturesOrderClient, BinanceFuturesAccountClient
+from trade.common.sdk_non_virtual_sync import (
+    merge_trade_row_from_query_order,
+    portfolio_row_from_sdk_position,
+    sdk_positions_iter,
+)
 from trade.common.database.database_model_prompts import ModelPromptsDatabase
 from trade.common.database.database_models import ModelsDatabase
 from trade.common.database.database_portfolios import PortfoliosDatabase
@@ -1995,6 +2000,98 @@ class TradingEngine:
         except Exception as e:
             logger.error(f"[TradingEngine] Failed to get portfolio for model {model_id}: {e}")
             raise
+
+    def _sync_non_virtual_positions_and_trade_order(
+        self,
+        *,
+        order_client: BinanceFuturesOrderClient,
+        model: Dict,
+        symbol: str,
+        parsed_response: Dict[str, Any],
+        trade_id: str,
+        model_uuid: str,
+        trade_signal_final: str,
+        trade_side_direction: str,
+        trade_position_side_final_upper: str,
+        leverage: int,
+        trade_fee: float,
+        initial_margin: float,
+        net_pnl: float,
+        strategy_decision_id: Optional[str],
+    ) -> None:
+        """
+        非虚拟真实成交后：用 account_information_v3 的 positions 全量替换 portfolios；
+        再用 query_order(orderId) 的 SDK 返回对象落库 trades（仅查询有数据时插入）。
+        """
+        api_key = (model.get("api_key") or "").strip()
+        api_secret = (model.get("api_secret") or "").strip()
+        if not api_key or not api_secret:
+            raise RuntimeError("api_key/api_secret 缺失，无法同步 SDK 持仓与订单")
+        testnet = getattr(app_config, "BINANCE_TESTNET", False)
+        account_client = BinanceFuturesAccountClient(
+            api_key=api_key,
+            api_secret=api_secret,
+            testnet=testnet,
+        )
+        account_data = account_client.get_account_information_v3_data()
+        positions = sdk_positions_iter(account_data)
+        model_mapping = self.models_db._get_model_id_mapping() if self.models_db else None
+        sdk_rows: List[Dict[str, Any]] = []
+        for p in positions:
+            row = portfolio_row_from_sdk_position(p, model_uuid)
+            if row:
+                sdk_rows.append(row)
+        self.portfolios_db.replace_all_positions_for_model_from_sdk(
+            self.model_id, sdk_rows, model_mapping
+        )
+        portfolios_id = None
+        try:
+            pr = self.portfolios_db.query(
+                f"SELECT id FROM {self.portfolios_db.portfolios_table} "
+                f"WHERE model_id = %s AND symbol = %s AND position_side = %s LIMIT 1",
+                (model_uuid, symbol.upper(), trade_position_side_final_upper),
+            )
+            if pr and len(pr) > 0 and pr[0] and pr[0][0] is not None:
+                portfolios_id = pr[0][0]
+        except Exception as e:
+            logger.warning(f"[TradingEngine] portfolios_id lookup after sync: {e}")
+
+        oid = parsed_response.get("orderId")
+        if oid is None:
+            logger.warning(
+                f"[Model {self.model_id}] SDK 同步：无 orderId，跳过 query_order 落库 trades"
+            )
+            return
+        try:
+            oid_int = int(oid)
+        except (TypeError, ValueError):
+            logger.warning(f"[Model {self.model_id}] SDK 同步：orderId 非法 {oid}，跳过 trades")
+            return
+        order_obj = order_client.query_order_data(symbol, oid_int)
+        if order_obj is None:
+            logger.warning(
+                f"[Model {self.model_id}] query_order 无数据，跳过 trades 落库 | symbol={symbol} orderId={oid_int}"
+            )
+            return
+        cols, vals = merge_trade_row_from_query_order(
+            order_obj,
+            trade_id=trade_id,
+            model_uuid=model_uuid,
+            future=symbol,
+            signal=trade_signal_final,
+            leverage=leverage,
+            side=trade_side_direction,
+            position_side=trade_position_side_final_upper,
+            pnl=net_pnl,
+            fee=trade_fee,
+            initial_margin=initial_margin,
+            strategy_decision_id=strategy_decision_id,
+            portfolios_id=portfolios_id,
+        )
+        self.db.insert_rows(self.db.trades_table, [vals], cols)
+        logger.info(
+            f"[Model {self.model_id}] SDK 同步完成：持仓已替换，trades 已从 query_order 写入 trade_id={trade_id}"
+        )
 
     def _get_realtime_price_for_symbol(self, symbol: str) -> Optional[float]:
         """从SDK获取单个symbol的实时价格（用于非真实交易校验）"""
@@ -4133,62 +4230,8 @@ class TradingEngine:
                 'error': sdk_error
             }
 
-        # 【更新持仓】只有在real模式且SDK返回成功时才更新portfolios表
-        # 对于real模式：优先使用SDK返回的cumQty，其次使用executedQty；使用avgPrice
-        # 对于test模式：使用策略返回的值
-        if trade_mode == 'real' and parsed_response and not parsed_response.get('error'):
-            # real模式且SDK返回成功，使用SDK返回的数据更新portfolios表
-            # 优先使用cumQty，其次使用executedQty
-            cum_qty = parsed_response.get('cumQty')
-            executed_qty_fallback = parsed_response.get('executedQty', 0.0)
-            executed_qty = cum_qty if cum_qty is not None else executed_qty_fallback
-            quantity_source = 'cumQty' if cum_qty is not None else 'executedQty'
-
-            avg_price_from_sdk = parsed_response.get('avgPrice', 0.0)
-            position_side_from_sdk = parsed_response.get('positionSide', position_side.lower())
-
-            logger.debug(f"[TradingEngine] 从SDK响应获取成交数量: {executed_qty} (字段: {quantity_source}), 成交价格: {avg_price_from_sdk}")
-
-            # 将position_side转换为大写（数据库存储为大写）
-            if position_side_from_sdk:
-                position_side_from_sdk = position_side_from_sdk.upper()
-            else:
-                position_side_from_sdk = position_side
-
-            # 根据价格调整executedQty精度（与strategy_decisions表保持一致）
-            if executed_qty and avg_price_from_sdk:
-                executed_qty_adjusted = adjust_quantity_precision_by_price(float(executed_qty), float(avg_price_from_sdk))
-                # 如果精度为0（整数），转换为整数类型
-                executed_qty_int = int(executed_qty_adjusted) if executed_qty_adjusted == int(executed_qty_adjusted) else executed_qty_adjusted
-            else:
-                executed_qty_int = int(float(executed_qty)) if executed_qty else 0
-            
-            if executed_qty_int > 0 and avg_price_from_sdk > 0:
-                try:
-                    # 重新计算initial_margin（基于实际成交的executedQty和avgPrice）
-                    # executed_qty_int可能是整数或浮点数（根据精度调整）
-                    actual_required_capital = (executed_qty_int * avg_price_from_sdk) / leverage
-                    actual_trade_amount, actual_buy_fee, _, actual_initial_margin = calculate_trade_requirements(
-                        executed_qty_int, avg_price_from_sdk, leverage, self.trade_fee_rate, actual_required_capital
-                    )
-                    
-                    # executed_qty_int可能是整数或浮点数（根据精度调整）
-                    position_amt_for_update = executed_qty_int
-                    self._update_position(
-                        self.model_id, symbol=symbol, position_amt=position_amt_for_update, 
-                        avg_price=avg_price_from_sdk, 
-                        leverage=leverage, position_side=position_side_from_sdk,
-                        initial_margin=actual_initial_margin
-                    )
-                    logger.info(f"TRADE: Updated portfolios (real mode, SDK success) - Model {self.model_id} {symbol} "
-                              f"position_amt={position_amt_for_update} avg_price={avg_price_from_sdk} position_side={position_side_from_sdk}")
-                except Exception as db_err:
-                    logger.error(f"TRADE: Update position failed (real mode, SDK success) model={self.model_id} future={symbol}: {db_err}")
-                    raise
-            else:
-                logger.warn(f"TRADE: Skipped portfolios update (real mode, SDK success but invalid data) - "
-                          f"Model {self.model_id} {symbol} executedQty={executed_qty} avgPrice={avg_price_from_sdk}")
-        elif trade_mode == 'test':
+        # 【更新持仓】非虚拟真实模式：不在此处写 portfolios；成交后统一用 account_information_v3.positions 全量替换（见下方 _sync_non_virtual_positions_and_trade_order）
+        if trade_mode == 'test':
             # test模式：使用策略返回的值更新portfolios表
             try:
                 self._update_position(
@@ -4269,61 +4312,90 @@ class TradingEngine:
         
         # 确保position_side为大写（LONG/SHORT）
         trade_position_side_final_upper = trade_position_side_final.upper() if trade_position_side_final else position_side
-        
-        # 获取 portfolios_id：查询 portfolios 表获取对应持仓记录的 id
-        portfolios_id = None
-        try:
-            portfolio_rows = self.portfolios_db.query(
-                f"SELECT id FROM {self.portfolios_db.portfolios_table} "
-                f"WHERE model_id = %s AND symbol = %s AND position_side = %s",
-                (model_uuid, symbol.upper(), trade_position_side_final_upper)
+
+        model_row = self.models_db.get_model(self.model_id) or {}
+        did_sdk_trade_sync = False
+        if (
+            trade_mode == 'real'
+            and parsed_response
+            and not parsed_response.get('error')
+            and not model_row.get('is_virtual', False)
+            and binance_client
+        ):
+            self._sync_non_virtual_positions_and_trade_order(
+                order_client=binance_client,
+                model=model_row,
+                symbol=symbol,
+                parsed_response=parsed_response,
+                trade_id=trade_id,
+                model_uuid=model_uuid,
+                trade_signal_final=trade_signal_final,
+                trade_side_direction=trade_side_direction,
+                trade_position_side_final_upper=trade_position_side_final_upper,
+                leverage=leverage,
+                trade_fee=trade_fee,
+                initial_margin=initial_margin,
+                net_pnl=0.0,
+                strategy_decision_id=strategy_decision_id,
             )
-            if portfolio_rows and len(portfolio_rows) > 0:
-                portfolios_id = portfolio_rows[0][0]
-                logger.debug(f"[TradingEngine] Found portfolios_id={portfolios_id} for model={self.model_id} symbol={symbol} position_side={trade_position_side_final_upper}")
-            else:
-                logger.warning(f"[TradingEngine] No portfolios_id found for model={self.model_id} symbol={symbol} position_side={trade_position_side_final_upper}")
-        except Exception as e:
-            logger.warning(f"[TradingEngine] Failed to get portfolios_id: {e}")
+            did_sdk_trade_sync = True
+
+        # 获取 portfolios_id：虚拟/test 或未走 SDK 同步时查询
+        portfolios_id = None
+        if not did_sdk_trade_sync:
+            try:
+                portfolio_rows = self.portfolios_db.query(
+                    f"SELECT id FROM {self.portfolios_db.portfolios_table} "
+                    f"WHERE model_id = %s AND symbol = %s AND position_side = %s",
+                    (model_uuid, symbol.upper(), trade_position_side_final_upper)
+                )
+                if portfolio_rows and len(portfolio_rows) > 0:
+                    portfolios_id = portfolio_rows[0][0]
+                    logger.debug(f"[TradingEngine] Found portfolios_id={portfolios_id} for model={self.model_id} symbol={symbol} position_side={trade_position_side_final_upper}")
+                else:
+                    logger.warning(f"[TradingEngine] No portfolios_id found for model={self.model_id} symbol={symbol} position_side={trade_position_side_final_upper}")
+            except Exception as e:
+                logger.warning(f"[TradingEngine] Failed to get portfolios_id: {e}")
         
         # 记录交易
         # quantity = 合约数量（用于 trades 表，与strategy_decisions表保持一致）
         # position_amt = 合约数量（用于 portfolios 表）
         # initial_margin = 开仓时使用的原始保证金（用于计算盈亏百分比）
-        logger.info(f"TRADE: PENDING - Model {self.model_id} {trade_signal_final.upper()} {symbol} position_side={trade_position_side_final_upper} side={trade_side_direction} quantity={trade_quantity} (合约数量), position_amt={position_amt} (合约数量), price={trade_price} fee={trade_fee} initial_margin={initial_margin} portfolios_id={portfolios_id}")
-        try:
-            # 构建插入数据的列和值
-            columns = ["id", "model_id", "future", "signal", "quantity", "price", "leverage", "side", "position_side", "pnl", "fee", "initial_margin", "portfolios_id", "timestamp"]
-            values = [trade_id, model_uuid, symbol.upper(), trade_signal_final, trade_quantity, trade_price, leverage, trade_side_direction, trade_position_side_final_upper, 0, trade_fee, initial_margin, portfolios_id, datetime.now(timezone(timedelta(hours=8))).replace(tzinfo=None)]
+        logger.info(f"TRADE: PENDING - Model {self.model_id} {trade_signal_final.upper()} {symbol} position_side={trade_position_side_final_upper} side={trade_side_direction} quantity={trade_quantity} (合约数量), position_amt={position_amt} (合约数量), price={trade_price} fee={trade_fee} initial_margin={initial_margin} portfolios_id={portfolios_id} sdk_sync={did_sdk_trade_sync}")
+        if not did_sdk_trade_sync:
+            try:
+                # 构建插入数据的列和值
+                columns = ["id", "model_id", "future", "signal", "quantity", "price", "leverage", "side", "position_side", "pnl", "fee", "initial_margin", "portfolios_id", "timestamp"]
+                values = [trade_id, model_uuid, symbol.upper(), trade_signal_final, trade_quantity, trade_price, leverage, trade_side_direction, trade_position_side_final_upper, 0, trade_fee, initial_margin, portfolios_id, datetime.now(timezone(timedelta(hours=8))).replace(tzinfo=None)]
 
-            # 关联策略执行记录（strategy_decisions.id）
-            if strategy_decision_id:
-                columns.append("strategy_decision_id")
-                values.append(strategy_decision_id)
-            
-            # 添加新字段（如果real模式有值）
-            if order_id is not None:
-                columns.append("orderId")
-                values.append(order_id)
-            if order_type is not None:
-                columns.append("type")
-                values.append(order_type)
-            if orig_type is not None:
-                columns.append("origType")
-                values.append(orig_type)
-            if error_msg is not None:
-                columns.append("error")
-                values.append(error_msg)
-            
-            self.db.insert_rows(
-                self.db.trades_table,
-                [values],
-                columns
-            )
-            logger.info(f"TRADE: RECORDED - Model {self.model_id} {trade_signal_final.upper()} {symbol}")
-        except Exception as db_err:
-            logger.error(f"TRADE: Add trade failed ({trade_signal_final.upper()}) model={self.model_id} future={symbol}: {db_err}")
-            raise
+                # 关联策略执行记录（strategy_decisions.id）
+                if strategy_decision_id:
+                    columns.append("strategy_decision_id")
+                    values.append(strategy_decision_id)
+                
+                # 添加新字段（如果real模式有值）
+                if order_id is not None:
+                    columns.append("orderId")
+                    values.append(order_id)
+                if order_type is not None:
+                    columns.append("type")
+                    values.append(order_type)
+                if orig_type is not None:
+                    columns.append("origType")
+                    values.append(orig_type)
+                if error_msg is not None:
+                    columns.append("error")
+                    values.append(error_msg)
+                
+                self.db.insert_rows(
+                    self.db.trades_table,
+                    [values],
+                    columns
+                )
+                logger.info(f"TRADE: RECORDED - Model {self.model_id} {trade_signal_final.upper()} {symbol}")
+            except Exception as db_err:
+                logger.error(f"TRADE: Add trade failed ({trade_signal_final.upper()}) model={self.model_id} future={symbol}: {db_err}")
+                raise
         
         self._log_trade_record(trade_signal, symbol, position_side, sdk_call_skipped, sdk_skip_reason)
         
@@ -4546,23 +4618,7 @@ class TradingEngine:
                     original_initial_margin = float(portfolio_row[0][0])
             except Exception:
                 pass
-        if trade_mode == 'real' and parsed_response and not parsed_response.get('error'):
-            try:
-                if qty_for_portfolio >= position_amt:
-                    self._close_position(self.model_id, symbol=symbol, position_side=position_side)
-                    logger.info(f"TRADE: Closed position (real mode, SDK success) - Model {self.model_id} {symbol} position_side={position_side} quantity={qty_for_portfolio}")
-                else:
-                    remaining_amt = position_amt - qty_for_portfolio
-                    leverage = self._resolve_leverage(decision)
-                    self._update_position(
-                        self.model_id, symbol=symbol, position_amt=remaining_amt, avg_price=entry_price,
-                        leverage=leverage, position_side=position_side, initial_margin=original_initial_margin,
-                        unrealized_profit=0.0
-                    )
-                    logger.info(f"TRADE: Partial close (real mode, SDK success) - Model {self.model_id} {symbol} position_side={position_side} closed={qty_for_portfolio} remaining={remaining_amt} margin_unchanged")
-            except Exception as db_err:
-                logger.error(f"TRADE: Update position failed (real mode, SDK success) model={self.model_id} future={symbol}: {db_err}")
-                raise
+        # 非虚拟真实：成交后由 account_information_v3 + query_order 同步持仓与 trades，不在此更新 portfolios
         elif trade_mode == 'test':
             try:
                 if qty_for_portfolio >= position_amt:
@@ -4636,6 +4692,8 @@ class TradingEngine:
         
         # 确保position_side为大写（LONG/SHORT）
         trade_position_side_final_upper = trade_position_side_final.upper() if trade_position_side_final else position_side
+
+        leverage = self._resolve_leverage(decision)
         
         # 获取持仓的initial_margin（用于计算盈亏百分比）
         # 从position中获取initial_margin，如果不存在则从portfolios表查询
@@ -4657,49 +4715,74 @@ class TradingEngine:
         # if position_amt > 0 and strategy_quantity < position_amt:
         #     initial_margin = initial_margin * (strategy_quantity / position_amt)
 
-        # 获取 portfolios_id：从 position 对象中获取 id
-        portfolios_id = position.get('id') if position else None
-        if not portfolios_id:
+        model_row_sell = self.models_db.get_model(self.model_id) or {}
+        did_sdk_trade_sync_sell = False
+        if (
+            trade_mode == 'real'
+            and parsed_response
+            and not parsed_response.get('error')
+            and not model_row_sell.get('is_virtual', False)
+            and binance_client
+        ):
+            self._sync_non_virtual_positions_and_trade_order(
+                order_client=binance_client,
+                model=model_row_sell,
+                symbol=symbol,
+                parsed_response=parsed_response,
+                trade_id=trade_id,
+                model_uuid=model_uuid,
+                trade_signal_final=trade_signal_final,
+                trade_side_direction=trade_side_direction,
+                trade_position_side_final_upper=trade_position_side_final_upper,
+                leverage=leverage,
+                trade_fee=trade_fee,
+                initial_margin=initial_margin,
+                net_pnl=net_pnl,
+                strategy_decision_id=strategy_decision_id,
+            )
+            did_sdk_trade_sync_sell = True
+
+        # 获取 portfolios_id：未走 SDK 同步时从本地 position
+        portfolios_id = None if did_sdk_trade_sync_sell else (position.get('id') if position else None)
+        if not did_sdk_trade_sync_sell and not portfolios_id:
             logger.warning(f"[TradingEngine] No portfolios_id found in position for model={self.model_id} symbol={symbol} position_side={position_side}")
         
         # 记录交易（使用 _resolve_leverage 解析，优先使用 decision 中的 leverage，否则使用模型配置的 leverage）
-        logger.info(f"TRADE: PENDING - Model {self.model_id} {trade_signal_final.upper()} {symbol} position_side={trade_position_side_final_upper} side={trade_side_direction} position_amt={trade_quantity} price={trade_price} fee={trade_fee} net_pnl={net_pnl} initial_margin={initial_margin} portfolios_id={portfolios_id}")
-        try:
-            # 使用 _resolve_leverage 解析杠杆（优先使用 decision 中的 leverage，否则使用模型配置的 leverage）
-            leverage = self._resolve_leverage(decision)
-            
-            # 构建插入数据的列和值
-            columns = ["id", "model_id", "future", "signal", "quantity", "price", "leverage", "side", "position_side", "pnl", "fee", "initial_margin", "portfolios_id", "timestamp"]
-            values = [trade_id, model_uuid, symbol.upper(), trade_signal_final, trade_quantity, trade_price, leverage, trade_side_direction, trade_position_side_final_upper, net_pnl, trade_fee, initial_margin, portfolios_id, datetime.now(timezone(timedelta(hours=8))).replace(tzinfo=None)]
+        logger.info(f"TRADE: PENDING - Model {self.model_id} {trade_signal_final.upper()} {symbol} position_side={trade_position_side_final_upper} side={trade_side_direction} position_amt={trade_quantity} price={trade_price} fee={trade_fee} net_pnl={net_pnl} initial_margin={initial_margin} portfolios_id={portfolios_id} sdk_sync={did_sdk_trade_sync_sell}")
+        if not did_sdk_trade_sync_sell:
+            try:
+                # 构建插入数据的列和值
+                columns = ["id", "model_id", "future", "signal", "quantity", "price", "leverage", "side", "position_side", "pnl", "fee", "initial_margin", "portfolios_id", "timestamp"]
+                values = [trade_id, model_uuid, symbol.upper(), trade_signal_final, trade_quantity, trade_price, leverage, trade_side_direction, trade_position_side_final_upper, net_pnl, trade_fee, initial_margin, portfolios_id, datetime.now(timezone(timedelta(hours=8))).replace(tzinfo=None)]
 
-            # 关联策略执行记录（strategy_decisions.id）
-            if strategy_decision_id:
-                columns.append("strategy_decision_id")
-                values.append(strategy_decision_id)
-            
-            # 添加新字段（如果real模式有值）
-            if order_id is not None:
-                columns.append("orderId")
-                values.append(order_id)
-            if order_type is not None:
-                columns.append("type")
-                values.append(order_type)
-            if orig_type is not None:
-                columns.append("origType")
-                values.append(orig_type)
-            if error_msg is not None:
-                columns.append("error")
-                values.append(error_msg)
-            
-            self.db.insert_rows(
-                self.db.trades_table,
-                [values],
-                columns
-            )
-            logger.info(f"TRADE: RECORDED - Model {self.model_id} {trade_signal_final.upper()} {symbol}")
-        except Exception as db_err:
-            logger.error(f"TRADE: Add trade failed ({trade_signal_final.upper()}) model={self.model_id} future={symbol}: {db_err}")
-            raise
+                # 关联策略执行记录（strategy_decisions.id）
+                if strategy_decision_id:
+                    columns.append("strategy_decision_id")
+                    values.append(strategy_decision_id)
+                
+                # 添加新字段（如果real模式有值）
+                if order_id is not None:
+                    columns.append("orderId")
+                    values.append(order_id)
+                if order_type is not None:
+                    columns.append("type")
+                    values.append(order_type)
+                if orig_type is not None:
+                    columns.append("origType")
+                    values.append(orig_type)
+                if error_msg is not None:
+                    columns.append("error")
+                    values.append(error_msg)
+                
+                self.db.insert_rows(
+                    self.db.trades_table,
+                    [values],
+                    columns
+                )
+                logger.info(f"TRADE: RECORDED - Model {self.model_id} {trade_signal_final.upper()} {symbol}")
+            except Exception as db_err:
+                logger.error(f"TRADE: Add trade failed ({trade_signal_final.upper()}) model={self.model_id} future={symbol}: {db_err}")
+                raise
         
         self._log_trade_record(trade_signal, symbol, position_side, sdk_call_skipped, sdk_skip_reason)
         
@@ -4882,10 +4965,8 @@ class TradingEngine:
                 'error': sdk_error
             }
         
-        # 更新数据库持仓记录：全平仓则删除，部分平仓则减少持仓数量（保证金不变）
-        # 只有在real模式且SDK返回成功时才更新；对于test模式：始终更新
+        # 更新数据库持仓记录：仅 test 模式维护 portfolios；非虚拟真实持仓由 SDK 账户接口全量同步
         model_mapping = self.models_db._get_model_id_mapping() if self.models_db else None
-        # 部分平仓时获取原始 initial_margin，保证金保持不变
         original_initial_margin = position.get('initial_margin', 0.0)
         if original_initial_margin == 0.0:
             try:
@@ -4898,24 +4979,7 @@ class TradingEngine:
                     original_initial_margin = float(portfolio_row[0][0])
             except Exception:
                 pass
-        if trade_mode == 'real' and parsed_response and not parsed_response.get('error'):
-            try:
-                if strategy_quantity >= position_amt:
-                    self._close_position(self.model_id, symbol=symbol, position_side=position_side)
-                    logger.info(f"TRADE: Closed position (real mode, SDK success) - Model {self.model_id} {symbol} position_side={position_side} quantity={strategy_quantity}")
-                else:
-                    remaining_amt = position_amt - strategy_quantity
-                    leverage = self._resolve_leverage(decision)
-                    self._update_position(
-                        self.model_id, symbol=symbol, position_amt=remaining_amt, avg_price=entry_price,
-                        leverage=leverage, position_side=position_side, initial_margin=original_initial_margin,
-                        unrealized_profit=0.0
-                    )
-                    logger.info(f"TRADE: Partial close (real mode, SDK success) - Model {self.model_id} {symbol} position_side={position_side} closed={strategy_quantity} remaining={remaining_amt} margin_unchanged")
-            except Exception as db_err:
-                logger.error(f"TRADE: Update position failed (real mode, SDK success) model={self.model_id} future={symbol}: {db_err}")
-                raise
-        elif trade_mode == 'test':
+        if trade_mode == 'test':
             try:
                 if strategy_quantity >= position_amt:
                     self._close_position(self.model_id, symbol=symbol, position_side=position_side)
@@ -4957,11 +5021,6 @@ class TradingEngine:
         # if position_amt > 0 and strategy_quantity < position_amt:
         #     initial_margin = initial_margin * (strategy_quantity / position_amt)
 
-        # 获取 portfolios_id：从 position 对象中获取 id
-        portfolios_id = position.get('id') if position else None
-        if not portfolios_id:
-            logger.warning(f"[TradingEngine] No portfolios_id found in position for model={self.model_id} symbol={symbol} position_side={position_side}")
-        
         # 【确定trades表的字段值】
         # 【trades表记录逻辑】close_position为平仓操作，统一按业务语义记录，不随SDK的side变化：
         # - signal 固定为 'close_position'
@@ -5014,45 +5073,78 @@ class TradingEngine:
         
         # 确保position_side为大写（LONG/SHORT）
         trade_position_side_final_upper = trade_position_side_final.upper() if trade_position_side_final else position_side
-        
-        # 记录交易（使用 _resolve_leverage 解析，优先使用 decision 中的 leverage，否则使用模型配置的 leverage）
-        logger.info(f"TRADE: PENDING - Model {self.model_id} CLOSE {symbol} position_side={trade_position_side_final_upper} side={trade_side_direction} position_amt={trade_quantity} price={trade_price} fee={trade_fee} net_pnl={net_pnl} initial_margin={initial_margin} portfolios_id={portfolios_id}")
-        try:
-            # 使用 _resolve_leverage 解析杠杆（优先使用 decision 中的 leverage，否则使用模型配置的 leverage）
-            leverage = self._resolve_leverage(decision)
-            
-            # 构建插入数据的列和值
-            columns = ["id", "model_id", "future", "signal", "quantity", "price", "leverage", "side", "position_side", "pnl", "fee", "initial_margin", "portfolios_id", "timestamp"]
-            values = [trade_id, model_uuid, symbol.upper(), trade_signal_final, trade_quantity, trade_price, leverage, trade_side_direction, trade_position_side_final_upper, net_pnl, trade_fee, initial_margin, portfolios_id, datetime.now(timezone(timedelta(hours=8))).replace(tzinfo=None)]
 
-            # 关联策略执行记录（strategy_decisions.id）
-            if strategy_decision_id:
-                columns.append("strategy_decision_id")
-                values.append(strategy_decision_id)
-            
-            # 添加新字段（如果real模式有值）
-            if order_id is not None:
-                columns.append("orderId")
-                values.append(order_id)
-            if order_type is not None:
-                columns.append("type")
-                values.append(order_type)
-            if orig_type is not None:
-                columns.append("origType")
-                values.append(orig_type)
-            if error_msg is not None:
-                columns.append("error")
-                values.append(error_msg)
-                
-            self.db.insert_rows(
-                self.db.trades_table,
-                [values],
-                columns
+        leverage = self._resolve_leverage(decision)
+        model_row_close = self.models_db.get_model(self.model_id) or {}
+        did_sdk_trade_sync_close = False
+        if (
+            trade_mode == 'real'
+            and parsed_response
+            and not parsed_response.get('error')
+            and not model_row_close.get('is_virtual', False)
+            and binance_client
+        ):
+            self._sync_non_virtual_positions_and_trade_order(
+                order_client=binance_client,
+                model=model_row_close,
+                symbol=symbol,
+                parsed_response=parsed_response,
+                trade_id=trade_id,
+                model_uuid=model_uuid,
+                trade_signal_final=trade_signal_final,
+                trade_side_direction=trade_side_direction,
+                trade_position_side_final_upper=trade_position_side_final_upper,
+                leverage=leverage,
+                trade_fee=trade_fee,
+                initial_margin=initial_margin,
+                net_pnl=net_pnl,
+                strategy_decision_id=strategy_decision_id,
             )
-            logger.info(f"TRADE: RECORDED - Model {self.model_id} CLOSE {symbol}")
-        except Exception as db_err:
-            logger.error(f"TRADE: Add trade failed (CLOSE) model={self.model_id} future={symbol}: {db_err}")
-            raise
+            did_sdk_trade_sync_close = True
+
+        portfolios_id = None if did_sdk_trade_sync_close else (position.get('id') if position else None)
+        if not did_sdk_trade_sync_close and not portfolios_id:
+            logger.warning(
+                f"[TradingEngine] No portfolios_id found in position for model={self.model_id} symbol={symbol} position_side={position_side}"
+            )
+
+        # 记录交易：非虚拟真实且 SDK 同步成功时 trades 已由 query_order 落库
+        logger.info(
+            f"TRADE: PENDING - Model {self.model_id} CLOSE {symbol} position_side={trade_position_side_final_upper} "
+            f"side={trade_side_direction} position_amt={trade_quantity} price={trade_price} fee={trade_fee} net_pnl={net_pnl} "
+            f"initial_margin={initial_margin} portfolios_id={portfolios_id} sdk_sync={did_sdk_trade_sync_close}"
+        )
+        if not did_sdk_trade_sync_close:
+            try:
+                columns = ["id", "model_id", "future", "signal", "quantity", "price", "leverage", "side", "position_side", "pnl", "fee", "initial_margin", "portfolios_id", "timestamp"]
+                values = [trade_id, model_uuid, symbol.upper(), trade_signal_final, trade_quantity, trade_price, leverage, trade_side_direction, trade_position_side_final_upper, net_pnl, trade_fee, initial_margin, portfolios_id, datetime.now(timezone(timedelta(hours=8))).replace(tzinfo=None)]
+
+                if strategy_decision_id:
+                    columns.append("strategy_decision_id")
+                    values.append(strategy_decision_id)
+
+                if order_id is not None:
+                    columns.append("orderId")
+                    values.append(order_id)
+                if order_type is not None:
+                    columns.append("type")
+                    values.append(order_type)
+                if orig_type is not None:
+                    columns.append("origType")
+                    values.append(orig_type)
+                if error_msg is not None:
+                    columns.append("error")
+                    values.append(error_msg)
+
+                self.db.insert_rows(
+                    self.db.trades_table,
+                    [values],
+                    columns
+                )
+                logger.info(f"TRADE: RECORDED - Model {self.model_id} CLOSE {symbol}")
+            except Exception as db_err:
+                logger.error(f"TRADE: Add trade failed (CLOSE) model={self.model_id} future={symbol}: {db_err}")
+                raise
         self._log_trade_record('close_position', symbol, position_side, sdk_call_skipped, sdk_skip_reason)
         
         # 每次交易后立即记录账户价值快照

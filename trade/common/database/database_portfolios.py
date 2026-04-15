@@ -344,6 +344,70 @@ class PortfoliosDatabase:
         except Exception as e:
             logger.error(f"[Portfolios] Failed to update position: model_id={model_id}, symbol={symbol}, position_side={position_side}, position_amt={position_amt}, error_type={type(e).__name__}, error={e}")
             raise
+
+    def replace_all_positions_for_model_from_sdk(
+        self,
+        model_id: int,
+        sdk_rows: List[Dict[str, Any]],
+        model_id_mapping: Dict[int, str] = None,
+    ) -> None:
+        """
+        非虚拟真实同步：删除该 model 下全部持仓行，再按 SDK account_information_v3.positions 批量插入。
+        sdk_rows 每项需含：model_id, symbol, position_amt, position_init, avg_price, leverage,
+        position_side, initial_margin, unrealized_profit。
+        """
+        if model_id_mapping is None:
+            rows = self.query(f"SELECT id FROM models")
+            model_id_mapping = {}
+            for row in rows:
+                uuid_str = row[0]
+                int_id = abs(hash(uuid_str)) % (10 ** 9)
+                model_id_mapping[int_id] = uuid_str
+        model_uuid = model_id_mapping.get(model_id)
+        if not model_uuid:
+            logger.warning(f"[Portfolios] replace_all: model {model_id} not found")
+            return
+        beijing_tz = timezone(timedelta(hours=8))
+        now = datetime.now(beijing_tz).replace(tzinfo=None)
+
+        def _run(conn):
+            cursor = conn.cursor()
+            try:
+                cursor.execute(
+                    f"DELETE FROM `{self.portfolios_table}` WHERE `model_id` = %s",
+                    (model_uuid,),
+                )
+                for row in sdk_rows or []:
+                    pid = self._generate_id()
+                    cursor.execute(
+                        f"""
+                        INSERT INTO `{self.portfolios_table}`
+                        (`id`, `model_id`, `symbol`, `position_amt`, `position_init`, `avg_price`, `leverage`,
+                         `position_side`, `initial_margin`, `unrealized_profit`, `created_at`, `updated_at`)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        """,
+                        (
+                            pid,
+                            row["model_id"],
+                            row["symbol"].upper(),
+                            float(row["position_amt"]),
+                            row.get("position_init"),
+                            float(row.get("avg_price") or 0),
+                            int(row.get("leverage") or 1),
+                            str(row.get("position_side") or "LONG").upper(),
+                            float(row.get("initial_margin") or 0),
+                            float(row.get("unrealized_profit") or 0),
+                            now,
+                            now,
+                        ),
+                    )
+            finally:
+                cursor.close()
+
+        self._with_connection(_run)
+        logger.info(
+            f"[Portfolios] replace_all_from_sdk model_id={model_id} rows={len(sdk_rows or [])}"
+        )
     
     def get_portfolio(self, model_id: int, current_prices: Dict = None,
                      model_id_mapping: Dict[int, str] = None,

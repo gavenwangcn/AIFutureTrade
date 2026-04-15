@@ -1117,6 +1117,13 @@ class BinanceFuturesAccountClient(_BinanceFuturesBase):
         except Exception as e:
             logger.error(f"[BinanceFuturesAccountClient] Failed to get account information: {e}")
             raise
+
+    def get_account_information_v3_data(self) -> Any:
+        """
+        账户信息 V3：返回 SDK 响应 data() 对象（含 positions 列表），供业务用 getattr 解析。
+        """
+        response = self._rest.account_information_v3()
+        return response.data() if response else None
     
 class BinanceFuturesOrderClient(_BinanceFuturesBase):
     """
@@ -1180,6 +1187,24 @@ class BinanceFuturesOrderClient(_BinanceFuturesBase):
         self._symbol_precision_cache: Dict[str, Dict[str, float]] = {}
         self._cache_timestamp: float = 0
         self._cache_ttl: float = 3600  # 缓存1小时
+
+    def query_order_data(self, symbol: str, order_id: int) -> Any:
+        """
+        查询订单：返回 SDK response.data() 对象，由调用方用 getattr 取字段落库。
+        """
+        import inspect
+
+        formatted_symbol = self.format_symbol(symbol)
+        sig = inspect.signature(self._rest.query_order)
+        kwargs = {}
+        if "symbol" in sig.parameters:
+            kwargs["symbol"] = formatted_symbol
+        if "order_id" in sig.parameters:
+            kwargs["order_id"] = order_id
+        elif "orderId" in sig.parameters:
+            kwargs["orderId"] = order_id
+        response = self._rest.query_order(**kwargs)
+        return response.data() if response else None
 
     def get_order_book_ticker(self, symbol: Optional[str] = None) -> List[Dict[str, Any]]:
         """
