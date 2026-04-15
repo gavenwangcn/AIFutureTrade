@@ -36,10 +36,12 @@ public class MarketLookDTO implements Serializable {
     @JsonAlias({"signalResult"})
     private String signalResult;
 
+    /** 执行开始时间（必填） */
     @JsonProperty("started_at")
     @JsonAlias({"startedAt"})
     private LocalDateTime startedAt;
 
+    /** 执行结束时间（必填）；RUNNING 未结束时为占位 2099-12-31T23:59:59 */
     @JsonProperty("ended_at")
     @JsonAlias({"endedAt"})
     private LocalDateTime endedAt;

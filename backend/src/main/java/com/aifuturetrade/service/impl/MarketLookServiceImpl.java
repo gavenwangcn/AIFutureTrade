@@ -110,10 +110,15 @@ public class MarketLookServiceImpl implements MarketLookService {
         LocalDateTime now = LocalDateTime.now();
         if (MarketLookDO.STATUS_RUNNING.equals(status)) {
             row.setStartedAt(dto.getStartedAt() != null ? dto.getStartedAt() : now);
-            row.setEndedAt(null);
+            row.setEndedAt(MarketLookDO.ENDED_AT_NOT_FINISHED_PLACEHOLDER);
         } else {
-            row.setStartedAt(dto.getStartedAt() != null ? dto.getStartedAt() : now);
-            row.setEndedAt(dto.getEndedAt() != null ? dto.getEndedAt() : now);
+            LocalDateTime started = dto.getStartedAt() != null ? dto.getStartedAt() : now;
+            LocalDateTime ended = dto.getEndedAt() != null ? dto.getEndedAt() : now;
+            row.setStartedAt(started);
+            row.setEndedAt(ended);
+            if (ended.isBefore(started)) {
+                throw new IllegalArgumentException("ended_at 不能早于 started_at");
+            }
         }
         row.setCreatedAt(now);
         row.setUpdatedAt(now);
@@ -131,6 +136,15 @@ public class MarketLookServiceImpl implements MarketLookService {
         }
         if (dto == null) {
             throw new IllegalArgumentException("请求体不能为空");
+        }
+
+        if (existing.getStartedAt() == null) {
+            existing.setStartedAt(LocalDateTime.now());
+        }
+        if (existing.getEndedAt() == null) {
+            existing.setEndedAt(MarketLookDO.STATUS_ENDED.equals(existing.getExecutionStatus())
+                    ? existing.getStartedAt()
+                    : MarketLookDO.ENDED_AT_NOT_FINISHED_PLACEHOLDER);
         }
 
         if (StringUtils.hasText(dto.getSymbol())) {
@@ -161,7 +175,13 @@ public class MarketLookServiceImpl implements MarketLookService {
             }
             existing.setExecutionStatus(status);
             if (MarketLookDO.STATUS_ENDED.equals(status)) {
-                existing.setEndedAt(dto.getEndedAt() != null ? dto.getEndedAt() : LocalDateTime.now());
+                LocalDateTime ended = dto.getEndedAt() != null ? dto.getEndedAt() : LocalDateTime.now();
+                existing.setEndedAt(ended);
+                if (existing.getStartedAt() != null && ended.isBefore(existing.getStartedAt())) {
+                    throw new IllegalArgumentException("ended_at 不能早于 started_at");
+                }
+            } else {
+                existing.setEndedAt(MarketLookDO.ENDED_AT_NOT_FINISHED_PLACEHOLDER);
             }
         } else if (dto.getEndedAt() != null) {
             existing.setEndedAt(dto.getEndedAt());
@@ -192,6 +212,14 @@ public class MarketLookServiceImpl implements MarketLookService {
         if (existing == null) {
             throw new IllegalArgumentException("记录不存在: " + id);
         }
+        if (existing.getStartedAt() == null) {
+            existing.setStartedAt(LocalDateTime.now());
+        }
+        if (existing.getEndedAt() == null) {
+            existing.setEndedAt(MarketLookDO.STATUS_ENDED.equals(existing.getExecutionStatus())
+                    ? existing.getStartedAt()
+                    : MarketLookDO.ENDED_AT_NOT_FINISHED_PLACEHOLDER);
+        }
         if (!StringUtils.hasText(executionStatus)) {
             throw new IllegalArgumentException("execution_status 不能为空");
         }
@@ -201,9 +229,13 @@ public class MarketLookServiceImpl implements MarketLookService {
         }
         existing.setExecutionStatus(status);
         if (MarketLookDO.STATUS_ENDED.equals(status)) {
-            existing.setEndedAt(endedAt != null ? endedAt : LocalDateTime.now());
+            LocalDateTime end = endedAt != null ? endedAt : LocalDateTime.now();
+            existing.setEndedAt(end);
+            if (existing.getStartedAt() != null && end.isBefore(existing.getStartedAt())) {
+                throw new IllegalArgumentException("ended_at 不能早于 started_at");
+            }
         } else {
-            existing.setEndedAt(null);
+            existing.setEndedAt(MarketLookDO.ENDED_AT_NOT_FINISHED_PLACEHOLDER);
         }
         existing.setUpdatedAt(LocalDateTime.now());
         marketLookMapper.updateById(existing);

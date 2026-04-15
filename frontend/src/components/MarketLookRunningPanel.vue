@@ -57,6 +57,8 @@
                     <span><span class="meta-k">id</span> {{ row.id }}</span>
                     <span><span class="meta-k">strategy_id</span> {{ row.strategy_id }}</span>
                     <span><span class="meta-k">execution_status</span> {{ row.execution_status }}</span>
+                    <span><span class="meta-k">started_at</span> {{ formatStarted(row.started_at) }}</span>
+                    <span><span class="meta-k">ended_at</span> {{ formatEndedAt(row.ended_at) }}</span>
                   </div>
                   <div class="detail-label">signal_result</div>
                   <pre class="detail-pre">{{ formatSignal(row.signal_result) }}</pre>
@@ -138,6 +140,18 @@ function formatStarted(iso) {
   } catch {
     return String(iso)
   }
+}
+
+/** 与后端 RUNNING 占位 ended_at（2099-12-31）一致 */
+function isPlaceholderEndedAt(iso) {
+  if (!iso) return true
+  const d = new Date(iso)
+  return Number.isFinite(d.getTime()) && d.getFullYear() >= 2099
+}
+
+function formatEndedAt(iso) {
+  if (isPlaceholderEndedAt(iso)) return '—（未结束占位）'
+  return formatStarted(iso)
 }
 
 function formatSignal(raw) {

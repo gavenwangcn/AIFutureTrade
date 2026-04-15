@@ -25,6 +25,17 @@ public class MarketLookDO implements Serializable {
     public static final String STATUS_RUNNING = "RUNNING";
     public static final String STATUS_ENDED = "ENDED";
 
+    /**
+     * RUNNING 且尚未真正结束时写入 ended_at，满足列 NOT NULL；
+     * 表示「尚未结束」，业务上不等于真实结束时间。
+     */
+    public static final LocalDateTime ENDED_AT_NOT_FINISHED_PLACEHOLDER =
+            LocalDateTime.of(2099, 12, 31, 23, 59, 59);
+
+    public static boolean isNotFinishedPlaceholder(LocalDateTime endedAt) {
+        return endedAt != null && endedAt.equals(ENDED_AT_NOT_FINISHED_PLACEHOLDER);
+    }
+
     @TableId(value = "id", type = IdType.ASSIGN_UUID)
     private String id;
 

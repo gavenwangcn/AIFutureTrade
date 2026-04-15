@@ -100,7 +100,7 @@ public class MarketLookController {
     }
 
     @PatchMapping("/{id}/status")
-    @Operation(summary = "仅更新执行状态", description = "ENDED 时可省略 ended_at，服务端自动填当前时间")
+    @Operation(summary = "仅更新执行状态", description = "ENDED 时可省略 ended_at（服务端填当前时间）；RUNNING 时 ended_at 存占位以满足 NOT NULL")
     public ResponseEntity<Map<String, Object>> patchStatus(
             @PathVariable("id") String id,
             @RequestBody Map<String, Object> body) {

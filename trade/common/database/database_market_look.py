@@ -15,6 +15,9 @@ logger = logging.getLogger(__name__)
 EXECUTION_RUNNING = "RUNNING"
 EXECUTION_ENDED = "ENDED"
 
+# 与 Java MarketLookDO.ENDED_AT_NOT_FINISHED_PLACEHOLDER 一致，满足 ended_at NOT NULL
+ENDED_AT_NOT_FINISHED_PLACEHOLDER = datetime(2099, 12, 31, 23, 59, 59)
+
 
 class MarketLookDatabase:
     def __init__(self, pool=None):
@@ -93,13 +96,20 @@ class MarketLookDatabase:
                     WHERE id = %s
                 """
                 params = (status, ended_at, row_id)
-            else:
+            elif status == EXECUTION_ENDED:
                 sql = f"""
                     UPDATE `{self.table}`
-                    SET execution_status = %s, updated_at = CURRENT_TIMESTAMP
+                    SET execution_status = %s, ended_at = NOW(), updated_at = CURRENT_TIMESTAMP
                     WHERE id = %s
                 """
                 params = (status, row_id)
+            else:
+                sql = f"""
+                    UPDATE `{self.table}`
+                    SET execution_status = %s, ended_at = %s, updated_at = CURRENT_TIMESTAMP
+                    WHERE id = %s
+                """
+                params = (status, ENDED_AT_NOT_FINISHED_PLACEHOLDER, row_id)
             cur = conn.cursor()
             try:
                 cur.execute(sql, params)
@@ -139,7 +149,9 @@ class MarketLookDatabase:
                         execution_status,
                         None,
                         st,
-                        None,
+                        ENDED_AT_NOT_FINISHED_PLACEHOLDER
+                        if execution_status == EXECUTION_RUNNING
+                        else st,
                     ),
                 )
                 conn.commit()
