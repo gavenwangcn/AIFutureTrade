@@ -329,9 +329,9 @@ const startLogStream = () => {
       logMessages.value.push(event.data)
     }
 
-    // 限制日志条数，避免内存溢出
-    if (logMessages.value.length > 1500) {
-      logMessages.value = logMessages.value.slice(-1200)
+    // 限制日志条数，避免内存溢出（最多保留最近 12000 条）
+    if (logMessages.value.length > 12300) {
+      logMessages.value = logMessages.value.slice(-12000)
     }
 
     nextTick(() => {

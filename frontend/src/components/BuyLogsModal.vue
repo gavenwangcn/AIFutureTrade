@@ -309,8 +309,9 @@ const startLogStream = () => {
     }
 
     // 限制日志条数，避免内存溢出
-    if (logMessages.value.length > 1500) {
-      logMessages.value = logMessages.value.slice(-1200)
+    // 最多保留最近 12000 条（与盯盘/卖出日志一致）
+    if (logMessages.value.length > 12300) {
+      logMessages.value = logMessages.value.slice(-12000)
     }
 
     nextTick(() => {
