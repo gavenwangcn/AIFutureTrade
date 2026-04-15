@@ -490,6 +490,15 @@ export const marketLookApi = {
   /** 全部盯盘任务 */
   listAll: () => apiGet('/api/market-look'),
   /** 仅执行中 RUNNING */
-  listRunning: () => apiGet('/api/market-look/status/running')
+  listRunning: () => apiGet('/api/market-look/status/running'),
+  /** 按主键 */
+  getById: (id) => apiGet(`/api/market-look/${encodeURIComponent(id)}`)
+}
+
+/**
+ * 交易通知 trade_notify（盯盘执行写入，按 market_look_id 查执行记录）
+ */
+export const tradeNotifyApi = {
+  page: (params = {}) => apiGet('/api/trade-notify/page', params)
 }
 

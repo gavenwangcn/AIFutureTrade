@@ -1,8 +1,18 @@
 <template>
   <div class="market-look-panel">
-    <div class="market-look-header">
-      <h3 class="market-look-title">盯盘详情</h3>
-      <span class="market-look-sub">执行中（RUNNING）</span>
+    <div class="market-look-toolbar">
+      <div class="market-look-heading">
+        <h3 class="market-look-title">盯盘详情</h3>
+        <span class="market-look-sub">运行中（RUNNING）</span>
+      </div>
+      <span
+        class="status-indicator small"
+        :class="{
+          updating: statusType === 'updating',
+          success: statusType === 'success',
+          error: statusType === 'error'
+        }"
+      >{{ statusText }}</span>
       <button
         type="button"
         class="btn-refresh"
@@ -14,79 +24,92 @@
       </button>
     </div>
 
-    <div v-if="loading && rows.length === 0" class="market-look-loading">
-      <i class="bi bi-arrow-repeat spin"></i>
-      <span>加载中…</span>
-    </div>
-    <div v-else-if="errorMsg" class="market-look-error">{{ errorMsg }}</div>
-    <div v-else class="market-look-table-wrap">
+    <div class="market-look-table-wrap">
       <table class="market-look-table">
         <thead>
           <tr>
+            <th>数据ID</th>
+            <th>策略ID</th>
+            <th>策略名称</th>
             <th>合约</th>
-            <th>策略</th>
             <th>开始时间</th>
             <th>执行进度</th>
-            <th class="col-expand"></th>
           </tr>
         </thead>
         <tbody>
-          <template v-for="row in rows" :key="row.id">
-            <tr class="data-row" @click="toggleExpand(row.id)">
-              <td><strong>{{ row.symbol }}</strong></td>
-              <td class="cell-clip" :title="row.strategy_name || row.strategy_id">
-                {{ row.strategy_name || row.strategy_id || '—' }}
-              </td>
-              <td class="cell-time">{{ formatStarted(row.started_at) }}</td>
-              <td>
-                <div class="progress-meta">
-                  <span class="elapsed">{{ elapsedLabel(row) }}</span>
-                </div>
-                <div class="progress-track" :title="progressTitle(row)">
-                  <div class="progress-fill" :style="{ width: progressPercent(row) + '%' }"></div>
-                </div>
-              </td>
-              <td class="col-expand">
-                <i class="bi" :class="expandedId === row.id ? 'bi-chevron-up' : 'bi-chevron-down'"></i>
-              </td>
-            </tr>
-            <tr v-if="expandedId === row.id" class="detail-row">
-              <td colspan="5">
-                <div class="detail-inner">
-                  <div class="detail-meta">
-                    <span><span class="meta-k">id</span> {{ row.id }}</span>
-                    <span><span class="meta-k">strategy_id</span> {{ row.strategy_id }}</span>
-                    <span><span class="meta-k">execution_status</span> {{ row.execution_status }}</span>
-                    <span><span class="meta-k">started_at</span> {{ formatStarted(row.started_at) }}</span>
-                    <span><span class="meta-k">ended_at</span> {{ formatEndedAt(row.ended_at) }}</span>
-                  </div>
-                  <div class="detail-label">signal_result</div>
-                  <pre class="detail-pre">{{ formatSignal(row.signal_result) }}</pre>
-                </div>
-              </td>
-            </tr>
-          </template>
-          <tr v-if="rows.length === 0">
-            <td colspan="5" class="empty-cell">暂无执行中的盯盘任务</td>
+          <tr v-if="loading && rows.length === 0" class="loading-row">
+            <td colspan="6" class="loading-cell">
+              <i class="bi bi-arrow-repeat spin"></i>
+              <span>加载中…</span>
+            </td>
+          </tr>
+          <tr
+            v-for="row in rows"
+            :key="row.id"
+            class="data-row"
+            @click="openSignalModal(row)"
+          >
+            <td class="cell-mono cell-clip" :title="row.id">{{ row.id }}</td>
+            <td class="cell-mono cell-clip" :title="row.strategy_id">{{ row.strategy_id || '—' }}</td>
+            <td class="cell-clip" :title="row.strategy_name">{{ row.strategy_name || '—' }}</td>
+            <td class="cell-symbol">{{ row.symbol || '—' }}</td>
+            <td class="cell-time">{{ formatStarted(row.started_at) }}</td>
+            <td class="col-progress">
+              <div class="progress-meta">
+                <span class="elapsed">{{ elapsedLabel(row) }}</span>
+              </div>
+              <div class="progress-track" :title="progressTitle">
+                <div class="progress-fill" :style="{ width: progressPercent(row) + '%' }"></div>
+              </div>
+            </td>
+          </tr>
+          <tr v-if="!loading && rows.length === 0">
+            <td colspan="6" class="empty-cell">暂无运行中的盯盘任务</td>
           </tr>
         </tbody>
       </table>
     </div>
+
+    <Modal
+      :visible="signalModalVisible"
+      title="signal_result"
+      :subtitle="signalModalSubtitle"
+      large
+      @update:visible="signalModalVisible = $event"
+      @close="closeSignalModal"
+    >
+      <div v-if="signalDetailRow" class="signal-modal-body">
+        <pre class="signal-pre">{{
+          formatSignal(signalDetailRow.signal_result ?? signalDetailRow.signalResult)
+        }}</pre>
+      </div>
+    </Modal>
   </div>
 </template>
 
 <script setup>
-import { ref, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { marketLookApi } from '../services/api.js'
+import Modal from './Modal.vue'
 
-/** 进度条参照时长：展示「自开始以来」相对该窗口的比例（非业务截止时刻） */
+/** 进度条：相对 24h 参照窗口的比例（RUNNING 无真实结束时刻时的可视化） */
 const REFERENCE_MS = 24 * 60 * 60 * 1000
 
 const rows = ref([])
 const loading = ref(false)
-const errorMsg = ref('')
-const expandedId = ref(null)
+const statusType = ref('default')
+const statusText = ref('等待数据...')
 const nowTick = ref(Date.now())
+
+const signalModalVisible = ref(false)
+const signalDetailRow = ref(null)
+
+const signalModalSubtitle = computed(() => {
+  const r = signalDetailRow.value
+  if (!r) return ''
+  const sym = r.symbol || '—'
+  return `数据ID: ${r.id} · 合约: ${sym}`
+})
 
 let pollTimer = null
 let tickTimer = null
@@ -104,9 +127,7 @@ function progressPercent(row) {
   return Math.min(100, (elapsed / REFERENCE_MS) * 100)
 }
 
-function progressTitle(row) {
-  return '相对 24h 参照窗口的占用比例；已执行时长见左侧文字'
-}
+const progressTitle = '相对 24h 参照窗口；下方为已执行时长'
 
 function elapsedLabel(row) {
   const start = parseStartMs(row.started_at)
@@ -126,6 +147,35 @@ function formatDuration(ms) {
   return `${s}秒`
 }
 
+function formatSignal(raw) {
+  if (raw == null || raw === '') return '（空）'
+  const s = String(raw).trim()
+  try {
+    const o = JSON.parse(s)
+    return JSON.stringify(o, null, 2)
+  } catch {
+    return s
+  }
+}
+
+async function openSignalModal(row) {
+  signalDetailRow.value = row
+  signalModalVisible.value = true
+  try {
+    const fresh = await marketLookApi.getById(row.id)
+    if (fresh && fresh.id === row.id) {
+      signalDetailRow.value = fresh
+    }
+  } catch (e) {
+    console.warn('[MarketLookRunningPanel] getById fallback to row', e)
+  }
+}
+
+function closeSignalModal() {
+  signalModalVisible.value = false
+  signalDetailRow.value = null
+}
+
 function formatStarted(iso) {
   if (!iso) return '—'
   try {
@@ -142,43 +192,21 @@ function formatStarted(iso) {
   }
 }
 
-/** 与后端 RUNNING 占位 ended_at（2099-12-31）一致 */
-function isPlaceholderEndedAt(iso) {
-  if (!iso) return true
-  const d = new Date(iso)
-  return Number.isFinite(d.getTime()) && d.getFullYear() >= 2099
-}
-
-function formatEndedAt(iso) {
-  if (isPlaceholderEndedAt(iso)) return '—（未结束占位）'
-  return formatStarted(iso)
-}
-
-function formatSignal(raw) {
-  if (raw == null || raw === '') return '（空）'
-  const s = String(raw).trim()
-  try {
-    const o = JSON.parse(s)
-    return JSON.stringify(o, null, 2)
-  } catch {
-    return s
-  }
-}
-
-function toggleExpand(id) {
-  expandedId.value = expandedId.value === id ? null : id
-}
-
 async function load() {
   loading.value = true
-  errorMsg.value = ''
+  statusType.value = 'updating'
+  statusText.value = '正在更新...'
   try {
     const data = await marketLookApi.listRunning()
     rows.value = Array.isArray(data) ? data : []
+    statusType.value = 'success'
+    const t = new Date()
+    statusText.value = `最后更新: ${t.toLocaleTimeString('zh-CN', { hour12: false })}`
   } catch (e) {
     console.error('[MarketLookRunningPanel]', e)
-    errorMsg.value = e.message || '加载失败'
     rows.value = []
+    statusType.value = 'error'
+    statusText.value = '更新失败'
   } finally {
     loading.value = false
   }
@@ -186,7 +214,6 @@ async function load() {
 
 onMounted(() => {
   load()
-  // 与首页涨跌榜类似的定时拉取节奏：每 30 秒刷新列表
   pollTimer = window.setInterval(load, 30000)
   tickTimer = window.setInterval(() => {
     nowTick.value = Date.now()
@@ -203,17 +230,22 @@ onUnmounted(() => {
 .market-look-panel {
   display: flex;
   flex-direction: column;
-  min-height: 220px;
   min-width: 0;
-  height: 100%;
 }
 
-.market-look-header {
+.market-look-toolbar {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   gap: 10px;
   margin-bottom: 12px;
   flex-wrap: wrap;
+}
+
+.market-look-heading {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
 }
 
 .market-look-title {
@@ -252,22 +284,21 @@ onUnmounted(() => {
   cursor: not-allowed;
 }
 
-.market-look-loading,
-.market-look-error {
-  padding: 24px;
+.loading-row .loading-cell {
   text-align: center;
+  padding: 20px !important;
   color: var(--text-2);
-  font-size: 14px;
+  font-size: 13px;
 }
 
-.market-look-error {
-  color: var(--danger, #dc3545);
+.loading-cell .spin {
+  margin-right: 8px;
+  vertical-align: middle;
 }
 
 .market-look-table-wrap {
   overflow: auto;
-  flex: 1;
-  max-height: 320px;
+  max-height: min(420px, 60vh);
   border-radius: 12px;
   border: 1px solid var(--border-1, rgba(0, 0, 0, 0.08));
 }
@@ -291,6 +322,11 @@ onUnmounted(() => {
   padding: 8px 10px;
   text-align: left;
   border-bottom: 1px solid var(--border-1, rgba(0, 0, 0, 0.06));
+  vertical-align: middle;
+}
+
+.market-look-table tbody tr:last-child td {
+  border-bottom: none;
 }
 
 .market-look-table th {
@@ -305,13 +341,24 @@ onUnmounted(() => {
 }
 
 .data-row:hover {
-  background: rgba(51, 112, 255, 0.06);
+  background: rgba(51, 112, 255, 0.08);
 }
 
 .cell-clip {
-  max-width: 120px;
+  max-width: 160px;
   overflow: hidden;
   text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cell-mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 11px;
+}
+
+.cell-symbol {
+  font-weight: 500;
+  color: var(--text-1);
   white-space: nowrap;
 }
 
@@ -320,10 +367,9 @@ onUnmounted(() => {
   color: var(--text-2);
 }
 
-.col-expand {
-  width: 36px;
-  text-align: center;
-  color: var(--text-3);
+.col-progress {
+  min-width: 140px;
+  max-width: 200px;
 }
 
 .progress-meta {
@@ -346,55 +392,13 @@ onUnmounted(() => {
   height: 100%;
   border-radius: 999px;
   background: linear-gradient(90deg, #5b7cff, #3370ff);
-  transition: width 0.3s ease;
-}
-
-.detail-row td {
-  padding: 0;
-  border-bottom: 1px solid var(--border-1, rgba(0, 0, 0, 0.06));
-  background: rgba(0, 0, 0, 0.02);
-}
-
-.detail-inner {
-  padding: 12px 14px;
-}
-
-.detail-meta {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px 16px;
-  font-size: 11px;
-  color: var(--text-2);
-  margin-bottom: 10px;
-  word-break: break-all;
-}
-
-.meta-k {
-  color: var(--text-3);
-  margin-right: 4px;
-}
-
-.detail-label {
-  font-size: 11px;
-  color: var(--text-3);
-  margin-bottom: 6px;
-}
-
-.detail-pre {
-  margin: 0;
-  font-size: 11px;
-  line-height: 1.45;
-  white-space: pre-wrap;
-  word-break: break-word;
-  max-height: 160px;
-  overflow: auto;
-  color: var(--text-1);
+  transition: width 0.35s ease;
 }
 
 .empty-cell {
   text-align: center;
   color: var(--text-3);
-  padding: 28px 12px !important;
+  padding: 20px 12px !important;
 }
 
 .spin {
@@ -405,5 +409,22 @@ onUnmounted(() => {
   to {
     transform: rotate(360deg);
   }
+}
+
+.signal-modal-body {
+  max-height: min(70vh, 640px);
+  overflow: auto;
+}
+
+.signal-pre {
+  margin: 0;
+  padding: 12px;
+  background: var(--bg-2, #f5f6fa);
+  border-radius: 8px;
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
 }
 </style>

@@ -234,7 +234,7 @@
 
       <!-- Main Content -->
       <main class="app-main">
-        <section v-if="!currentModelId" class="hero-banner hero-banner-split glass-panel">
+        <section class="hero-banner hero-banner-split glass-panel">
           <div class="hero-intro-panel">
             <div class="hero-copy">
               <p class="hero-subtitle">实时 AI 交易驾驶舱</p>
@@ -246,24 +246,6 @@
                 <span class="badge-pill"><i class="bi bi-lightning-charge"></i>秒级刷新</span>
                 <span class="badge-pill"><i class="bi bi-shield-check"></i> 风控指令</span>
                 <span class="badge-pill"><i class="bi bi-box"></i> AI资产管理</span>
-              </div>
-            </div>
-            <div class="hero-visual">
-              <div class="hero-orb orb-main"></div>
-              <div class="hero-orb orb-secondary"></div>
-              <div class="hero-plane plane-top"></div>
-              <div class="hero-plane plane-bottom"></div>
-              <div class="hero-metric metric-primary">
-                <span>策略胜率</span>
-                <strong>72%</strong>
-              </div>
-              <div class="hero-metric metric-secondary">
-                <span>AI响应</span>
-                <strong>500ms</strong>
-              </div>
-              <div class="hero-metric metric-tertiary">
-                <span>资产热度</span>
-                <strong>HIGH</strong>
               </div>
             </div>
           </div>

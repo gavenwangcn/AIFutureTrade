@@ -1652,19 +1652,16 @@ body {
     overflow: hidden;
 }
 
-/* 首页介绍区与盯盘详情左右各半 */
+/* 左侧介绍文案 + 右侧盯盘详情（详情区更宽，不依赖是否选中交易模型） */
 .hero-banner.hero-banner-split {
-    grid-template-columns: 1fr 1fr;
+    grid-template-columns: minmax(240px, 1fr) minmax(320px, 2.2fr);
     align-items: stretch;
     gap: 28px;
 }
 
 .hero-banner-split .hero-intro-panel {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 20px;
+    display: block;
     min-width: 0;
-    align-items: center;
 }
 
 .hero-look-aside {
@@ -1675,26 +1672,6 @@ body {
     .hero-banner.hero-banner-split {
         grid-template-columns: 1fr;
     }
-}
-
-@media (max-width: 720px) {
-    .hero-banner-split .hero-intro-panel {
-        grid-template-columns: 1fr;
-    }
-}
-
-.hero-banner-split .hero-visual {
-    min-height: 220px;
-}
-
-.hero-banner-split .orb-main {
-    width: 140px;
-    height: 140px;
-}
-
-.hero-banner-split .orb-secondary {
-    width: 90px;
-    height: 90px;
 }
 
 .hero-banner-split .hero-copy h2 {
