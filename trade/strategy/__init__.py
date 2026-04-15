@@ -7,7 +7,7 @@
 3. strategy_code_executor: 策略代码执行器
 4. strategy_code_tester_buy: 买入策略代码测试器
 5. strategy_code_tester_sell: 卖出策略代码测试器
-6. strategy_trader: 基于策略代码的交易决策生成器
+6. strategy_trader: 基于策略代码的交易决策生成器（门面，实现见 strategy_*_trader / strategy_trader_base / strategy_trader_utils）
 7. strategy_prompt_template_buy: 买入策略代码生成 Prompt 模板
 8. strategy_prompt_template_sell: 卖出策略代码生成 Prompt 模板
 """
