@@ -483,3 +483,13 @@ export const algoOrderApi = {
   getByModelId: (modelId, page = 1, pageSize = 10) => apiGet(`/api/algo-orders/model/${modelId}`, { page, pageSize })
 }
 
+/**
+ * 盯盘任务 market_look（主库 backend）
+ */
+export const marketLookApi = {
+  /** 全部盯盘任务 */
+  listAll: () => apiGet('/api/market-look'),
+  /** 仅执行中 RUNNING */
+  listRunning: () => apiGet('/api/market-look/status/running')
+}
+

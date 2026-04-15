@@ -1652,6 +1652,55 @@ body {
     overflow: hidden;
 }
 
+/* 首页介绍区与盯盘详情左右各半 */
+.hero-banner.hero-banner-split {
+    grid-template-columns: 1fr 1fr;
+    align-items: stretch;
+    gap: 28px;
+}
+
+.hero-banner-split .hero-intro-panel {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 20px;
+    min-width: 0;
+    align-items: center;
+}
+
+.hero-look-aside {
+    min-width: 0;
+}
+
+@media (max-width: 1100px) {
+    .hero-banner.hero-banner-split {
+        grid-template-columns: 1fr;
+    }
+}
+
+@media (max-width: 720px) {
+    .hero-banner-split .hero-intro-panel {
+        grid-template-columns: 1fr;
+    }
+}
+
+.hero-banner-split .hero-visual {
+    min-height: 220px;
+}
+
+.hero-banner-split .orb-main {
+    width: 140px;
+    height: 140px;
+}
+
+.hero-banner-split .orb-secondary {
+    width: 90px;
+    height: 90px;
+}
+
+.hero-banner-split .hero-copy h2 {
+    font-size: clamp(20px, 2.2vw, 26px);
+}
+
 .hero-copy {
     display: flex;
     flex-direction: column;

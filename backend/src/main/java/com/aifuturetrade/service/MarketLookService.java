@@ -14,6 +14,11 @@ public interface MarketLookService {
 
     List<MarketLookDTO> listAll();
 
+    /**
+     * 执行中的盯盘任务（execution_status = RUNNING）
+     */
+    List<MarketLookDTO> listRunning();
+
     PageResult<MarketLookDTO> page(PageRequest pageRequest, String executionStatus, String symbol, String strategyId);
 
     MarketLookDTO getById(String id);

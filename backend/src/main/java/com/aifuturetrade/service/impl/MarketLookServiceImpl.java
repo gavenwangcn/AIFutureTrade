@@ -43,6 +43,16 @@ public class MarketLookServiceImpl implements MarketLookService {
     }
 
     @Override
+    public List<MarketLookDTO> listRunning() {
+        LambdaQueryWrapper<MarketLookDO> q = new LambdaQueryWrapper<>();
+        q.eq(MarketLookDO::getExecutionStatus, MarketLookDO.STATUS_RUNNING);
+        q.orderByDesc(MarketLookDO::getStartedAt);
+        return marketLookMapper.selectList(q).stream()
+                .map(this::toDto)
+                .collect(Collectors.toList());
+    }
+
+    @Override
     public PageResult<MarketLookDTO> page(PageRequest pageRequest, String executionStatus, String symbol, String strategyId) {
         int pageNum = pageRequest.getPageNum() != null && pageRequest.getPageNum() > 0 ? pageRequest.getPageNum() : 1;
         int pageSize = pageRequest.getPageSize() != null && pageRequest.getPageSize() > 0 ? pageRequest.getPageSize() : 10;

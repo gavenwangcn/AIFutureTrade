@@ -234,37 +234,40 @@
 
       <!-- Main Content -->
       <main class="app-main">
-        <section v-if="!currentModelId" class="hero-banner glass-panel">
-          <div class="hero-copy">
-            <p class="hero-subtitle">实时 AI 交易驾驶舱</p>
-            <h2>立体监控资金 · 沉浸式AI资产交易管理</h2>
-            <p class="hero-text">
-              通过多维度可视化，快速洞察行情动能、模型表现与风控指标，获得更具未来感的资产体验。
-            </p>
-            <div class="hero-badges">
-              <span class="badge-pill"><i class="bi bi-lightning-charge"></i>秒级刷新</span>
-              <span class="badge-pill"><i class="bi bi-shield-check"></i> 风控指令</span>
-              <span class="badge-pill"><i class="bi bi-box"></i> AI资产管理</span>
+        <section v-if="!currentModelId" class="hero-banner hero-banner-split glass-panel">
+          <div class="hero-intro-panel">
+            <div class="hero-copy">
+              <p class="hero-subtitle">实时 AI 交易驾驶舱</p>
+              <h2>立体监控资金 · 沉浸式AI资产交易管理</h2>
+              <p class="hero-text">
+                通过多维度可视化，快速洞察行情动能、模型表现与风控指标，获得更具未来感的资产体验。
+              </p>
+              <div class="hero-badges">
+                <span class="badge-pill"><i class="bi bi-lightning-charge"></i>秒级刷新</span>
+                <span class="badge-pill"><i class="bi bi-shield-check"></i> 风控指令</span>
+                <span class="badge-pill"><i class="bi bi-box"></i> AI资产管理</span>
+              </div>
+            </div>
+            <div class="hero-visual">
+              <div class="hero-orb orb-main"></div>
+              <div class="hero-orb orb-secondary"></div>
+              <div class="hero-plane plane-top"></div>
+              <div class="hero-plane plane-bottom"></div>
+              <div class="hero-metric metric-primary">
+                <span>策略胜率</span>
+                <strong>72%</strong>
+              </div>
+              <div class="hero-metric metric-secondary">
+                <span>AI响应</span>
+                <strong>500ms</strong>
+              </div>
+              <div class="hero-metric metric-tertiary">
+                <span>资产热度</span>
+                <strong>HIGH</strong>
+              </div>
             </div>
           </div>
-          <div class="hero-visual">
-            <div class="hero-orb orb-main"></div>
-            <div class="hero-orb orb-secondary"></div>
-            <div class="hero-plane plane-top"></div>
-            <div class="hero-plane plane-bottom"></div>
-            <div class="hero-metric metric-primary">
-              <span>策略胜率</span>
-              <strong>72%</strong>
-            </div>
-            <div class="hero-metric metric-secondary">
-              <span>AI响应</span>
-              <strong>500ms</strong>
-            </div>
-            <div class="hero-metric metric-tertiary">
-              <span>资产热度</span>
-              <strong>HIGH</strong>
-            </div>
-          </div>
+          <MarketLookRunningPanel class="hero-look-aside" />
         </section>
 
         <section class="leaderboard-section glass-panel">
@@ -1316,6 +1319,7 @@ import TradeLogsModal from './components/TradeLogsModal.vue'
 import BuyLogsModal from './components/BuyLogsModal.vue'
 import SellLogsModal from './components/SellLogsModal.vue'
 import LookLogsModal from './components/LookLogsModal.vue'
+import MarketLookRunningPanel from './components/MarketLookRunningPanel.vue'
 import ModelAnalysisModal from './components/ModelAnalysisModal.vue'
 import { useTradingApp } from './composables/useTradingApp'
 
