@@ -124,6 +124,7 @@ LOG_LEVEL = 'INFO'  # Optional values: DEBUG, INFO, WARNING, ERROR, CRITICAL
 TRADE_MONITOR_BASE_URL = os.getenv('TRADE_MONITOR_BASE_URL', 'http://127.0.0.1:5005')
 
 # ============ Market look loop ============
+# 盯盘主循环：每轮处理完 RUNNING 任务后 sleep 该秒数再下一轮。默认 60 = 约每 1 分钟一轮。
 MARKET_LOOK_POLL_INTERVAL_SECONDS = int(os.getenv('MARKET_LOOK_POLL_INTERVAL_SECONDS', '60'))
 LOG_FORMAT = '%(asctime)s - %(name)s - %(levelname)s - %(message)s'  # Log format
 LOG_DATE_FORMAT = '%Y-%m-%d %H:%M:%S'  # Log date format

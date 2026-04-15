@@ -330,6 +330,8 @@ services:
     image: aifuturetrade-model-look:latest
     environment:
       - MODEL_ID=${MODEL_ID:-1}
+      # 盯盘轮询间隔（秒）：默认 60 = 约每 1 分钟执行一轮 RUNNING 任务；合法范围 5～86400（见 trade/look_loop.py）
+      - MARKET_LOOK_POLL_INTERVAL_SECONDS=${MARKET_LOOK_POLL_INTERVAL_SECONDS:-60}
       - MYSQL_HOST=${MYSQL_HOST:-156.254.6.224}
       - MYSQL_PORT=${MYSQL_PORT:-32123}
       - MYSQL_USER=${MYSQL_USER:-aifuturetrade}
