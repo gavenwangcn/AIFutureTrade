@@ -24,7 +24,7 @@
       <textarea
         v-model="form.detailSummary"
         class="form-textarea detail-summary-textarea"
-        rows="8"
+        rows="14"
         placeholder="任务说明或监控要点"
       />
     </div>
@@ -410,7 +410,7 @@ async function handleSave() {
 }
 
 .detail-summary-textarea {
-  min-height: 168px;
+  min-height: 280px;
   resize: vertical;
   line-height: 1.5;
 }
