@@ -267,12 +267,24 @@ class Database:
                 # Includes "read of closed file" error, which usually indicates underlying connection is closed
                 is_network_error = any(keyword in error_msg.lower() for keyword in [
                     'connection', 'broken', 'lost', 'timeout', 'reset', 'gone away',
-                    'operationalerror', 'interfaceerror', 'packet sequence', 'internalerror',
+                    'interfaceerror', 'packet sequence', 'internalerror',
                     'deadlock found', 'read of closed file'
                 ]) or any(keyword in error_type.lower() for keyword in [
-                    'connection', 'timeout', 'operationalerror', 'interfaceerror', 'internalerror',
+                    'connection', 'timeout', 'interfaceerror', 'internalerror',
                     'valueerror'
                 ]) or (isinstance(e, pymysql.err.MySQLError) and e.args[0] == 1213)
+                # 勿将 OperationalError 一律当网络错误：1060「列已存在」等 DDL/元数据错误重试无效
+                if isinstance(e, pymysql.err.MySQLError) and e.args:
+                    code = e.args[0]
+                    if code in (
+                        1060,  # Duplicate column name
+                        1061,  # Duplicate key name
+                        1050,  # Table already exists
+                        1054,  # Unknown column
+                        1146,  # Table doesn't exist
+                        1062,  # Duplicate entry
+                    ):
+                        is_network_error = False
                 
                 # If connection has been acquired, need to handle connection (close it)
                 # Regardless of exception type, ensure connection is properly released to prevent connection leak

@@ -91,7 +91,10 @@
     >
       <div v-if="signalDetailRow" class="signal-modal-body">
         <section class="detail-section detail-section--strategy">
-          <h4 class="section-label">策略内容</h4>
+          <h4 class="section-label">关联策略</h4>
+          <p class="section-hint muted strategy-code-hint">
+            此处仅展示任务关联的策略摘要；完整 Python 策略代码请在「策略管理」中打开对应策略查看，避免在盯盘任务详情中铺满代码。
+          </p>
           <p v-if="strategyLoading" class="section-hint muted">正在加载策略…</p>
           <p v-else-if="strategyFetchError" class="section-hint error-text">{{ strategyFetchError }}</p>
           <template v-else-if="strategyDetail">
@@ -113,18 +116,14 @@
               <span class="block-label">策略说明 / 上下文</span>
               <pre class="strategy-pre">{{ strategyContextText }}</pre>
             </div>
-            <div v-if="strategyCodeText" class="strategy-block">
-              <span class="block-label">策略代码</span>
-              <pre class="strategy-pre strategy-pre--code">{{ strategyCodeText }}</pre>
-            </div>
             <p
-              v-if="!strategyContextText && !strategyCodeText"
+              v-if="!strategyContextText"
               class="section-hint muted"
             >
-              该策略暂无说明与代码文本
+              该策略暂无文字说明（仍可在策略管理中查看代码）
             </p>
           </template>
-          <p v-else class="section-hint muted">当前任务未关联策略 ID，无法加载策略内容</p>
+          <p v-else class="section-hint muted">当前任务未关联策略 ID，无法加载策略信息</p>
         </section>
 
         <div class="detail-divider" role="separator" aria-hidden="true" />
@@ -220,14 +219,6 @@ const strategyContextText = computed(() => {
   const s = strategyDetail.value
   if (!s) return ''
   const raw = s.strategy_context ?? s.strategyContext
-  if (raw == null || String(raw).trim() === '') return ''
-  return String(raw).trim()
-})
-
-const strategyCodeText = computed(() => {
-  const s = strategyDetail.value
-  if (!s) return ''
-  const raw = s.strategy_code ?? s.strategyCode
   if (raw == null || String(raw).trim() === '') return ''
   return String(raw).trim()
 })
@@ -484,9 +475,10 @@ defineExpose({ load })
   vertical-align: middle;
 }
 
+/* 默认可视高度为原 2 倍；多条记录时内部纵向滚动（overflow:auto） */
 .market-look-table-wrap {
   overflow: auto;
-  max-height: min(420px, 60vh);
+  max-height: min(840px, 120vh);
   border-radius: 12px;
   border: 1px solid var(--border-1, rgba(0, 0, 0, 0.08));
 }
@@ -717,8 +709,10 @@ defineExpose({ load })
   overflow: auto;
 }
 
-.strategy-pre--code {
-  max-height: min(36vh, 360px);
+.strategy-code-hint {
+  margin: 0 0 10px;
+  line-height: 1.45;
+  font-size: 12px;
 }
 
 .signal-pre {
