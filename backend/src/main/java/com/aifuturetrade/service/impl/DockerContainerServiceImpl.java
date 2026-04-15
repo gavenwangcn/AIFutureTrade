@@ -250,9 +250,14 @@ public class DockerContainerServiceImpl implements DockerContainerService {
     }
 
     @Override
-    public Map<String, Object> startModelLookContainer(String modelId, String imageName, Map<String, String> envVars) {
-        String containerName = "look-" + modelId;
-        return startModelContainer(containerName, imageName != null ? imageName : defaultLookImageName, envVars);
+    public Map<String, Object> startNamedMarketLookContainer(String containerName, String imageName, Map<String, String> envVars) {
+        if (containerName == null || containerName.isBlank()) {
+            Map<String, Object> err = new HashMap<>();
+            err.put("success", false);
+            err.put("error", "containerName is required");
+            return err;
+        }
+        return startModelContainer(containerName.trim(), imageName != null ? imageName : defaultLookImageName, envVars);
     }
 
     private Map<String, Object> startModelContainer(String containerName, String imageName, Map<String, String> envVars) {
@@ -297,7 +302,7 @@ public class DockerContainerServiceImpl implements DockerContainerService {
             } else if (containerName.startsWith("sell-")) {
                 cmd = new String[]{"python", "-m", "trade.start.model_start_sell"};
                 log.info("设置容器启动命令为: python -m trade.start.model_start_sell");
-            } else if (containerName.startsWith("look-")) {
+            } else if (containerName.startsWith("look-") || "trade-look".equals(containerName)) {
                 cmd = new String[]{"python", "-m", "trade.start.start_market_look"};
                 log.info("设置容器启动命令为: python -m trade.start.start_market_look");
             }

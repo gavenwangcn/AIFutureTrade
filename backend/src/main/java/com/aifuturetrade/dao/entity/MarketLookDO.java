@@ -53,6 +53,10 @@ public class MarketLookDO implements Serializable {
     @TableField("signal_result")
     private String signalResult;
 
+    /** 任务详情摘要（人工或业务填写） */
+    @TableField("detail_summary")
+    private String detailSummary;
+
     @TableField("started_at")
     private LocalDateTime startedAt;
 

@@ -249,14 +249,14 @@ public interface ModelService {
     Map<String, Object> executeSellTrading(String modelId);
 
     /**
-     * 启动盯盘循环容器（look-{modelId}，运行 start_market_look；不修改买卖自动交易开关）
+     * 启动盯盘循环容器，固定容器名 trade-look（不校验是否存在交易模型）
      */
-    Map<String, Object> executeMarketLookTrading(String modelId);
+    Map<String, Object> startTradeLookMarketLoop();
 
     /**
-     * 停止并删除盯盘容器 look-{modelId}
+     * 停止并删除固定盯盘容器 trade-look
      */
-    Map<String, Object> stopMarketLookTrading(String modelId);
+    Map<String, Object> stopTradeLookMarketLoop();
 
     /**
      * 禁用模型的自动买入功能

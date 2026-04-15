@@ -18,7 +18,6 @@ from trade.common.database.database_market_look import (
 )
 from trade.common.database.database_strategys import StrategysDatabase
 from trade.common.database.database_trade_notify import TradeNotifyDatabase
-from trade.market import calculate_market_indicators
 from trade.market.market_data import MarketDataFetcher
 from trade.market.market_index import MarketIndexCalculator
 from trade.market.indicator_rounding import round_indicator_4
@@ -289,42 +288,6 @@ def build_single_symbol_market_state(
         "previous_close_prices": previous_close_prices,
     }
 
-    try:
-        klines_data_for_indicators: Dict[str, Any] = {}
-        state_info = market_state[symbol_upper]
-        indicators = state_info.get("indicators", {})
-        timeframes = indicators.get("timeframes", {})
-        klines = None
-        for tf in ["1h", "4h", "30m", "15m"]:
-            tf_data = timeframes.get(tf, {})
-            tf_klines = tf_data.get("klines", [])
-            if tf_klines and len(tf_klines) > 0:
-                klines = tf_klines
-                break
-        if klines and len(klines) > 0:
-            high_prices = []
-            low_prices = []
-            close_prices = []
-            for kline in klines:
-                if isinstance(kline, dict):
-                    high_prices.append(float(kline.get("high", 0)))
-                    low_prices.append(float(kline.get("low", 0)))
-                    close_prices.append(float(kline.get("close", 0)))
-            if high_prices and low_prices and close_prices:
-                klines_data_for_indicators[symbol_upper] = {
-                    "high": high_prices,
-                    "low": low_prices,
-                    "close": close_prices,
-                }
-        if klines_data_for_indicators:
-            market_indicators = calculate_market_indicators(klines_data_for_indicators)
-            market_state[symbol_upper]["market_indicators"] = market_indicators
-        else:
-            market_state[symbol_upper]["market_indicators"] = {}
-    except Exception as e:
-        logger.error("[%s] market_indicators 计算失败: %s", log_tag, e, exc_info=True)
-        market_state[symbol_upper]["market_indicators"] = {}
-
     logger.info("[%s] 单品种 market_state 构建完成: %s", log_tag, symbol_upper)
     return market_state
 
@@ -356,7 +319,6 @@ def trim_market_snapshot_for_notify(market_state: Dict, symbol_key: str, max_kli
                 block["klines"] = kl[:max_klines]
             trimmed_tf[interval] = block
     out["indicators"] = {"timeframes": trimmed_tf}
-    out["market_indicators"] = payload.get("market_indicators")
     return out
 
 
@@ -379,7 +341,7 @@ class LookEngine:
         self.strategy_trader = StrategyTrader(db=db, model_id=model_id)
 
     def build_market_state_for_symbol(self, symbol: str) -> Dict:
-        """仅请求当前 symbol 对应合约的行情（SDK 价格 + DB 成交额 + 8 周期 K 线 + ADX + market_indicators）。"""
+        """仅请求当前 symbol 对应合约的行情（SDK 价格 + DB 成交额 + 8 周期 K 线 + ADX；不含全市场聚合 market_indicators）。"""
         c = _candidate_for_symbol(symbol)
         tag = f"LookEngine m={self.strategy_trader.model_id}"
         return build_single_symbol_market_state(

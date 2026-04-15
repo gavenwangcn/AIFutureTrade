@@ -106,6 +106,9 @@ public class MarketLookServiceImpl implements MarketLookService {
         }
         row.setExecutionStatus(status);
         row.setSignalResult(dto.getSignalResult());
+        if (dto.getDetailSummary() != null) {
+            row.setDetailSummary(dto.getDetailSummary().trim().isEmpty() ? null : dto.getDetailSummary().trim());
+        }
 
         LocalDateTime now = LocalDateTime.now();
         if (MarketLookDO.STATUS_RUNNING.equals(status)) {
@@ -189,6 +192,10 @@ public class MarketLookServiceImpl implements MarketLookService {
 
         if (dto.getSignalResult() != null) {
             existing.setSignalResult(dto.getSignalResult());
+        }
+        if (dto.getDetailSummary() != null) {
+            String ds = dto.getDetailSummary().trim();
+            existing.setDetailSummary(ds.isEmpty() ? null : ds);
         }
         if (dto.getStartedAt() != null) {
             existing.setStartedAt(dto.getStartedAt());

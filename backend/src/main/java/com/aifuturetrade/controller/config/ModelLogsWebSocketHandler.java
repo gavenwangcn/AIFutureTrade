@@ -72,8 +72,13 @@ public class ModelLogsWebSocketHandler extends TextWebSocketHandler {
             return;
         }
         
-        // 构建容器名称：buy-{modelId}、sell-{modelId} 或 look-{modelId}
-        String containerName = type + "-" + modelId;
+        // 构建容器名称：buy-{modelId}、sell-{modelId}、look-{modelId}，或固定盯盘容器 trade-look
+        String containerName;
+        if ("look".equals(type) && "trade-look".equals(modelId)) {
+            containerName = "trade-look";
+        } else {
+            containerName = type + "-" + modelId;
+        }
         logger.info("开始获取模型容器日志: containerName={}, modelId={}, type={}", containerName, modelId, type);
         
         // 开始流式获取日志

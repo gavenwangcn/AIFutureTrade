@@ -41,10 +41,9 @@ public interface DockerContainerService {
     Map<String, Object> startModelSellContainer(String modelId, String imageName, Map<String, String> envVars);
 
     /**
-     * 启动盯盘循环容器（start_market_look）
-     * 容器名固定为 look-{modelId}
+     * 启动盯盘循环容器，使用指定容器名（如 trade-look），运行 start_market_look
      */
-    Map<String, Object> startModelLookContainer(String modelId, String imageName, Map<String, String> envVars);
+    Map<String, Object> startNamedMarketLookContainer(String containerName, String imageName, Map<String, String> envVars);
 
     /**
      * 停止容器

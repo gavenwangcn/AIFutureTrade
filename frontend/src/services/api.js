@@ -86,14 +86,14 @@ export const modelApi = {
   executeSell: (modelId) => apiPost(`/api/models/${modelId}/execute-sell`),
 
   /**
-   * 启动盯盘循环（Docker 容器 look-{modelId}，start_market_look）
+   * 启动盯盘循环（Docker 固定容器 trade-look，start_market_look）
    */
-  executeMarketLook: (modelId) => apiPost(`/api/models/${modelId}/execute-market-look`),
+  executeMarketLook: () => apiPost('/api/models/market-look/start'),
 
   /**
-   * 关闭盯盘（删除 Docker 容器 look-{modelId}）
+   * 关闭盯盘（删除 Docker 容器 trade-look）
    */
-  stopMarketLook: (modelId) => apiPost(`/api/models/${modelId}/stop-market-look`),
+  stopMarketLook: () => apiPost('/api/models/market-look/stop'),
 
   /**
    * 禁用自动买入

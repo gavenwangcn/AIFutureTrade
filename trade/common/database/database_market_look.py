@@ -52,7 +52,7 @@ class MarketLookDatabase:
 
             sql = f"""
                 SELECT id, symbol, strategy_id, strategy_name, execution_status, signal_result,
-                       started_at, ended_at, created_at, updated_at
+                       detail_summary, started_at, ended_at, created_at, updated_at
                 FROM `{self.table}`
                 WHERE execution_status = %s
                 ORDER BY started_at ASC
@@ -127,6 +127,7 @@ class MarketLookDatabase:
         execution_status: str = EXECUTION_RUNNING,
         started_at: Optional[datetime] = None,
         row_id: Optional[str] = None,
+        detail_summary: Optional[str] = None,
     ) -> str:
         rid = row_id or str(uuid.uuid4())
         st = started_at or datetime.now()
@@ -134,8 +135,8 @@ class MarketLookDatabase:
         def _run(conn):
             sql = f"""
                 INSERT INTO `{self.table}`
-                (id, symbol, strategy_id, strategy_name, execution_status, signal_result, started_at, ended_at)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                (id, symbol, strategy_id, strategy_name, execution_status, signal_result, detail_summary, started_at, ended_at)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
             """
             cur = conn.cursor()
             try:
@@ -148,6 +149,7 @@ class MarketLookDatabase:
                         strategy_name,
                         execution_status,
                         None,
+                        detail_summary,
                         st,
                         ENDED_AT_NOT_FINISHED_PLACEHOLDER
                         if execution_status == EXECUTION_RUNNING

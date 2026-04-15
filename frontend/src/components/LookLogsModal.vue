@@ -13,7 +13,7 @@
             v-if="!isLogConnected"
             class="btn btn-primary btn-sm"
             :disabled="logConnecting || !hasConnectableModelId"
-            :title="!hasConnectableModelId ? '需要先有可用的交易模型 ID' : ''"
+            :title="!hasConnectableModelId ? '需要有效的盯盘容器标识' : ''"
             @click="startLogStream"
           >
             {{ logConnecting ? '连接中...' : '开始查看日志' }}
@@ -87,8 +87,7 @@
         <span class="dialog-title">盯盘容器日志: {{ displayTitleName }}</span>
       </div>
       <div v-if="!hasConnectableModelId" class="look-logs-no-model-hint">
-        当前没有可用的交易模型 ID，无法连接 <code>look-&#123;模型ID&#125;</code> 容器日志。
-        请先在左侧「交易模型」中添加模型；添加后未选中时也会自动使用列表中的第一个模型。
+        未传入盯盘容器标识。默认盯盘使用固定容器 <code>trade-look</code>（与「执行盯盘」一致）。
       </div>
       <div class="log-container">
         <div
@@ -306,7 +305,7 @@ const startLogStream = () => {
   const wsUrl = createModelLogStreamUrl()
   if (!wsUrl) {
     logConnecting.value = false
-    console.warn('[LookLogsModal] 无 modelId，无法连接 look-{模型ID} 日志流')
+    console.warn('[LookLogsModal] 无 modelId，无法连接盯盘容器日志流')
     return
   }
 

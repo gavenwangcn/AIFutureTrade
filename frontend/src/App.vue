@@ -25,7 +25,7 @@
           </div>
         </div>
         <div class="header-right">
-          <div class="header-status look-logs-header-status" title="盯盘容器日志（可随时打开；连接流需要 look-{模型ID}，无模型时请先添加）">
+          <div class="header-status look-logs-header-status" title="盯盘容器日志（固定容器 trade-look，可随时打开）">
             <span class="status-dot active"></span>
             <span class="status-text">运行中</span>
             <button
@@ -41,7 +41,7 @@
           <button
             class="btn-secondary"
             @click="handleExecuteMarketLook"
-            title="启动盯盘循环（Docker 容器 look-当前或列表首个模型ID）"
+            title="启动盯盘循环（Docker 固定容器 trade-look，无需交易模型）"
             :disabled="isExecutingMarketLook"
           >
             <i class="bi bi-play-fill" :class="{ spin: isExecutingMarketLook }"></i>
@@ -50,7 +50,7 @@
           <button
             class="btn-secondary"
             @click="handleStopMarketLook"
-            title="删除盯盘容器 look-{模型ID}"
+            title="删除盯盘容器 trade-look"
             :disabled="isStoppingMarketLook"
           >
             <i class="bi bi-stop-circle" :class="{ spin: isStoppingMarketLook }"></i>
@@ -1415,7 +1415,6 @@ const {
   handleExecuteSell,
   handleExecuteMarketLook,
   handleStopMarketLook,
-  resolveMarketLookModelId,
   handleDisableBuy,
   handleDisableSell,
   isExecutingBuy,
@@ -1459,10 +1458,11 @@ const {
   handleSellPosition
 } = useTradingApp()
 
+const TRADE_LOOK_CONTAINER_ID = 'trade-look'
+
 const handleOpenLookContainerLogsModal = () => {
-  const mid = resolveMarketLookModelId()
-  pendingLookLogsModelId.value = mid
-  lookLogsModelName.value = mid ? getModelDisplayName(mid) : '（未关联交易模型）'
+  pendingLookLogsModelId.value = TRADE_LOOK_CONTAINER_ID
+  lookLogsModelName.value = '盯盘容器 (trade-look)'
   showLookLogsModal.value = true
 }
 

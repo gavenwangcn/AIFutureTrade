@@ -39,6 +39,11 @@ import java.util.stream.Collectors;
 @Service
 public class ModelServiceImpl implements ModelService {
 
+    /** 盯盘循环固定 Docker 容器名（与前端「执行盯盘」一致，不依赖 models 表是否有记录） */
+    private static final String TRADE_LOOK_CONTAINER_NAME = "trade-look";
+    /** 传入盯盘进程的 MODEL_ID 环境变量（LookEngine 执行单条策略时不依赖模型表） */
+    private static final String TRADE_LOOK_MODEL_ID_ENV = "trade-look";
+
     @Autowired
     private ModelMapper modelMapper;
 
@@ -2163,35 +2168,26 @@ public class ModelServiceImpl implements ModelService {
 
     @Override
     @Transactional(rollbackFor = Exception.class)
-    public Map<String, Object> executeMarketLookTrading(String modelId) {
-        log.debug("[ModelService] 启动盯盘循环容器, modelId={}", modelId);
+    public Map<String, Object> startTradeLookMarketLoop() {
+        log.debug("[ModelService] 启动盯盘循环容器, container={}", TRADE_LOOK_CONTAINER_NAME);
         try {
-            ModelDTO model = getModelById(modelId);
-            if (model == null) {
-                Map<String, Object> errorResult = new HashMap<>();
-                errorResult.put("success", false);
-                errorResult.put("error", "Model not found");
-                return errorResult;
-            }
-
             Map<String, Object> result = new HashMap<>();
-            String containerName = "look-" + modelId;
-            result.put("containerName", containerName);
+            result.put("containerName", TRADE_LOOK_CONTAINER_NAME);
 
-            if (dockerContainerService.isContainerRunning(containerName)) {
-                log.info("盯盘容器已存在且运行中: {}", containerName);
+            if (dockerContainerService.isContainerRunning(TRADE_LOOK_CONTAINER_NAME)) {
+                log.info("盯盘容器已存在且运行中: {}", TRADE_LOOK_CONTAINER_NAME);
                 result.put("success", true);
                 result.put("containerStatus", "already_running");
                 result.put("message", "Market look container already running");
                 return result;
             }
 
-            if (!dockerContainerService.removeContainer(containerName)) {
-                log.warn("删除旧盯盘容器失败，但继续创建新容器: {}", containerName);
+            if (!dockerContainerService.removeContainer(TRADE_LOOK_CONTAINER_NAME)) {
+                log.warn("删除旧盯盘容器失败，但继续创建新容器: {}", TRADE_LOOK_CONTAINER_NAME);
             }
 
             Map<String, String> envVars = new HashMap<>();
-            envVars.put("MODEL_ID", modelId);
+            envVars.put("MODEL_ID", TRADE_LOOK_MODEL_ID_ENV);
             envVars.put("MYSQL_HOST", mysqlHost);
             envVars.put("MYSQL_PORT", mysqlPort);
             envVars.put("MYSQL_USER", mysqlUser);
@@ -2204,16 +2200,16 @@ public class ModelServiceImpl implements ModelService {
                 envVars.put("BINANCE_SECRET_KEY", binanceApiSecret);
             }
 
-            log.info("=== Container Database Configuration (Market Look) ===");
-            log.info("MODEL_ID: {}", modelId);
+            log.info("=== Container Database Configuration (Market Look trade-look) ===");
+            log.info("MODEL_ID: {}", TRADE_LOOK_MODEL_ID_ENV);
             log.info("MYSQL_HOST: {}", mysqlHost);
             log.info("MYSQL_PORT: {}", mysqlPort);
             log.info("MYSQL_USER: {}", mysqlUser);
             log.info("MYSQL_DATABASE: {}", mysqlDatabase);
-            log.info("======================================================");
+            log.info("================================================================");
 
-            Map<String, Object> containerResult = dockerContainerService.startModelLookContainer(
-                    modelId, modelLookImageName, envVars);
+            Map<String, Object> containerResult = dockerContainerService.startNamedMarketLookContainer(
+                    TRADE_LOOK_CONTAINER_NAME, modelLookImageName, envVars);
             result.putAll(containerResult);
             if (Boolean.TRUE.equals(containerResult.get("success"))) {
                 result.put("message", "Market look container started successfully");
@@ -2222,7 +2218,7 @@ public class ModelServiceImpl implements ModelService {
             }
             return result;
         } catch (Exception e) {
-            log.error("[ModelService] 启动盯盘容器失败: {}", e.getMessage(), e);
+            log.error("[ModelService] 启动盯盘容器 trade-look 失败: {}", e.getMessage(), e);
             Map<String, Object> errorResult = new HashMap<>();
             errorResult.put("success", false);
             errorResult.put("error", e.getMessage());
@@ -2232,22 +2228,13 @@ public class ModelServiceImpl implements ModelService {
 
     @Override
     @Transactional(rollbackFor = Exception.class)
-    public Map<String, Object> stopMarketLookTrading(String modelId) {
-        log.debug("[ModelService] 停止并删除盯盘容器, modelId={}", modelId);
+    public Map<String, Object> stopTradeLookMarketLoop() {
+        log.debug("[ModelService] 停止并删除盯盘容器, container={}", TRADE_LOOK_CONTAINER_NAME);
         try {
-            ModelDTO model = getModelById(modelId);
-            if (model == null) {
-                Map<String, Object> errorResult = new HashMap<>();
-                errorResult.put("success", false);
-                errorResult.put("error", "Model not found");
-                return errorResult;
-            }
-
-            String containerName = "look-" + modelId;
             Map<String, Object> result = new HashMap<>();
-            result.put("containerName", containerName);
+            result.put("containerName", TRADE_LOOK_CONTAINER_NAME);
 
-            if (!dockerContainerService.removeContainer(containerName)) {
+            if (!dockerContainerService.removeContainer(TRADE_LOOK_CONTAINER_NAME)) {
                 result.put("success", false);
                 result.put("error", "Failed to remove market look container");
                 return result;
@@ -2257,7 +2244,7 @@ public class ModelServiceImpl implements ModelService {
             result.put("message", "Market look container removed");
             return result;
         } catch (Exception e) {
-            log.error("[ModelService] 关闭盯盘容器失败: {}", e.getMessage(), e);
+            log.error("[ModelService] 关闭盯盘容器 trade-look 失败: {}", e.getMessage(), e);
             Map<String, Object> errorResult = new HashMap<>();
             errorResult.put("success", false);
             errorResult.put("error", e.getMessage());
