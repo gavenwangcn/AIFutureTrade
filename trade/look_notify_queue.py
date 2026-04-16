@@ -1,5 +1,6 @@
 """
-盯盘 notify 异步队列：收到 notify 信号后落库 SENDING 并入队，由后台线程 FIFO 调用 trade-monitor 推送并落库 trade_notify，成功后置 ENDED。
+盯盘异步队列：notify 信号或超时结束（queue_payload.payload_kind == look_timeout）均落库 SENDING 并入队，
+由后台线程 FIFO 调用 trade-monitor 推送并落库 trade_notify，成功后置 ENDED。
 进程重启时从 DB 加载 SENDING 行重新入队。
 """
 

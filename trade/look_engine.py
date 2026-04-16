@@ -1,6 +1,7 @@
 """
 盯盘引擎：每次只针对一个 symbol 拉取实时价、多周期 K 线与指标（逻辑与 TradingEngine 中单品种分支一致），
-不通过 _build_market_state_for_candidates 批量接口。触发 notify 时：落库 SENDING、并入异步队列，由后台线程经 trade-monitor 推送后再写入 trade_notify 并置 ENDED。
+不通过 _build_market_state_for_candidates 批量接口。触发 notify 或超时结束时：落库 SENDING、并入 look_notify 异步队列，由后台线程经 trade-monitor 推送后再写入 trade_notify 并置 ENDED。
+超时结束（无 notify 且已过 ended_at）：与 notify 相同，置 SENDING 并入 look_notify 队列，由后台线程 post_event_notify 后落库 trade_notify 并置 ENDED。
 """
 
 import copy
@@ -775,40 +776,40 @@ class LookEngine:
             summary["execution_ended"] = "queued_notify"
             return summary
 
-        # 无 notify：若已超过 ended_at（上海时区），落库超时通知并结束任务（仅一次）
+        # 无 notify：若已超过 ended_at（上海时区），与 notify 相同：SENDING + 入队，由 look_notify worker 异步推送并落库
         if _is_deadline_passed(row):
-            timeout_ids = self._emit_look_timeout_notify(
+            queue_payload = self._build_look_timeout_queue_payload(
                 row, strategy, sym_key, decisions, market_state
             )
-            summary["trade_notify_ids"] = timeout_ids
-            summary["notify_sent"] = bool(timeout_ids)
+            stub = {
+                "ts": _utc8_now_iso(),
+                "notify": False,
+                "notify_queue": True,
+                "queue_kind": "look_timeout",
+                "queue_payload": queue_payload,
+                "reason": "deadline_passed",
+                "decisions": decisions,
+                "market_look_id": row_id,
+                "strategy_id": strategy_id,
+            }
             self.market_look_db.update_signal_result(
                 row_id,
-                json.dumps(
-                    {
-                        "ts": _utc8_now_iso(),
-                        "notify": False,
-                        "execution_ended": "timeout",
-                        "reason": "deadline_passed",
-                        "message": "策略已经执行超时，没有找到任何交易信号",
-                        "decisions": decisions,
-                        "trade_notify_ids": timeout_ids,
-                        "market_look_id": row_id,
-                        "strategy_id": strategy_id,
-                    },
-                    ensure_ascii=False,
-                    default=str,
-                ),
+                json.dumps(stub, ensure_ascii=False, default=str),
             )
-            tn_ids = timeout_ids or []
-            end_msg = (
-                f"[超时结束] 当前时间已超过计划结束时间 ended_at，策略未返回 notify 信号。"
-                f" 已写入 trade_notify 超时说明；trade_notify_ids={tn_ids}。"
+            self.market_look_db.update_status(row_id, EXECUTION_SENDING)
+            from trade.look_notify_queue import JOB_KIND_LOOK_NOTIFY, enqueue_look_notify
+
+            enqueue_look_notify(
+                {
+                    "kind": JOB_KIND_LOOK_NOTIFY,
+                    "market_look_id": str(row_id),
+                    "queue_payload": queue_payload,
+                    "retries": 0,
+                }
             )
-            self.market_look_db.update_status(
-                row_id, EXECUTION_ENDED, ended_at=_now_shanghai_naive(), end_log=end_msg
-            )
-            summary["execution_ended"] = "timeout"
+            summary["notify_sent"] = True
+            summary["notify_queued"] = True
+            summary["execution_ended"] = "queued_look_timeout"
         return summary
 
     def process_notify_queue_payload(self, row_id: str, queue_payload: Dict[str, Any]) -> bool:
@@ -816,6 +817,9 @@ class LookEngine:
         异步通知线程调用：先调 trade-monitor 推送，成功后再落 trade_notify 并置 ENDED。
         多条 notify 决策合并为一条消息，避免部分 HTTP 成功导致重试时重复推送。
         """
+        if queue_payload.get("payload_kind") == "look_timeout":
+            return self._process_look_timeout_queue_payload(row_id, queue_payload)
+
         from trade.common.trade_monitor_client import post_event_notify
 
         base = (getattr(app_config, "TRADE_MONITOR_BASE_URL", None) or "").strip()
@@ -967,15 +971,15 @@ class LookEngine:
             row_id, EXECUTION_ENDED, ended_at=_now_shanghai_naive(), end_log=end_msg
         )
 
-    def _emit_look_timeout_notify(
+    def _build_look_timeout_queue_payload(
         self,
         row: Dict,
         strategy: Dict,
         sym_key: str,
         decisions: Dict,
         market_state: Dict,
-    ) -> List[int]:
-        """已超过 ended_at 时落库一条超时说明（trade_notify），返回 id 列表。"""
+    ) -> Dict[str, Any]:
+        """已超过 ended_at：构造入队 payload（由 look_notify worker 推送并落库）。"""
         row_id = row.get("id")
         strategy_id = row.get("strategy_id")
         snap = trim_market_snapshot_full_for_storage(market_state, sym_key)
@@ -1000,16 +1004,78 @@ class LookEngine:
             "decisions": decisions,
             "market_snapshot": snap,
         }
+        return {
+            "payload_kind": "look_timeout",
+            "strategy_id": strategy_id,
+            "strategy_name": strategy.get("strategy_name"),
+            "sym_key": sym_key,
+            "title": title,
+            "message": message,
+            "extra": extra,
+            "decisions": decisions,
+        }
+
+    def _process_look_timeout_queue_payload(self, row_id: str, qp: Dict[str, Any]) -> bool:
+        """队列线程：盯盘超时 — post_event_notify → insert_look_notify → ENDED。"""
+        from trade.common.trade_monitor_client import post_event_notify
+
+        title = (qp.get("title") or "").strip()
+        message = qp.get("message") or ""
+        extra = qp.get("extra")
+        if not isinstance(extra, dict):
+            extra = {}
+        strategy_id = qp.get("strategy_id")
+        strategy_name = qp.get("strategy_name")
+        sym_key = qp.get("sym_key") or ""
+
+        base = (getattr(app_config, "TRADE_MONITOR_BASE_URL", None) or "").strip()
+        if not base:
+            logger.warning(
+                "TRADE_MONITOR_BASE_URL 未配置，盯盘超时队列任务跳过 HTTP，仅落库 trade_notify | market_look=%s",
+                row_id,
+            )
+            ok = True
+        else:
+            ok, _aid = post_event_notify(title, message, metadata=extra)
+        if not ok:
+            return False
+
         nid = self.trade_notify_db.insert_look_notify(
             market_look_id=str(row_id) if row_id is not None else None,
             strategy_id=str(strategy_id),
-            strategy_name=strategy.get("strategy_name"),
+            strategy_name=strategy_name,
             symbol=sym_key,
             title=title,
             message=message,
-            extra=extra,
+            extra=extra if extra else None,
         )
-        return [nid]
+        self.market_look_db.update_signal_result(
+            row_id,
+            json.dumps(
+                {
+                    "ts": _utc8_now_iso(),
+                    "notify": False,
+                    "execution_ended": "timeout",
+                    "reason": "deadline_passed",
+                    "message": "策略已经执行超时，没有找到任何交易信号",
+                    "decisions": qp.get("decisions") or {},
+                    "trade_notify_ids": [nid],
+                    "market_look_id": row_id,
+                    "strategy_id": strategy_id,
+                    "notify_channel": "trade_monitor",
+                },
+                ensure_ascii=False,
+                default=str,
+            ),
+        )
+        end_msg = (
+            f"[超时结束] 当前时间已超过计划结束时间 ended_at，策略未返回 notify 信号。"
+            f" 已通过 trade-monitor 异步推送并写入 trade_notify；trade_notify_ids={[nid]}。"
+        )
+        self.market_look_db.update_status(
+            row_id, EXECUTION_ENDED, ended_at=_now_shanghai_naive(), end_log=end_msg
+        )
+        return True
 
     def _extract_notify_decisions(self, decisions: Dict, sym_key: str) -> List[Dict]:
         out: List[Dict] = []
