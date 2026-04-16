@@ -22,7 +22,7 @@ _worker_thread: Optional[threading.Thread] = None
 _worker_lock = threading.Lock()
 _notify_queue: "queue.Queue[Dict[str, Any]]" = queue.Queue()
 
-MAX_NOTIFY_RETRIES = 25
+MAX_NOTIFY_RETRIES = 2
 
 
 def start_look_notify_worker(look_engine: Any) -> None:
