@@ -47,7 +47,7 @@ services:
       # 应用配置
       - APP_AUTO_TRADING=${AUTO_TRADING:-true}
       - APP_TRADE_FEE_RATE=${TRADE_FEE_RATE:-0.001}
-      # Trade服务配置
+      # Trade 服务：Compose 默认用容器名 trade（同网络 DNS）。若 Trade 在宿主机或其它机器，在 .env 设 TRADE_SERVICE_URL=http://156.254.6.224:5000
       - TRADE_SERVICE_URL=${TRADE_SERVICE_URL:-http://trade:5000}
       # 动态创建 trade-look 时注入 Python TRADE_MONITOR_BASE_URL（与根目录 .env 一致）
       - TRADE_MONITOR_BASE_URL=${TRADE_MONITOR_BASE_URL:-http://trade-monitor:5005}

@@ -182,7 +182,8 @@ socketio:
 
 # Trade服务配置（可通过环境变量覆盖）
 trade:
-  base-url: ${TRADE_SERVICE_URL:http://156.254.6.224:5000}  # Trade服务基础URL，默认 http://trade:5000
+  # 未设置 TRADE_SERVICE_URL 时用冒号后默认值；docker-compose 会为 backend 注入 TRADE_SERVICE_URL=http://trade:5000（同网络内服务名）
+  base-url: ${TRADE_SERVICE_URL:http://156.254.6.224:5000}
   connect-timeout: 10000  # 连接超时时间（毫秒）
   read-timeout: 30000  # 读取超时时间（毫秒）
   retries: 3  # 重试次数

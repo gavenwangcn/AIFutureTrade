@@ -14,8 +14,8 @@ import org.springframework.stereotype.Component;
 public class TradeServiceConfig {
 
     /**
-     * Trade服务基础URL（默认 http://trade:5000）
-     * 可通过环境变量 TRADE_SERVICE_URL 覆盖
+     * Trade 服务基础 URL（实际值来自 application.yml 的 trade.base-url，通常由环境变量 TRADE_SERVICE_URL 注入）。
+     * Docker Compose 下常见为 http://trade:5000；未通过 Compose 启动时见 yml 默认值。
      */
     private String baseUrl = "http://trade:5000";
 
