@@ -42,8 +42,6 @@ public class ModelServiceImpl implements ModelService {
 
     /** 盯盘循环固定 Docker 容器名（与前端「执行盯盘」一致，不依赖 models 表是否有记录） */
     private static final String TRADE_LOOK_CONTAINER_NAME = "aifuturetrade-model-look-1";
-    /** 旧版容器名：执行盯盘时会尝试删除，避免与新版并存 */
-    private static final String TRADE_LOOK_CONTAINER_NAME_LEGACY = "trade-look";
     /** 传入盯盘进程的 MODEL_ID 环境变量（LookEngine 执行单条策略时不依赖模型表） */
     private static final String TRADE_LOOK_MODEL_ID_ENV = "trade-look";
 
@@ -2195,10 +2193,6 @@ public class ModelServiceImpl implements ModelService {
                 return result;
             }
 
-            // 清理旧版固定名容器，避免与 aifuturetrade-model-look-1 并存
-            if (dockerContainerService.removeContainer(TRADE_LOOK_CONTAINER_NAME_LEGACY)) {
-                log.info("已清理旧版盯盘容器: {}", TRADE_LOOK_CONTAINER_NAME_LEGACY);
-            }
             // 未运行则删后重建（含已停止、已退出、仅残留名）
             if (!dockerContainerService.removeContainer(TRADE_LOOK_CONTAINER_NAME)) {
                 log.warn("删除盯盘容器失败，但继续尝试创建: {}", TRADE_LOOK_CONTAINER_NAME);
@@ -2257,7 +2251,6 @@ public class ModelServiceImpl implements ModelService {
             result.put("containerName", TRADE_LOOK_CONTAINER_NAME);
 
             boolean removed = dockerContainerService.removeContainer(TRADE_LOOK_CONTAINER_NAME);
-            dockerContainerService.removeContainer(TRADE_LOOK_CONTAINER_NAME_LEGACY);
             if (!removed) {
                 result.put("success", false);
                 result.put("error", "Failed to remove market look container");

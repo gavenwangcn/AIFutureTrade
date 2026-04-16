@@ -583,7 +583,7 @@ public class ModelController {
     }
 
     /**
-     * 停止并删除固定盯盘容器 aifuturetrade-model-look-1（并清理旧名 trade-look）
+     * 停止并删除固定盯盘容器 aifuturetrade-model-look-1
      */
     @PostMapping("/market-look/stop")
     @Operation(summary = "关闭盯盘（删除 Docker 容器 aifuturetrade-model-look-1）")
