@@ -498,6 +498,8 @@ export const marketLookApi = {
   page: (params = {}) => apiGet('/api/market-look/page', params),
   /** 按主键 */
   getById: (id) => apiGet(`/api/market-look/${encodeURIComponent(id)}`),
+  /** 详情：market_look + trade_notify（extra_json 等） */
+  getTaskDetail: (id) => apiGet(`/api/market-look/${encodeURIComponent(id)}/detail`),
   /** 创建盯盘任务（默认 RUNNING，需 type=look 策略） */
   create: (data) => apiPost('/api/market-look', data),
   /**

@@ -8,7 +8,10 @@ import com.aifuturetrade.common.util.PageRequest;
 import com.aifuturetrade.common.util.PageResult;
 import com.aifuturetrade.service.MarketLookDeleteOutcome;
 import com.aifuturetrade.service.MarketLookService;
+import com.aifuturetrade.service.TradeNotifyService;
 import com.aifuturetrade.service.dto.MarketLookDTO;
+import com.aifuturetrade.service.dto.MarketLookTaskDetailDTO;
+import com.aifuturetrade.service.dto.TradeNotifyDTO;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import org.springframework.beans.BeanUtils;
@@ -18,6 +21,7 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.UUID;
@@ -34,6 +38,11 @@ public class MarketLookServiceImpl implements MarketLookService {
 
     @Autowired
     private StrategyMapper strategyMapper;
+
+    @Autowired
+    private TradeNotifyService tradeNotifyService;
+
+    private static final int TASK_DETAIL_NOTIFY_LIMIT = 100;
 
     @Override
     public List<MarketLookDTO> listAll() {
@@ -107,6 +116,22 @@ public class MarketLookServiceImpl implements MarketLookService {
     public MarketLookDTO getById(String id) {
         MarketLookDO row = marketLookMapper.selectById(id);
         return row != null ? toDto(row) : null;
+    }
+
+    @Override
+    public MarketLookTaskDetailDTO getTaskDetail(String id) {
+        if (!StringUtils.hasText(id)) {
+            return null;
+        }
+        MarketLookDTO ml = getById(id.trim());
+        if (ml == null) {
+            return null;
+        }
+        List<TradeNotifyDTO> notifies = tradeNotifyService.listByMarketLookId(ml.getId(), TASK_DETAIL_NOTIFY_LIMIT);
+        MarketLookTaskDetailDTO out = new MarketLookTaskDetailDTO();
+        out.setMarketLook(ml);
+        out.setTradeNotifies(notifies != null ? notifies : new ArrayList<>());
+        return out;
     }
 
     @Override

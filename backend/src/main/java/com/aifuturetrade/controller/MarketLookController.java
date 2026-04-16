@@ -5,6 +5,7 @@ import com.aifuturetrade.common.util.PageResult;
 import com.aifuturetrade.service.MarketLookDeleteOutcome;
 import com.aifuturetrade.service.MarketLookService;
 import com.aifuturetrade.service.dto.MarketLookDTO;
+import com.aifuturetrade.service.dto.MarketLookTaskDetailDTO;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -82,6 +83,13 @@ public class MarketLookController {
             err.put("error", e.getMessage());
             return ResponseEntity.badRequest().body(err);
         }
+    }
+
+    @GetMapping("/{id}/detail")
+    @Operation(summary = "盯盘任务详情（含 trade_notify 快照）", description = "返回 market_look 与关联 trade_notify 列表（extra_json 等），通知条数上限 100")
+    public ResponseEntity<MarketLookTaskDetailDTO> getTaskDetail(@PathVariable("id") String id) {
+        MarketLookTaskDetailDTO dto = marketLookService.getTaskDetail(id);
+        return dto != null ? ResponseEntity.ok(dto) : ResponseEntity.notFound().build();
     }
 
     @GetMapping("/{id}")
