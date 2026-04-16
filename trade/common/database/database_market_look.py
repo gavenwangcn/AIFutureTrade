@@ -3,14 +3,50 @@ market_look 表访问：实时盯盘任务
 """
 
 import logging
+import time
 import uuid
 from datetime import datetime
 from typing import Any, Callable, Dict, List, Optional
 
+import pymysql
 import trade.common.config as app_config
 from .database_basic import create_pooled_db
 
 logger = logging.getLogger(__name__)
+
+
+def _is_transient_mysql_error(exc: BaseException) -> bool:
+    """长间隔轮询时连接可能被服务端回收，池内连接失效会导致 InterfaceError / OperationalError 等，可重试。"""
+    if isinstance(exc, pymysql.err.InterfaceError):
+        return True
+    if isinstance(exc, pymysql.err.OperationalError) and exc.args:
+        code = exc.args[0]
+        if code in (2006, 2013, 2003, 2014, 2055):
+            return True
+    if isinstance(exc, pymysql.err.InternalError) and exc.args:
+        msg = str(exc.args[1]).lower() if len(exc.args) > 1 else ""
+        if "packet sequence" in msg or "lost connection" in msg:
+            return True
+    err_name = type(exc).__name__.lower()
+    err_text = str(exc).lower()
+    if any(k in err_text for k in ("gone away", "broken pipe", "reset by peer", "read of closed file")):
+        return True
+    if any(k in err_name for k in ("interfaceerror", "timeouterror", "connectionerror")):
+        return True
+    return False
+
+
+def _discard_pool_connection(conn) -> None:
+    if not conn:
+        return
+    try:
+        conn.rollback()
+    except Exception:
+        pass
+    try:
+        conn.close()
+    except Exception:
+        pass
 
 EXECUTION_RUNNING = "RUNNING"
 EXECUTION_SENDING = "SENDING"
@@ -39,11 +75,35 @@ class MarketLookDatabase:
         self.table = "market_look"
 
     def _with_connection(self, func: Callable, *args, **kwargs) -> Any:
-        conn = self._pool.connection()
-        try:
-            return func(conn, *args, **kwargs)
-        finally:
-            conn.close()
+        max_retries = 3
+        retry_delay = 0.5
+        for attempt in range(max_retries):
+            conn = None
+            try:
+                conn = self._pool.connection()
+                return func(conn, *args, **kwargs)
+            except Exception as e:
+                _discard_pool_connection(conn)
+                conn = None
+                if attempt < max_retries - 1 and _is_transient_mysql_error(e):
+                    wait = retry_delay * (2**attempt)
+                    logger.warning(
+                        "[MarketLookDatabase] transient MySQL error (attempt %s/%s): %s: %s. retry in %.2fs",
+                        attempt + 1,
+                        max_retries,
+                        type(e).__name__,
+                        e,
+                        wait,
+                    )
+                    time.sleep(wait)
+                    continue
+                raise
+            finally:
+                if conn is not None:
+                    try:
+                        conn.close()
+                    except Exception:
+                        pass
 
     def list_running(self) -> List[Dict]:
         """执行中任务"""
