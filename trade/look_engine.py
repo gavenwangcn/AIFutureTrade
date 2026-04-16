@@ -5,8 +5,9 @@
 
 import json
 import logging
+import re
 from datetime import datetime, timezone, timedelta
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 from zoneinfo import ZoneInfo
 
 import numpy as np
@@ -300,12 +301,155 @@ def _notify_indicators_without_vol(raw: Any) -> Dict[str, Any]:
     return {k: v for k, v in raw.items() if k != "vol"}
 
 
+# 通知正文里每个周期携带的 K 线根数（时间升序，取末尾为最新）
+LOOK_NOTIFY_KLINE_BARS = 3
+
+# 策略在 notify 信号里声明周期时使用的字段名（与行情 timeframes 的 key 语义一致，如 "5m"）
+# Prompt 建议写在 key_date（如 pattern + timeframe）；顶层 / market_date 仍兼容。
+_STRATEGY_INTERVAL_FIELD_NAMES = ("timeframe", "interval", "tf", "period")
+
+# 与 merge_timeframe_klines / strategy_look_prompt 中 8 周期一致
+_KNOWN_TIMEFRAME_KEYS = frozenset({"1m", "5m", "15m", "30m", "1h", "4h", "1d", "1w"})
+
+# 紧凑英文变体 -> canonical
+_TF_COMPACT_ALIASES = {
+    "5min": "5m",
+    "5mins": "5m",
+    "15min": "15m",
+    "30min": "30m",
+    "1min": "1m",
+    "1hr": "1h",
+    "4hr": "4h",
+    "1day": "1d",
+    "1week": "1w",
+}
+
+# 顺序敏感：先匹配 15m/30m 再 5m/1m，避免「15m」误命中「5m」
+_TF_FUZZY_REGEX: Tuple[Tuple[re.Pattern[str], str], ...] = (
+    (re.compile(r"(?:^|[^\d])15m(?:[^\d]|$)|15\s*分钟|15\s*分|15\s*min", re.I), "15m"),
+    (re.compile(r"(?:^|[^\d])30m(?:[^\d]|$)|30\s*分钟|30\s*分|30\s*min", re.I), "30m"),
+    (re.compile(r"(?:^|[^\d])5m(?:[^\d]|$)|5\s*分钟|五分钟|5\s*分|5\s*min", re.I), "5m"),
+    (re.compile(r"(?:^|[^\d])1m(?:[^\d]|$)|1\s*分钟|一分钟|1\s*分|1\s*min", re.I), "1m"),
+    (re.compile(r"(?:^|[^\d])4h(?:[^\d]|$)|4\s*小时|四\s*小时|4\s*hr", re.I), "4h"),
+    (re.compile(r"(?:^|[^\d])1h(?:[^\d]|$)|1\s*小时|一小时|60\s*分钟|60\s*min", re.I), "1h"),
+    (re.compile(r"(?:^|[^\d])1d(?:[^\d]|$)|1\s*天|一日|日线", re.I), "1d"),
+    (re.compile(r"(?:^|[^\d])1w(?:[^\d]|$)|1\s*周|一周|周线", re.I), "1w"),
+)
+
+
+def _normalize_timeframe_label(raw: Optional[str]) -> str:
+    """空白/大小写归一（用于与快照 key 直接比对）。"""
+    if not raw or not isinstance(raw, str):
+        return ""
+    return raw.strip().lower().replace(" ", "").replace("　", "")
+
+
+def _timeframe_raw_to_canonical(raw: Optional[str]) -> Optional[str]:
+    """
+    将策略/模型写的周期文案转为与行情 timeframes 一致的 canonical key（如 5m）。
+    支持 5m、5分钟、五分钟、5min、1小时、60分钟 等模糊说法。
+    """
+    if not raw or not isinstance(raw, str):
+        return None
+    s = raw.strip()
+    if not s:
+        return None
+    compact = re.sub(r"[\s　]+", "", s.lower())
+    if compact in _KNOWN_TIMEFRAME_KEYS:
+        return compact
+    if compact in _TF_COMPACT_ALIASES:
+        return _TF_COMPACT_ALIASES[compact]
+    sl = s.lower()
+    for rx, canon in _TF_FUZZY_REGEX:
+        if rx.search(sl):
+            return canon
+    return None
+
+
+def _interval_field_from_mapping(m: Dict[str, Any]) -> Optional[str]:
+    """从单层 dict 取 timeframe/interval/tf/period 中第一个非空字符串。"""
+    for key in _STRATEGY_INTERVAL_FIELD_NAMES:
+        v = m.get(key)
+        if isinstance(v, str) and v.strip():
+            return v.strip()
+    return None
+
+
+def _resolve_timeframe_in_map(raw: Optional[str], timeframes: Dict[str, Any]) -> Optional[str]:
+    """
+    将策略给出的周期文案与快照 indicators.timeframes 的实际 key 对齐。
+    先模糊归一成 canonical，再命中字典 key；否则再试与 key 的大小写不敏感相等。
+    """
+    if not raw or not isinstance(timeframes, dict) or not timeframes:
+        return None
+    canon = _timeframe_raw_to_canonical(raw)
+    if canon and canon in timeframes:
+        return canon
+    needle = _normalize_timeframe_label(raw)
+    if needle:
+        for k in timeframes.keys():
+            if _normalize_timeframe_label(str(k)) == needle:
+                return str(k)
+    return None
+
+
+def interval_from_strategy_notify_signal(dec: Dict[str, Any]) -> Optional[str]:
+    """
+    从策略返回的 notify 条目中取出「信号相关周期」原始字符串，供 _resolve_timeframe_in_map 使用。
+
+    读取顺序（与 strategy_look_prompt 一致，优先 key_date）：
+    1. key_date 内：timeframe / interval / tf / period（Prompt 示例：key_date 含 pattern、timeframe）
+    2. 本条决策顶层同名字段
+    3. market_date 内同名字段
+
+    取到第一个非空字符串即返回；均未设置则返回 None（通知带全周期 K 线）。
+    """
+    if not isinstance(dec, dict):
+        return None
+    kd = dec.get("key_date")
+    if isinstance(kd, dict):
+        hit = _interval_field_from_mapping(kd)
+        if hit:
+            return hit
+    hit = _interval_field_from_mapping(dec)
+    if hit:
+        return hit
+    md = dec.get("market_date")
+    if isinstance(md, dict):
+        hit = _interval_field_from_mapping(md)
+        if hit:
+            return hit
+    return None
+
+
+def infer_notify_focus_interval(dec: Dict[str, Any]) -> Optional[str]:
+    """兼容旧名：等同 interval_from_strategy_notify_signal。"""
+    return interval_from_strategy_notify_signal(dec)
+
+
+def _trim_kline_bar_for_notify(bar: Dict[str, Any]) -> Dict[str, Any]:
+    """单根 K 线：仅时间、价格（OHLC）、K 线指标（去掉 vol）。"""
+    if not isinstance(bar, dict):
+        return {}
+    t = bar.get("time")
+    if t is None:
+        t = bar.get("open_time_dt_str") or bar.get("open_time")
+    out: Dict[str, Any] = {"time": t}
+    for pk in ("open", "high", "low", "close"):
+        if bar.get(pk) is not None:
+            out[pk] = bar.get(pk)
+    raw_ind = bar.get("indicators")
+    if isinstance(raw_ind, dict) and raw_ind:
+        out["indicators"] = _notify_indicators_without_vol(raw_ind)
+    return out
+
+
 def trim_market_snapshot_for_notify(market_state: Dict, symbol_key: str) -> Dict:
     """
-    构造盯盘通知用的轻量「整包」快照（与约定 D 一致）：
-    - 顶层仅 price、contract_symbol；
-    - indicators.timeframes[周期] 为最近一根：time、close、indicators（已去掉 vol；无 K 线数组/OHLCV 序列）。
-    K 线列表为时间升序时取末尾为最新。
+    构造盯盘通知用的「整包」快照基座（入队、超时通知、metadata）：
+    - 顶层：price、contract_symbol；
+    - indicators.timeframes[周期]：近 LOOK_NOTIFY_KLINE_BARS 根 K，每根 time + OHLC + indicators（无 vol）。
+    列表时间升序时取末尾为最新。
     """
     sym_u = symbol_key.strip().upper()
     payload = market_state.get(sym_u) or market_state.get(symbol_key) or {}
@@ -324,20 +468,49 @@ def trim_market_snapshot_for_notify(market_state: Dict, symbol_key: str) -> Dict
                 continue
             kl = block.get("klines") or []
             if not isinstance(kl, list) or not kl:
-                trimmed_tf[interval] = {}
+                trimmed_tf[interval] = {"klines": []}
                 continue
-            last = kl[-1]
-            if not isinstance(last, dict):
-                trimmed_tf[interval] = {}
-                continue
-            raw_ind = last.get("indicators")
+            n = min(LOOK_NOTIFY_KLINE_BARS, len(kl))
+            tail = kl[-n:]
             trimmed_tf[interval] = {
-                "time": last.get("time") or last.get("open_time_dt_str"),
-                "close": last.get("close"),
-                "indicators": _notify_indicators_without_vol(raw_ind),
+                "klines": [_trim_kline_bar_for_notify(b) for b in tail if isinstance(b, dict)]
             }
     out["indicators"] = {"timeframes": trimmed_tf}
     return out
+
+
+def filter_notify_snapshot_for_decision(base_snap: Dict[str, Any], dec: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    若策略在 notify 的 key_date（优先）/ 顶层 / market_date 中声明了周期，且经模糊匹配后快照中有该周期，
+    则只保留该周期的 K 线块；未声明或匹配失败则返回完整基座（全部周期）。
+    """
+    if not isinstance(base_snap, dict):
+        return {}
+    tf = ((base_snap.get("indicators") or {}).get("timeframes")) or {}
+    if not isinstance(tf, dict) or not tf:
+        return dict(base_snap)
+    raw_focus = interval_from_strategy_notify_signal(dec)
+    key = _resolve_timeframe_in_map(raw_focus, tf) if raw_focus else None
+    if not key:
+        return dict(base_snap)
+    block = tf.get(key)
+    if not isinstance(block, dict):
+        return dict(base_snap)
+    return {
+        "price": base_snap.get("price"),
+        "contract_symbol": base_snap.get("contract_symbol"),
+        "indicators": {"timeframes": {key: block}},
+        "focus_interval": key,
+    }
+
+
+def merge_market_date_for_notify_message(filtered_snap: Dict[str, Any], dec: Dict[str, Any]) -> Dict[str, Any]:
+    """K 线快照与策略自定义 market_date（如 MACD 标量）合并，后者可补充说明字段。"""
+    base = dict(filtered_snap) if isinstance(filtered_snap, dict) else {}
+    strat = dec.get("market_date") if isinstance(dec, dict) else None
+    if isinstance(strat, dict) and strat:
+        return {**base, **strat}
+    return base
 
 
 class LookEngine:
@@ -506,8 +679,8 @@ class LookEngine:
             if not isinstance(dec, dict):
                 continue
             dec_copy = dict(dec)
-            if dec_copy.get("market_date") is None:
-                dec_copy["market_date"] = snap
+            filtered = filter_notify_snapshot_for_decision(snap, dec_copy)
+            dec_copy["market_date"] = merge_market_date_for_notify_message(filtered, dec_copy)
             body_lines = [
                 f"盯盘任务ID (market_look.id): {row_id}",
                 f"策略ID (strategys.id): {strategy_id}",
@@ -516,7 +689,7 @@ class LookEngine:
                 f"合约: {dec_copy.get('symbol') or sym_key}",
                 f"价格: {dec_copy.get('price')}",
                 f"说明: {dec_copy.get('justification')}",
-                f"market_date: {json.dumps(dec_copy.get('market_date'), ensure_ascii=False, default=str)[:2000]}",
+                f"market_date: {json.dumps(dec_copy.get('market_date'), ensure_ascii=False, default=str)[:32000]}",
             ]
             parts.append("\n".join(body_lines))
         if not parts:

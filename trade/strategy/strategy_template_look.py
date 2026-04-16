@@ -25,6 +25,10 @@ class StrategyBaseLook(ABC):
         Returns:
             Dict[str, List[Dict]]: 例如 {"BTC": [{"signal": "notify", ...}]}
             无信号时返回 {} 或 {"BTC": [{"signal": "hold", ...}]}（hold 不触发企微）
+
+            触发 notify 时若希望通知正文只带某一周期近 3 根 K 线，请在 **key_date**（推荐，与生成 Prompt 一致）
+            或顶层 / market_date 中设置周期字段（任填其一）：timeframe / interval / tf / period。
+            支持模糊写法（如 5m、5分钟、5min 等）。未设置则通知中带全部周期 K 线。
         """
         pass
 

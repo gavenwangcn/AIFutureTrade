@@ -268,7 +268,7 @@ else:
 - 若要求「例如 1h 死叉且 15m 同向」，应对 **各周期分别取 `klines`**，分别算交叉布尔值，再 `and`，且 **每个周期单独打日志**，便于企微与复盘。
 
 #### 写入 `notify` 时的建议
-- `key_date` 中保存：`{"pattern": "MA金叉", "timeframe": "1h", "fast": ma_f_cur, "slow": ma_s_cur, ...}`  
+- `key_date` 中保存：`{"pattern": "MA金叉", "timeframe": "1h", "fast": ma_f_cur, "slow": ma_s_cur, ...}`（**`timeframe` 亦可用 `interval` / `tf` / `period`**；盯盘服务会**优先从 `key_date` 取周期**，并对 `5m` / `5分钟` / `5min` / `1小时` 等作模糊匹配后裁剪通知中的 K 线周期。）
 - `justification` 用**中文简述**触发的形态与关键数值（如「1h MA5 上穿 MA20，MA5=…, MA20=…」）。
 
 ### 7）多周期联合示例（指导性伪代码）
