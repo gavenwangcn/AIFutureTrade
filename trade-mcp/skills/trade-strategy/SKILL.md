@@ -5,11 +5,13 @@ description: >-
   parameter validation, user confirmation before calls, ID handoff, post-create verification against
   real Python execution context, scenario-based testing with mock market_state, and clarification when
   rules are ambiguous. Iterates with the user until strategy rules are confirmed or the user abandons;
-  uses trade_strategy_regenerate_code to revise strategy after calibration. After create/regenerate, the model
-  must show the returned strategy_code to the user and judge (beyond test_passed) whether logic matches intent.
-  Strategy create/update tool calls can take several minutes (often up to ~5 minutes); tell the user to wait
-  and avoid duplicate retries until timeout or error. Use when the user asks to build/configure 盯盘策略、盯盘任务、
-  market_look, validate_symbol, strategy_context, or trade_look_* / trade_strategy_*（含 `trade_strategy_delete`） MCP tools in AIFutureTrade,
+  uses trade_strategy_regenerate_code (AI 生成代码) or trade_strategy_apply_submitted_code（用户/模型已写好代码、不经 LLM 生成、仅跑测试后落库）
+  to revise strategy after calibration. After create/regenerate/apply, the model must show the returned strategy_code
+  to the user and judge (beyond test_passed) whether logic matches intent. AI-heavy calls (create/regenerate) can
+  take several minutes (often up to ~5 minutes); apply_submitted_code skips model generation but still runs Trade
+  tests and may take noticeable time. Tell the user to wait and avoid duplicate retries until timeout or error.
+  Use when the user asks to build/configure 盯盘策略、盯盘任务、
+  market_look, validate_symbol, strategy_context, or trade_look_* / trade_strategy_*（含 `trade_strategy_delete`、`trade_strategy_apply_submitted_code`） MCP tools in AIFutureTrade,
   including deleting a market_look task via trade_look_market_look_delete.
 ---
 
@@ -19,7 +21,9 @@ description: >-
 
 ## 执行耗时（必须告知用户）
 
-涉及 **创建策略**、**修改策略（重新生成代码）** 的 MCP 工具调用（例如 **`trade_look_strategy_create_look`**、**`trade_strategy_regenerate_code`**）时，服务端通常要经历大模型生成代码、语法/继承/试跑类校验等步骤，**单次调用耗时可能较长（数分钟级别，极端情况下可达约 5 分钟）**。
+涉及 **创建策略**、**用 AI 重新生成策略代码** 的 MCP 工具调用（例如 **`trade_look_strategy_create_look`**、**`trade_strategy_regenerate_code`**）时，服务端通常要经历**大模型生成代码**、语法/继承/试跑类校验等步骤，**单次调用耗时可能较长（数分钟级别，极端情况下可达约 5 分钟）**。
+
+**`trade_strategy_apply_submitted_code`**：**不调用大模型生成代码**；只把你提交的完整 `strategyCode` 交给服务端做与「获取代码」相同的 **Trade 测试执行**，**仅测试通过才写库**。仍可能因试跑、网络等耗时，但一般**明显短于**「创建 / `trade_strategy_regenerate_code`」这类含 LLM 的路径。
 
 - **须在调用前或调用伊始向用户说明**：请耐心等待，不要误以为卡死。
 - **未完成前**：不要因无立即响应而重复发起相同创建/再生请求；若客户端或网关报超时，再按报错与用户确认是否重试。
@@ -88,9 +92,10 @@ description: >-
 
 1. **对齐缺口**：用用户能懂的话说明「当前策略/代码与你想实现的内容差在哪里」（规则、条件、周期、阈值、notify 语义等）。
 2. **再次向用户确认**：基于完整上下文，请用户补充或修正策略规则与条件；必要时用第 5、6 节的**示例与追问**逐项对齐。
-3. **更新策略内容（经 MCP）**：在用户同意修改方向后，对已存在策略：
-   - 使用 **`trade_strategy_regenerate_code`**，传入 **`strategyId`** 与**修订后的 `strategyContext`**（与上一步用户确认的正文一致）；提供方与模型由系统设置决定，**无需** `providerId`/`modelName`。可先 **`persist=false`** 查看返回的 **`strategyCode`** 与 **`testResult`**，**向用户展示代码**并确认逻辑后再 **`persist=true`** 落库。详见 `references/mcp-market-look-tools.md`。
-   - 若仅需改名称、校验合约等元数据而不重新生成代码，可按后端能力使用策略更新接口（以 MCP/后端暴露为准）；**仍以 MCP 工具为主**。
+3. **更新策略内容（经 MCP）**：在用户同意修改方向后，对已存在策略，**二选一**（勿混淆）：
+   - **要由服务端按自然语言再生成代码**（与「获取代码」一致）：使用 **`trade_strategy_regenerate_code`**，传入 **`strategyId`** 与**修订后的 `strategyContext`**；提供方与模型由系统设置决定，**无需** `providerId`/`modelName`。可先 **`persist=false`** 查看返回的 **`strategyCode`** 与 **`testResult`**，**向用户展示代码**并确认逻辑后再 **`persist=true`** 落库。详见 `references/mcp-market-look-tools.md`。
+   - **已有完整可提交的 Python 策略代码、不要走 LLM 生成**：使用 **`trade_strategy_apply_submitted_code`**（见 **第 8.1 节**）。服务端**不会**调用模型生成；**必须**先跑完整测试，**仅 `testPassed=true`（响应里 `persisted=true`）才保存**；失败则库不变。
+   - 若仅需改名称、校验合约等元数据而不改代码，可按后端能力使用策略更新接口（以 MCP/后端暴露为准）；**仍以 MCP 工具为主**。
 4. **再次请用户确认**：展示新摘要或关键片段，问用户是否认可；**不认可则回到步骤 1**，继续循环。
 
 ### 7.2 终止条件（必须二选一）
@@ -101,15 +106,29 @@ description: >-
 ### 7.3 禁止
 
 - **不得**在用户未表态「确认」或「放弃」前，默认策略已合格并停止追问（除非会话已自然结束且用户已口头定稿）。
-- **不得**用非 MCP 方式「偷偷」改库；修改策略内容与重新生成代码须通过 **`trade_strategy_regenerate_code`**；删除策略须通过 **`trade_strategy_delete`**（见第 10 节）等已提供的工具路径。
+- **不得**用非 MCP 方式「偷偷」改库；改策略代码须通过 **`trade_strategy_regenerate_code`**（AI 生成）或 **`trade_strategy_apply_submitted_code`**（直接提交代码+测试）；删除策略须通过 **`trade_strategy_delete`**（见第 10 节）等已提供的工具路径。
 
 ## 8. 仅用 MCP 做创建与查询
 
 - **创建/查询盯盘策略与盯盘任务**：优先且重点使用 trade-mcp 提供的 **`trade_look_*`** 工具（创建、按 ID 查、分页查、受控 SQL 等）。
 - **禁止**：为「代替 MCP」而随意生成独立脚本去直连数据库或 REST 创建策略/任务（除非用户明确授权且场景是离线维护，并说明与 MCP 无关）。
 - 需要列表或排查时：使用 `trade_look_strategy_search_look`、`trade_look_market_look_query_page`、`trade_look_strategy_get_by_id`、`trade_look_market_look_get_by_id` 等。
-- **修正已存在策略的代码/描述**：使用 **`trade_strategy_regenerate_code`**（见第 7 节闭环）。
+- **修正已存在策略的代码**：**自然语言驱动再生成** → **`trade_strategy_regenerate_code`**；**已有一份完整代码、跳过 LLM** → **`trade_strategy_apply_submitted_code`**（见第 7 节与 **第 8.1 节**）。
 - **删除策略行**：使用 **`trade_strategy_delete`**（见第 10 节）。
+
+## 8.1 `trade_strategy_apply_submitted_code`（专用说明，避免误用）
+
+**是什么**：按策略 **`strategyId`** **直接提交**一整段 **`strategyCode`**（Python 策略类源码）。服务端**不调用**策略用大模型去「生成代码」；与 `trade_strategy_regenerate_code` **不是同一路径**。
+
+**必须满足的约束**：
+
+- **测试**：与 `regenerate` / 新建策略一致，服务端会调用 Trade 侧**完整测试执行**（含试跑等）。**只有测试通过才会把代码写入数据库**；失败时响应里 **`persisted=false`**，**库中 `strategy_code` 不变**。
+- **必填参数**：**`strategyId`**、**`strategyCode`**（完整代码字符串）。
+- **可选**：**`strategyName`**（测试展示名，默认用库中 `name`）；**`validateSymbol`** 仅当策略为 **look** 时需要覆盖库中验证合约时传入，否则用库中 **`validate_symbol`**。
+
+**何时用**：用户或助手已经**写好/粘贴好**完整策略代码，只想**替换落库**且愿意接受自动化测试 gate。**何时不用**：需要按 `strategy_context` 让系统**重新 AI 生成** → 用 **`trade_strategy_regenerate_code`**。
+
+**响应关注点**：**`testPassed`**、**`testResult`**、**`persisted`**、**`message`**；须向用户说明是否已成功保存。
 
 ## 9. 盯盘任务删除（market_look）
 
@@ -130,12 +149,12 @@ description: >-
 
 ## 快速检查清单
 
-0. 若将调用创建策略或 `trade_strategy_regenerate_code`：**是否已提示可能需等待数分钟（约 5 分钟级）**？  
+0. 若将调用创建策略或 **`trade_strategy_regenerate_code`**：**是否已提示可能需等待数分钟（约 5 分钟级）**？若仅用 **`trade_strategy_apply_submitted_code`**：**是否已说明不经过 LLM 生成，但仍会跑完整测试、失败则 `persisted=false` 不落库**？  
 1. **`trade_look_strategy_create_look` 标准流程是否含 `name` + `validate_symbol`（验证合约 symbol *）+ `strategy_context` 三必传**？缺则问。  
 2. 用户是否已确认即将提交的参数？  
 3. 是否先策略后任务？`strategy_id` 是否已拿到？  
 4. 返回的策略 **`id` 是否写清**？若响应含 **`strategy_code`**：**是否已向用户完整展示代码**并**对照用户需求做了逻辑审阅**（不仅依赖 `test_passed`）？  
-5. `trade_strategy_regenerate_code` 返回后：**是否展示 `strategyCode`** 并请用户确认？  
+5. **`trade_strategy_regenerate_code`** 返回后：**是否展示 `strategyCode`** 并请用户确认？若调用了 **`trade_strategy_apply_submitted_code`**：**是否根据 `persisted` / `testPassed` 向用户说明是否已保存**，未通过时是否结合 **`testResult`** 排查？  
 6. 有代码时是否在执行语义上自洽？复杂时是否有场景级说明/追问？  
 7. 若结果不满意，是否已进入第 7 节闭环，直至用户**确认**或**明确放弃**？  
 8. 是否全程以 MCP 工具为主？  

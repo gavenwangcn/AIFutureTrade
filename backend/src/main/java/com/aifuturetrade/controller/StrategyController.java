@@ -171,6 +171,36 @@ public class StrategyController {
         }
     }
 
+    /**
+     * 直接提交策略代码（不调用模型生成）；仅当 Trade 端测试执行通过时写入 {@code strategy_code}。
+     */
+    @PostMapping("/{id}/update-strategy-code")
+    @Operation(summary = "按策略ID提交代码（测试通过后保存，不调用模型）")
+    public ResponseEntity<Map<String, Object>> applySubmittedStrategyCode(
+            @PathVariable(value = "id") String id,
+            @RequestBody Map<String, Object> body) {
+        if (body == null) {
+            body = new HashMap<>();
+        }
+        String strategyCode = stringField(body, "strategyCode", "strategy_code");
+        String strategyName = stringField(body, "strategyName", "strategy_name");
+        String validateSymbol = stringField(body, "validateSymbol", "validate_symbol");
+        try {
+            Map<String, Object> result = strategyService.applySubmittedStrategyCode(
+                    id, strategyCode, strategyName, validateSymbol);
+            return new ResponseEntity<>(result, HttpStatus.OK);
+        } catch (IllegalArgumentException e) {
+            Map<String, Object> error = new HashMap<>();
+            error.put("error", e.getMessage());
+            return new ResponseEntity<>(error, HttpStatus.BAD_REQUEST);
+        } catch (Exception e) {
+            logger.error("applySubmittedStrategyCode failed: {}", e.getMessage(), e);
+            Map<String, Object> error = new HashMap<>();
+            error.put("error", "Failed to apply strategy code: " + e.getMessage());
+            return new ResponseEntity<>(error, HttpStatus.INTERNAL_SERVER_ERROR);
+        }
+    }
+
     private static String stringField(Map<String, Object> body, String... keys) {
         for (String k : keys) {
             Object v = body.get(k);

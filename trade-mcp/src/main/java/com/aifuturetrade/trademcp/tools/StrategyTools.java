@@ -52,6 +52,30 @@ public class StrategyTools {
     }
 
     @McpTool(
+            name = "trade_strategy_apply_submitted_code",
+            description = "按 strategys.id **直接提交**用户或模型给出的 `strategy_code`，**不调用 AI 重新生成**。"
+                    + " 服务端会调用 Trade 与「获取代码」相同的**完整测试执行**（含试跑）；**仅 `testPassed=true` 时写入数据库**。"
+                    + " 必填：`strategyId`、`strategyCode`（完整 Python 策略类代码）。"
+                    + " 可选：`strategyName`（测试展示名，默认库中 name）、`validateSymbol`（仅 type=look 时可覆盖库中合约）。"
+                    + " 响应含 `strategyCode`、`testPassed`、`testResult`、`persisted`、`message`；未通过时 `persisted=false` 且库不变。"
+                    + " 适用于 buy / sell / look；与 `trade_strategy_regenerate_code`（走模型生成）二选一。")
+    public Map<String, Object> strategyApplySubmittedCode(
+            @McpToolParam(description = "strategys.id（UUID）", required = true) String strategyId,
+            @McpToolParam(description = "待保存的完整策略代码（须通过服务端测试）", required = true) String strategyCode,
+            @McpToolParam(description = "测试展示名；省略则用库中 name", required = false) String strategyName,
+            @McpToolParam(description = "盯盘策略测试用合约；省略则用库中 validate_symbol", required = false) String validateSymbol) {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("strategyCode", strategyCode);
+        if (strategyName != null && !strategyName.isEmpty()) {
+            body.put("strategyName", strategyName);
+        }
+        if (validateSymbol != null && !validateSymbol.isEmpty()) {
+            body.put("validateSymbol", validateSymbol);
+        }
+        return backendClient.strategyApplySubmittedCode(strategyId, body);
+    }
+
+    @McpTool(
             name = "trade_strategy_delete",
             description = "按 **strategys.id（UUID）** 删除一条策略记录，对应后端 `DELETE /api/strategies/{id}`。"
                     + " 必填：`strategyId`。"

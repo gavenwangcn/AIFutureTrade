@@ -144,6 +144,7 @@ class AllMcpToolsSmokeTest {
         lenient().when(backendClient.marketLookCreate(anyMap())).thenReturn(okId);
         lenient().when(backendClient.strategyCreate(anyMap())).thenReturn(okId);
         lenient().when(backendClient.strategyRegenerateCode(anyString(), anyMap())).thenReturn(okId);
+        lenient().when(backendClient.strategyApplySubmittedCode(anyString(), anyMap())).thenReturn(okId);
         Map<String, Object> okStrategyDelete = new HashMap<>();
         okStrategyDelete.put("success", true);
         okStrategyDelete.put("message", "Strategy deleted successfully");
@@ -253,6 +254,8 @@ class AllMcpToolsSmokeTest {
     void trade_strategy_tools() {
         assertNotNull(strategyTools.strategyRegenerateCode(
                 "00000000-0000-0000-0000-000000000099", null, null, null, false));
+        assertNotNull(strategyTools.strategyApplySubmittedCode(
+                "00000000-0000-0000-0000-000000000099", "print(1)", null, null));
         Map<String, Object> del = strategyTools.strategyDelete("00000000-0000-0000-0000-000000000099");
         assertNotNull(del);
         assertTrue(Boolean.TRUE.equals(del.get("success")), "strategyDelete: " + del);

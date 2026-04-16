@@ -90,5 +90,21 @@ public interface StrategyService {
             String strategyName,
             Boolean persist);
 
+    /**
+     * 按策略 ID 直接提交 {@code strategy_code}，**不调用模型生成**；先走与「获取代码」相同的 Trade 端测试执行，
+     * 仅当 {@code passed=true} 时更新库中 {@code strategy_code}。
+     *
+     * @param strategyId     策略 UUID
+     * @param strategyCode   待写入的完整策略代码（必填）
+     * @param strategyName   测试展示名，可选，默认库中 name
+     * @param validateSymbol 盯盘可选覆盖；未传则用库中 validate_symbol
+     * @return id、strategyCode、testPassed、testResult、persisted、message 等
+     */
+    Map<String, Object> applySubmittedStrategyCode(
+            String strategyId,
+            String strategyCode,
+            String strategyName,
+            String validateSymbol);
+
 }
 

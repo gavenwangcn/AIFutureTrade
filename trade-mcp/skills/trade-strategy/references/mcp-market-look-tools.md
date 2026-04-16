@@ -9,7 +9,11 @@
 
 ## 执行耗时（重要）
 
-**创建盯盘策略**（`trade_look_strategy_create_look`）与 **修改/重新生成策略代码**（`trade_strategy_regenerate_code`，含 buy/sell/look）会触发后端大模型生成与多轮校验，**单次工具调用可能耗时数分钟，极端约 5 分钟**。使用前请向最终用户说明需耐心等待；避免在未返回结果前重复提交相同请求（除非已明确失败或超时后再试）。
+**创建盯盘策略**（`trade_look_strategy_create_look`）与 **AI 重新生成策略代码**（`trade_strategy_regenerate_code`，含 buy/sell/look）会触发后端**大模型生成**与多轮校验，**单次工具调用可能耗时数分钟，极端约 5 分钟**。
+
+**`trade_strategy_apply_submitted_code`**：**不经过大模型生成**；仅提交已有 `strategyCode` 并由服务端跑 Trade **完整测试**，通过才落库。仍可能因试跑等耗时，但通常**明显短于**上两类含 LLM 的调用。
+
+以上路径使用前请向最终用户说明需等待；避免在未返回结果前重复提交相同请求（除非已明确失败或超时后再试）。
 
 ## 调用顺序（硬性）
 
@@ -84,6 +88,21 @@
 
 **落库条件**：`persist!=false` **且** 代码测试通过（与新建策略校验一致）。未通过时仍返回生成代码与 `testResult` 供排查。
 
+## `trade_strategy_apply_submitted_code`（buy / sell / look 通用，**非 AI 生成**）
+
+**与 `trade_strategy_regenerate_code` 的本质区别**：本工具**不会**调用策略用大模型根据 `strategy_context` **生成**代码；只接受调用方传入的**完整** `strategyCode`，服务端再跑与新建/再生一致的 **Trade 测试执行**，**仅测试通过才更新库中的 `strategy_code`**。
+
+| 参数 | 必填 | 说明 |
+|------|------|------|
+| `strategyId` | 是 | `strategys.id` |
+| `strategyCode` | 是 | 待保存的完整 Python 策略源码（字符串） |
+| `strategyName` | 否 | 测试展示名；省略用库中 `name` |
+| `validateSymbol` | 否 | 仅 **type=look** 时需覆盖库中验证合约时传入；否则用库中 `validate_symbol` |
+
+**响应（常用字段）**：`strategyCode`、`testPassed`、`testResult`、`persisted`（`true` 表示已写入库）、`message`。**`persisted=false`** 表示测试未通过或出错，**数据库中原策略代码不变**。
+
+**后端 REST**：`POST /api/strategies/{id}/update-strategy-code`（请求体可含 `strategyCode` / `strategy_code` 等字段，与控制器约定一致）。
+
 ## `trade_strategy_delete`（buy / sell / look 通用）
 
 | 参数 | 必填 | 说明 |
@@ -95,4 +114,4 @@
 ## 后端 REST 参考（便于理解，非 MCP 直连）
 
 - 盯盘任务：`/api/market-look`、分页、`GET/DELETE /api/market-look/{id}`（删除成功体含 `verifiedAbsent`）  
-- 策略：`/api/strategies`、`DELETE /api/strategies/{id}`、按 id 查询、`POST /api/strategies/{id}/regenerate-code`、分页 `type=look`
+- 策略：`/api/strategies`、`DELETE /api/strategies/{id}`、按 id 查询、`POST /api/strategies/{id}/regenerate-code`、`POST /api/strategies/{id}/update-strategy-code`（直接提交代码+测试通过后保存）、分页 `type=look`

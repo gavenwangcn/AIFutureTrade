@@ -12,6 +12,7 @@ import com.aifuturetrade.service.dto.StrategyDTO;
 import com.aifuturetrade.common.util.PageResult;
 import com.aifuturetrade.common.util.PageRequest;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import org.springframework.beans.BeanUtils;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -278,26 +279,36 @@ public class StrategyServiceImpl implements StrategyService {
         
         // 如果更新了策略代码，进行测试验证
         if (strategyDO.getStrategyCode() != null && !strategyDO.getStrategyCode().trim().isEmpty()) {
+            StrategyDO existingRow = strategyMapper.selectById(strategyDO.getId());
+
             String strategyType = strategyDO.getType();
-            String strategyName = strategyDO.getName() != null ? strategyDO.getName() : "策略";
-            
-            // 如果类型为空，尝试从数据库获取
             if (strategyType == null || strategyType.trim().isEmpty()) {
-                StrategyDO existingStrategy = strategyMapper.selectById(strategyDO.getId());
-                if (existingStrategy != null) {
-                    strategyType = existingStrategy.getType();
+                if (existingRow != null) {
+                    strategyType = existingRow.getType();
                 }
             }
-            
+
             if (strategyType == null || strategyType.trim().isEmpty()) {
                 throw new IllegalArgumentException("策略类型不能为空，无法验证策略代码");
             }
-            
+
+            String strategyName = "策略";
+            if (strategyDO.getName() != null && StringUtils.hasText(strategyDO.getName())) {
+                strategyName = strategyDO.getName().trim();
+            } else if (existingRow != null && StringUtils.hasText(existingRow.getName())) {
+                strategyName = existingRow.getName().trim();
+            }
+
             try {
                 if ("look".equalsIgnoreCase(strategyType)) {
                     String sym = strategyDTO.getValidateSymbol();
                     if (sym == null || sym.trim().isEmpty()) {
-                        throw new IllegalArgumentException("盯盘策略必须提供 validate_symbol 用于行情验证");
+                        if (existingRow != null && StringUtils.hasText(existingRow.getValidateSymbol())) {
+                            sym = existingRow.getValidateSymbol();
+                        }
+                    }
+                    if (sym == null || sym.trim().isEmpty()) {
+                        throw new IllegalArgumentException("盯盘策略必须提供 validate_symbol（请求参数或库中已有）用于行情验证");
                     }
                     strategyCodeTesterService.validateLookStrategyCode(
                             strategyDO.getStrategyCode(),
@@ -306,9 +317,9 @@ public class StrategyServiceImpl implements StrategyService {
                     );
                 } else {
                     strategyCodeTesterService.validateStrategyCode(
-                        strategyDO.getStrategyCode(), 
-                        strategyType, 
-                        strategyName
+                            strategyDO.getStrategyCode(),
+                            strategyType,
+                            strategyName
                     );
                 }
                 log.info("策略代码验证通过: {}", strategyName);
@@ -406,6 +417,67 @@ public class StrategyServiceImpl implements StrategyService {
         updateStrategy(toUpdate);
         response.put("persisted", true);
         response.put("message", "策略代码已重新生成并通过测试，已保存");
+        return response;
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public Map<String, Object> applySubmittedStrategyCode(
+            String strategyId,
+            String strategyCode,
+            String strategyName,
+            String validateSymbol) {
+        if (!StringUtils.hasText(strategyCode)) {
+            throw new IllegalArgumentException("strategy_code 不能为空");
+        }
+        String code = strategyCode.trim();
+        StrategyDTO existing = getStrategyById(strategyId);
+        if (existing == null) {
+            throw new IllegalArgumentException("策略不存在: " + strategyId);
+        }
+        String type = existing.getType();
+        if (type == null || type.trim().isEmpty()) {
+            throw new IllegalArgumentException("策略类型为空，无法测试策略代码");
+        }
+        String typeNorm = type.trim().toLowerCase();
+        String testName = StringUtils.hasText(strategyName) ? strategyName.trim()
+                : (StringUtils.hasText(existing.getName()) ? existing.getName() : "策略");
+
+        Map<String, Object> testResult;
+        if ("look".equals(typeNorm)) {
+            String sym = StringUtils.hasText(validateSymbol) ? validateSymbol.trim() : existing.getValidateSymbol();
+            if (!StringUtils.hasText(sym)) {
+                throw new IllegalArgumentException("盯盘策略须提供 validate_symbol（请求参数或库中已有）");
+            }
+            testResult = strategyCodeTesterService.testLookStrategyCode(code, testName, sym);
+        } else if ("buy".equals(typeNorm) || "sell".equals(typeNorm)) {
+            testResult = strategyCodeTesterService.testStrategyCode(code, typeNorm, testName);
+        } else {
+            throw new IllegalArgumentException("不支持的策略类型: " + type);
+        }
+
+        boolean testPassed = Boolean.TRUE.equals(testResult.get("passed"));
+
+        Map<String, Object> response = new HashMap<>();
+        response.put("id", strategyId);
+        response.put("strategyCode", code);
+        response.put("testPassed", testPassed);
+        response.put("testResult", testResult);
+
+        if (!testPassed) {
+            response.put("persisted", false);
+            response.put("message", "提交的代码未通过测试，未写入数据库");
+            return response;
+        }
+
+        LambdaUpdateWrapper<StrategyDO> uw = new LambdaUpdateWrapper<>();
+        uw.eq(StrategyDO::getId, strategyId)
+                .set(StrategyDO::getStrategyCode, code)
+                .set(StrategyDO::getUpdatedAt, LocalDateTime.now());
+        strategyMapper.update(null, uw);
+
+        response.put("persisted", true);
+        response.put("message", "策略代码已通过测试并已保存");
         return response;
     }
 

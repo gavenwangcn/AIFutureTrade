@@ -252,6 +252,14 @@ public class BackendClient {
         return json.postJson(URI.create(baseUrl() + "/api/strategies/" + enc + "/regenerate-code"), body);
     }
 
+    /**
+     * 直接提交策略代码（不调用模型）；服务端先执行与「获取代码」相同的测试，仅通过时写入 {@code strategy_code}。
+     */
+    public Map<String, Object> strategyApplySubmittedCode(String strategyId, Map<String, Object> body) {
+        String enc = URLEncoder.encode(strategyId, StandardCharsets.UTF_8);
+        return json.postJson(URI.create(baseUrl() + "/api/strategies/" + enc + "/update-strategy-code"), body);
+    }
+
     public Map<String, Object> strategyGetById(String id) {
         String enc = URLEncoder.encode(id, StandardCharsets.UTF_8);
         return json.get(URI.create(baseUrl() + "/api/strategies/" + enc));
