@@ -3,6 +3,7 @@
 不通过 _build_market_state_for_candidates 批量接口。触发 notify 时：落库 SENDING、并入异步队列，由后台线程经 trade-monitor 推送后再写入 trade_notify 并置 ENDED。
 """
 
+import copy
 import json
 import logging
 import re
@@ -294,15 +295,12 @@ def build_single_symbol_market_state(
     return market_state
 
 
-def _notify_indicators_without_vol(raw: Any) -> Dict[str, Any]:
-    """通知用：去掉 indicators 内 vol（成交量块），减轻体积且避免与 K 线量数据重复。"""
-    if not isinstance(raw, dict):
-        return {}
-    return {k: v for k, v in raw.items() if k != "vol"}
-
-
-# 通知正文里每个周期携带的 K 线根数（时间升序，取末尾为最新）
+# 从行情截取进快照时最多保留根数（时间升序，取末尾为最新）；需 ≥ 下面两个常量
 LOOK_NOTIFY_KLINE_BARS = 3
+# 策略周期匹配成功：通知里该周期近 N 根
+LOOK_NOTIFY_KLINE_BARS_FOCUSED = 3
+# 未匹配到周期（全量 interval）：每个周期近 N 根
+LOOK_NOTIFY_KLINE_BARS_ALL_INTERVALS = 2
 
 # 策略在 notify 信号里声明周期时使用的字段名（与行情 timeframes 的 key 语义一致，如 "5m"）
 # Prompt 建议写在 key_date（如 pattern + timeframe）；顶层 / market_date 仍兼容。
@@ -427,20 +425,31 @@ def infer_notify_focus_interval(dec: Dict[str, Any]) -> Optional[str]:
     return interval_from_strategy_notify_signal(dec)
 
 
+# 通知正文不携带的 K 线 indicators 顶层键（与策略合并后也会从 indicators 顶层去掉）
+_NOTIFY_DROP_INDICATOR_KEYS = frozenset({"adx", "vol"})
+
+
+def _notify_indicators_drop_adx_vol(raw: Dict[str, Any]) -> Dict[str, Any]:
+    """从单根 K 的 indicators 中去掉 adx、vol 指标块；其余指标原样保留。"""
+    out = copy.deepcopy(raw)
+    for k in _NOTIFY_DROP_INDICATOR_KEYS:
+        out.pop(k, None)
+    return out
+
+
 def _trim_kline_bar_for_notify(bar: Dict[str, Any]) -> Dict[str, Any]:
-    """单根 K 线：仅时间、价格（OHLC）、K 线指标（去掉 vol）。"""
+    """单根 K 线：时间、open（不再带 high/low/close/volume）、indicators（不含 adx/vol 块）。"""
     if not isinstance(bar, dict):
         return {}
     t = bar.get("time")
     if t is None:
         t = bar.get("open_time_dt_str") or bar.get("open_time")
     out: Dict[str, Any] = {"time": t}
-    for pk in ("open", "high", "low", "close"):
-        if bar.get(pk) is not None:
-            out[pk] = bar.get(pk)
+    if bar.get("open") is not None:
+        out["open"] = bar.get("open")
     raw_ind = bar.get("indicators")
     if isinstance(raw_ind, dict) and raw_ind:
-        out["indicators"] = _notify_indicators_without_vol(raw_ind)
+        out["indicators"] = _notify_indicators_drop_adx_vol(raw_ind)
     return out
 
 
@@ -448,7 +457,7 @@ def trim_market_snapshot_for_notify(market_state: Dict, symbol_key: str) -> Dict
     """
     构造盯盘通知用的「整包」快照基座（入队、超时通知、metadata）：
     - 顶层：price、contract_symbol；
-    - indicators.timeframes[周期]：近 LOOK_NOTIFY_KLINE_BARS 根 K，每根 time + OHLC + indicators（无 vol）。
+    - indicators.timeframes[周期]：近 LOOK_NOTIFY_KLINE_BARS 根 K，每根 time + open + indicators（不含 adx/vol 块）。
     列表时间升序时取末尾为最新。
     """
     sym_u = symbol_key.strip().upper()
@@ -479,10 +488,29 @@ def trim_market_snapshot_for_notify(market_state: Dict, symbol_key: str) -> Dict
     return out
 
 
+def _snap_limit_klines_per_timeframe(snap: Dict[str, Any], max_bars: int) -> Dict[str, Any]:
+    """复制 snap，并将各周期 klines 截为末尾最多 max_bars 根（用于匹配/未匹配不同根数）。"""
+    if max_bars < 1 or not isinstance(snap, dict):
+        return snap
+    out = copy.deepcopy(snap)
+    tfw = ((out.get("indicators") or {}).get("timeframes")) or {}
+    if not isinstance(tfw, dict):
+        return out
+    for interval, block in tfw.items():
+        if not isinstance(block, dict):
+            continue
+        kl = block.get("klines") or []
+        if not isinstance(kl, list) or not kl:
+            continue
+        n = min(max_bars, len(kl))
+        tfw[interval] = {**block, "klines": kl[-n:]}
+    return out
+
+
 def filter_notify_snapshot_for_decision(base_snap: Dict[str, Any], dec: Dict[str, Any]) -> Dict[str, Any]:
     """
-    若策略在 notify 的 key_date（优先）/ 顶层 / market_date 中声明了周期，且经模糊匹配后快照中有该周期，
-    则只保留该周期的 K 线块；未声明或匹配失败则返回完整基座（全部周期）。
+    若策略声明的周期能匹配到快照中的 timeframe，则只保留该周期，且 K 线取近 LOOK_NOTIFY_KLINE_BARS_FOCUSED 根；
+    匹配不到则保留全量周期，每周期取近 LOOK_NOTIFY_KLINE_BARS_ALL_INTERVALS 根。
     """
     if not isinstance(base_snap, dict):
         return {}
@@ -492,25 +520,61 @@ def filter_notify_snapshot_for_decision(base_snap: Dict[str, Any], dec: Dict[str
     raw_focus = interval_from_strategy_notify_signal(dec)
     key = _resolve_timeframe_in_map(raw_focus, tf) if raw_focus else None
     if not key:
-        return dict(base_snap)
+        return _snap_limit_klines_per_timeframe(base_snap, LOOK_NOTIFY_KLINE_BARS_ALL_INTERVALS)
     block = tf.get(key)
     if not isinstance(block, dict):
-        return dict(base_snap)
-    return {
+        return _snap_limit_klines_per_timeframe(base_snap, LOOK_NOTIFY_KLINE_BARS_ALL_INTERVALS)
+    focused = {
         "price": base_snap.get("price"),
         "contract_symbol": base_snap.get("contract_symbol"),
         "indicators": {"timeframes": {key: block}},
         "focus_interval": key,
     }
+    return _snap_limit_klines_per_timeframe(focused, LOOK_NOTIFY_KLINE_BARS_FOCUSED)
+
+
+def _merge_indicators_preserve_timeframes(base_i: Any, strat_i: Any) -> Any:
+    """
+    合并策略 market_date 中的 indicators：不得用策略侧 dict 覆盖快照里已带的
+    indicators.timeframes（全量 K 线指标树）；策略多写的键（如单独汇总的 macd）并入同级。
+    """
+    if not isinstance(base_i, dict):
+        base_i = {}
+    out = copy.deepcopy(base_i)
+    if not isinstance(strat_i, dict) or not strat_i:
+        return out
+    for k, v in strat_i.items():
+        if k == "timeframes" and isinstance(out.get("timeframes"), dict):
+            continue
+        out[k] = copy.deepcopy(v)
+    return out
 
 
 def merge_market_date_for_notify_message(filtered_snap: Dict[str, Any], dec: Dict[str, Any]) -> Dict[str, Any]:
-    """K 线快照与策略自定义 market_date（如 MACD 标量）合并，后者可补充说明字段。"""
+    """
+    K 线快照与策略 market_date 合并：顶层标量（timeframe、current_macd_dif 等）叠加；
+    若策略也提供 indicators，与快照 indicators 深度合并且保留 timeframes 全量指标。
+    """
     base = dict(filtered_snap) if isinstance(filtered_snap, dict) else {}
     strat = dec.get("market_date") if isinstance(dec, dict) else None
-    if isinstance(strat, dict) and strat:
-        return {**base, **strat}
-    return base
+    if not isinstance(strat, dict) or not strat:
+        return base
+    merged: Dict[str, Any] = {**base}
+    for k, v in strat.items():
+        if k == "indicators":
+            continue
+        merged[k] = v
+    s_ind = strat.get("indicators")
+    b_ind = base.get("indicators")
+    if isinstance(s_ind, dict) and s_ind:
+        merged["indicators"] = _merge_indicators_preserve_timeframes(b_ind, s_ind)
+    elif isinstance(b_ind, dict):
+        merged["indicators"] = copy.deepcopy(b_ind)
+    mi = merged.get("indicators")
+    if isinstance(mi, dict):
+        for k in _NOTIFY_DROP_INDICATOR_KEYS:
+            mi.pop(k, None)
+    return merged
 
 
 class LookEngine:
