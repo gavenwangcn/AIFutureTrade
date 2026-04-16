@@ -3,8 +3,11 @@ package com.aifuturetrade.service.impl;
 import com.aifuturetrade.dao.entity.StrategyDO;
 import com.aifuturetrade.dao.mapper.StrategyMapper;
 import com.aifuturetrade.service.AiProviderService;
+import com.aifuturetrade.service.ProviderService;
+import com.aifuturetrade.service.SettingsService;
 import com.aifuturetrade.service.StrategyService;
 import com.aifuturetrade.service.StrategyCodeTesterService;
+import com.aifuturetrade.service.dto.ProviderDTO;
 import com.aifuturetrade.service.dto.StrategyDTO;
 import com.aifuturetrade.common.util.PageResult;
 import com.aifuturetrade.common.util.PageRequest;
@@ -21,6 +24,7 @@ import java.time.LocalDateTime;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
@@ -40,6 +44,12 @@ public class StrategyServiceImpl implements StrategyService {
 
     @Autowired
     private AiProviderService aiProviderService;
+
+    @Autowired
+    private SettingsService settingsService;
+
+    @Autowired
+    private ProviderService providerService;
 
     @Override
     public List<StrategyDTO> getAllStrategies() {
@@ -123,7 +133,10 @@ public class StrategyServiceImpl implements StrategyService {
         if (strategyDO.getId() == null || strategyDO.getId().isEmpty()) {
             strategyDO.setId(UUID.randomUUID().toString());
         }
-        
+
+        // 与「获取代码」一致：有 strategy_context 且无 strategy_code 时，使用系统设置中的策略 API 提供方与模型生成并测试
+        Optional<Map<String, Object>> aiGenerationMeta = maybeGenerateStrategyCodeOnCreate(strategyDTO, strategyDO);
+
         // 如果提供了策略代码，进行测试验证
         if (strategyDO.getStrategyCode() != null && !strategyDO.getStrategyCode().trim().isEmpty()) {
             String strategyType = strategyDO.getType();
@@ -161,7 +174,101 @@ public class StrategyServiceImpl implements StrategyService {
         strategyDO.setCreatedAt(LocalDateTime.now());
         strategyDO.setUpdatedAt(LocalDateTime.now());
         strategyMapper.insert(strategyDO);
-        return convertToDTO(strategyDO);
+        StrategyDTO out = convertToDTO(strategyDO);
+        aiGenerationMeta.ifPresent(meta -> {
+            @SuppressWarnings("unchecked")
+            Map<String, Object> testResult = (Map<String, Object>) meta.get("testResult");
+            out.setGenerationTestResult(testResult);
+            out.setGenerationTestPassed(Boolean.TRUE.equals(meta.get("testPassed")));
+        });
+        return out;
+    }
+
+    /**
+     * 创建时若有 strategy_context 且无 strategy_code，则从系统设置读取策略 API 提供方与模型，走完整生成与测试。
+     *
+     * @return 若执行了 AI 生成且测试通过，携带 testResult / testPassed，否则 empty
+     */
+    private Optional<Map<String, Object>> maybeGenerateStrategyCodeOnCreate(StrategyDTO strategyDTO, StrategyDO strategyDO) {
+        if (strategyDO.getStrategyCode() != null && !strategyDO.getStrategyCode().trim().isEmpty()) {
+            return Optional.empty();
+        }
+        if (!StringUtils.hasText(strategyDTO.getStrategyContext())) {
+            return Optional.empty();
+        }
+        String[] pm = resolveStrategyProviderAndModel();
+        String pid = pm[0];
+        String model = pm[1];
+        String strategyType = strategyDO.getType();
+        if (strategyType == null || strategyType.trim().isEmpty()) {
+            throw new IllegalArgumentException("策略类型不能为空，无法生成策略代码");
+        }
+        String typeNorm = strategyType.trim().toLowerCase();
+        if (!"buy".equals(typeNorm) && !"sell".equals(typeNorm) && !"look".equals(typeNorm)) {
+            throw new IllegalArgumentException("strategy type must be buy, sell, or look");
+        }
+        String validateSym = null;
+        if ("look".equals(typeNorm)) {
+            validateSym = strategyDTO.getValidateSymbol();
+            if (!StringUtils.hasText(validateSym)) {
+                throw new IllegalArgumentException("盯盘策略用 AI 生成代码时必须提供 validate_symbol（与「获取代码」一致，用于合约校验与测试）");
+            }
+            validateSym = validateSym.trim();
+        }
+        String context = strategyDTO.getStrategyContext().trim();
+        String generatedCode = aiProviderService.generateStrategyCode(pid, model, context, typeNorm);
+
+        String testName = strategyDTO.getName() != null && StringUtils.hasText(strategyDTO.getName().trim())
+                ? strategyDTO.getName().trim()
+                : ("look".equals(typeNorm) ? "新盯盘策略" : "新" + ("buy".equals(typeNorm) ? "买入" : "卖出") + "策略");
+
+        Map<String, Object> testResult;
+        if ("look".equals(typeNorm)) {
+            testResult = strategyCodeTesterService.testLookStrategyCode(generatedCode, testName, validateSym);
+        } else {
+            testResult = strategyCodeTesterService.testStrategyCode(generatedCode, typeNorm, testName);
+        }
+        if (!Boolean.TRUE.equals(testResult.get("passed"))) {
+            @SuppressWarnings("unchecked")
+            List<String> errs = (List<String>) testResult.get("errors");
+            String detail = errs != null && !errs.isEmpty() ? String.join("; ", errs) : String.valueOf(testResult.get("message") != null ? testResult.get("message") : testResult);
+            throw new RuntimeException("AI 生成的策略代码未通过测试，无法保存: " + detail);
+        }
+        strategyDO.setStrategyCode(generatedCode);
+        Map<String, Object> meta = new HashMap<>();
+        meta.put("testPassed", true);
+        meta.put("testResult", testResult);
+        return Optional.of(meta);
+    }
+
+    /**
+     * 与前端「设置策略API提供方」一致：settings.strategy_provider / strategy_model；模型未配置时尝试使用提供方 models 字段首项。
+     */
+    private String[] resolveStrategyProviderAndModel() {
+        Map<String, Object> settings = settingsService.getSettings();
+        Object p = settings.get("strategy_provider");
+        Object m = settings.get("strategy_model");
+        String providerId = p != null ? p.toString().trim() : null;
+        String modelName = m != null ? m.toString().trim() : null;
+        if (!StringUtils.hasText(providerId)) {
+            throw new IllegalArgumentException("请先在系统设置中配置策略API提供方（与「获取代码」使用的配置相同）");
+        }
+        if (!StringUtils.hasText(modelName)) {
+            ProviderDTO prov = providerService.getProviderById(providerId);
+            if (prov != null && StringUtils.hasText(prov.getModels())) {
+                for (String part : prov.getModels().split(",")) {
+                    String mm = part.trim();
+                    if (StringUtils.hasText(mm)) {
+                        modelName = mm;
+                        break;
+                    }
+                }
+            }
+        }
+        if (!StringUtils.hasText(modelName)) {
+            throw new IllegalArgumentException("请先在系统设置中选择策略所用模型，或在API提供方中配置可用模型列表");
+        }
+        return new String[]{providerId, modelName};
     }
 
     @Override
@@ -227,8 +334,6 @@ public class StrategyServiceImpl implements StrategyService {
     @Transactional(rollbackFor = Exception.class)
     public Map<String, Object> regenerateStrategyCode(
             String strategyId,
-            String providerId,
-            String modelName,
             String strategyContext,
             String validateSymbol,
             String strategyName,
@@ -254,8 +359,9 @@ public class StrategyServiceImpl implements StrategyService {
             }
         }
 
+        String[] pm = resolveStrategyProviderAndModel();
         String generatedCode = aiProviderService.generateStrategyCode(
-                providerId, modelName, context, typeNorm);
+                pm[0], pm[1], context, typeNorm);
 
         String testName = StringUtils.hasText(strategyName) ? strategyName.trim()
                 : (StringUtils.hasText(existing.getName()) ? existing.getName() : "策略");

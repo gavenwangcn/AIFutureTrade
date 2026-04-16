@@ -1,11 +1,13 @@
 package com.aifuturetrade.service.dto;
 
 import com.fasterxml.jackson.annotation.JsonAlias;
+import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import lombok.Data;
 
 import java.io.Serializable;
 import java.time.LocalDateTime;
+import java.util.Map;
 
 /**
  * 数据传输对象：策略
@@ -55,6 +57,22 @@ public class StrategyDTO implements Serializable {
     @JsonProperty("strategy_code")
     @JsonAlias({"strategyCode"})
     private String strategyCode;
+
+    /**
+     * 仅当本次创建由服务端 AI 生成策略代码时回填，便于 MCP/前端展示与复核。
+     */
+    @JsonProperty("generation_test_passed")
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    @JsonAlias({"generationTestPassed"})
+    private Boolean generationTestPassed;
+
+    /**
+     * 与 {@link #generationTestPassed} 同时出现；结构与「获取代码」测试返回一致。
+     */
+    @JsonProperty("generation_test_result")
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    @JsonAlias({"generationTestResult"})
+    private Map<String, Object> generationTestResult;
 
     /**
      * 创建时间

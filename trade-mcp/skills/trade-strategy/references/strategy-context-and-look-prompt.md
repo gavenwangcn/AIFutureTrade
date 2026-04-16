@@ -70,9 +70,10 @@
 
 通过 **`trade_look_strategy_create_look`** 创建盯盘策略时：
 
+- **`name` / `validate_symbol` / `strategy_context`**：标准流程下**三者均必传**；**`validate_symbol`** 为**验证用合约 symbol**（如 `BTCUSDT`），与「获取代码」一致，用于行情校验与试跑。  
 - **`strategy_context`**：对应上述用户侧策略正文（建议直接采用第 3 节写法）。  
-- **`strategy_code`**：若已由模型生成，应仍满足第 2 节；**`validate_symbol`** 须与试跑/校验用合约一致（常为 `BTCUSDT` 等形式，与后端校验规则一致）。  
-- **多轮校准与修正（推荐）**：对已存在的策略，使用 **`trade_strategy_regenerate_code`**（`strategyId` + `providerId` + `modelName`），按需传入**修订后的 `strategy_context`**、**`validate_symbol`**；可先 **`persist=false`** 查看生成与 `testResult`，用户满意后再 **`persist=true`**。若对话后仍不满意，应**反复澄清规则并再次调用**，直至用户**确认定稿**或**明确放弃**（流程见 **`../SKILL.md` 第 7 节**）。详见 `mcp-market-look-tools.md`。
+- **`strategy_code`**：由服务端生成，勿在 MCP 参数中提交；生成结果须满足第 2 节；**`validate_symbol`** 须与试跑/校验用合约一致。  
+- **多轮校准与修正（推荐）**：对已存在的策略，使用 **`trade_strategy_regenerate_code`**（`strategyId` + 可选**修订后的 `strategyContext`/`validateSymbol`**）；提供方与模型取自系统设置；可先 **`persist=false`** 查看 `strategyCode` 与 `testResult`，用户满意后再 **`persist=true`**。若对话后仍不满意，应**反复澄清规则并再次调用**，直至用户**确认定稿**或**明确放弃**（流程见 **`../SKILL.md` 第 7 节**）。详见 `mcp-market-look-tools.md`。
 
 ---
 

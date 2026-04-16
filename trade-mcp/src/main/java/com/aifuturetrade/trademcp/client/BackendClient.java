@@ -258,6 +258,14 @@ public class BackendClient {
     }
 
     /**
+     * 按主键删除 strategys 一行，对应 {@code DELETE /api/strategies/{id}}。
+     */
+    public Map<String, Object> strategyDelete(String strategyId) {
+        String enc = URLEncoder.encode(strategyId, StandardCharsets.UTF_8);
+        return json.delete(URI.create(baseUrl() + "/api/strategies/" + enc));
+    }
+
+    /**
      * 分页查询策略；固定 type=look 时用于盯盘策略列表。返回 PageResult JSON（含 data 数组）。
      */
     public Map<String, Object> strategyPageByType(Integer pageNum, Integer pageSize, String name, String type) {

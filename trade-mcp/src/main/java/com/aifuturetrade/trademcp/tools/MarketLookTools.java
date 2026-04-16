@@ -69,16 +69,19 @@ public class MarketLookTools {
 
     @McpTool(
             name = "trade_look_strategy_create_look",
-            description = "新建策略，且 type 固定为盯盘 look。成功时响应含 id 与 message。"
-                    + " 必填：name（策略名称）。"
-                    + " 若填写 strategy_code，则必须同时提供 validate_symbol（校验用合约如 BTCUSDT），服务端会执行代码校验。"
-                    + " 可选：strategy_context（说明/上下文）、strategy_code（Python 策略代码）。"
-                    + " type 由本工具固定为 look，无需传入。")
+            description = "新建策略，且 type 固定为盯盘 look。"
+                    + " **标准流程（推荐，用于生成可执行盯盘代码）必填三项**：`name`、`validate_symbol`、`strategy_context`。"
+                    + " 其中 **`validate_symbol` = 验证用合约 symbol（如 BTCUSDT）**，与前端「获取代码」一致，用于行情校验与试跑测试，**缺一则无法完成合法盯盘策略创建（含 AI 生成）**。"
+                    + " 服务端用系统设置「策略API提供方」生成 strategy_code 并测试，**仅测试通过才落库**；勿传 strategy_code。"
+                    + " **成功响应含 `strategy_code` / `test_result` 等**：须向用户展示完整代码并审阅逻辑；不满意则改 strategy_context 后再调 `trade_strategy_regenerate_code`。"
+                    + " 例外：仅建无规则占位（不传 strategy_context）时可省略 validate_symbol，一般不推荐。"
+                    + " type 固定为 look，无需传入。")
     public Map<String, Object> strategyCreateLook(
             @McpToolParam(description = "策略名称", required = true) String name,
-            @McpToolParam(description = "校验合约符号，填写 strategy_code 时必填", required = false) String validateSymbol,
-            @McpToolParam(description = "策略说明/上下文，可选", required = false) String strategyContext,
-            @McpToolParam(description = "策略代码，可选；有代码时必须 validate_symbol", required = false) String strategyCode) {
+            @McpToolParam(
+                    description = "验证合约 symbol（*必传*）：与「获取代码」一致，用于行情校验与策略代码试跑，如 BTCUSDT。标准创建（含 strategy_context / AI 生成）时必填；仅建无说明空壳可不传",
+                    required = false) String validateSymbol,
+            @McpToolParam(description = "策略自然语言说明；标准流程下与 validate_symbol 同时为必填，供 AI 生成代码", required = false) String strategyContext) {
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("name", name);
         body.put("type", "look");
@@ -87,9 +90,6 @@ public class MarketLookTools {
         }
         if (strategyContext != null && !strategyContext.isEmpty()) {
             body.put("strategy_context", strategyContext);
-        }
-        if (strategyCode != null && !strategyCode.isEmpty()) {
-            body.put("strategy_code", strategyCode);
         }
         return backendClient.strategyCreate(body);
     }

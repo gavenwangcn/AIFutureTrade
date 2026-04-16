@@ -87,6 +87,18 @@ mcporter --config ./mcporter-trade-mcp.json --log-level error call \
 
 ---
 
+## `trade_look_strategy_create_look` / `trade_strategy_*`（主库 backend，无 modelId）
+
+| MCP tool name | Required（标准流程） | Optional / 说明 |
+|---------------|----------------------|-----------------|
+| `trade_look_strategy_create_look` | **`name`**, **`validateSymbol`**（验证合约 symbol *，如 `BTCUSDT`）**, **`strategyContext`** | 三者为生成可执行盯盘策略的**必传组合**；勿传 `strategy_code`。仅建无规则占位时可省略 `validateSymbol`/`strategyContext`（不推荐） |
+| `trade_strategy_regenerate_code` | **`strategyId`** | `strategyContext`, `validateSymbol`（盯盘）, `strategyName`, `persist`；提供方/模型来自系统设置 |
+| `trade_strategy_delete` | **`strategyId`** | 删除策略行；不可恢复 |
+
+详见 [market-look-tools.md](market-look-tools.md)、**`../trade-strategy/references/mcp-market-look-tools.md`**。
+
+---
+
 ## Common pitfalls
 
 1. **Casing**: always **camelCase** (`startTime` not `start_time`, `orderBy` not `orderby`). Trust `list --schema`.

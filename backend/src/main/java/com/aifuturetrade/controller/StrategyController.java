@@ -118,23 +118,30 @@ public class StrategyController {
         Map<String, Object> response = new HashMap<>();
         response.put("id", addedStrategy.getId());
         response.put("message", "Strategy added successfully");
+        if (StringUtils.hasText(addedStrategy.getStrategyCode())) {
+            response.put("strategy_code", addedStrategy.getStrategyCode());
+        }
+        if (StringUtils.hasText(addedStrategy.getStrategyContext())) {
+            response.put("strategy_context", addedStrategy.getStrategyContext());
+        }
+        if (addedStrategy.getGenerationTestPassed() != null) {
+            response.put("test_passed", addedStrategy.getGenerationTestPassed());
+            response.put("test_result", addedStrategy.getGenerationTestResult());
+        }
         return new ResponseEntity<>(response, HttpStatus.CREATED);
     }
 
     /**
-     * 按策略 ID 使用 AI 重新生成策略代码（可选更新 strategy_context / validate_symbol），测试通过后落库。
+     * 按策略 ID 使用 AI 重新生成策略代码（可选更新 strategy_context / validate_symbol）。
+     * 提供方与模型取自系统设置「策略API提供方」，请求体无需 providerId/modelName。
      */
     @PostMapping("/{id}/regenerate-code")
     @Operation(summary = "按策略ID重新生成策略代码")
     public ResponseEntity<Map<String, Object>> regenerateStrategyCode(
             @PathVariable(value = "id") String id,
-            @RequestBody Map<String, Object> body) {
-        String providerId = stringField(body, "providerId");
-        String modelName = stringField(body, "modelName");
-        if (providerId == null || modelName == null) {
-            Map<String, Object> error = new HashMap<>();
-            error.put("error", "providerId and modelName are required");
-            return new ResponseEntity<>(error, HttpStatus.BAD_REQUEST);
+            @RequestBody(required = false) Map<String, Object> body) {
+        if (body == null) {
+            body = new HashMap<>();
         }
         String strategyContext = stringField(body, "strategyContext", "strategy_context");
         String validateSymbol = stringField(body, "validateSymbol", "validate_symbol");
@@ -150,7 +157,7 @@ public class StrategyController {
         }
         try {
             Map<String, Object> result = strategyService.regenerateStrategyCode(
-                    id, providerId, modelName, strategyContext, validateSymbol, strategyName, persist);
+                    id, strategyContext, validateSymbol, strategyName, persist);
             return new ResponseEntity<>(result, HttpStatus.OK);
         } catch (IllegalArgumentException e) {
             Map<String, Object> error = new HashMap<>();

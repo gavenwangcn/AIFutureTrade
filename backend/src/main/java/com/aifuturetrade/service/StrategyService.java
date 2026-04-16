@@ -73,11 +73,10 @@ public interface StrategyService {
 
     /**
      * 按策略 ID 使用 AI 重新生成策略代码；可选覆盖 strategy_context / validate_symbol（盯盘）。
+     * 提供方与模型取自系统设置「策略API提供方」（与前端「获取代码」一致），请求体无需传 providerId/modelName。
      * 仅当代码测试通过时写入数据库（与新建策略校验一致）。
      *
      * @param strategyId        策略 UUID
-     * @param providerId        AI 提供方 ID
-     * @param modelName         模型名
      * @param strategyContext   若非空则替换后再生成；否则使用库中现有 strategy_context（须非空）
      * @param validateSymbol    盯盘可选覆盖 validate_symbol；否则用库中值
      * @param strategyName      测试用名称，可选
@@ -86,8 +85,6 @@ public interface StrategyService {
      */
     Map<String, Object> regenerateStrategyCode(
             String strategyId,
-            String providerId,
-            String modelName,
             String strategyContext,
             String validateSymbol,
             String strategyName,

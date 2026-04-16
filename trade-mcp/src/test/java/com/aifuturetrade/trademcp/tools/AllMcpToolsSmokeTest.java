@@ -144,6 +144,10 @@ class AllMcpToolsSmokeTest {
         lenient().when(backendClient.marketLookCreate(anyMap())).thenReturn(okId);
         lenient().when(backendClient.strategyCreate(anyMap())).thenReturn(okId);
         lenient().when(backendClient.strategyRegenerateCode(anyString(), anyMap())).thenReturn(okId);
+        Map<String, Object> okStrategyDelete = new HashMap<>();
+        okStrategyDelete.put("success", true);
+        okStrategyDelete.put("message", "Strategy deleted successfully");
+        lenient().when(backendClient.strategyDelete(anyString())).thenReturn(okStrategyDelete);
         lenient().when(backendClient.strategyGetById(anyString())).thenReturn(okId);
         lenient().when(backendClient.strategyPageByType(
                 nullable(Integer.class),
@@ -248,13 +252,16 @@ class AllMcpToolsSmokeTest {
     @Test
     void trade_strategy_tools() {
         assertNotNull(strategyTools.strategyRegenerateCode(
-                "00000000-0000-0000-0000-000000000099", "prov", "gpt-4o", null, null, null, false));
+                "00000000-0000-0000-0000-000000000099", null, null, null, false));
+        Map<String, Object> del = strategyTools.strategyDelete("00000000-0000-0000-0000-000000000099");
+        assertNotNull(del);
+        assertTrue(Boolean.TRUE.equals(del.get("success")), "strategyDelete: " + del);
     }
 
     @Test
     void trade_look_tools() {
         assertNotNull(marketLookTools.marketLookCreate("BTC", "sid", "摘要", null, null, null, null, null));
-        assertNotNull(marketLookTools.strategyCreateLook("测试盯盘", null, null, null));
+        assertNotNull(marketLookTools.strategyCreateLook("测试盯盘", null, null));
         assertNotNull(marketLookTools.strategyGetById("sid"));
         assertNotNull(marketLookTools.strategySearchLook(1, 10, null));
         assertNotNull(marketLookTools.marketLookQueryPage(1, 10, null, null, null, null, null, null, null));
