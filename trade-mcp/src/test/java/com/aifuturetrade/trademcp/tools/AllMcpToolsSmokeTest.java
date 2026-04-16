@@ -264,7 +264,7 @@ class AllMcpToolsSmokeTest {
 
     @Test
     void trade_look_tools() {
-        assertNotNull(marketLookTools.marketLookCreate("BTC", "sid", "摘要", null, null, null, null, null));
+        assertNotNull(marketLookTools.marketLookCreate("BTC", "sid", "摘要", null, null, null, null));
         assertNotNull(marketLookTools.strategyCreateLook("测试盯盘", null, null));
         assertNotNull(marketLookTools.strategyGetById("sid"));
         assertNotNull(marketLookTools.strategySearchLook(1, 10, null));

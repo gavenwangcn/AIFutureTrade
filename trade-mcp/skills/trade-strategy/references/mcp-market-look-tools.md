@@ -44,7 +44,7 @@
 | `strategy_name` | 否 | 冗余展示名 |
 | `execution_status` | 否 | `RUNNING` / `ENDED` 等；默认 `RUNNING` |
 | `signal_result` | 否 | 文本或 JSON 字符串 |
-| `started_at` / `ended_at` | 否 | 时间格式常见：`yyyy-MM-dd HH:mm:ss` 或 ISO-8601 |
+| `ended_at` | 否 | 计划截止时间；**不传 `started_at`**（工具已不提供）：服务端 **开始时间=当前**；**不传 `ended_at` 且 RUNNING** 时，服务端 **结束时间=开始+24h**。格式：`yyyy-MM-dd HH:mm:ss` 或 ISO-8601 |
 
 成功响应含 **盯盘任务 `id`**（UUID）等（以实际响应为准）。
 

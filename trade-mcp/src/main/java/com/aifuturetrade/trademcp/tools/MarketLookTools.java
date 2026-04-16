@@ -33,8 +33,9 @@ public class MarketLookTools {
             description = "新建盯盘任务 market_look。成功时响应含 id（UUID）与 data。"
                     + " 必填：symbol（合约如 BTC 或 BTCUSDT）、strategy_id（须为 strategys 中 type=look 的策略 ID）、"
                     + "detail_summary（任务摘要）。"
-                    + " 可选：strategy_name、execution_status（默认 RUNNING；创建时仅允许 RUNNING 或 ENDED）、"
-                    + "signal_result、started_at/ended_at（ISO 或 yyyy-MM-dd HH:mm:ss；RUNNING 时若省略则服务端默认开始=现在、结束=开始+24h）。"
+                    + " 可选：strategy_name、execution_status（默认 RUNNING；创建时仅允许 RUNNING 或 ENDED）、signal_result、"
+                    + "ended_at（计划截止时间；ISO 或 yyyy-MM-dd HH:mm:ss）。"
+                    + " **开始时间无需传**：服务端固定为当前时间。**若省略 ended_at**（RUNNING）：服务端默认为「当前时间 + 24 小时」。"
                     + " 失败时 success=false 与 error 说明。")
     public Map<String, Object> marketLookCreate(
             @McpToolParam(description = "合约符号，如 BTC 或 BTCUSDT", required = true) String symbol,
@@ -43,8 +44,9 @@ public class MarketLookTools {
             @McpToolParam(description = "策略名称冗余，可选", required = false) String strategyName,
             @McpToolParam(description = "RUNNING 或 ENDED，默认 RUNNING", required = false) String executionStatus,
             @McpToolParam(description = "信号结果文本或 JSON 字符串，可选", required = false) String signalResult,
-            @McpToolParam(description = "开始时间，可选", required = false) String startedAt,
-            @McpToolParam(description = "结束/截止时间，可选", required = false) String endedAt) {
+            @McpToolParam(
+                    description = "计划结束/截止时间，可选；不传则 RUNNING 任务默认为当前时间+24h。格式：yyyy-MM-dd HH:mm:ss 或 ISO-8601",
+                    required = false) String endedAt) {
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("symbol", symbol);
         body.put("strategy_id", strategyId);
@@ -58,9 +60,7 @@ public class MarketLookTools {
         if (signalResult != null && !signalResult.isEmpty()) {
             body.put("signal_result", signalResult);
         }
-        if (startedAt != null && !startedAt.isEmpty()) {
-            body.put("started_at", startedAt);
-        }
+        // 不传 started_at：backend 使用当前时间（MarketLookServiceImpl.create）
         if (endedAt != null && !endedAt.isEmpty()) {
             body.put("ended_at", endedAt);
         }

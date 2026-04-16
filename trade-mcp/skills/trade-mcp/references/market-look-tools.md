@@ -6,7 +6,7 @@
 
 | 工具名 | 作用 | 必填参数 | 可选参数 |
 |--------|------|----------|----------|
-| `trade_look_market_look_create` | 新建 `market_look` | `symbol`, `strategy_id`, `detail_summary` | `strategy_name`, `execution_status`, `signal_result`, `started_at`, `ended_at` |
+| `trade_look_market_look_create` | 新建 `market_look` | `symbol`, `strategy_id`, `detail_summary` | `strategy_name`, `execution_status`, `signal_result`, `ended_at`（开始时间由服务端取当前；省略 `ended_at` 时 RUNNING 默认开始+24h） |
 | `trade_look_strategy_create_look` | 新建 `type=look` 策略 | **标准：`name`、`validate_symbol`（验证合约 symbol *）、`strategy_context` 均必传** | 代码由服务端生成；成功响应含 `strategy_code` 等；仅无规则占位可不传后两项 |
 | `trade_look_strategy_get_by_id` | 按 ID 查策略 | `strategyId` | — |
 | `trade_look_strategy_search_look` | 盯盘策略分页（固定 `type=look`） | — | `pageNum`, `pageSize`, `name`（模糊） |
