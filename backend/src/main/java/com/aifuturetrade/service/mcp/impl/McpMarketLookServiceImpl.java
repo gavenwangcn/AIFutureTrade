@@ -1,5 +1,6 @@
 package com.aifuturetrade.service.mcp.impl;
 
+import com.aifuturetrade.common.json.JsonSafeValues;
 import com.aifuturetrade.service.mcp.McpMarketLookService;
 import com.aifuturetrade.service.mcp.util.MarketLookSqlGuard;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -32,6 +33,7 @@ public class McpMarketLookServiceImpl implements McpMarketLookService {
                     return m;
                 },
                 args.toArray());
+        rows = JsonSafeValues.sanitizeMapList(rows);
         Map<String, Object> out = new HashMap<>();
         out.put("success", true);
         out.put("data", rows);

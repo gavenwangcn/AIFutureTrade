@@ -1,5 +1,6 @@
 package com.aifuturetrade.service.mcp.impl;
 
+import com.aifuturetrade.common.json.JsonSafeValues;
 import com.aifuturetrade.dao.entity.MarketTickerDO;
 import com.aifuturetrade.dao.mapper.MarketTickerMapper;
 import com.aifuturetrade.service.mcp.McpMarketTickersService;
@@ -227,6 +228,7 @@ public class McpMarketTickersServiceImpl implements McpMarketTickersService {
                     return m;
                 },
                 args.toArray());
+        rows = JsonSafeValues.sanitizeMapList(rows);
         Map<String, Object> out = new HashMap<>();
         out.put("success", true);
         out.put("data", rows);

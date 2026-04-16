@@ -1,5 +1,6 @@
 package com.aifuturetrade.service.impl;
 
+import com.aifuturetrade.common.json.JsonSafeValues;
 import com.aifuturetrade.dao.entity.StrategyDecisionDO;
 import com.aifuturetrade.dao.mapper.StrategyDecisionMapper;
 import com.aifuturetrade.service.StrategyDecisionService;
@@ -131,8 +132,8 @@ public class StrategyDecisionServiceImpl implements StrategyDecisionService {
             decisionMap.put("justification", decision.getJustification());
             decisionMap.put("tradeId", decision.getTradeId());
             decisionMap.put("errorReason", decision.getErrorReason());
-            decisionMap.put("createdAt", decision.getCreatedAt());
-            decisionMap.put("updatedAt", decision.getUpdatedAt());
+            decisionMap.put("createdAt", JsonSafeValues.normalizeForJson(decision.getCreatedAt()));
+            decisionMap.put("updatedAt", JsonSafeValues.normalizeForJson(decision.getUpdatedAt()));
             result.add(decisionMap);
             
             if (i == 0) {

@@ -11,6 +11,7 @@ import com.aifuturetrade.common.util.PageRequest;
 import com.aifuturetrade.common.api.binance.BinanceFuturesAccountClient;
 import com.aifuturetrade.common.api.binance.BinanceFuturesClient;
 import com.aifuturetrade.common.api.binance.BinanceConfig;
+import com.aifuturetrade.common.json.JsonSafeValues;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
@@ -844,7 +845,8 @@ public class ModelServiceImpl implements ModelService {
             portfolio.put("unrealized_pnl", unrealizedPnl);
             
             // 获取账户价值历史（默认查询最近100条，如果前端需要时间范围查询，可以调用新的API）
-            List<Map<String, Object>> accountValueHistory = accountValueHistoryMapper.selectHistoryByModelId(modelId, 100);
+            List<Map<String, Object>> accountValueHistory = JsonSafeValues.sanitizeMapList(
+                    accountValueHistoryMapper.selectHistoryByModelId(modelId, 100));
             
             Map<String, Object> result = new LinkedHashMap<>();
             result.put("portfolio", portfolio);
@@ -1719,7 +1721,8 @@ public class ModelServiceImpl implements ModelService {
             totalPortfolio.put("positions", new ArrayList<>(allPositions.values()));
             
             // 获取多模型图表数据
-            List<Map<String, Object>> chartData = accountValueHistoryMapper.selectMultiModelChartData(100);
+            List<Map<String, Object>> chartData = JsonSafeValues.sanitizeMapList(
+                    accountValueHistoryMapper.selectMultiModelChartData(100));
             
             Map<String, Object> result = new LinkedHashMap<>();
             result.put("portfolio", totalPortfolio);
@@ -2375,7 +2378,7 @@ public class ModelServiceImpl implements ModelService {
                     modelId, startDateTime, endDateTime);
             
             log.debug("[ModelService] 查询到 {} 条账户价值历史记录", history.size());
-            return history;
+            return JsonSafeValues.sanitizeMapList(history);
         } catch (Exception e) {
             log.error("[ModelService] 获取账户价值历史失败: {}", e.getMessage(), e);
             return new ArrayList<>();

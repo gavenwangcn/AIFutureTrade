@@ -2,6 +2,7 @@ package com.aifuturetrade.service.impl;
 
 import com.aifuturetrade.common.api.binance.BinanceConfig;
 import com.aifuturetrade.common.api.binance.BinanceFuturesClient;
+import com.aifuturetrade.common.json.JsonSafeValues;
 import com.aifuturetrade.dao.mapper.FutureMapper;
 import com.aifuturetrade.dao.mapper.MarketTickerMapper;
 import com.aifuturetrade.service.MarketService;
@@ -10,11 +11,8 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
-import java.time.Instant;
-import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
-import java.util.Date;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -280,41 +278,12 @@ public class MarketServiceImpl implements MarketService {
             item.put("quote_volume", quoteVolume);
             item.put("base_volume", baseVolume);
             item.put("timeframes", "");
-            item.put("event_time", toJsonSafeEventTime(eventTime));
+            item.put("event_time", JsonSafeValues.normalizeForJson(eventTime));
             
             formatted.add(item);
         }
         
         return formatted;
-    }
-
-    /**
-     * 涨跌幅榜行来自 MyBatis {@code Map}，{@code event_time} 可能为 {@code LocalDateTime}。
-     * Jackson 2.19+ 对 Map 内嵌 {@code java.time.*} 需 JSR310 模块；此处统一成字符串，避免依赖全局 ObjectMapper 配置是否生效。
-     */
-    private Object toJsonSafeEventTime(Object eventTime) {
-        if (eventTime == null) {
-            return null;
-        }
-        if (eventTime instanceof java.time.LocalDateTime ldt) {
-            return ldt.format(DateTimeFormatter.ISO_LOCAL_DATE_TIME);
-        }
-        if (eventTime instanceof java.time.OffsetDateTime odt) {
-            return odt.format(DateTimeFormatter.ISO_OFFSET_DATE_TIME);
-        }
-        if (eventTime instanceof java.time.ZonedDateTime zdt) {
-            return zdt.format(DateTimeFormatter.ISO_OFFSET_DATE_TIME);
-        }
-        if (eventTime instanceof java.sql.Timestamp ts) {
-            return ts.toLocalDateTime().format(DateTimeFormatter.ISO_LOCAL_DATE_TIME);
-        }
-        if (eventTime instanceof Date d) {
-            return Instant.ofEpochMilli(d.getTime())
-                    .atZone(ZoneId.of("Asia/Shanghai"))
-                    .toLocalDateTime()
-                    .format(DateTimeFormatter.ISO_LOCAL_DATE_TIME);
-        }
-        return eventTime;
     }
 
     /**
