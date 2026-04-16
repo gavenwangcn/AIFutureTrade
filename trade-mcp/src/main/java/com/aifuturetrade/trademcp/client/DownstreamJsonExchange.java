@@ -15,6 +15,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
+import org.springframework.web.client.RestClientResponseException;
 import tools.jackson.core.type.TypeReference;
 import tools.jackson.databind.json.JsonMapper;
 
@@ -23,7 +24,8 @@ import tools.jackson.databind.json.JsonMapper;
  * <ul>
  *   <li>2xx：解析 JSON 体；空体返回空 Map</li>
  *   <li>4xx/5xx：尽量解析 JSON（与 backend 约定的 {@code success/error} 或 Spring 默认错误体），
- *   不再仅因状态码抛异常，以便 MCP 工具把业务错误以 Map 形式返回</li>
+ *   不再仅因状态码抛异常，以便 MCP 工具把业务错误以 Map 形式返回。
+ *   Spring 6+ {@link RestClient} 对错误状态码可能先抛出 {@link RestClientResponseException}，需在 catch 中读取响应体再转 Map，否则会落到泛化 {@link #transportFailure}，MCP 端看不到下游 {@code error}。</li>
  *   <li>连接/读超时等：捕获为 {@code success=false} 的 Map，避免长时间无反馈</li>
  * </ul>
  */
@@ -44,6 +46,8 @@ public class DownstreamJsonExchange {
     public Map<String, Object> get(String uriTemplate, Object... uriVariables) {
         try {
             return restClient.get().uri(uriTemplate, uriVariables).exchange((request, response) -> readResponseAsMap(response));
+        } catch (RestClientResponseException e) {
+            return errorFromStatusException(e);
         } catch (RestClientException e) {
             return transportFailure(e);
         }
@@ -52,6 +56,8 @@ public class DownstreamJsonExchange {
     public Map<String, Object> get(URI uri) {
         try {
             return restClient.get().uri(uri).exchange((request, response) -> readResponseAsMap(response));
+        } catch (RestClientResponseException e) {
+            return errorFromStatusException(e);
         } catch (RestClientException e) {
             return transportFailure(e);
         }
@@ -64,6 +70,8 @@ public class DownstreamJsonExchange {
                     .contentType(MediaType.APPLICATION_JSON)
                     .body(body)
                     .exchange((request, response) -> readResponseAsMap(response));
+        } catch (RestClientResponseException e) {
+            return errorFromStatusException(e);
         } catch (RestClientException e) {
             return transportFailure(e);
         }
@@ -76,6 +84,8 @@ public class DownstreamJsonExchange {
                     .contentType(MediaType.APPLICATION_JSON)
                     .body(body)
                     .exchange((request, response) -> readResponseAsMap(response));
+        } catch (RestClientResponseException e) {
+            return errorFromStatusException(e);
         } catch (RestClientException e) {
             return transportFailure(e);
         }
@@ -85,9 +95,23 @@ public class DownstreamJsonExchange {
     public Map<String, Object> delete(URI uri) {
         try {
             return restClient.delete().uri(uri).exchange((request, response) -> readResponseAsMap(response));
+        } catch (RestClientResponseException e) {
+            return errorFromStatusException(e);
         } catch (RestClientException e) {
             return transportFailure(e);
         }
+    }
+
+    /** Spring {@link RestClient} 在 4xx/5xx 时可能直接抛异常，exchange 回调未执行，此处补读响应体。 */
+    private Map<String, Object> errorFromStatusException(RestClientResponseException e) {
+        String bodyText = "";
+        try {
+            bodyText = e.getResponseBodyAsString(StandardCharsets.UTF_8);
+        } catch (Exception ignored) {
+            // keep empty
+        }
+        log.debug("[downstream] HTTP {} 错误响应体: {}", e.getStatusCode().value(), bodyText);
+        return errorStatusToMap(e.getStatusCode(), bodyText);
     }
 
     private Map<String, Object> readResponseAsMap(ClientHttpResponse response) throws IOException {

@@ -10,7 +10,12 @@ spring:
   mvc:
     pathmatch:
       matching-strategy: ant_path_matcher
-  
+
+  # Jackson：带时区语义的类型（java.util.Date、ZonedDateTime 等）序列化/反序列化基准时区。
+  # LocalDateTime 本身无时区，按字面值读写；此项减轻 JVM 默认 UTC 与「按北京时间理解」混用时差 8 小时的问题。
+  jackson:
+    time-zone: Asia/Shanghai
+
   # 数据库配置（可通过环境变量覆盖）
   datasource:
     url: ${SPRING_DATASOURCE_URL:jdbc:mysql://156.254.6.224:32123/aifuturetrade?useSSL=false&serverTimezone=Asia/Shanghai&characterEncoding=utf8}
