@@ -29,10 +29,10 @@ spring:
         sse-message-endpoint: /mcp/message
 
 downstream:
-  # 下游 HTTP 超时（毫秒）；避免 backend / binance-service 无响应时 MCP 长时间挂起
+  # 下游 HTTP 超时（毫秒）；read 含等待响应体，策略类接口可能较慢
   http:
     connect-timeout-ms: 10000
-    read-timeout-ms: 60000
+    read-timeout-ms: 600000
   backend:
     # Java backend（/api/mcp/*）；与生产/测试机一致：156.254.6.224，API 端口见项目 docker-compose BACKEND_PORT（默认 5002）
     base-url: http://156.254.6.224:5002

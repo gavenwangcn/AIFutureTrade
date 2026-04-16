@@ -25,8 +25,8 @@ public class DownstreamProperties {
     public static class Http {
         /** 建立 TCP 连接超时（毫秒） */
         private int connectTimeoutMs = 10_000;
-        /** 等待响应体（毫秒） */
-        private int readTimeoutMs = 60_000;
+        /** 等待响应体（毫秒）；策略生成等长耗时接口需足够大，默认 10 分钟 */
+        private int readTimeoutMs = 600_000;
 
         public int getConnectTimeoutMs() {
             return connectTimeoutMs;
