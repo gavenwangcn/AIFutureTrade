@@ -30,10 +30,10 @@ log_wd() {
     echo "[$(date -Iseconds)] [watchdog] $1" | tee -a "$WD_LOG"
 }
 
-# 单实例：已有 watchdog 在跑则退出
+# 单实例：仅当「文件中 PID ≠ 本进程」且该 PID 仍存活时拒绝（避免父脚本抢先写入 $! 导致误判自己为重复实例）
 if [ -f "$WATCHDOG_PID_FILE" ]; then
     OW=$(cat "$WATCHDOG_PID_FILE" 2>/dev/null || true)
-    if [ -n "$OW" ] && ps -p "$OW" > /dev/null 2>&1; then
+    if [ -n "$OW" ] && [ "$OW" != "$$" ] && ps -p "$OW" > /dev/null 2>&1; then
         log_wd "refuse start: watchdog already running (PID $OW)"
         exit 1
     fi

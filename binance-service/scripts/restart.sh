@@ -208,8 +208,7 @@ start_service() {
         rm -f "$BINANCE_SERVICE_DIR/binance-service.shutdown"
         nohup bash "$SCRIPT_DIR/watchdog.sh" >> "$BINANCE_SERVICE_DIR/logs/watchdog.log" 2>&1 &
         local WD_PID=$!
-        echo "$WD_PID" > "$BINANCE_SERVICE_DIR/binance-service.watchdog.pid"
-        log_info "守护进程 PID: $WD_PID"
+        log_info "守护进程 PID: $WD_PID（PID 文件由 watchdog.sh 写入）"
         sleep 4
         if ! ps -p "$WD_PID" > /dev/null 2>&1; then
             log_error "守护进程启动失败，请查看 watchdog.log"

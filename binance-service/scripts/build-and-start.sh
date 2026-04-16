@@ -214,10 +214,10 @@ start_under_watchdog() {
     rm -f "$BINANCE_SERVICE_DIR/binance-service.shutdown"
     log_info "以守护进程模式启动（进程异常退出将自动重启，间隔 ${BINANCE_RESTART_DELAY:-10}s）..."
     log_info "守护日志: $BINANCE_SERVICE_DIR/logs/watchdog.log"
+    # 勿在此处写入 binance-service.watchdog.pid，否则子进程启动后会读到自身 PID 误判为「已有实例」；仅由 watchdog.sh 写入
     nohup bash "$SCRIPT_DIR/watchdog.sh" >> "$BINANCE_SERVICE_DIR/logs/watchdog.log" 2>&1 &
     WD_PID=$!
-    echo "$WD_PID" > "$BINANCE_SERVICE_DIR/binance-service.watchdog.pid"
-    log_info "守护进程 PID: $WD_PID"
+    log_info "守护进程 PID: $WD_PID（PID 文件由 watchdog.sh 写入）"
     sleep 3
     if ! ps -p "$WD_PID" > /dev/null 2>&1; then
         log_error "守护进程已退出，请查看: $BINANCE_SERVICE_DIR/logs/watchdog.log"
