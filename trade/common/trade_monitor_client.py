@@ -20,12 +20,19 @@ _LOG_MESSAGE_MAX = 4000
 
 
 def _payload_preview_for_log(payload: Dict[str, Any]) -> str:
-    """生成可打印的 JSON 字符串；message 过长时截断并标注原长度。"""
+    """生成可打印的 JSON 摘要：message 过长截断；metadata 永不展开（可能含 K 线快照，仅记长度）。"""
     try:
         out = dict(payload)
         msg = out.get("message")
         if isinstance(msg, str) and len(msg) > _LOG_MESSAGE_MAX:
             out["message"] = msg[:_LOG_MESSAGE_MAX] + f"...(truncated, total_len={len(msg)})"
+        md = out.get("metadata")
+        if md is not None:
+            try:
+                raw = json.dumps(md, ensure_ascii=False, default=str)
+                out["metadata"] = f"<omitted, approx_bytes={len(raw.encode('utf-8'))}>"
+            except Exception:
+                out["metadata"] = "<omitted>"
         return json.dumps(out, ensure_ascii=False, default=str)
     except Exception:
         return str(payload)

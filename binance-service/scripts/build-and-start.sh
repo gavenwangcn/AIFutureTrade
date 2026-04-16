@@ -20,6 +20,7 @@
 # ============================================
 
 set -e  # 遇到错误立即退出
+set -o pipefail  # 管道中前一命令失败时整体失败（Maven | tee 等）
 
 # 颜色定义
 RED='\033[0;31m'
@@ -107,19 +108,29 @@ install_jdk_maven() {
 build_jar() {
     log_info "开始构建Binance Service JAR包..." >&2
     cd "$BINANCE_SERVICE_DIR"
-    
-    log_info "执行Maven构建命令: mvn clean package -DskipTests" >&2
+
+    mkdir -p "$BINANCE_SERVICE_DIR/logs"
+    MVN_LOG="$BINANCE_SERVICE_DIR/logs/maven-build.log"
+    log_info "执行Maven构建命令: mvn -B clean package -DskipTests -ntp（完整日志同步写入 $MVN_LOG）" >&2
+    log_info "另开终端可实时查看: tail -f $MVN_LOG" >&2
     log_info "============================================" >&2
-    
-    # 清理并构建，显示输出
-    if mvn clean package -DskipTests; then
-        log_info "============================================" >&2
-        log_info "Maven构建完成" >&2
+
+    # Maven 在管道/重定下常全缓冲，终端长时间无输出；stdbuf 行缓冲。tee 落盘便于排查。
+    set +e
+    if command -v stdbuf >/dev/null 2>&1; then
+        stdbuf -oL -eL mvn -B clean package -DskipTests -ntp 2>&1 | tee "$MVN_LOG"
     else
+        mvn -B clean package -DskipTests -ntp 2>&1 | tee "$MVN_LOG"
+    fi
+    MVN_RC=${PIPESTATUS[0]}
+    set -e
+    if [ "$MVN_RC" -ne 0 ]; then
         log_error "============================================" >&2
-        log_error "Maven构建失败" >&2
+        log_error "Maven构建失败 (exit=$MVN_RC)，见: $MVN_LOG" >&2
         exit 1
     fi
+    log_info "============================================" >&2
+    log_info "Maven构建完成" >&2
     
     # 检查JAR文件是否存在
     JAR_FILE="$BINANCE_SERVICE_DIR/target/binance-service-1.0.0.jar"

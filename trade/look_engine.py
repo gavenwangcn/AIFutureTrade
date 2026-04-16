@@ -866,21 +866,12 @@ class LookEngine:
             "market_snapshot": snap_full,
             "kind": "look_notify_queued",
         }
-        try:
-            snap_msg_json = json.dumps(snap, ensure_ascii=False, default=str)
-            snap_full_json = json.dumps(snap_full, ensure_ascii=False, default=str)
-            extra_json = json.dumps(extra, ensure_ascii=False, default=str)
-            logger.info(
-                "[look notify] 体积: 群消息用快照(4周期) JSON %s 字符 | 落库全量快照 JSON %s 字符 | "
-                "metadata(extra) JSON %s 字符 | message 正文 %s 字符 | title %s 字符",
-                len(snap_msg_json),
-                len(snap_full_json),
-                len(extra_json),
-                len(message),
-                len(title),
-            )
-        except Exception as sz_err:
-            logger.debug("look notify size log skipped: %s", sz_err)
+        logger.info(
+            "[look notify] 推送 trade-monitor market_look_id=%s | title_len=%s message_len=%s（快照仅落库/发群，不在此打印）",
+            row_id,
+            len(title),
+            len(message),
+        )
 
         alert_id_tm: Optional[int] = None
         if not base:
@@ -977,12 +968,11 @@ class LookEngine:
         strategy: Dict,
         sym_key: str,
         decisions: Dict,
-        market_state: Dict,
+        _market_state: Dict,
     ) -> Dict[str, Any]:
-        """已超过 ended_at：构造入队 payload（由 look_notify worker 推送并落库）。"""
+        """已超过 ended_at：构造入队 payload（由 look_notify worker 推送并落库）。超时通知不落库 K 线快照。"""
         row_id = row.get("id")
         strategy_id = row.get("strategy_id")
-        snap = trim_market_snapshot_full_for_storage(market_state, sym_key)
         deadline = _parse_row_ended_at(row)
         now_s = _now_shanghai_naive()
         title = f"盯盘超时 [{sym_key}] {strategy.get('strategy_name') or ''}".strip()
@@ -1002,7 +992,6 @@ class LookEngine:
             "symbol": sym_key,
             "kind": "look_timeout",
             "decisions": decisions,
-            "market_snapshot": snap,
         }
         return {
             "payload_kind": "look_timeout",
