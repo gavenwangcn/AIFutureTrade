@@ -119,7 +119,12 @@
                 <artifactId>jackson-annotations</artifactId>
                 <version>${jackson.version}</version>
             </dependency>
-            
+            <dependency>
+                <groupId>com.fasterxml.jackson.datatype</groupId>
+                <artifactId>jackson-datatype-jsr310</artifactId>
+                <version>${jackson.version}</version>
+            </dependency>
+
             <!-- Jakarta Validation 3.1.1 - 与 Binance SDK 完全对齐 -->
             <dependency>
                 <groupId>jakarta.validation</groupId>
@@ -239,6 +244,11 @@
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-aop</artifactId>
             <version>${spring-boot.version}</version>
+        </dependency>
+        <!-- 与 jackson.version 对齐；显式引入避免与 core/databind 覆盖组合下 classpath 缺 JSR310 -->
+        <dependency>
+            <groupId>com.fasterxml.jackson.datatype</groupId>
+            <artifactId>jackson-datatype-jsr310</artifactId>
         </dependency>
 
         <!-- MyBatis Plus (兼容 Spring Boot 3.x 和 JDK 17) -->
