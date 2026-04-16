@@ -1,23 +1,26 @@
 <template>
-  <div v-if="visible" class="modal show" @click.self="handleClose">
-    <div class="modal-content" :class="{ large: large, extraLarge: extraLarge }" :style="width ? { width } : {}">
-      <div class="modal-header">
-        <div>
-          <h3>{{ title }}</h3>
-          <p v-if="subtitle" class="modal-subtitle">{{ subtitle }}</p>
+  <!-- 挂到 body，避免祖先 overflow:hidden（如 .hero-banner）把 fixed 弹层裁成「嵌在模块内」 -->
+  <Teleport to="body">
+    <div v-if="visible" class="modal show modal-root" @click.self="handleClose">
+      <div class="modal-content" :class="{ large: large, extraLarge: extraLarge }" :style="width ? { width } : {}">
+        <div class="modal-header">
+          <div>
+            <h3>{{ title }}</h3>
+            <p v-if="subtitle" class="modal-subtitle">{{ subtitle }}</p>
+          </div>
+          <button class="btn-close" @click="handleClose">
+            <i class="bi bi-x-lg"></i>
+          </button>
         </div>
-        <button class="btn-close" @click="handleClose">
-          <i class="bi bi-x-lg"></i>
-        </button>
-      </div>
-      <div class="modal-body">
-        <slot></slot>
-      </div>
-      <div v-if="$slots.footer" class="modal-footer">
-        <slot name="footer"></slot>
+        <div class="modal-body">
+          <slot></slot>
+        </div>
+        <div v-if="$slots.footer" class="modal-footer">
+          <slot name="footer"></slot>
+        </div>
       </div>
     </div>
-  </div>
+  </Teleport>
 </template>
 
 <script setup>
@@ -68,6 +71,11 @@ watch(() => props.visible, (newVal) => {
 </script>
 
 <style scoped>
+/* 高于页面内多数浮层，且 Teleport 到 body 后需盖住顶栏等 */
+.modal-root {
+  z-index: 10050;
+}
+
 .modal-content.large {
   width: 800px;
   max-width: 95vw;
