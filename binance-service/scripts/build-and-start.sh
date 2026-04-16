@@ -264,18 +264,14 @@ main() {
     fi
     
     # 构建JAR包
-    # build_jar函数会将日志输出到stderr，只将文件路径输出到stdout
-    # 使用临时文件来分离日志输出和返回值
+    # build_jar：日志在 stderr，仅最后一行 stdout 为 JAR 路径。此前重定向到临时文件会导致 Maven 长时间无终端输出，易被误认为卡死；改用 tee 同步打印。
     TEMP_OUTPUT=$(mktemp)
-    if build_jar > "$TEMP_OUTPUT" 2>&1; then
-        # 显示所有输出（包括日志）
-        cat "$TEMP_OUTPUT"
-        # 提取最后一行（JAR文件路径）
+    build_jar 2>&1 | tee "$TEMP_OUTPUT"
+    BUILD_RC=${PIPESTATUS[0]}
+    if [ "$BUILD_RC" -eq 0 ]; then
         JAR_FILE=$(tail -n 1 "$TEMP_OUTPUT")
         rm -f "$TEMP_OUTPUT"
     else
-        # 显示错误输出
-        cat "$TEMP_OUTPUT" >&2
         rm -f "$TEMP_OUTPUT"
         exit 1
     fi
