@@ -9,10 +9,14 @@
 #   3. 使用java -jar方式启动服务
 #
 # 使用方法：
-#   bash build-and-start.sh           # 交互模式，会询问是否启动
-#   bash build-and-start.sh --auto-start  # 自动启动模式
-#   bash build-and-start.sh -y        # 自动启动模式（简写）
-#   AUTO_START=true bash build-and-start.sh  # 通过环境变量控制
+#   bash build-and-start.sh              # 交互模式，会询问是否启动
+#   bash build-and-start.sh --auto-start # 自动启动（单次 nohup java）
+#   bash build-and-start.sh -y
+#   bash build-and-start.sh --watchdog   # 构建后由守护进程托管，Java 退出则自动重启
+#   bash build-and-start.sh -w -y        # 同上并跳过询问
+#   WATCHDOG=true bash build-and-start.sh
+#   BINANCE_RESTART_DELAY=30 ...        # 重启间隔秒数（默认 10）
+#   AUTO_START=true bash build-and-start.sh
 # ============================================
 
 set -e  # 遇到错误立即退出
@@ -135,7 +139,10 @@ build_jar() {
 }
 
 
-# 启动服务
+# shellcheck source=common-env.sh
+source "$SCRIPT_DIR/common-env.sh"
+
+# 启动服务（直接 java，无守护；进程退出不会自动拉起）
 start_service() {
     JAR_FILE="$1"
     
@@ -151,31 +158,11 @@ start_service() {
     mkdir -p "$BINANCE_SERVICE_DIR/logs"
     
     log_info "所有配置从application.yml读取（可通过环境变量覆盖）"
+    rm -f "$BINANCE_SERVICE_DIR/binance-service.shutdown"
     
-    # 设置JVM参数（高性能优化）
-    # -Xms: 初始堆内存1G，-Xmx: 最大堆内存2G（允许动态调整以适应负载）
-    # -XX:+UseG1GC: 使用G1垃圾收集器，适合大内存和低延迟场景
-    # -XX:MaxGCPauseMillis: 最大GC暂停时间目标（毫秒）
-    # -XX:+UseStringDeduplication: 字符串去重，减少内存占用
-    # -XX:+OptimizeStringConcat: 优化字符串拼接
-    # -XX:+UseCompressedOops: 使用压缩指针，节省内存
-    # -XX:+UseCompressedClassPointers: 使用压缩类指针
-    # -Djava.awt.headless=true: 无头模式，不需要图形界面
-    # -Dfile.encoding=UTF-8: 文件编码
-    # 注意：端口配置通过application.yml中的${SERVER_PORT:5004}自动读取，无需通过-Dserver.port传递
-    JAVA_OPTS="-Xms1g -Xmx2g \
-                -XX:+UseG1GC \
-                -XX:MaxGCPauseMillis=200 \
-                -XX:+UseStringDeduplication \
-                -XX:+OptimizeStringConcat \
-                -XX:+UseCompressedOops \
-                -XX:+UseCompressedClassPointers \
-                -Djava.awt.headless=true \
-                -Dfile.encoding=UTF-8"
-    
-    # 启动服务（后台运行）
-    log_info "执行启动命令: java $JAVA_OPTS -jar $JAR_FILE"
-    nohup java $JAVA_OPTS -jar "$JAR_FILE" > "$BINANCE_SERVICE_DIR/logs/startup.log" 2>&1 &
+    # 启动服务（后台运行）；JVM 参数见 common-env.sh
+    log_info "执行启动命令: java <opts> -jar $JAR_FILE"
+    nohup java $BINANCE_JAVA_OPTS -jar "$JAR_FILE" > "$BINANCE_SERVICE_DIR/logs/startup.log" 2>&1 &
     PID=$!
     
     log_info "Binance Service已启动，PID: $PID"
@@ -210,6 +197,43 @@ start_service() {
             cat "$BINANCE_SERVICE_DIR/logs/startup.log"
         fi
         exit 1
+    fi
+}
+
+# 守护进程模式：watchdog.sh 负责在 Java 崩溃退出后自动重启（见 logs/watchdog.log）
+start_under_watchdog() {
+    JAR_FILE="$1"
+    if [ ! -f "$JAR_FILE" ]; then
+        log_error "JAR文件不存在: $JAR_FILE"
+        exit 1
+    fi
+    if [ "$JAR_FILE" != "$BINANCE_JAR_FILE" ]; then
+        log_warn "守护脚本固定读取 JAR: $BINANCE_JAR_FILE（请与构建产物路径一致）"
+    fi
+    mkdir -p "$BINANCE_SERVICE_DIR/logs"
+    rm -f "$BINANCE_SERVICE_DIR/binance-service.shutdown"
+    log_info "以守护进程模式启动（进程异常退出将自动重启，间隔 ${BINANCE_RESTART_DELAY:-10}s）..."
+    log_info "守护日志: $BINANCE_SERVICE_DIR/logs/watchdog.log"
+    nohup bash "$SCRIPT_DIR/watchdog.sh" >> "$BINANCE_SERVICE_DIR/logs/watchdog.log" 2>&1 &
+    WD_PID=$!
+    echo "$WD_PID" > "$BINANCE_SERVICE_DIR/binance-service.watchdog.pid"
+    log_info "守护进程 PID: $WD_PID"
+    sleep 3
+    if ! ps -p "$WD_PID" > /dev/null 2>&1; then
+        log_error "守护进程已退出，请查看: $BINANCE_SERVICE_DIR/logs/watchdog.log"
+        exit 1
+    fi
+    log_info "等待 Java 子进程写入 PID..."
+    sleep 4
+    if [ -f "$BINANCE_SERVICE_DIR/binance-service.pid" ]; then
+        JP=$(cat "$BINANCE_SERVICE_DIR/binance-service.pid" 2>/dev/null || true)
+        if [ -n "$JP" ] && ps -p "$JP" > /dev/null 2>&1; then
+            log_info "Java 进程运行中 (PID: $JP)"
+        else
+            log_warn "PID 文件存在但进程未就绪，请查看 startup.log / watchdog.log"
+        fi
+    else
+        log_warn "尚未写入 binance-service.pid，请稍候查看 startup.log"
     fi
 }
 
@@ -264,26 +288,53 @@ main() {
     fi
     log_info "确认JAR文件: $JAR_FILE"
     
-    # 检查是否在非交互模式或自动启动模式
+    USE_WATCHDOG=false
+    AUTO_START_ARG=false
+    for arg in "$@"; do
+        case "$arg" in
+            --auto-start|-y) AUTO_START_ARG=true ;;
+            --watchdog|-w) USE_WATCHDOG=true ;;
+        esac
+    done
     AUTO_START=${AUTO_START:-""}
-    if [ "$1" = "--auto-start" ] || [ "$1" = "-y" ] || [ "$AUTO_START" = "true" ]; then
-        # 自动启动模式
-        log_info "自动启动模式：正在启动服务..."
-        start_service "$JAR_FILE"
+    WATCHDOG=${WATCHDOG:-""}
+    if [ "$WATCHDOG" = "true" ]; then
+        USE_WATCHDOG=true
+    fi
+    if [ "$USE_WATCHDOG" = true ]; then
+        AUTO_START_ARG=true
+    fi
+    
+    # 检查是否在非交互模式或自动启动模式
+    if [ "$AUTO_START_ARG" = true ] || [ "$AUTO_START" = "true" ]; then
+        if [ "$USE_WATCHDOG" = true ]; then
+            log_info "自动启动模式（守护进程）：Java 异常退出将自动重启"
+            start_under_watchdog "$JAR_FILE"
+        else
+            log_info "自动启动模式：正在启动服务..."
+            start_service "$JAR_FILE"
+        fi
         
         log_info "============================================"
         log_info "构建和启动完成！"
         log_info "============================================"
         log_info "服务信息:"
-        log_info "  - PID文件: $BINANCE_SERVICE_DIR/binance-service.pid"
+        log_info "  - Java PID 文件: $BINANCE_SERVICE_DIR/binance-service.pid"
+        if [ "$USE_WATCHDOG" = true ]; then
+            log_info "  - 守护进程 PID 文件: $BINANCE_SERVICE_DIR/binance-service.watchdog.pid"
+            log_info "  - 守护日志: $BINANCE_SERVICE_DIR/logs/watchdog.log"
+        fi
         log_info "  - 启动日志: $BINANCE_SERVICE_DIR/logs/startup.log"
         log_info "  - 应用日志: $BINANCE_SERVICE_DIR/logs/binance-service.log"
         log_info ""
         log_info "常用命令:"
         log_info "  查看实时日志: tail -f $BINANCE_SERVICE_DIR/logs/binance-service.log"
         log_info "  查看启动日志: tail -f $BINANCE_SERVICE_DIR/logs/startup.log"
-        log_info "  停止服务: kill \$(cat $BINANCE_SERVICE_DIR/binance-service.pid)"
-        log_info "  检查服务状态: ps -p \$(cat $BINANCE_SERVICE_DIR/binance-service.pid)"
+        if [ "$USE_WATCHDOG" = true ]; then
+            log_info "  守护日志: tail -f $BINANCE_SERVICE_DIR/logs/watchdog.log"
+        fi
+        log_info "  停止服务: bash $SCRIPT_DIR/stop.sh"
+        log_info "  检查 Java: ps -p \$(cat $BINANCE_SERVICE_DIR/binance-service.pid 2>/dev/null)"
     elif [ -t 0 ]; then
         # 交互模式：有终端输入
         echo
@@ -291,21 +342,31 @@ main() {
         echo
         # 如果用户直接按回车，默认启动
         if [[ -z "$REPLY" ]] || [[ $REPLY =~ ^[Yy]$ ]]; then
-            start_service "$JAR_FILE"
+            read -p "是否在 Java 崩溃退出时自动重启（守护进程）? (y/N): " -n 1 -r
+            echo
+            if [[ $REPLY =~ ^[Yy]$ ]]; then
+                start_under_watchdog "$JAR_FILE"
+            else
+                start_service "$JAR_FILE"
+            fi
             
             log_info "============================================"
             log_info "构建和启动完成！"
             log_info "============================================"
             log_info "服务信息:"
-            log_info "  - PID文件: $BINANCE_SERVICE_DIR/binance-service.pid"
+            log_info "  - Java PID 文件: $BINANCE_SERVICE_DIR/binance-service.pid"
+            if [ -f "$BINANCE_SERVICE_DIR/binance-service.watchdog.pid" ]; then
+                log_info "  - 守护进程 PID 文件: $BINANCE_SERVICE_DIR/binance-service.watchdog.pid"
+                log_info "  - 守护日志: $BINANCE_SERVICE_DIR/logs/watchdog.log"
+            fi
             log_info "  - 启动日志: $BINANCE_SERVICE_DIR/logs/startup.log"
             log_info "  - 应用日志: $BINANCE_SERVICE_DIR/logs/binance-service.log"
             log_info ""
             log_info "常用命令:"
             log_info "  查看实时日志: tail -f $BINANCE_SERVICE_DIR/logs/binance-service.log"
             log_info "  查看启动日志: tail -f $BINANCE_SERVICE_DIR/logs/startup.log"
-            log_info "  停止服务: kill \$(cat $BINANCE_SERVICE_DIR/binance-service.pid)"
-            log_info "  检查服务状态: ps -p \$(cat $BINANCE_SERVICE_DIR/binance-service.pid)"
+            log_info "  停止服务: bash $SCRIPT_DIR/stop.sh"
+            log_info "  检查 Java: ps -p \$(cat $BINANCE_SERVICE_DIR/binance-service.pid 2>/dev/null)"
             log_info ""
             
             # 询问是否查看实时日志
@@ -322,7 +383,8 @@ main() {
             log_info "JAR文件: $JAR_FILE"
             log_info "手动启动命令:"
             log_info "  cd $BINANCE_SERVICE_DIR"
-            log_info "  java -Xms1g -Xmx2g -XX:+UseG1GC -jar $JAR_FILE"
+            log_info "  bash scripts/build-and-start.sh --watchdog -y   # 推荐：带自动重启"
+            log_info "  或: java ... -jar $JAR_FILE"
             log_info "  注意: 所有配置从application.yml读取，可通过环境变量覆盖（如SERVER_PORT）"
         fi
     else
@@ -331,8 +393,8 @@ main() {
         log_info "============================================"
         log_info "JAR文件: $JAR_FILE"
         log_info "手动启动命令:"
-        log_info "  cd $BINANCE_SERVICE_DIR"
-        log_info "  java -Xms1g -Xmx2g -XX:+UseG1GC -jar $JAR_FILE"
+        log_info "  bash $SCRIPT_DIR/build-and-start.sh --watchdog -y"
+        log_info "  或: cd $BINANCE_SERVICE_DIR && java ... -jar $JAR_FILE"
         log_info "  注意: 所有配置从application.yml读取，可通过环境变量覆盖（如SERVER_PORT）"
     fi
 }

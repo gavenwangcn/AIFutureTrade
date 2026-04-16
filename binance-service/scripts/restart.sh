@@ -42,6 +42,8 @@ BINANCE_SERVICE_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 PROJECT_ROOT="$(cd "$BINANCE_SERVICE_DIR/.." && pwd)"
 STOP_SCRIPT="$SCRIPT_DIR/stop.sh"
 BUILD_SCRIPT="$SCRIPT_DIR/build-and-start.sh"
+# shellcheck source=common-env.sh
+source "$SCRIPT_DIR/common-env.sh"
 
 log_info "Binance Service目录: $BINANCE_SERVICE_DIR"
 log_info "项目根目录: $PROJECT_ROOT"
@@ -50,6 +52,7 @@ log_info "项目根目录: $PROJECT_ROOT"
 DO_BUILD=false
 DO_FORCE=false
 AUTO_START=true
+USE_WATCHDOG=false
 
 # 解析参数
 while [[ $# -gt 0 ]]; do
@@ -62,18 +65,24 @@ while [[ $# -gt 0 ]]; do
             DO_FORCE=true
             shift
             ;;
+        -w|--watchdog)
+            USE_WATCHDOG=true
+            shift
+            ;;
         -h|--help)
             echo "使用方法: $0 [OPTIONS]"
             echo ""
             echo "选项:"
             echo "  -b, --build    重新构建JAR包后再启动"
             echo "  -f, --force    强制重启（使用SIGKILL）"
+            echo "  -w, --watchdog 由守护进程托管（Java 退出则自动重启）"
             echo "  -h, --help     显示帮助信息"
             echo ""
             echo "示例:"
             echo "  $0                    # 仅重启服务"
             echo "  $0 --build            # 重新构建并重启"
             echo "  $0 -b -f              # 强制重新构建并重启"
+            echo "  $0 -w                 # 重启并启用守护进程"
             exit 0
             ;;
         *)
@@ -92,6 +101,11 @@ check_scripts() {
     
     if [ "$DO_BUILD" = true ] && [ ! -f "$BUILD_SCRIPT" ]; then
         log_error "构建脚本不存在: $BUILD_SCRIPT"
+        exit 1
+    fi
+    
+    if [ "$USE_WATCHDOG" = true ] && [ ! -f "$SCRIPT_DIR/watchdog.sh" ]; then
+        log_error "守护脚本不存在: $SCRIPT_DIR/watchdog.sh"
         exit 1
     fi
 }
@@ -189,20 +203,26 @@ start_service() {
     # 创建logs目录
     mkdir -p "$BINANCE_SERVICE_DIR/logs"
     
-    # JVM参数（高性能优化）
-    JAVA_OPTS="-Xms1g -Xmx2g \
-                -XX:+UseG1GC \
-                -XX:MaxGCPauseMillis=200 \
-                -XX:+UseStringDeduplication \
-                -XX:+OptimizeStringConcat \
-                -XX:+UseCompressedOops \
-                -XX:+UseCompressedClassPointers \
-                -Djava.awt.headless=true \
-                -Dfile.encoding=UTF-8"
+    if [ "$USE_WATCHDOG" = true ]; then
+        log_info "以守护进程方式启动（见 logs/watchdog.log）..."
+        rm -f "$BINANCE_SERVICE_DIR/binance-service.shutdown"
+        nohup bash "$SCRIPT_DIR/watchdog.sh" >> "$BINANCE_SERVICE_DIR/logs/watchdog.log" 2>&1 &
+        local WD_PID=$!
+        echo "$WD_PID" > "$BINANCE_SERVICE_DIR/binance-service.watchdog.pid"
+        log_info "守护进程 PID: $WD_PID"
+        sleep 4
+        if ! ps -p "$WD_PID" > /dev/null 2>&1; then
+            log_error "守护进程启动失败，请查看 watchdog.log"
+            return 1
+        fi
+        log_info "守护进程运行中，Java PID 见 binance-service.pid"
+        return 0
+    fi
     
-    # 启动服务（后台运行）
-    log_info "执行启动命令: java $JAVA_OPTS -jar $JAR_FILE"
-    nohup java $JAVA_OPTS -jar "$JAR_FILE" > "$BINANCE_SERVICE_DIR/logs/startup.log" 2>&1 &
+    # 启动服务（后台运行）；JVM 见 common-env.sh
+    log_info "执行启动命令: java <opts> -jar $JAR_FILE"
+    rm -f "$BINANCE_SERVICE_DIR/binance-service.shutdown"
+    nohup java $BINANCE_JAVA_OPTS -jar "$JAR_FILE" > "$BINANCE_SERVICE_DIR/logs/startup.log" 2>&1 &
     local PID=$!
     
     log_info "Binance Service已启动，PID: $PID"
@@ -297,14 +317,18 @@ main() {
     log_info "Binance Service 重启完成！"
     log_info "============================================"
     log_info "服务信息:"
-    log_info "  - PID文件: $BINANCE_SERVICE_DIR/binance-service.pid"
+    log_info "  - Java PID 文件: $BINANCE_SERVICE_DIR/binance-service.pid"
+    if [ "$USE_WATCHDOG" = true ]; then
+        log_info "  - 守护 PID 文件: $BINANCE_SERVICE_DIR/binance-service.watchdog.pid"
+        log_info "  - 守护日志: $BINANCE_SERVICE_DIR/logs/watchdog.log"
+    fi
     log_info "  - 启动日志: $BINANCE_SERVICE_DIR/logs/startup.log"
     log_info "  - 应用日志: $BINANCE_SERVICE_DIR/logs/binance-service.log"
     log_info ""
     log_info "常用命令:"
     log_info "  查看实时日志: tail -f $BINANCE_SERVICE_DIR/logs/binance-service.log"
     log_info "  停止服务: bash $STOP_SCRIPT"
-    log_info "  检查服务状态: ps -p \$(cat $BINANCE_SERVICE_DIR/binance-service.pid)"
+    log_info "  检查 Java: ps -p \$(cat $BINANCE_SERVICE_DIR/binance-service.pid 2>/dev/null)"
 }
 
 # 执行主函数

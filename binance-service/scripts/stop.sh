@@ -4,25 +4,25 @@
 # Binance Service 停止脚本
 # ============================================
 # 功能：
-#   1. 读取PID文件并停止服务进程
-#   2. 支持强制杀死进程
-#   3. 清理PID文件
-#   4. 显示停止状态
+#   1. 停止 Java 服务（binance-service-*.jar）
+#   2. 停止守护进程（watchdog.sh），并清理 PID 文件
+#   3. 支持强制杀死进程
+#
+# 说明：先写入 binance-service.shutdown 通知 watchdog 勿再拉起 Java，
+#       再结束 Java，最后结束 watchdog（含 pid 文件缺失时的进程探测）。
 #
 # 使用方法：
-#   bash stop.sh           # 正常停止（发送SIGTERM）
-#   bash stop.sh -f        # 强制停止（发送SIGKILL）
+#   bash stop.sh           # 正常停止（SIGTERM）
+#   bash stop.sh -f        # 强制停止（SIGKILL）
 # ============================================
 
-set -e  # 遇到错误立即退出
+set -e
 
-# 颜色定义
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
-NC='\033[0m' # No Color
+NC='\033[0m'
 
-# 日志函数
 log_info() {
     echo -e "${GREEN}[INFO]${NC} $1"
 }
@@ -35,17 +35,17 @@ log_error() {
     echo -e "${RED}[ERROR]${NC} $1"
 }
 
-# 获取脚本所在目录
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BINANCE_SERVICE_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 PID_FILE="$BINANCE_SERVICE_DIR/binance-service.pid"
+SHUTDOWN_FLAG="$BINANCE_SERVICE_DIR/binance-service.shutdown"
+WATCHDOG_PID_FILE="$BINANCE_SERVICE_DIR/binance-service.watchdog.pid"
+WATCHDOG_SCRIPT="$SCRIPT_DIR/watchdog.sh"
 
 log_info "Binance Service目录: $BINANCE_SERVICE_DIR"
 
-# 停止模式：false=正常停止，true=强制停止
 FORCE_STOP=false
 
-# 解析参数
 while [[ $# -gt 0 ]]; do
     case $1 in
         -f|--force)
@@ -55,148 +55,157 @@ while [[ $# -gt 0 ]]; do
         *)
             log_error "未知参数: $1"
             echo "使用方法: $0 [-f|--force]"
-            echo "  无参数: 正常停止（发送SIGTERM）"
-            echo "  -f/--force: 强制停止（发送SIGKILL）"
             exit 1
             ;;
     esac
 done
 
-# 检查PID文件是否存在
-if [ ! -f "$PID_FILE" ]; then
-    log_warn "PID文件不存在: $PID_FILE"
-    log_warn "尝试查找正在运行的进程..."
-    
-    # 尝试通过进程名查找
-    PID=$(pgrep -f "binance-service.*\.jar" 2>/dev/null || true)
-    
-    if [ -z "$PID" ]; then
-        log_error "未找到正在运行的Binance Service进程"
-        exit 0
+# 解析 Java PID：优先 pid 文件，其次按 jar 进程名
+resolve_java_pid() {
+    PID=""
+    if [ -f "$PID_FILE" ]; then
+        PID=$(cat "$PID_FILE" 2>/dev/null || true)
     fi
-    
-    log_info "找到进程PID: $PID"
-else
-    # 读取PID文件
-    PID=$(cat "$PID_FILE" 2>/dev/null || true)
-    
-    if [ -z "$PID" ]; then
-        log_error "PID文件为空: $PID_FILE"
-        log_warn "尝试查找正在运行的进程..."
-        PID=$(pgrep -f "binance-service.*\.jar" 2>/dev/null || true)
-        
-        if [ -z "$PID" ]; then
-            log_error "未找到正在运行的Binance Service进程"
-            exit 0
-        fi
+    if [ -z "$PID" ] || ! ps -p "$PID" > /dev/null 2>&1; then
+        PID=$(pgrep -f "binance-service-1\.0\.0\.jar" 2>/dev/null | head -n 1 || true)
     fi
-fi
-
-# 检查进程是否存在
-check_process() {
-    if [ -n "$PID" ] && ps -p $PID > /dev/null 2>&1; then
-        return 0
-    else
-        return 1
+    if [ -z "$PID" ]; then
+        PID=$(pgrep -f "binance-service.*\.jar" 2>/dev/null | head -n 1 || true)
     fi
 }
 
-# 停止进程
-stop_process() {
+check_java_running() {
+    [ -n "$PID" ] && ps -p "$PID" > /dev/null 2>&1
+}
+
+stop_java_process() {
     local signal=$1
     local signal_name=$2
-    
-    log_info "发送${signal_name}信号到进程 $PID..."
-    kill -$signal $PID 2>/dev/null || true
-    
-    # 等待进程停止
+    log_info "向 Java 进程发送 ${signal_name} (PID $PID)..."
+    kill -"$signal" "$PID" 2>/dev/null || true
     local timeout=30
     local count=0
-    
-    while check_process; do
+    while check_java_running; do
         sleep 1
         count=$((count + 1))
-        
-        if [ $count -ge $timeout ]; then
+        if [ "$count" -ge "$timeout" ]; then
             return 1
         fi
-        
         if [ $((count % 5)) -eq 0 ]; then
-            log_info "等待进程停止... ($count/$timeout 秒)"
+            log_info "等待 Java 结束... ($count/${timeout} 秒)"
         fi
     done
-    
     return 0
 }
 
-# 主逻辑
-log_info "============================================"
-log_info "Binance Service 停止脚本"
-log_info "============================================"
+# 结束所有与本项目相关的 watchdog（pid 文件 + pgrep 兜底）
+stop_watchdog_all() {
+    log_info "----------------------------------------"
+    log_info "停止守护进程 (watchdog)..."
 
-if ! check_process; then
-    log_warn "Binance Service进程未运行或已停止"
-    
-    # 清理PID文件
-    if [ -f "$PID_FILE" ]; then
-        log_info "清理PID文件..."
-        rm -f "$PID_FILE"
+    local sig=15
+    [ "$FORCE_STOP" = true ] && sig=9
+
+    # 1) pid 文件中的 watchdog
+    local wd=""
+    if [ -f "$WATCHDOG_PID_FILE" ]; then
+        wd=$(cat "$WATCHDOG_PID_FILE" 2>/dev/null || true)
     fi
-    
-    exit 0
-fi
-
-log_info "找到进程 PID: $PID"
-log_info "进程状态: $(ps -p $PID -o pid,ppid,cmd --no-headers 2>/dev/null || echo '未知')"
-
-# 停止进程
-if [ "$FORCE_STOP" = true ]; then
-    log_warn "强制停止模式：发送SIGKILL信号..."
-    
-    if ! stop_process 9 "SIGKILL"; then
-        log_error "强制停止失败，进程仍在运行"
-        log_error "请手动检查: ps -p $PID"
-        exit 1
+    if [ -n "$wd" ] && ps -p "$wd" > /dev/null 2>&1; then
+        log_info "结束守护进程 PID $wd (信号 $sig)..."
+        kill -"$sig" "$wd" 2>/dev/null || true
+        if [ "$FORCE_STOP" != true ]; then
+            local i=0
+            while [ "$i" -lt 20 ] && ps -p "$wd" > /dev/null 2>&1; do
+                sleep 1
+                i=$((i + 1))
+            done
+            if ps -p "$wd" > /dev/null 2>&1; then
+                log_warn "守护进程未退出，发送 SIGKILL..."
+                kill -9 "$wd" 2>/dev/null || true
+            fi
+        fi
     fi
-    
-    log_info "进程已被强制停止"
-else
-    log_info "正常停止模式：发送SIGTERM信号..."
-    log_info "等待进程优雅停止（最多30秒）..."
-    
-    if ! stop_process 15 "SIGTERM"; then
-        log_warn "进程未能在30秒内优雅停止"
-        log_warn "尝试强制停止..."
-        
-        if ! stop_process 9 "SIGKILL"; then
-            log_error "停止失败，进程仍在运行"
-            log_error "请手动检查: ps -p $PID"
+
+    rm -f "$WATCHDOG_PID_FILE"
+
+    # 2) 未登记到 pid 文件、仍匹配的 watchdog.sh（同路径）
+    if [ -f "$WATCHDOG_SCRIPT" ]; then
+        local stray
+        stray=$(pgrep -f "$WATCHDOG_SCRIPT" 2>/dev/null || true)
+        if [ -n "$stray" ]; then
+            log_warn "发现残留守护进程: $stray ，正在结束..."
+            echo "$stray" | while read -r p; do
+                [ -n "$p" ] || continue
+                kill -"$sig" "$p" 2>/dev/null || true
+            done
+            sleep 2
+            stray=$(pgrep -f "$WATCHDOG_SCRIPT" 2>/dev/null || true)
+            if [ -n "$stray" ]; then
+                echo "$stray" | while read -r p; do
+                    [ -n "$p" ] || continue
+                    kill -9 "$p" 2>/dev/null || true
+                done
+            fi
+        fi
+    fi
+
+    log_info "守护进程已处理完毕"
+}
+
+log_info "============================================"
+log_info "Binance Service 停止（Java + 守护进程）"
+log_info "============================================"
+
+resolve_java_pid
+
+# 通知 watchdog：不要再拉起 Java（与 watchdog.sh 约定）
+touch "$SHUTDOWN_FLAG"
+
+if check_java_running; then
+    log_info "当前 Java PID: $PID"
+    log_info "进程: $(ps -p "$PID" -o pid,ppid,cmd --no-headers 2>/dev/null || echo '未知')"
+
+    if [ "$FORCE_STOP" = true ]; then
+        if ! stop_java_process 9 "SIGKILL"; then
+            log_error "无法结束 Java 进程"
+            rm -f "$SHUTDOWN_FLAG"
             exit 1
         fi
-        
-        log_info "进程已被强制停止"
+        log_info "Java 已强制结束"
     else
-        log_info "进程已正常停止"
+        if ! stop_java_process 15 "SIGTERM"; then
+            log_warn "SIGTERM 超时，尝试 SIGKILL..."
+            if ! stop_java_process 9 "SIGKILL"; then
+                log_error "无法结束 Java 进程"
+                rm -f "$SHUTDOWN_FLAG"
+                exit 1
+            fi
+        else
+            log_info "Java 已正常结束"
+        fi
     fi
+else
+    log_warn "未发现运行中的 Java 服务（可能已退出）"
 fi
 
-# 清理PID文件
-if [ -f "$PID_FILE" ]; then
-    log_info "清理PID文件..."
-    rm -f "$PID_FILE"
-fi
+rm -f "$PID_FILE"
 
-# 验证进程已停止
-if check_process; then
-    log_error "进程仍然在运行，请手动处理"
+if check_java_running; then
+    log_error "Java 进程仍在运行: $PID"
+    rm -f "$SHUTDOWN_FLAG"
     exit 1
 fi
 
+stop_watchdog_all
+
+rm -f "$SHUTDOWN_FLAG"
+
 log_info "============================================"
-log_info "Binance Service 已停止"
+log_info "Binance Service 与守护进程均已停止"
 log_info "============================================"
-log_info "日志文件位置:"
-log_info "  - 启动日志: $BINANCE_SERVICE_DIR/logs/startup.log"
-log_info "  - 应用日志: $BINANCE_SERVICE_DIR/logs/binance-service.log"
+log_info "日志: $BINANCE_SERVICE_DIR/logs/startup.log"
+log_info "      $BINANCE_SERVICE_DIR/logs/binance-service.log"
+log_info "      $BINANCE_SERVICE_DIR/logs/watchdog.log"
 
 exit 0
