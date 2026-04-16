@@ -49,7 +49,7 @@ services:
       - APP_TRADE_FEE_RATE=${TRADE_FEE_RATE:-0.001}
       # Trade 服务：Compose 默认用容器名 trade（同网络 DNS）。若 Trade 在宿主机或其它机器，在 .env 设 TRADE_SERVICE_URL=http://156.254.6.224:5000
       - TRADE_SERVICE_URL=${TRADE_SERVICE_URL:-http://trade:5000}
-      # 动态创建 trade-look 时注入 Python TRADE_MONITOR_BASE_URL（与根目录 .env 一致）
+      # 动态创建 aifuturetrade-model-look-1 时注入 Python TRADE_MONITOR_BASE_URL（与根目录 .env 一致）
       - TRADE_MONITOR_BASE_URL=${TRADE_MONITOR_BASE_URL:-http://trade-monitor:5005}
       # JVM参数
       # 添加 --add-opens 参数以解决 MyBatis-Plus 在 Java 9+ 上的反射访问警告
@@ -322,9 +322,10 @@ services:
       - aifuturetrade-network
 
   # ============================================================================
-  # 盯盘循环服务镜像（仅构建，由 Java 动态创建容器 trade-look）
+  # 盯盘循环：compose 启动时容器名为 aifuturetrade-model-look-1（与后端 API 动态创建同名，勿重复同时起两套）
   # ============================================================================
   model-look:
+    container_name: aifuturetrade-model-look-1
     build:
       context: .
       dockerfile: trade/Dockerfile

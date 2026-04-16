@@ -573,20 +573,20 @@ public class ModelController {
     }
 
     /**
-     * 启动盯盘循环（固定容器名 trade-look，不依赖是否已创建交易模型）
+     * 启动盯盘循环（固定容器名 aifuturetrade-model-look-1，不依赖是否已创建交易模型）
      */
     @PostMapping("/market-look/start")
-    @Operation(summary = "启动盯盘循环（Docker 容器 trade-look）")
+    @Operation(summary = "启动盯盘循环（Docker 容器 aifuturetrade-model-look-1）")
     public ResponseEntity<Map<String, Object>> startTradeLookMarketLoop() {
         Map<String, Object> result = modelService.startTradeLookMarketLoop();
         return new ResponseEntity<>(result, HttpStatus.OK);
     }
 
     /**
-     * 停止并删除固定盯盘容器 trade-look
+     * 停止并删除固定盯盘容器 aifuturetrade-model-look-1（并清理旧名 trade-look）
      */
     @PostMapping("/market-look/stop")
-    @Operation(summary = "关闭盯盘（删除 Docker 容器 trade-look）")
+    @Operation(summary = "关闭盯盘（删除 Docker 容器 aifuturetrade-model-look-1）")
     public ResponseEntity<Map<String, Object>> stopTradeLookMarketLoop() {
         Map<String, Object> result = modelService.stopTradeLookMarketLoop();
         return new ResponseEntity<>(result, HttpStatus.OK);

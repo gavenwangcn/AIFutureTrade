@@ -25,38 +25,22 @@
           </div>
         </div>
         <div class="header-right">
-          <div class="header-status look-logs-header-status" title="盯盘容器日志（固定容器 trade-look，可随时打开）">
+          <div
+            class="header-status look-logs-header-status"
+            title="盯盘由 docker compose 启动（容器名 aifuturetrade-model-look-1），此处仅查看日志"
+          >
             <span class="status-dot active"></span>
             <span class="status-text">运行中</span>
             <button
               class="btn-icon"
               type="button"
               @click="handleOpenLookContainerLogsModal"
-              title="盯盘容器日志"
+              title="盯盘容器日志（aifuturetrade-model-look-1）"
               style="margin-left: 8px;"
             >
               <i class="bi bi-file-text"></i>
             </button>
           </div>
-          <button
-            class="btn-secondary"
-            type="button"
-            @click="handleExecuteMarketLook"
-            title="启动盯盘循环（Docker 固定容器 trade-look，无需交易模型）"
-            :disabled="isExecutingMarketLook"
-          >
-            <i class="bi bi-play-fill" :class="{ spin: isExecutingMarketLook }"></i>
-            {{ isExecutingMarketLook ? '盯盘启动中...' : '执行盯盘' }}
-          </button>
-          <button
-            class="btn-secondary"
-            @click="handleStopMarketLook"
-            title="删除盯盘容器 trade-look"
-            :disabled="isStoppingMarketLook"
-          >
-            <i class="bi bi-stop-circle" :class="{ spin: isStoppingMarketLook }"></i>
-            {{ isStoppingMarketLook ? '关闭中...' : '关闭盯盘' }}
-          </button>
           <button
             class="btn-secondary"
             type="button"
@@ -1427,14 +1411,10 @@ const {
   handleRefresh,
   handleExecuteBuy,
   handleExecuteSell,
-  handleExecuteMarketLook,
-  handleStopMarketLook,
   handleDisableBuy,
   handleDisableSell,
   isExecutingBuy,
   isExecutingSell,
-  isExecutingMarketLook,
-  isStoppingMarketLook,
   isDisablingBuy,
   isDisablingSell,
   loadGainers,
@@ -1479,11 +1459,11 @@ function onMarketLookSaved() {
   marketLookPanelRef.value?.load?.()
 }
 
-const TRADE_LOOK_CONTAINER_ID = 'trade-look'
+const TRADE_LOOK_CONTAINER_ID = 'aifuturetrade-model-look-1'
 
 const handleOpenLookContainerLogsModal = () => {
   pendingLookLogsModelId.value = TRADE_LOOK_CONTAINER_ID
-  lookLogsModelName.value = '盯盘容器 (trade-look)'
+  lookLogsModelName.value = '盯盘容器 (aifuturetrade-model-look-1 · docker compose)'
   showLookLogsModal.value = true
 }
 

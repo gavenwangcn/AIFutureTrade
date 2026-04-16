@@ -72,10 +72,11 @@ public class ModelLogsWebSocketHandler extends TextWebSocketHandler {
             return;
         }
         
-        // 构建容器名称：buy-{modelId}、sell-{modelId}、look-{modelId}，或固定盯盘容器 trade-look
+        // 构建容器名称：buy-{modelId}、sell-{modelId}、look-{modelId}，或固定盯盘容器 aifuturetrade-model-look-1
         String containerName;
-        if ("look".equals(type) && "trade-look".equals(modelId)) {
-            containerName = "trade-look";
+        if ("look".equals(type)
+                && ("aifuturetrade-model-look-1".equals(modelId) || "trade-look".equals(modelId))) {
+            containerName = "aifuturetrade-model-look-1";
         } else {
             containerName = type + "-" + modelId;
         }

@@ -86,12 +86,12 @@ export const modelApi = {
   executeSell: (modelId) => apiPost(`/api/models/${modelId}/execute-sell`),
 
   /**
-   * 启动盯盘循环（Docker 固定容器 trade-look，start_market_look）
+   * 启动盯盘循环（可选：一般由 docker compose 起容器；API 仍可用于运维）
    */
   executeMarketLook: () => apiPost('/api/models/market-look/start'),
 
   /**
-   * 关闭盯盘（删除 Docker 容器 trade-look）
+   * 关闭盯盘（删除容器 aifuturetrade-model-look-1；compose 场景请用 docker compose stop/rm）
    */
   stopMarketLook: () => apiPost('/api/models/market-look/stop'),
 
