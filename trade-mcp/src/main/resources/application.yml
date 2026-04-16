@@ -39,7 +39,7 @@ downstream:
   binance-service:
     # 行情/K 线：与 trade/common/config.py 中 BINANCE_SERVICE_LIST 默认实例一致，多地址轮询
     base-urls:
-      - http://185.242.232.23:5004
+      - http://103.242.3.119:5004
       - http://185.242.232.42:5004
     # 未配置 base-urls 时的单地址回退（一般不用）
     # base-url: http://185.242.232.23:5004
