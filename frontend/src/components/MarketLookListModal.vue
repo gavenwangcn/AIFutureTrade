@@ -9,7 +9,7 @@
     <div class="market-look-list-container">
       <div class="search-section">
         <div class="search-form">
-          <div class="form-group">
+          <div class="form-group form-group--status">
             <label>类型（执行状态）</label>
             <select v-model="searchForm.executionStatus" class="form-input">
               <option value="">全部</option>
@@ -18,7 +18,7 @@
               <option value="ENDED">ENDED</option>
             </select>
           </div>
-          <div class="form-group flex-grow">
+          <div class="form-group form-group--summary">
             <label>摘要</label>
             <input
               v-model="searchForm.detailSummary"
@@ -28,22 +28,26 @@
               @keyup.enter="handleSearch"
             />
           </div>
-          <div class="form-group">
-            <button class="btn-primary" type="button" @click="handleSearch" :disabled="loading">
-              <i class="bi bi-search"></i>
-              查询
-            </button>
-            <button class="btn-secondary" type="button" @click="handleReset">
-              <i class="bi bi-arrow-counterclockwise"></i>
-              重置
+          <div class="form-group form-group--search-btns">
+            <label class="form-label-placeholder" aria-hidden="true">&nbsp;</label>
+            <div class="btn-row">
+              <button class="btn-primary" type="button" @click="handleSearch" :disabled="loading">
+                <i class="bi bi-search"></i>
+                查询
+              </button>
+              <button class="btn-secondary" type="button" @click="handleReset">
+                <i class="bi bi-arrow-counterclockwise"></i>
+                重置
+              </button>
+            </div>
+          </div>
+          <div class="form-group form-group--add">
+            <label class="form-label-placeholder" aria-hidden="true">&nbsp;</label>
+            <button class="btn-primary" type="button" @click="showAddMarketLookModal = true">
+              <i class="bi bi-plus-lg"></i>
+              添加盯盘
             </button>
           </div>
-        </div>
-        <div class="action-section">
-          <button class="btn-primary" type="button" @click="showAddMarketLookModal = true">
-            <i class="bi bi-plus-lg"></i>
-            添加盯盘
-          </button>
         </div>
       </div>
 
@@ -268,11 +272,6 @@ watch(
 }
 
 .search-section {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-end;
-  gap: 16px;
-  flex-wrap: wrap;
   padding: 16px;
   background: var(--bg-2);
   border-radius: var(--radius);
@@ -280,33 +279,57 @@ watch(
 
 .search-form {
   display: flex;
-  gap: 16px;
-  flex: 1;
   flex-wrap: wrap;
   align-items: flex-end;
+  gap: 12px 16px;
 }
 
 .search-form .form-group {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  min-width: 140px;
 }
 
-.search-form .form-group.flex-grow {
-  flex: 1;
-  min-width: 200px;
+.form-group--status {
+  flex: 0 0 auto;
+  min-width: 160px;
+  max-width: 200px;
 }
 
-.search-form label {
+.form-group--summary {
+  flex: 0 1 auto;
+  width: 260px;
+  max-width: min(320px, 100%);
+}
+
+.form-group--summary .form-input {
+  width: 100%;
+  min-width: 0;
+}
+
+.form-group--search-btns .btn-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.form-group--add {
+  flex: 0 0 auto;
+  margin-left: auto;
+}
+
+.form-label-placeholder {
+  visibility: hidden;
+  font-size: 13px;
+  line-height: 1.2;
+  min-height: 1.2em;
+  user-select: none;
+}
+
+.search-form label:not(.form-label-placeholder) {
   font-size: 13px;
   color: var(--text-2);
   font-weight: 500;
-}
-
-.action-section {
-  display: flex;
-  gap: 8px;
 }
 
 .list-section {
