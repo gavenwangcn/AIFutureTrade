@@ -5,10 +5,8 @@
 # 如果看到警告，可以安全地忽略或移除version字段
 # ==============================================================================
 # 环境变量配置：
-# 1. 所有配置已抽离到 .env 文件中，便于统一管理
-# 2. 首次使用前，请创建 .env 文件（参考 ENV_SETUP.md）
-# 3. Docker Compose 会自动读取 .env 文件中的环境变量
-# 4. 所有变量都有默认值，可以不设置 .env 文件（不推荐）
+# 1. 在项目根目录维护 .env（勿提交仓库）；Docker Compose 会自动加载该文件
+# 2. trade-monitor：可在 .env 覆盖 TRADE_MONITOR_BASE_URL / TRADE_MONITOR_URL；trade 与 model-look 对 BASE_URL 有默认 http://trade-monitor:5005
 # ==============================================================================
 # 使用说明：
 # 1. 启动MySQL服务：docker-compose -f docker-compose-mysql.yml up -d（必须先启动）
@@ -183,8 +181,8 @@ services:
       - ASYNC_AUTO_START_ENABLED=${ASYNC_AUTO_START_ENABLED:-true}
       - ASYNC_AUTO_START_TASK=${ASYNC_AUTO_START_TASK:-all}
       - ASYNC_AUTO_START_DELAY=${ASYNC_AUTO_START_DELAY:-3}
-      # 监控配置
-      - TRADE_MONITOR_URL=${TRADE_MONITOR_URL:-http://trade-monitor:5005}
+      # 监控配置（TRADE_MONITOR_URL 须在根目录 .env 中配置）
+      - TRADE_MONITOR_URL=${TRADE_MONITOR_URL}
       - ASYNC_MONITOR_TICKER_TIMEOUT=${ASYNC_MONITOR_TICKER_TIMEOUT:-3}
       - ASYNC_MONITOR_CHECK_INTERVAL=${ASYNC_MONITOR_CHECK_INTERVAL:-60}
       - ASYNC_SERVICE_CONTAINER_NAME=${ASYNC_SERVICE_CONTAINER_NAME:-aifuturetrade-async-service}
@@ -233,8 +231,8 @@ services:
       # Binance配置
       - BINANCE_API_KEY=${BINANCE_API_KEY}
       - BINANCE_SECRET_KEY=${BINANCE_API_SECRET}
-      # 盯盘/交易告警推送至 trade-monitor（Python 读 TRADE_MONITOR_BASE_URL；容器内服务名为 trade-monitor）
-      - TRADE_MONITOR_BASE_URL=${TRADE_MONITOR_BASE_URL:-http://127.0.0.1:5005}
+      # 盯盘/交易告警推送（Python TRADE_MONITOR_BASE_URL；未在 .env 设置时默认 trade-monitor:5005）
+      - TRADE_MONITOR_BASE_URL=${TRADE_MONITOR_BASE_URL:-http://trade-monitor:5005}
     restart: unless-stopped
     networks:
       - aifuturetrade-network
@@ -343,7 +341,8 @@ services:
       - MYSQL_DATABASE=${MYSQL_DATABASE:-aifuturetrade}
       - BINANCE_API_KEY=${BINANCE_API_KEY}
       - BINANCE_SECRET_KEY=${BINANCE_API_SECRET}
-      - TRADE_MONITOR_BASE_URL=${TRADE_MONITOR_BASE_URL:-http://156.254.6.224:5005}
+      # 与 trade 共用；未在 .env 设置时默认访问同 compose 栈内 trade-monitor:5005
+      - TRADE_MONITOR_BASE_URL=${TRADE_MONITOR_BASE_URL:-http://trade-monitor:5005}
     command: [ "python", "-m", "trade.start.start_market_look" ]
     networks:
       - aifuturetrade-network
