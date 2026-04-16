@@ -41,6 +41,18 @@
 
 成功响应含 **盯盘任务 `id`**（UUID）等（以实际响应为准）。
 
+## `trade_look_market_look_delete`（删除盯盘任务）
+
+按主键删除 `market_look` **一行**。与前端「盯盘详情」删除、后端 `DELETE /api/market-look/{id}` 一致。
+
+| 参数 | 必填 | 说明 |
+|------|------|------|
+| `id` | 是 | `market_look.id`（UUID） |
+
+**成功判定（重要）**：响应中 **`success=true` 且 `verifiedAbsent=true`** 表示服务端已执行删除并**再次查询主键确认行已不存在**（不仅依赖 DELETE 返回值）。不存在任务时 `success=false`（常见 HTTP 404）；删除后仍能查到会为错误态。
+
+**典型用途**：用户要求取消/清理某条盯盘任务、或模型在确认 id 后执行删除时使用；删除后该任务不再参与盯盘轮询。
+
 ## 查询类（创建后排查、列表）
 
 | 工具 | 用途 |
@@ -50,6 +62,7 @@
 | `trade_look_market_look_get_by_id` | 按盯盘任务 id 查单条 |
 | `trade_look_market_look_query_page` | 分页查任务，可按状态、symbol、`strategy_id`、时间范围 |
 | `trade_look_market_look_sql` | 受控只读 SQL，**必须**出现表名 `market_look`，仅 `SELECT` |
+| `trade_look_market_look_delete` | **删除**盯盘任务（必填 `id`）；成功以 `verifiedAbsent` 为准，见上节 |
 
 ## `trade_strategy_regenerate_code`（buy / sell / look 通用）
 
@@ -67,5 +80,5 @@
 
 ## 后端 REST 参考（便于理解，非 MCP 直连）
 
-- 盯盘任务：`/api/market-look`、分页、按 id  
+- 盯盘任务：`/api/market-look`、分页、`GET/DELETE /api/market-look/{id}`（删除成功体含 `verifiedAbsent`）  
 - 策略：`/api/strategies`、按 id、`POST /api/strategies/{id}/regenerate-code`、分页 `type=look`
