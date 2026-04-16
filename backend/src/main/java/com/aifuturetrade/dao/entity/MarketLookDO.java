@@ -59,6 +59,10 @@ public class MarketLookDO implements Serializable {
     @TableField("detail_summary")
     private String detailSummary;
 
+    /** 任务结束说明：非策略信号类原因（由盯盘引擎写入） */
+    @TableField("end_log")
+    private String endLog;
+
     @TableField("started_at")
     private LocalDateTime startedAt;
 

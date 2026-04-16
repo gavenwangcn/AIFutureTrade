@@ -14,6 +14,21 @@ logger = logging.getLogger(__name__)
 # 与 wechat_groups.alert_types 匹配：交易类盯盘通知
 ALERT_TYPE_TRADE = "TRADE_ALERT"
 
+# 日志中单条 message 最大字符数，避免刷屏
+_LOG_MESSAGE_MAX = 4000
+
+
+def _payload_preview_for_log(payload: Dict[str, Any]) -> str:
+    """生成可打印的 JSON 字符串；message 过长时截断并标注原长度。"""
+    try:
+        out = dict(payload)
+        msg = out.get("message")
+        if isinstance(msg, str) and len(msg) > _LOG_MESSAGE_MAX:
+            out["message"] = msg[:_LOG_MESSAGE_MAX] + f"...(truncated, total_len={len(msg)})"
+        return json.dumps(out, ensure_ascii=False, default=str)
+    except Exception:
+        return str(payload)
+
 
 def post_event_notify(
     title: str,
@@ -44,6 +59,15 @@ def post_event_notify(
         "message": message,
         "metadata": metadata or {},
     }
+    body_len = len(message) if isinstance(message, str) else 0
+    logger.info(
+        "[trade-monitor] 发送事件通知 -> 服务 aifuturetrade-trade-monitor (HTTP) | POST %s | "
+        "Content-Type=application/json | title=%s | message_len=%s | payload_json=%s",
+        url,
+        title,
+        body_len,
+        _payload_preview_for_log(payload),
+    )
     try:
         import urllib.request
         import urllib.error
@@ -58,7 +82,12 @@ def post_event_notify(
         with urllib.request.urlopen(req, timeout=15) as resp:
             body = resp.read().decode("utf-8", errors="replace")
             if resp.status >= 400:
-                logger.error("trade-monitor notify failed: %s %s", resp.status, body)
+                logger.error(
+                    "trade-monitor notify failed: status=%s url=%s body=%s",
+                    resp.status,
+                    url,
+                    body[:2000],
+                )
                 return False, None
             try:
                 j = json.loads(body)
@@ -70,9 +99,28 @@ def post_event_notify(
                         alert_id = int(raw_aid)
                     except (TypeError, ValueError):
                         pass
+                logger.info(
+                    "[trade-monitor] 事件通知响应 OK | url=%s | http_status=%s | success=%s | alertId=%s | response_body=%s",
+                    url,
+                    resp.status,
+                    ok,
+                    alert_id,
+                    body[:2000] + ("..." if len(body) > 2000 else ""),
+                )
                 return ok, alert_id
             except Exception:
+                logger.info(
+                    "[trade-monitor] 事件通知响应（JSON 解析跳过）| url=%s | http_status=%s | raw=%s",
+                    url,
+                    resp.status,
+                    body[:2000],
+                )
                 return True, None
     except Exception as e:
-        logger.error("post_event_notify failed: %s", e)
+        logger.error(
+            "post_event_notify failed: url=%s | error=%s",
+            url,
+            e,
+            exc_info=True,
+        )
         return False, None

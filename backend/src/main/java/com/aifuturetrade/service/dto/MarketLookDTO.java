@@ -41,6 +41,11 @@ public class MarketLookDTO implements Serializable {
     @JsonAlias({"detailSummary"})
     private String detailSummary;
 
+    /** 任务结束说明（非策略信号类：正常/异常/超时等） */
+    @JsonProperty("end_log")
+    @JsonAlias({"endLog"})
+    private String endLog;
+
     /** 执行开始时间（必填） */
     @JsonProperty("started_at")
     @JsonAlias({"startedAt"})

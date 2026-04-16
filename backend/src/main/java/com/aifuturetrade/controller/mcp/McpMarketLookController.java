@@ -27,7 +27,7 @@ public class McpMarketLookController {
     @Operation(
             summary = "受控 SELECT（必须包含 market_look）",
             description = "列与表 market_look 一致：id, symbol, strategy_id, strategy_name, execution_status, "
-                    + "signal_result, detail_summary, started_at, ended_at, created_at, updated_at")
+                    + "signal_result, detail_summary, end_log, started_at, ended_at, created_at, updated_at")
     public ResponseEntity<Map<String, Object>> sql(@RequestBody McpMarketLookSqlRequest req) {
         if (req == null) {
             Map<String, Object> bad = new HashMap<>();

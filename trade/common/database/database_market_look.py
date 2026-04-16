@@ -53,7 +53,7 @@ class MarketLookDatabase:
 
             sql = f"""
                 SELECT id, symbol, strategy_id, strategy_name, execution_status, signal_result,
-                       detail_summary, started_at, ended_at, created_at, updated_at
+                       detail_summary, end_log, started_at, ended_at, created_at, updated_at
                 FROM `{self.table}`
                 WHERE execution_status = %s
                 ORDER BY started_at ASC
@@ -75,7 +75,7 @@ class MarketLookDatabase:
 
             sql = f"""
                 SELECT id, symbol, strategy_id, strategy_name, execution_status, signal_result,
-                       detail_summary, started_at, ended_at, created_at, updated_at
+                       detail_summary, end_log, started_at, ended_at, created_at, updated_at
                 FROM `{self.table}`
                 WHERE execution_status = %s
                 ORDER BY updated_at ASC
@@ -84,6 +84,29 @@ class MarketLookDatabase:
             try:
                 cur.execute(sql, (EXECUTION_SENDING,))
                 return [dict(r) for r in cur.fetchall()]
+            finally:
+                cur.close()
+
+        return self._with_connection(_run)
+
+    def get_by_id(self, row_id: str) -> Optional[Dict]:
+        """按主键取单行（用于合并更新 signal_result 等）。"""
+
+        def _run(conn):
+            from pymysql import cursors
+
+            sql = f"""
+                SELECT id, symbol, strategy_id, strategy_name, execution_status, signal_result,
+                       detail_summary, end_log, started_at, ended_at, created_at, updated_at
+                FROM `{self.table}`
+                WHERE id = %s
+                LIMIT 1
+            """
+            cur = conn.cursor(cursors.DictCursor)
+            try:
+                cur.execute(sql, (row_id,))
+                r = cur.fetchone()
+                return dict(r) if r else None
             finally:
                 cur.close()
 
@@ -110,32 +133,37 @@ class MarketLookDatabase:
         row_id: str,
         status: str,
         ended_at: Optional[datetime] = None,
+        end_log: Optional[str] = None,
     ) -> None:
+        """更新执行状态；任务结束时可写入 end_log（非策略信号类结束说明）。"""
+
         def _run(conn):
+            sets = ["execution_status = %s"]
+            params: List[Any] = [status]
+
             if ended_at is not None:
-                sql = f"""
-                    UPDATE `{self.table}`
-                    SET execution_status = %s, ended_at = %s, updated_at = CURRENT_TIMESTAMP
-                    WHERE id = %s
-                """
-                params = (status, ended_at, row_id)
+                sets.append("ended_at = %s")
+                params.append(ended_at)
             elif status == EXECUTION_ENDED:
-                sql = f"""
-                    UPDATE `{self.table}`
-                    SET execution_status = %s, ended_at = NOW(), updated_at = CURRENT_TIMESTAMP
-                    WHERE id = %s
-                """
-                params = (status, row_id)
+                sets.append("ended_at = NOW()")
             else:
-                sql = f"""
-                    UPDATE `{self.table}`
-                    SET execution_status = %s, ended_at = %s, updated_at = CURRENT_TIMESTAMP
-                    WHERE id = %s
-                """
-                params = (status, ENDED_AT_NOT_FINISHED_PLACEHOLDER, row_id)
+                sets.append("ended_at = %s")
+                params.append(ENDED_AT_NOT_FINISHED_PLACEHOLDER)
+
+            if end_log is not None:
+                sets.append("end_log = %s")
+                params.append(end_log)
+
+            sets.append("updated_at = CURRENT_TIMESTAMP")
+            params.append(row_id)
+            sql = f"""
+                UPDATE `{self.table}`
+                SET {", ".join(sets)}
+                WHERE id = %s
+            """
             cur = conn.cursor()
             try:
-                cur.execute(sql, params)
+                cur.execute(sql, tuple(params))
                 conn.commit()
             finally:
                 cur.close()

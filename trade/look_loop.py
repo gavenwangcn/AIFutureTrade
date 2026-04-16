@@ -24,7 +24,9 @@ def market_look_loop(auto_run: bool, look_engine: LookEngine, db):
     while auto_run:
         try:
             rows = market_look_db.list_running()
-            logger.info("LOOK CYCLE: %s, running tasks=%s", _now_cn(), len(rows))
+            n = len(rows)
+            if n:
+                logger.info("LOOK CYCLE: %s, running tasks=%s", _now_cn(), n)
             for row in rows:
                 try:
                     look_engine.execute_look_row(row)

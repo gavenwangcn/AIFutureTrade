@@ -456,7 +456,14 @@ class LookEngine:
                     default=str,
                 ),
             )
-            self.market_look_db.update_status(row_id, EXECUTION_ENDED, ended_at=_now_shanghai_naive())
+            tn_ids = timeout_ids or []
+            end_msg = (
+                f"[超时结束] 当前时间已超过计划结束时间 ended_at，策略未返回 notify 信号。"
+                f" 已写入 trade_notify 超时说明；trade_notify_ids={tn_ids}。"
+            )
+            self.market_look_db.update_status(
+                row_id, EXECUTION_ENDED, ended_at=_now_shanghai_naive(), end_log=end_msg
+            )
             summary["execution_ended"] = "timeout"
         return summary
 
@@ -509,6 +516,7 @@ class LookEngine:
             "market_snapshot": snap,
             "kind": "look_notify_queued",
         }
+        alert_id_tm: Optional[int] = None
         if not base:
             logger.warning(
                 "TRADE_MONITOR_BASE_URL 未配置，跳过 HTTP 推送，仅落库 trade_notify (market_look=%s)",
@@ -516,7 +524,7 @@ class LookEngine:
             )
             ok = True
         else:
-            ok, _ = post_event_notify(title, message, metadata=extra)
+            ok, alert_id_tm = post_event_notify(title, message, metadata=extra)
         if not ok:
             return False
 
@@ -547,26 +555,55 @@ class LookEngine:
                 default=str,
             ),
         )
-        self.market_look_db.update_status(row_id, EXECUTION_ENDED, ended_at=_now_shanghai_naive())
+        if not base:
+            end_msg = (
+                f"[正常结束] 未配置 TRADE_MONITOR_BASE_URL，已跳过 trade-monitor HTTP；"
+                f"已落库 trade_notify id={nid}。"
+            )
+        else:
+            tm_part = (
+                f"trade-monitor 告警记录 alertId={alert_id_tm}" if alert_id_tm is not None else "trade-monitor 已接收"
+            )
+            end_msg = (
+                f"[正常结束] 已通过 trade-monitor 推送事件并落库 trade_notify。"
+                f" trade_notify.id={nid}；{tm_part}。"
+            )
+        self.market_look_db.update_status(
+            row_id, EXECUTION_ENDED, ended_at=_now_shanghai_naive(), end_log=end_msg
+        )
         return True
 
     def abandon_notify_queue(self, row_id: str, reason: str) -> None:
-        """重试用尽：结束任务并记录原因。"""
+        """重试用尽：结束任务并记录原因。写入 engine 子对象，保留已有 decisions 等策略输出。"""
+        row = self.market_look_db.get_by_id(str(row_id))
+        prev: Dict[str, Any] = {}
+        if row and row.get("signal_result"):
+            try:
+                raw = row["signal_result"]
+                parsed = json.loads(raw) if isinstance(raw, str) else raw
+                if isinstance(parsed, dict):
+                    prev = parsed
+            except Exception:
+                prev = {}
+        engine_block = {
+            "ts": _utc8_now_iso(),
+            "notify": False,
+            "notify_queue_aborted": True,
+            "reason": reason,
+            "execution_ended": reason,
+        }
+        merged = {**prev, "engine": engine_block}
         self.market_look_db.update_signal_result(
             row_id,
-            json.dumps(
-                {
-                    "ts": _utc8_now_iso(),
-                    "notify": False,
-                    "notify_queue_aborted": True,
-                    "reason": reason,
-                    "execution_ended": reason,
-                },
-                ensure_ascii=False,
-                default=str,
-            ),
+            json.dumps(merged, ensure_ascii=False, default=str),
         )
-        self.market_look_db.update_status(row_id, EXECUTION_ENDED, ended_at=_now_shanghai_naive())
+        end_msg = (
+            f"[异常结束] 异步通知 trade-monitor 重试耗尽，任务终止。"
+            f" reason={reason}（通常为推送失败或策略记录缺失）。"
+        )
+        self.market_look_db.update_status(
+            row_id, EXECUTION_ENDED, ended_at=_now_shanghai_naive(), end_log=end_msg
+        )
 
     def _emit_look_timeout_notify(
         self,

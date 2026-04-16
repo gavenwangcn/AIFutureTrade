@@ -599,8 +599,9 @@ class DatabaseInitializer:
             `strategy_id` VARCHAR(36) NOT NULL COMMENT 'strategys.id，type=look',
             `strategy_name` VARCHAR(200) DEFAULT NULL COMMENT '策略名称冗余',
             `execution_status` VARCHAR(20) NOT NULL DEFAULT 'RUNNING' COMMENT 'RUNNING=执行中, SENDING=通知异步发送中, ENDED=已结束',
-            `signal_result` TEXT COMMENT '最近一次信号/执行结果描述或JSON',
+            `signal_result` TEXT COMMENT 'JSON：策略输出见 decisions；引擎/通知链路状态见 engine（勿与纯策略信号混为一谈）',
             `detail_summary` VARCHAR(2000) DEFAULT NULL COMMENT '任务详情摘要（人工或业务填写）',
+            `end_log` TEXT DEFAULT NULL COMMENT '任务结束说明：非策略信号类原因（正常/异常/超时/推送失败等）',
             `started_at` DATETIME NOT NULL COMMENT '执行开始时间',
             `ended_at` DATETIME NOT NULL COMMENT '执行结束时间（RUNNING 未结束时为占位 2099-12-31 23:59:59）',
             `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -626,6 +627,22 @@ class DatabaseInitializer:
             code = getattr(e, "args", [None])[0]
             if "duplicate column" in msg or code == 1060 or "1060" in str(e):
                 logger.debug(f"[DatabaseInit] Column detail_summary already on {table_name}, skip")
+            else:
+                raise
+
+    def ensure_market_look_end_log_column(self, table_name: str = "market_look"):
+        """已有库补列：end_log（新建表已含此列，ALTER 重复时忽略）"""
+        try:
+            self.command(
+                f"ALTER TABLE `{table_name}` ADD COLUMN `end_log` TEXT DEFAULT NULL "
+                f"COMMENT '任务结束说明：非策略信号类原因（正常/异常/超时/推送失败等）' AFTER `detail_summary`"
+            )
+            logger.info(f"[DatabaseInit] Added column end_log to {table_name}")
+        except Exception as e:
+            msg = str(e).lower()
+            code = getattr(e, "args", [None])[0]
+            if "duplicate column" in msg or code == 1060 or "1060" in str(e):
+                logger.debug(f"[DatabaseInit] Column end_log already on {table_name}, skip")
             else:
                 raise
 
@@ -776,6 +793,7 @@ def init_database_tables(command_func: Callable[[str], Any], table_names: dict, 
     # Market look (盯盘任务)
     initializer.ensure_market_look_table(table_names.get('market_look_table', 'market_look'))
     initializer.ensure_market_look_detail_summary_column(table_names.get('market_look_table', 'market_look'))
+    initializer.ensure_market_look_end_log_column(table_names.get('market_look_table', 'market_look'))
 
     # 交易通知（独立于告警表 alert_records）
     initializer.ensure_trade_notify_table(table_names.get('trade_notify_table', 'trade_notify'))

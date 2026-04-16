@@ -30,7 +30,7 @@ services:
       dockerfile: Dockerfile
     container_name: ${BACKEND_CONTAINER_NAME:-aifuturetrade-backend}
     ports:
-      - "${BACKEND_PORT:-5002}:5002"  # 后端API端口，供前端调用
+      - "${BACKEND_PORT:-5002}:5002" # 后端API端口，供前端调用
     volumes:
       # 挂载Docker socket，允许backend容器访问宿主机Docker来查询其他容器日志
       - /var/run/docker.sock:/var/run/docker.sock:ro
@@ -60,16 +60,16 @@ services:
     # 注意：MySQL服务在docker-compose-mysql.yml中，需要先启动
     # 如果MySQL服务未启动，请先运行：docker-compose -f docker-compose-mysql.yml up -d
 
-  # ============================================================================
-  # Binance服务（Java Spring Boot Binance API微服务）
-  # ============================================================================
+    # ============================================================================
+    # Binance服务（Java Spring Boot Binance API微服务）
+    # ============================================================================
   binance-service:
     build:
       context: ./binance-service
       dockerfile: Dockerfile
     container_name: ${BINANCE_SERVICE_CONTAINER_NAME:-aifuturetrade-binance-service}
     ports:
-      - "${BINANCE_SERVICE_PORT:-5004}:5004"  # Binance服务端口
+      - "${BINANCE_SERVICE_PORT:-5004}:5004" # Binance服务端口
     environment:
       # Spring Profile配置（生产环境）
       - SPRING_PROFILES_ACTIVE=${SPRING_PROFILES_ACTIVE:-prod}
@@ -94,9 +94,9 @@ services:
     # 注意：MySQL服务在docker-compose-mysql.yml中，需要先启动
     # 如果MySQL服务未启动，请先运行：docker-compose -f docker-compose-mysql.yml up -d
 
-  # ============================================================================
-  # trade-mcp（Spring AI MCP Server：行情走 binance-service，账号/订单走 backend）
-  # ============================================================================
+    # ============================================================================
+    # trade-mcp（Spring AI MCP Server：行情走 binance-service，账号/订单走 backend）
+    # ============================================================================
   trade-mcp:
     build:
       context: ./trade-mcp
@@ -130,7 +130,7 @@ services:
       dockerfile: Dockerfile
     container_name: ${TRADE_MONITOR_CONTAINER_NAME:-aifuturetrade-trade-monitor}
     ports:
-      - "${TRADE_MONITOR_PORT:-5005}:5005"  # 监控服务端口
+      - "${TRADE_MONITOR_PORT:-5005}:5005" # 监控服务端口
     volumes:
       # 挂载Docker socket，允许trade-monitor容器管理其他容器
       - /var/run/docker.sock:/var/run/docker.sock
@@ -157,16 +157,16 @@ services:
     # 注意：MySQL服务在docker-compose-mysql.yml中，需要先启动
     # 如果MySQL服务未启动，请先运行：docker-compose -f docker-compose-mysql.yml up -d
 
-  # ============================================================================
-  # 异步服务（Java Spring Boot 异步服务 - 价格刷新、市场Ticker流等）
-  # ============================================================================
+    # ============================================================================
+    # 异步服务（Java Spring Boot 异步服务 - 价格刷新、市场Ticker流等）
+    # ============================================================================
   async-service:
     build:
       context: ./async-service
       dockerfile: Dockerfile
     container_name: ${ASYNC_SERVICE_CONTAINER_NAME:-aifuturetrade-async-service}
     ports:
-      - "${ASYNC_SERVICE_PORT:-5003}:5003"  # 异步服务端口
+      - "${ASYNC_SERVICE_PORT:-5003}:5003" # 异步服务端口
     environment:
       # Spring Profile配置（生产环境）
       - SPRING_PROFILES_ACTIVE=${SPRING_PROFILES_ACTIVE:-prod}
@@ -200,9 +200,9 @@ services:
     # 注意：MySQL服务在docker-compose-mysql.yml中，需要先启动
     # 如果MySQL服务未启动，请先运行：docker-compose -f docker-compose-mysql.yml up -d
 
-  # ============================================================================
-  # 交易服务（Python Flask Trading Service）
-  # ============================================================================
+    # ============================================================================
+    # 交易服务（Python Flask Trading Service）
+    # ============================================================================
   trade:
     build:
       context: .
@@ -212,7 +212,7 @@ services:
         PIP_INDEX_URL: ${PIP_INDEX_URL:-https://pypi.tuna.tsinghua.edu.cn/simple}
     container_name: ${TRADE_CONTAINER_NAME:-aifuturetrade-trade}
     ports:
-      - "${TRADE_PORT:-5000}:5000"  # 交易服务端口
+      - "${TRADE_PORT:-5000}:5000" # 交易服务端口
     environment:
       # 基础配置
       - USE_GUNICORN=${USE_GUNICORN:-true}
@@ -233,9 +233,13 @@ services:
       # Binance配置
       - BINANCE_API_KEY=${BINANCE_API_KEY}
       - BINANCE_SECRET_KEY=${BINANCE_API_SECRET}
+      # 盯盘/交易告警推送至 trade-monitor（Python 读 TRADE_MONITOR_BASE_URL；容器内服务名为 trade-monitor）
+      - TRADE_MONITOR_BASE_URL=${TRADE_MONITOR_BASE_URL:-http://127.0.0.1:5005}
     restart: unless-stopped
     networks:
       - aifuturetrade-network
+    depends_on:
+      - trade-monitor
 
   # ============================================================================
   # 模型买入服务镜像（仅构建，不自动启动）
@@ -256,7 +260,7 @@ services:
       args:
         PYTHON_IMAGE: ${PYTHON_IMAGE:-python:3.11-slim}
         PIP_INDEX_URL: ${PIP_INDEX_URL:-https://pypi.tuna.tsinghua.edu.cn/simple}
-    image: aifuturetrade-model-buy:latest  # 明确指定镜像名称，与后端配置一致
+    image: aifuturetrade-model-buy:latest # 明确指定镜像名称，与后端配置一致
     # 不设置 container_name，因为容器由 Java Backend 动态创建
     # 不设置 ports，因为容器由 Java Backend 动态创建时指定
     # 不设置 restart，确保容器不会自动重启
@@ -273,7 +277,7 @@ services:
       - BINANCE_API_KEY=${BINANCE_API_KEY}
       - BINANCE_SECRET_KEY=${BINANCE_API_SECRET}
     # 覆盖 CMD，使用 model_start_buy.py 启动
-    command: ["python", "-m", "trade.start.model_start_buy"]
+    command: [ "python", "-m", "trade.start.model_start_buy" ]
     networks:
       - aifuturetrade-network
 
@@ -296,7 +300,7 @@ services:
       args:
         PYTHON_IMAGE: ${PYTHON_IMAGE:-python:3.11-slim}
         PIP_INDEX_URL: ${PIP_INDEX_URL:-https://pypi.tuna.tsinghua.edu.cn/simple}
-    image: aifuturetrade-model-sell:latest  # 明确指定镜像名称，与后端配置一致
+    image: aifuturetrade-model-sell:latest # 明确指定镜像名称，与后端配置一致
     # 不设置 container_name，因为容器由 Java Backend 动态创建
     # 不设置 ports，因为容器由 Java Backend 动态创建时指定
     # 不设置 restart，确保容器不会自动重启
@@ -313,7 +317,7 @@ services:
       - BINANCE_API_KEY=${BINANCE_API_KEY}
       - BINANCE_SECRET_KEY=${BINANCE_API_SECRET}
     # 覆盖 CMD，使用 model_start_sell.py 启动
-    command: ["python", "-m", "trade.start.model_start_sell"]
+    command: [ "python", "-m", "trade.start.model_start_sell" ]
     networks:
       - aifuturetrade-network
 
@@ -339,7 +343,8 @@ services:
       - MYSQL_DATABASE=${MYSQL_DATABASE:-aifuturetrade}
       - BINANCE_API_KEY=${BINANCE_API_KEY}
       - BINANCE_SECRET_KEY=${BINANCE_API_SECRET}
-    command: ["python", "-m", "trade.start.start_market_look"]
+      - TRADE_MONITOR_BASE_URL=${TRADE_MONITOR_BASE_URL:-http://trade-monitor:5005}
+    command: [ "python", "-m", "trade.start.start_market_look" ]
     networks:
       - aifuturetrade-network
 
@@ -360,7 +365,7 @@ services:
         NPM_REGISTRY: ${NPM_REGISTRY:-https://registry.npmmirror.com}
     container_name: ${FRONTEND_CONTAINER_NAME:-aifuturetrade-frontend}
     ports:
-      - "${FRONTEND_PORT:-3000}:3000"  # 前端服务端口
+      - "${FRONTEND_PORT:-3000}:3000" # 前端服务端口
     environment:
       - BACKEND_URL=${BACKEND_URL:-http://backend:5002}
       - FRONTEND_PORT=${FRONTEND_PORT:-3000}

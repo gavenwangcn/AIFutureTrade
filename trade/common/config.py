@@ -120,7 +120,11 @@ BINANCE_SERVICE_DEFAULT_TIMEOUT = 30
 LOG_LEVEL = 'INFO'  # Optional values: DEBUG, INFO, WARNING, ERROR, CRITICAL
 
 # ============ Trade Monitor (告警 / 企微) ============
-# trade-monitor 服务，用于写入 alert_records 并推送企微（见 /api/events/notify）
+# Python（trade 容器 / 本机）调用 trade-monitor 的基址，实际请求：{TRADE_MONITOR_BASE_URL}/api/events/notify
+# 配置方式（任选其一）：
+#   - 环境变量 TRADE_MONITOR_BASE_URL（推荐部署时设置）
+#   - docker-compose：见 trade 服务的 environment 中 TRADE_MONITOR_BASE_URL（与 aifuturetrade-trade-monitor 同网络时用 http://trade-monitor:5005）
+#   - 未设置时默认本机 127.0.0.1:5005（仅适用于 trade 与 trade-monitor 同主机且端口映射为 5005）
 TRADE_MONITOR_BASE_URL = os.getenv('TRADE_MONITOR_BASE_URL', 'http://127.0.0.1:5005')
 
 # ============ Market look loop ============

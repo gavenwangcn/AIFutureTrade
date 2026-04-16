@@ -63,10 +63,13 @@ wechat:
   webhook-url: ${WECHAT_WEBHOOK_URL:https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=9f081d45-efc0-421d-ae22-343141e61eff}
 
 # 日志配置
+# 盯盘推送排查：POST /api/events/notify 入站见 EventNotifyInboundLoggingFilter 与 EventController 的 [trade-monitor][EventNotify] 前缀
 logging:
   level:
     root: INFO
-    com.aifuturetrade.trademonitor: DEBUG
-    com.baomidou.mybatisplus: DEBUG
+    com.aifuturetrade.trademonitor: INFO
+    com.aifuturetrade.trademonitor.web.EventNotifyInboundLoggingFilter: INFO
+    com.aifuturetrade.trademonitor.controller.EventController: INFO
+    com.baomidou.mybatisplus: WARN
   pattern:
     console: "%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{50} - %msg%n"
