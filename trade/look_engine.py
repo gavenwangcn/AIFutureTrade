@@ -14,6 +14,7 @@ from zoneinfo import ZoneInfo
 import numpy as np
 
 import trade.common.config as app_config
+from trade.common.wechat_markdown_limit import MAX_MARKDOWN_CHARS as _WECHAT_MD_MAX
 from trade.common.database.database_market_look import (
     EXECUTION_ENDED,
     EXECUTION_SENDING,
@@ -29,6 +30,18 @@ from trade.strategy.strategy_trader import StrategyTrader
 logger = logging.getLogger(__name__)
 
 _TZ_SHANGHAI = ZoneInfo("Asia/Shanghai")
+
+
+def _truncate_json_for_notify_line(obj: Any) -> str:
+    """单行 market_date JSON，避免过大；整段 message 仍由 trade_monitor_client 按 4096 兜底。"""
+    try:
+        raw = json.dumps(obj, ensure_ascii=False, default=str)
+    except Exception:
+        raw = str(obj)
+    cap = min(3500, max(512, _WECHAT_MD_MAX - 400))
+    if len(raw) <= cap:
+        return raw
+    return raw[:cap] + f"...(truncated, total_len={len(raw)})"
 
 
 def _now_shanghai_naive() -> datetime:
@@ -295,12 +308,17 @@ def build_single_symbol_market_state(
     return market_state
 
 
-# 从行情截取进快照时最多保留根数（时间升序，取末尾为最新）；需 ≥ 下面两个常量
-LOOK_NOTIFY_KLINE_BARS = 3
-# 策略周期匹配成功：通知里该周期近 N 根
-LOOK_NOTIFY_KLINE_BARS_FOCUSED = 3
-# 未匹配到周期（全量 interval）：每个周期近 N 根
-LOOK_NOTIFY_KLINE_BARS_ALL_INTERVALS = 2
+# 盯盘通知用快照仅包含以下周期（与全量行情 8 周期解耦，减小 metadata / 合并后体积）
+_NOTIFY_SNAPSHOT_TIMEFRAMES: Tuple[str, ...] = ("5m", "15m", "30m", "1h")
+# 正文 filter：匹配不到时，群消息仅用以下周期各 1 根 K（不含 30m）
+_NOTIFY_MSG_INTERVALS_UNMATCHED: Tuple[str, ...] = ("5m", "15m", "1h")
+
+# 企微/正文用快照（snap）：每周期只取最近 N 根 K（当前为 1，减小 message 体积）
+LOOK_NOTIFY_KLINE_BARS_MESSAGE = 1
+# trade_notify 入库全量快照（snap_full）：每周期最近 N 根（保留多根便于复盘）
+LOOK_NOTIFY_KLINE_BARS_STORAGE = 3
+# 正文 filter 后再确保每周期至多 N 根（当前与 MESSAGE 均为 1）
+LOOK_NOTIFY_KLINE_BARS_ALL_INTERVALS = 1
 
 # 策略在 notify 信号里声明周期时使用的字段名（与行情 timeframes 的 key 语义一致，如 "5m"）
 # Prompt 建议写在 key_date（如 pattern + timeframe）；顶层 / market_date 仍兼容。
@@ -438,7 +456,7 @@ def _notify_indicators_drop_adx_vol(raw: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def _trim_kline_bar_for_notify(bar: Dict[str, Any]) -> Dict[str, Any]:
-    """单根 K 线：时间、open（不再带 high/low/close/volume）、indicators（不含 adx/vol 块）。"""
+    """单根 K 线（企微/正文）：时间、open、indicators（不含 adx/vol）；不含 high/low/close/volume 以缩小体积。"""
     if not isinstance(bar, dict):
         return {}
     t = bar.get("time")
@@ -453,12 +471,26 @@ def _trim_kline_bar_for_notify(bar: Dict[str, Any]) -> Dict[str, Any]:
     return out
 
 
-def trim_market_snapshot_for_notify(market_state: Dict, symbol_key: str) -> Dict:
+def _kline_bar_for_storage(bar: Dict[str, Any]) -> Dict[str, Any]:
+    """单根 K 线（trade_notify 落库）：保留行情侧完整字段（开高低收、量、时间戳及 indicators 等）。"""
+    if not isinstance(bar, dict):
+        return {}
+    return copy.deepcopy(bar)
+
+
+def _trim_market_snapshot(
+    market_state: Dict,
+    symbol_key: str,
+    *,
+    only_intervals: Optional[Tuple[str, ...]],
+    full_kline_bars: bool = False,
+) -> Dict:
     """
-    构造盯盘通知用的「整包」快照基座（入队、超时通知、metadata）：
-    - 顶层：price、contract_symbol；
-    - indicators.timeframes[周期]：近 LOOK_NOTIFY_KLINE_BARS 根 K，每根 time + open + indicators（不含 adx/vol 块）。
-    列表时间升序时取末尾为最新。
+    构造盯盘用快照基座。
+    - only_intervals 为 None：保留行情中的全部周期（落 trade_notify / 队列入库）。
+    - only_intervals 为 _NOTIFY_SNAPSHOT_TIMEFRAMES：仅 5m/15m/30m/1h（企微正文与 filter 输入）。
+    - full_kline_bars=True：每周期最多 LOOK_NOTIFY_KLINE_BARS_STORAGE 根，深拷贝原 bar（含 OHLCV）。
+    - full_kline_bars=False：每周期最多 LOOK_NOTIFY_KLINE_BARS_MESSAGE 根，精简条（仅正文）。
     """
     sym_u = symbol_key.strip().upper()
     payload = market_state.get(sym_u) or market_state.get(symbol_key) or {}
@@ -471,21 +503,73 @@ def trim_market_snapshot_for_notify(market_state: Dict, symbol_key: str) -> Dict
     ind = payload.get("indicators") or {}
     tf = (ind.get("timeframes") or {}) if isinstance(ind, dict) else {}
     trimmed_tf: Dict[str, Any] = {}
-    if isinstance(tf, dict):
+    if not isinstance(tf, dict):
+        out["indicators"] = {"timeframes": trimmed_tf}
+        return out
+
+    kline_fn = _kline_bar_for_storage if full_kline_bars else _trim_kline_bar_for_notify
+    max_klines = LOOK_NOTIFY_KLINE_BARS_STORAGE if full_kline_bars else LOOK_NOTIFY_KLINE_BARS_MESSAGE
+
+    def _one_interval(interval: str, block: Dict[str, Any], omit_empty: bool) -> None:
+        kl = block.get("klines") or []
+        if not isinstance(kl, list) or not kl:
+            if not omit_empty:
+                trimmed_tf[interval] = {"klines": []}
+            return
+        n = min(max_klines, len(kl))
+        tail = kl[-n:]
+        trimmed_tf[interval] = {"klines": [kline_fn(b) for b in tail if isinstance(b, dict)]}
+
+    if only_intervals is None:
         for interval, block in tf.items():
             if not isinstance(block, dict):
                 continue
-            kl = block.get("klines") or []
-            if not isinstance(kl, list) or not kl:
-                trimmed_tf[interval] = {"klines": []}
+            _one_interval(str(interval), block, omit_empty=False)
+    else:
+        for interval in only_intervals:
+            block = tf.get(interval)
+            if not isinstance(block, dict):
                 continue
-            n = min(LOOK_NOTIFY_KLINE_BARS, len(kl))
-            tail = kl[-n:]
-            trimmed_tf[interval] = {
-                "klines": [_trim_kline_bar_for_notify(b) for b in tail if isinstance(b, dict)]
-            }
+            _one_interval(interval, block, omit_empty=True)
+
     out["indicators"] = {"timeframes": trimmed_tf}
     return out
+
+
+def trim_market_snapshot_full_for_storage(market_state: Dict, symbol_key: str) -> Dict:
+    """trade_notify.extra / signal_result / 队列 snap_full：全周期；每周期最近 LOOK_NOTIFY_KLINE_BARS_STORAGE 根完整 K。"""
+    return _trim_market_snapshot(
+        market_state, symbol_key, only_intervals=None, full_kline_bars=True
+    )
+
+
+def trim_market_snapshot_for_message(market_state: Dict, symbol_key: str) -> Dict:
+    """企微群消息正文与 filter_notify 输入：仅 5m / 15m / 30m / 1h；每周期最近 LOOK_NOTIFY_KLINE_BARS_MESSAGE 根 K。"""
+    return _trim_market_snapshot(market_state, symbol_key, only_intervals=_NOTIFY_SNAPSHOT_TIMEFRAMES)
+
+
+def trim_market_snapshot_for_notify(market_state: Dict, symbol_key: str) -> Dict:
+    """兼容旧名，等同 trim_market_snapshot_for_message。"""
+    return trim_market_snapshot_for_message(market_state, symbol_key)
+
+
+def _subset_snap_timeframes(
+    base_snap: Dict[str, Any], interval_keys: Tuple[str, ...]
+) -> Dict[str, Any]:
+    """从正文基座快照中只保留指定周期键（顺序与 interval_keys 一致），其余顶层字段保留。"""
+    if not isinstance(base_snap, dict):
+        return {}
+    tf = ((base_snap.get("indicators") or {}).get("timeframes")) or {}
+    trimmed: Dict[str, Any] = {}
+    if isinstance(tf, dict):
+        for k in interval_keys:
+            if k in tf:
+                trimmed[k] = tf[k]
+    return {
+        "price": base_snap.get("price"),
+        "contract_symbol": base_snap.get("contract_symbol"),
+        "indicators": {"timeframes": trimmed},
+    }
 
 
 def _snap_limit_klines_per_timeframe(snap: Dict[str, Any], max_bars: int) -> Dict[str, Any]:
@@ -509,8 +593,10 @@ def _snap_limit_klines_per_timeframe(snap: Dict[str, Any], max_bars: int) -> Dic
 
 def filter_notify_snapshot_for_decision(base_snap: Dict[str, Any], dec: Dict[str, Any]) -> Dict[str, Any]:
     """
-    若策略声明的周期能匹配到快照中的 timeframe，则只保留该周期，且 K 线取近 LOOK_NOTIFY_KLINE_BARS_FOCUSED 根；
-    匹配不到则保留全量周期，每周期取近 LOOK_NOTIFY_KLINE_BARS_ALL_INTERVALS 根。
+    企微正文用快照子集（基座已为每周期 1 根精简 K：time + open + indicators）：
+
+    - 策略声明的周期**能**在基座快照中匹配到：正文**只保留该 interval**，最近 **1** 根 K；
+    - **匹配不到**：正文保留 **5m / 15m / 1h** 各 1 根。
     """
     if not isinstance(base_snap, dict):
         return {}
@@ -519,18 +605,20 @@ def filter_notify_snapshot_for_decision(base_snap: Dict[str, Any], dec: Dict[str
         return dict(base_snap)
     raw_focus = interval_from_strategy_notify_signal(dec)
     key = _resolve_timeframe_in_map(raw_focus, tf) if raw_focus else None
-    if not key:
-        return _snap_limit_klines_per_timeframe(base_snap, LOOK_NOTIFY_KLINE_BARS_ALL_INTERVALS)
-    block = tf.get(key)
-    if not isinstance(block, dict):
-        return _snap_limit_klines_per_timeframe(base_snap, LOOK_NOTIFY_KLINE_BARS_ALL_INTERVALS)
-    focused = {
-        "price": base_snap.get("price"),
-        "contract_symbol": base_snap.get("contract_symbol"),
-        "indicators": {"timeframes": {key: block}},
-        "focus_interval": key,
-    }
-    return _snap_limit_klines_per_timeframe(focused, LOOK_NOTIFY_KLINE_BARS_FOCUSED)
+    if key:
+        block = tf.get(key)
+        if isinstance(block, dict):
+            out: Dict[str, Any] = {
+                "price": base_snap.get("price"),
+                "contract_symbol": base_snap.get("contract_symbol"),
+                "indicators": {"timeframes": {key: block}},
+                "focus_interval": key,
+            }
+        else:
+            out = _subset_snap_timeframes(base_snap, _NOTIFY_MSG_INTERVALS_UNMATCHED)
+    else:
+        out = _subset_snap_timeframes(base_snap, _NOTIFY_MSG_INTERVALS_UNMATCHED)
+    return _snap_limit_klines_per_timeframe(out, LOOK_NOTIFY_KLINE_BARS_ALL_INTERVALS)
 
 
 def _merge_indicators_preserve_timeframes(base_i: Any, strat_i: Any) -> Any:
@@ -648,11 +736,13 @@ class LookEngine:
         notify_payloads = self._extract_notify_decisions(decisions, sym_key)
 
         if notify_payloads:
-            snap = trim_market_snapshot_for_notify(market_state, sym_key)
+            snap_message = trim_market_snapshot_for_message(market_state, sym_key)
+            snap_full = trim_market_snapshot_full_for_storage(market_state, sym_key)
             queue_payload = {
                 "strategy_id": strategy_id,
                 "sym_key": sym_key,
-                "snap": snap,
+                "snap": snap_message,
+                "snap_full": snap_full,
                 "decisions": decisions,
                 "notify_payloads": notify_payloads,
             }
@@ -736,6 +826,7 @@ class LookEngine:
             return False
         sym_key = queue_payload.get("sym_key") or ""
         snap = queue_payload.get("snap") or {}
+        snap_full = queue_payload.get("snap_full") or snap
         notify_payloads = queue_payload.get("notify_payloads") or []
         decisions = queue_payload.get("decisions") or {}
         parts: List[str] = []
@@ -743,6 +834,7 @@ class LookEngine:
             if not isinstance(dec, dict):
                 continue
             dec_copy = dict(dec)
+            # 正文与企微仅基于 5m/15m/30m/1h 快照
             filtered = filter_notify_snapshot_for_decision(snap, dec_copy)
             dec_copy["market_date"] = merge_market_date_for_notify_message(filtered, dec_copy)
             body_lines = [
@@ -753,7 +845,7 @@ class LookEngine:
                 f"合约: {dec_copy.get('symbol') or sym_key}",
                 f"价格: {dec_copy.get('price')}",
                 f"说明: {dec_copy.get('justification')}",
-                f"market_date: {json.dumps(dec_copy.get('market_date'), ensure_ascii=False, default=str)[:32000]}",
+                f"market_date: {_truncate_json_for_notify_line(dec_copy.get('market_date'))}",
             ]
             parts.append("\n".join(body_lines))
         if not parts:
@@ -767,9 +859,25 @@ class LookEngine:
             "strategy_id": strategy_id,
             "symbol": sym_key,
             "notify_payloads": notify_payloads,
-            "market_snapshot": snap,
+            "market_snapshot": snap_full,
             "kind": "look_notify_queued",
         }
+        try:
+            snap_msg_json = json.dumps(snap, ensure_ascii=False, default=str)
+            snap_full_json = json.dumps(snap_full, ensure_ascii=False, default=str)
+            extra_json = json.dumps(extra, ensure_ascii=False, default=str)
+            logger.info(
+                "[look notify] 体积: 群消息用快照(4周期) JSON %s 字符 | 落库全量快照 JSON %s 字符 | "
+                "metadata(extra) JSON %s 字符 | message 正文 %s 字符 | title %s 字符",
+                len(snap_msg_json),
+                len(snap_full_json),
+                len(extra_json),
+                len(message),
+                len(title),
+            )
+        except Exception as sz_err:
+            logger.debug("look notify size log skipped: %s", sz_err)
+
         alert_id_tm: Optional[int] = None
         if not base:
             logger.warning(
@@ -798,7 +906,7 @@ class LookEngine:
                     "ts": _utc8_now_iso(),
                     "notify": True,
                     "decisions": decisions,
-                    "snapshot_trimmed": snap,
+                    "market_snapshot": snap_full,
                     "market_look_id": row_id,
                     "strategy_id": strategy_id,
                     "trade_notify_ids": [nid],
@@ -870,7 +978,7 @@ class LookEngine:
         """已超过 ended_at 时落库一条超时说明（trade_notify），返回 id 列表。"""
         row_id = row.get("id")
         strategy_id = row.get("strategy_id")
-        snap = trim_market_snapshot_for_notify(market_state, sym_key)
+        snap = trim_market_snapshot_full_for_storage(market_state, sym_key)
         deadline = _parse_row_ended_at(row)
         now_s = _now_shanghai_naive()
         title = f"盯盘超时 [{sym_key}] {strategy.get('strategy_name') or ''}".strip()

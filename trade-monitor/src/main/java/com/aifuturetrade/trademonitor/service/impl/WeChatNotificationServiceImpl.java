@@ -3,6 +3,7 @@ package com.aifuturetrade.trademonitor.service.impl;
 import com.aifuturetrade.trademonitor.dao.mapper.WeChatGroupMapper;
 import com.aifuturetrade.trademonitor.entity.WeChatGroupDO;
 import com.aifuturetrade.trademonitor.service.WeChatNotificationService;
+import com.aifuturetrade.trademonitor.util.WeChatMarkdownLimiter;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -75,8 +76,8 @@ public class WeChatNotificationServiceImpl implements WeChatNotificationService 
      */
     private boolean sendToWebhook(String webhookUrl, String title, String message) {
         try {
-            // 构造Markdown格式消息
-            String content = buildMarkdownContent(title, message);
+            // 构造Markdown格式消息（企微 markdown.content 上限 4096）
+            String content = WeChatMarkdownLimiter.clamp(buildMarkdownContent(title, message));
 
             Map<String, Object> requestBody = new HashMap<>();
             requestBody.put("msgtype", "markdown");

@@ -8,6 +8,7 @@ import logging
 from typing import Any, Dict, Optional, Tuple
 
 import trade.common.config as app_config
+from trade.common.wechat_markdown_limit import clamp_notify_title_and_message_for_wechat
 
 logger = logging.getLogger(__name__)
 
@@ -50,6 +51,7 @@ def post_event_notify(
     if not base:
         logger.warning("TRADE_MONITOR_BASE_URL 未配置，跳过告警推送")
         return False, None
+    title, message = clamp_notify_title_and_message_for_wechat(title, message)
     url = f"{base}/api/events/notify"
     payload = {
         "eventType": event_type,
