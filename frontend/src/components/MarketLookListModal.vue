@@ -296,15 +296,18 @@ watch(
   max-width: 200px;
 }
 
+/* 摘要关键字：固定窄宽度，避免在 extraLarge 弹窗里被拉成整行 */
 .form-group--summary {
-  flex: 0 1 auto;
-  width: 260px;
-  max-width: min(320px, 100%);
+  flex: 0 0 auto;
+  width: 200px;
+  max-width: min(200px, calc(100vw - 120px));
 }
 
 .form-group--summary .form-input {
   width: 100%;
+  max-width: 200px;
   min-width: 0;
+  box-sizing: border-box;
 }
 
 .form-group--search-btns .btn-row {
