@@ -50,6 +50,26 @@
             <i class="bi bi-list-ul"></i>
             盯盘列表
           </button>
+          <button
+            class="btn-secondary"
+            type="button"
+            title="启动盯盘循环容器 aifuturetrade-model-look-1（后端 Docker API；与 compose 二选一部署）"
+            :disabled="isExecutingMarketLook || isStoppingMarketLook"
+            @click="handleExecuteMarketLook"
+          >
+            <i class="bi bi-play-circle" :class="{ spin: isExecutingMarketLook }"></i>
+            {{ isExecutingMarketLook ? '启动中...' : '执行盯盘' }}
+          </button>
+          <button
+            class="btn-secondary"
+            type="button"
+            title="停止并删除盯盘容器 aifuturetrade-model-look-1"
+            :disabled="isExecutingMarketLook || isStoppingMarketLook"
+            @click="handleStopMarketLookConfirm"
+          >
+            <i class="bi bi-stop-circle" :class="{ spin: isStoppingMarketLook }"></i>
+            {{ isStoppingMarketLook ? '关闭中...' : '关闭盯盘' }}
+          </button>
           <button 
             class="btn-secondary" 
             @click="handleExecuteBuy" 
@@ -1415,8 +1435,12 @@ const {
   handleDisableSell,
   isExecutingBuy,
   isExecutingSell,
+  isExecutingMarketLook,
+  isStoppingMarketLook,
   isDisablingBuy,
   isDisablingSell,
+  handleExecuteMarketLook,
+  handleStopMarketLook,
   loadGainers,
   loadLosers,
   selectModel,
@@ -1451,6 +1475,18 @@ const {
   isSellingPosition,
   handleSellPosition
 } = useTradingApp()
+
+/** 关闭盯盘前确认（固定容器 aifuturetrade-model-look-1） */
+function handleStopMarketLookConfirm() {
+  if (
+    !window.confirm(
+      '确定关闭盯盘并删除 Docker 容器 aifuturetrade-model-look-1？\n若由 docker compose 管理该容器，请优先使用 compose stop/rm。'
+    )
+  ) {
+    return
+  }
+  handleStopMarketLook()
+}
 
 const showMarketLookListModal = ref(false)
 const marketLookPanelRef = ref(null)
