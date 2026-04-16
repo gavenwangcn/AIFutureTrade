@@ -2,6 +2,7 @@ package com.aifuturetrade.controller;
 
 import com.aifuturetrade.common.util.PageRequest;
 import com.aifuturetrade.common.util.PageResult;
+import com.aifuturetrade.service.MarketLookDeleteOutcome;
 import com.aifuturetrade.service.MarketLookService;
 import com.aifuturetrade.service.dto.MarketLookDTO;
 import io.swagger.v3.oas.annotations.Operation;
@@ -180,12 +181,29 @@ public class MarketLookController {
     }
 
     @DeleteMapping("/{id}")
-    @Operation(summary = "删除盯盘任务")
+    @Operation(summary = "删除盯盘任务", description = "成功时 success=true 且 verifiedAbsent=true，表示 DELETE 后再次查询主键确认行已不存在")
     public ResponseEntity<Map<String, Object>> delete(@PathVariable("id") String id) {
-        boolean ok = marketLookService.delete(id);
+        MarketLookDeleteOutcome outcome = marketLookService.delete(id);
         Map<String, Object> res = new HashMap<>();
-        res.put("success", ok);
-        res.put("message", ok ? "deleted" : "not found");
-        return ok ? ResponseEntity.ok(res) : ResponseEntity.status(HttpStatus.NOT_FOUND).body(res);
+        res.put("id", id);
+        res.put("verifiedAbsent", outcome == MarketLookDeleteOutcome.VERIFIED_REMOVED);
+        if (outcome == MarketLookDeleteOutcome.VERIFIED_REMOVED) {
+            res.put("success", true);
+            res.put("message", "deleted");
+            return ResponseEntity.ok(res);
+        }
+        if (outcome == MarketLookDeleteOutcome.NOT_FOUND) {
+            res.put("success", false);
+            res.put("message", "not found");
+            return ResponseEntity.status(HttpStatus.NOT_FOUND).body(res);
+        }
+        if (outcome == MarketLookDeleteOutcome.NO_ROWS_DELETED) {
+            res.put("success", false);
+            res.put("message", "delete affected zero rows");
+            return ResponseEntity.status(HttpStatus.CONFLICT).body(res);
+        }
+        res.put("success", false);
+        res.put("message", "delete executed but row still exists (verification failed)");
+        return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(res);
     }
 }

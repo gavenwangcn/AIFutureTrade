@@ -37,11 +37,12 @@
             <th>结束时间</th>
             <th>执行进度</th>
             <th>详情摘要</th>
+            <th class="col-actions">操作</th>
           </tr>
         </thead>
         <tbody>
           <tr v-if="loading && rows.length === 0" class="loading-row">
-            <td colspan="9" class="loading-cell">
+            <td colspan="10" class="loading-cell">
               <i class="bi bi-arrow-repeat spin"></i>
               <span>加载中…</span>
             </td>
@@ -73,9 +74,20 @@
               </div>
             </td>
             <td class="cell-detail" :title="detailSummaryRaw(row) || undefined">{{ detailSummaryDisplay(row) }}</td>
+            <td class="cell-actions" @click.stop>
+              <button
+                type="button"
+                class="btn-delete-row"
+                :disabled="deletingId === row.id"
+                title="删除该盯盘任务"
+                @click="handleDeleteMarketLook(row, $event)"
+              >
+                {{ deletingId === row.id ? '删除中…' : '删除' }}
+              </button>
+            </td>
           </tr>
           <tr v-if="!loading && rows.length === 0">
-            <td colspan="9" class="empty-cell">暂无执行中或发送中的盯盘任务</td>
+            <td colspan="10" class="empty-cell">暂无执行中或发送中的盯盘任务</td>
           </tr>
         </tbody>
       </table>
@@ -86,12 +98,20 @@
       title="盯盘任务详情"
       :subtitle="signalModalSubtitle"
       :extra-large="true"
+      width="50vw"
+      height="50vh"
       @update:visible="signalModalVisible = $event"
       @close="closeSignalModal"
     >
       <div v-if="signalDetailRow" class="signal-modal-body">
         <section class="detail-section detail-section--strategy">
           <h4 class="section-label">关联策略</h4>
+          <dl class="strategy-meta strategy-meta--task">
+            <div class="meta-row">
+              <dt>策略名称</dt>
+              <dd>{{ taskStrategyNameDisplay }}</dd>
+            </div>
+          </dl>
           <p class="section-hint muted strategy-code-hint">
             此处仅展示任务关联的策略摘要；完整 Python 策略代码请在「策略管理」中打开对应策略查看，避免在盯盘任务详情中铺满代码。
           </p>
@@ -129,7 +149,7 @@
         <div class="detail-divider" role="separator" aria-hidden="true" />
 
         <section class="detail-section detail-section--signal">
-          <h4 class="section-label">信号结果</h4>
+          <h4 class="section-label">运行结果 run_log</h4>
           <pre class="signal-pre">{{
             formatSignal(signalDetailRow.signal_result ?? signalDetailRow.signalResult)
           }}</pre>
@@ -182,6 +202,8 @@ const nowTick = ref(Date.now())
 
 const signalModalVisible = ref(false)
 const signalDetailRow = ref(null)
+/** 正在删除的 market_look.id，用于按钮禁用 */
+const deletingId = ref(null)
 const strategyDetail = ref(null)
 const strategyLoading = ref(false)
 const strategyFetchError = ref('')
@@ -191,6 +213,14 @@ const signalModalSubtitle = computed(() => {
   if (!r) return ''
   const sym = r.symbol || '—'
   return `数据ID: ${r.id} · 合约: ${sym}`
+})
+
+/** 任务行上的策略名称（列表/详情接口字段） */
+const taskStrategyNameDisplay = computed(() => {
+  const r = signalDetailRow.value
+  if (!r) return '—'
+  const n = (r.strategy_name ?? r.strategyName ?? '').trim()
+  return n || '—'
 })
 
 const strategyDisplayName = computed(() => {
@@ -297,6 +327,28 @@ function formatSignal(raw) {
     return JSON.stringify(o, null, 2)
   } catch {
     return s
+  }
+}
+
+async function handleDeleteMarketLook(row, evt) {
+  evt?.stopPropagation?.()
+  if (!row?.id) return
+  if (!window.confirm('确定删除该盯盘任务？删除后不可恢复。')) return
+  deletingId.value = row.id
+  try {
+    const res = await marketLookApi.delete(row.id)
+    if (res?.success === true && res?.verifiedAbsent === true) {
+      if (signalDetailRow.value?.id === row.id) {
+        closeSignalModal()
+      }
+      await load()
+    } else {
+      window.alert(res?.message || '删除未确认成功，请稍后重试')
+    }
+  } catch (e) {
+    window.alert(e?.message || '删除失败')
+  } finally {
+    deletingId.value = null
   }
 }
 
@@ -603,6 +655,36 @@ defineExpose({ load })
   padding: 20px 12px !important;
 }
 
+.col-actions {
+  width: 76px;
+  text-align: right;
+}
+
+.cell-actions {
+  white-space: nowrap;
+  text-align: right;
+  vertical-align: middle;
+}
+
+.btn-delete-row {
+  font-size: 12px;
+  padding: 4px 10px;
+  border-radius: 6px;
+  border: 1px solid rgba(192, 57, 43, 0.35);
+  background: rgba(192, 57, 43, 0.08);
+  color: #c0392b;
+  cursor: pointer;
+}
+
+.btn-delete-row:hover:not(:disabled) {
+  background: rgba(192, 57, 43, 0.14);
+}
+
+.btn-delete-row:disabled {
+  opacity: 0.65;
+  cursor: not-allowed;
+}
+
 .spin {
   animation: spin 0.9s linear infinite;
 }
@@ -614,7 +696,7 @@ defineExpose({ load })
 }
 
 .signal-modal-body {
-  max-height: min(72vh, 680px);
+  max-height: min(46vh, 640px);
   overflow: auto;
   display: flex;
   flex-direction: column;
@@ -656,6 +738,11 @@ defineExpose({ load })
 .strategy-meta {
   margin: 0 0 12px;
   font-size: 12px;
+}
+
+.strategy-meta--task {
+  margin-top: -4px;
+  margin-bottom: 10px;
 }
 
 .meta-row {

@@ -96,6 +96,10 @@ public class ModelServiceImpl implements ModelService {
     @Value("${docker.market-look-poll-interval-seconds:60}")
     private int marketLookPollIntervalSeconds;
 
+    /** 与 docker-compose 中 trade-monitor 服务名一致；勿用 127.0.0.1（在 trade-look 容器内指向本容器） */
+    @Value("${docker.trade-monitor-base-url:http://trade-monitor:5005}")
+    private String tradeMonitorBaseUrl;
+
     @Value("${mysql.host:156.254.6.224}")
     private String mysqlHost;
     
@@ -2204,6 +2208,7 @@ public class ModelServiceImpl implements ModelService {
                 envVars.put("BINANCE_SECRET_KEY", binanceApiSecret);
             }
             envVars.put("MARKET_LOOK_POLL_INTERVAL_SECONDS", String.valueOf(marketLookPollIntervalSeconds));
+            envVars.put("TRADE_MONITOR_BASE_URL", tradeMonitorBaseUrl);
 
             log.info("=== Container Database Configuration (Market Look trade-look) ===");
             log.info("MODEL_ID: {}", TRADE_LOOK_MODEL_ID_ENV);
@@ -2212,6 +2217,7 @@ public class ModelServiceImpl implements ModelService {
             log.info("MYSQL_USER: {}", mysqlUser);
             log.info("MYSQL_DATABASE: {}", mysqlDatabase);
             log.info("MARKET_LOOK_POLL_INTERVAL_SECONDS: {}", marketLookPollIntervalSeconds);
+            log.info("TRADE_MONITOR_BASE_URL: {}", tradeMonitorBaseUrl);
             log.info("================================================================");
 
             Map<String, Object> containerResult = dockerContainerService.startNamedMarketLookContainer(

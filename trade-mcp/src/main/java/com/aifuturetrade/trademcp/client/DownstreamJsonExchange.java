@@ -81,6 +81,15 @@ public class DownstreamJsonExchange {
         }
     }
 
+    /** DELETE，响应体解析规则与 GET/POST 一致（含 4xx/5xx 转 Map）。 */
+    public Map<String, Object> delete(URI uri) {
+        try {
+            return restClient.delete().uri(uri).exchange((request, response) -> readResponseAsMap(response));
+        } catch (RestClientException e) {
+            return transportFailure(e);
+        }
+    }
+
     private Map<String, Object> readResponseAsMap(ClientHttpResponse response) throws IOException {
         String bodyText = StreamUtils.copyToString(response.getBody(), StandardCharsets.UTF_8);
         HttpStatusCode status = response.getStatusCode();

@@ -319,6 +319,14 @@ public class BackendClient {
         return json.get(URI.create(baseUrl() + "/api/market-look/" + enc));
     }
 
+    /**
+     * 删除盯盘任务；成功时 success=true 且 verifiedAbsent=true（服务端 DELETE 后再次 select 确认行已不存在）。
+     */
+    public Map<String, Object> marketLookDelete(String id) {
+        String enc = URLEncoder.encode(id, StandardCharsets.UTF_8);
+        return json.delete(URI.create(baseUrl() + "/api/market-look/" + enc));
+    }
+
     public Map<String, Object> marketLookSql(Map<String, Object> body) {
         return json.postJson(URI.create(baseUrl() + "/api/mcp/market-look/sql"), body);
     }

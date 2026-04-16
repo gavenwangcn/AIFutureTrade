@@ -163,6 +163,12 @@ class AllMcpToolsSmokeTest {
                 nullable(String.class)
         )).thenReturn(okEmptyPage);
         lenient().when(backendClient.marketLookGetById(anyString())).thenReturn(okId);
+        Map<String, Object> okDelete = new HashMap<>();
+        okDelete.put("success", true);
+        okDelete.put("verifiedAbsent", true);
+        okDelete.put("id", "00000000-0000-0000-0000-000000000001");
+        okDelete.put("message", "deleted");
+        lenient().when(backendClient.marketLookDelete(anyString())).thenReturn(okDelete);
         lenient().when(backendClient.marketLookSql(anyMap())).thenReturn(okSql);
 
         Map<String, Object> pricesOk = new HashMap<>();
@@ -253,6 +259,7 @@ class AllMcpToolsSmokeTest {
         assertNotNull(marketLookTools.strategySearchLook(1, 10, null));
         assertNotNull(marketLookTools.marketLookQueryPage(1, 10, null, null, null, null, null, null, null));
         assertNotNull(marketLookTools.marketLookGetById("mid"));
+        assertSuccessMap(marketLookTools.marketLookDelete("00000000-0000-0000-0000-000000000099"));
         assertSuccessMap(marketLookTools.marketLookSql(
                 "SELECT id FROM `market_look` WHERE execution_status=? LIMIT 1",
                 List.of("RUNNING")));

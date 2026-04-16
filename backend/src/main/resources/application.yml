@@ -217,6 +217,8 @@ docker:
     look: ${DOCKER_IMAGE_LOOK:aifuturetrade-model-look}  # 盯盘循环容器镜像名称
   # 盯盘主循环间隔（秒），默认 60≈每 1 分钟一轮；与 trade/look_loop.py 一致，可用环境变量覆盖
   market-look-poll-interval-seconds: ${MARKET_LOOK_POLL_INTERVAL_SECONDS:60}
+  # 动态创建的 trade-look 容器内 Python 调用 trade-monitor；须与 trade-monitor 同 Docker 网络可解析（默认 compose 服务名）
+  trade-monitor-base-url: ${TRADE_MONITOR_BASE_URL:http://trade-monitor:5005}
 
 # MySQL配置（用于传递给模型容器）
 mysql:

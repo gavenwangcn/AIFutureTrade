@@ -293,32 +293,49 @@ def build_single_symbol_market_state(
     return market_state
 
 
-def trim_market_snapshot_for_notify(market_state: Dict, symbol_key: str, max_klines: int = 5) -> Dict:
-    """各周期仅保留最近 max_klines 根 K 线，用于 market_date 字段。"""
+def _notify_indicators_without_vol(raw: Any) -> Dict[str, Any]:
+    """通知用：去掉 indicators 内 vol（成交量块），减轻体积且避免与 K 线量数据重复。"""
+    if not isinstance(raw, dict):
+        return {}
+    return {k: v for k, v in raw.items() if k != "vol"}
+
+
+def trim_market_snapshot_for_notify(market_state: Dict, symbol_key: str) -> Dict:
+    """
+    构造盯盘通知用的轻量「整包」快照（与约定 D 一致）：
+    - 顶层仅 price、contract_symbol；
+    - indicators.timeframes[周期] 为最近一根：time、close、indicators（已去掉 vol；无 K 线数组/OHLCV 序列）。
+    K 线列表为时间升序时取末尾为最新。
+    """
     sym_u = symbol_key.strip().upper()
     payload = market_state.get(sym_u) or market_state.get(symbol_key) or {}
     if not isinstance(payload, dict):
         return {}
-    out = {
+    out: Dict[str, Any] = {
         "price": payload.get("price"),
         "contract_symbol": payload.get("contract_symbol"),
-        "quote_volume": payload.get("quote_volume"),
-        "base_volume": payload.get("base_volume"),
-        "change_24h": payload.get("change_24h"),
-        "previous_close_prices": payload.get("previous_close_prices"),
     }
     ind = payload.get("indicators") or {}
     tf = (ind.get("timeframes") or {}) if isinstance(ind, dict) else {}
-    trimmed_tf = {}
+    trimmed_tf: Dict[str, Any] = {}
     if isinstance(tf, dict):
         for interval, block in tf.items():
             if not isinstance(block, dict):
                 continue
             kl = block.get("klines") or []
-            if isinstance(kl, list) and kl:
-                block = dict(block)
-                block["klines"] = kl[:max_klines]
-            trimmed_tf[interval] = block
+            if not isinstance(kl, list) or not kl:
+                trimmed_tf[interval] = {}
+                continue
+            last = kl[-1]
+            if not isinstance(last, dict):
+                trimmed_tf[interval] = {}
+                continue
+            raw_ind = last.get("indicators")
+            trimmed_tf[interval] = {
+                "time": last.get("time") or last.get("open_time_dt_str"),
+                "close": last.get("close"),
+                "indicators": _notify_indicators_without_vol(raw_ind),
+            }
     out["indicators"] = {"timeframes": trimmed_tf}
     return out
 

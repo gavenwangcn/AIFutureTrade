@@ -495,7 +495,12 @@ export const marketLookApi = {
   /** 按主键 */
   getById: (id) => apiGet(`/api/market-look/${encodeURIComponent(id)}`),
   /** 创建盯盘任务（默认 RUNNING，需 type=look 策略） */
-  create: (data) => apiPost('/api/market-look', data)
+  create: (data) => apiPost('/api/market-look', data),
+  /**
+   * 删除盯盘任务；成功时返回 { success, verifiedAbsent, id, message }
+   * （服务端 DELETE 后再次查询确认行已不存在）
+   */
+  delete: (id) => apiDelete(`/api/market-look/${encodeURIComponent(id)}`)
 }
 
 /**

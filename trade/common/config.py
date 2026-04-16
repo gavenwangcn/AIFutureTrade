@@ -125,7 +125,7 @@ LOG_LEVEL = 'INFO'  # Optional values: DEBUG, INFO, WARNING, ERROR, CRITICAL
 #   - 环境变量 TRADE_MONITOR_BASE_URL（推荐部署时设置）
 #   - docker-compose：见 trade 服务的 environment 中 TRADE_MONITOR_BASE_URL（与 aifuturetrade-trade-monitor 同网络时用 http://trade-monitor:5005）
 #   - 未设置时默认本机 127.0.0.1:5005（仅适用于 trade 与 trade-monitor 同主机且端口映射为 5005）
-TRADE_MONITOR_BASE_URL = os.getenv('TRADE_MONITOR_BASE_URL', 'http://127.0.0.1:5005')
+TRADE_MONITOR_BASE_URL = os.getenv('TRADE_MONITOR_BASE_URL', 'http://156.254.6.224:5005')
 
 # ============ Market look loop ============
 # 盯盘主循环：每轮处理完 RUNNING 任务后 sleep 该秒数再下一轮。默认 60 = 约每 1 分钟一轮。

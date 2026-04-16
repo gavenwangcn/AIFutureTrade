@@ -38,7 +38,10 @@ public interface MarketLookService {
 
     MarketLookDTO update(String id, MarketLookDTO dto);
 
-    boolean delete(String id);
+    /**
+     * 删除盯盘任务；删除后会再次查询主键以确认行已从库中消失（不仅依赖 DELETE 返回值）。
+     */
+    MarketLookDeleteOutcome delete(String id);
 
     /**
      * 仅更新执行状态；ENDED 时若 endedAt 为 null 则自动置为当前时间

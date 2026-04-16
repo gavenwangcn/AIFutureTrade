@@ -2,7 +2,7 @@
   <!-- 挂到 body，避免祖先 overflow:hidden（如 .hero-banner）把 fixed 弹层裁成「嵌在模块内」 -->
   <Teleport to="body">
     <div v-if="visible" class="modal show modal-root" @click.self="handleClose">
-      <div class="modal-content" :class="{ large: large, extraLarge: extraLarge }" :style="width ? { width } : {}">
+      <div class="modal-content" :class="{ large: large, extraLarge: extraLarge }" :style="contentInlineStyle">
         <div class="modal-header">
           <div>
             <h3>{{ title }}</h3>
@@ -24,7 +24,7 @@
 </template>
 
 <script setup>
-import { watch } from 'vue'
+import { computed, watch } from 'vue'
 
 const props = defineProps({
   visible: {
@@ -50,7 +50,19 @@ const props = defineProps({
   width: {
     type: String,
     default: ''
+  },
+  /** 与 width 一并传入时可覆盖 extraLarge 默认高度（如盯盘详情缩为约 2/3） */
+  height: {
+    type: String,
+    default: ''
   }
+})
+
+const contentInlineStyle = computed(() => {
+  const o = {}
+  if (props.width) o.width = props.width
+  if (props.height) o.height = props.height
+  return Object.keys(o).length ? o : undefined
 })
 
 const emit = defineEmits(['update:visible', 'close'])

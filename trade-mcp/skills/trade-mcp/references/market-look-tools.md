@@ -12,6 +12,7 @@
 | `trade_look_strategy_search_look` | 盯盘策略分页（固定 `type=look`） | — | `pageNum`, `pageSize`, `name`（模糊） |
 | `trade_look_market_look_query_page` | 分页查盯盘任务 | — | `pageNum`, `pageSize`, `execution_status`, `symbol`, `strategy_id`, `started_at_from/to`, `ended_at_from/to` |
 | `trade_look_market_look_get_by_id` | 按 ID 查盯盘任务 | `marketLookId` | — |
+| `trade_look_market_look_delete` | 按 ID 删除盯盘任务（服务端 DELETE 后再次查询确认行已不存在） | `id` | — |
 | `trade_look_market_look_sql` | 受控只读 SQL | `sql` | `params`（与 `?` 对应） |
 
 ### 策略代码重新生成（全类型）
@@ -26,7 +27,7 @@
 
 ## 后端路径
 
-- 盯盘：`/api/market-look`, `/api/market-look/page`, `/api/market-look/{id}`
+- 盯盘：`/api/market-look`, `/api/market-look/page`, `GET/DELETE /api/market-look/{id}`
 - 策略：`/api/strategies`, `/api/strategies/{id}`, `POST /api/strategies/{id}/regenerate-code`, `/api/strategies/page?type=look&name=...`
 - 受控 SQL：`POST /api/mcp/market-look/sql`，body：`{ "sql": "...", "params": [] }`
 

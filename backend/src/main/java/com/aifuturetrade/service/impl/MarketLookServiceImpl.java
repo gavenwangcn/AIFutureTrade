@@ -6,6 +6,7 @@ import com.aifuturetrade.dao.mapper.MarketLookMapper;
 import com.aifuturetrade.dao.mapper.StrategyMapper;
 import com.aifuturetrade.common.util.PageRequest;
 import com.aifuturetrade.common.util.PageResult;
+import com.aifuturetrade.service.MarketLookDeleteOutcome;
 import com.aifuturetrade.service.MarketLookService;
 import com.aifuturetrade.service.dto.MarketLookDTO;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
@@ -242,8 +243,24 @@ public class MarketLookServiceImpl implements MarketLookService {
 
     @Override
     @Transactional(rollbackFor = Exception.class)
-    public boolean delete(String id) {
-        return marketLookMapper.deleteById(id) > 0;
+    public MarketLookDeleteOutcome delete(String id) {
+        if (!StringUtils.hasText(id)) {
+            return MarketLookDeleteOutcome.NOT_FOUND;
+        }
+        String trimmed = id.trim();
+        MarketLookDO existing = marketLookMapper.selectById(trimmed);
+        if (existing == null) {
+            return MarketLookDeleteOutcome.NOT_FOUND;
+        }
+        int affected = marketLookMapper.deleteById(trimmed);
+        if (affected <= 0) {
+            return MarketLookDeleteOutcome.NO_ROWS_DELETED;
+        }
+        MarketLookDO stillThere = marketLookMapper.selectById(trimmed);
+        if (stillThere != null) {
+            return MarketLookDeleteOutcome.VERIFY_FAILED;
+        }
+        return MarketLookDeleteOutcome.VERIFIED_REMOVED;
     }
 
     @Override

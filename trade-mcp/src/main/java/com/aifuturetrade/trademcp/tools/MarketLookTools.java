@@ -149,6 +149,17 @@ public class MarketLookTools {
     }
 
     @McpTool(
+            name = "trade_look_market_look_delete",
+            description = "按主键删除盯盘任务 market_look 一行。"
+                    + " 必填：id（market_look.id，UUID）。"
+                    + " 成功时 success=true 且 verifiedAbsent=true，表示数据库中该行已不存在（服务端在 DELETE 后再次查询校验）；"
+                    + " 不存在时 success=false 与 HTTP 404；校验失败时 success=false 与错误说明。")
+    public Map<String, Object> marketLookDelete(
+            @McpToolParam(description = "market_look.id（UUID）", required = true) String id) {
+        return backendClient.marketLookDelete(id);
+    }
+
+    @McpTool(
             name = "trade_look_market_look_sql",
             description = SQL_DESC)
     public Map<String, Object> marketLookSql(
