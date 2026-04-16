@@ -165,6 +165,7 @@ class AllMcpToolsSmokeTest {
                 nullable(String.class),
                 nullable(String.class),
                 nullable(String.class),
+                nullable(String.class),
                 nullable(String.class)
         )).thenReturn(okEmptyPage);
         lenient().when(backendClient.marketLookGetById(anyString())).thenReturn(okId);
@@ -267,7 +268,7 @@ class AllMcpToolsSmokeTest {
         assertNotNull(marketLookTools.strategyCreateLook("测试盯盘", null, null));
         assertNotNull(marketLookTools.strategyGetById("sid"));
         assertNotNull(marketLookTools.strategySearchLook(1, 10, null));
-        assertNotNull(marketLookTools.marketLookQueryPage(1, 10, null, null, null, null, null, null, null));
+        assertNotNull(marketLookTools.marketLookQueryPage(1, 10, null, null, null, null, null, null, null, null));
         assertNotNull(marketLookTools.marketLookGetById("mid"));
         assertSuccessMap(marketLookTools.marketLookDelete("00000000-0000-0000-0000-000000000099"));
         assertSuccessMap(marketLookTools.marketLookSql(

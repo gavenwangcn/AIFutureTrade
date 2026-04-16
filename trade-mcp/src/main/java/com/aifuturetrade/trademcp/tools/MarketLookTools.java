@@ -116,7 +116,7 @@ public class MarketLookTools {
     @McpTool(
             name = "trade_look_market_look_query_page",
             description = "分页查询盯盘任务。可按运行状态 execution_status（RUNNING/SENDING/ENDED）、symbol（模糊）、strategy_id、"
-                    + "started_at/ended_at 时间范围筛选（闭区间）。时间格式：yyyy-MM-dd HH:mm:ss 或 ISO-8601。"
+                    + "detail_summary（摘要模糊）、started_at/ended_at 时间范围筛选（闭区间）。时间格式：yyyy-MM-dd HH:mm:ss 或 ISO-8601。"
                     + " 返回 PageResult：data 为行列表，total、pageNum、pageSize、totalPages。")
     public Map<String, Object> marketLookQueryPage(
             @McpToolParam(description = "页码，从 1 开始，默认 1", required = false) Integer pageNum,
@@ -124,6 +124,7 @@ public class MarketLookTools {
             @McpToolParam(description = "执行状态：RUNNING / SENDING / ENDED，可选", required = false) String executionStatus,
             @McpToolParam(description = "合约关键字，模糊匹配，可选", required = false) String symbol,
             @McpToolParam(description = "策略 ID，精确匹配，可选", required = false) String strategyId,
+            @McpToolParam(description = "详情摘要关键字，模糊匹配，可选", required = false) String detailSummary,
             @McpToolParam(description = "started_at 下限，可选", required = false) String startedAtFrom,
             @McpToolParam(description = "started_at 上限，可选", required = false) String startedAtTo,
             @McpToolParam(description = "ended_at 下限，可选", required = false) String endedAtFrom,
@@ -134,6 +135,7 @@ public class MarketLookTools {
                 executionStatus,
                 symbol,
                 strategyId,
+                detailSummary,
                 startedAtFrom,
                 startedAtTo,
                 endedAtFrom,

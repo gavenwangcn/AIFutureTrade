@@ -44,7 +44,7 @@ public class MarketLookController {
     }
 
     @GetMapping("/page")
-    @Operation(summary = "分页查询盯盘任务", description = "可选按 execution_status、symbol、strategy_id、started_at/ended_at 时间范围筛选")
+    @Operation(summary = "分页查询盯盘任务", description = "可选按 execution_status、symbol、strategy_id、detail_summary（模糊）、started_at/ended_at 时间范围筛选")
     public ResponseEntity<?> page(
             @RequestParam(value = "pageNum", defaultValue = "1") Integer pageNum,
             @RequestParam(value = "pageSize", defaultValue = "10") Integer pageSize,
@@ -52,6 +52,8 @@ public class MarketLookController {
             @RequestParam(value = "execution_status", required = false) String executionStatus,
             @RequestParam(value = "symbol", required = false) String symbol,
             @RequestParam(value = "strategy_id", required = false) String strategyId,
+            @Parameter(description = "详情摘要模糊匹配")
+            @RequestParam(value = "detail_summary", required = false) String detailSummary,
             @Parameter(description = "started_at 下限，ISO 或 yyyy-MM-dd HH:mm:ss")
             @RequestParam(value = "started_at_from", required = false) String startedAtFrom,
             @Parameter(description = "started_at 上限")
@@ -69,6 +71,7 @@ public class MarketLookController {
                     executionStatus,
                     symbol,
                     strategyId,
+                    detailSummary,
                     parseOptionalDateTime(startedAtFrom, "started_at_from"),
                     parseOptionalDateTime(startedAtTo, "started_at_to"),
                     parseOptionalDateTime(endedAtFrom, "ended_at_from"),

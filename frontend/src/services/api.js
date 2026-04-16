@@ -492,6 +492,10 @@ export const marketLookApi = {
   listAll: () => apiGet('/api/market-look'),
   /** 活跃任务：RUNNING 与 SENDING（异步通知发送中） */
   listRunning: () => apiGet('/api/market-look/status/running'),
+  /**
+   * 分页查询；可选 execution_status、detail_summary（模糊）、symbol、strategy_id、时间范围等
+   */
+  page: (params = {}) => apiGet('/api/market-look/page', params),
   /** 按主键 */
   getById: (id) => apiGet(`/api/market-look/${encodeURIComponent(id)}`),
   /** 创建盯盘任务（默认 RUNNING，需 type=look 策略） */

@@ -27,6 +27,7 @@ public interface MarketLookService {
             String executionStatus,
             String symbol,
             String strategyId,
+            String detailSummary,
             LocalDateTime startedAtFrom,
             LocalDateTime startedAtTo,
             LocalDateTime endedAtFrom,

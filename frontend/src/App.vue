@@ -41,15 +41,6 @@
           <button
             class="btn-secondary"
             type="button"
-            @click="showAddMarketLookModal = true"
-            title="添加盯盘任务（market_look，执行中 RUNNING）"
-          >
-            <i class="bi bi-plus-circle"></i>
-            添加盯盘
-          </button>
-          <button
-            class="btn-secondary"
-            type="button"
             @click="handleExecuteMarketLook"
             title="启动盯盘循环（Docker 固定容器 trade-look，无需交易模型）"
             :disabled="isExecutingMarketLook"
@@ -65,6 +56,15 @@
           >
             <i class="bi bi-stop-circle" :class="{ spin: isStoppingMarketLook }"></i>
             {{ isStoppingMarketLook ? '关闭中...' : '关闭盯盘' }}
+          </button>
+          <button
+            class="btn-secondary"
+            type="button"
+            title="查看与管理全部盯盘任务（分页、搜索）"
+            @click="showMarketLookListModal = true"
+          >
+            <i class="bi bi-list-ul"></i>
+            盯盘列表
           </button>
           <button 
             class="btn-secondary" 
@@ -1035,10 +1035,10 @@
       @refresh="handleRefresh"
     />
 
-    <AddMarketLookModal
-      :visible="showAddMarketLookModal"
-      @update:visible="showAddMarketLookModal = $event"
-      @saved="onMarketLookSaved"
+    <MarketLookListModal
+      :visible="showMarketLookListModal"
+      @update:visible="showMarketLookListModal = $event"
+      @task-saved="onMarketLookSaved"
     />
 
     <ModelStrategyConfigModal
@@ -1317,7 +1317,7 @@ import BuyLogsModal from './components/BuyLogsModal.vue'
 import SellLogsModal from './components/SellLogsModal.vue'
 import LookLogsModal from './components/LookLogsModal.vue'
 import MarketLookRunningPanel from './components/MarketLookRunningPanel.vue'
-import AddMarketLookModal from './components/AddMarketLookModal.vue'
+import MarketLookListModal from './components/MarketLookListModal.vue'
 import ModelAnalysisModal from './components/ModelAnalysisModal.vue'
 import { useTradingApp } from './composables/useTradingApp'
 
@@ -1472,7 +1472,7 @@ const {
   handleSellPosition
 } = useTradingApp()
 
-const showAddMarketLookModal = ref(false)
+const showMarketLookListModal = ref(false)
 const marketLookPanelRef = ref(null)
 
 function onMarketLookSaved() {

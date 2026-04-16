@@ -62,6 +62,7 @@ public class MarketLookServiceImpl implements MarketLookService {
             String executionStatus,
             String symbol,
             String strategyId,
+            String detailSummary,
             LocalDateTime startedAtFrom,
             LocalDateTime startedAtTo,
             LocalDateTime endedAtFrom,
@@ -78,6 +79,9 @@ public class MarketLookServiceImpl implements MarketLookService {
         }
         if (StringUtils.hasText(strategyId) && !"undefined".equalsIgnoreCase(strategyId)) {
             q.eq(MarketLookDO::getStrategyId, strategyId.trim());
+        }
+        if (StringUtils.hasText(detailSummary) && !"undefined".equalsIgnoreCase(detailSummary)) {
+            q.like(MarketLookDO::getDetailSummary, detailSummary.trim());
         }
         if (startedAtFrom != null) {
             q.ge(MarketLookDO::getStartedAt, startedAtFrom);

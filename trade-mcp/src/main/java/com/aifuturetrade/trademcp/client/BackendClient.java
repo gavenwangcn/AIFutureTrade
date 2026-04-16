@@ -295,6 +295,7 @@ public class BackendClient {
             String executionStatus,
             String symbol,
             String strategyId,
+            String detailSummary,
             String startedAtFrom,
             String startedAtTo,
             String endedAtFrom,
@@ -314,6 +315,9 @@ public class BackendClient {
         }
         if (strategyId != null && !strategyId.isEmpty()) {
             b.queryParam("strategy_id", strategyId);
+        }
+        if (detailSummary != null && !detailSummary.isEmpty()) {
+            b.queryParam("detail_summary", detailSummary);
         }
         if (startedAtFrom != null && !startedAtFrom.isEmpty()) {
             b.queryParam("started_at_from", startedAtFrom);
