@@ -3,6 +3,7 @@
 ## ⚠️ 盯盘策略代码（必须遵守）
 - **禁止**在策略代码内发起 HTTP 请求、调用交易所 REST/WebSocket、或自行访问「市场微服务」接口——**行情已由交易引擎侧通过 Binance 相关数据管道拉取并注入 `market_state`**，盯盘策略**只消费**本方法参数中的 `market_state`。
 - **仅**使用 `symbol` 与 `market_state[symbol]` 内的实时价、24h 成交量/额、`previous_close_prices`、`indicators.timeframes` 各周期 K 线及**已预计算**的指标进行判断。**盯盘服务不向 `market_state` 注入全市场聚合的 `market_indicators`，策略代码请勿使用或依赖该字段。**
+- **K 线技术指标（强制）**：**禁止**在策略代码中使用 `talib` / 手写公式等对 MA、EMA、RSI、MACD、KDJ、ATR、ADX、Supertrend 等与 K 线绑定的指标**自行重算**；**必须**通过遍历各周期 `klines`、读取每根 `kline['indicators']` 获取（见下文 **5.2 全量字段示例**）。允许对已读出的数值做比较、阈值判断；允许对 OHLC 做**非指标类**运算（如 `high - low`），但**不得**用其推导 MACD/EMA 等。
 - 业务目标：条件满足时返回 **`signal`: `"notify"`**（见下文返回格式），由系统调用通知服务推送企微并落库；**不触发通知**则返回空字典 `{}`。
 - **不得**用 `signal` 为 `notify` 以外的值来「模拟」通知（如 `hold`、`alert` 等不会触发企微）；不需要通知时不要向 `decisions` 放入无意义条目。
 
@@ -121,6 +122,88 @@ symbol_state = {
   - 可选 `close_time` / `close_time_dt_str`（毫秒与字符串）；另有 `quote_asset_volume` / `quote_volume`（计价成交额）等与币安第 8 列一致时会有。
 - **禁止**为拿「某段历史」再去请求行情接口；**只能**使用当前已注入的 `klines`（及各周期 `timeframes`）在策略代码内部做**遍历、筛选、切片、滑动窗口**等计算后再做逻辑判断。
 - **需要「历史某段时间」或「连续多根历史 K」时**：对对应周期的 `klines` 做 `for` 循环，用 `open_time` 与目标时间窗比较，或按下标取 `klines[i]`、`klines[-20:]` 等；跨多周期时分别取各周期 `tf` 的 `klines` 再组合判断。
+
+### 5.2）K 线内嵌 `indicators`：仅遍历查询、禁止在策略内计算；全量键与示例
+
+**规则（与 `binance-service` → `trade/market_data` 注入一致）**
+
+- **获取方式**：对每个周期取 `klines = (timeframes.get(tf) or {}).get("klines") or []`，再 `for kline in klines:` 或取 `klines[-1]` / `klines[-2]`，读 **`kline.get("indicators") or {}`**。需要 MACD 金叉、均线交叉、RSI 超买等，**一律**从上述 `indicators` 取标量，**禁止**用 `close` 序列在策略里重算指标。
+- **禁止**：`import talib`（或同类库）计算与下表同名的指标；禁止从 `dif` 反推 EMA 等「自创公式」冒充 MACD。
+- **允许**：指标值为 `None` 时分支处理；对**已读取**的 `dif`/`dea`/`ma5` 等做比较；用 `current_price` 与 `kline["close"]` 做价格逻辑（非重算指标公式）。
+- **键名注意**：`adx` 子键含 **`"+di14"`**、**`"-di14"`**（含 `+`/`-` 号），Python 中用 `adx_data.get("+di14")`，勿写错。
+
+**每根 K 线 `kline["indicators"]` 完整结构示例（数值为占位示例，实际以注入为准；各子键均可能为 `None`）**
+
+```python
+{
+    "ma": {
+        "ma5": 0.1234567,
+        "ma20": 0.1200000,
+        "ma60": 0.1150000,
+        "ma99": 0.1100000,
+    },
+    "ema": {
+        "ema5": 0.1220000,
+        "ema20": 0.1190000,
+        "ema30": 0.1175000,
+        "ema60": 0.1140000,
+        "ema99": 0.1110000,
+    },
+    "rsi": {
+        "rsi6": 55.12,
+        "rsi9": 52.34,
+        "rsi14": 48.90,
+    },
+    "macd": {
+        "dif": 0.00012,
+        "dea": -0.00005,
+        "bar": 0.00017,
+    },
+    "kdj": {
+        "k": 70.0,
+        "d": 65.0,
+        "j": 80.0,
+    },
+    "atr": {
+        "atr7": 0.0012,
+        "atr14": 0.0015,
+        "atr21": 0.0018,
+    },
+    "adx": {
+        "adx14": 25.0,
+        "+di14": 18.0,
+        "-di14": 15.0,
+    },
+    "vol": {
+        "vol": 1000000.0,
+        "buy_vol": 600000.0,
+        "sell_vol": 400000.0,
+        "mavol5": 950000.0,
+        "mavol10": 900000.0,
+        "mavol60": 850000.0,
+    },
+    "supertrend": {
+        "line": 0.1180000,
+        "trend": 1,
+        "upper": 0.1220000,
+        "lower": 0.1140000,
+        "atr_period": 10,
+        "multiplier": 3.0,
+    },
+}
+```
+
+**读取示例（1h 最新一根 MACD）**
+
+```python
+klines_1h = ((symbol_state.get("indicators") or {}).get("timeframes") or {}).get("1h", {}).get("klines") or []
+if len(klines_1h) < 1:
+    self.log.warning("无 1h K 线")
+else:
+    macd = (klines_1h[-1].get("indicators") or {}).get("macd") or {}
+    dif = macd.get("dif")
+    dea = macd.get("dea")
+```
 
 **示例 A：按时间戳筛选「最近 24 小时内」的 1h K 线（相对最新一根的开盘时间回推）**
 ```python
