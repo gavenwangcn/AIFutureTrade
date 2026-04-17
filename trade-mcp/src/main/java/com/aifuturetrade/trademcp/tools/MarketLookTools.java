@@ -176,4 +176,16 @@ public class MarketLookTools {
         body.put("params", params == null ? List.of() : params);
         return backendClient.marketLookSql(body);
     }
+
+    @McpTool(
+            name = "trade_look_container_logs",
+            description =
+                    "读取**固定盯盘容器** Docker 日志（`aifuturetrade-model-look-1`）**最近若干行** stdout/stderr，"
+                            + "用于分析策略执行输出、异常栈与优化策略代码。依赖 backend 能访问 Docker。"
+                            + " **唯一参数**：尾部行数（默认 1000，最大 5000）。"
+                            + " 成功时 `success=true`，`lines` 为字符串数组，`lineCount` 为行数；失败时 `success=false` 与 `error`。")
+    public Map<String, Object> lookContainerLogs(
+            @McpToolParam(description = "读取最近多少行日志，默认 1000，最大 5000", required = false) Integer tail) {
+        return backendClient.lookContainerLogs(tail);
+    }
 }

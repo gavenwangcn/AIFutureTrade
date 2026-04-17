@@ -1,5 +1,6 @@
 package com.aifuturetrade.service;
 
+import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.Consumer;
 
@@ -34,4 +35,13 @@ public interface DockerLogService {
      * @param sessionId WebSocket会话ID
      */
     void stopLogStream(String sessionId);
+
+    /**
+     * 一次性读取指定容器最近若干行日志（stdout+stderr，非流式），供 HTTP/MCP 查询。
+     *
+     * @param containerName Docker 容器名称或 ID
+     * @param tailLines     行数：默认 1000，范围 1～5000（与 Docker API tail 一致）
+     * @return success、containerName、tail、lines（字符串行列表）、lineCount；失败时 success=false 与 error
+     */
+    Map<String, Object> getContainerLogTail(String containerName, int tailLines);
 }

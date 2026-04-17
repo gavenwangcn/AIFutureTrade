@@ -177,6 +177,14 @@ class AllMcpToolsSmokeTest {
         lenient().when(backendClient.marketLookDelete(anyString())).thenReturn(okDelete);
         lenient().when(backendClient.marketLookSql(anyMap())).thenReturn(okSql);
 
+        Map<String, Object> okLookLogs = new HashMap<>();
+        okLookLogs.put("success", true);
+        okLookLogs.put("containerName", "aifuturetrade-model-look-1");
+        okLookLogs.put("tail", 1000);
+        okLookLogs.put("lineCount", 1);
+        okLookLogs.put("lines", List.of("smoke test log line"));
+        lenient().when(backendClient.lookContainerLogs(nullable(Integer.class))).thenReturn(okLookLogs);
+
         Map<String, Object> pricesOk = new HashMap<>();
         pricesOk.put("success", true);
         pricesOk.put("data", List.of(Map.of("symbol", "BTCUSDT", "price", 1.0)));
@@ -274,5 +282,6 @@ class AllMcpToolsSmokeTest {
         assertSuccessMap(marketLookTools.marketLookSql(
                 "SELECT id FROM `market_look` WHERE execution_status=? LIMIT 1",
                 List.of("RUNNING")));
+        assertNotNull(marketLookTools.lookContainerLogs(1000));
     }
 }

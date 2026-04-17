@@ -350,4 +350,16 @@ public class BackendClient {
     public Map<String, Object> marketLookSql(Map<String, Object> body) {
         return json.postJson(URI.create(baseUrl() + "/api/mcp/market-look/sql"), body);
     }
+
+    /**
+     * 固定盯盘容器 {@code aifuturetrade-model-look-1} 最近若干行日志；默认 1000 行，最多 5000（服务端裁剪）。
+     */
+    public Map<String, Object> lookContainerLogs(Integer tail) {
+        UriComponentsBuilder b =
+                UriComponentsBuilder.fromUriString(baseUrl() + "/api/mcp/docker/look-container/logs");
+        if (tail != null) {
+            b.queryParam("tail", tail);
+        }
+        return json.get(URI.create(b.toUriString()));
+    }
 }

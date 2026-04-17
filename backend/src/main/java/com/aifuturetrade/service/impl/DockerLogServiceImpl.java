@@ -16,10 +16,16 @@ import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import java.io.Closeable;
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 
 /**
@@ -302,6 +308,72 @@ public class DockerLogServiceImpl implements DockerLogService {
                 logger.warn("停止日志流失败: {}", sessionId, e);
             }
         }
+    }
+
+    @Override
+    public Map<String, Object> getContainerLogTail(String containerName, int tailLines) {
+        Map<String, Object> out = new LinkedHashMap<>();
+        if (containerName == null || containerName.trim().isEmpty()) {
+            out.put("success", false);
+            out.put("error", "containerName 不能为空");
+            return out;
+        }
+        int tail = Math.min(5000, Math.max(1, tailLines));
+        if (dockerClient == null) {
+            out.put("success", false);
+            out.put("error", "Docker 客户端未初始化");
+            return out;
+        }
+        String name = containerName.trim();
+        try {
+            dockerClient.inspectContainerCmd(name).exec();
+        } catch (Exception e) {
+            logger.warn("容器不存在或无法访问: {}", name, e);
+            out.put("success", false);
+            out.put("error", "容器不存在或无法访问: " + e.getMessage());
+            return out;
+        }
+
+        StringBuilder acc = new StringBuilder();
+        ResultCallback.Adapter<Frame> callback =
+                new ResultCallback.Adapter<Frame>() {
+                    @Override
+                    public void onNext(Frame frame) {
+                        byte[] payload = frame.getPayload();
+                        if (payload != null && payload.length > 0) {
+                            acc.append(new String(payload, StandardCharsets.UTF_8));
+                        }
+                    }
+                };
+        try {
+            dockerClient
+                    .logContainerCmd(name)
+                    .withStdOut(true)
+                    .withStdErr(true)
+                    .withTail(tail)
+                    .withFollowStream(false)
+                    .exec(callback);
+            callback.awaitCompletion(90, TimeUnit.SECONDS);
+        } catch (Exception e) {
+            logger.error("读取容器日志尾部失败: {}", name, e);
+            out.put("success", false);
+            out.put("error", e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName());
+            return out;
+        }
+
+        List<String> lines = new ArrayList<>();
+        String all = acc.toString();
+        if (!all.isEmpty()) {
+            for (String line : all.split("\r?\n")) {
+                lines.add(line);
+            }
+        }
+        out.put("success", true);
+        out.put("containerName", name);
+        out.put("tail", tail);
+        out.put("lineCount", lines.size());
+        out.put("lines", lines);
+        return out;
     }
 }
 
