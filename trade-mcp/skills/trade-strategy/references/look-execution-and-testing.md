@@ -164,13 +164,13 @@ market_state = {
     "base_volume": float,
     "quote_volume": float,
     "previous_close_prices": {
-        "1m": float, "5m": float, ...   # 各周期「上一根已收盘」收盘价；可能部分缺失
+        "1m": float, "5m": float, ...   # key 与下面 timeframes 中已有周期一致；可能部分缺失
     },
     "indicators": {
         "timeframes": {
             "1m": { "klines": [ ... ] },
             "5m": { ... },
-            # 共 8 档：1m,5m,15m,30m,1h,4h,1d,1w（以实际有数据为准）
+            # 共 7 档：1m, 5m, 15m, 30m, 1h, 4h, 1d（以实际有数据为准）
         }
     }
   }
@@ -183,6 +183,29 @@ market_state = {
 - **`previous_close_prices`**：引擎由各周期 K 线推导，**避免**策略里再猜「倒数第几根是上一根收盘」；若与 `klines` 联用，须在日志中写明语义。
 - **K 线列表**：每根通常含 `open/high/low/close/volume` 及时间字段（如 `open_time`）、以及预计算的 `indicators` 子结构；**排序以实际数据为准**——分析代码时务必看策略里取的是 `klines[-1]` 还是 `[-2]`，并与「已收盘」语义对齐。
 - **不要假设**存在 `market_state[symbol]["source"]` 等买入全路径才有的字段（盯盘单品种组装通常不带 `source`）。
+
+### 3.1 K 线与技术指标（与 `strategy_look_prompt.txt`、Python 注入一致）
+
+**数据链路（便于审代码时核对）**：`LookEngine.build_market_state_for_symbol` → `build_single_symbol_market_state`（`look_engine.py`）→ `MarketDataFetcher.merge_timeframe_klines_for_contract` / `merge_timeframe_klines`。K 线 OHLC 与**技术指标**由 **binance-service** `get_klines_with_indicators` 计算后注入；**`trade/market/market_data.py` 不在本地用 TA-Lib 重算指标**。
+
+**时间周期**：盯盘合并路径为 **7 个** interval：`1m`、`5m`、`15m`、`30m`、`1h`、`4h`、`1d`。实现上**显式不含周线 `1w`**（见 `merge_timeframe_klines_for_contract` 注释：避免周线历史不足导致无数据告警），与买入侧若含更多周期时**不要混用**文档描述。
+
+**访问路径（固定）**：
+
+```text
+tf_wrap = (symbol_state.get("indicators") or {}).get("timeframes") or {}
+klines = (tf_wrap.get("1h") or {}).get("klines") or []   # 例：1h
+latest = klines[-1] if klines else {}
+ind = latest.get("indicators") or {}
+```
+
+**`klines` 顺序**：与 `market_data._get_market_data_by_interval` 一致，为**时间升序（旧到新）**；**`klines[-1]`** 为「当前最后一根」（通常作当前 K），**`klines[-2]`** 为上一根；`previous_close_prices[tf]` 用 **`-2` 根的 `close`** 填充（根数 ≥2 时）。
+
+**指标获取规则（与 system prompt 强制一致）**：
+
+- **必须**从每根 K 线的 **`kline["indicators"]`** 读取标量；**禁止**在策略里 `import talib`（或手写公式）对 MA、EMA、RSI、MACD、KDJ、ATR、ADX、Supertrend 等与 K 线绑定的指标**自行重算**。
+- **允许**：对 OHLC 做非指标类运算（如 `high - low`）；对已读出的数值做比较、阈值判断；`is None` / `is not None` 判空。
+- **每根 `indicators` 子结构**（各子键内字段可能为 `None`）与线上 Prompt 示例一致，分组包括：`ma`（ma5/ma20/…）、`ema`、`rsi`（rsi6/rsi14/…）、`macd`（dif/dea/bar）、`kdj`、`atr`、`adx`（**注意键名 `"+di14"`、`"-di14"`**，Python 用 `adx_data.get("+di14")`）、`vol`、`supertrend`（line/trend/upper/lower 等）。完整键表以仓库 **`backend/src/main/resources/prompts/strategy_look_prompt.txt` 第 5.2 节**为准。
 
 ---
 
@@ -242,6 +265,14 @@ def minimal_mock_market_state_btc() -> dict:
                                 "indicators": {
                                     "rsi": {"rsi14": 55.0},
                                     "ma": {"ma20": 49800.0},
+                                    "macd": {"dif": 0.0, "dea": 0.0, "bar": 0.0},
+                                    "adx": {"adx14": 20.0, "+di14": 15.0, "-di14": 12.0},
+                                    "supertrend": {
+                                        "line": 49800.0,
+                                        "trend": 1,
+                                        "upper": 50200.0,
+                                        "lower": 49600.0,
+                                    },
                                 },
                             },
                             # 更多根…
@@ -297,6 +328,8 @@ Agent **若无仓库**：不要假装已运行 tester；应明确说明「需在
 | 现象 | 可能原因 |
 |------|----------|
 | KeyError / 取不到行情 | `market_state` 的 key 用了 `BTCUSDT`，实际 key 是基础符号 `BTC` |
+| 指标全 None 或结构不对 | 从 **`klines[i]["indicators"]`** 读，不要从 `symbol_state` 顶层虚构 `rsi`/`macd` 键；勿假设存在 `1w` 周期 |
+| 测试失败：使用 talib 算指标 | system prompt **禁止**对 MA/EMA/RSI/MACD 等与 K 线绑定指标自行重算；须用预计算字段 |
 | 永远不 notify | 条件写反、`signal` 不是 `notify`、或 price/指标为 None 未处理 |
 | 误判「上一根收盘」 | 未使用 `previous_close_prices` 且 K 线索引与排序假设错误 |
 | 执行通过但业务不对 | 规则与用户自然语言不一致，需用第 5、6 节与用户逐项确认 |
@@ -307,9 +340,78 @@ Agent **若无仓库**：不要假装已运行 tester；应明确说明「需在
 
 - 创建策略时提交的 **`strategy_code`** 会按上述契约在校验服务中执行；**`validate_symbol`** 须与试跑/盯盘合约一致。
 - 本文档**不替代** MCP 工具参数说明；创建任务前仍需先有 **look 策略 `id`**，见 `mcp-market-look-tools.md`。
+- **排查盯盘容器日志（可选）**：`trade_look_container_logs` 仅接受可选参数 **`tail`**（最近多少行，默认 1000），读取固定容器 **`aifuturetrade-model-look-1`** 的 stdout/stderr；用于对照策略打印与异常栈，与「改 `market_state` 契约」无直接关系。
 
 ---
 
 ## 10. 与「策略描述 / 生成 Prompt」的关系
 
 AI 生成盯盘代码时，后端使用 **`strategy_look_prompt.txt` 作为 system**、**用户策略正文作为 user**（见 `strategy-context-and-look-prompt.md`）。若需**调整自然语言表述**以便生成代码更贴合业务，应优先阅读该文档中的撰写要点与 system 约束摘要，再与本文件的运行时契约对照。
+
+---
+
+## 11. 可运行脚本目录 `scripts/`（严格审代码 / 场景测试）
+
+**路径**：`trade-mcp/skills/trade-strategy/scripts/`（与 `references/` 并列，**勿**把整份脚本或大段 JSON 一次性塞进模型 system prompt；先读 **`scripts/README.md`** 的渐进式披露层级）。
+
+### 11.1 模型何时读、读多少（渐进式披露）
+
+| 步骤 | 动作 |
+|------|------|
+| 1 | 默认只依赖 **`SKILL.md`** 完成 MCP 流程；需要理解执行契约时再打开**本文档**对应章节。 |
+| 2 | 用户要求**严格核对策略与需求**时，再读 **`scripts/README.md`**（L0～L4 表），按需打开脚本。 |
+| 3 | 需要 **`market_state` 全量键名**时：由执行环境运行 `python .../scripts/look_strategy_scenario_test_runner.py --print-schema`，或读**本文档 11.3** 与第 5～6 节契约（**不必读** `.py` 源码）。 |
+| 4 | 构造/修改场景 JSON 时**一次只打开一个文件**，避免多份大 JSON 同时进上下文。 |
+
+生产盯盘服务入口（非本技能脚本）：仓库内为 **`python -m trade.start.start_market_look`**（需 `MODEL_ID`、MySQL、行情等），见 `trade/start/start_market_look.py`。
+
+### 11.2 `look_strategy_scenario_test_runner.py`（MCP 策略 + 模拟数据场景）
+
+在**用户明确要求**用多组行情验证「代码是否符合需求」时使用：
+
+- **实现性质**：脚本**仅依赖 Python 标准库**，在进程内用 `exec` 执行策略、注入假的 `trade.strategy.strategy_template_look.StrategyBaseLook`，并对 `decisions` 做与线上一致的归一化；**不** `import` 本仓库 `trade` 包，**不**调用 `strategy_code_executor.py`。适合无项目代码树、无 DB 的环境；与第 6.1 节「已安装 `trade` 包时直接调 `StrategyCodeExecutor`」是两条路径。
+- **输入**：`trade_look_strategy_get_by_id` 等取得的 **`strategy_code`** 存成 `.py` 文件 + 一份或多份 **`market_state` JSON**（`--market-state` 或 `--scenarios-dir` 下每个 `*.json`）。
+- **输出**：每场景 `decisions`（可用 `--output-json`）；stdout/stderr 与 logging 供对照需求；stderr 含审阅提示。
+- **示例数据**：`scripts/look_scenario_examples/`（`btc_baseline.json`、`btc_rsi_oversold.json`、`demo_minimal_look_strategy.py`）。
+
+**示例命令**：
+
+```text
+python trade-mcp/skills/trade-strategy/scripts/look_strategy_scenario_test_runner.py ^
+  --strategy-file trade-mcp/skills/trade-strategy/scripts/look_scenario_examples/demo_minimal_look_strategy.py ^
+  --scenarios-dir trade-mcp/skills/trade-strategy/scripts/look_scenario_examples ^
+  --symbol BTC --output-json
+```
+
+### 11.3 模型使用说明（**不读、不改** `look_strategy_scenario_test_runner.py`）
+
+下列内容供**模型**在指导用户或说明审阅步骤时使用；**无需**打开或修改仿真脚本本身，也**无需**把整份脚本贴进对话。
+
+| 项 | 说明 |
+|----|------|
+| **用途** | 在用户已拿到 MCP 返回的 **`strategy_code`** 且需多组**模拟行情**验证「代码是否满足需求」时，让用户（或 CI）在装有 **Python 3** 的环境运行本脚本；脚本用标准库**仿真**线上盯盘执行（`exec` 策略 + 归一化 `decisions`），**不依赖**本仓库 `trade` 包。 |
+| **准备** | ① 将 **`strategy_code`** 原样保存为 **`.py` 文件**（与 MCP 文本一致，可去掉外层 markdown 代码块——脚本会自动剥离）。② 按本文件第 5～6 节与 **`--print-schema`** 输出（若可执行）构造 **`market_state` JSON**：顶层 key 为**基础符号大写**（如 `BTC`），须与 **`--symbol`** 一致，**不要**用 `BTCUSDT` 作顶层 key。③ 策略里读到的字段（如某周期 K 线根数、`quote_volume`、嵌套 `indicators`）必须在 JSON 里**齐全**，否则逻辑会走「跳过」分支，易误判。 |
+| **测试数据怎么造（覆盖）** | **模型应主动**按需求各维度与 **`strategy_code` 内各条件分支** 设计多份互不相同 JSON，使 notify / 不触发 / 数据不足 / 空指标等路径尽量各至少测到一次；清单与原则见 **`scripts/README.md`「模型如何构建模拟测试数据」**。 |
+| **单场景** | `python .../look_strategy_scenario_test_runner.py --strategy-file <策略.py> --market-state <场景.json> --symbol BTC` |
+| **多场景** | 将多个 `*.json` 放在同一目录，使用 **`--scenarios-dir <目录>`**；每个文件跑一轮。 |
+| **输出怎么读** | 加 **`--output-json`** 便于解析；关注每场景的 **`decisions`**、是否含 **`error`/`traceback`**（若有则策略未在仿真中跑通）；策略内的 **`self.log`** 会打在终端，可对照用户规则是否应出现 `notify`。 |
+| **限制** | 策略若在**文件顶层** `import` 未安装的第三方库（如 `talib`），仿真会失败——与「仅标准库」环境一致；审阅时可说明需在安装该依赖的环境试跑，或依赖思想实验。 |
+| **示例** | 见 **`scripts/look_scenario_examples/`**（最小策略 + 若干 JSON）；路径以仓库内 `trade-mcp/skills/trade-strategy/scripts/` 为准。 |
+
+### 11.4 `strategy_look_prompt.txt` 固定语法与仿真兼容性（审阅用）
+
+后端生成盯盘代码时以 **`backend/src/main/resources/prompts/strategy_look_prompt.txt`** 为准。下列为**与执行/仿真强相关**的硬性约定；仿真脚本**不校验**业务规则是否违反 prompt（例如是否误用 talib 重算指标），仅保证**语法与调用形态**可运行。
+
+| Prompt 要求 | 仿真行为 |
+|-------------|----------|
+| 首行 `from` / `import`；可含 `from trade.strategy.strategy_template_look import StrategyBaseLook` | 通过 **`sys.modules`** 注入假包，**无需**磁盘上的 `trade` 包。 |
+| 仅允许 `execute_look_decision(self, symbol: str, market_state: Dict) -> Dict[str, List[Dict]]`，禁止改参、禁止 `*args/**kwargs` | 仿真实例化策略类后**按该签名调用**；基类抽象方法签名一致。 |
+| 返回 `Dict[str, List[Dict]]`，不得 `None`；规范推荐 value 为 **list** | 若返回 `None` 会按空 dict 处理；若某 key 的 value 为**单条 dict**，与线上一致**归一化为 list**。 |
+| 大量使用 `self.log.info` / `warning` / `error` / `exception` | 仿真 `StrategyBaseLook` 使用标准库 **`logging.Logger`**，并 `basicConfig` 便于终端可见。 |
+| 可选 `self.get_available_libraries()` | 仿真基类提供，返回结构与线上一致（talib/numpy/pandas 按环境显示可用性）。 |
+| 推荐 `from datetime import datetime, timedelta, timezone`；禁止无参 `datetime.now()` 等（由生成代码自律） | `exec` 前后对 **`datetime` 模块/类**的注入与 **`timezone` / `date` / `timedelta`** 与 **`StrategyCodeExecutor`** 盯盘分支一致，避免与 prompt 推荐写法冲突。 |
+| 常用 `typing`（`Dict`、`List`、`Any` 等） | 仿真预置若干 typing 符号；策略内亦可 **`from typing import ...`**。 |
+| 可能使用 `collections` / `itertools` / `functools` 等标准库 | 仿真在全局预注入上述**模块对象**；仍可直接 `import`。 |
+| **禁止**顶层 `import talib` 用于重算指标（规范） | 若生成代码仍**顶层** `import talib` 且环境未安装，仿真会失败（与「仅 Python 标准库」场景一致）；**不**在仿真中内置 TA-Lib。 |
+
+**多类定义**：若同一策略文件中出现多个继承 `StrategyBaseLook` 的类，仿真取**按定义顺序最后一个**（与 Python 模块 `__dict__` 插入序一致），避免 `dir()` 字母序误选。

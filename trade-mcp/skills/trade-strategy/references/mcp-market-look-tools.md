@@ -70,7 +70,16 @@
 | `trade_look_market_look_query_page` | 分页查任务，可按状态、symbol、`strategy_id`、时间范围 |
 | `trade_look_market_look_sql` | 受控只读 SQL，**必须**出现表名 `market_look`，仅 `SELECT` |
 | `trade_look_market_look_delete` | **删除**盯盘任务（必填 `id`）；成功以 `verifiedAbsent` 为准，见上节 |
+| `trade_look_container_logs` | 读取**固定盯盘 Docker 容器**（`aifuturetrade-model-look-1`）最近若干行日志；**唯一参数** `tail`（可选，默认 1000，最大 5000 由后端裁剪）。用于排查策略打印/异常，**不涉及** `market_state` 或策略 API |
 | `trade_strategy_delete` | **删除策略**（必填 `strategyId`）；见下节「`trade_strategy_delete`」 |
+
+## `trade_look_container_logs`（盯盘容器日志快照）
+
+| 参数 | 必填 | 说明 |
+|------|------|------|
+| `tail` | 否 | 最近多少行；默认 **1000**，服务端上限 **5000** |
+
+**说明**：始终读取容器 **`aifuturetrade-model-look-1`**，无容器名等其它入参。成功时响应含 `lines`（字符串行列表）、`lineCount` 等；需 backend 能访问 Docker。与「创建策略/任务」流程无关，供诊断用。
 
 ## `trade_strategy_regenerate_code`（buy / sell / look 通用）
 

@@ -1,0 +1,36 @@
+{
+  "BTC": {
+    "price": 50000.0,
+    "contract_symbol": "BTCUSDT",
+    "name": "BTC",
+    "exchange": "BINANCE_FUTURES",
+    "change_24h": 0.5,
+    "base_volume": 1000.0,
+    "quote_volume": 5e7,
+    "previous_close_prices": {
+      "1h": 49900.0,
+      "4h": 49500.0
+    },
+    "indicators": {
+      "timeframes": {
+        "1h": {
+          "klines": [
+            {
+              "open": 49800.0,
+              "high": 50200.0,
+              "low": 49700.0,
+              "close": 50000.0,
+              "volume": 100.0,
+              "open_time": 1710000000000,
+              "indicators": {
+                "rsi": { "rsi14": 50.0 },
+                "macd": { "dif": 0.001, "dea": 0.0005, "bar": 0.0005 },
+                "ma": { "ma5": 49900.0, "ma20": 49800.0 }
+              }
+            }
+          ]
+        }
+      }
+    }
+  }
+}

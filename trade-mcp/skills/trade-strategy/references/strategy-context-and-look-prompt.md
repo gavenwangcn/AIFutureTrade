@@ -26,7 +26,7 @@
 | 类别 | 要求摘要 |
 |------|----------|
 | 数据来源 | **仅**使用入参 `symbol` 与 `market_state[symbol]`；**禁止**在策略代码里 HTTP/WS/自拉交易所/调独立行情服务。 |
-| 可用字段 | `price`、24h 量/额、`previous_close_prices`、`indicators.timeframes` 各周期 K 线及**已预计算指标**；**勿依赖**全市场 `market_indicators`；盯盘路径**勿依赖** `source`。 |
+| 可用字段 | `price`、24h 量/额、`previous_close_prices`、`indicators.timeframes`。**K 线**：`timeframes[interval]["klines"]` 为时间升序列表；每根含 OHLCV、时间键（如 `open_time`）及嵌套的 **`kline["indicators"]`**。**指标**：由 **binance-service** 预计算后写入每根 K 线，分组键包括 `ma`、`ema`、`rsi`、`macd`、`kdj`、`atr`、`adx`（**`"+di14"` / `"-di14"`**）、`vol`、`supertrend` 等，与 `strategy_look_prompt.txt` **第 5.2 节**一致；**禁止** `talib` 或手写公式重算上述指标。**周期**：盯盘合并为 **7 档** `1m`～`1d`（**不含 `1w`**）。**勿依赖**全市场 `market_indicators`；盯盘路径**勿依赖** `source`。 |
 | 目标行为 | 满足条件时 `signal: "notify"` 触发企微类通知；否则 **`return {}`**；勿用非 `notify` 的 signal 冒充通知。 |
 | 输出形态 | 只输出**纯 Python**；第一行为 import；**禁止** Markdown 代码块包装。 |
 | 返回类型 | `Dict[str, List[Dict]]`，key 为**大写基础符号**（与 `symbol` 一致）；value 为**列表**；方法内常用局部变量名 `decisions`，以 `return decisions` 结束。 |
@@ -81,4 +81,6 @@
 
 - 运行时结构与 mock：`look-execution-and-testing.md`  
 - MCP 工具参数：`mcp-market-look-tools.md`  
-- 主技能流程：`../SKILL.md`
+- 主技能流程：`../SKILL.md`  
+- 可运行脚本与渐进式披露：`../scripts/README.md`
+- MCP 策略代码 + 多场景 JSON 仿真测试：用法见 **`look-execution-and-testing.md` 第 11.3 节**（模型无需读脚本源码）；示例目录 **`../scripts/look_scenario_examples/`**

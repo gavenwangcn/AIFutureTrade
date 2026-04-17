@@ -11,13 +11,34 @@ description: >-
   take several minutes (often up to ~5 minutes); apply_submitted_code skips model generation but still runs Trade
   tests and may take noticeable time. Tell the user to wait and avoid duplicate retries until timeout or error.
   Use when the user asks to build/configure 盯盘策略、盯盘任务、
-  market_look, validate_symbol, strategy_context, or trade_look_* / trade_strategy_*（含 `trade_strategy_delete`、`trade_strategy_apply_submitted_code`） MCP tools in AIFutureTrade,
-  including deleting a market_look task via trade_look_market_look_delete.
+  market_look, validate_symbol, strategy_context, or trade_look_* / trade_strategy_*（含 `trade_strategy_delete`、`trade_strategy_apply_submitted_code`、`trade_look_container_logs`） MCP tools in AIFutureTrade,
+  including deleting a market_look task via trade_look_market_look_delete or inspecting look Docker logs.
 ---
 
 # trade-strategy
 
 本技能位于 **`trade-mcp/skills/trade-strategy/`**（`trade-mcp` 的 `skills` 目录下）。模型通过 **已配置的 trade-mcp** 调用 `trade_look_*` 工具；本技能只规定流程与约束。
+
+## 目录结构（Agent Skills 约定）
+
+与通用技能规范一致，本技能根目录包含：
+
+| 路径 | 角色 |
+|------|------|
+| **`SKILL.md`** | 【必需】YAML 元数据 + Markdown 主流程与约束 |
+| **`references/`** | 【可选】参考文档；由 `SKILL.md` 与 `scripts/README.md` **按需引用**，避免一次性塞满上下文 |
+| **`scripts/`** | 【可选】可执行脚本（场景测试等）；入口说明见 **`scripts/README.md`** |
+| **`assets/`** | 【可选】模板、图片等资源；当前未使用，见该目录内说明 |
+
+**引用关系**：`SKILL.md` → 渐进式披露 → `scripts/README.md` / `references/*.md`；`references/look-execution-and-testing.md` 第 11 节描述如何运行 `scripts/` 下命令。
+
+## 渐进式披露（控制 token，必循）
+
+**默认只把本文件（`SKILL.md`）当作主上下文**；其余材料按任务**按需读取**，避免一次性向 prompt 塞入过长参考文与整段 JSON。
+
+- **层级表与脚本位置**：见 **`scripts/README.md`**（`trade-mcp/skills/trade-strategy/scripts/README.md`）。
+- **原则**：先完成 MCP 流程与对话；仅在用户要求**严格核对策略代码与需求**时，再按 **`references/look-execution-and-testing.md` 第 11.3 节**指导用户（或说明命令）使用场景仿真脚本；构造 `market_state` 时**一次处理一个场景文件**。**模型不必读、改 `look_strategy_scenario_test_runner.py` 源码**，用法以第 11.3 节为准。
+- **执行与数据结构细节**：需要时再读 **`references/look-execution-and-testing.md`**（尤其第 11 节：含 11.3 模型使用说明）。
 
 ## 执行耗时（必须告知用户）
 
@@ -66,15 +87,16 @@ description: >-
 在已展示 **`strategy_code`** 的前提下（见第 3 节）：
 
 - **生成侧对齐**：先读 `references/strategy-context-and-look-prompt.md`——其中说明 **Java 如何用 `strategy_look_prompt.txt`（system）+ 用户策略正文（user）** 生成代码，以及 **system Prompt 对代码的硬性约束摘要**、**如何撰写 strategy_context** 才能与运行环境一致。
-- **运行侧对齐**：再结合 `references/look-execution-and-testing.md`（执行链路、`market_state`、返回值、mock 场景）。无完整仓库时依赖上述两篇即可审阅；有仓库时可对照源码与 `backend/.../strategy_look_prompt.txt` 全文。
+- **运行侧对齐**：再结合 `references/look-execution-and-testing.md`（执行链路、`market_state`、**K 线嵌套 `indicators` 与 binance-service 预计算约束**、返回值、mock 场景；**第 11.4 节**：`strategy_look_prompt.txt` 固定语法与场景仿真脚本的兼容性说明）。无完整仓库时依赖上述两篇即可审阅；有仓库时可对照 `trade/look_engine.py`、`trade/market/market_data.py` 与 `backend/.../strategy_look_prompt.txt` 全文。
+- **严格排查「策略代码 ↔ 需求」时**：**不要**打开仿真脚本源码；按 **`references/look-execution-and-testing.md` 第 11.3 节** 使用 **`scripts/look_strategy_scenario_test_runner.py`**（将 MCP 取得的 `strategy_code` 存为 `.py`、按契约构造 `market_state` JSON、传 `--symbol` 与 `--market-state` 或 `--scenarios-dir`）。该脚本为 **Python 标准库纯仿真**（注入假的 `StrategyBaseLook`，不依赖仓库 `trade` 包），语义与盯盘执行路径对齐；**有完整仓库时**仍可用 **`StrategyCodeTesterLook`** / 集成测试做更贴近生产的校验。示例见 **`scripts/look_scenario_examples/`**。
 - **主动审阅**：结合用户原始需求，判断代码是否实现预期分支；**用自然语言向用户说明**一致点与疑点，必要时**先澄清/修订 strategy_context 再重新生成**，不要仅因 `test_passed=true` 就默认业务正确。
 
 ## 5. 复杂策略：构造场景与模拟数据（思想实验或说明性示例）
 
 对**多条件、多周期**类策略：
 
-- 可基于已理解的 **`market_state` 结构**（单 symbol、含 `price`、`indicators.timeframes`、`previous_close_prices` 等）说明：在哪些**模拟行情/K 线/指标**组合下应触发 `notify`，哪些不应触发。
-- **测试数据原则**：针对「用户规则中的每一种结果分支」至少给一个**具体数值示例**（symbol、价格、某周期 K 线片段、关键指标），说明预期输出（是否 notify、`justification` 要点）。
+- 可基于已理解的 **`market_state` 结构**（单 symbol、含 `price`、`indicators.timeframes[*].klines[*].indicators`、`previous_close_prices` 等）说明：在哪些**模拟行情/K 线/指标**组合下应触发 `notify`，哪些不应触发。指标须按 **每根 K 线内嵌 `indicators`** 描述，**不要**假设在策略里本地用 talib 计算。
+- **测试数据原则**：针对「用户规则中的每一种结果分支」至少给一个**具体数值示例**（symbol、价格、某周期 K 线片段、**嵌套在 kline 上的**关键指标），说明预期输出（是否 notify、`justification` 要点）。若用本技能 **`scripts/look_strategy_scenario_test_runner.py`** 做仿真：**模型应自行按需求维度与策略代码分支构造多份 JSON 场景，确保各条件路径尽量被覆盖**——操作清单见 **`scripts/README.md`「模型如何构建模拟测试数据」**。
 - 实际试跑以项目内 **`strategy_code_tester_look`** 与后端校验为准；模型侧以**可追溯的推理与示例**为主，避免编造与仓库不一致的 API。
 
 ## 6. 模糊则追问，并用示例与用户核对
@@ -110,7 +132,7 @@ description: >-
 
 ## 8. 仅用 MCP 做创建与查询
 
-- **创建/查询盯盘策略与盯盘任务**：优先且重点使用 trade-mcp 提供的 **`trade_look_*`** 工具（创建、按 ID 查、分页查、受控 SQL 等）。
+- **创建/查询盯盘策略与盯盘任务**：优先且重点使用 trade-mcp 提供的 **`trade_look_*`** 工具（创建、按 ID 查、分页查、受控 SQL 等）。需对照盯盘容器运行时日志时，使用 **`trade_look_container_logs`**（仅 `tail`，固定容器名），见 `references/mcp-market-look-tools.md`。
 - **禁止**：为「代替 MCP」而随意生成独立脚本去直连数据库或 REST 创建策略/任务（除非用户明确授权且场景是离线维护，并说明与 MCP 无关）。
 - 需要列表或排查时：使用 `trade_look_strategy_search_look`、`trade_look_market_look_query_page`、`trade_look_strategy_get_by_id`、`trade_look_market_look_get_by_id` 等。
 - **修正已存在策略的代码**：**自然语言驱动再生成** → **`trade_strategy_regenerate_code`**；**已有一份完整代码、跳过 LLM** → **`trade_strategy_apply_submitted_code`**（见第 7 节与 **第 8.1 节**）。
@@ -159,8 +181,10 @@ description: >-
 7. 若结果不满意，是否已进入第 7 节闭环，直至用户**确认**或**明确放弃**？  
 8. 是否全程以 MCP 工具为主？  
 9. 若用户要**删除盯盘任务**：是否已用 **`trade_look_market_look_delete`** 并以 **`verifiedAbsent`** 确认成功（第 9 节）？  
-10. 若用户要**删除策略**：是否已确认且按需先清理 **`market_look`** 等关联，再调 **`trade_strategy_delete`**（第 10 节）？
+10. 若用户要**删除策略**：是否已确认且按需先清理 **`market_look`** 等关联，再调 **`trade_strategy_delete`**（第 10 节）？  
+11. 若使用 **`scripts/`** 下场景测试脚本：**是否按 `look-execution-and-testing.md` 第 11.3 节**指导用法（**不必读** `.py` 源码），并一次只处理**单个** JSON 场景文件，避免一次塞满 prompt？
 
-更多字段级说明见：`references/mcp-market-look-tools.md`。  
-**策略正文与生成 Prompt（含 system/user 分工、撰写要点）**：`references/strategy-context-and-look-prompt.md`。  
-**盯盘代码运行环境、契约、`market_state`、mock 与测试**：`references/look-execution-and-testing.md`。
+更多字段级说明见：`references/mcp-market-look-tools.md`（含 **`trade_look_container_logs`**）。  
+**策略正文与生成 Prompt（含 system/user 分工、撰写要点、K 线指标键名）**：`references/strategy-context-and-look-prompt.md`。  
+**盯盘代码运行环境、契约、`market_state`、K 线 `indicators`、mock 与测试**：`references/look-execution-and-testing.md`。  
+**可运行脚本目录**：`scripts/`（含 `README.md`）；场景仿真用法见 **`references/look-execution-and-testing.md` 第 11.3 节**（无需读脚本源码）。
