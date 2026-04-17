@@ -189,7 +189,18 @@
         <div class="detail-divider" role="separator" aria-hidden="true" />
 
         <section class="detail-section detail-section--snapshots">
-          <h4 class="section-label">通知快照 trade_notify（extra_json）</h4>
+          <template v-if="tradeNotifies.length">
+            <h4 class="section-label">通知 message（trade_notify）</h4>
+            <div v-for="n in tradeNotifies" :key="'msg-' + n.id" class="notify-msg-item">
+              <div class="notify-card-head">
+                <span class="notify-id">#{{ n.id }}</span>
+                <span class="notify-time">{{ formatNotifyTime(n.created_at ?? n.createdAt) }}</span>
+              </div>
+              <pre v-if="notifyMessageText(n)" class="notify-msg">{{ notifyMessageText(n) }}</pre>
+            </div>
+          </template>
+
+          <h4 class="section-label section-label--snapshot">通知快照 trade_notify（extra_json）</h4>
           <p v-if="!tradeNotifies.length" class="section-hint muted">暂无通知快照</p>
           <div v-for="n in tradeNotifies" :key="n.id" class="notify-card">
             <div class="notify-card-head">
@@ -197,7 +208,6 @@
               <span class="notify-time">{{ formatNotifyTime(n.created_at ?? n.createdAt) }}</span>
             </div>
             <div v-if="n.title" class="notify-title">{{ n.title }}</div>
-            <pre v-if="n.message" class="notify-msg">{{ n.message }}</pre>
             <div class="notify-extra-label">数据快照 extra_json</div>
             <pre class="notify-extra-pre">{{ formatExtraJson(n.extra_json ?? n.extraJson) }}</pre>
           </div>
@@ -367,6 +377,14 @@ function formatNotifyTime(iso) {
   } catch {
     return String(iso)
   }
+}
+
+/** trade_notify.message：无则空串，不渲染正文块 */
+function notifyMessageText(n) {
+  if (!n) return ''
+  const v = n.message
+  if (v == null) return ''
+  return String(v).trim()
 }
 
 async function openTaskDetail(row) {
@@ -857,6 +875,18 @@ watch(
 .cell-mono {
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   font-size: 12px;
+}
+
+.section-label--snapshot {
+  margin-top: 16px;
+}
+
+.notify-msg-item {
+  margin-bottom: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--border-1, rgba(0, 0, 0, 0.08));
+  border-radius: 8px;
+  background: var(--bg-2, #fafbfc);
 }
 
 .notify-card {
