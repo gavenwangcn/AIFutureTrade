@@ -1,15 +1,5 @@
 """
-市场分析模块
-
-提供市场指标计算和分析功能
+市场数据模块：价格与多周期 K 线拉取；K 线内指标由 binance-service 计算。
 """
 
-from .market_index import (
-    MarketIndexCalculator,
-    calculate_market_indicators
-)
-
-__all__ = [
-    'MarketIndexCalculator',
-    'calculate_market_indicators'
-]
+__all__: list = []

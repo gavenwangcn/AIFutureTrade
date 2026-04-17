@@ -75,15 +75,15 @@ def test_market_data_methods():
         print("⚠️  注意: 未安装 tiktoken，将使用简单估算方法")
         print("   建议安装: pip install tiktoken\n")
     
-    # 测试7个时间周期的方法
+    # 测试 7 个时间周期的方法（不含周线 1w）
     methods = [
         ("1m", market_data.get_market_data_1m),
         ("5m", market_data.get_market_data_5m),
         ("15m", market_data.get_market_data_15m),
+        ("30m", market_data.get_market_data_30m),
         ("1h", market_data.get_market_data_1h),
         ("4h", market_data.get_market_data_4h),
         ("1d", market_data.get_market_data_1d),
-        ("1w", market_data.get_market_data_1w)
     ]
     
     # 存储所有时间周期的数据用于token计算
@@ -163,7 +163,7 @@ def test_market_data_methods():
     print(f"{'时间周期':<10} {'K线数量':<12} {'MA5长度':<12} {'字符数':<15} {'Token数':<15}")
     print("-" * 80)
     
-    for interval in ["1m", "5m", "15m", "1h", "4h", "1d", "1w"]:
+    for interval in ["1m", "5m", "15m", "30m", "1h", "4h", "1d"]:
         stats = interval_stats.get(interval, {})
         kline_count = stats.get('kline_count', 0)
         ma5_length = stats.get('ma5_length', 0)

@@ -1,22 +1,7 @@
 """
-市场数据获取模块 - 从币安USDS-M期货SDK获取实时市场数据
+市场数据获取模块 - 从币安 USDS-M 期货与 binance-service 获取实时市场数据。
 
-本模块提供MarketDataFetcher类，用于获取和管理实时市场数据，包括：
-1. 价格数据：实时获取交易对的最新价格、涨跌幅、成交量等
-2. 技术指标：计算MA、MACD、RSI、VOL等技术指标
-3. 市场数据：获取不同时间周期的K线数据和指标
-4. 涨跌榜：从数据库查询涨跌幅排行榜数据
-
-主要功能：
-- 价格获取：实时从币安API获取价格数据（无缓存，保证实时性）
-- 技术指标计算：使用TA-Lib库计算多时间框架的技术指标
-- 市场数据：提供1m、5m、15m、30m、1h、4h、1d、1w等8个时间周期的数据
-- 涨跌榜同步：从24_market_tickers表查询涨跌幅排行榜
-
-使用场景：
-- 后端API：为前端提供价格、指标、涨跌榜等数据
-- 交易：为交易引擎提供实时价格和技术指标数据
-- 前端展示：为K线图、涨跌榜等组件提供数据支持
+K 线技术指标由 binance-service（get_klines_with_indicators）计算；本模块不在 Python 内实现指标公式。
 """
 import time
 import logging
@@ -24,62 +9,12 @@ import threading
 import trade.common.config as app_config
 from datetime import datetime, timezone, timedelta
 from typing import Dict, List, Optional
-import pandas as pd
-import numpy as np
-import talib
-from trade.market.indicator_rounding import round_indicator_4
 
 from trade.common.binance_futures import BinanceFuturesClient
 from trade.common.database.database_market_tickers import MarketTickersDatabase
 from trade.common.database.database_futures import FuturesDatabase
 
 logger = logging.getLogger(__name__)
-
-def _calculate_rsi_tradingview(close_array: np.ndarray, period: int) -> np.ndarray:
-    """
-    使用TradingView的计算逻辑计算RSI（Wilder's Smoothing方法）
-
-    与前端实现完全一致（frontend/KLineChart/indicators/rsi.ts）：
-    - i==0：初始化AvgGain/AvgLoss
-    - i < period：累计gain/loss
-    - i == period-1：计算初始平均
-    - i > period-1：Wilder's Smoothing
-    - i >= period-1 输出RSI
-    """
-    if len(close_array) == 0:
-        return np.full(0, np.nan)
-
-    rsi = np.full(len(close_array), np.nan)
-    avg_gain = 0.0
-    avg_loss = 0.0
-
-    for i in range(len(close_array)):
-        prev_close = close_array[i - 1] if i > 0 else close_array[i]
-        change = close_array[i] - prev_close
-        gain = change if change > 0 else 0.0
-        loss = -change if change < 0 else 0.0
-
-        if i == 0:
-            avg_gain = gain
-            avg_loss = loss
-        elif i < period:
-            avg_gain += gain
-            avg_loss += loss
-            if i == period - 1:
-                avg_gain = avg_gain / period
-                avg_loss = avg_loss / period
-        else:
-            avg_gain = (avg_gain * (period - 1) + gain) / period
-            avg_loss = (avg_loss * (period - 1) + loss) / period
-
-        if i >= period - 1:
-            if avg_loss != 0:
-                rs = avg_gain / avg_loss
-                rsi[i] = 100 - (100 / (1 + rs))
-            else:
-                rsi[i] = 100.0 if avg_gain > 0 else 50.0
-
-    return rsi
 
 
 def _ensure_usdt_suffix(symbol: str, quote_asset: str = 'USDT') -> str:
@@ -107,22 +42,8 @@ def _ensure_usdt_suffix(symbol: str, quote_asset: str = 'USDT') -> str:
 
 class MarketDataFetcher:
     """
-    市场数据获取器
-    
-    负责从币安USDS-M期货API获取实时市场数据，包括价格、技术指标、K线数据等。
-    所有数据均为实时获取，不使用缓存机制，以保证最高实时性。
-    
-    主要特性：
-    - 实时价格获取：每次调用都直接请求交易所API
-    - 多时间框架支持：支持1m到1w共7个时间周期
-    - 技术指标计算：使用TA-Lib库计算MA、MACD、RSI、VOL等指标
-    - 涨跌榜查询：从MySQL数据库的24_market_tickers表查询
-    
-    使用示例：
-        fetcher = MarketDataFetcher(db)
-        prices = fetcher.get_prices(['BTC', 'ETH'])
-        indicators = fetcher.calculate_technical_indicators('BTC')
-        leaderboard = fetcher.get_leaderboard(limit=10)
+    市场数据获取器：价格、多周期带指标 K 线（binance-service）、涨跌榜等。
+    K 线内嵌指标由服务端计算，本类不包含 TA-Lib 等指标公式实现。
     """
 
     def __init__(self, db):
@@ -569,7 +490,6 @@ class MarketDataFetcher:
             except (ValueError, TypeError):
                 continue
 
-            # 不再实时生成 timeframes 数据，只在 AI 交易时通过 calculate_technical_indicators 计算
             future_meta = next((f for f in futures if f['symbol'] == symbol), {})
             prices[symbol] = {
                 'price': last_price,
@@ -577,376 +497,11 @@ class MarketDataFetcher:
                 'exchange': future_meta.get('exchange', 'BINANCE_FUTURES'),
                 'change_24h': change_percent,
                 'quote_volume': quote_volume,
-                'timeframes': {}  # 不再实时生成，只在 AI 交易时计算
+                'timeframes': {},
             }
 
         return prices
 
-    # ============ 技术指标计算方法 ============
-
-    def calculate_technical_indicators(self, symbol: str) -> Dict:
-        """
-        实时计算指定交易对的技术指标（使用pandas-ta库优化）
-        
-        技术指标说明：
-        1. MA（移动平均线）：反映价格趋势方向和强度
-           - MA5：5周期均线（短期趋势）
-           - MA20：20周期均线（中期趋势）
-           - MA60：60周期均线（中长期趋势）
-           - MA99：99周期均线（长期趋势，币圈中部分交易者视为牛熊分界线）
-           
-        2. MACD（指数平滑异同移动平均线）：判断买卖时机和趋势强度
-           - DIF（差离值）：快线与慢线的差值
-           - DEA（信号线）：DIF的移动平均线
-           - BAR（柱状线）：DIF与DEA的差值（简化版，不乘以2）
-           
-        3. RSI（相对强弱指数）：衡量超买超卖状态
-           - RSI6：6周期RSI（短期敏感度）
-           - RSI9：9周期RSI（中期平衡点）
-           
-        4. VOL（成交量）和均量线（MAVOL）：辅助判断资金流向和趋势可靠性
-           - VOL：当前K线的成交量（该周期内的成交总量）
-           - MAVOL5：5周期成交量均线（短期资金热度）
-           - MAVOL10：10周期成交量均线（中期资金趋势）
-           
-        币圈特点说明：
-        - 7×24小时连续交易，无休市时间
-        - 波动剧烈，需要多时间框架结合分析
-        - 技术指标滞后性明显，需结合基本面分析
-        
-        Args:
-            symbol: 交易对符号（如 BTCUSDT）
-            
-        Returns:
-            包含各时间框架技术指标的嵌套字典，结构如下：
-            {
-                'BTCUSDT': {
-                    '1w': {
-                        'kline': {...},
-                        'ma': {'ma5': ..., 'ma20': ..., 'ma60': ..., 'ma99': ...},
-                        'macd': {'dif': ..., 'dea': ..., 'bar': ...},
-                        'rsi': {'rsi6': ..., 'rsi9': ...},
-                        'vol': {'vol': ..., 'mavol5': ..., 'mavol10': ...}
-                    },
-                    '1d': {...},
-                    '4h': {...},
-                    '1h': {...},
-                    '15m': {...},
-                    '5m': {...},
-                    '1m': {...}
-                }
-            }
-        """
-        logger.debug(f'[Indicators] 开始计算技术指标: {symbol}')
-        
-        # 定义时间框架映射关系（标签: Binance API周期标识符）
-        timeframe_mapping = {
-            '1w': '1w',   # 周线：观察长期趋势和牛熊转换
-            '1d': '1d',   # 日线：观察中期趋势和重要支撑阻力
-            '4h': '4h',   # 4小时线：日内短线交易的重要参考
-            '1h': '1h',   # 1小时线：短线交易的主要依据
-            '30m': '30m', # 30分钟线：中短期交易的重要参考
-            '15m': '15m', # 15分钟线：捕捉短期波动和入场点
-            '5m': '5m',   # 5分钟线：超短线交易的精确参考
-            '1m': '1m'    # 1分钟线：极短线交易的微观信号
-        }
-        
-        # 定义各指标的计算周期参数
-        ma_lengths = [5, 20, 60, 99]         # MA均线周期
-        mavol_lengths = [5, 10, 60]          # 成交量均线周期
-        
-        # 存储各时间框架的数据
-        timeframe_data = {}
-        
-        # 为每个时间框架计算技术指标
-        for label, interval in timeframe_mapping.items():
-            try:
-                logger.debug(f'[Indicators] Processing {symbol} {label} ({interval})')
-                
-                # 根据不同时间框架设置不同的K线数量限制
-                # 短周期需要更多数据以保证指标准确性
-                limit_map = {
-                    '1w': 120,   # 周线：获取120周数据（约2.3年）
-                    '1d': 120,   # 日线：获取120天数据（约4个月）
-                    '4h': 120,   # 4小时线：获取120根4小时K线（约20天）
-                    '1h': 120,   # 1小时线：获取120根1小时K线（约5天）
-                    '30m': 120,  # 30分钟线：获取120根30分钟K线（约2.5天）
-                    '15m': 120,  # 15分钟线：获取120根15分钟K线（约1.25天）
-                    '5m': 120,   # 5分钟线：获取120根5分钟K线（约10小时）
-                    '1m': 120    # 1分钟线：获取120根1分钟K线（约2小时）
-                }
-                limit = limit_map.get(label, 120)  # 默认获取120根K线
-                
-                # 构造币安API需要的交易对符号（添加计价资产后缀，如BTC -> BTCUSDT）
-                symbol_key = self._futures_client.format_symbol(symbol)
-                
-                # 从币安期货API获取K线数据
-                # 不指定startTime和endTime时，API默认返回最新的limit根K线数据
-                # 这正好符合我们的需求：获取最新的K线数据用于指标计算
-                klines = self._futures_client.get_klines(
-                    symbol_key, 
-                    interval, 
-                    limit=limit
-                )
-                
-                logger.debug(
-                    f'[Indicators] 获取K线数据: symbol={symbol}, interval={interval}, limit={limit}, '
-                    f'返回{len(klines) if klines else 0}根K线'
-                )
-                
-                if not klines or len(klines) == 0:
-                    logger.debug(f'[Indicators] No klines data for {symbol} {label}')
-                    continue
-                
-                # 提取完整的OHLCV数据（TA-Lib库需要numpy数组格式）
-                opens = []
-                highs = []
-                lows = []
-                closes = []
-                volumes = []
-                timestamps = []
-                for item in klines:
-                    # 兼容旧的列表格式和新的字典格式
-                    try:
-                        # 如果是字典格式（新的实现）
-                        if isinstance(item, dict):
-                            opens.append(float(item.get('open', 0)))
-                            highs.append(float(item.get('high', 0)))
-                            lows.append(float(item.get('low', 0)))
-                            closes.append(float(item.get('close', 0)))
-                            volumes.append(float(item.get('volume', 0)))
-                            timestamps.append(int(item['open_time']) if item.get('open_time') else 0)
-                        # 如果是列表格式（旧的实现）
-                        elif isinstance(item, (list, tuple)) and len(item) > 4:
-                            opens.append(float(item[1]) if len(item) > 1 else 0.0)
-                            highs.append(float(item[2]) if len(item) > 2 else 0.0)
-                            lows.append(float(item[3]) if len(item) > 3 else 0.0)
-                            closes.append(float(item[4]) if len(item) > 4 else 0.0)
-                            volumes.append(float(item[5]) if len(item) > 5 else 0.0)
-                            timestamps.append(int(item[0]) if len(item) > 0 and item[0] else 0)
-                    except (ValueError, TypeError, KeyError):
-                        continue
-                
-                if not closes or len(closes) < 2:
-                    logger.debug(f'[Indicators] Insufficient data for {symbol} {label}: {len(closes)} closes')
-                    continue
-                
-                # 获取最新一根K线数据
-                latest_kline = klines[-1]
-                try:
-                    # 兼容旧的列表格式和新的字典格式
-                    if isinstance(latest_kline, dict):
-                        # 新的字典格式
-                        open_time_ms = int(latest_kline['open_time']) if latest_kline.get('open_time') else None
-                        kline_data = {
-                            'open_time': open_time_ms,
-                            'open_time_date': datetime.fromtimestamp(open_time_ms / 1000, tz=timezone.utc).strftime('%Y-%m-%d %H:%M:%S') if open_time_ms else None,
-                            'open': float(latest_kline['open']) if latest_kline.get('open') else 0.0,
-                            'high': float(latest_kline['high']) if latest_kline.get('high') else 0.0,
-                            'low': float(latest_kline['low']) if latest_kline.get('low') else 0.0,
-                            'close': float(latest_kline['close']) if latest_kline.get('close') else 0.0,
-                            'volume': float(latest_kline['volume']) if latest_kline.get('volume') else 0.0
-                        }
-                    else:
-                        # 旧的列表格式
-                        open_time_ms = int(latest_kline[0]) if len(latest_kline) > 0 and latest_kline[0] else None
-                        kline_data = {
-                            'open_time': open_time_ms,
-                            'open_time_date': datetime.fromtimestamp(open_time_ms / 1000, tz=timezone.utc).strftime('%Y-%m-%d %H:%M:%S') if open_time_ms else None,
-                            'open': float(latest_kline[1]) if len(latest_kline) > 1 else 0.0,
-                            'high': float(latest_kline[2]) if len(latest_kline) > 2 else 0.0,
-                            'low': float(latest_kline[3]) if len(latest_kline) > 3 else 0.0,
-                            'close': float(latest_kline[4]) if len(latest_kline) > 4 else 0.0,
-                            'volume': float(latest_kline[5]) if len(latest_kline) > 5 else 0.0
-                        }
-                except (ValueError, TypeError, IndexError) as e:
-                    logger.warning(f'[Indicators] Failed to parse kline data for {symbol} {label}: {e}')
-                    continue
-                
-                # 转换为numpy数组用于TA-Lib计算（TA-Lib需要numpy数组格式）
-                open_array = np.array(opens, dtype=np.float64)
-                high_array = np.array(highs, dtype=np.float64)
-                low_array = np.array(lows, dtype=np.float64)
-                close_array = np.array(closes, dtype=np.float64)
-                volume_array = np.array(volumes, dtype=np.float64)
-                
-                # 实时计算MA值（简单移动平均）使用TA-Lib
-                ma_values = {}
-                for length in ma_lengths:
-                    if len(closes) >= length:
-                        try:
-                            ma_result = talib.SMA(close_array, timeperiod=length)
-                            if ma_result is not None and len(ma_result) > 0:
-                                last_value = ma_result[-1]
-                                if not np.isnan(last_value) and not np.isinf(last_value):
-                                    ma_values[f'ma{length}'] = round_indicator_4(float(last_value))
-                                else:
-                                    ma_values[f'ma{length}'] = 0.0
-                            else:
-                                ma_values[f'ma{length}'] = 0.0
-                        except Exception as e:
-                            ma_values[f'ma{length}'] = 0.0
-                            logger.warning(
-                                f'[MA] 无法计算MA{length}: {e}'
-                            )
-                    else:
-                        ma_values[f'ma{length}'] = 0.0
-                        logger.warning(
-                            f'[MA] 数据不足: MA{length}需要至少{length}根K线数据，实际只有{len(closes)}根，无法计算'
-                        )
-                
-                # 实时计算MACD指标使用TA-Lib
-                macd = {'dif': 0.0, 'dea': 0.0, 'bar': 0.0}
-                if len(closes) >= 26:  # MACD需要至少26个数据点
-                    try:
-                        # TA-Lib的MACD返回三个数组：macd, signal, histogram
-                        macd_result, signal_result, histogram_result = talib.MACD(
-                            close_array, 
-                            fastperiod=12, 
-                            slowperiod=26, 
-                            signalperiod=9
-                        )
-                        if macd_result is not None and len(macd_result) > 0:
-                            # DIF = MACD线
-                            dif_value = macd_result[-1]
-                            if not np.isnan(dif_value) and not np.isinf(dif_value):
-                                macd['dif'] = round_indicator_4(float(dif_value))
-                            
-                            # DEA = Signal线
-                            if signal_result is not None and len(signal_result) > 0:
-                                dea_value = signal_result[-1]
-                                if not np.isnan(dea_value) and not np.isinf(dea_value):
-                                    macd['dea'] = round_indicator_4(float(dea_value))
-                            
-                            # BAR = Histogram = DIF - DEA
-                            if histogram_result is not None and len(histogram_result) > 0:
-                                bar_value = histogram_result[-1]
-                                if not np.isnan(bar_value) and not np.isinf(bar_value):
-                                    macd['bar'] = round_indicator_4(float(bar_value))
-                                else:
-                                    # 如果histogram为NaN，手动计算：BAR = DIF - DEA
-                                    macd['bar'] = round_indicator_4(macd['dif'] - macd['dea'])
-                            else:
-                                # 如果没有histogram，手动计算
-                                macd['bar'] = round_indicator_4(macd['dif'] - macd['dea'])
-                    except Exception as e:
-                        logger.warning(f'[MACD] 无法计算MACD: {e}')
-                else:
-                    logger.warning(f'[MACD] 数据不足: 需要至少26个数据点，实际只有{len(closes)}个')
-                
-                # 实时计算RSI指标使用TradingView的计算逻辑（Wilder's Smoothing方法）
-                rsi = {'rsi6': 50.0, 'rsi9': 50.0}
-                # 计算RSI(6)
-                if len(closes) >= 7:  # RSI(6)需要至少7个数据点
-                    try:
-                        rsi6_result = _calculate_rsi_tradingview(close_array, period=6)
-                        if rsi6_result is not None and len(rsi6_result) > 0:
-                            rsi6_value = rsi6_result[-1]
-                            if not np.isnan(rsi6_value) and not np.isinf(rsi6_value):
-                                rsi['rsi6'] = round_indicator_4(float(rsi6_value))
-                    except Exception as e:
-                        logger.warning(f'[RSI] 无法计算RSI6: {e}')
-                
-                # 计算RSI(9)
-                if len(closes) >= 10:  # RSI(9)需要至少10个数据点
-                    try:
-                        rsi9_result = _calculate_rsi_tradingview(close_array, period=9)
-                        if rsi9_result is not None and len(rsi9_result) > 0:
-                            rsi9_value = rsi9_result[-1]
-                            if not np.isnan(rsi9_value) and not np.isinf(rsi9_value):
-                                rsi['rsi9'] = round_indicator_4(float(rsi9_value))
-                    except Exception as e:
-                        logger.warning(f'[RSI] 无法计算RSI9: {e}')
-                
-                # 计算VOL指标（成交量）和均量线（MAVOL）使用pandas-ta
-                vol_data = {}
-                # VOL：最新一根K线的成交量
-                vol_data['vol'] = round_indicator_4(volumes[-1]) if volumes else 0.0
-                
-                # 获取最新K线的买入成交量和卖出成交量
-                # 从klines中提取买入成交量数据
-                buy_volumes = []
-                for item in klines:
-                    try:
-                        # 如果是字典格式（新的实现）
-                        if isinstance(item, dict):
-                            buy_volume = float(item.get('taker_buy_base_volume', 0))
-                            buy_volumes.append(buy_volume)
-                        # 如果是列表格式（旧的实现）
-                        elif isinstance(item, (list, tuple)) and len(item) > 10:
-                            buy_volume = float(item[9])  # taker_buy_base_volume 是第10个元素（索引9）
-                            buy_volumes.append(buy_volume)
-                        else:
-                            buy_volumes.append(0)
-                    except (ValueError, TypeError, IndexError):
-                        buy_volumes.append(0)
-                
-                # 计算最新K线的买入量和卖出量
-                if buy_volumes:
-                    vol_data['buy_vol'] = round_indicator_4(buy_volumes[-1])
-                    vol_data['sell_vol'] = round_indicator_4(volumes[-1] - buy_volumes[-1]) if volumes else 0.0
-                else:
-                    vol_data['buy_vol'] = 0.0
-                    vol_data['sell_vol'] = 0.0
-                
-                # 计算均量线（MAVOL）- 使用pandas的rolling方法直接计算，更可靠
-                df = pd.DataFrame({'volume': volumes})
-                for length in mavol_lengths:
-                    if len(volumes) >= length:
-                        try:
-                            # 直接使用pandas的rolling方法计算volume的移动平均
-                            mavol_value = df['volume'].rolling(window=length, min_periods=length).mean().iloc[-1]
-                            vol_data[f'mavol{length}'] = (
-                                round_indicator_4(float(mavol_value)) if pd.notna(mavol_value) else 0.0
-                            )
-                        except Exception as e:
-                            vol_data[f'mavol{length}'] = 0.0
-                            logger.warning(
-                                f'[VOL] 无法计算MAVOL{length}: {e}'
-                            )
-                    else:
-                        # 数据不足：使用所有可用数据的平均值
-                        if len(volumes) > 0:
-                            vol_data[f'mavol{length}'] = round_indicator_4(sum(volumes) / len(volumes))
-                            logger.warning(
-                                f'[VOL] 数据不足: MAVOL{length}需要{length}个数据点，实际只有{len(volumes)}个，使用所有可用数据计算'
-                            )
-                        else:
-                            vol_data[f'mavol{length}'] = 0.0
-                            logger.warning(f'[VOL] 无数据: 无法计算MAVOL{length}')
-                
-                # 组装该时间框架的数据
-                timeframe_data[label] = {
-                    'kline': kline_data,
-                    'ma': ma_values,
-                    'macd': macd,
-                    'rsi': rsi,
-                    'vol': vol_data
-                }
-                
-                # 记录计算成功的日志（仅在DEBUG级别）
-                logger.debug(
-                    f'[Indicators] {symbol} {label} 指标计算完成: '
-                    f'MA5={ma_values.get("ma5", 0):.2f}, '
-                    f'MACD_DIF={macd.get("dif", 0):.4f}, '
-                    f'RSI6={rsi.get("rsi6", 0):.2f}, '
-                    f'VOL={vol_data.get("vol", 0):.2f}, '
-                    f'MAVOL5={vol_data.get("mavol5", 0):.2f}'
-                )
-                
-            except Exception as e:
-                logger.warning(
-                    f"[技术指标] 计算 {symbol} {label} 时间框架指标失败: {e}",
-                    exc_info=True
-                )
-                continue
-
-        # 直接返回结果，不使用缓存（保证实时性）
-        result = {symbol: timeframe_data}
-        logger.debug(f'[Indicators] Calculated indicators for {symbol}: {len(timeframe_data)} timeframes')
-        
-        return result
-    
     # ============ 市场数据获取方法 ============
     
     def _get_market_data_by_interval(self, symbol: str, interval: str, limit: int, return_count: int) -> Dict:
@@ -958,7 +513,7 @@ class MarketDataFetcher:
 
         Args:
             symbol: 交易对符号（如 'BTC' 或 'BTCUSDT'）
-            interval: 时间周期（如 '1m', '5m', '1h', '4h', '1d', '1w'）
+            interval: 时间周期（如 '1m', '5m', '1h', '4h', '1d'）
             limit: 请求的K线数量（至少500，以满足历史窗口）
             return_count: 返回最近若干根带完整指标的K线
 
@@ -1039,6 +594,15 @@ class MarketDataFetcher:
                         'open_time_dt_str': open_time_dt_str,
                         'indicators': kline.get('indicators', {}) if isinstance(kline.get('indicators'), dict) else {}
                     }
+                    # 币安 API 第 8 列为计价成交额；服务端键名为 quote_asset_volume。策略常写 quote_volume，一并提供。
+                    qv_raw = kline.get('quote_asset_volume')
+                    if qv_raw is not None and str(qv_raw).strip() != '':
+                        try:
+                            qv = float(qv_raw)
+                            kline_data['quote_asset_volume'] = qv
+                            kline_data['quote_volume'] = qv
+                        except (TypeError, ValueError):
+                            pass
 
                     if close_time_ms:
                         kline_data['close_time'] = close_time_ms
@@ -1157,18 +721,53 @@ class MarketDataFetcher:
         """
         return self._get_market_data_by_interval(symbol, '1d', limit=200, return_count=100)
 
-    def get_market_data_1w(self, symbol: str) -> Dict:
+    def merge_timeframe_klines_for_contract(self, contract_symbol: str) -> Dict:
         """
-        获取1周时间周期的市场数据（包含预计算的技术指标）
-
-        Args:
-            symbol: 交易对符号（如 'BTC'）
-
-        Returns:
-            市场数据字典，包含symbol、timeframe、klines（每根K线含indicators字段）和metadata字段
+        合并多周期带指标 K 线（不含周线 1w，避免周线历史不足导致服务端无数据告警）。
+        与 look_engine.merge_timeframe_klines / TradingEngine._merge_timeframe_data 对齐。
         """
-        return self._get_market_data_by_interval(symbol, '1w', limit=200, return_count=100)
+        symbol_upper = contract_symbol.upper()
+        if not symbol_upper.endswith("USDT"):
+            formatted_symbol = f"{symbol_upper}USDT"
+        else:
+            formatted_symbol = symbol_upper
 
+        timeframe_methods = {
+            "1m": self.get_market_data_1m,
+            "5m": self.get_market_data_5m,
+            "15m": self.get_market_data_15m,
+            "30m": self.get_market_data_30m,
+            "1h": self.get_market_data_1h,
+            "4h": self.get_market_data_4h,
+            "1d": self.get_market_data_1d,
+        }
+
+        merged_data: Dict[str, Dict] = {formatted_symbol: {}}
+        errors: List[str] = []
+
+        for timeframe, method in timeframe_methods.items():
+            try:
+                data = method(formatted_symbol)
+                if data:
+                    klines = data.get("klines", [])
+                    if klines:
+                        merged_data[formatted_symbol][timeframe] = {"klines": klines}
+                    else:
+                        errors.append(f"{timeframe}: K线数据为空")
+                else:
+                    errors.append(f"{timeframe}: 返回数据为空")
+            except Exception as e:
+                errors.append(f"{timeframe}: {e}")
+                logger.warning(
+                    "[MarketData] 获取 %s %s 失败: %s", formatted_symbol, timeframe, e
+                )
+
+        if not merged_data[formatted_symbol] and errors:
+            logger.warning(
+                "[MarketData] 获取 %s 全周期失败: %s", formatted_symbol, errors
+            )
+
+        return merged_data
 
     # ============ Leaderboard Methods ===========
 

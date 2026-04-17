@@ -12,8 +12,6 @@ from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 from zoneinfo import ZoneInfo
 
-import numpy as np
-
 import trade.common.config as app_config
 from trade.common.wechat_markdown_limit import MAX_MARKDOWN_CHARS as _WECHAT_MD_MAX
 from trade.common.database.database_market_look import (
@@ -24,8 +22,6 @@ from trade.common.database.database_market_look import (
 from trade.common.database.database_strategys import StrategysDatabase
 from trade.common.database.database_trade_notify import TradeNotifyDatabase
 from trade.market.market_data import MarketDataFetcher
-from trade.market.market_index import MarketIndexCalculator
-from trade.market.indicator_rounding import round_indicator_4
 from trade.strategy.strategy_trader import StrategyTrader
 
 logger = logging.getLogger(__name__)
@@ -108,116 +104,12 @@ def _candidate_for_symbol(symbol: str) -> Dict:
     }
 
 
-def _klines_include_service_adx14(klines: List) -> bool:
-    """binance-service 已在 indicators.adx 中写入 adx14 时，不再本地重算 ADX。"""
-    for k in klines:
-        if not isinstance(k, dict):
-            continue
-        adx = (k.get("indicators") or {}).get("adx")
-        if isinstance(adx, dict) and adx.get("adx14") is not None:
-            return True
-    return False
-
-
 def merge_timeframe_klines(market_fetcher: MarketDataFetcher, contract_symbol: str) -> Dict:
     """
-    与 TradingEngine._merge_timeframe_data 相同：合并 8 周期 K 线（仅 klines），单合约。
+    与 TradingEngine._merge_timeframe_data 相同：合并多周期 K 线（仅 klines），单合约。
+    不包含周线 1w。
     """
-    symbol_upper = contract_symbol.upper()
-    if not symbol_upper.endswith("USDT"):
-        formatted_symbol = f"{symbol_upper}USDT"
-    else:
-        formatted_symbol = symbol_upper
-
-    timeframe_methods = {
-        "1m": market_fetcher.get_market_data_1m,
-        "5m": market_fetcher.get_market_data_5m,
-        "15m": market_fetcher.get_market_data_15m,
-        "30m": market_fetcher.get_market_data_30m,
-        "1h": market_fetcher.get_market_data_1h,
-        "4h": market_fetcher.get_market_data_4h,
-        "1d": market_fetcher.get_market_data_1d,
-        "1w": market_fetcher.get_market_data_1w,
-    }
-
-    merged_data: Dict[str, Dict] = {formatted_symbol: {}}
-    errors: List[str] = []
-
-    for timeframe, method in timeframe_methods.items():
-        try:
-            data = method(formatted_symbol)
-            if data:
-                klines = data.get("klines", [])
-                if klines:
-                    merged_data[formatted_symbol][timeframe] = {"klines": klines}
-                else:
-                    errors.append(f"{timeframe}: K线数据为空")
-            else:
-                errors.append(f"{timeframe}: 返回数据为空")
-        except Exception as e:
-            errors.append(f"{timeframe}: {e}")
-            logger.warning("LookEngine 获取 %s %s 失败: %s", formatted_symbol, timeframe, e)
-
-    if not merged_data[formatted_symbol] and errors:
-        logger.warning("LookEngine 获取 %s 全周期失败: %s", formatted_symbol, errors)
-
-    return merged_data
-
-
-def calculate_symbol_adx_timeframes(timeframes_data: Dict) -> Dict:
-    """与 TradingEngine._calculate_symbol_adx 一致：为 1h/4h/1d K 线补充 ADX。"""
-    calculator = MarketIndexCalculator()
-    updated_timeframes: Dict = {}
-
-    for timeframe in ["1h", "4h", "1d"]:
-        tf_data = timeframes_data.get(timeframe, {})
-        updated_timeframes[timeframe] = tf_data.copy() if tf_data else {}
-        klines = tf_data.get("klines", [])
-
-        if not klines or len(klines) < 14:
-            updated_timeframes[timeframe]["klines"] = klines
-            continue
-
-        if _klines_include_service_adx14(klines):
-            updated_timeframes[timeframe]["klines"] = klines
-            continue
-
-        try:
-            high = np.array([float(k.get("high", 0)) for k in klines if isinstance(k, dict)])
-            low = np.array([float(k.get("low", 0)) for k in klines if isinstance(k, dict)])
-            close = np.array([float(k.get("close", 0)) for k in klines if isinstance(k, dict)])
-
-            if len(high) > 0 and len(low) > 0 and len(close) > 0:
-                result = calculator.compute_adx(high, low, close)
-                if result is not None:
-                    adx_array, _, _ = result
-                    updated_klines = []
-                    for i, kline in enumerate(klines):
-                        kline_copy = kline.copy() if isinstance(kline, dict) else {}
-                        if "indicators" not in kline_copy:
-                            kline_copy["indicators"] = {}
-                        if i < len(adx_array) and not np.isnan(adx_array[i]):
-                            adx_value = round_indicator_4(float(adx_array[i]))
-                        else:
-                            adx_value = None
-                        if "adx" not in kline_copy["indicators"]:
-                            kline_copy["indicators"]["adx"] = {}
-                        kline_copy["indicators"]["adx"][f"adx_{timeframe}"] = adx_value
-                        updated_klines.append(kline_copy)
-                    updated_timeframes[timeframe]["klines"] = updated_klines
-                else:
-                    updated_timeframes[timeframe]["klines"] = klines
-            else:
-                updated_timeframes[timeframe]["klines"] = klines
-        except Exception as e:
-            logger.warning("LookEngine 计算 %s ADX 失败: %s", timeframe, e)
-            updated_timeframes[timeframe]["klines"] = klines
-
-    for tf in timeframes_data:
-        if tf not in updated_timeframes:
-            updated_timeframes[tf] = timeframes_data[tf]
-
-    return updated_timeframes
+    return market_fetcher.merge_timeframe_klines_for_contract(contract_symbol)
 
 
 def build_single_symbol_market_state(
@@ -228,6 +120,7 @@ def build_single_symbol_market_state(
     """
     仅构建一个 symbol 的 market_state 条目（与 TradingEngine 中单候选分支逻辑一致），
     不经过 _build_market_state_for_candidates。
+    K 线指标（含 ADX）由 binance-service 带指标接口提供，不在此本地计算。
     """
     market_state: Dict[str, Any] = {}
 
@@ -303,8 +196,7 @@ def build_single_symbol_market_state(
         quote_volume_value = price_info.get("quote_volume", candidate.get("quote_volume", 0))
 
     if timeframes_data:
-        timeframes_with_adx = calculate_symbol_adx_timeframes(timeframes_data)
-        indicators_data = {"timeframes": timeframes_with_adx}
+        indicators_data = {"timeframes": timeframes_data}
     else:
         indicators_data = {}
 
@@ -390,7 +282,7 @@ class LookEngine:
         self.strategy_trader = StrategyTrader(db=db, model_id=model_id)
 
     def build_market_state_for_symbol(self, symbol: str) -> Dict:
-        """仅请求当前 symbol 对应合约的行情（SDK 价格 + DB 成交额 + 8 周期 K 线 + ADX；不含全市场聚合 market_indicators）。"""
+        """仅请求当前 symbol 对应合约的行情（SDK 价格 + DB 成交额 + 7 周期带指标 K 线；不含全市场聚合 market_indicators）。"""
         c = _candidate_for_symbol(symbol)
         tag = f"LookEngine m={self.strategy_trader.model_id}"
         return build_single_symbol_market_state(

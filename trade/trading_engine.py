@@ -56,8 +56,6 @@ from trade.trading.trading_utils import (
 )
 from trade.trading.market_data_manager import MarketDataManager
 from trade.trading.batch_decision_processor import BatchDecisionProcessor
-from trade.market import calculate_market_indicators
-
 logger = logging.getLogger(__name__)
 
 
@@ -1332,7 +1330,7 @@ class TradingEngine:
             timeframes_data = merged_data.get(query_symbol, {}) if merged_data else {}
             
             # 提取每个时间框架的上一根K线收盘价（倒数第二个K线的close）
-            # K线数组是倒序的（从新到旧），索引-2就是上一根K线的收盘价
+            # K 线为时间升序（从旧到新）：索引 -1 为最近一根，-2 为上一根已收盘（与 previous_close_prices 推导一致）
             previous_close_prices = {}
             for timeframe, timeframe_data in timeframes_data.items():
                 klines = timeframe_data.get('klines', [])
@@ -1358,37 +1356,18 @@ class TradingEngine:
                                 pass
             
             if query_symbol in merged_data:
-                # 计算多时间周期ADX并添加到timeframes中
-                timeframes_with_adx = self._calculate_symbol_adx(timeframes_data)
-                market_state[original_symbol]['indicators'] = {'timeframes': timeframes_with_adx}
+                market_state[original_symbol]['indicators'] = {'timeframes': timeframes_data}
             else:
                 market_state[original_symbol]['indicators'] = {'timeframes': {}}
             
             # 添加上一根K线收盘价信息
             market_state[original_symbol]['previous_close_prices'] = previous_close_prices
 
-        # 市场聚合指标：使用各 symbol 已加载的带指标 K 线中的 atr14/adx14（binance-service），不本地重算
-        try:
-            if market_state:
-                market_indicators = calculate_market_indicators(market_state)
-                logger.debug(f"[Model {self.model_id}] 市场聚合指标: {market_indicators}")
-                for symbol in market_state:
-                    market_state[symbol]['market_indicators'] = market_indicators
-            else:
-                for symbol in market_state:
-                    market_state[symbol]['market_indicators'] = {}
-        except Exception as e:
-            logger.error(f"[Model {self.model_id}] 计算市场指标失败: {e}", exc_info=True)
-            for symbol in market_state:
-                market_state[symbol]['market_indicators'] = {}
+        # 全市场聚合指标不在 Python 计算；如需可由策略从各 symbol 的 K 线 indicators 自行汇总
+        for symbol in market_state:
+            market_state[symbol]['market_indicators'] = {}
 
         return market_state
-
-    def _calculate_symbol_adx(self, timeframes_data: Dict) -> Dict:
-        """
-        K 线已由 binance-service 的带指标接口写入完整 indicators（含 ADX），不再在 Python 侧补算。
-        """
-        return timeframes_data
 
     def _validate_symbol_market_data(
         self,
@@ -3412,7 +3391,7 @@ class TradingEngine:
             timeframes_data = merged_data.get(query_symbol, {}) if merged_data else {}
             
             # 提取每个时间框架的上一根K线收盘价（倒数第二个K线的close）
-            # K线数组是倒序的（从新到旧），索引-2就是上一根K线的收盘价
+            # K 线为时间升序（从旧到新）：索引 -1 为最近一根，-2 为上一根已收盘（与 previous_close_prices 推导一致）
             previous_close_prices = {}
             for timeframe, timeframe_data in timeframes_data.items():
                 klines = timeframe_data.get('klines', [])
@@ -3447,11 +3426,9 @@ class TradingEngine:
             if quote_volume_value == 0.0:
                 quote_volume_value = price_info.get('quote_volume', candidate.get('quote_volume', 0))
             
-            # 构建市场状态条目（只包含klines，不包含indicators）
-            # 计算多时间周期ADX并添加到timeframes中
+            # 构建市场状态条目；K 线指标来自 binance-service，Python 不计算
             if timeframes_data:
-                timeframes_with_adx = self._calculate_symbol_adx(timeframes_data)
-                indicators_data = {'timeframes': timeframes_with_adx}
+                indicators_data = {'timeframes': timeframes_data}
             else:
                 indicators_data = {}
 
@@ -3472,20 +3449,8 @@ class TradingEngine:
             if quote_volume_value > 0 or base_volume_value > 0:
                 logger.debug(f"[Model {self.model_id}] {symbol} 成交量: {base_volume_value}, 成交额: {quote_volume_value}")
 
-        # 市场聚合指标：使用已加载的带指标 K 线中的 atr14/adx14（binance-service）
-        try:
-            if market_state:
-                market_indicators = calculate_market_indicators(market_state)
-                logger.debug(f"[Model {self.model_id}] 市场聚合指标: {market_indicators}")
-                for symbol in market_state:
-                    market_state[symbol]['market_indicators'] = market_indicators
-            else:
-                for symbol in market_state:
-                    market_state[symbol]['market_indicators'] = {}
-        except Exception as e:
-            logger.error(f"[Model {self.model_id}] 计算市场指标失败: {e}", exc_info=True)
-            for symbol in market_state:
-                market_state[symbol]['market_indicators'] = {}
+        for symbol in market_state:
+            market_state[symbol]['market_indicators'] = {}
 
         logger.info(f"[Model {self.model_id}] 为 {len(market_state)} 个候选symbol构建了市场状态信息")
         return market_state

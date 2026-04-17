@@ -71,13 +71,13 @@ def execute_look_decision(self, symbol: str, market_state: Dict) -> Dict[str, Li
 ## 市场数据说明：数据从哪来？（指导性规范）
 
 ### 1）策略内不调用「市场服务接口」
-- 实盘与校验时，**交易服务（trade）**已通过内部 **MarketDataFetcher / TradingEngine** 从 **Binance 行情与本地 `24_market_tickers` 等** 聚合数据，再调用 **`_build_market_state_for_candidates` 同类逻辑** 填入 `market_state`。
+- 实盘盯盘任务中，**trade** 的 `LookEngine.build_market_state_for_symbol` → **`build_single_symbol_market_state`**（`look_engine.py`）拉取 SDK 实时价、`24_market_tickers` 成交量/额、`MarketDataFetcher.merge_timeframe_klines_for_contract` 多周期带指标 K 线后组装 **`market_state`**（**不是** `TradingEngine._build_market_state_for_candidates`，与买入批量候选路径不同）。
 - **盯盘策略代码中禁止**：`requests.get`、`urllib` 调 Binance、调 Java、调独立「行情微服务」URL 等。
 - 若需「接口」语义上的理解：请把 **`market_state` 视为唯一允许的只读行情 API 响应体**。
 
 ### 2）`market_state` 顶层结构与 key
-- 类型：`Dict[str, Any]`，**key 为合约基础符号大写**（如 `BTC`、`ETH`），与参数 **`symbol`** 一致。
-- 取值示例：`symbol_state = market_state.get(symbol)` 或 `market_state.get(symbol, {})`；**禁止**假设 key 为小写或带 `USDT` 后缀（基础符号无后缀）。
+- 类型：`Dict[str, Any]`。盯盘路径下 **key 与参数 `symbol` 一致**：为**去掉 `USDT` 后缀的基础符号大写**（如 `BTC`），由 `build_single_symbol_market_state` 使用 `_candidate_for_symbol` 规范化得到（见 `look_engine.py`）。
+- 取值示例：`symbol_state = market_state.get(symbol)` 或 `market_state.get(symbol, {})`；**禁止**假设 key 为小写。
 - **必须先判断** `symbol_state` 非空再读内部字段。
 
 ### 3）单 symbol 条目内常用字段
@@ -93,7 +93,7 @@ symbol_state = {
   "quote_volume": float,       # 24h USDT 成交额
   "previous_close_prices": {   # 各周期「上一根已收盘」K 的收盘价
       "1m": float, "5m": float, "15m": float, "30m": float,
-      "1h": float, "4h": float, "1d": float, "1w": float
+      "1h": float, "4h": float, "1d": float
   },
   "indicators": {
       "timeframes": {
@@ -106,18 +106,19 @@ symbol_state = {
 ```
 
 ### 4）时间周期（interval）完整集合
-与买入策略相同，共 **8 类**：`'1m','5m','15m','30m','1h','4h','1d','1w'`。  
+与买入策略相同，共 **7 类**：`'1m','5m','15m','30m','1h','4h','1d'`。  
 按 strategy_context 选用；无数据时 `timeframes.get(tf,{})` 可能为空。
 
 ### 5）K 线数组顺序与「最新一根」
 - `tf_data = timeframes.get('1h', {})`，`klines = tf_data.get('klines', [])`。
-- **数组为从新到旧排序时**：**索引 `-1` 表示最新一根**（与现有引擎/买入文档一致）；若 strategy_context 要求用「上一根已收盘」，需结合 `previous_close_prices` 或取倒数第二根，**必须在代码与日志中写清楚采用的是哪一根**。
+- **与 `trade/market/market_data.py` 一致**：`klines` 为**时间升序（从旧到新）**；**`klines[-1]` 为最近一根**，**`klines[-2]` 为上一根已收盘**（引擎用 `-2` 的 `close` 填充 `previous_close_prices`）。若 strategy_context 另指「最新已收盘」等含义，**必须在代码与日志中写清楚取的是哪一根**。
 
 ### 5.1）每根 K 线均带时间标识；历史区间与多根计算须在本策略内遍历查询
-- **时间字段（必读）**：每一根 K 线都有可用于标识「该根 K 所属周期时段」的字段（以实际注入为准，常见包括）：
-  - `open_time`：`int`，该根 K 线**开盘时间**的 Unix 毫秒时间戳；
-  - `open_time_dt_str`：`str`，开盘时间可读字符串（多为 `Asia/Shanghai` 语义下的 `YYYY-MM-DD HH:MM:SS`）；
-  - 可能还有 `close_time` / `close_time_dt_str` 等收线相关时间。
+- **时间字段（必读）**：每一根 K 线由 `market_data._get_market_data_by_interval` 组装，常见键包括：
+  - `time`：`str`，可读时间（含秒后小数）；
+  - `open_time`：`int`，该根 K 线**开盘** Unix 毫秒时间戳；
+  - `open_time_dt_str`：`str`，开盘时间字符串；
+  - 可选 `close_time` / `close_time_dt_str`（毫秒与字符串）；另有 `quote_asset_volume` / `quote_volume`（计价成交额）等与币安第 8 列一致时会有。
 - **禁止**为拿「某段历史」再去请求行情接口；**只能**使用当前已注入的 `klines`（及各周期 `timeframes`）在策略代码内部做**遍历、筛选、切片、滑动窗口**等计算后再做逻辑判断。
 - **需要「历史某段时间」或「连续多根历史 K」时**：对对应周期的 `klines` 做 `for` 循环，用 `open_time` 与目标时间窗比较，或按下标取 `klines[i]`、`klines[-20:]` 等；跨多周期时分别取各周期 `tf` 的 `klines` 再组合判断。
 
