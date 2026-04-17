@@ -18,6 +18,7 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
 import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.util.Arrays;
 import java.util.List;
 import java.util.UUID;
@@ -28,6 +29,9 @@ import java.util.stream.Collectors;
  */
 @Service
 public class MarketLookServiceImpl implements MarketLookService {
+
+    /** 业务时间与 MCP/前端约定：使用上海时区作为「当前时间」基准（与盯盘场景一致） */
+    private static final ZoneId SHANGHAI = ZoneId.of("Asia/Shanghai");
 
     @Autowired
     private MarketLookMapper marketLookMapper;
@@ -140,7 +144,7 @@ public class MarketLookServiceImpl implements MarketLookService {
         row.setDetailSummary(dto.getDetailSummary().trim());
         row.setEndLog(StringUtils.hasText(dto.getEndLog()) ? dto.getEndLog().trim() : null);
 
-        LocalDateTime now = LocalDateTime.now();
+        LocalDateTime now = LocalDateTime.now(SHANGHAI);
         if (MarketLookDO.STATUS_RUNNING.equals(status)) {
             LocalDateTime started = dto.getStartedAt() != null ? dto.getStartedAt() : now;
             LocalDateTime ended = dto.getEndedAt() != null ? dto.getEndedAt() : started.plusHours(24);
@@ -177,7 +181,7 @@ public class MarketLookServiceImpl implements MarketLookService {
         }
 
         if (existing.getStartedAt() == null) {
-            existing.setStartedAt(LocalDateTime.now());
+            existing.setStartedAt(LocalDateTime.now(SHANGHAI));
         }
         if (existing.getEndedAt() == null) {
             existing.setEndedAt(MarketLookDO.STATUS_ENDED.equals(existing.getExecutionStatus())
@@ -213,7 +217,7 @@ public class MarketLookServiceImpl implements MarketLookService {
             }
             existing.setExecutionStatus(status);
             if (MarketLookDO.STATUS_ENDED.equals(status)) {
-                LocalDateTime ended = dto.getEndedAt() != null ? dto.getEndedAt() : LocalDateTime.now();
+                LocalDateTime ended = dto.getEndedAt() != null ? dto.getEndedAt() : LocalDateTime.now(SHANGHAI);
                 existing.setEndedAt(ended);
                 if (existing.getStartedAt() != null && ended.isBefore(existing.getStartedAt())) {
                     throw new IllegalArgumentException("ended_at 不能早于 started_at");
@@ -240,7 +244,7 @@ public class MarketLookServiceImpl implements MarketLookService {
             existing.setStartedAt(dto.getStartedAt());
         }
 
-        existing.setUpdatedAt(LocalDateTime.now());
+        existing.setUpdatedAt(LocalDateTime.now(SHANGHAI));
         marketLookMapper.updateById(existing);
         return toDto(existing);
     }
@@ -275,7 +279,7 @@ public class MarketLookServiceImpl implements MarketLookService {
             throw new IllegalArgumentException("记录不存在: " + id);
         }
         if (existing.getStartedAt() == null) {
-            existing.setStartedAt(LocalDateTime.now());
+            existing.setStartedAt(LocalDateTime.now(SHANGHAI));
         }
         if (existing.getEndedAt() == null) {
             existing.setEndedAt(MarketLookDO.STATUS_ENDED.equals(existing.getExecutionStatus())
@@ -291,7 +295,7 @@ public class MarketLookServiceImpl implements MarketLookService {
         }
         existing.setExecutionStatus(status);
         if (MarketLookDO.STATUS_ENDED.equals(status)) {
-            LocalDateTime end = endedAt != null ? endedAt : LocalDateTime.now();
+            LocalDateTime end = endedAt != null ? endedAt : LocalDateTime.now(SHANGHAI);
             existing.setEndedAt(end);
             if (existing.getStartedAt() != null && end.isBefore(existing.getStartedAt())) {
                 throw new IllegalArgumentException("ended_at 不能早于 started_at");
@@ -299,7 +303,7 @@ public class MarketLookServiceImpl implements MarketLookService {
         } else {
             existing.setEndedAt(MarketLookDO.ENDED_AT_NOT_FINISHED_PLACEHOLDER);
         }
-        existing.setUpdatedAt(LocalDateTime.now());
+        existing.setUpdatedAt(LocalDateTime.now(SHANGHAI));
         marketLookMapper.updateById(existing);
         return toDto(existing);
     }

@@ -35,7 +35,7 @@ public class MarketLookTools {
                     + "detail_summary（任务摘要）。"
                     + " 可选：strategy_name、execution_status（默认 RUNNING；创建时仅允许 RUNNING 或 ENDED）、signal_result、"
                     + "ended_at（计划截止时间；ISO 或 yyyy-MM-dd HH:mm:ss）。"
-                    + " **开始时间无需传**：服务端固定为当前时间。**若省略 ended_at**（RUNNING）：服务端默认为「当前时间 + 24 小时」。"
+                    + " **开始时间无需传**：服务端固定为**上海时区**当前时间。**若省略 ended_at**（RUNNING）：服务端默认为「上海时区当前时间 + 24 小时」。"
                     + " 失败时 success=false 与 error 说明。")
     public Map<String, Object> marketLookCreate(
             @McpToolParam(description = "合约符号，如 BTC 或 BTCUSDT", required = true) String symbol,
@@ -60,7 +60,7 @@ public class MarketLookTools {
         if (signalResult != null && !signalResult.isEmpty()) {
             body.put("signal_result", signalResult);
         }
-        // 不传 started_at：backend 使用当前时间（MarketLookServiceImpl.create）
+        // 不传 started_at：backend 使用上海时区当前时间（MarketLookServiceImpl.create）
         if (endedAt != null && !endedAt.isEmpty()) {
             body.put("ended_at", endedAt);
         }
