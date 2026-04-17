@@ -112,7 +112,13 @@ public class MarketDataController {
             @Parameter(description = "返回的K线数量，不传默认 299", required = false) @RequestParam(value = "limit", required = false) Integer limit,
             @Parameter(description = "起始时间戳（毫秒）", required = false) @RequestParam(value = "startTime", required = false) Long startTime,
             @Parameter(description = "结束时间戳（毫秒）", required = false) @RequestParam(value = "endTime", required = false) Long endTime) {
-        log.debug("[MarketDataController] 带指标K线请求: symbol={}, interval={}, limit={}", symbol, interval, limit);
+        log.info(
+                "[MarketDataController] 带指标K线请求: symbol={}, interval={}, limit={}, startTime={}, endTime={}",
+                symbol,
+                interval,
+                limit,
+                startTime,
+                endTime);
         try {
             Map<String, Object> result = marketDataService.getKlinesWithIndicators(symbol, interval, limit, startTime, endTime);
             return new ResponseEntity<>(result, HttpStatus.OK);

@@ -134,6 +134,37 @@ public class MarketDataServiceImpl implements MarketDataService {
         Map<String, Object> response = new HashMap<>();
         response.put("success", true);
         response.put("data", enriched);
+
+        log.info(
+                "[MarketDataServiceImpl] klines-with-indicators 结果: rawKlines={}, enrichedBars={}, symbol={}, interval={}, "
+                        + "effectiveLimit={}, requestLimit={}, startTime={}, endTime={}",
+                rows.size(),
+                enriched.size(),
+                symbol,
+                interval,
+                effectiveLimit,
+                limit,
+                startTime,
+                endTime);
+
+        if (rows.isEmpty()) {
+            log.warn(
+                    "[MarketDataServiceImpl] klines-with-indicators 上游 K 线为 0 条（与 enrich 无关）。请用相同 symbol/interval/limit/startTime/endTime "
+                            + "调用 GET /api/market-data/klines 对比；并查看日志中 [Binance Futures] 获取 K 线 相关 WARN/ERROR（网络、API Key、testnet/mainnet、交易对是否存在）。");
+        } else if (enriched.isEmpty()) {
+            if (rows.size() < KlineIndicatorCalculator.MIN_KLINES_FOR_FULL_INDICATORS) {
+                log.warn(
+                        "[MarketDataServiceImpl] klines-with-indicators enrich 为空: 仅 {} 根 K 线，低于指标最少 {} 根",
+                        rows.size(),
+                        KlineIndicatorCalculator.MIN_KLINES_FOR_FULL_INDICATORS);
+            } else {
+                log.warn(
+                        "[MarketDataServiceImpl] klines-with-indicators enrich 为空: 已有 {} 根 K 线但无任一根通过指标完备校验，"
+                                + "多为 high/low/close/volume/taker_buy_base_volume 等字段缺失或非数字，详见 [KlineIndicatorCalculator] 日志",
+                        rows.size());
+            }
+        }
+
         if (!rows.isEmpty() && enriched.isEmpty() && rows.size() < KlineIndicatorCalculator.MIN_KLINES_FOR_FULL_INDICATORS) {
             response.put(
                     "indicatorSkipReason",

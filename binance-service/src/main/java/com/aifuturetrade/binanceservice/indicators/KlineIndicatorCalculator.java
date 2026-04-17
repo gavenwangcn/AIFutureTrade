@@ -1,5 +1,8 @@
 package com.aifuturetrade.binanceservice.indicators;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.util.ArrayList;
@@ -21,6 +24,8 @@ import java.util.Map;
  * </p>
  */
 public final class KlineIndicatorCalculator {
+
+    private static final Logger log = LoggerFactory.getLogger(KlineIndicatorCalculator.class);
 
     private static final int KDJ_K_PERIOD = 9;
     private static final int KDJ_SMOOTH_K = 3;
@@ -54,6 +59,10 @@ public final class KlineIndicatorCalculator {
         }
         int n = klines.size();
         if (n < FULL_BAR_MIN_BARS) {
+            log.debug(
+                    "[KlineIndicatorCalculator] enrich 跳过: n={} < MIN_KLINES_FOR_FULL_INDICATORS={}（不计算指标）",
+                    n,
+                    MIN_KLINES_FOR_FULL_INDICATORS);
             return List.of();
         }
 
@@ -114,6 +123,7 @@ public final class KlineIndicatorCalculator {
         double[] mavol60 = sma(volumes, 60);
 
         List<Map<String, Object>> out = new ArrayList<>(Math.max(0, n - FULL_BAR_MIN_INDEX));
+        int skippedBars = 0;
         for (int i = FULL_BAR_MIN_INDEX; i < n; i++) {
             if (!isFiniteFullBarAt(
                     i,
@@ -145,6 +155,7 @@ public final class KlineIndicatorCalculator {
                     mavol10,
                     mavol60,
                     supertrend)) {
+                skippedBars++;
                 continue;
             }
             Map<String, Object> row = new LinkedHashMap<>(klines.get(i));
@@ -181,6 +192,16 @@ public final class KlineIndicatorCalculator {
                             mavol60,
                             supertrend));
             out.add(row);
+        }
+        if (out.isEmpty() && n >= FULL_BAR_MIN_BARS) {
+            int candidateBars = n - FULL_BAR_MIN_INDEX;
+            log.warn(
+                    "[KlineIndicatorCalculator] n={} 根 K 线、候选输出根数={}，但全部被 isFiniteFullBarAt 跳过（skipped={}）。"
+                            + "常见原因：volume/taker_buy_base_volume 为 NaN，或某技术指标在整段仍为 NaN。可检查首根候选 K 线 open_time={}",
+                    n,
+                    candidateBars,
+                    skippedBars,
+                    klines.get(FULL_BAR_MIN_INDEX).get("open_time"));
         }
         return out;
     }
