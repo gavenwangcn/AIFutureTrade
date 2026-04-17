@@ -104,7 +104,7 @@ public class MarketDataServiceImpl implements MarketDataService {
 
     @Override
     public Map<String, Object> getKlinesWithIndicators(
-            String symbol, String interval, Integer limit, Long startTime, Long endTime) {
+            String symbol, String interval, Integer limit, Long startTime, Long endTime, Integer last) {
         if (binanceFuturesClient == null) {
             log.error("[MarketDataServiceImpl] BinanceFuturesClient未初始化");
             Map<String, Object> err = new HashMap<>();
@@ -119,18 +119,32 @@ public class MarketDataServiceImpl implements MarketDataService {
         } else if (effectiveLimit > 1000) {
             effectiveLimit = 1000;
         }
+        // 仅返回末尾 N 根时，拉取量必须 ≥ 指标最少根数，否则 enrich 无数据
+        int tail = last != null && last > 0 ? last : 0;
+        if (tail > 0) {
+            effectiveLimit = Math.max(effectiveLimit, KlineIndicatorCalculator.MIN_KLINES_FOR_FULL_INDICATORS);
+            if (effectiveLimit > 1000) {
+                effectiveLimit = 1000;
+            }
+        }
         log.debug(
-                "[MarketDataServiceImpl] 带指标K线, symbol={}, interval={}, limit={} (effective={})",
+                "[MarketDataServiceImpl] 带指标K线, symbol={}, interval={}, limit={} (effective={}), last={}",
                 symbol,
                 interval,
                 limit,
-                effectiveLimit);
+                effectiveLimit,
+                last);
         List<Map<String, Object>> raw = getKlines(symbol, interval, effectiveLimit, startTime, endTime);
         List<Map<String, Object>> rows = new ArrayList<>();
         for (Map<String, Object> m : raw) {
             rows.add(new LinkedHashMap<>(m));
         }
         List<Map<String, Object>> enriched = KlineIndicatorCalculator.enrich(rows);
+        if (tail > 0 && !enriched.isEmpty()) {
+            int n = Math.min(tail, enriched.size());
+            int from = enriched.size() - n;
+            enriched = new ArrayList<>(enriched.subList(from, enriched.size()));
+        }
         Map<String, Object> response = new HashMap<>();
         response.put("success", true);
         response.put("data", enriched);

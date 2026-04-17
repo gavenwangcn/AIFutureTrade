@@ -2,14 +2,14 @@
 盯盘引擎：每次只针对一个 symbol 拉取实时价、多周期 K 线与指标（逻辑与 TradingEngine 中单品种分支一致），
 不通过 _build_market_state_for_candidates 批量接口。触发 notify 或超时结束时：落库 SENDING、并入 look_notify 异步队列，由后台线程经 trade-monitor 推送后再写入 trade_notify 并置 ENDED。
 超时结束（无 notify 且已过 ended_at）：与 notify 相同，置 SENDING 并入 look_notify 队列，由后台线程 post_event_notify 后落库 trade_notify 并置 ENDED。
+通知消息与 trade_notify.extra 不包含服务端拉取的市场 K 线快照，仅保留策略决策字段（如 justification、price、策略自定义 market_date）。
 """
 
 import copy
 import json
 import logging
-import re
 from datetime import datetime, timezone, timedelta
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 from zoneinfo import ZoneInfo
 
 import numpy as np
@@ -324,323 +324,14 @@ def build_single_symbol_market_state(
     return market_state
 
 
-# 盯盘通知用快照仅包含以下周期（与全量行情 8 周期解耦，减小 metadata / 合并后体积）
-_NOTIFY_SNAPSHOT_TIMEFRAMES: Tuple[str, ...] = ("5m", "15m", "30m", "1h")
-# 正文 filter：匹配不到时，群消息仅用以下周期各 1 根 K（不含 30m）
-_NOTIFY_MSG_INTERVALS_UNMATCHED: Tuple[str, ...] = ("5m", "15m", "1h")
-
-# 企微/正文用快照（snap）：每周期只取最近 N 根 K（当前为 1，减小 message 体积）
-LOOK_NOTIFY_KLINE_BARS_MESSAGE = 1
-# trade_notify 入库全量快照（snap_full）：每周期最近 N 根（保留多根便于复盘）
-LOOK_NOTIFY_KLINE_BARS_STORAGE = 3
-# 正文 filter 后再确保每周期至多 N 根（当前与 MESSAGE 均为 1）
-LOOK_NOTIFY_KLINE_BARS_ALL_INTERVALS = 1
-
-# 策略在 notify 信号里声明周期时使用的字段名（与行情 timeframes 的 key 语义一致，如 "5m"）
-# Prompt 建议写在 key_date（如 pattern + timeframe）；顶层 / market_date 仍兼容。
-_STRATEGY_INTERVAL_FIELD_NAMES = ("timeframe", "interval", "tf", "period")
-
-# 与 merge_timeframe_klines / strategy_look_prompt 中 8 周期一致
-_KNOWN_TIMEFRAME_KEYS = frozenset({"1m", "5m", "15m", "30m", "1h", "4h", "1d", "1w"})
-
-# 紧凑英文变体 -> canonical
-_TF_COMPACT_ALIASES = {
-    "5min": "5m",
-    "5mins": "5m",
-    "15min": "15m",
-    "30min": "30m",
-    "1min": "1m",
-    "1hr": "1h",
-    "4hr": "4h",
-    "1day": "1d",
-    "1week": "1w",
-}
-
-# 顺序敏感：先匹配 15m/30m 再 5m/1m，避免「15m」误命中「5m」
-_TF_FUZZY_REGEX: Tuple[Tuple[re.Pattern[str], str], ...] = (
-    (re.compile(r"(?:^|[^\d])15m(?:[^\d]|$)|15\s*分钟|15\s*分|15\s*min", re.I), "15m"),
-    (re.compile(r"(?:^|[^\d])30m(?:[^\d]|$)|30\s*分钟|30\s*分|30\s*min", re.I), "30m"),
-    (re.compile(r"(?:^|[^\d])5m(?:[^\d]|$)|5\s*分钟|五分钟|5\s*分|5\s*min", re.I), "5m"),
-    (re.compile(r"(?:^|[^\d])1m(?:[^\d]|$)|1\s*分钟|一分钟|1\s*分|1\s*min", re.I), "1m"),
-    (re.compile(r"(?:^|[^\d])4h(?:[^\d]|$)|4\s*小时|四\s*小时|4\s*hr", re.I), "4h"),
-    (re.compile(r"(?:^|[^\d])1h(?:[^\d]|$)|1\s*小时|一小时|60\s*分钟|60\s*min", re.I), "1h"),
-    (re.compile(r"(?:^|[^\d])1d(?:[^\d]|$)|1\s*天|一日|日线", re.I), "1d"),
-    (re.compile(r"(?:^|[^\d])1w(?:[^\d]|$)|1\s*周|一周|周线", re.I), "1w"),
-)
-
-
-def _normalize_timeframe_label(raw: Optional[str]) -> str:
-    """空白/大小写归一（用于与快照 key 直接比对）。"""
-    if not raw or not isinstance(raw, str):
-        return ""
-    return raw.strip().lower().replace(" ", "").replace("　", "")
-
-
-def _timeframe_raw_to_canonical(raw: Optional[str]) -> Optional[str]:
-    """
-    将策略/模型写的周期文案转为与行情 timeframes 一致的 canonical key（如 5m）。
-    支持 5m、5分钟、五分钟、5min、1小时、60分钟 等模糊说法。
-    """
-    if not raw or not isinstance(raw, str):
-        return None
-    s = raw.strip()
-    if not s:
-        return None
-    compact = re.sub(r"[\s　]+", "", s.lower())
-    if compact in _KNOWN_TIMEFRAME_KEYS:
-        return compact
-    if compact in _TF_COMPACT_ALIASES:
-        return _TF_COMPACT_ALIASES[compact]
-    sl = s.lower()
-    for rx, canon in _TF_FUZZY_REGEX:
-        if rx.search(sl):
-            return canon
-    return None
-
-
-def _interval_field_from_mapping(m: Dict[str, Any]) -> Optional[str]:
-    """从单层 dict 取 timeframe/interval/tf/period 中第一个非空字符串。"""
-    for key in _STRATEGY_INTERVAL_FIELD_NAMES:
-        v = m.get(key)
-        if isinstance(v, str) and v.strip():
-            return v.strip()
-    return None
-
-
-def _resolve_timeframe_in_map(raw: Optional[str], timeframes: Dict[str, Any]) -> Optional[str]:
-    """
-    将策略给出的周期文案与快照 indicators.timeframes 的实际 key 对齐。
-    先模糊归一成 canonical，再命中字典 key；否则再试与 key 的大小写不敏感相等。
-    """
-    if not raw or not isinstance(timeframes, dict) or not timeframes:
-        return None
-    canon = _timeframe_raw_to_canonical(raw)
-    if canon and canon in timeframes:
-        return canon
-    needle = _normalize_timeframe_label(raw)
-    if needle:
-        for k in timeframes.keys():
-            if _normalize_timeframe_label(str(k)) == needle:
-                return str(k)
-    return None
-
-
-def interval_from_strategy_notify_signal(dec: Dict[str, Any]) -> Optional[str]:
-    """
-    从策略返回的 notify 条目中取出「信号相关周期」原始字符串，供 _resolve_timeframe_in_map 使用。
-
-    读取顺序（与 strategy_look_prompt 一致，优先 key_date）：
-    1. key_date 内：timeframe / interval / tf / period（Prompt 示例：key_date 含 pattern、timeframe）
-    2. 本条决策顶层同名字段
-    3. market_date 内同名字段
-
-    取到第一个非空字符串即返回；均未设置则返回 None（通知带全周期 K 线）。
-    """
-    if not isinstance(dec, dict):
-        return None
-    kd = dec.get("key_date")
-    if isinstance(kd, dict):
-        hit = _interval_field_from_mapping(kd)
-        if hit:
-            return hit
-    hit = _interval_field_from_mapping(dec)
-    if hit:
-        return hit
-    md = dec.get("market_date")
-    if isinstance(md, dict):
-        hit = _interval_field_from_mapping(md)
-        if hit:
-            return hit
-    return None
-
-
-def infer_notify_focus_interval(dec: Dict[str, Any]) -> Optional[str]:
-    """兼容旧名：等同 interval_from_strategy_notify_signal。"""
-    return interval_from_strategy_notify_signal(dec)
-
-
-# 通知正文不携带的 K 线 indicators 顶层键（与策略合并后也会从 indicators 顶层去掉）
+# 合并策略 market_date 时，从 indicators 顶层去掉的键（避免冗余大块）
 _NOTIFY_DROP_INDICATOR_KEYS = frozenset({"adx", "vol"})
-
-
-def _notify_indicators_drop_adx_vol(raw: Dict[str, Any]) -> Dict[str, Any]:
-    """从单根 K 的 indicators 中去掉 adx、vol 指标块；其余指标原样保留。"""
-    out = copy.deepcopy(raw)
-    for k in _NOTIFY_DROP_INDICATOR_KEYS:
-        out.pop(k, None)
-    return out
-
-
-def _trim_kline_bar_for_notify(bar: Dict[str, Any]) -> Dict[str, Any]:
-    """单根 K 线（企微/正文）：时间、open、indicators（不含 adx/vol）；不含 high/low/close/volume 以缩小体积。"""
-    if not isinstance(bar, dict):
-        return {}
-    t = bar.get("time")
-    if t is None:
-        t = bar.get("open_time_dt_str") or bar.get("open_time")
-    out: Dict[str, Any] = {"time": t}
-    if bar.get("open") is not None:
-        out["open"] = bar.get("open")
-    raw_ind = bar.get("indicators")
-    if isinstance(raw_ind, dict) and raw_ind:
-        out["indicators"] = _notify_indicators_drop_adx_vol(raw_ind)
-    return out
-
-
-def _kline_bar_for_storage(bar: Dict[str, Any]) -> Dict[str, Any]:
-    """单根 K 线（trade_notify 落库）：保留行情侧完整字段（开高低收、量、时间戳及 indicators 等）。"""
-    if not isinstance(bar, dict):
-        return {}
-    return copy.deepcopy(bar)
-
-
-def _trim_market_snapshot(
-    market_state: Dict,
-    symbol_key: str,
-    *,
-    only_intervals: Optional[Tuple[str, ...]],
-    full_kline_bars: bool = False,
-) -> Dict:
-    """
-    构造盯盘用快照基座。
-    - only_intervals 为 None：保留行情中的全部周期（落 trade_notify / 队列入库）。
-    - only_intervals 为 _NOTIFY_SNAPSHOT_TIMEFRAMES：仅 5m/15m/30m/1h（企微正文与 filter 输入）。
-    - full_kline_bars=True：每周期最多 LOOK_NOTIFY_KLINE_BARS_STORAGE 根，深拷贝原 bar（含 OHLCV）。
-    - full_kline_bars=False：每周期最多 LOOK_NOTIFY_KLINE_BARS_MESSAGE 根，精简条（仅正文）。
-    """
-    sym_u = symbol_key.strip().upper()
-    payload = market_state.get(sym_u) or market_state.get(symbol_key) or {}
-    if not isinstance(payload, dict):
-        return {}
-    out: Dict[str, Any] = {
-        "price": payload.get("price"),
-        "contract_symbol": payload.get("contract_symbol"),
-    }
-    ind = payload.get("indicators") or {}
-    tf = (ind.get("timeframes") or {}) if isinstance(ind, dict) else {}
-    trimmed_tf: Dict[str, Any] = {}
-    if not isinstance(tf, dict):
-        out["indicators"] = {"timeframes": trimmed_tf}
-        return out
-
-    kline_fn = _kline_bar_for_storage if full_kline_bars else _trim_kline_bar_for_notify
-    max_klines = LOOK_NOTIFY_KLINE_BARS_STORAGE if full_kline_bars else LOOK_NOTIFY_KLINE_BARS_MESSAGE
-
-    def _one_interval(interval: str, block: Dict[str, Any], omit_empty: bool) -> None:
-        kl = block.get("klines") or []
-        if not isinstance(kl, list) or not kl:
-            if not omit_empty:
-                trimmed_tf[interval] = {"klines": []}
-            return
-        n = min(max_klines, len(kl))
-        tail = kl[-n:]
-        trimmed_tf[interval] = {"klines": [kline_fn(b) for b in tail if isinstance(b, dict)]}
-
-    if only_intervals is None:
-        for interval, block in tf.items():
-            if not isinstance(block, dict):
-                continue
-            _one_interval(str(interval), block, omit_empty=False)
-    else:
-        for interval in only_intervals:
-            block = tf.get(interval)
-            if not isinstance(block, dict):
-                continue
-            _one_interval(interval, block, omit_empty=True)
-
-    out["indicators"] = {"timeframes": trimmed_tf}
-    return out
-
-
-def trim_market_snapshot_full_for_storage(market_state: Dict, symbol_key: str) -> Dict:
-    """trade_notify.extra / signal_result / 队列 snap_full：全周期；每周期最近 LOOK_NOTIFY_KLINE_BARS_STORAGE 根完整 K。"""
-    return _trim_market_snapshot(
-        market_state, symbol_key, only_intervals=None, full_kline_bars=True
-    )
-
-
-def trim_market_snapshot_for_message(market_state: Dict, symbol_key: str) -> Dict:
-    """企微群消息正文与 filter_notify 输入：仅 5m / 15m / 30m / 1h；每周期最近 LOOK_NOTIFY_KLINE_BARS_MESSAGE 根 K。"""
-    return _trim_market_snapshot(market_state, symbol_key, only_intervals=_NOTIFY_SNAPSHOT_TIMEFRAMES)
-
-
-def trim_market_snapshot_for_notify(market_state: Dict, symbol_key: str) -> Dict:
-    """兼容旧名，等同 trim_market_snapshot_for_message。"""
-    return trim_market_snapshot_for_message(market_state, symbol_key)
-
-
-def _subset_snap_timeframes(
-    base_snap: Dict[str, Any], interval_keys: Tuple[str, ...]
-) -> Dict[str, Any]:
-    """从正文基座快照中只保留指定周期键（顺序与 interval_keys 一致），其余顶层字段保留。"""
-    if not isinstance(base_snap, dict):
-        return {}
-    tf = ((base_snap.get("indicators") or {}).get("timeframes")) or {}
-    trimmed: Dict[str, Any] = {}
-    if isinstance(tf, dict):
-        for k in interval_keys:
-            if k in tf:
-                trimmed[k] = tf[k]
-    return {
-        "price": base_snap.get("price"),
-        "contract_symbol": base_snap.get("contract_symbol"),
-        "indicators": {"timeframes": trimmed},
-    }
-
-
-def _snap_limit_klines_per_timeframe(snap: Dict[str, Any], max_bars: int) -> Dict[str, Any]:
-    """复制 snap，并将各周期 klines 截为末尾最多 max_bars 根（用于匹配/未匹配不同根数）。"""
-    if max_bars < 1 or not isinstance(snap, dict):
-        return snap
-    out = copy.deepcopy(snap)
-    tfw = ((out.get("indicators") or {}).get("timeframes")) or {}
-    if not isinstance(tfw, dict):
-        return out
-    for interval, block in tfw.items():
-        if not isinstance(block, dict):
-            continue
-        kl = block.get("klines") or []
-        if not isinstance(kl, list) or not kl:
-            continue
-        n = min(max_bars, len(kl))
-        tfw[interval] = {**block, "klines": kl[-n:]}
-    return out
-
-
-def filter_notify_snapshot_for_decision(base_snap: Dict[str, Any], dec: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    企微正文用快照子集（基座已为每周期 1 根精简 K：time + open + indicators）：
-
-    - 策略声明的周期**能**在基座快照中匹配到：正文**只保留该 interval**，最近 **1** 根 K；
-    - **匹配不到**：正文保留 **5m / 15m / 1h** 各 1 根。
-    """
-    if not isinstance(base_snap, dict):
-        return {}
-    tf = ((base_snap.get("indicators") or {}).get("timeframes")) or {}
-    if not isinstance(tf, dict) or not tf:
-        return dict(base_snap)
-    raw_focus = interval_from_strategy_notify_signal(dec)
-    key = _resolve_timeframe_in_map(raw_focus, tf) if raw_focus else None
-    if key:
-        block = tf.get(key)
-        if isinstance(block, dict):
-            out: Dict[str, Any] = {
-                "price": base_snap.get("price"),
-                "contract_symbol": base_snap.get("contract_symbol"),
-                "indicators": {"timeframes": {key: block}},
-                "focus_interval": key,
-            }
-        else:
-            out = _subset_snap_timeframes(base_snap, _NOTIFY_MSG_INTERVALS_UNMATCHED)
-    else:
-        out = _subset_snap_timeframes(base_snap, _NOTIFY_MSG_INTERVALS_UNMATCHED)
-    return _snap_limit_klines_per_timeframe(out, LOOK_NOTIFY_KLINE_BARS_ALL_INTERVALS)
 
 
 def _merge_indicators_preserve_timeframes(base_i: Any, strat_i: Any) -> Any:
     """
-    合并策略 market_date 中的 indicators：不得用策略侧 dict 覆盖快照里已带的
-    indicators.timeframes（全量 K 线指标树）；策略多写的键（如单独汇总的 macd）并入同级。
+    合并策略 market_date 中的 indicators：若 base 已有 indicators.timeframes，则不被策略覆盖；
+    策略多写的键（如单独汇总的 macd）并入同级。
     """
     if not isinstance(base_i, dict):
         base_i = {}
@@ -656,8 +347,7 @@ def _merge_indicators_preserve_timeframes(base_i: Any, strat_i: Any) -> Any:
 
 def merge_market_date_for_notify_message(filtered_snap: Dict[str, Any], dec: Dict[str, Any]) -> Dict[str, Any]:
     """
-    K 线快照与策略 market_date 合并：顶层标量（timeframe、current_macd_dif 等）叠加；
-    若策略也提供 indicators，与快照 indicators 深度合并且保留 timeframes 全量指标。
+    合并策略 notify 中的 market_date（可选与 base 叠加）。盯盘通知不再附带服务端 K 线快照，base 通常为空 {}。
     """
     base = dict(filtered_snap) if isinstance(filtered_snap, dict) else {}
     strat = dec.get("market_date") if isinstance(dec, dict) else None
@@ -752,13 +442,9 @@ class LookEngine:
         notify_payloads = self._extract_notify_decisions(decisions, sym_key)
 
         if notify_payloads:
-            snap_message = trim_market_snapshot_for_message(market_state, sym_key)
-            snap_full = trim_market_snapshot_full_for_storage(market_state, sym_key)
             queue_payload = {
                 "strategy_id": strategy_id,
                 "sym_key": sym_key,
-                "snap": snap_message,
-                "snap_full": snap_full,
                 "decisions": decisions,
                 "notify_payloads": notify_payloads,
             }
@@ -844,8 +530,6 @@ class LookEngine:
             logger.error("queued notify: strategy not found id=%s", strategy_id)
             return False
         sym_key = queue_payload.get("sym_key") or ""
-        snap = queue_payload.get("snap") or {}
-        snap_full = queue_payload.get("snap_full") or snap
         notify_payloads = queue_payload.get("notify_payloads") or []
         decisions = queue_payload.get("decisions") or {}
         parts: List[str] = []
@@ -853,9 +537,8 @@ class LookEngine:
             if not isinstance(dec, dict):
                 continue
             dec_copy = dict(dec)
-            # 正文与企微仅基于 5m/15m/30m/1h 快照
-            filtered = filter_notify_snapshot_for_decision(snap, dec_copy)
-            dec_copy["market_date"] = merge_market_date_for_notify_message(filtered, dec_copy)
+            merged_md = merge_market_date_for_notify_message({}, dec_copy)
+            dec_copy["market_date"] = merged_md
             body_lines = [
                 f"盯盘任务ID (market_look.id): {row_id}",
                 f"策略ID (strategys.id): {strategy_id}",
@@ -864,8 +547,9 @@ class LookEngine:
                 f"合约: {dec_copy.get('symbol') or sym_key}",
                 f"价格: {dec_copy.get('price')}",
                 f"说明: {dec_copy.get('justification')}",
-                f"market_date: {_truncate_json_for_notify_line(dec_copy.get('market_date'))}",
             ]
+            if merged_md:
+                body_lines.append(f"market_date: {_truncate_json_for_notify_line(merged_md)}")
             parts.append("\n".join(body_lines))
         if not parts:
             logger.warning("queued notify: empty payloads market_look_id=%s", row_id)
@@ -878,11 +562,10 @@ class LookEngine:
             "strategy_id": strategy_id,
             "symbol": sym_key,
             "notify_payloads": notify_payloads,
-            "market_snapshot": snap_full,
             "kind": "look_notify_queued",
         }
         logger.info(
-            "[look notify] 推送 trade-monitor market_look_id=%s | title_len=%s message_len=%s（快照仅落库/发群，不在此打印）",
+            "[look notify] 推送 trade-monitor market_look_id=%s | title_len=%s message_len=%s",
             row_id,
             len(title),
             len(message),
@@ -916,7 +599,6 @@ class LookEngine:
                     "ts": _utc8_now_iso(),
                     "notify": True,
                     "decisions": decisions,
-                    "market_snapshot": snap_full,
                     "market_look_id": row_id,
                     "strategy_id": strategy_id,
                     "trade_notify_ids": [nid],

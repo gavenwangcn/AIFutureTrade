@@ -109,18 +109,20 @@ public class MarketDataController {
     public ResponseEntity<Map<String, Object>> getKlinesWithIndicators(
             @Parameter(description = "交易对符号", required = true) @RequestParam(value = "symbol") String symbol,
             @Parameter(description = "K线间隔", required = true) @RequestParam(value = "interval") String interval,
-            @Parameter(description = "返回的K线数量，不传默认 299", required = false) @RequestParam(value = "limit", required = false) Integer limit,
+            @Parameter(description = "从交易所拉取的K线数量（上限1000），不传默认 299。与 last 同时使用时，实际拉取量会取 max(limit,99) 以满足指标计算", required = false) @RequestParam(value = "limit", required = false) Integer limit,
             @Parameter(description = "起始时间戳（毫秒）", required = false) @RequestParam(value = "startTime", required = false) Long startTime,
-            @Parameter(description = "结束时间戳（毫秒）", required = false) @RequestParam(value = "endTime", required = false) Long endTime) {
+            @Parameter(description = "结束时间戳（毫秒）", required = false) @RequestParam(value = "endTime", required = false) Long endTime,
+            @Parameter(description = "仅返回末尾 N 根带指标K线（如 1=只要最新一根）。不传则返回全部 enrich 后的 K 线", required = false) @RequestParam(value = "last", required = false) Integer last) {
         log.info(
-                "[MarketDataController] 带指标K线请求: symbol={}, interval={}, limit={}, startTime={}, endTime={}",
+                "[MarketDataController] 带指标K线请求: symbol={}, interval={}, limit={}, startTime={}, endTime={}, last={}",
                 symbol,
                 interval,
                 limit,
                 startTime,
-                endTime);
+                endTime,
+                last);
         try {
-            Map<String, Object> result = marketDataService.getKlinesWithIndicators(symbol, interval, limit, startTime, endTime);
+            Map<String, Object> result = marketDataService.getKlinesWithIndicators(symbol, interval, limit, startTime, endTime, last);
             return new ResponseEntity<>(result, HttpStatus.OK);
         } catch (Exception e) {
             log.error("[MarketDataController] 获取带指标K线失败: {}", e.getMessage(), e);

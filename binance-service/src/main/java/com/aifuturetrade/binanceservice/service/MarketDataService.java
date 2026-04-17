@@ -41,10 +41,12 @@ public interface MarketDataService {
     /**
      * 获取带技术指标的 K 线（在服务端对 {@link #getKlines} 结果做指标 enrich）。
      *
+     * @param last 若不为 null 且大于 0，则仅将末尾 {@code last} 根放入返回的 {@code data}（先按 limit 拉取，
+     *             根数不足指标最少要求时会自动提高拉取量，见实现类）
      * @return success、data、可选 indicatorSkipReason（根数不足 99 时）
      */
     Map<String, Object> getKlinesWithIndicators(String symbol, String interval, Integer limit,
-                                                Long startTime, Long endTime);
+                                                Long startTime, Long endTime, Integer last);
 
     /**
      * 格式化交易对符号
