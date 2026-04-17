@@ -25,14 +25,17 @@
           </div>
         </div>
         <div class="header-right">
-          <div class="header-status look-logs-header-status" title="盯盘容器日志（固定容器 trade-look，可随时打开）">
+          <div
+            class="header-status look-logs-header-status"
+            title="盯盘由 docker compose 启动（容器名 aifuturetrade-model-look-1），此处仅查看日志"
+          >
             <span class="status-dot active"></span>
             <span class="status-text">运行中</span>
             <button
               class="btn-icon"
               type="button"
               @click="handleOpenLookContainerLogsModal"
-              title="盯盘容器日志"
+              title="盯盘容器日志（aifuturetrade-model-look-1）"
               style="margin-left: 8px;"
             >
               <i class="bi bi-file-text"></i>
@@ -41,30 +44,31 @@
           <button
             class="btn-secondary"
             type="button"
-            @click="handleExecuteMarketLook"
-            title="启动盯盘循环（Docker 固定容器 trade-look，无需交易模型）"
-            :disabled="isExecutingMarketLook"
-          >
-            <i class="bi bi-play-fill" :class="{ spin: isExecutingMarketLook }"></i>
-            {{ isExecutingMarketLook ? '盯盘启动中...' : '执行盯盘' }}
-          </button>
-          <button
-            class="btn-secondary"
-            @click="handleStopMarketLook"
-            title="删除盯盘容器 trade-look"
-            :disabled="isStoppingMarketLook"
-          >
-            <i class="bi bi-stop-circle" :class="{ spin: isStoppingMarketLook }"></i>
-            {{ isStoppingMarketLook ? '关闭中...' : '关闭盯盘' }}
-          </button>
-          <button
-            class="btn-secondary"
-            type="button"
             title="查看与管理全部盯盘任务（分页、搜索）"
             @click="showMarketLookListModal = true"
           >
             <i class="bi bi-list-ul"></i>
             盯盘列表
+          </button>
+          <button
+            class="btn-secondary"
+            type="button"
+            title="启动盯盘循环容器 aifuturetrade-model-look-1（后端 Docker API；与 compose 二选一部署）"
+            :disabled="isExecutingMarketLook || isStoppingMarketLook"
+            @click="handleExecuteMarketLook"
+          >
+            <i class="bi bi-play-circle" :class="{ spin: isExecutingMarketLook }"></i>
+            {{ isExecutingMarketLook ? '启动中...' : '执行盯盘' }}
+          </button>
+          <button
+            class="btn-secondary"
+            type="button"
+            title="停止并删除盯盘容器 aifuturetrade-model-look-1"
+            :disabled="isExecutingMarketLook || isStoppingMarketLook"
+            @click="handleStopMarketLookConfirm"
+          >
+            <i class="bi bi-stop-circle" :class="{ spin: isStoppingMarketLook }"></i>
+            {{ isStoppingMarketLook ? '关闭中...' : '关闭盯盘' }}
           </button>
           <button 
             class="btn-secondary" 
@@ -1427,8 +1431,6 @@ const {
   handleRefresh,
   handleExecuteBuy,
   handleExecuteSell,
-  handleExecuteMarketLook,
-  handleStopMarketLook,
   handleDisableBuy,
   handleDisableSell,
   isExecutingBuy,
@@ -1437,6 +1439,8 @@ const {
   isStoppingMarketLook,
   isDisablingBuy,
   isDisablingSell,
+  handleExecuteMarketLook,
+  handleStopMarketLook,
   loadGainers,
   loadLosers,
   selectModel,
@@ -1472,6 +1476,18 @@ const {
   handleSellPosition
 } = useTradingApp()
 
+/** 关闭盯盘前确认（固定容器 aifuturetrade-model-look-1） */
+function handleStopMarketLookConfirm() {
+  if (
+    !window.confirm(
+      '确定关闭盯盘并删除 Docker 容器 aifuturetrade-model-look-1？\n若由 docker compose 管理该容器，请优先使用 compose stop/rm。'
+    )
+  ) {
+    return
+  }
+  handleStopMarketLook()
+}
+
 const showMarketLookListModal = ref(false)
 const marketLookPanelRef = ref(null)
 
@@ -1479,11 +1495,11 @@ function onMarketLookSaved() {
   marketLookPanelRef.value?.load?.()
 }
 
-const TRADE_LOOK_CONTAINER_ID = 'trade-look'
+const TRADE_LOOK_CONTAINER_ID = 'aifuturetrade-model-look-1'
 
 const handleOpenLookContainerLogsModal = () => {
   pendingLookLogsModelId.value = TRADE_LOOK_CONTAINER_ID
-  lookLogsModelName.value = '盯盘容器 (trade-look)'
+  lookLogsModelName.value = '盯盘容器 (aifuturetrade-model-look-1 · docker compose)'
   showLookLogsModal.value = true
 }
 

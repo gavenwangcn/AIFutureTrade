@@ -41,7 +41,7 @@ import java.util.stream.Collectors;
 public class ModelServiceImpl implements ModelService {
 
     /** 盯盘循环固定 Docker 容器名（与前端「执行盯盘」一致，不依赖 models 表是否有记录） */
-    private static final String TRADE_LOOK_CONTAINER_NAME = "trade-look";
+    private static final String TRADE_LOOK_CONTAINER_NAME = "aifuturetrade-model-look-1";
     /** 传入盯盘进程的 MODEL_ID 环境变量（LookEngine 执行单条策略时不依赖模型表） */
     private static final String TRADE_LOOK_MODEL_ID_ENV = "trade-look";
 
@@ -97,7 +97,7 @@ public class ModelServiceImpl implements ModelService {
     @Value("${docker.market-look-poll-interval-seconds:60}")
     private int marketLookPollIntervalSeconds;
 
-    /** 与 docker-compose 中 trade-monitor 服务名一致；勿用 127.0.0.1（在 trade-look 容器内指向本容器） */
+    /** 与 docker-compose 中 trade-monitor 服务名一致；勿用 127.0.0.1（在盯盘容器内指向本服务） */
     @Value("${docker.trade-monitor-base-url:http://trade-monitor:5005}")
     private String tradeMonitorBaseUrl;
 
@@ -2193,8 +2193,9 @@ public class ModelServiceImpl implements ModelService {
                 return result;
             }
 
+            // 未运行则删后重建（含已停止、已退出、仅残留名）
             if (!dockerContainerService.removeContainer(TRADE_LOOK_CONTAINER_NAME)) {
-                log.warn("删除旧盯盘容器失败，但继续创建新容器: {}", TRADE_LOOK_CONTAINER_NAME);
+                log.warn("删除盯盘容器失败，但继续尝试创建: {}", TRADE_LOOK_CONTAINER_NAME);
             }
 
             Map<String, String> envVars = new HashMap<>();
@@ -2213,7 +2214,7 @@ public class ModelServiceImpl implements ModelService {
             envVars.put("MARKET_LOOK_POLL_INTERVAL_SECONDS", String.valueOf(marketLookPollIntervalSeconds));
             envVars.put("TRADE_MONITOR_BASE_URL", tradeMonitorBaseUrl);
 
-            log.info("=== Container Database Configuration (Market Look trade-look) ===");
+            log.info("=== Container Database Configuration (Market Look {}) ===", TRADE_LOOK_CONTAINER_NAME);
             log.info("MODEL_ID: {}", TRADE_LOOK_MODEL_ID_ENV);
             log.info("MYSQL_HOST: {}", mysqlHost);
             log.info("MYSQL_PORT: {}", mysqlPort);
@@ -2233,7 +2234,7 @@ public class ModelServiceImpl implements ModelService {
             }
             return result;
         } catch (Exception e) {
-            log.error("[ModelService] 启动盯盘容器 trade-look 失败: {}", e.getMessage(), e);
+            log.error("[ModelService] 启动盯盘容器 {} 失败: {}", TRADE_LOOK_CONTAINER_NAME, e.getMessage(), e);
             Map<String, Object> errorResult = new HashMap<>();
             errorResult.put("success", false);
             errorResult.put("error", e.getMessage());
@@ -2249,7 +2250,8 @@ public class ModelServiceImpl implements ModelService {
             Map<String, Object> result = new HashMap<>();
             result.put("containerName", TRADE_LOOK_CONTAINER_NAME);
 
-            if (!dockerContainerService.removeContainer(TRADE_LOOK_CONTAINER_NAME)) {
+            boolean removed = dockerContainerService.removeContainer(TRADE_LOOK_CONTAINER_NAME);
+            if (!removed) {
                 result.put("success", false);
                 result.put("error", "Failed to remove market look container");
                 return result;
@@ -2259,7 +2261,7 @@ public class ModelServiceImpl implements ModelService {
             result.put("message", "Market look container removed");
             return result;
         } catch (Exception e) {
-            log.error("[ModelService] 关闭盯盘容器 trade-look 失败: {}", e.getMessage(), e);
+            log.error("[ModelService] 关闭盯盘容器 {} 失败: {}", TRADE_LOOK_CONTAINER_NAME, e.getMessage(), e);
             Map<String, Object> errorResult = new HashMap<>();
             errorResult.put("success", false);
             errorResult.put("error", e.getMessage());

@@ -3,6 +3,7 @@ package com.aifuturetrade.service;
 import com.aifuturetrade.common.util.PageRequest;
 import com.aifuturetrade.common.util.PageResult;
 import com.aifuturetrade.service.dto.MarketLookDTO;
+import com.aifuturetrade.service.dto.MarketLookTaskDetailDTO;
 
 import java.time.LocalDateTime;
 import java.util.List;
@@ -34,6 +35,11 @@ public interface MarketLookService {
             LocalDateTime endedAtTo);
 
     MarketLookDTO getById(String id);
+
+    /**
+     * 盯盘任务详情：market_look 与关联的 trade_notify（含 extra_json）
+     */
+    MarketLookTaskDetailDTO getTaskDetail(String id);
 
     MarketLookDTO create(MarketLookDTO dto);
 

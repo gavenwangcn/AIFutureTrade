@@ -302,7 +302,8 @@ public class DockerContainerServiceImpl implements DockerContainerService {
             } else if (containerName.startsWith("sell-")) {
                 cmd = new String[]{"python", "-m", "trade.start.model_start_sell"};
                 log.info("设置容器启动命令为: python -m trade.start.model_start_sell");
-            } else if (containerName.startsWith("look-") || "trade-look".equals(containerName)) {
+            } else if (containerName.startsWith("look-")
+                    || "aifuturetrade-model-look-1".equals(containerName)) {
                 cmd = new String[]{"python", "-m", "trade.start.start_market_look"};
                 log.info("设置容器启动命令为: python -m trade.start.start_market_look");
             }

@@ -249,12 +249,12 @@ public interface ModelService {
     Map<String, Object> executeSellTrading(String modelId);
 
     /**
-     * 启动盯盘循环容器，固定容器名 trade-look（不校验是否存在交易模型）
+     * 启动盯盘循环容器，固定容器名 aifuturetrade-model-look-1（不校验是否存在交易模型）
      */
     Map<String, Object> startTradeLookMarketLoop();
 
     /**
-     * 停止并删除固定盯盘容器 trade-look
+     * 停止并删除固定盯盘容器 aifuturetrade-model-look-1
      */
     Map<String, Object> stopTradeLookMarketLoop();
 

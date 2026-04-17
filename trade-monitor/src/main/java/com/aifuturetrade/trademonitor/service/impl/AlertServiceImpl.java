@@ -6,6 +6,7 @@ import com.aifuturetrade.trademonitor.entity.dto.EventNotificationRequest;
 import com.aifuturetrade.trademonitor.service.AlertService;
 import com.aifuturetrade.trademonitor.service.DockerContainerService;
 import com.aifuturetrade.trademonitor.service.WeChatNotificationService;
+import com.aifuturetrade.trademonitor.service.WeChatSendOutcome;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
@@ -58,16 +59,23 @@ public class AlertServiceImpl implements AlertService {
             alertRecordMapper.updateById(alertRecord);
 
             // 发送微信通知
-            boolean wechatSuccess = weChatNotificationService.sendAlert(
+            WeChatSendOutcome wechatOutcome = weChatNotificationService.sendAlert(
                     request.getEventType(),
                     request.getTitle(),
                     messageWithId
             );
 
-            if (wechatSuccess) {
+            if (wechatOutcome.isSuccess()) {
                 alertRecord.setWechatSent(true);
                 alertRecord.setWechatSentAt(LocalDateTime.now());
                 alertRecordMapper.updateById(alertRecord);
+            } else {
+                String err = wechatOutcome.getErrorDetail();
+                String merged = messageWithId + "\n\n【企微群消息发送失败】\n" + err;
+                alertRecord.setMessage(merged);
+                alertRecord.setUpdatedAt(LocalDateTime.now());
+                alertRecordMapper.updateById(alertRecord);
+                log.warn("企微推送失败已合并写入 alert_records.message | alertId={} | detail={}", alertId, err);
             }
 
             // 执行自动处置

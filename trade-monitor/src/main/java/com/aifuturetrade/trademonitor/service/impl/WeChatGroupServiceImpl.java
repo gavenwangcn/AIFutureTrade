@@ -3,6 +3,7 @@ package com.aifuturetrade.trademonitor.service.impl;
 import com.aifuturetrade.trademonitor.dao.mapper.WeChatGroupMapper;
 import com.aifuturetrade.trademonitor.entity.WeChatGroupDO;
 import com.aifuturetrade.trademonitor.service.WeChatGroupService;
+import com.aifuturetrade.trademonitor.util.WeChatMarkdownLimiter;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
@@ -148,7 +149,7 @@ public class WeChatGroupServiceImpl implements WeChatGroupService {
      */
     private boolean sendToWebhook(String webhookUrl, String title, String message) {
         try {
-            String content = buildMarkdownContent(title, message);
+            String content = WeChatMarkdownLimiter.clamp(buildMarkdownContent(title, message));
 
             Map<String, Object> requestBody = new HashMap<>();
             requestBody.put("msgtype", "markdown");

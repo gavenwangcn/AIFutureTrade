@@ -86,12 +86,12 @@ export const modelApi = {
   executeSell: (modelId) => apiPost(`/api/models/${modelId}/execute-sell`),
 
   /**
-   * 启动盯盘循环（Docker 固定容器 trade-look，start_market_look）
+   * 启动盯盘循环（可选：一般由 docker compose 起容器；API 仍可用于运维）
    */
   executeMarketLook: () => apiPost('/api/models/market-look/start'),
 
   /**
-   * 关闭盯盘（删除 Docker 容器 trade-look）
+   * 关闭盯盘（删除容器 aifuturetrade-model-look-1；compose 场景请用 docker compose stop/rm）
    */
   stopMarketLook: () => apiPost('/api/models/market-look/stop'),
 
@@ -498,6 +498,8 @@ export const marketLookApi = {
   page: (params = {}) => apiGet('/api/market-look/page', params),
   /** 按主键 */
   getById: (id) => apiGet(`/api/market-look/${encodeURIComponent(id)}`),
+  /** 详情：market_look + trade_notify（extra_json 等） */
+  getTaskDetail: (id) => apiGet(`/api/market-look/${encodeURIComponent(id)}/detail`),
   /** 创建盯盘任务（默认 RUNNING，需 type=look 策略） */
   create: (data) => apiPost('/api/market-look', data),
   /**

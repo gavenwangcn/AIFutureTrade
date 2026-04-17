@@ -87,7 +87,7 @@
         <span class="dialog-title">盯盘容器日志: {{ displayTitleName }}</span>
       </div>
       <div v-if="!hasConnectableModelId" class="look-logs-no-model-hint">
-        未传入盯盘容器标识。默认盯盘使用固定容器 <code>trade-look</code>（与「执行盯盘」一致）。
+        未传入盯盘容器标识。默认使用 <code>aifuturetrade-model-look-1</code>（由 <code>docker compose up -d</code> 启动，与界面「盯盘容器日志」一致）。
       </div>
       <div class="log-container">
         <div

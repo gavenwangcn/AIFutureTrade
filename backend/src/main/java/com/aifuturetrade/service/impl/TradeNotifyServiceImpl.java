@@ -13,14 +13,30 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
+import java.util.Collections;
 import java.util.List;
 import java.util.stream.Collectors;
 
 @Service
 public class TradeNotifyServiceImpl implements TradeNotifyService {
 
+    private static final int MAX_MARKET_LOOK_NOTIFY_LIMIT = 200;
+
     @Autowired
     private TradeNotifyMapper tradeNotifyMapper;
+
+    @Override
+    public List<TradeNotifyDTO> listByMarketLookId(String marketLookId, int limit) {
+        if (!StringUtils.hasText(marketLookId) || "undefined".equalsIgnoreCase(marketLookId)) {
+            return Collections.emptyList();
+        }
+        int lim = Math.min(Math.max(limit, 1), MAX_MARKET_LOOK_NOTIFY_LIMIT);
+        LambdaQueryWrapper<TradeNotifyDO> q = new LambdaQueryWrapper<>();
+        q.eq(TradeNotifyDO::getMarketLookId, marketLookId.trim());
+        q.orderByDesc(TradeNotifyDO::getCreatedAt);
+        q.last("LIMIT " + lim);
+        return tradeNotifyMapper.selectList(q).stream().map(this::toDto).collect(Collectors.toList());
+    }
 
     @Override
     public TradeNotifyDTO getById(Long id) {
