@@ -9,7 +9,7 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * 与 {@code trade/market/market_data.py} 中 {@code _calculate_indicators_for_klines} 对齐的 K 线指标计算（含 Supertrend / TradingView）。
+ * K 线技术指标聚合（与 Python / 前端 K 线指标对齐）。
  * <p>
  * 返回的 K 线序列按时间从旧到新排列时，索引 {@code i} 处只能使用 {@code [0,i]} 的历史。
  * 任一时间点若存在任一指标无法给出有效值，则<strong>整根 K 线不加入结果</strong>（不从单根里删除字段）。
@@ -19,6 +19,16 @@ import java.util.Map;
  * <p>
  * 写入每根 K 线 {@code indicators} 的数值统一保留至多小数点后 4 位（HALF_UP）。
  * </p>
+ * <h2>算法来源（与 binance-service 中同名类保持一致）</h2>
+ * <ul>
+ * <li><b>RSI</b>：{@code trade/market/market_data.py} {@code _calculate_rsi_tradingview}；完备性见 {@link #finRsiSeries(double[], int, int)}。</li>
+ * <li><b>EMA</b>：{@code frontend/KLineChart/indicators/ema.ts}（与 {@link #emaFrontend} 相同）。</li>
+ * <li><b>MACD</b>：{@code frontend/KLineChart/indicators/macd.ts}（与 {@link #macdFrontend} 相同）。</li>
+ * <li><b>KDJ</b>：{@code frontend/KLineChart/indicators/kdj.ts}（与 {@link #kdjTradingView} 等价）。</li>
+ * <li><b>ATR</b>：{@code frontend/KLineChart/indicators/atr.ts} RMA(TR)（与 {@link #atrTradingView} 相同）。</li>
+ * <li><b>ADX</b>：{@code trade/market/market_index.py} {@code MarketIndexCalculator#compute_adx}（与 {@link #computeAdx} 相同）。</li>
+ * <li><b>Supertrend</b>：{@code trade/market/supertrend_tradingview.py}；{@code trend} 初值须为 0（勿用 NaN）。</li>
+ * </ul>
  */
 public final class KlineIndicatorCalculator {
 
@@ -67,12 +77,12 @@ public final class KlineIndicatorCalculator {
             highs[i] = num(k.get("high"));
             lows[i] = num(k.get("low"));
             closes[i] = num(k.get("close"));
-            volumes[i] = num(k.get("volume"));
+            volumes[i] = numVolumeLike(k.get("volume"));
             Object tb = k.get("taker_buy_base_volume");
             if (tb == null) {
                 tb = k.get("takerBuyBaseVolume");
             }
-            takerBuy[i] = num(tb);
+            takerBuy[i] = numVolumeLike(tb);
         }
 
         // n ≥ 99：以下计算与输出下标 98..n-1 所需；不再对 n 做分段短路
@@ -237,7 +247,9 @@ public final class KlineIndicatorCalculator {
                 || !fin(ema99, i, 98)) {
             return false;
         }
-        if (!fin(rsi6, i, 6) || !fin(rsi9, i, 9) || !fin(rsi14, i, 14)) {
+        if (!finRsiSeries(rsi6, i, 6)
+                || !finRsiSeries(rsi9, i, 9)
+                || !finRsiSeries(rsi14, i, 14)) {
             return false;
         }
         if (macd == null
@@ -278,6 +290,23 @@ public final class KlineIndicatorCalculator {
 
     private static boolean fin(double[] arr, int i, int minInclusive) {
         return arr != null && i >= minInclusive && !nan(arr[i]);
+    }
+
+    /** RSI：首根有效值在下标 {@code period - 1}，与 {@code _calculate_rsi_tradingview} 一致。 */
+    private static boolean finRsiSeries(double[] rsi, int i, int period) {
+        return fin(rsi, i, period - 1);
+    }
+
+    /** 成交量类字段：null/空串/非数字按 0，与 binance-service 行为一致。 */
+    private static double numVolumeLike(Object o) {
+        if (o == null) {
+            return 0.0;
+        }
+        if (o instanceof String && ((String) o).trim().isEmpty()) {
+            return 0.0;
+        }
+        double v = num(o);
+        return nan(v) ? 0.0 : v;
     }
 
     /** 仅当 isFullIndicatorBar 为真时调用；输出完整指标嵌套结构（无 null 叶子） */
@@ -405,7 +434,9 @@ public final class KlineIndicatorCalculator {
         double[] finalUpper = new double[n];
         double[] finalLower = new double[n];
         Arrays.fill(line, Double.NaN);
-        Arrays.fill(trend, Double.NaN);
+        // 与 Python trend = np.zeros(n) 一致：ATR 未就绪的 bar 会 continue，若此处用 NaN，
+        // 则 trend[i-1] 长期为 NaN，else 分支 trend[i]=trend[i-1] 会把 NaN 永久传下去，导致整段 Supertrend 无效。
+        Arrays.fill(trend, 0.0);
         Arrays.fill(finalUpper, Double.NaN);
         Arrays.fill(finalLower, Double.NaN);
 
