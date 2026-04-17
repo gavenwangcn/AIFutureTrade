@@ -1,4 +1,4 @@
-package com.aifuturetrade.trademcp.indicators;
+package com.aifuturetrade.market.indicators;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
@@ -31,8 +31,15 @@ public final class KlineIndicatorCalculator {
 
     /** MA99/EMA99 等全部就绪的最小下标（含）；更小的下标整根丢弃 */
     private static final int FULL_BAR_MIN_INDEX = 98;
+
+    /**
+     * 计算完整指标集（含 MA99/EMA99、KDJ 全窗口等）所需的最少 K 线条数；
+     * 少于该条数时 {@link #enrich(List)} 直接返回空列表（与 Python 侧一致）。
+     */
+    public static final int MIN_KLINES_FOR_FULL_INDICATORS = 99;
+
     /** 上述指标所需最少 K 线根数 */
-    private static final int FULL_BAR_MIN_BARS = 99;
+    private static final int FULL_BAR_MIN_BARS = MIN_KLINES_FOR_FULL_INDICATORS;
 
     /** Supertrend：与 Pine ta.supertrend(3, 10) 一致 */
     private static final int SUPERTREND_ATR_PERIOD = 10;
@@ -793,3 +800,5 @@ public final class KlineIndicatorCalculator {
         return new AdxResult(adxValues, pdiValues, ndiValues);
     }
 }
+
+

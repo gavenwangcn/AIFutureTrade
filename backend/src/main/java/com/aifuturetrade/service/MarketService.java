@@ -36,7 +36,7 @@ public interface MarketService {
     /**
      * 获取K线历史数据
      */
-    List<Map<String, Object>> getMarketKlines(String symbol, String interval, Integer limit, String startTime, String endTime);
+    List<Map<String, Object>> getMarketKlines(String symbol, String interval, Integer limit, String startTime,
+            String endTime);
 
 }
-

@@ -108,6 +108,17 @@ def _candidate_for_symbol(symbol: str) -> Dict:
     }
 
 
+def _klines_include_service_adx14(klines: List) -> bool:
+    """binance-service 已在 indicators.adx 中写入 adx14 时，不再本地重算 ADX。"""
+    for k in klines:
+        if not isinstance(k, dict):
+            continue
+        adx = (k.get("indicators") or {}).get("adx")
+        if isinstance(adx, dict) and adx.get("adx14") is not None:
+            return True
+    return False
+
+
 def merge_timeframe_klines(market_fetcher: MarketDataFetcher, contract_symbol: str) -> Dict:
     """
     与 TradingEngine._merge_timeframe_data 相同：合并 8 周期 K 线（仅 klines），单合约。
@@ -164,6 +175,10 @@ def calculate_symbol_adx_timeframes(timeframes_data: Dict) -> Dict:
         klines = tf_data.get("klines", [])
 
         if not klines or len(klines) < 14:
+            updated_timeframes[timeframe]["klines"] = klines
+            continue
+
+        if _klines_include_service_adx14(klines):
             updated_timeframes[timeframe]["klines"] = klines
             continue
 

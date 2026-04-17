@@ -53,8 +53,7 @@ public class MarketServiceImpl implements MarketService {
                     binanceConfig.getBaseUrl(),
                     binanceConfig.getTestnet(),
                     binanceConfig.getConnectTimeout(),
-                    binanceConfig.getReadTimeout()
-            );
+                    binanceConfig.getReadTimeout());
         }
         return futuresClient;
     }
@@ -74,7 +73,8 @@ public class MarketServiceImpl implements MarketService {
             List<String> contractSymbols = new ArrayList<>();
             for (com.aifuturetrade.dao.entity.FutureDO future : futureConfigs) {
                 String symbol = future.getSymbol() != null ? future.getSymbol().toUpperCase() : "";
-                String contractSymbol = future.getContractSymbol() != null ? future.getContractSymbol().toUpperCase() : "";
+                String contractSymbol = future.getContractSymbol() != null ? future.getContractSymbol().toUpperCase()
+                        : "";
                 if (contractSymbol.isEmpty()) {
                     contractSymbol = symbol + "USDT";
                 }
@@ -123,7 +123,7 @@ public class MarketServiceImpl implements MarketService {
                             break;
                         }
                     }
-                    
+
                     // 从24_market_tickers表获取涨幅百分比和成交额
                     Map<String, Object> tickerData = tickerDataMap.get(contractSymbol);
                     if (tickerData != null) {
@@ -139,7 +139,7 @@ public class MarketServiceImpl implements MarketService {
                             priceInfo.put("quote_volume", quoteVolume); // 同时提供quote_volume字段以便兼容
                         }
                     }
-                    
+
                     result.put(symbol, priceInfo);
                 }
             }
@@ -171,10 +171,10 @@ public class MarketServiceImpl implements MarketService {
             if (limit == null) {
                 limit = 10;
             }
-            
+
             List<Map<String, Object>> rawGainers = marketTickerMapper.selectGainersFromTickers(limit);
             List<Map<String, Object>> gainers = formatLeaderboardData(rawGainers, "gainer");
-            
+
             Map<String, Object> result = new HashMap<>();
             result.put("gainers", gainers);
             result.put("timestamp", System.currentTimeMillis());
@@ -195,10 +195,10 @@ public class MarketServiceImpl implements MarketService {
             if (limit == null) {
                 limit = 10;
             }
-            
+
             List<Map<String, Object>> rawLosers = marketTickerMapper.selectLosersFromTickers(limit);
             List<Map<String, Object>> losers = formatLeaderboardData(rawLosers, "loser");
-            
+
             Map<String, Object> result = new HashMap<>();
             result.put("losers", losers);
             result.put("timestamp", System.currentTimeMillis());
@@ -219,14 +219,14 @@ public class MarketServiceImpl implements MarketService {
             if (limit == null) {
                 limit = 10;
             }
-            
+
             // 一次查询获取涨幅榜和跌幅榜数据
             List<Map<String, Object>> rawGainers = marketTickerMapper.selectGainersFromTickers(limit);
             List<Map<String, Object>> rawLosers = marketTickerMapper.selectLosersFromTickers(limit);
-            
+
             List<Map<String, Object>> gainers = formatLeaderboardData(rawGainers, "gainer");
             List<Map<String, Object>> losers = formatLeaderboardData(rawLosers, "loser");
-            
+
             Map<String, Object> result = new HashMap<>();
             result.put("gainers", gainers);
             result.put("losers", losers);
@@ -244,14 +244,15 @@ public class MarketServiceImpl implements MarketService {
 
     /**
      * 格式化涨跌幅榜数据
+     * 
      * @param rawData 原始数据列表
-     * @param side 类型（gainer或loser）
+     * @param side    类型（gainer或loser）
      * @return 格式化后的数据列表
      */
     private List<Map<String, Object>> formatLeaderboardData(List<Map<String, Object>> rawData, String side) {
         List<Map<String, Object>> formatted = new ArrayList<>();
         int position = 1;
-        
+
         for (Map<String, Object> row : rawData) {
             String symbol = getStringValue(row, "symbol");
             String contractSymbol = symbol;
@@ -259,13 +260,13 @@ public class MarketServiceImpl implements MarketService {
             if (symbol != null && symbol.endsWith("USDT")) {
                 name = symbol.replace("USDT", "");
             }
-            
+
             Double priceChangePercent = getDoubleValue(row, "price_change_percent");
             Double lastPrice = getDoubleValue(row, "last_price");
             Double quoteVolume = getDoubleValue(row, "quote_volume");
             Double baseVolume = getDoubleValue(row, "base_volume");
             Object eventTime = row.get("event_time");
-            
+
             Map<String, Object> item = new HashMap<>();
             item.put("symbol", symbol);
             item.put("contract_symbol", contractSymbol);
@@ -279,10 +280,10 @@ public class MarketServiceImpl implements MarketService {
             item.put("base_volume", baseVolume);
             item.put("timeframes", "");
             item.put("event_time", JsonSafeValues.normalizeForJson(eventTime));
-            
+
             formatted.add(item);
         }
-        
+
         return formatted;
     }
 
@@ -311,7 +312,7 @@ public class MarketServiceImpl implements MarketService {
             return 0.0;
         }
     }
-    
+
     /**
      * 从Map中获取Long值
      */
@@ -329,14 +330,14 @@ public class MarketServiceImpl implements MarketService {
             return null;
         }
     }
-    
+
     /**
      * 将数值保留6位小数
      */
     private double roundTo6Decimals(double value) {
         return Math.round(value * 1000000.0) / 1000000.0;
     }
-    
+
     /**
      * 将timestamp（毫秒）转换为datetime字符串用于验证（使用 UTC+8 时区）
      */
@@ -355,8 +356,9 @@ public class MarketServiceImpl implements MarketService {
     }
 
     @Override
-    public List<Map<String, Object>> getMarketKlines(String symbol, String interval, Integer limit, String startTime, String endTime) {
-        log.info("[MarketService] 获取K线数据, symbol={}, interval={}, limit={}", 
+    public List<Map<String, Object>> getMarketKlines(String symbol, String interval, Integer limit, String startTime,
+            String endTime) {
+        log.info("[MarketService] 获取K线数据, symbol={}, interval={}, limit={}",
                 symbol, interval, limit);
         try {
             BinanceFuturesClient client = getFuturesClient();
@@ -370,7 +372,7 @@ public class MarketServiceImpl implements MarketService {
                     limit = 499;
                 }
             }
-            
+
             // 验证limit参数的有效性（Binance API限制：1-1000）
             if (limit != null) {
                 if (limit <= 0) {
@@ -393,7 +395,7 @@ public class MarketServiceImpl implements MarketService {
 
             // SDK返回的数据是倒序的（从新到旧），数组[0]是最新的K线，数组[-1]是最旧的K线
             // 注意：K线页面已改为仅使用历史数据，不再订阅实时K线更新，因此保留所有数据（包括最新K线）
-            log.debug("[MarketService] SDK返回{}条K线数据（倒序：最新→最旧），保留所有数据（包括最新K线）", 
+            log.debug("[MarketService] SDK返回{}条K线数据（倒序：最新→最旧），保留所有数据（包括最新K线）",
                     klinesRaw != null ? klinesRaw.size() : 0);
 
             // 格式化 K 线数据，价格保留6位小数
@@ -405,7 +407,7 @@ public class MarketServiceImpl implements MarketService {
                     double formattedHigh = roundTo6Decimals(getDoubleValue(kline, "high"));
                     double formattedLow = roundTo6Decimals(getDoubleValue(kline, "low"));
                     double formattedClose = roundTo6Decimals(getDoubleValue(kline, "close"));
-                    
+
                     Map<String, Object> formatted = new HashMap<>();
                     formatted.put("timestamp", kline.get("open_time"));
                     formatted.put("open", formattedOpen);
@@ -416,54 +418,60 @@ public class MarketServiceImpl implements MarketService {
                     formatted.put("turnover", getDoubleValue(kline, "quote_asset_volume"));
                     formattedKlines.add(formatted);
                 }
-                
+
                 // 由于SDK返回的数据是倒序的（从新到旧），需要按timestamp升序排序（从旧到新）
                 // 确保与前端期望的数据顺序一致
                 // 前端K线图表从左到右显示，左边是最旧的数据，右边是最新的数据，所以需要从旧到新的顺序
                 formattedKlines.sort((a, b) -> {
                     Long timestampA = getLongValue(a, "timestamp");
                     Long timestampB = getLongValue(b, "timestamp");
-                    if (timestampA == null && timestampB == null) return 0;
-                    if (timestampA == null) return -1;
-                    if (timestampB == null) return 1;
+                    if (timestampA == null && timestampB == null)
+                        return 0;
+                    if (timestampA == null)
+                        return -1;
+                    if (timestampB == null)
+                        return 1;
                     return timestampA.compareTo(timestampB);
                 });
-                
-                log.info("[MarketService] SDK查询完成，共获取 {} 条K线数据（已排序为从旧到新，包含最新K线）", 
+
+                log.info("[MarketService] SDK查询完成，共获取 {} 条K线数据（已排序为从旧到新，包含最新K线）",
                         formattedKlines.size());
-                
+
                 // 验证数据顺序：确保第一条时间戳小于最后一条时间戳（从旧到新，timestamp升序）
                 // 前端K线图表从左到右显示，左边是最旧的数据（第一条），右边是最新的数据（最后一条）
                 // 所以数据顺序应该是：第一条（最旧）< 最后一条（最新）
                 if (formattedKlines.size() > 1) {
                     Long firstTimestamp = getLongValue(formattedKlines.get(0), "timestamp");
                     Long lastTimestamp = getLongValue(formattedKlines.get(formattedKlines.size() - 1), "timestamp");
-                    
+
                     if (firstTimestamp != null && lastTimestamp != null) {
                         String firstTimestampStr = formatTimestamp(firstTimestamp);
                         String lastTimestampStr = formatTimestamp(lastTimestamp);
-                        
+
                         if (firstTimestamp >= lastTimestamp) {
                             log.warn("[MarketService] ⚠️ 数据顺序异常：第一条时间戳({}, {}) >= 最后一条({}, {})，" +
                                     "重新排序以确保从旧到新的顺序（与前端K线图表从左到右的要求一致）",
                                     firstTimestamp, firstTimestampStr, lastTimestamp, lastTimestampStr);
-                            
+
                             // 重新排序
                             formattedKlines.sort((a, b) -> {
                                 Long timestampA = getLongValue(a, "timestamp");
                                 Long timestampB = getLongValue(b, "timestamp");
-                                if (timestampA == null && timestampB == null) return 0;
-                                if (timestampA == null) return -1;
-                                if (timestampB == null) return 1;
+                                if (timestampA == null && timestampB == null)
+                                    return 0;
+                                if (timestampA == null)
+                                    return -1;
+                                if (timestampB == null)
+                                    return 1;
                                 return timestampA.compareTo(timestampB);
                             });
-                            
+
                             // 重新验证
                             firstTimestamp = getLongValue(formattedKlines.get(0), "timestamp");
                             lastTimestamp = getLongValue(formattedKlines.get(formattedKlines.size() - 1), "timestamp");
                             firstTimestampStr = formatTimestamp(firstTimestamp);
                             lastTimestampStr = formatTimestamp(lastTimestamp);
-                            
+
                             log.debug("[MarketService] ✓ 重新排序后：第一条时间戳={} ({}), 最后一条时间戳={} ({})",
                                     firstTimestamp, firstTimestampStr, lastTimestamp, lastTimestampStr);
                         } else {
@@ -477,30 +485,30 @@ public class MarketServiceImpl implements MarketService {
 
             // 记录返回数据信息
             int klinesCount = formattedKlines.size();
-            log.info("[MarketService] 获取K线历史数据查询完成: symbol={}, interval={}, 返回数据条数={}", 
+            log.info("[MarketService] 获取K线历史数据查询完成: symbol={}, interval={}, 返回数据条数={}",
                     symbol, interval, klinesCount);
-            
+
             if (klinesCount > 0) {
                 // 记录第一条和最后一条数据的时间戳（用于调试）
                 Map<String, Object> firstKline = formattedKlines.get(0);
                 Map<String, Object> lastKline = formattedKlines.get(formattedKlines.size() - 1);
                 Long firstTimestamp = getLongValue(firstKline, "timestamp");
                 Long lastTimestamp = getLongValue(lastKline, "timestamp");
-                
+
                 String firstTimestampStr = formatTimestamp(firstTimestamp);
                 String lastTimestampStr = formatTimestamp(lastTimestamp);
-                
+
                 log.info("[MarketService] 获取K线历史数据时间范围: 第一条timestamp={} ({}), " +
                         "最后一条timestamp={} ({}), 共返回{}条数据",
                         firstTimestamp, firstTimestampStr, lastTimestamp, lastTimestampStr, klinesCount);
-                
+
                 // 记录第一条数据的详细信息（用于调试数据格式）
                 log.debug("[MarketService] 获取K线历史数据示例（第一条）: {}", firstKline);
                 log.debug("[MarketService] 获取K线历史数据示例（最后一条）: {}", lastKline);
             } else {
                 log.warn("[MarketService] 未找到K线历史数据: symbol={}, interval={}", symbol, interval);
             }
-            
+
             return formattedKlines;
         } catch (Exception e) {
             log.error("[MarketService] 获取K线数据失败: {}", e.getMessage(), e);
@@ -508,4 +516,3 @@ public class MarketServiceImpl implements MarketService {
         }
     }
 }
-

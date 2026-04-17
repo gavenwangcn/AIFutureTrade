@@ -57,11 +57,9 @@ from trade.trading.trading_utils import (
 from trade.trading.market_data_manager import MarketDataManager
 from trade.trading.batch_decision_processor import BatchDecisionProcessor
 from trade.market import calculate_market_indicators
-from trade.market.market_index import MarketIndexCalculator
-from trade.market.indicator_rounding import round_indicator_4
-import numpy as np
 
 logger = logging.getLogger(__name__)
+
 
 class TradingEngine:
     """
@@ -1325,9 +1323,7 @@ class TradingEngine:
             
             if quote_volume_value > 0 or base_volume_value > 0:
                 logger.debug(f"[Model {self.model_id}] {original_symbol} 成交量: {base_volume_value}, 成交额: {quote_volume_value}")
-            # 获取K线数据（不计算指标）
-            # 注意：include_indicators 参数已废弃，但保留以兼容旧代码
-            # 现在只获取klines，指标由ai_trader内部按需计算
+            # 多周期 K 线由 merge_timeframe_klines_for_contract 拉取，每根含 binance-service 指标
             query_symbol = original_symbol.upper()
             if not query_symbol.endswith('USDT'):
                 query_symbol = f"{query_symbol}USDT"
@@ -1371,57 +1367,18 @@ class TradingEngine:
             # 添加上一根K线收盘价信息
             market_state[original_symbol]['previous_close_prices'] = previous_close_prices
 
-        # ⚠️ 计算市场指标（波动率和趋势强度）
-        # 收集所有symbol的K线数据用于计算市场指标
+        # 市场聚合指标：使用各 symbol 已加载的带指标 K 线中的 atr14/adx14（binance-service），不本地重算
         try:
-            klines_data_for_indicators = {}
-            for symbol, state_info in market_state.items():
-                indicators = state_info.get('indicators', {})
-                timeframes = indicators.get('timeframes', {})
-
-                # 优先使用1h K线，其次4h、30m、15m
-                klines = None
-                for tf in ['1h', '4h', '30m', '15m']:
-                    tf_data = timeframes.get(tf, {})
-                    tf_klines = tf_data.get('klines', [])
-                    if tf_klines and len(tf_klines) > 0:
-                        klines = tf_klines
-                        break
-
-                if klines and len(klines) > 0:
-                    # 提取high、low、close数据
-                    high_prices = []
-                    low_prices = []
-                    close_prices = []
-                    for kline in klines:
-                        if isinstance(kline, dict):
-                            high_prices.append(float(kline.get('high', 0)))
-                            low_prices.append(float(kline.get('low', 0)))
-                            close_prices.append(float(kline.get('close', 0)))
-
-                    if high_prices and low_prices and close_prices:
-                        klines_data_for_indicators[symbol] = {
-                            'high': high_prices,
-                            'low': low_prices,
-                            'close': close_prices
-                        }
-
-            # 计算市场指标
-            if klines_data_for_indicators:
-                market_indicators = calculate_market_indicators(klines_data_for_indicators)
-                logger.debug(f"[Model {self.model_id}] 计算市场指标完成: {market_indicators}")
-
-                # 将market_indicators添加到每个symbol的market_state中
+            if market_state:
+                market_indicators = calculate_market_indicators(market_state)
+                logger.debug(f"[Model {self.model_id}] 市场聚合指标: {market_indicators}")
                 for symbol in market_state:
                     market_state[symbol]['market_indicators'] = market_indicators
             else:
-                logger.warning(f"[Model {self.model_id}] 没有有效的K线数据用于计算市场指标")
-                # 添加空的market_indicators
                 for symbol in market_state:
                     market_state[symbol]['market_indicators'] = {}
         except Exception as e:
             logger.error(f"[Model {self.model_id}] 计算市场指标失败: {e}", exc_info=True)
-            # 添加空的market_indicators，确保不影响后续流程
             for symbol in market_state:
                 market_state[symbol]['market_indicators'] = {}
 
@@ -1429,62 +1386,9 @@ class TradingEngine:
 
     def _calculate_symbol_adx(self, timeframes_data: Dict) -> Dict:
         """
-        为timeframes中的1h、4h、1d的每根K线添加ADX指标到indicators中
-
-        Args:
-            timeframes_data: 时间周期数据，格式为 {timeframe: {'klines': [...], ...}}
-
-        Returns:
-            Dict: 更新后的timeframes_data，每根K线的indicators中添加了adx字段
+        K 线已由 binance-service 的带指标接口写入完整 indicators（含 ADX），不再在 Python 侧补算。
         """
-        calculator = MarketIndexCalculator()
-        updated_timeframes = {}
-
-        for timeframe in ['1h', '4h', '1d']:
-            tf_data = timeframes_data.get(timeframe, {})
-            updated_timeframes[timeframe] = tf_data.copy() if tf_data else {}
-
-            klines = tf_data.get('klines', [])
-
-            if not klines or len(klines) < 14:
-                updated_timeframes[timeframe]['klines'] = klines
-                continue
-
-            try:
-                high = np.array([float(k.get('high', 0)) for k in klines if isinstance(k, dict)])
-                low = np.array([float(k.get('low', 0)) for k in klines if isinstance(k, dict)])
-                close = np.array([float(k.get('close', 0)) for k in klines if isinstance(k, dict)])
-
-                if len(high) > 0 and len(low) > 0 and len(close) > 0:
-                    result = calculator.compute_adx(high, low, close)
-                    if result is not None:
-                        adx_array, _, _ = result
-                        updated_klines = []
-                        for i, kline in enumerate(klines):
-                            kline_copy = kline.copy() if isinstance(kline, dict) else {}
-                            if 'indicators' not in kline_copy:
-                                kline_copy['indicators'] = {}
-
-                            # 添加adx字段到indicators中
-                            if i < len(adx_array) and not np.isnan(adx_array[i]):
-                                adx_value = round_indicator_4(float(adx_array[i]))
-                            else:
-                                adx_value = None
-
-                            if 'adx' not in kline_copy['indicators']:
-                                kline_copy['indicators']['adx'] = {}
-                            kline_copy['indicators']['adx'][f'adx_{timeframe}'] = adx_value
-                            updated_klines.append(kline_copy)
-                        updated_timeframes[timeframe]['klines'] = updated_klines
-                    else:
-                        updated_timeframes[timeframe]['klines'] = klines
-                else:
-                    updated_timeframes[timeframe]['klines'] = klines
-            except Exception as e:
-                logger.warning(f"计算{timeframe} ADX失败: {e}")
-                updated_timeframes[timeframe]['klines'] = klines
-
-        return updated_timeframes
+        return timeframes_data
 
     def _validate_symbol_market_data(
         self,
@@ -1551,60 +1455,11 @@ class TradingEngine:
     
     def _merge_timeframe_data(self, symbol: str) -> Dict:
         """
-        合并8个时间周期的K线数据（不计算指标），包括：1m, 5m, 15m, 30m, 1h, 4h, 1d, 1w
-        
-        Args:
-            symbol: 交易对符号（如 'BTC' 或 'BTCUSDT'）
-            
-        Returns:
-            Dict: 合并后的数据格式 {symbol: {1m: {klines: [...]}, 5m: {klines: [...]}, 30m: {klines: [...]}, ...}}
-            只包含klines数据，不包含indicators
+        合并 8 个周期 K 线；每根 K 线由 binance-service 带完整 indicators 一次性返回。
         """
-        # 确保symbol以USDT结尾，防止重复添加
         symbol_upper = symbol.upper()
-        if not symbol_upper.endswith('USDT'):
-            formatted_symbol = f"{symbol_upper}USDT"
-        else:
-            formatted_symbol = symbol_upper
-        
-        # 获取8个时间周期的数据（包括30m）
-        timeframe_methods = {
-            '1m': self.market_fetcher.get_market_data_1m,
-            '5m': self.market_fetcher.get_market_data_5m,
-            '15m': self.market_fetcher.get_market_data_15m,
-            '30m': self.market_fetcher.get_market_data_30m,
-            '1h': self.market_fetcher.get_market_data_1h,
-            '4h': self.market_fetcher.get_market_data_4h,
-            '1d': self.market_fetcher.get_market_data_1d,
-            '1w': self.market_fetcher.get_market_data_1w
-        }
-        
-        merged_data = {formatted_symbol: {}}
-        errors = []
-        
-        for timeframe, method in timeframe_methods.items():
-            try:
-                data = method(formatted_symbol)  # 使用格式化后的symbol
-                if data:
-                    # 只提取klines数据，不包含indicators
-                    klines = data.get('klines', [])
-                    if klines:
-                        merged_data[formatted_symbol][timeframe] = {'klines': klines}
-                    else:
-                        errors.append(f"{timeframe}: K线数据为空")
-                else:
-                    errors.append(f"{timeframe}: 返回数据为空")
-            except Exception as e:
-                error_msg = str(e)
-                errors.append(f"{timeframe}: {error_msg}")
-                logger.warning(f"[Model {self.model_id}] 获取 {formatted_symbol} {timeframe} 数据失败: {e}")
-                continue
-        
-        # 如果所有时间周期都失败，记录错误
-        if not merged_data[formatted_symbol] and errors:
-            logger.warning(f"[Model {self.model_id}] 获取 {formatted_symbol} 所有时间周期数据失败，错误详情: {errors}")
-        
-        return merged_data
+        formatted_symbol = f'{symbol_upper}USDT' if not symbol_upper.endswith('USDT') else symbol_upper
+        return self.market_fetcher.merge_timeframe_klines_for_contract(formatted_symbol)
         
     def _extract_price_map(self, market_state: Dict) -> Dict[str, float]:
         """
@@ -3552,9 +3407,7 @@ class TradingEngine:
                 logger.warning(f"[Model {self.model_id}] 无法获取 {symbol} 的实时价格（从SDK）")
                 continue
             
-            # 获取K线数据（不计算指标）
-            # 注意：include_indicators 参数已废弃，但保留以兼容旧代码
-            # 现在只获取klines，指标由ai_trader内部按需计算
+            # 多周期 K 线由 merge_timeframe_klines_for_contract 拉取，每根含 binance-service 指标
             merged_data = self._merge_timeframe_data(query_symbol)
             timeframes_data = merged_data.get(query_symbol, {}) if merged_data else {}
             
@@ -3619,57 +3472,18 @@ class TradingEngine:
             if quote_volume_value > 0 or base_volume_value > 0:
                 logger.debug(f"[Model {self.model_id}] {symbol} 成交量: {base_volume_value}, 成交额: {quote_volume_value}")
 
-        # ⚠️ 计算市场指标（波动率和趋势强度）
-        # 收集所有symbol的K线数据用于计算市场指标
+        # 市场聚合指标：使用已加载的带指标 K 线中的 atr14/adx14（binance-service）
         try:
-            klines_data_for_indicators = {}
-            for symbol, state_info in market_state.items():
-                indicators = state_info.get('indicators', {})
-                timeframes = indicators.get('timeframes', {})
-
-                # 优先使用1h K线，其次4h、30m、15m
-                klines = None
-                for tf in ['1h', '4h', '30m', '15m']:
-                    tf_data = timeframes.get(tf, {})
-                    tf_klines = tf_data.get('klines', [])
-                    if tf_klines and len(tf_klines) > 0:
-                        klines = tf_klines
-                        break
-
-                if klines and len(klines) > 0:
-                    # 提取high、low、close数据
-                    high_prices = []
-                    low_prices = []
-                    close_prices = []
-                    for kline in klines:
-                        if isinstance(kline, dict):
-                            high_prices.append(float(kline.get('high', 0)))
-                            low_prices.append(float(kline.get('low', 0)))
-                            close_prices.append(float(kline.get('close', 0)))
-
-                    if high_prices and low_prices and close_prices:
-                        klines_data_for_indicators[symbol] = {
-                            'high': high_prices,
-                            'low': low_prices,
-                            'close': close_prices
-                        }
-
-            # 计算市场指标
-            if klines_data_for_indicators:
-                market_indicators = calculate_market_indicators(klines_data_for_indicators)
-                logger.debug(f"[Model {self.model_id}] 计算市场指标完成: {market_indicators}")
-
-                # 将market_indicators添加到每个symbol的market_state中
+            if market_state:
+                market_indicators = calculate_market_indicators(market_state)
+                logger.debug(f"[Model {self.model_id}] 市场聚合指标: {market_indicators}")
                 for symbol in market_state:
                     market_state[symbol]['market_indicators'] = market_indicators
             else:
-                logger.warning(f"[Model {self.model_id}] 没有有效的K线数据用于计算市场指标")
-                # 添加空的market_indicators
                 for symbol in market_state:
                     market_state[symbol]['market_indicators'] = {}
         except Exception as e:
             logger.error(f"[Model {self.model_id}] 计算市场指标失败: {e}", exc_info=True)
-            # 添加空的market_indicators，确保不影响后续流程
             for symbol in market_state:
                 market_state[symbol]['market_indicators'] = {}
 

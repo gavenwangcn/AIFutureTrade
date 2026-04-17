@@ -102,8 +102,8 @@ public class MarketController {
         // 优先使用下划线命名（前端使用），如果没有则使用驼峰命名
         String startTimeParam = start_time != null ? start_time : startTime;
         String endTimeParam = end_time != null ? end_time : endTime;
-        List<Map<String, Object>> klines = marketService.getMarketKlines(symbol, interval, limit, startTimeParam, endTimeParam);
+        List<Map<String, Object>> klines = marketService.getMarketKlines(symbol, interval, limit, startTimeParam,
+                endTimeParam);
         return new ResponseEntity<>(klines, HttpStatus.OK);
     }
 }
-

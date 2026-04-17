@@ -330,6 +330,61 @@ class BinanceServiceClient:
         
         result = self._make_request('GET', '/api/market-data/klines', params=params)
         return result if result else []
+
+    def get_klines_with_indicators(
+        self,
+        symbol: str,
+        interval: str,
+        limit: int = 299,
+        startTime: Optional[int] = None,
+        endTime: Optional[int] = None,
+    ) -> Optional[List[Dict[str, Any]]]:
+        """
+        获取已由 binance-service（KlineIndicatorCalculator）计算指标的 K 线。
+        响应含 success / data / indicatorSkipReason。
+
+        Returns:
+            - ``None``：HTTP/解析失败或业务 success=false，调用方可换下一 base_url 重试。
+            - ``[]``：请求成功但无带指标 K 线（如根数不足等，见 indicatorSkipReason）。
+            - 非空 list：带指标的 K 线数据。
+        """
+        logger.debug(
+            f"[BinanceServiceClient] 调用get_klines_with_indicators: symbol={symbol}, "
+            f"interval={interval}, limit={limit}"
+        )
+        params: Dict[str, Any] = {
+            "symbol": symbol,
+            "interval": interval,
+            "limit": limit,
+        }
+        if startTime is not None:
+            params["startTime"] = startTime
+        if endTime is not None:
+            params["endTime"] = endTime
+        url = f"{self.base_url}/api/market-data/klines-with-indicators"
+        try:
+            response = requests.get(url, params=params, timeout=self.timeout)
+            response.raise_for_status()
+            body = response.json()
+        except requests.exceptions.RequestException as e:
+            logger.warning(f"[BinanceServiceClient] klines-with-indicators HTTP失败: {e}, url={url}")
+            return None
+        except Exception as e:
+            logger.warning(f"[BinanceServiceClient] klines-with-indicators 解析失败: {e}, url={url}")
+            return None
+
+        if not body.get("success"):
+            logger.warning(
+                f"[BinanceServiceClient] klines-with-indicators 业务失败: {body.get('message')}, url={url}"
+            )
+            return None
+
+        skip = body.get("indicatorSkipReason")
+        if skip:
+            logger.debug(f"[BinanceServiceClient] indicatorSkipReason: {skip}")
+
+        data = body.get("data")
+        return data if isinstance(data, list) else []
     
     def format_symbol(self, base_symbol: str) -> str:
         """
@@ -1043,6 +1098,124 @@ class BinanceFuturesClient(_BinanceFuturesBase):
                 exc_info=True
             )
             return []
+
+    def get_klines_with_indicators(
+        self,
+        symbol: str,
+        interval: str,
+        limit: int = 299,
+        startTime: Optional[int] = None,
+        endTime: Optional[int] = None,
+    ) -> List[Dict[str, Any]]:
+        """
+        从 binance-service 获取带指标的 K 线（与 MCP / Java KlineIndicatorCalculator 一致）。
+
+        先使用 ``get_next_service()`` 轮询到的节点；若该次请求失败（返回 None），**仅再试列表中的下一个**
+        节点（环形），最多 2 次，不遍历整表。
+        无 SDK 本地指标回退：未启用或未配置 binance-service 时返回空列表。
+        """
+        service_enabled = getattr(app_config, "BINANCE_SERVICE_ENABLED", False)
+        if not service_enabled:
+            logger.warning(
+                "[Binance Futures] get_klines_with_indicators 需要 BINANCE_SERVICE_ENABLED=True"
+            )
+            return []
+        service_manager = _get_binance_service_manager()
+        if not service_manager.has_service():
+            logger.warning(
+                "[Binance Futures] get_klines_with_indicators 需要配置 BINANCE_SERVICE_LIST"
+            )
+            return []
+
+        raw_list = getattr(app_config, "BINANCE_SERVICE_LIST", []) or []
+        service_list: List[Dict[str, Any]] = [
+            c for c in raw_list if isinstance(c, dict) and c.get("base_url")
+        ]
+        if not service_list:
+            logger.warning(
+                "[Binance Futures] get_klines_with_indicators 需要有效的 BINANCE_SERVICE_LIST（含 base_url）"
+            )
+            return []
+
+        default_timeout = getattr(app_config, "BINANCE_SERVICE_DEFAULT_TIMEOUT", 30)
+
+        def _norm_base(u: Any) -> str:
+            return (str(u or "").rstrip("/"))
+
+        def _try_cfg(svc_cfg: Dict[str, Any]) -> Optional[List[Dict[str, Any]]]:
+            base_url = svc_cfg.get("base_url")
+            timeout = svc_cfg.get("timeout", default_timeout)
+            client = BinanceServiceClient(base_url=base_url, timeout=timeout)
+            logger.debug(
+                f"[Binance Futures] get_klines_with_indicators 请求节点: {base_url}, "
+                f"symbol={symbol}, interval={interval}, limit={limit}"
+            )
+            try:
+                return client.get_klines_with_indicators(
+                    symbol, interval, limit, startTime, endTime
+                )
+            except Exception as e:
+                logger.warning(
+                    "[Binance Futures] get_klines_with_indicators 节点异常 %s: %s",
+                    base_url,
+                    e,
+                    exc_info=True,
+                )
+                return None
+
+        primary_cfg = service_manager.get_next_service()
+        if not primary_cfg:
+            return []
+
+        result = _try_cfg(primary_cfg)
+        if result is not None:
+            return result
+
+        n = len(service_list)
+        if n < 2:
+            logger.error(
+                "[Binance Futures] get_klines_with_indicators 首节点失败且无其他节点可重试: %s",
+                _norm_base(primary_cfg.get("base_url")),
+            )
+            return []
+
+        primary_url = _norm_base(primary_cfg.get("base_url"))
+        pidx = next(
+            (
+                i
+                for i, c in enumerate(service_list)
+                if _norm_base(c.get("base_url")) == primary_url
+            ),
+            0,
+        )
+        backup_cfg = service_list[(pidx + 1) % n]
+        backup_url = _norm_base(backup_cfg.get("base_url"))
+        if backup_url == primary_url:
+            logger.error(
+                "[Binance Futures] get_klines_with_indicators 首节点失败，下一节点与首节点 URL 相同，不再重试: %s",
+                primary_url,
+            )
+            return []
+
+        logger.warning(
+            "[Binance Futures] get_klines_with_indicators 首节点失败，重试下一节点: %s -> %s",
+            primary_url,
+            backup_url,
+        )
+        result2 = _try_cfg(backup_cfg)
+        if result2 is not None:
+            logger.info(
+                "[Binance Futures] get_klines_with_indicators 在下一节点成功: %s",
+                backup_url,
+            )
+            return result2
+
+        logger.error(
+            "[Binance Futures] get_klines_with_indicators 首节点与下一节点均失败: %s, %s",
+            primary_url,
+            backup_url,
+        )
+        return []
 
 
 class BinanceFuturesAccountClient(_BinanceFuturesBase):

@@ -20,7 +20,7 @@ import java.util.Map;
  */
 @Slf4j
 @RestController
-@RequestMapping({"/api/market-data", "/api/market"})
+@RequestMapping({ "/api/market-data", "/api/market" })
 @Tag(name = "市场数据管理", description = "市场数据管理接口")
 public class MarketDataController {
 
@@ -84,7 +84,7 @@ public class MarketDataController {
             @Parameter(description = "返回的K线数量", required = false) @RequestParam(value = "limit", required = false) Integer limit,
             @Parameter(description = "起始时间戳（毫秒）", required = false) @RequestParam(value = "startTime", required = false) Long startTime,
             @Parameter(description = "结束时间戳（毫秒）", required = false) @RequestParam(value = "endTime", required = false) Long endTime) {
-        log.debug("[MarketDataController] 接收到K线数据请求: symbol={}, interval={}, limit={}", 
+        log.debug("[MarketDataController] 接收到K线数据请求: symbol={}, interval={}, limit={}",
                 symbol, interval, limit);
         try {
             List<Map<String, Object>> result = marketDataService.getKlines(symbol, interval, limit, startTime, endTime);
@@ -97,6 +97,30 @@ public class MarketDataController {
             Map<String, Object> errorResponse = new HashMap<>();
             errorResponse.put("success", false);
             errorResponse.put("message", "获取K线数据失败: " + e.getMessage());
+            return new ResponseEntity<>(errorResponse, HttpStatus.INTERNAL_SERVER_ERROR);
+        }
+    }
+
+    /**
+     * 获取带技术指标的 K 线（指标在 binance-service 内计算；trade-mcp 仅转发到此接口）。
+     */
+    @GetMapping("/klines-with-indicators")
+    @Operation(summary = "获取带技术指标的K线数据")
+    public ResponseEntity<Map<String, Object>> getKlinesWithIndicators(
+            @Parameter(description = "交易对符号", required = true) @RequestParam(value = "symbol") String symbol,
+            @Parameter(description = "K线间隔", required = true) @RequestParam(value = "interval") String interval,
+            @Parameter(description = "返回的K线数量，不传默认 299", required = false) @RequestParam(value = "limit", required = false) Integer limit,
+            @Parameter(description = "起始时间戳（毫秒）", required = false) @RequestParam(value = "startTime", required = false) Long startTime,
+            @Parameter(description = "结束时间戳（毫秒）", required = false) @RequestParam(value = "endTime", required = false) Long endTime) {
+        log.debug("[MarketDataController] 带指标K线请求: symbol={}, interval={}, limit={}", symbol, interval, limit);
+        try {
+            Map<String, Object> result = marketDataService.getKlinesWithIndicators(symbol, interval, limit, startTime, endTime);
+            return new ResponseEntity<>(result, HttpStatus.OK);
+        } catch (Exception e) {
+            log.error("[MarketDataController] 获取带指标K线失败: {}", e.getMessage(), e);
+            Map<String, Object> errorResponse = new HashMap<>();
+            errorResponse.put("success", false);
+            errorResponse.put("message", "获取带指标K线失败: " + e.getMessage());
             return new ResponseEntity<>(errorResponse, HttpStatus.INTERNAL_SERVER_ERROR);
         }
     }
@@ -130,8 +154,7 @@ public class MarketDataController {
     @GetMapping("/leaderboard/losers")
     @Operation(summary = "获取跌幅榜")
     public ResponseEntity<Map<String, Object>> getMarketLeaderboardLosers(
-            @Parameter(description = "返回的数据条数限制", required = false) 
-            @RequestParam(value = "limit", required = false) Integer limit) {
+            @Parameter(description = "返回的数据条数限制", required = false) @RequestParam(value = "limit", required = false) Integer limit) {
         log.debug("[MarketDataController] 接收到跌幅榜请求: limit={}", limit);
         try {
             Map<String, Object> result = marketDataService.getMarketLeaderboardLosers(limit);
@@ -145,4 +168,3 @@ public class MarketDataController {
         }
     }
 }
-

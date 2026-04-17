@@ -1,5 +1,5 @@
 """
-技术指标对外输出精度：与 trade-mcp KlineIndicatorCalculator 一致，最多保留小数点后 4 位（HALF_UP）。
+技术指标对外输出精度：与 binance-service（及原 trade-mcp）KlineIndicatorCalculator 一致，最多保留小数点后 4 位（HALF_UP）。
 """
 from __future__ import annotations
 

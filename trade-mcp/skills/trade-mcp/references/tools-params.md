@@ -45,7 +45,7 @@ mcporter --config ./mcporter-trade-mcp.json --log-level error call \
 |---------------|----------|----------|-----------------|
 | `trade_market_symbol_prices` | `symbols` | — | **`symbols`**: `string[]`, mcporter: `symbols='["BTCUSDT","ETHUSDT"]'` |
 | `trade_market_klines` | `symbol`, `interval` | `limit`, `startTime`, `endTime` | **`symbol`** string; **`interval`** string (e.g. `5m`); **`limit`** int; **`startTime`/`endTime`** long (ms) |
-| `trade_market_klines_with_indicators` | `symbol`, `interval` | `limit`, `startTime`, `endTime` | Same as above |
+| `trade_market_klines_with_indicators` | `symbol`, `interval` | `limit`, `startTime`, `endTime` | 参数同左；**指标在 binance-service** `GET /api/market-data/klines-with-indicators` **计算**，MCP 转发；`limit` 不传默认 **299** |
 
 ---
 

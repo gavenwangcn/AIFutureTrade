@@ -39,6 +39,14 @@ public interface MarketDataService {
                                          Long startTime, Long endTime);
 
     /**
+     * 获取带技术指标的 K 线（在服务端对 {@link #getKlines} 结果做指标 enrich）。
+     *
+     * @return success、data、可选 indicatorSkipReason（根数不足 99 时）
+     */
+    Map<String, Object> getKlinesWithIndicators(String symbol, String interval, Integer limit,
+                                                Long startTime, Long endTime);
+
+    /**
      * 格式化交易对符号
      * 
      * @param baseSymbol 基础交易对符号

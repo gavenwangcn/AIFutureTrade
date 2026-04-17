@@ -98,7 +98,7 @@ mcporter --config ./mcporter-trade-mcp.json --log-level error call \
 
 ## 3. `trade_market_klines_with_indicators`
 
-**Purpose**: K-lines plus **MA/EMA/RSI/MACD/KDJ/ATR/ADX/VOL/Supertrend** (aligned with Java `KlineIndicatorCalculator` and Python `trade/market/market_data.py`).
+**Purpose**: K-lines plus **MA/EMA/RSI/MACD/KDJ/ATR/ADX/VOL/Supertrend**. Indicators are **computed in binance-service** (`GET /api/market-data/klines-with-indicators`); **trade-mcp only proxies**. Aligned with Python `trade/market/market_data.py` and Java `KlineIndicatorCalculator` in **binance-service** (not in trade-mcp).
 
 | Param | Required | Type | Notes |
 |-------|----------|------|-------|

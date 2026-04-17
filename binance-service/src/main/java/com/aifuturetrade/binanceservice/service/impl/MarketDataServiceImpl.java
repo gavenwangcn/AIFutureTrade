@@ -2,13 +2,16 @@ package com.aifuturetrade.binanceservice.service.impl;
 
 import com.aifuturetrade.binanceservice.api.binance.BinanceConfig;
 import com.aifuturetrade.binanceservice.api.binance.BinanceFuturesClient;
+import com.aifuturetrade.binanceservice.indicators.KlineIndicatorCalculator;
 import com.aifuturetrade.binanceservice.service.MarketDataService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import jakarta.annotation.PostConstruct;
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -19,6 +22,9 @@ import java.util.Map;
 @Slf4j
 @Service
 public class MarketDataServiceImpl implements MarketDataService {
+
+    /** 未传 limit 时拉取根数（与 trade-mcp 约定一致，满足 MA99 等窗口） */
+    private static final int DEFAULT_KLINE_LIMIT_WITH_INDICATORS = 299;
 
     @Autowired
     private BinanceConfig binanceConfig;
@@ -96,9 +102,55 @@ public class MarketDataServiceImpl implements MarketDataService {
         return binanceFuturesClient.getKlines(symbol, interval, limit, startTime, endTime);
     }
 
+    @Override
+    public Map<String, Object> getKlinesWithIndicators(
+            String symbol, String interval, Integer limit, Long startTime, Long endTime) {
+        if (binanceFuturesClient == null) {
+            log.error("[MarketDataServiceImpl] BinanceFuturesClient未初始化");
+            Map<String, Object> err = new HashMap<>();
+            err.put("success", false);
+            err.put("data", List.of());
+            err.put("message", "BinanceFuturesClient未初始化");
+            return err;
+        }
+        int effectiveLimit = limit != null ? limit : DEFAULT_KLINE_LIMIT_WITH_INDICATORS;
+        if (effectiveLimit <= 0) {
+            effectiveLimit = DEFAULT_KLINE_LIMIT_WITH_INDICATORS;
+        } else if (effectiveLimit > 1000) {
+            effectiveLimit = 1000;
+        }
+        log.debug(
+                "[MarketDataServiceImpl] 带指标K线, symbol={}, interval={}, limit={} (effective={})",
+                symbol,
+                interval,
+                limit,
+                effectiveLimit);
+        List<Map<String, Object>> raw = getKlines(symbol, interval, effectiveLimit, startTime, endTime);
+        List<Map<String, Object>> rows = new ArrayList<>();
+        for (Map<String, Object> m : raw) {
+            rows.add(new LinkedHashMap<>(m));
+        }
+        List<Map<String, Object>> enriched = KlineIndicatorCalculator.enrich(rows);
+        Map<String, Object> response = new HashMap<>();
+        response.put("success", true);
+        response.put("data", enriched);
+        if (!rows.isEmpty() && enriched.isEmpty() && rows.size() < KlineIndicatorCalculator.MIN_KLINES_FOR_FULL_INDICATORS) {
+            response.put(
+                    "indicatorSkipReason",
+                    "K线根数 "
+                            + rows.size()
+                            + " 小于指标计算所需最少 "
+                            + KlineIndicatorCalculator.MIN_KLINES_FOR_FULL_INDICATORS
+                            + " 根（MA99/EMA99/KDJ 等），未返回带指标的 K 线。请将 limit 设为至少 "
+                            + KlineIndicatorCalculator.MIN_KLINES_FOR_FULL_INDICATORS
+                            + "（建议 120 或更大）。");
+        }
+        return response;
+    }
+
     /**
      * 格式化交易对符号
-     * 
+     *
      * @param baseSymbol 基础交易对符号
      * @return 完整交易对符号
      */

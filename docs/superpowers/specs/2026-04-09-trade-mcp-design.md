@@ -15,7 +15,7 @@
 
 - **所有对下游的调用都必须调用对方的 Controller REST 服务**（而不是直接调用对方 Service/DAO，也不是直接调用交易所 SDK）。
 - **写操作（如创建订单）必须走原有的创建订单逻辑**：不仅是执行 SDK 下单，还需要对应数据落库/业务一致性（等价于“对应 model 执行相关操作”）。
-- **K 线接口返回不仅包含 K 线，还必须封装技术指标**，并保证 Java 指标计算与 Python 侧（`trade/market/market_data.py`、`trade/market/market_index.py`）逻辑一致，尤其是 TradingView/Wilder 等边界处理。
+- **K 线带指标**：技术指标在 **binance-service**（`GET /api/market-data/klines-with-indicators`）计算；`trade-mcp` 仅转发。Java 实现与 Python 侧（`trade/market/market_data.py` 等）逻辑对齐，尤其是 TradingView/Wilder 等边界处理。
 
 ## 2. 非目标（明确不做）
 
@@ -40,7 +40,7 @@
 `Agent -> MCP(tool: trade_market_*) -> trade-mcp -> binance-service Controller -> binance-service Service -> Binance -> Controller -> trade-mcp`
 
 3) **K 线 + 指标（不带 modelId）**  
-`Agent -> MCP(tool: trade_market_klines_with_indicators) -> trade-mcp -> binance-service /klines -> trade-mcp(计算指标并封装) -> Agent`
+`Agent -> MCP(tool: trade_market_klines_with_indicators) -> trade-mcp -> binance-service GET /klines-with-indicators(计算指标) -> trade-mcp -> Agent`
 
 ## 4. 下游 REST 契约（现状与补齐）
 
@@ -50,6 +50,7 @@
 
 - `POST /api/market-data/symbol-prices`（body：`List<String> symbols`）  
 - `GET /api/market-data/klines?symbol=...&interval=...&limit=...&startTime=...&endTime=...`
+- `GET /api/market-data/klines-with-indicators?...`（同参；指标在 binance-service 内计算）
 
 说明：
 
@@ -125,7 +126,7 @@
 
 - `trade_market_symbol_prices` → `binance-service` `POST /api/market-data/symbol-prices`
 - `trade_market_klines` → `binance-service` `GET /api/market-data/klines`
-- `trade_market_klines_with_indicators` → 先调用 `binance-service /klines`，再由 `trade-mcp` 在内存计算指标并返回
+- `trade_market_klines_with_indicators` → `binance-service` `GET /api/market-data/klines-with-indicators`（`trade-mcp` 仅转发）
 
 - `trade_account_*` → `backend` 新增 `/api/mcp/binance-futures/account/*`
 - `trade_order_*` → `backend` 新增 `/api/mcp/binance-futures/order/*`
