@@ -76,12 +76,13 @@ public final class KlineIndicatorCalculator {
             highs[i] = num(k.get("high"));
             lows[i] = num(k.get("low"));
             closes[i] = num(k.get("close"));
-            volumes[i] = num(k.get("volume"));
+            // 成交量类：null/空串按 0 处理，避免 SDK/字段缺失时 num→NaN，导致每根 K 线在首道门即失败
+            volumes[i] = numVolumeLike(k.get("volume"));
             Object tb = k.get("taker_buy_base_volume");
             if (tb == null) {
                 tb = k.get("takerBuyBaseVolume");
             }
-            takerBuy[i] = num(tb);
+            takerBuy[i] = numVolumeLike(tb);
         }
 
         // n ≥ 99：以下计算与输出下标 98..n-1 所需；不再对 n 做分段短路
@@ -202,8 +203,155 @@ public final class KlineIndicatorCalculator {
                     candidateBars,
                     skippedBars,
                     klines.get(FULL_BAR_MIN_INDEX).get("open_time"));
+            log.warn(
+                    "[KlineIndicatorCalculator] 首根候选下标 {} 未通过原因（用于定位）: {}",
+                    FULL_BAR_MIN_INDEX,
+                    explainFullBarFailure(
+                            FULL_BAR_MIN_INDEX,
+                            volumes,
+                            takerBuy,
+                            ma5,
+                            ma20,
+                            ma60,
+                            ma99,
+                            ema5,
+                            ema20,
+                            ema30,
+                            ema60,
+                            ema99,
+                            rsi6,
+                            rsi9,
+                            rsi14,
+                            macd,
+                            kdjK,
+                            kdjD,
+                            kdjJ,
+                            atr7,
+                            atr14,
+                            atr21,
+                            adx14,
+                            plusDi14,
+                            minusDi14,
+                            mavol5,
+                            mavol10,
+                            mavol60,
+                            supertrend));
         }
         return out;
+    }
+
+    /**
+     * 成交量/主动买入量：与 OHLC 不同，缺字段在业务上可视为 0；若保留 NaN 会导致 isFiniteFullBarAt 第一行即失败。
+     */
+    private static double numVolumeLike(Object o) {
+        if (o == null) {
+            return 0.0;
+        }
+        if (o instanceof String && ((String) o).trim().isEmpty()) {
+            return 0.0;
+        }
+        double v = num(o);
+        return nan(v) ? 0.0 : v;
+    }
+
+    /**
+     * 与 {@link #isFiniteFullBarAt} 判定顺序一致，返回首道失败原因（仅用于日志）。
+     */
+    private static String explainFullBarFailure(
+            int i,
+            double[] volumes,
+            double[] takerBuy,
+            double[] ma5,
+            double[] ma20,
+            double[] ma60,
+            double[] ma99,
+            double[] ema5,
+            double[] ema20,
+            double[] ema30,
+            double[] ema60,
+            double[] ema99,
+            double[] rsi6,
+            double[] rsi9,
+            double[] rsi14,
+            Macd macd,
+            double[] kdjK,
+            double[] kdjD,
+            double[] kdjJ,
+            double[] atr7,
+            double[] atr14,
+            double[] atr21,
+            double[] adx14,
+            double[] plusDi14,
+            double[] minusDi14,
+            double[] mavol5,
+            double[] mavol10,
+            double[] mavol60,
+            SupertrendResult supertrend) {
+        double vol = volumes[i];
+        double buyV = takerBuy[i];
+        if (nan(vol) || nan(buyV)) {
+            return "volume/taker NaN (vol=" + vol + ", taker=" + buyV + ")";
+        }
+        if (!fin(ma5, i, 4)
+                || !fin(ma20, i, 19)
+                || !fin(ma60, i, 59)
+                || !fin(ma99, i, 98)) {
+            return "MA (ma5/20/60/99 某一在 i=" + i + " 为 NaN 或未到窗口)";
+        }
+        if (!fin(ema5, i, 4)
+                || !fin(ema20, i, 19)
+                || !fin(ema30, i, 29)
+                || !fin(ema60, i, 59)
+                || !fin(ema99, i, 98)) {
+            return "EMA (ema5/20/30/60/99 某一在 i=" + i + " 为 NaN 或未到窗口)";
+        }
+        if (!fin(rsi6, i, 6) || !fin(rsi9, i, 9) || !fin(rsi14, i, 14)) {
+            return "RSI (rsi6/9/14 某一在 i=" + i + " 为 NaN 或 fin 窗口未满足; rsi6="
+                    + sample(rsi6, i)
+                    + " rsi14="
+                    + sample(rsi14, i)
+                    + ")";
+        }
+        if (macd == null
+                || nan(macd.dif[i])
+                || nan(macd.dea[i])
+                || nan(macd.bar[i])) {
+            return "MACD NaN (dif="
+                    + sample(macd != null ? macd.dif : null, i)
+                    + " dea="
+                    + sample(macd != null ? macd.dea : null, i)
+                    + " bar="
+                    + sample(macd != null ? macd.bar : null, i)
+                    + ")";
+        }
+        if (!fin(kdjK, i, KDJ_READY_INDEX)
+                || !fin(kdjD, i, KDJ_READY_INDEX)
+                || !fin(kdjJ, i, KDJ_READY_INDEX)) {
+            return "KDJ (K/D/J 某一在 i=" + i + " 为 NaN 或 i<KDJ_READY(" + KDJ_READY_INDEX + "); k="
+                    + sample(kdjK, i)
+                    + ")";
+        }
+        if (!fin(atr7, i, 6) || !fin(atr14, i, 13) || !fin(atr21, i, 20)) {
+            return "ATR (atr7/14/21 某一在 i=" + i + " 为 NaN)";
+        }
+        if (!fin(adx14, i, 13) || !fin(plusDi14, i, 13) || !fin(minusDi14, i, 13)) {
+            return "ADX/DI (adx/+di/-di 某一在 i=" + i + " 为 NaN 或未到窗口)";
+        }
+        if (!finSupertrend(supertrend, i)) {
+            return "Supertrend (line/trend/upper/lower 某一在 i=" + i + " 为 NaN)";
+        }
+        if (!fin(mavol5, i, 4) || !fin(mavol10, i, 9) || !fin(mavol60, i, 59)) {
+            return "量均线 mavol5/10/60 某一在 i=" + i + " 为 NaN";
+        }
+        return "unknown（逻辑上不应到达）";
+    }
+
+    private static String sample(double[] arr, int i) {
+        if (arr == null || i < 0 || i >= arr.length) {
+            return "n/a";
+        }
+        double v = arr[i];
+        return nan(v) ? "NaN" : Double.toString(v);
     }
 
     /**
