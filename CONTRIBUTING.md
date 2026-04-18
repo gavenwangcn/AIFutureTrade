@@ -25,7 +25,7 @@ Thank you for considering contributing to this project!
 3. Ensure all tests pass
 4. Get approval from maintainer
 
-## Reporting Issue1
+## Reporting Issue
 
 - Use GitHub Issues
 - Provide clear description

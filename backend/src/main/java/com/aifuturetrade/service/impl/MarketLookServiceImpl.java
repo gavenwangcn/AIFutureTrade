@@ -333,6 +333,21 @@ public class MarketLookServiceImpl implements MarketLookService {
         return toDto(existing);
     }
 
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public MarketLookDTO finishSingleRunning(LocalDateTime endedAt) {
+        List<MarketLookDTO> list = listRunning();
+        if (list.isEmpty()) {
+            throw new IllegalArgumentException("当前没有执行中的盯盘任务（RUNNING/SENDING）");
+        }
+        if (list.size() > 1) {
+            String ids = list.stream().map(MarketLookDTO::getId).collect(Collectors.joining(", "));
+            throw new IllegalArgumentException(
+                    "存在多个执行中的盯盘任务，请使用按主键结束的接口并传入 market_look.id。当前任务 id：" + ids);
+        }
+        return patchStatus(list.get(0).getId(), "ENDED", endedAt);
+    }
+
     private MarketLookDTO toDto(MarketLookDO row) {
         MarketLookDTO dto = new MarketLookDTO();
         BeanUtils.copyProperties(row, dto);

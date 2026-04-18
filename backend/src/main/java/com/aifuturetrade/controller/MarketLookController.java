@@ -1,7 +1,6 @@
 package com.aifuturetrade.controller;
 
 import com.aifuturetrade.common.util.PageRequest;
-import com.aifuturetrade.common.util.PageResult;
 import com.aifuturetrade.service.MarketLookDeleteOutcome;
 import com.aifuturetrade.service.MarketLookService;
 import com.aifuturetrade.service.dto.MarketLookDTO;
@@ -127,6 +126,32 @@ public class MarketLookController {
             res.put("message", "updated");
             return ResponseEntity.ok(res);
         } catch (IllegalArgumentException e) {
+            Map<String, Object> err = new HashMap<>();
+            err.put("success", false);
+            err.put("error", e.getMessage());
+            return ResponseEntity.badRequest().body(err);
+        }
+    }
+
+    @PatchMapping("/{id}/end")
+    @Operation(
+            summary = "结束盯盘任务",
+            description = "将 execution_status 置为 ENDED；请求体仅可含 ended_at（可选，默认当前上海时间）")
+    public ResponseEntity<Map<String, Object>> end(
+            @PathVariable("id") String id, @RequestBody(required = false) Map<String, Object> body) {
+        try {
+            LocalDateTime endedAt = parseEndedAt(body != null ? body.get("ended_at") : null);
+            MarketLookDTO updated = marketLookService.patchStatus(id, "ENDED", endedAt);
+            Map<String, Object> res = new HashMap<>();
+            res.put("data", updated);
+            res.put("message", "ended");
+            return ResponseEntity.ok(res);
+        } catch (IllegalArgumentException e) {
+            Map<String, Object> err = new HashMap<>();
+            err.put("success", false);
+            err.put("error", e.getMessage());
+            return ResponseEntity.badRequest().body(err);
+        } catch (Exception e) {
             Map<String, Object> err = new HashMap<>();
             err.put("success", false);
             err.put("error", e.getMessage());
