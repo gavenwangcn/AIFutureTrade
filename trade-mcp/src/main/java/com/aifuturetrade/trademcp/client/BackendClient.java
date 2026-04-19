@@ -349,6 +349,14 @@ public class BackendClient {
     }
 
     /**
+     * 更新盯盘任务（部分字段）；PUT /api/market-look/{id}。例如仅传 ended_at 可调整计划截止时间且不结束任务。
+     */
+    public Map<String, Object> marketLookUpdate(String marketLookId, Map<String, Object> body) {
+        String enc = URLEncoder.encode(marketLookId, StandardCharsets.UTF_8);
+        return json.putJson(URI.create(baseUrl() + "/api/market-look/" + enc), body);
+    }
+
+    /**
      * 结束盯盘任务：PATCH /api/market-look/{id}/end，请求体仅含 ended_at（可选；省略则由服务端使用当前上海时间）。
      */
     public Map<String, Object> marketLookFinishById(String marketLookId, String endedAt) {
@@ -358,17 +366,6 @@ public class BackendClient {
             body.put("ended_at", endedAt);
         }
         return json.patchJson(URI.create(baseUrl() + "/api/market-look/" + enc + "/end"), body.isEmpty() ? Map.of() : body);
-    }
-
-    /**
-     * 当且仅当存在一条 RUNNING/SENDING 任务时结束之；POST /api/mcp/market-look/finish-running，请求体仅含 ended_at（可选）。
-     */
-    public Map<String, Object> marketLookFinishRunning(String endedAt) {
-        Map<String, Object> body = new LinkedHashMap<>();
-        if (endedAt != null && !endedAt.isEmpty()) {
-            body.put("ended_at", endedAt);
-        }
-        return json.postJson(URI.create(baseUrl() + "/api/mcp/market-look/finish-running"), body.isEmpty() ? Map.of() : body);
     }
 
     public Map<String, Object> marketLookSql(Map<String, Object> body) {

@@ -107,6 +107,22 @@ public class DownstreamJsonExchange {
         }
     }
 
+    /** PUT，JSON 请求体；响应解析规则与 POST 一致。 */
+    public Map<String, Object> putJson(URI uri, Object body) {
+        Object payload = body != null ? body : Map.of();
+        try {
+            return restClient.put()
+                    .uri(uri)
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .body(payload)
+                    .exchange((request, response) -> readResponseAsMap(response));
+        } catch (RestClientResponseException e) {
+            return errorFromStatusException(e);
+        } catch (RestClientException e) {
+            return transportFailure(e);
+        }
+    }
+
     /** DELETE，响应体解析规则与 GET/POST 一致（含 4xx/5xx 转 Map）。 */
     public Map<String, Object> delete(URI uri) {
         try {

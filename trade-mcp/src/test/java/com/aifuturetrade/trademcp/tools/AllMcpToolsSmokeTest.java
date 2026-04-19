@@ -175,7 +175,7 @@ class AllMcpToolsSmokeTest {
         okDelete.put("id", "00000000-0000-0000-0000-000000000001");
         okDelete.put("message", "deleted");
         lenient().when(backendClient.marketLookDelete(anyString())).thenReturn(okDelete);
-        lenient().when(backendClient.marketLookFinishRunning(nullable(String.class))).thenReturn(okId);
+        lenient().when(backendClient.marketLookUpdate(anyString(), anyMap())).thenReturn(okId);
         lenient().when(backendClient.marketLookFinishById(anyString(), nullable(String.class))).thenReturn(okId);
         lenient().when(backendClient.marketLookSql(anyMap())).thenReturn(okSql);
 
@@ -281,7 +281,7 @@ class AllMcpToolsSmokeTest {
         assertNotNull(marketLookTools.marketLookQueryPage(1, 10, null, null, null, null, null, null, null, null));
         assertNotNull(marketLookTools.marketLookGetById("mid"));
         assertSuccessMap(marketLookTools.marketLookDelete("00000000-0000-0000-0000-000000000099"));
-        assertNotNull(marketLookTools.marketLookFinishRunning(null));
+        assertNotNull(marketLookTools.marketLookSetPlanEndedAt("mid", "2099-12-31T23:59:59"));
         assertNotNull(marketLookTools.marketLookFinishById("mid", null));
         assertSuccessMap(marketLookTools.marketLookSql(
                 "SELECT id FROM `market_look` WHERE execution_status=? LIMIT 1",

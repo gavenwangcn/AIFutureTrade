@@ -162,28 +162,28 @@ public class MarketLookTools {
     }
 
     @McpTool(
-            name = "trade_look_market_look_finish_running",
-            description = "结束盯盘任务：当且仅当当前存在**一条**执行中任务（RUNNING 或 SENDING）时，将其置为 ENDED。"
-                    + " **工具参数仅为结束时间** `endedAt`（映射下游 JSON 字段 `ended_at`，无其它业务字段）。"
-                    + " 省略或空字符串则服务端使用当前上海时间。"
-                    + " 若无执行中任务、或同时存在多条，返回 success=false 与 error（多任务时 error 中会列出各任务 id，请改用 `trade_look_market_look_finish_by_id`）。"
-                    + " 时间格式：yyyy-MM-dd HH:mm:ss 或 ISO-8601。")
-    public Map<String, Object> marketLookFinishRunning(
-            @McpToolParam(
-                    description = "任务结束时间（ended_at）。可省略或留空表示当前上海时间。",
-                    required = false) String endedAt) {
-        return backendClient.marketLookFinishRunning(endedAt);
-    }
-
-    @McpTool(
             name = "trade_look_market_look_finish_by_id",
-            description = "按 market_look.id 结束指定盯盘任务（置为 ENDED）。适用于同时有多条执行中任务的场景。"
-                    + " 除主键 id 外，下游请求体**仅**含结束时间字段 `ended_at`（与 `trade_look_market_look_finish_running` 一致）。")
+            description = "按 market_look.id 结束指定盯盘任务（置为 ENDED）。"
+                    + " 除主键 id 外，下游请求体**仅**含结束时间字段 `ended_at`（可选；省略则服务端使用当前上海时间）。")
     public Map<String, Object> marketLookFinishById(
             @McpToolParam(description = "market_look.id（UUID）", required = true) String marketLookId,
             @McpToolParam(description = "任务结束时间（ended_at）。可省略或留空表示当前上海时间。", required = false)
                     String endedAt) {
         return backendClient.marketLookFinishById(marketLookId, endedAt);
+    }
+
+    @McpTool(
+            name = "trade_look_market_look_set_plan_ended_at",
+            description = "仅更新盯盘任务的计划/展示用结束时间字段 `ended_at`，**不**将任务标为 ENDED（不改 execution_status）。"
+                    + " 用于执行中（RUNNING/SENDING）延长或缩短截止时间；与 `trade_look_market_look_finish_by_id`（结束任务）不同。"
+                    + " 走 PUT /api/market-look/{id}，请求体仅含 ended_at。"
+                    + " 时间格式：yyyy-MM-dd HH:mm:ss 或 ISO-8601；须不早于 started_at。")
+    public Map<String, Object> marketLookSetPlanEndedAt(
+            @McpToolParam(description = "market_look.id（UUID）", required = true) String marketLookId,
+            @McpToolParam(description = "新的 ended_at（计划截止时间）", required = true) String endedAt) {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("ended_at", endedAt);
+        return backendClient.marketLookUpdate(marketLookId, body);
     }
 
     @McpTool(

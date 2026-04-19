@@ -1,7 +1,5 @@
 package com.aifuturetrade.controller.mcp;
 
-import com.aifuturetrade.service.MarketLookService;
-import com.aifuturetrade.service.dto.MarketLookDTO;
 import com.aifuturetrade.service.mcp.McpMarketLookService;
 import com.aifuturetrade.service.mcp.dto.McpMarketLookSqlRequest;
 import io.swagger.v3.oas.annotations.Operation;
@@ -14,9 +12,6 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
-import java.time.LocalDateTime;
-import java.time.format.DateTimeFormatter;
-import java.time.format.DateTimeParseException;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -27,9 +22,6 @@ public class McpMarketLookController {
 
     @Autowired
     private McpMarketLookService mcpMarketLookService;
-
-    @Autowired
-    private MarketLookService marketLookService;
 
     @PostMapping("/sql")
     @Operation(
@@ -56,51 +48,6 @@ public class McpMarketLookController {
             bad.put("success", false);
             bad.put("error", e.getMessage());
             return new ResponseEntity<>(bad, HttpStatus.INTERNAL_SERVER_ERROR);
-        }
-    }
-
-    @PostMapping("/finish-running")
-    @Operation(
-            summary = "结束唯一执行中的盯盘任务",
-            description = "当且仅当存在一条 RUNNING/SENDING 任务时将其置为 ENDED；请求体仅可含 ended_at（可选，默认当前上海时间）。"
-                    + " 若 0 条或多条任务则返回 400。")
-    public ResponseEntity<Map<String, Object>> finishRunning(@RequestBody(required = false) Map<String, Object> body) {
-        try {
-            LocalDateTime endedAt = parseEndedAt(body != null ? body.get("ended_at") : null);
-            MarketLookDTO updated = marketLookService.finishSingleRunning(endedAt);
-            Map<String, Object> res = new HashMap<>();
-            res.put("data", updated);
-            res.put("message", "ended");
-            return ResponseEntity.ok(res);
-        } catch (IllegalArgumentException e) {
-            Map<String, Object> err = new HashMap<>();
-            err.put("success", false);
-            err.put("error", e.getMessage());
-            return ResponseEntity.badRequest().body(err);
-        } catch (Exception e) {
-            Map<String, Object> err = new HashMap<>();
-            err.put("success", false);
-            err.put("error", e.getMessage());
-            return ResponseEntity.badRequest().body(err);
-        }
-    }
-
-    private static LocalDateTime parseEndedAt(Object raw) {
-        if (raw == null) {
-            return null;
-        }
-        String s = String.valueOf(raw).trim();
-        if (s.isEmpty()) {
-            return null;
-        }
-        try {
-            return LocalDateTime.parse(s.replace(" ", "T"));
-        } catch (DateTimeParseException ignored) {
-            try {
-                return LocalDateTime.parse(s, DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"));
-            } catch (DateTimeParseException e) {
-                throw new IllegalArgumentException("ended_at 格式无效: " + s);
-            }
         }
     }
 }

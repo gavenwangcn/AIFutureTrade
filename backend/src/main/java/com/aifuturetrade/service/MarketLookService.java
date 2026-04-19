@@ -54,9 +54,4 @@ public interface MarketLookService {
      * 仅更新执行状态；ENDED 时若 endedAt 为 null 则自动置为当前时间
      */
     MarketLookDTO patchStatus(String id, String executionStatus, LocalDateTime endedAt);
-
-    /**
-     * 结束唯一一条执行中的盯盘任务（RUNNING/SENDING）。若无或多条则抛出 {@link IllegalArgumentException}。
-     */
-    MarketLookDTO finishSingleRunning(LocalDateTime endedAt);
 }
